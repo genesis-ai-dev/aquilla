@@ -14,8 +14,12 @@ export interface CloudFileSummary {
   name: string
   type: string
   cellCount: number
+  sourceLanguage?: string | null
+  targetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
   orderedBy?: string
+  sourceTextDirection?: "ltr" | "rtl" | null
+  targetTextDirection?: "ltr" | "rtl" | null
   /** Timeline editor: core video URL for the preview; absent/null ⇒ no video. */
   coreMediaUrl?: string | null
 }
@@ -26,7 +30,7 @@ export interface CloudProjectSummary {
   gitlabProjectId: number | null
   /** The org this project belongs to. Present when fetched with an orgId filter. */
   orgId?: number | null
-  /** FRO-473: the host org's display name, joined server-side by the list
+  /** AQU-473: the host org's display name, joined server-side by the list
    *  endpoint. Absent on the single-project endpoint or older servers. */
   orgName?: string | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
@@ -42,7 +46,7 @@ export interface CloudProjectSummary {
    * endpoint may omit (older servers).
    */
   sourceProjectId?: string | null
-  /** FRO-476/478: link mode/consumes/gate/cursor. Only the single-project
+  /** AQU-476/478: link mode/consumes/gate/cursor. Only the single-project
    *  endpoint returns these (the list endpoint returns sourceProjectId only —
    *  the picker/settings-detail views are what need the full state). */
   sourceLinkMode?: "clone" | "live" | null
@@ -221,7 +225,11 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       type: f.type as FileType,
       createdAt: now,
       cellCount: f.cellCount,
+      ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
+      ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
+      ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
+      ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),
       ...(f.coreMediaUrl ? { coreMediaUrl: f.coreMediaUrl } : {}),
     })),
     members: [],
@@ -244,7 +252,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   if (summary.sourceProjectId !== undefined) {
     record.sourceProjectId = summary.sourceProjectId
   }
-  // FRO-476/478: propagate link mode/consumes/gate/cursor when present.
+  // AQU-476/478: propagate link mode/consumes/gate/cursor when present.
   if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode
   if (summary.sourceLinkConsumes !== undefined) record.sourceLinkConsumes = summary.sourceLinkConsumes
   if (summary.sourceLinkGate !== undefined) record.sourceLinkGate = summary.sourceLinkGate
@@ -360,7 +368,7 @@ export async function resolveCloudProjectResult(
       }
       const found = listResult.projects.find((p) => p.id === projectId)
       if (found) return { ok: true, project: found }
-      // FRO-346: a 403 on the direct endpoint means the project exists but
+      // AQU-346: a 403 on the direct endpoint means the project exists but
       // this account has no access (e.g. membership was revoked) — surface
       // it distinctly so the workspace shows "you no longer have access"
       // instead of the misleading "project not found".

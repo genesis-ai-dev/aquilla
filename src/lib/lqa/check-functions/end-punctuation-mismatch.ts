@@ -28,6 +28,14 @@ export function runCheck(source: string, target: string): InfractionSpan[] | nul
   if (sc === "none") return null
   const trimmed = target.replace(TRAILING_NOISE_RE, "")
   const end = trimmed.length
+  if (tc === "none") {
+    return [{
+      side: "target",
+      start: end,
+      end,
+      matchedText: "",
+    }]
+  }
   const start = Math.max(0, end - 1)
   return [{
     side: "target",

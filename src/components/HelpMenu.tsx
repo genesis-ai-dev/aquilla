@@ -1,6 +1,7 @@
-import { useState } from "react"
-import { HelpCircle, ExternalLink, Mail } from "lucide-react"
+import { useCallback, useState } from "react"
+import { HelpCircle, ExternalLink, Mail, BookOpen, Map } from "lucide-react"
 import { Discord } from "@/components/icons/Discord"
+import { useProductTourContext } from "@/context/ProductTourContext"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,6 +11,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 // Configured at build time with sane defaults so help links always work.
+const DOCS_URL =
+  (import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
+  "https://help.aquilla.app"
 const DISCORD_URL =
   (import.meta.env.VITE_DISCORD_INVITE_URL as string | undefined)?.trim() ||
   "https://discord.gg/T2EndwXe4W"
@@ -19,12 +23,17 @@ const SUPPORT_EMAIL =
 
 /**
  * Global help + community affordance (the escape hatch the UX audit flagged as
- * missing). Feedback already has a home via ReportProblemButton; this adds the
- * two things that didn't exist anywhere in-app: a community link and a way to
- * contact a human.
+ * missing). Feedback already has a home via ReportProblemButton; this adds docs,
+ * community, and a way to contact a human.
  */
 export function HelpMenu() {
   const [open, setOpen] = useState(false)
+  const { openTour } = useProductTourContext()
+
+  const handleTour = useCallback(() => {
+    setOpen(false)
+    openTour()
+  }, [openTour])
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -46,6 +55,24 @@ export function HelpMenu() {
         sideOffset={4}
       >
         <DropdownMenuGroup>
+          <DropdownMenuItem onClick={handleTour}>
+            <Map />
+            Take the tour
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            render={
+              <a
+                href={DOCS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOpen(false)}
+              />
+            }
+          >
+            <BookOpen />
+            Help
+            <ExternalLink className="ml-auto opacity-60" />
+          </DropdownMenuItem>
           <DropdownMenuItem
             render={
               <a

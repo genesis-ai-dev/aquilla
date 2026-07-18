@@ -65,7 +65,7 @@ describe("MemberAccessRow", () => {
   })
 })
 
-describe("MemberAccessRow — FRO-427 permission denial on Revoke button", () => {
+describe("MemberAccessRow — AQU-427 permission denial on Revoke button", () => {
   function renderRowWithRole(callerOrgRoleLevel: number) {
     return render(
       <ul>
@@ -86,7 +86,7 @@ describe("MemberAccessRow — FRO-427 permission denial on Revoke button", () =>
   })
 
   it("revoke button is disabled for PROJECT_LEAD (500) — server requires MAINTAINER", async () => {
-    // FRO-427: the server gate for removing a member is MAINTAINER (600); a
+    // AQU-427: the server gate for removing a member is MAINTAINER (600); a
     // PROJECT_LEAD must NOT see an enabled button that would 403 server-side.
     vi.mocked(getMemberAccess).mockResolvedValue(ACCESS)
     renderRowWithRole(500)

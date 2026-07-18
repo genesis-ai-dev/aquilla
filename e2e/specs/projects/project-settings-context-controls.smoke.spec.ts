@@ -9,13 +9,13 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * (Base UI select triggers + checkbox):
  *   - #context-size select: Small | Medium (default) | Large
  *   - #few-shot-example-format select: "Source + target (default)" | "Target only"
- *   - "Validated examples only" checkbox (unchecked by default)
+ *   - "Approved examples only" trust boundary (always checked and locked)
  *
  * Each change marks the form dirty ("Save changes" button appears).
  *
  * This spec: navigate to /project/:id/settings → change context-size →
  * verify "Save changes" visible → change few-shot-format → still visible →
- * toggle validated-only → still visible.
+ * verify approved-only retrieval cannot be disabled.
  */
 test("project settings AI context controls mark form dirty", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -27,7 +27,7 @@ test("project settings AI context controls mark form dirty", async ({ alice }) =
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${projectId}/settings?section=ai`)
   await alice.waitForLoadState("networkidle")
 
   // #context-size select defaults to "Medium" — change to "Large".
@@ -48,12 +48,10 @@ test("project settings AI context controls mark form dirty", async ({ alice }) =
   await pickSelectOption(alice, fewShotSelect, "Target only")
   await expectSelectValue(fewShotSelect, "Target only")
 
-  // "Validated examples only" checkbox — toggle it on.
-  const validatedOnlyChk = alice.getByRole("checkbox", { name: "Validated examples only" })
-  await expect(validatedOnlyChk).toBeVisible({ timeout: 3_000 })
-  const wasChecked = await validatedOnlyChk.isChecked()
-  await validatedOnlyChk.setChecked(!wasChecked)
-  await expect(validatedOnlyChk).toBeChecked({ timeout: 2_000, checked: !wasChecked })
+  const approvedOnlyChk = alice.getByRole("checkbox", { name: "Approved examples only" })
+  await expect(approvedOnlyChk).toBeVisible({ timeout: 3_000 })
+  await expect(approvedOnlyChk).toBeChecked()
+  await expect(approvedOnlyChk).toBeDisabled()
 
   // "Save changes" is still visible.
   await expect(saveBtn).toBeVisible()

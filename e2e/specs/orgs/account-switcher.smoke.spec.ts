@@ -28,12 +28,12 @@ test("account switcher dropdown opens with session info", async ({ alice }) => {
 
   // "Add another account…" button is visible.
   await expect(
-    alice.getByRole("button", { name: /Add another account/i })
+    alice.getByRole("menuitem", { name: /Add another account/i })
   ).toBeVisible({ timeout: 3_000 })
 
   // "Preferences" link is visible.
   await expect(
-    alice.getByRole("link", { name: /Preferences/i })
+    alice.getByRole("menuitem", { name: /Preferences/i })
   ).toBeVisible({ timeout: 3_000 })
 
   // Close by pressing Escape or clicking outside.
@@ -52,7 +52,7 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
-  await alice.getByRole("button", { name: /^Log out$/i }).click()
+  await alice.getByRole("menuitem", { name: /^Log out$/i }).click()
 
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
     timeout: 10_000,

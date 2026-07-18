@@ -9,7 +9,7 @@ export class Workspace {
   }
 
   async importFile(filePath: string): Promise<void> {
-    // FRO-244 auto-opens the "Project setup" checklist sheet once per fresh
+    // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.
     const projectId = this.page.url().match(/\/project\/([^/?#]+)/)?.[1]
@@ -25,56 +25,95 @@ export class Workspace {
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
     // Open the ImportDialog — lands on the "landing" screen (card grid).
-    // Retry once: right after a previous import, header re-renders can
-    // swallow the click (the button is replaced mid-press), leaving no
-    // dialog open and the next locator hanging for the full test budget.
-    const uploadCard = this.page.getByText("Upload Files")
+    // Use the card's accessible button name rather than a case-sensitive text
+    // locator; the product label is "Upload files".
+    const uploadCard = this.uploadFilesCard()
     await this.openImportDialog()
-    if (!(await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false))) {
-      await this.openImportDialog()
-    }
     // Navigate to the Upload Files panel by clicking its card.
     await uploadCard.click()
     // UploadPanel is now visible with a "Choose Files" button.
-    await expect(this.page.getByRole("button", { name: /Choose Files/i })).toBeVisible({
-      timeout: 5_000,
-    })
-    // The panel has two file inputs: file picker + folder picker (webkitdirectory).
-    // Target the plain file picker.
-    await this.page
-      .locator('input[type="file"]:not([webkitdirectory])')
-      .setInputFiles(filePath)
-    // FRO-310: selecting a file now lands on a Preview panel (parsed cells +
+    // Prefer the import dialog's file picker — cell audio upload inputs also
+    // match a bare `input[type=file]:not([webkitdirectory])` once the editor
+    // has hydrated, which trips Playwright's strict mode.
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
+    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
     // counts) instead of starting the upload immediately. Confirm it to kick
     // off the actual bulk upload.
     const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
     await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
     await confirmBtn.click()
-    // The upload runs ("Uploading…"), then the dialog closes on success.
-    await expect(confirmBtn).not.toBeVisible({ timeout: 15_000 })
-    // The dialog closing only means the upload was handed off — the sidebar
-    // file list renders from the server projection, which lags the import by
-    // a sync round-trip. Wait for an actual file row so callers can click it
-    // immediately (every openFileBySubstring caller depends on this).
-    await expect(
-      this.page.locator("aside").locator('button[aria-label="File actions"]').first(),
-    ).toBeVisible({ timeout: 15_000 })
+    // A hidden confirm button is only the transient "Uploading…" state, not a
+    // success signal. Wait for the authoritative sidebar row, while surfacing
+    // any import error immediately instead of timing out on an unrelated row.
+    const fileActions = this.page
+      .locator("aside")
+      .locator('button[aria-label="File actions"]')
+      .first()
+    const importError = this.page.getByText(/^Import failed:/i).first()
+    let outcome = "pending"
+    await expect.poll(async () => {
+      if (await importError.isVisible().catch(() => false)) {
+        outcome = `error:${(await importError.textContent())?.trim() ?? "Import failed"}`
+        return "settled"
+      }
+      if (await fileActions.isVisible().catch(() => false)) {
+        outcome = "success"
+        return "settled"
+      }
+      return "pending"
+    }, { timeout: 30_000 }).toBe("settled")
+    if (outcome.startsWith("error:")) throw new Error(outcome.slice("error:".length))
+  }
+
+  private uploadFilesCard(): Locator {
+    return this.page.getByRole("button", { name: /^Upload files/i }).first()
   }
 
   private async openImportDialog(): Promise<void> {
-    const banner = this.page.getByRole("banner")
-    const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
-    if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await moreActionsBtn.click()
-      const importBtn = this.page.getByRole("button", { name: /^Import$/i }).filter({ visible: true }).last()
-      await expect(importBtn).toBeVisible({ timeout: 5_000 })
-      await importBtn.click()
-      return
+    const uploadCard = this.uploadFilesCard()
+    if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+
+    // Header controls can be replaced while project data hydrates. Retry the
+    // opener, but first check whether the previous click already opened the
+    // dialog so we never click through its overlay.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+
+      const banner = this.page.getByRole("banner")
+      const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
+      if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await moreActionsBtn.click()
+        const importItem = this.page
+          .getByRole("menuitem", { name: /^Import$/i })
+          .filter({ visible: true })
+          .last()
+        await expect(importItem).toBeVisible({ timeout: 5_000 })
+        try {
+          await importItem.click({ timeout: 2_000 })
+        } catch (error) {
+          // Base UI can open the dialog on pointer-up before Playwright's
+          // actionability loop finishes. The new overlay then covers the menu
+          // item and makes click() reject even though the intended action won.
+          if (!(await uploadCard.isVisible({ timeout: 500 }).catch(() => false))) {
+            throw error
+          }
+          return
+        }
+      } else {
+        const directImportBtn = this.page
+          .getByRole("button", { name: /^Import$/i })
+          .filter({ visible: true })
+          .first()
+        await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
+        await directImportBtn.click()
+      }
+
+      if (await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false)) return
     }
 
-    const directImportBtn = this.page.getByRole("button", { name: /^Import$/i }).filter({ visible: true }).first()
-    await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
-    await directImportBtn.click()
+    throw new Error("Import dialog did not open")
   }
 
   /** Click a file row in the sidebar, identified by a substring of its name. */
@@ -151,6 +190,36 @@ export class Workspace {
     return (await this.cellRow(index).textContent()) ?? ""
   }
 
+  /** The per-cell validation toggle. `aria-pressed="true"` means the current
+   * user is one of the cell's active validators. */
+  validationToggle(index: number): Locator {
+    return this.cellRow(index).getByRole("button", { name: /Validate|Validated/i }).first()
+  }
+
+  /** Assert the current user has validated this cell (green self-validated). */
+  async expectSelfValidated(index: number): Promise<void> {
+    const row = this.cellRow(index)
+    // CellActionRail children are opacity:0 until hover/focus — reveal first.
+    await row.hover()
+    await expect(this.validationToggle(index)).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
+  }
+
+  /** Remove the current user's validation and wait for the row state to settle. */
+  async unvalidateCell(index: number): Promise<void> {
+    const row = this.cellRow(index)
+    const validationButton = this.validationToggle(index)
+    await row.hover()
+    await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
+    await validationButton.click()
+
+    const removeButton = this.page.locator(
+      '[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]',
+    )
+    await expect(removeButton).toBeVisible({ timeout: 8_000 })
+    await removeButton.click()
+    await expect(validationButton).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
+  }
+
   /** Validate a cell and assert the emerald indicator appears.
    *
    * The health button uses Base UI's Popover with openOnHover — hover events
@@ -195,7 +264,7 @@ export class Workspace {
     await moreBtn.click()
   }
 
-  /** FRO-331: view settings live in the header overflow menu. */
+  /** AQU-331: view settings live in the header overflow menu. */
   async openViewSettingsMenu(): Promise<void> {
     await this.openHeaderOverflowMenu()
     await this.page.getByRole("menuitem", { name: /View settings/i }).click()
@@ -207,12 +276,43 @@ export class Workspace {
     const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
     await expect(moreActionsBtn).toBeVisible({ timeout: 10_000 })
     await moreActionsBtn.click()
-    await this.page.getByRole("button", { name: /^Export$/i }).click()
+    await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 
-  /** FRO-331: next unfinished lives in the header overflow menu. */
+  /** AQU-331: next unfinished lives in the header overflow menu. */
   async jumpNextUnfinished(): Promise<void> {
     await this.openHeaderOverflowMenu()
     await this.page.getByRole("menuitem", { name: /Next unfinished/i }).click()
+  }
+
+  /** Read the currently active target cell's text (empty string if untranslated). */
+  async readTargetText(index: number): Promise<string> {
+    return ((await this.targetColumn(index).textContent()) ?? "").trim()
+  }
+
+  /**
+   * AQU-602: the lane switcher is the TARGET language tag in the editor's
+   * column header (`data-testid="lane-switcher"`). It renders as a dropdown
+   * ONLY when the project has a second target lane — otherwise the tag is a
+   * static pill. The trigger carries `data-active-lane="<tag>"` (default lane
+   * is `""`). Opening it reveals `data-testid="lane-option-<tag>"` items.
+   */
+  laneSwitcher(): Locator {
+    return this.page.getByTestId("lane-switcher")
+  }
+
+  /** Switch the active target lane. Pass `""` for the default lane. */
+  async switchLane(tag: string): Promise<void> {
+    await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
+    await this.laneSwitcher().click()
+    const option = this.page.getByTestId(`lane-option-${tag}`)
+    await option.click()
+    await expect(this.laneSwitcher()).toHaveAttribute("data-active-lane", tag, { timeout: 5_000 })
+  }
+
+  /** Read the currently active lane's tag (`""` = default) off the switcher. */
+  async readActiveLane(): Promise<string> {
+    await expect(this.laneSwitcher()).toBeVisible({ timeout: 10_000 })
+    return (await this.laneSwitcher().getAttribute("data-active-lane")) ?? ""
   }
 }

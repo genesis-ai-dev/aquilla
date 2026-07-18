@@ -42,7 +42,7 @@ function recordsEqual(a: readonly OutboxRecord[], b: readonly OutboxRecord[]): b
  * subscription so the list updates the moment a user action enqueues an
  * event, and the moment the flusher removes one.
  *
- * FRO-274: `failed` (quarantined) records are excluded so the overlay does
+ * AQU-274: `failed` (quarantined) records are excluded so the overlay does
  * not replay a rejected commit/validate as live cell state. The outbox
  * inspector should call `peekOutboxBatch` directly to get all statuses.
  */
@@ -60,7 +60,7 @@ export function usePendingOutboxRecords(opts: Options): OutboxRecord[] {
     async function refresh() {
       const all = await peekOutboxBatch(maxResults * 2)
       if (cancelled) return
-      // FRO-274: exclude quarantined records from the overlay so failed events
+      // AQU-274: exclude quarantined records from the overlay so failed events
       // don't show as pending validation/commit state. Inspector views should
       // use peekOutboxBatch directly to preserve visibility of failed records.
       const active = all.filter((r) => (r.status ?? "pending") !== "failed")

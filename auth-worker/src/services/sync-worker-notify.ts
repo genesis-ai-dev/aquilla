@@ -1,4 +1,4 @@
-// FRO-346: best-effort notification to aquilla-sync-worker when a project
+// AQU-346: best-effort notification to aquilla-sync-worker when a project
 // member is removed, so the per-project ProjectSync DO can eject the removed
 // user's live WebSocket sessions and denylist their still-valid (≤15 min)
 // sync tokens.
@@ -37,5 +37,34 @@ export async function notifySyncWorkerOfMemberRemoval(
       `sync-worker member-removed notification failed for ${projectId}/${removed.userId}:`,
       err,
     )
+  }
+}
+
+/**
+ * Tell connected editor clients that server-authoritative project settings
+ * changed. This is deliberately best-effort: settings reads on reconnect are
+ * still the correctness path, while this keeps validation-dependent progress
+ * and project overlays current for collaborators who are already online.
+ */
+export async function notifySyncWorkerOfProjectSettingsChange(
+  env: Pick<Env, "SYNC_WORKER_URL" | "SYNC_SECRET_KEY">,
+  projectId: string,
+  version: number,
+): Promise<void> {
+  if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) return
+  try {
+    await fetch(
+      `${env.SYNC_WORKER_URL.replace(/\/$/, "")}/admin/projects/${encodeURIComponent(projectId)}/settings-changed`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ version }),
+      },
+    )
+  } catch (err) {
+    console.warn(`sync-worker settings notification failed for ${projectId}:`, err)
   }
 }

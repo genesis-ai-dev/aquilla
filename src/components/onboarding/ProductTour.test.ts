@@ -1,5 +1,5 @@
 /**
- * FRO-243: Product tour unit tests.
+ * AQU-243: Product tour unit tests.
  *
  * These tests cover the pure persistence/logic layer (useProductTour.ts)
  * and the step-skipping logic. The full render path is tested via the
@@ -14,7 +14,8 @@ import {
   shouldAutoStartTour,
 } from "@/hooks/useProductTour"
 // Import step list directly for data-level assertions (no render harness needed).
-import { TOUR_STEPS } from "./ProductTour"
+import { TOUR_STEPS, filterStepsByRole, type TourStep } from "./ProductTour"
+import { ROLE } from "@/lib/frontier/roles"
 
 const TOUR_DONE_KEY = "codex:productTourDone"
 const ONBOARDING_DONE_KEY = "codex:onboardingComplete"
@@ -24,16 +25,16 @@ describe("wasProductTourDone / markProductTourDone / resetProductTour", () => {
     localStorage.removeItem(TOUR_DONE_KEY)
   })
 
-  it("FRO-243: returns false before tour is marked done", () => {
+  it("AQU-243: returns false before tour is marked done", () => {
     expect(wasProductTourDone()).toBe(false)
   })
 
-  it("FRO-243: returns true after markProductTourDone", () => {
+  it("AQU-243: returns true after markProductTourDone", () => {
     markProductTourDone()
     expect(wasProductTourDone()).toBe(true)
   })
 
-  it("FRO-243: resetProductTour clears the flag", () => {
+  it("AQU-243: resetProductTour clears the flag", () => {
     markProductTourDone()
     resetProductTour()
     expect(wasProductTourDone()).toBe(false)
@@ -46,23 +47,23 @@ describe("shouldAutoStartTour", () => {
     localStorage.removeItem(ONBOARDING_DONE_KEY)
   })
 
-  it("FRO-243: returns false when onboarding is not complete", () => {
+  it("AQU-243: returns false when onboarding is not complete", () => {
     // onboardingComplete not set → not a post-signup user
     expect(shouldAutoStartTour()).toBe(false)
   })
 
-  it("FRO-243: returns true when onboarding complete and tour not done", () => {
+  it("AQU-243: returns true when onboarding complete and tour not done", () => {
     localStorage.setItem(ONBOARDING_DONE_KEY, "true")
     expect(shouldAutoStartTour()).toBe(true)
   })
 
-  it("FRO-243: returns false when tour already done (dismissed/completed)", () => {
+  it("AQU-243: returns false when tour already done (dismissed/completed)", () => {
     localStorage.setItem(ONBOARDING_DONE_KEY, "true")
     markProductTourDone()
     expect(shouldAutoStartTour()).toBe(false)
   })
 
-  it("FRO-243: auto-start triggers once — marking done prevents re-auto-start", () => {
+  it("AQU-243: auto-start triggers once — marking done prevents re-auto-start", () => {
     localStorage.setItem(ONBOARDING_DONE_KEY, "true")
     // First check: should start
     expect(shouldAutoStartTour()).toBe(true)
@@ -72,8 +73,8 @@ describe("shouldAutoStartTour", () => {
     expect(shouldAutoStartTour()).toBe(false)
   })
 
-  it("FRO-243: independent from FRO-244 project-scoped setup flag", () => {
-    // Simulate FRO-244 marking a project's setup checklist as shown.
+  it("AQU-243: independent from AQU-244 project-scoped setup flag", () => {
+    // Simulate AQU-244 marking a project's setup checklist as shown.
     localStorage.setItem("codex.setupAutoShown.some-project-id", "1")
     // That key must NOT affect the product tour flag.
     localStorage.setItem(ONBOARDING_DONE_KEY, "true")
@@ -82,29 +83,29 @@ describe("shouldAutoStartTour", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-262: TOUR_STEPS content correctness
+// AQU-262: TOUR_STEPS content correctness
 // ---------------------------------------------------------------------------
 
-describe("TOUR_STEPS — FRO-262 copy and anchor correctness", () => {
-  it("FRO-262: account-switcher step does not mention switching organizations", () => {
+describe("TOUR_STEPS — AQU-262 copy and anchor correctness", () => {
+  it("AQU-262: account-switcher step does not mention switching organizations", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "account-switcher")
     expect(step).toBeDefined()
     expect(step!.body.toLowerCase()).not.toMatch(/switch.*org|org.*switch/i)
     expect(step!.body.toLowerCase()).not.toContain("organization")
   })
 
-  it("FRO-262: a step anchored to org-switcher exists", () => {
+  it("AQU-262: a step anchored to org-switcher exists", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "org-switcher")
     expect(step).toBeDefined()
   })
 
-  it("FRO-262: org-switcher step body mentions organizations", () => {
+  it("AQU-262: org-switcher step body mentions organizations", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "org-switcher")
     expect(step).toBeDefined()
     expect(step!.body.toLowerCase()).toMatch(/org/)
   })
 
-  it("FRO-262: org-switcher step appears before nav steps (near start of tour)", () => {
+  it("AQU-262: org-switcher step appears before nav steps (near start of tour)", () => {
     const orgSwitcherIdx = TOUR_STEPS.findIndex((s) => s.anchor === "org-switcher")
     const navOverviewIdx = TOUR_STEPS.findIndex((s) => s.anchor === "nav-overview")
     // org-switcher should come before the nav items
@@ -112,7 +113,7 @@ describe("TOUR_STEPS — FRO-262 copy and anchor correctness", () => {
     expect(orgSwitcherIdx).toBeLessThan(navOverviewIdx)
   })
 
-  it("FRO-262: projects step describes the consolidated project hub", () => {
+  it("AQU-262: projects step describes the consolidated project hub", () => {
     const step = TOUR_STEPS.find((s) => s.anchor === "nav-overview")
     expect(step).toBeDefined()
     expect(step!.title).toBe("Projects")
@@ -121,7 +122,56 @@ describe("TOUR_STEPS — FRO-262 copy and anchor correctness", () => {
     expect(step!.body.toLowerCase()).toMatch(/filter.*sort|sort.*filter/)
   })
 
-  it("FRO-262: splash step (anchor=null) still comes first", () => {
+  it("AQU-262: splash step (anchor=null) still comes first", () => {
     expect(TOUR_STEPS[0].anchor).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-512: role-tailored steps — a translator (contributor) shouldn't be
+// walked through PM-only surfaces (org settings/members) they can't act on;
+// a PM (project_lead+) should see them.
+// ---------------------------------------------------------------------------
+
+describe("filterStepsByRole (AQU-512)", () => {
+  it("AQU-512: nav-settings step in TOUR_STEPS is gated at PROJECT_LEAD", () => {
+    const step = TOUR_STEPS.find((s) => s.anchor === "nav-settings")
+    expect(step).toBeDefined()
+    expect(step!.minRole).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("AQU-512: a CONTRIBUTOR (translator, 400) does not get the PM-gated step", () => {
+    const visible = filterStepsByRole(TOUR_STEPS, ROLE.CONTRIBUTOR)
+    expect(visible.find((s) => s.anchor === "nav-settings")).toBeUndefined()
+    // ...but still gets the ungated, translator-relevant steps.
+    expect(visible.find((s) => s.anchor === "nav-overview")).toBeDefined()
+    expect(visible.find((s) => s.anchor === "nav-assigned")).toBeDefined()
+  })
+
+  it("AQU-512: a PROJECT_LEAD (PM, 500) does get the PM-gated step", () => {
+    const visible = filterStepsByRole(TOUR_STEPS, ROLE.PROJECT_LEAD)
+    expect(visible.find((s) => s.anchor === "nav-settings")).toBeDefined()
+  })
+
+  it("AQU-512: a MAINTAINER (600, also a PM-tier role) gets the PM-gated step", () => {
+    const visible = filterStepsByRole(TOUR_STEPS, ROLE.MAINTAINER)
+    expect(visible.find((s) => s.anchor === "nav-settings")).toBeDefined()
+  })
+
+  it("AQU-512: unresolved role (null) fails open — matches RoleGatedStep/RulesPage convention", () => {
+    const visible = filterStepsByRole(TOUR_STEPS, null)
+    expect(visible.find((s) => s.anchor === "nav-settings")).toBeDefined()
+  })
+
+  it("AQU-512: a step with no minRole is shown regardless of role level", () => {
+    const steps: TourStep[] = [{ anchor: "x", title: "t", body: "b" }]
+    expect(filterStepsByRole(steps, ROLE.VIEWER)).toHaveLength(1)
+    expect(filterStepsByRole(steps, null)).toHaveLength(1)
+  })
+
+  it("AQU-512: a below-floor role is excluded even one rung under minRole", () => {
+    const steps: TourStep[] = [{ anchor: "x", title: "t", body: "b", minRole: ROLE.PROJECT_LEAD }]
+    expect(filterStepsByRole(steps, ROLE.REVIEWER)).toHaveLength(0)
+    expect(filterStepsByRole(steps, ROLE.PROJECT_LEAD)).toHaveLength(1)
   })
 })

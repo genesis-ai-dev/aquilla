@@ -1,14 +1,16 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Trash2, GitMerge } from "lucide-react"
 import type { SecondarySrc } from "@/lib/frontier/members"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
+import { TableCell } from "@/components/ui/table"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { RoleLabel } from "@/components/RoleLabel"
 import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
@@ -35,6 +37,13 @@ interface CellEditorProps {
   sourceBadge: string
   /** Non-winning contributing paths from the server. Empty = single path. */
   secondarySources?: SecondarySrc[]
+  /**
+   * AQU-538 §3.4: optional extra content rendered under the role, inside the
+   * same cell — the matrix's lane-scope chips + scope-editor affordance.
+   * Purely additive (undefined = no visual change), so this component's
+   * existing role-edit behavior is untouched when the caller doesn't pass it.
+   */
+  footer?: ReactNode
 }
 
 type Status = "idle" | "submitting" | "error"
@@ -56,7 +65,7 @@ type Status = "idle" | "submitting" | "error"
  * override is exactly the "system did something behind your back" failure.
  * The popover names the source so the operator knows where to go to edit.
  */
-/** FRO-170 vocabulary labels for each grant-path source. */
+/** AQU-170 vocabulary labels for each grant-path source. */
 const SOURCE_LABEL: Record<string, string> = {
   override: "direct",
   group: "via group",
@@ -82,6 +91,7 @@ export function MembersMatrixCellEditor({
   sourceHint,
   sourceBadge,
   secondarySources = [],
+  footer,
 }: CellEditorProps) {
   const { session } = useFrontierSession()
   const [open, setOpen] = useState(false)
@@ -127,7 +137,7 @@ export function MembersMatrixCellEditor({
   // otherwise. Click opens the add-role popover.
   if (!cell) {
     return (
-      <td className="border-l p-0">
+      <TableCell className="border-l p-0">
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger
             render={
@@ -151,7 +161,7 @@ export function MembersMatrixCellEditor({
             />
           </PopoverContent>
         </Popover>
-      </td>
+      </TableCell>
     )
   }
 
@@ -159,7 +169,7 @@ export function MembersMatrixCellEditor({
   // edit popover (always — even for immutable cells, where the popover
   // shows the explanation).
   return (
-    <td className={`border-l p-0 ${cellClassName}`}>
+    <TableCell className={`border-l p-0 ${cellClassName}`}>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
@@ -171,9 +181,7 @@ export function MembersMatrixCellEditor({
           }
         >
           <div className="flex items-center justify-between gap-1">
-            <span className="capitalize truncate">
-              {cell.role.name.replace(/_/g, " ")}
-            </span>
+            <RoleLabel name={cell.role.name} className="truncate" />
             <div className="flex items-center gap-0.5 shrink-0">
               {sourceBadge && (
                 <Tooltip>
@@ -211,7 +219,7 @@ export function MembersMatrixCellEditor({
                     <ul className="space-y-0.5">
                       {secondarySources.map((s) => (
                         <li key={s.source} className="text-[10px] capitalize">
-                          {SOURCE_LABEL[s.source]} · {s.name.replace(/_/g, " ")}
+                          {SOURCE_LABEL[s.source]} · <RoleLabel name={s.name} />
                         </li>
                       ))}
                     </ul>
@@ -236,7 +244,8 @@ export function MembersMatrixCellEditor({
           )}
         </PopoverContent>
       </Popover>
-    </td>
+      {footer}
+    </TableCell>
   )
 }
 
@@ -271,7 +280,7 @@ function RolePickerBody({
               }`}
             >
               <span className="text-xs font-medium capitalize">
-                {opt.name.replace(/_/g, " ")}
+                <RoleLabel name={opt.name} />
                 {isCurrent && (
                   <span className="ml-1.5 text-[9px] text-muted-foreground">current</span>
                 )}
@@ -402,8 +411,8 @@ function ImmutableBody({
               disabled={status === "submitting"}
               className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-muted disabled:opacity-60"
             >
-              <span className="capitalize">{opt.name.replace(/_/g, " ")}</span>
-              <span className="text-[10px] text-muted-foreground">{roleName(opt.level)}</span>
+              <RoleLabel name={opt.name} />
+              <RoleLabel name={roleName(opt.level)} className="text-[10px] text-muted-foreground" />
             </button>
           ))}
         </div>

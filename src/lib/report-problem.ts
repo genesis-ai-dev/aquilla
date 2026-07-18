@@ -1,5 +1,5 @@
 /**
- * FRO-307: "Report a problem" — payload assembly + PostHog submission.
+ * AQU-307: "Report a problem" — payload assembly + PostHog submission.
  *
  * All PostHog calls are already consent-gated at the posthog.ts module level
  * (opt_out_capturing_by_default=true). This module just assembles the payload

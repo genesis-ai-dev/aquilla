@@ -1,5 +1,5 @@
 /**
- * FRO-428: Project-only invitees (users with a direct project_members grant
+ * AQU-428: Project-only invitees (users with a direct project_members grant
  * but NO org membership) must be able to see their project in the navigation
  * listing. These tests verify:
  *
@@ -49,10 +49,10 @@ function roleName(level: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// FRO-428: partitionSharedProjects with project-only member (no org)
+// AQU-428: partitionSharedProjects with project-only member (no org)
 // ---------------------------------------------------------------------------
 
-describe("FRO-428 — project-only invitee visibility", () => {
+describe("AQU-428 — project-only invitee visibility", () => {
   it("a user with NO orgs sees their project in sharedWithMe", () => {
     // The user is a direct project_members invitee (contributor) with no org.
     const project = makeProject("proj-alpha", 5, 400)
@@ -140,13 +140,13 @@ describe("FRO-428 — project-only invitee visibility", () => {
 })
 
 // ---------------------------------------------------------------------------
-// FRO-428: minRole filter semantics
+// AQU-428: minRole filter semantics
 // Verifies that the invite-picker (minRole=600) and the nav hook (no filter)
 // have different visibility — the pure logic is on the server, but we document
 // the contract here for regression safety.
 // ---------------------------------------------------------------------------
 
-describe("FRO-428 — minRole filter semantics", () => {
+describe("AQU-428 — minRole filter semantics", () => {
   it("viewer-level project IS in the full accessible list (no minRole)", () => {
     // simulate what fetchAccessibleProjects(jwt) returns without minRole
     const serverProjects = [

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { resolveBtTargetEventId } from "./bt-auto"
 
-// FRO-203 regression: a back-translation must be pinned to the event id of the
+// AQU-203 regression: a back-translation must be pinned to the event id of the
 // commit whose text it describes, not to the cell's currently-projected head.
 //
 // The trap: `applyOptimisticTargetEdit` updates the row's text but NOT its

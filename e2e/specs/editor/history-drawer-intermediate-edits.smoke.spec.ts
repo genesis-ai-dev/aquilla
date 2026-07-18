@@ -21,7 +21,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * This spec:
  *   1. Imports sample.md.
  *   2. Edits cell 0 three times quickly (same author, same session).
- *   3. Opens the CellExpansion → History tab → "Open full history".
+ *   3. Hovers the row → clicks the "Edit history" rail button.
  *   4. Verifies HistoryDrawer opens with heading "Edit history".
  *   5. Looks for "Show intermediate edits" button → clicks it.
  *   6. Verifies the text changes to "Hide intermediate edits".
@@ -50,24 +50,14 @@ test("HistoryDrawer show/hide intermediate edits toggle works", async ({ alice }
   await ws.editCell(0, "v1 final")
   await alice.waitForTimeout(500)
 
-  // Open CellExpansion panel.
+  // Hover the row to reveal the CellActionRail, then open the history drawer.
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()
   await row.hover()
 
-  const expandBtn = row.locator('button[aria-label="Open cell details"]').first()
-  await expect(expandBtn).toBeVisible({ timeout: 5_000 })
-  await expandBtn.click()
-
-  // Switch to History tab.
-  const historyTab = alice.locator('[role="tab"]').filter({ hasText: /History/i }).first()
-  await expect(historyTab).toBeVisible({ timeout: 5_000 })
-  await historyTab.click()
-
-  // Click "Open full history" button.
-  const openHistoryBtn = alice.getByRole("button", { name: /Open full history/i }).first()
-  await expect(openHistoryBtn).toBeVisible({ timeout: 5_000 })
-  await openHistoryBtn.click()
+  const historyBtn = row.locator('button[aria-label="Edit history"]').first()
+  await expect(historyBtn).toBeVisible({ timeout: 5_000 })
+  await historyBtn.click()
 
   // HistoryDrawer opens.
   await expect(alice.getByRole("heading", { name: /Edit history/i }).first()).toBeVisible({ timeout: 5_000 })

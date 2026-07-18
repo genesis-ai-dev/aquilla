@@ -8,7 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * ProjectWorkspace — soft-delete ConfirmActionDialog (FRO-272).
+ * ProjectWorkspace — soft-delete ConfirmActionDialog (AQU-272).
  *
  * ProjectWorkspace.tsx (~line 3622):
  *   <ConfirmActionDialog

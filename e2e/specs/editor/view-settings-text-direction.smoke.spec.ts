@@ -8,17 +8,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * ViewSettingsMenu — text direction toggle.
+ * ViewSettingsMenu — text direction modes.
  *
- * The menu (opened via header ⋯ → "View settings", FRO-331) has two menu items:
- *   - "Source" — toggles source text direction LTR ↔ RTL
- *   - "Target" — toggles target text direction LTR ↔ RTL
- * Each shows a DirPill badge with the current direction text ("LTR" or "RTL").
- *
- * This spec: opens the menu → verifies "Source" menuitem shows "LTR" →
- * clicks it → verifies it now shows "RTL" → clicks again → returns to "LTR".
+ * The menu (opened via header ⋯ → "View settings", FRO-331) exposes explicit
+ * Auto / LTR / RTL controls for the source and target columns.
  */
-test("view settings text direction Source toggle switches LTR to RTL", async ({ alice }) => {
+test("view settings text direction Source mode can force RTL and return to Auto", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `TextDir ${Date.now()}`
@@ -33,27 +28,23 @@ test("view settings text direction Source toggle switches LTR to RTL", async ({ 
   // Open the view settings menu from the header overflow menu (FRO-331).
   await ws.openViewSettingsMenu()
 
-  // "Source" menu item is visible showing "LTR".
-  const sourceItem = alice.getByRole("menuitem", { name: /Source/i })
-  await expect(sourceItem).toBeVisible({ timeout: 3_000 })
-  await expect(sourceItem.getByText("LTR")).toBeVisible({ timeout: 2_000 })
+  const menu = alice.getByRole("menu")
+  await expect(menu.getByText("Text Direction")).toBeVisible({ timeout: 3_000 })
 
-  // Click Source to toggle to RTL.
-  await sourceItem.click()
+  const sourceText = alice.locator('[data-cell-type="source"]').first()
+  await expect(sourceText).toHaveAttribute("dir", "ltr")
 
-  // Reopen menu (clicking a menu item closes it).
-  await ws.openViewSettingsMenu()
+  const sourceAuto = menu.getByRole("button", { name: "Source direction Auto" })
+  const sourceRtl = menu.getByRole("button", { name: "Source direction RTL" })
+  await expect(sourceAuto).toHaveAttribute("aria-pressed", "true")
 
-  // Source now shows "RTL".
-  const sourceItem2 = alice.getByRole("menuitem", { name: /Source/i })
-  await expect(sourceItem2).toBeVisible({ timeout: 3_000 })
-  await expect(sourceItem2.getByText("RTL")).toBeVisible({ timeout: 2_000 })
+  await sourceRtl.click()
+  await expect(sourceRtl).toHaveAttribute("aria-pressed", "true")
+  await expect(sourceText).toHaveAttribute("dir", "rtl")
 
-  // Toggle back to LTR.
-  await sourceItem2.click()
-  await ws.openViewSettingsMenu()
-  const sourceItem3 = alice.getByRole("menuitem", { name: /Source/i })
-  await expect(sourceItem3.getByText("LTR")).toBeVisible({ timeout: 2_000 })
+  await sourceAuto.click()
+  await expect(sourceAuto).toHaveAttribute("aria-pressed", "true")
+  await expect(sourceText).toHaveAttribute("dir", "ltr")
 
   // Close menu.
   await alice.keyboard.press("Escape")

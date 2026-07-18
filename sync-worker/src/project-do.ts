@@ -24,6 +24,7 @@ import {
   applyFocusClaim,
   applyFocusRelease,
   applyFocusRenew,
+  applyPresenceUpdate,
   parseProjectDoClientMessage,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
@@ -39,7 +40,7 @@ import { makePostgres } from "../../db/shim/postgres"
 const LEASE_SWEEP_INTERVAL_MS = 5_000
 
 /**
- * FRO-346: how long a member-removed denylist entry blocks reconnects.
+ * AQU-346: how long a member-removed denylist entry blocks reconnects.
  * Must exceed the sync-token TTL (15 min, auth-worker SYNC_TOKEN_TTL_SECONDS)
  * so a removed user's cached-but-still-valid token cannot rejoin; after this
  * window every token minted before the removal has expired and the mint-time
@@ -68,7 +69,7 @@ interface DOEnv {
    */
   SELF?: { fetch(input: Request | string, init?: RequestInit): Promise<Response> }
   /**
-   * FRO-476: Hyperdrive binding for the mirror sync engine (/__link-sync).
+   * AQU-476: Hyperdrive binding for the mirror sync engine (/__link-sync).
    * Unlike the worker's top-level fetch, a DO instance does NOT receive the
    * request-scoped synthesized AQUILLA_PG — it gets its own env from the
    * Workers runtime bindings, so /__link-sync builds its own short-lived
@@ -85,13 +86,13 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private locks = new Map<string, LockState>()
   private sweepTimer: ReturnType<typeof setInterval> | null = null
   /**
-   * FRO-346: numeric userIds whose membership was revoked, mapped to the
+   * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
    * tokens after an eject. In-memory by design (no durable DO state).
    */
   private removedUsers = new Map<number, number>()
   /**
-   * FRO-476: single-flight for the mirror sync. One DO instance == one
+   * AQU-476: single-flight for the mirror sync. One DO instance == one
    * project, so a single in-flight promise field serializes concurrent
    * /__link-sync callers (push accelerator + lazy pull racing) — the second
    * caller awaits the SAME run instead of starting an overlapping fold. This
@@ -103,14 +104,14 @@ export class ProjectSync extends DurableObject<DOEnv> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
 
-    // FRO-476: mirror sync trigger, single-flighted per DO instance (see
+    // AQU-476: mirror sync trigger, single-flighted per DO instance (see
     // linkSyncInFlight above). Internal-only, same bearer-secret gate as
     // /__broadcast. `?project=` is required (the DO doesn't trust
     // `idFromName`'s internal id string as the project id) — same query-
     // param convention as /connect, so the caller (link-sync-route.ts)
     // passes it explicitly.
     //
-    // SWARM-TODO(FRO-476): verify single-flight against a REAL deployed DO
+    // SWARM-TODO(AQU-476): verify single-flight against a REAL deployed DO
     // (vitest can't exercise Cloudflare's actual DO runtime/HYPERDRIVE
     // binding — the unit tests call mirrorSync() directly and the route
     // tests stub AQUILLA_PG). On the dev stack: create project A (import a
@@ -179,7 +180,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return Response.json({ ok: true, recipients: this.connections.size })
     }
 
-    // FRO-346: membership-revocation hook. identity's member-removal routes
+    // AQU-346: membership-revocation hook. identity's member-removal routes
     // notify the sync-worker, which forwards here (see member-removed.ts).
     // We eject the user's live sockets (member.removed frame + 4403 close)
     // and denylist the numeric userId for longer than the token TTL so a
@@ -250,7 +251,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       if (!auth.ok) {
         return new Response(auth.reason, { status: auth.status })
       }
-      // FRO-346: a valid token only proves membership at MINT time. If this
+      // AQU-346: a valid token only proves membership at MINT time. If this
       // user was ejected via /__member-removed, refuse reconnects until every
       // token minted before the removal has expired (deny window > token TTL).
       const deniedUntil = this.removedUsers.get(auth.claims.userId)
@@ -347,6 +348,12 @@ export class ProjectSync extends DurableObject<DOEnv> {
       for (const m of result.emit) this.broadcastToAll(m)
       return
     }
+    if (msg.t === "presence.update") {
+      const result = applyPresenceUpdate(this.presence, conn.userId, msg, now)
+      this.presence = result.presence
+      for (const m of result.emit) this.broadcastToAll(m)
+      return
+    }
     if (msg.t === "outbox.event") {
       void this.forwardOutboxEvent(msg.event)
       return
@@ -366,7 +373,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
   private handleConnectionClose(conn: ConnectionState): void {
-    // Idempotency guard: the FRO-346 eject path calls this explicitly right
+    // Idempotency guard: the AQU-346 eject path calls this explicitly right
     // after ws.close(); if the runtime later fires the close event anyway,
     // the second invocation must not re-run applyDisconnect.
     if (!this.connections.has(conn.ws)) return
@@ -390,8 +397,9 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (this.sweepTimer !== null) return
     this.sweepTimer = setInterval(() => {
       const now = Date.now()
-      const result = sweepExpiredLeases(this.locks, now)
+      const result = sweepExpiredLeases(this.locks, this.presence, now)
       this.locks = result.locks
+      this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
       if (result.emit.length > 0) this.broadcastPresence()
     }, LEASE_SWEEP_INTERVAL_MS)

@@ -1,5 +1,5 @@
 /**
- * FRO-138: Permission Semantics — derived from code, locked in with tests.
+ * AQU-138: Permission Semantics — derived from code, locked in with tests.
  *
  * Covers the full access-control journey:
  *   sign-up → invite to org → grant project → create team → add project/users
@@ -29,7 +29,7 @@
  *   - maintainer(600)+ required to create/rename/delete groups and manage group membership
  *   - owner(700) required to add/remove org members
  *   - maintainer(600)+ required to create project (into a specific org)
- *   - project_lead(500)+ required to delete a file projection (raised from 400 by FRO-271)
+ *   - project_lead(500)+ required to delete a file projection (raised from 400 by AQU-271)
  *   - maintainer(600)+ required to set deadline
  *   - owner(700) required to archive / restore project
  */
@@ -560,7 +560,12 @@ describe("Role × Scope edit gates", () => {
       expect(res.status).toBe(403)
     })
 
-    it("org viewer (100) can list org members", async () => {
+    // AQU-485: the default rosterViewMinRole floor is MAINTAINER (600) — safe
+    // for sensitive teams out of the box. This SUPERSEDES the pre-AQU-485
+    // behavior (viewer could always list org members); the roster-visibility
+    // permission tests in roster-progress-visibility.test.ts cover the full
+    // matrix (default, configured floor, independence from member-progress).
+    it("org viewer (100) is denied the roster under the AQU-485 default floor (maintainer)", async () => {
       await seedBaseOrg()
       await env.AQUILLA_PG.prepare(
         "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
@@ -568,6 +573,16 @@ describe("Role × Scope edit gates", () => {
       const res = await app.request(
         "/api/v2/orgs/1/members",
         { headers: authHeader(await jwtFor("viewer_member")) },
+        env,
+      )
+      expect(res.status).toBe(403)
+    })
+
+    it("org owner (700) still lists org members under the AQU-485 default floor", async () => {
+      await seedBaseOrg()
+      const res = await app.request(
+        "/api/v2/orgs/1/members",
+        { headers: authHeader(await jwtFor("owner")) },
         env,
       )
       expect(res.status).toBe(200)

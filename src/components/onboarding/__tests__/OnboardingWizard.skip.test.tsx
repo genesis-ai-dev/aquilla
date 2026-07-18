@@ -1,5 +1,5 @@
 /**
- * FRO-282: OnboardingWizard returning-user skip logic
+ * AQU-282: OnboardingWizard returning-user skip logic
  *
  * Covers:
  *  - Existing user (has orgs): after login in SignInStep, wizard skips to dashboard

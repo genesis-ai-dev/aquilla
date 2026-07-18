@@ -26,6 +26,8 @@ import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
+import { ValidationQueueCard } from "./cards/ValidationQueueCard"
+import { isValidationProposal } from "./cards/registry"
 import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
 
 // ── Lint ───────────────────────────────────────────────────────────────────
@@ -35,12 +37,16 @@ import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
  * in place of the current translation. Prefers the live cell (so
  * source-dependent rules see the real source text); falls back to a minimal
  * synthetic cell when the projection hasn't loaded that cell.
+ *
+ * Exported for the workbench's working set, which lints the row's CURRENT
+ * text (the user may have edited the draft) — pass it as `afterOverride`.
  */
-function lintCellFor(
+export function lintCellFor(
   ev: StagedEvent,
   resolveCell: ((cellId: string) => CellData | undefined) | undefined,
+  afterOverride?: string,
 ): CellData {
-  const after = ev.display.after ?? ""
+  const after = afterOverride ?? ev.display.after ?? ""
   const live = ev.cellId ? resolveCell?.(ev.cellId) : undefined
   const base: CellData =
     live ??
@@ -197,6 +203,32 @@ export interface ProposalCardProps {
 type CardState = "idle" | "applying" | "applied" | "discarded"
 
 export function ProposalCard({
+  proposal,
+  roleLevel,
+  rules,
+  resolveCell,
+  applyContext,
+  onApplied,
+}: ProposalCardProps) {
+  // Tier 2 (testimony): all-validation proposals get the per-item queue —
+  // one Confirm per cell, no apply-all (agent-complete design §3/§6).
+  // Before any hooks: a proposal's composition never changes, but React
+  // still wants an unconditional hook order per code path.
+  if (isValidationProposal(proposal)) {
+    return (
+      <ValidationQueueCard
+        proposal={proposal}
+        applyContext={applyContext}
+        onApplied={onApplied}
+        canValidate={canApply("cell.validate", roleLevel).allowed}
+      />
+    )
+  }
+  return <StagedProposalCard proposal={proposal} roleLevel={roleLevel} rules={rules} resolveCell={resolveCell} applyContext={applyContext} onApplied={onApplied} />
+}
+
+/** The generic staged-diff card (tier 1 / mixed proposals). */
+function StagedProposalCard({
   proposal,
   roleLevel,
   rules,

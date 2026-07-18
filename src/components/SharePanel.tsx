@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Copy, AlertCircle, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -16,16 +16,26 @@ import {
   revokeProjectInvite,
   type ActiveProjectInvite,
 } from "@/lib/sync/invites"
+import { fetchProjectSettings } from "@/lib/sync/project-settings"
+import { resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
+import { fetchMemberScopes, putMemberScopes } from "@/lib/sync/member-scopes"
 import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
-import { MembersPanel, type MembersPanelMember } from "./MembersPanel"
+import {
+  MembersPanel,
+  type MembersPanelMember,
+  type MembersPanelScopeConfig,
+  type MemberScopeValue,
+} from "./MembersPanel"
 import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
+  roleDisplayText,
 } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 
 interface SharePanelProps {
   open: boolean
@@ -100,10 +110,11 @@ function MembersTab({ projectId }: { projectId: string }) {
   const callerUserId = null
   const { session } = useFrontierSession()
   const callerUsername = session?.username ?? null
+  const jwt = session?.jwt ?? null
 
   const { members, isLoading, error, add, remove } = useProjectMembers(projectId)
 
-  // FRO-285 (F-A4): derive callerMaxRole from the caller's own effective role
+  // AQU-285 (F-A4): derive callerMaxRole from the caller's own effective role
   // in the members list so the role picker never offers what the server 403s.
   // Fall back to MAINTAINER (600) if the caller's entry isn't in the list yet
   // (e.g. still loading) — the server is the security boundary regardless.
@@ -127,6 +138,78 @@ function MembersTab({ projectId }: { projectId: string }) {
           : undefined,
   }))
 
+  // AQU-553: only leads+ can manage member scopes, and leads are themselves
+  // never scopable — so the fetches below are skipped entirely for anyone
+  // who wouldn't see the editor MembersPanel renders.
+  const canManageScopes = callerMaxRole >= ROLE.PROJECT_LEAD
+
+  const [scopeLanes, setScopeLanes] = useState<Array<{ value: string; label: string }>>([
+    { value: "", label: "Default" },
+  ])
+  const [scopeFiles, setScopeFiles] = useState<Array<{ id: string; name: string }>>([])
+  const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScopeValue[]>>({})
+
+  // Lanes + files come from the project's settings/record — fetched once per
+  // (project, caller) as soon as the caller can manage scopes. Failure to
+  // load settings just leaves the "Default" lane placeholder in place.
+  useEffect(() => {
+    if (!canManageScopes || !jwt) return
+    let alive = true
+    void (async () => {
+      const [settingsRes, projectRes] = await Promise.all([
+        fetchProjectSettings(jwt, projectId),
+        resolveCloudProjectResult(projectId, jwt),
+      ])
+      if (!alive) return
+      const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
+      setScopeLanes([
+        { value: "", label: defaultLabel },
+        ...(settingsRes?.settings.targetLanes ?? []).map((t) => ({ value: t, label: t })),
+      ])
+      if (projectRes.ok) {
+        setScopeFiles(
+          (projectRes.project.files ?? []).map((f) => ({ id: f.id, name: f.name })),
+        )
+      }
+    })()
+    return () => { alive = false }
+  }, [canManageScopes, jwt, projectId])
+
+  // Members below project_lead are the only scopable rows (leads+ must stay
+  // unscoped). Recomputed whenever the roster changes.
+  const scopableUserIds = useMemo(
+    () => members.filter((m) => m.role.level < ROLE.PROJECT_LEAD).map((m) => m.userId),
+    [members],
+  )
+
+  const loadScopes = useCallback(async () => {
+    if (!canManageScopes || !jwt || scopableUserIds.length === 0) {
+      setScopesByUser({})
+      return
+    }
+    // Tolerate individual failures as unscoped — one member's fetch failing
+    // shouldn't block the rest of the roster from rendering scope state.
+    const entries = await Promise.all(
+      scopableUserIds.map(async (userId) => {
+        const scopes = await fetchMemberScopes(jwt, projectId, userId)
+        return [userId, scopes ?? []] as const
+      }),
+    )
+    setScopesByUser(Object.fromEntries(entries))
+  }, [canManageScopes, jwt, projectId, scopableUserIds])
+
+  useEffect(() => { void loadScopes() }, [loadScopes])
+
+  const handleSaveScopes = useCallback(async (userId: number, scopes: MemberScopeValue[]) => {
+    if (!jwt) throw new Error("Sign in to manage scopes.")
+    const saved = await putMemberScopes(jwt, projectId, userId, scopes)
+    setScopesByUser((prev) => ({ ...prev, [userId]: saved }))
+  }, [jwt, projectId])
+
+  const scopeConfig: MembersPanelScopeConfig | undefined = canManageScopes
+    ? { lanes: scopeLanes, files: scopeFiles, scopesByUser, onSave: handleSaveScopes }
+    : undefined
+
   return (
     <div>
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
@@ -136,7 +219,7 @@ function MembersTab({ projectId }: { projectId: string }) {
         <MembersPanel
           members={panelMembers}
           roleOptions={[...PROJECT_ROLE_OPTIONS]}
-          defaultRole={ROLE.CONTRIBUTOR}
+          newMemberDefaultRole={ROLE.CONTRIBUTOR}
           callerUserId={callerUserId}
           callerMaxRole={callerMaxRole}
           onAdd={async (username, role) => {
@@ -145,6 +228,7 @@ function MembersTab({ projectId }: { projectId: string }) {
           }}
           onRemove={remove}
           onChangeRole={async (username, role) => { await add(username, role) }}
+          scopeConfig={scopeConfig}
         />
       )}
     </div>
@@ -268,7 +352,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
             <Select
               items={LINK_ROLE_OPTIONS.map((opt) => ({
                 value: String(opt.level),
-                label: opt.name,
+                label: roleDisplayText(opt.name),
               }))}
               value={String(inviteRole)}
               onValueChange={(v) => setInviteRole(Number(v ?? ""))}
@@ -281,7 +365,7 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
                 <SelectGroup>
                   {LINK_ROLE_OPTIONS.map((opt) => (
                     <SelectItem key={opt.level} value={String(opt.level)}>
-                      {opt.name}
+                      <RoleLabel name={opt.name} />
                     </SelectItem>
                   ))}
                 </SelectGroup>
@@ -443,7 +527,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                 …{inv.token.slice(-8)}
               </p>
               <p className="text-[10px] text-muted-foreground">
-                {inv.role.name}
+                <RoleLabel name={inv.role.name} />
                 {inv.email ? ` · ${inv.email}` : " · open link"}
                 {" · "}
                 {formatExpiry(inv.expiresAt)}

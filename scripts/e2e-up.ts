@@ -321,21 +321,39 @@ async function main(): Promise<void> {
   // SQL (Postgres syntax) executes correctly without a deployed Hyperdrive.
   // --var WRANGLER_LOCAL:1 unlocks /__test__/reset (process env alone doesn't
   // reach c.env bindings).
-  console.log(`${TAG}[boot 3/8] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
+  // Scripted OpenRouter mock (scripts/mock-openrouter.ts) — the agent route's
+  // "model brain" for e2e. Per-shard port so concurrent stacks don't clash.
+  const OPENROUTER_MOCK_PORT = 9456 + K * 100
+  console.log(`${TAG}[boot 3/8] starting mock OpenRouter on :${OPENROUTER_MOCK_PORT} + identity (auth-worker) on :${IDENTITY_PORT}…`)
+  const openrouterMock = spawn(
+    "npx",
+    ["tsx", "scripts/mock-openrouter.ts", String(OPENROUTER_MOCK_PORT)],
+    { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } },
+  )
+  attachOutput(openrouterMock, "mock-openrouter", openLogFile(path.join(LOG_DIR, "mock-openrouter.log")), VERBOSE)
+  cleanup.push(() => killChildTree(openrouterMock))
+
   const identity: SpawnedWorker = await spawnWranglerDev({
     cwd: AUTH_WORKER_DIR,
     port: IDENTITY_PORT,
     label: "identity",
-    env: {
-      ...HYPERDRIVE_ENV,
-      SYNC_WORKER_URL: `http://127.0.0.1:${SYNC_WORKER_PORT}`,
-      ENVIRONMENT: "development",
-    },
+    env: { ...HYPERDRIVE_ENV },
     // ADMIN_EMAILS: site-admin identity is by account email; the admin-console
     // specs need alice to be a platform admin. Her seeded email is
     // alice@example.test (e2e/helpers/seed.ts). WRANGLER_LOCAL=1 + the unset
     // ADMIN_REQUIRE_ELEVATION here keep the step-up off so the console opens.
-    extraArgs: ["--persist-to", PERSIST_DIR, "--var", "WRANGLER_LOCAL:1", "--var", "ADMIN_REQUIRE_ELEVATION:false", "--var", "ADMIN_EMAILS:alice@example.test"],
+    // OPENROUTER_* point the agent/chat loops at the scripted mock above.
+    // SYNC_WORKER_URL/ENVIRONMENT let identity reach the isolated sync worker.
+    extraArgs: [
+      "--persist-to", PERSIST_DIR,
+      "--var", "WRANGLER_LOCAL:1",
+      "--var", "ADMIN_REQUIRE_ELEVATION:false",
+      "--var", "ADMIN_EMAILS:alice@example.test",
+      "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${OPENROUTER_MOCK_PORT}/api/v1`,
+      "--var", "OPENROUTER_API_KEY:mock",
+      "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_WORKER_PORT}`,
+      "--var", "ENVIRONMENT:development",
+    ],
     logFile: openLogFile(logFiles.identity),
     streamToParent: VERBOSE,
   })

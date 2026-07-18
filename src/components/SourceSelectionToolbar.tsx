@@ -1,5 +1,5 @@
 // Floating action cluster shown above a SOURCE selection. Mirrors the
-// CellActionRail aesthetic (rounded pill, muted icons). Buttons:
+// CellActionRail aesthetic (rounded container, muted icons). Buttons:
 // Ask AI (push the selection into the agent chat as a chip) and Add to termbase
 // (existing terminology flow). A "View term" lookup appears when the selection
 // matches an active concept.
@@ -15,9 +15,9 @@ export interface SourceSelectionToolbarProps {
   onAskAi: () => void
   onAddToTermbase?: () => void
   onTermApply: (rendering: string) => void
-  /** FRO-260: called on mousedown so the parent suppresses selectionchange clearing. */
+  /** AQU-260: called on mousedown so the parent suppresses selectionchange clearing. */
   onToolbarMouseDown?: () => void
-  /** FRO-260: called on mouseup/mouseleave so the parent resets the guard. */
+  /** AQU-260: called on mouseup/mouseleave so the parent resets the guard. */
   onToolbarMouseUp?: () => void
 }
 
@@ -41,7 +41,7 @@ export function SourceSelectionToolbar({
     [activeConcepts, sourceSelection],
   )
 
-  // FRO-260: preserve the browser selection + suppress the selectionchange guard.
+  // AQU-260: preserve the browser selection + suppress the selectionchange guard.
   const handleButtonMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
     onToolbarMouseDown?.()
@@ -49,7 +49,7 @@ export function SourceSelectionToolbar({
 
   return (
     <div
-      className="absolute right-1 top-0 z-10 flex items-center gap-0.5 rounded-full bg-card px-1 py-0.5"
+      className="absolute right-1 top-0 z-10 flex items-center gap-0.5 rounded-md bg-card p-1"
       dir="ltr"
       onMouseUp={onToolbarMouseUp}
       onMouseLeave={onToolbarMouseUp}

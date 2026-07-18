@@ -10,7 +10,7 @@
 //      the form `EditorTable` row rendering uses (one fetch per file,
 //      used to decorate every row).
 //
-// FRO-477 (§6/§9.4): a SECOND, visually distinct tone for INHERITED
+// AQU-477 (§6/§9.4): a SECOND, visually distinct tone for INHERITED
 // staleness — an ancestor further up the link chain changed (or the
 // immediate upstream's own translation is itself stale against its
 // source), even though this project's direct pin comparison sees nothing
@@ -34,7 +34,7 @@ interface BaseProps {
   /** Optional override for the direct-stale tooltip body. Defaults to the
    *  AD-9 wording. */
   tooltipText?: string
-  /** Optional override for the inherited-stale tooltip body (FRO-477).
+  /** Optional override for the inherited-stale tooltip body (AQU-477).
    *  Defaults to the chain wording. */
   upstreamTooltipText?: string
   /** Tailwind size; default 12px (h-3 w-3) so it fits in a cell action rail. */
@@ -45,7 +45,7 @@ interface ManagedProps extends BaseProps {
   /** Membership set produced by `useStaleSourceCells`. The component
    *  reads `.has(cellId)`; no internal fetch. */
   staleCellIds: ReadonlySet<string>
-  /** FRO-477: membership set of cells whose ANCESTRY is stale (inherited,
+  /** AQU-477: membership set of cells whose ANCESTRY is stale (inherited,
    *  §6). Optional — omit to render only the direct-stale tone (existing
    *  call sites keep working unchanged). */
   upstreamStaleCellIds?: ReadonlySet<string>

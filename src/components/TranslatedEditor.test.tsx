@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, fireEvent, act } from "@testing-library/react"
 import { TranslatedEditor } from "./TranslatedEditor"
 
-// FRO-216: Opening a file must not emit phantom revisions.
+// AQU-216: Opening a file must not emit phantom revisions.
 //
 // Legacy-imported cells store HTML-escaped text (e.g. `--&gt;`). On open the
 // editor hydrates the *unescaped* form (`-->`) because content is parsed
@@ -11,7 +11,7 @@ import { TranslatedEditor } from "./TranslatedEditor"
 // no-op — otherwise merely focusing then blurring a cell commits a revision the
 // user never made, which then collides across sessions.
 
-describe("TranslatedEditor — no phantom commit on open (FRO-216)", () => {
+describe("TranslatedEditor — no phantom commit on open (AQU-216)", () => {
   it("does not commit when an escaped legacy value is opened and blurred without editing", () => {
     const onCommit = vi.fn()
     // Stored value as legacy-import wrote it: HTML-escaped arrow.

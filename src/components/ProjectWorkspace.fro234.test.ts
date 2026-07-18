@@ -1,5 +1,5 @@
 /**
- * Unit tests for the FRO-234 systemPrompt-patch guard in ProjectWorkspace.
+ * Unit tests for the AQU-234 systemPrompt-patch guard in ProjectWorkspace.
  *
  * Business rules:
  *   1. An empty/whitespace/null prompt must NEVER patch the server — a
@@ -14,7 +14,7 @@
 import { describe, it, expect } from "vitest"
 import { shouldPatchSystemPrompt } from "./ProjectWorkspace"
 
-describe("shouldPatchSystemPrompt (FRO-234)", () => {
+describe("shouldPatchSystemPrompt (AQU-234)", () => {
   // ── empty / missing prompt ─────────────────────────────────────────────────
 
   it("returns false when systemPrompt is undefined (missing from completionSettings)", () => {

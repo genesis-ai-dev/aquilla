@@ -1,92 +1,110 @@
-import { useState, useEffect, forwardRef, useImperativeHandle } from "react"
+import { useState, forwardRef, useImperativeHandle } from "react"
 import { Menu } from "@base-ui/react/menu"
-import { Eye, X, Languages } from "lucide-react"
+import { AlertTriangle, Eye, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
+import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
 
 export interface ViewSettingsMenuHandle {
   open: () => void
 }
 
 interface ViewSettingsMenuProps {
-  /** When true, the eye trigger is visually hidden — open via ref/imperative handle or RTL hint. */
+  /** When true, the eye trigger is visually hidden — open via ref/imperative handle. */
   hideTrigger?: boolean
   fileOpen: boolean
   lineNumbersEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
+  sourceAutoDirectionSummary?: TextDirectionSummary | null
+  targetAutoDirectionSummary?: TextDirectionSummary | null
+  directionWarningScope?: string | null
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
-  /** FRO-317: USFM \f...\f* footnote display mode. */
+  /** AQU-317: USFM \f...\f* footnote display mode. */
   footnoteViewMode?: FootnoteViewMode
-  rtlHintDismissed?: boolean
   /** Per-file source-column font size in px. */
   sourceFontSize: number
   /** Per-file target-column font size in px. */
   targetFontSize: number
   onLineNumbersChange: (v: boolean) => void
-  onSourceTextDirectionChange: (v: "ltr" | "rtl") => void
-  onTargetTextDirectionChange: (v: "ltr" | "rtl") => void
+  onSourceDirectionModeChange: (v: DirectionMode) => void
+  onTargetDirectionModeChange: (v: DirectionMode) => void
   onCellLabelsChange: (v: boolean) => void
   onSourceFontSizeChange: (v: number) => void
   onTargetFontSizeChange: (v: number) => void
   onTnSidebarChange: (v: boolean) => void
   onFootnoteViewModeChange?: (v: FootnoteViewMode) => void
-  onDismissRtlHint?: () => void
 }
 
 export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsMenuProps>(function ViewSettingsMenu({
   hideTrigger = false,
   fileOpen,
   lineNumbersEnabled,
+  sourceDirectionMode,
+  targetDirectionMode,
   sourceTextDirection,
   targetTextDirection,
+  sourceAutoDirectionSummary,
+  targetAutoDirectionSummary,
+  directionWarningScope,
   cellLabelsEnabled,
   tnSidebarEnabled,
   footnoteViewMode = "off",
-  rtlHintDismissed = true,
   sourceFontSize,
   targetFontSize,
   onLineNumbersChange,
-  onSourceTextDirectionChange,
-  onTargetTextDirectionChange,
+  onSourceDirectionModeChange,
+  onTargetDirectionModeChange,
   onCellLabelsChange,
   onSourceFontSizeChange,
   onTargetFontSizeChange,
   onTnSidebarChange,
   onFootnoteViewModeChange,
-  onDismissRtlHint,
 }, ref) {
-  const rtlDetected = sourceTextDirection === "rtl" || targetTextDirection === "rtl"
-  const showHint = fileOpen && rtlDetected && !rtlHintDismissed
   const [menuOpen, setMenuOpen] = useState(false)
-  const [hintVisible, setHintVisible] = useState(showHint)
+  const mismatch = getManualDirectionMismatch({
+    sourceMode: sourceDirectionMode,
+    targetMode: targetDirectionMode,
+    sourceSummary: sourceAutoDirectionSummary,
+    targetSummary: targetAutoDirectionSummary,
+  })
+  const mismatchSignature = mismatch
+    ? `${directionWarningScope ?? ""}:${mismatch.side}:${mismatch.forced}:${mismatch.detected}`
+    : null
+  const [dismissedMismatchSignature, setDismissedMismatchSignature] = useState<string | null>(null)
+  const showMismatchWarning = Boolean(
+    fileOpen &&
+    mismatch &&
+    mismatchSignature &&
+    dismissedMismatchSignature !== mismatchSignature &&
+    !menuOpen,
+  )
+  const detectedManualDirection = mismatch?.detected === "mixed" ? null : (mismatch?.detected ?? null)
 
   useImperativeHandle(ref, () => ({
     open: () => setMenuOpen(true),
   }))
 
-  // Sync hint visibility with detection state — if user opens the menu, the
-  // hint collapses silently (they're seeing the settings now).
-  useEffect(() => {
-    if (menuOpen) setHintVisible(false)
-  }, [menuOpen])
-  useEffect(() => {
-    setHintVisible(showHint)
-  }, [showHint])
-
-  function handleDismissHint() {
-    setHintVisible(false)
-    onDismissRtlHint?.()
+  function applyDirectionMismatchFix(mode: DirectionMode) {
+    if (!mismatch) return
+    if (mismatch.side === "source") onSourceDirectionModeChange(mode)
+    else onTargetDirectionModeChange(mode)
   }
 
   return (
-    <div className="relative flex items-center">
-      {/* Auto-popover nudge when we detect RTL and user hasn't acknowledged */}
-      {hintVisible && (
+    // AQU-358: when the trigger is hidden (opened from the ⋯ menu) this wrapper
+    // is a zero-width flex child sitting between the primary-action button and the
+    // ⋯ menu; the parent's `gap-1` then renders on *both* sides of it, doubling the
+    // visible gap before the ⋯. Pull it back by one gap step so the ⋯ sits tight
+    // against the action button while the wrapper still anchors the warning popover.
+    <div className={cn("relative flex items-center", hideTrigger && "-ml-1")}>
+      {showMismatchWarning && mismatch && (
         <div
           className={cn(
             "absolute right-full top-1/2 z-30 mr-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
@@ -95,45 +113,46 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           )}
           role="status"
         >
-          <Languages className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-amber-600" />
           <span className="text-foreground">
-            Detected <strong>right-to-left</strong> for{" "}
-            {sourceTextDirection === "rtl" && targetTextDirection === "rtl"
-              ? "source and target"
-              : sourceTextDirection === "rtl"
-                ? "source"
-                : "target"}
+            {mismatch.sideLabel} is forced{" "}
+            <strong>{directionName(mismatch.forced)}</strong>, but content looks{" "}
+            <strong>{detectedDirectionName(mismatch.detected)}</strong>
           </span>
           <button
             type="button"
-            onClick={() => {
-              setMenuOpen(true)
-              handleDismissHint()
-            }}
+            onClick={() => applyDirectionMismatchFix("auto")}
             className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
           >
-            Adjust
+            Auto
           </button>
+          {detectedManualDirection && (
+            <button
+              type="button"
+              onClick={() => applyDirectionMismatchFix(detectedManualDirection)}
+              className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+            >
+              {detectedManualDirection.toUpperCase()}
+            </button>
+          )}
           <AppTooltip content="Dismiss">
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
-              onClick={handleDismissHint}
-              aria-label="Dismiss"
+              onClick={() => setDismissedMismatchSignature(mismatchSignature)}
+              aria-label="Dismiss direction warning"
               className="size-5 rounded-full text-muted-foreground/70"
             >
               <X className="h-3 w-3" />
             </Button>
           </AppTooltip>
-          {/* Arrow pointing to the eye icon */}
           <span
             className="absolute left-full top-1/2 -translate-y-1/2 border-y-4 border-l-4 border-y-transparent border-l-card"
             aria-hidden="true"
           />
         </div>
       )}
-
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <Menu.Trigger
           render={
@@ -145,12 +164,6 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               className={cn(hideTrigger ? "sr-only" : "relative")}
             >
               <Eye className="h-4 w-4" />
-              {showHint && !hideTrigger && (
-                <span
-                  className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary ring-2 ring-background"
-                  aria-hidden="true"
-                />
-              )}
             </Button>
           }
         />
@@ -210,22 +223,22 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Text Direction
               </div>
-              <Menu.Item
+              <DirectionModeRow
+                label="Source"
                 disabled={!fileOpen}
-                onClick={() => onSourceTextDirectionChange(sourceTextDirection === "ltr" ? "rtl" : "ltr")}
-                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
-              >
-                <span>Source</span>
-                <DirPill dir={sourceTextDirection} />
-              </Menu.Item>
-              <Menu.Item
+                mode={sourceDirectionMode}
+                resolved={sourceTextDirection}
+                autoSummary={sourceAutoDirectionSummary}
+                onChange={onSourceDirectionModeChange}
+              />
+              <DirectionModeRow
+                label="Target"
                 disabled={!fileOpen}
-                onClick={() => onTargetTextDirectionChange(targetTextDirection === "ltr" ? "rtl" : "ltr")}
-                className="flex cursor-pointer select-none items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[disabled]:opacity-50"
-              >
-                <span>Target</span>
-                <DirPill dir={targetTextDirection} />
-              </Menu.Item>
+                mode={targetDirectionMode}
+                resolved={targetTextDirection}
+                autoSummary={targetAutoDirectionSummary}
+                onChange={onTargetDirectionModeChange}
+              />
               <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Font Size
@@ -346,10 +359,123 @@ function FontSizeRow({
   )
 }
 
-function DirPill({ dir }: { dir: "ltr" | "rtl" }) {
+function DirectionModeRow({
+  label,
+  mode,
+  resolved,
+  autoSummary,
+  disabled,
+  onChange,
+}: {
+  label: string
+  mode: DirectionMode
+  resolved: TextDirection
+  autoSummary?: TextDirectionSummary | null
+  disabled: boolean
+  onChange: (mode: DirectionMode) => void
+}) {
+  const modes: DirectionMode[] = ["auto", "ltr", "rtl"]
+  return (
+    <div className={cn(
+      "rounded-lg px-2 py-1.5",
+      disabled && "opacity-50",
+    )}>
+      <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+        <span>{label}</span>
+        <DirPill dir={resolved} mode={mode} autoSummary={autoSummary} />
+      </div>
+      <div className="grid grid-cols-3 gap-1">
+        {modes.map((nextMode) => {
+          const active = mode === nextMode
+          return (
+            <button
+              key={nextMode}
+              type="button"
+              disabled={disabled}
+              aria-label={`${label} direction ${nextMode === "auto" ? "Auto" : nextMode.toUpperCase()}`}
+              aria-pressed={active}
+              onClick={() => onChange(nextMode)}
+              className={cn(
+                "rounded-md px-2 py-1 text-[11px] font-medium transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35",
+                active
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted/60 text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                disabled && "cursor-not-allowed hover:bg-muted/60 hover:text-muted-foreground",
+              )}
+            >
+              {nextMode === "auto" ? "Auto" : nextMode.toUpperCase()}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function DirPill({
+  dir,
+  mode,
+  autoSummary,
+}: {
+  dir: TextDirection
+  mode: DirectionMode
+  autoSummary?: TextDirectionSummary | null
+}) {
+  const label = mode === "auto" ? `AUTO ${(autoSummary ?? dir).toUpperCase()}` : dir.toUpperCase()
   return (
     <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
-      {dir.toUpperCase()}
+      {label}
     </span>
   )
+}
+
+interface DirectionMismatchInput {
+  sourceMode: DirectionMode
+  targetMode: DirectionMode
+  sourceSummary?: TextDirectionSummary | null
+  targetSummary?: TextDirectionSummary | null
+}
+
+interface DirectionMismatch {
+  side: "source" | "target"
+  sideLabel: "Source" | "Target"
+  forced: TextDirection
+  detected: TextDirectionSummary
+}
+
+function getManualDirectionMismatch({
+  sourceMode,
+  targetMode,
+  sourceSummary,
+  targetSummary,
+}: DirectionMismatchInput): DirectionMismatch | null {
+  return (
+    getManualDirectionMismatchForSide("target", targetMode, targetSummary) ??
+    getManualDirectionMismatchForSide("source", sourceMode, sourceSummary)
+  )
+}
+
+function getManualDirectionMismatchForSide(
+  side: "source" | "target",
+  mode: DirectionMode,
+  summary?: TextDirectionSummary | null,
+): DirectionMismatch | null {
+  if (mode === "auto" || summary == null) return null
+  if (summary === mode) return null
+  return {
+    side,
+    sideLabel: side === "source" ? "Source" : "Target",
+    forced: mode,
+    detected: summary,
+  }
+}
+
+function directionName(direction: TextDirection): string {
+  return direction === "rtl" ? "right-to-left" : "left-to-right"
+}
+
+function detectedDirectionName(direction: TextDirectionSummary): string {
+  if (direction === "mixed") return "mixed"
+  return directionName(direction)
 }

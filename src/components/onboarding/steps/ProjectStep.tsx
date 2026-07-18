@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { v4 as uuid } from "uuid"
 import { Button } from "@/components/ui/button"
 import {
@@ -8,10 +9,20 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
 import { createProject as createLocalProject } from "@/lib/store/project-index"
 import { createRemoteProject } from "@/lib/frontier/members"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { requiredString } from "@/lib/forms/schemas"
+import { useSubmitError } from "@/lib/forms/submit-error"
 import type { ProjectRecord } from "@/lib/parsers/types"
+
+const formSchema = z.object({
+  name: requiredString("Project name"),
+  sourceLanguage: requiredString("Source language"),
+  targetLanguage: requiredString("Target language"),
+})
 
 export function ProjectStep({
   displayName,
@@ -27,12 +38,44 @@ export function ProjectStep({
   /** When set (Team onboarding), the project is created inside this org. */
   orgId?: number
 }) {
-  const [name, setName] = useState("")
-  const [sourceLanguage, setSourceLanguage] = useState("")
-  const [targetLanguage, setTargetLanguage] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const { session } = useFrontierSession()
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const form = useForm({
+    defaultValues: { name: "", sourceLanguage: "", targetLanguage: "" },
+    validators: { onSubmit: formSchema },
+    onSubmit: async ({ value }) => {
+      if (!session?.jwt) return
+      clearSubmitError()
+      try {
+        const created = await createRemoteProject(
+          { id: uuid(), name: value.name.trim() },
+          session.jwt,
+          orgId,
+        )
+        const project: ProjectRecord = {
+          id: created.id,
+          name: value.name.trim(),
+          sourceLanguage: value.sourceLanguage.trim(),
+          targetLanguage: value.targetLanguage.trim(),
+          createdAt: new Date().toISOString(),
+          files: [],
+          members: [{ userId: session.username, role: "owner" }],
+          username: displayName || session.username,
+          syncRole: {
+            level: created.role.level,
+            name: created.role.name,
+            source: created.role.source as "override" | "creator" | "org",
+            fetchedAt: new Date().toISOString(),
+          },
+        }
+        await createLocalProject(project)
+        onCreated(project)
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Failed to create project.")
+      }
+    },
+  })
 
   // Guard: project creation requires a server session (AD-3 projects are
   // server-only reads; a local-only project will 403 the moment the user
@@ -41,8 +84,8 @@ export function ProjectStep({
   // sign-in prompt here rather than silently producing a broken project.
   if (!session?.jwt) {
     return (
-      <div className="space-y-6">
-        <div className="text-center space-y-2">
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2 text-center">
           <h2 className="text-2xl font-semibold">Sign in to create a project</h2>
           <p className="text-sm text-muted-foreground">
             Projects are stored on the server. You need to be signed in so the
@@ -59,104 +102,95 @@ export function ProjectStep({
       </div>
     )
   }
-  const sessionJwt = session.jwt
-  const sessionUsername = session.username
-
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
-    if (!name.trim() || !sourceLanguage.trim() || !targetLanguage.trim()) return
-    setBusy(true)
-    setError(null)
-    try {
-      // Create the server row first — reads are server-only (AD-3), so
-      // without it the project 403s the moment you open it. Mirror
-      // ProjectCreateDialog which enforces this same ordering.
-      const created = await createRemoteProject(
-        { id: uuid(), name: name.trim() },
-        sessionJwt,
-        orgId,
-      )
-      const project: ProjectRecord = {
-        id: created.id,
-        name: name.trim(),
-        sourceLanguage: sourceLanguage.trim(),
-        targetLanguage: targetLanguage.trim(),
-        createdAt: new Date().toISOString(),
-        files: [],
-        members: [{ userId: sessionUsername, role: "owner" }],
-        username: displayName || sessionUsername,
-        syncRole: {
-          level: created.role.level,
-          name: created.role.name,
-          source: created.role.source as "override" | "creator" | "org",
-          fetchedAt: new Date().toISOString(),
-        },
-      }
-      await createLocalProject(project)
-      onCreated(project)
-    } catch (err) {
-      // Surface remote-create failures rather than silently navigating to a
-      // 404 project page. Common shapes: 401 stale jwt, 409 id collision,
-      // 5xx transient.
-      const message =
-        err instanceof Error ? err.message : "Failed to create project."
-      setError(message)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
-    <div className="space-y-6">
-      <div className="text-center space-y-2">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2 text-center">
         <h2 className="text-2xl font-semibold">Create your first project</h2>
         <p className="text-sm text-muted-foreground">
           You can import files and invite collaborators after setup.
         </p>
       </div>
-      <form onSubmit={handleCreate} className="space-y-4">
+      <form
+        id="project-step-form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void form.handleSubmit()
+        }}
+        className="flex flex-col gap-4"
+      >
         <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="proj-name">Project name</FieldLabel>
-            <Input
-              id="proj-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="My Translation Project"
-              autoFocus
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="src-lang">Source language</FieldLabel>
-            <Input
-              id="src-lang"
-              value={sourceLanguage}
-              onChange={(e) => setSourceLanguage(e.target.value)}
-              placeholder="English"
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="tgt-lang">Target language</FieldLabel>
-            <Input
-              id="tgt-lang"
-              value={targetLanguage}
-              onChange={(e) => setTargetLanguage(e.target.value)}
-              placeholder="French"
-            />
-          </Field>
+          <form.Field
+            name="name"
+            children={(field) => {
+              const invalid = isFieldInvalid(field)
+              return (
+                <Field data-invalid={invalid}>
+                  <FieldLabel htmlFor="proj-name">Project name</FieldLabel>
+                  <Input
+                    id="proj-name"
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="My Translation Project"
+                    aria-invalid={invalid}
+                    autoFocus
+                  />
+                  {invalid && <FieldError errors={field.state.meta.errors} />}
+                </Field>
+              )
+            }}
+          />
+          <form.Field
+            name="sourceLanguage"
+            children={(field) => {
+              const invalid = isFieldInvalid(field)
+              return (
+                <Field data-invalid={invalid}>
+                  <FieldLabel htmlFor="src-lang">Source language</FieldLabel>
+                  <Input
+                    id="src-lang"
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="English"
+                    aria-invalid={invalid}
+                  />
+                  {invalid && <FieldError errors={field.state.meta.errors} />}
+                </Field>
+              )
+            }}
+          />
+          <form.Field
+            name="targetLanguage"
+            children={(field) => {
+              const invalid = isFieldInvalid(field)
+              return (
+                <Field data-invalid={invalid}>
+                  <FieldLabel htmlFor="tgt-lang">Target language</FieldLabel>
+                  <Input
+                    id="tgt-lang"
+                    name={field.name}
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    placeholder="French"
+                    aria-invalid={invalid}
+                  />
+                  {invalid && <FieldError errors={field.state.meta.errors} />}
+                </Field>
+              )
+            }}
+          />
         </FieldGroup>
-        {error ? (
-          <FieldError role="alert">
-            {error}
-          </FieldError>
-        ) : null}
-        <Button
-          type="submit"
-          size="lg"
-          className="w-full"
-          disabled={busy || !name.trim() || !sourceLanguage.trim() || !targetLanguage.trim()}
-        >
-          {busy ? "Creating…" : "Create Project"}
+        {submitError && (
+          <FieldError role="alert">{submitError}</FieldError>
+        )}
+        <Button type="submit" form="project-step-form" size="lg" className="w-full">
+          {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
+          {form.state.isSubmitting ? "Creating…" : "Create Project"}
         </Button>
         <Button
           type="button"
@@ -164,7 +198,7 @@ export function ProjectStep({
           size="lg"
           className="w-full"
           onClick={onSkip}
-          disabled={busy}
+          disabled={form.state.isSubmitting}
         >
           Do this later
         </Button>

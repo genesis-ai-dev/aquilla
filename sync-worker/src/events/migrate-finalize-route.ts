@@ -11,6 +11,8 @@
 //
 // Idempotent: pure recompute from current cells, safe to call any number of times.
 
+import { fullProgressRecomputeStmts } from './progress-projection'
+
 const PATH = '/migrate/finalize'
 
 export interface MigrateFinalizeEnv {
@@ -52,7 +54,14 @@ export async function handleMigrateFinalizeRequest(
     )
       .bind(Date.now(), projectId)
       .run()
-    return Response.json({ ok: true, filesUpdated: res.meta?.changes ?? null })
+    const { results: files } = await env.AQUILLA_PG
+      .prepare('SELECT id FROM files WHERE project_id = ?')
+      .bind(projectId)
+      .all<{ id: string }>()
+    for (const file of files) {
+      await env.AQUILLA_PG.batch(fullProgressRecomputeStmts(env.AQUILLA_PG, projectId, file.id, Date.now()))
+    }
+    return Response.json({ ok: true, filesUpdated: res.meta?.changes ?? null, progressUpdated: files.length })
   } catch (err) {
     return Response.json({ error: `finalize failed: ${String(err)}` }, { status: 500 })
   }

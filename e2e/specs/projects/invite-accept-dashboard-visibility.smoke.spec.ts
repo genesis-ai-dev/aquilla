@@ -2,7 +2,7 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * FRO-335 — magic-link invite accept must leave the project REACHABLE.
+ * AQU-335 — magic-link invite accept must leave the project REACHABLE.
  *
  * The failure mode this guards against: bob redeems alice's invite link,
  * lands in the workspace, then closes the tab — and the project never
@@ -12,8 +12,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   1. JoinPage shows an explicit "Accept invitation" confirmation for
  *      signed-in users (spec join-via-invite-link Step 2) instead of a
  *      silent auto-accept on link-open.
- *   2. /projects partitions the unfiltered accessible-projects list and
- *      renders cross-org grants under "Shared with you".
+ *   2. AQU-417: cross-org grants are collected on a single dedicated page
+ *      (/shared), reached from the sidebar's "Shared with you" link — instead
+ *      of being scattered under every org's dashboard.
  */
 test("invite accept shows confirmation and the project surfaces on the invitee's dashboard", async ({ alice, bob }) => {
   // ── alice: create a project and mint an invite link ──
@@ -49,15 +50,15 @@ test("invite accept shows confirmation and the project surfaces on the invitee's
   await acceptBtn.click()
   await bob.waitForURL(/\/project\//, { timeout: 15_000 })
 
-  // ── bob: the project is now reachable from the dashboard ──
-  await bob.goto("/projects")
+  // ── bob: the project is reachable from the dedicated "Shared with you" page,
+  //    linked from the sidebar (AQU-417 — one place, not scattered per org). ──
+  await bob.goto("/")
+  const sharedLink = bob.getByRole("link", { name: "Shared with you" })
+  await expect(sharedLink).toBeVisible({ timeout: 10_000 })
+  await sharedLink.click()
+  await bob.waitForURL(/\/shared$/, { timeout: 10_000 })
+
   const shared = bob.getByTestId("shared-with-you")
   await expect(shared).toBeVisible({ timeout: 10_000 })
   await expect(shared.getByText(name)).toBeVisible()
-
-  // And from the Overview (dashboard root) as well.
-  await bob.goto("/")
-  const overviewShared = bob.getByTestId("shared-with-you")
-  await expect(overviewShared).toBeVisible({ timeout: 10_000 })
-  await expect(overviewShared.getByText(name)).toBeVisible()
 })

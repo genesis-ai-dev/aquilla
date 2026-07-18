@@ -1,6 +1,6 @@
 /**
- * Tests for FRO-316 spreadsheet parser and column mapping utilities.
- * FRO-439: added tests for splitCastName (camera-angle splitting).
+ * Tests for AQU-316 spreadsheet parser and column mapping utilities.
+ * AQU-439: added tests for splitCastName (camera-angle splitting).
  */
 
 import { describe, it, expect } from "vitest"
@@ -13,7 +13,7 @@ import {
   splitCastName,
 } from "./spreadsheet"
 
-// ─── FRO-439: splitCastName ──────────────────────────────────────────────────
+// ─── AQU-439: splitCastName ──────────────────────────────────────────────────
 
 describe("splitCastName", () => {
   it("returns voice + cameraState when a trailing (angle) group is present", () => {

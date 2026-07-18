@@ -21,6 +21,17 @@ import { readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cel
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 
+// AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
+// SWARM-TODO(AQU-538): slice 1 adds `targetLang` to `CellRow` in
+// `cells-read-types.ts`; until that lands in this worktree we read it through
+// this local widening so the lane filter compiles under `no-any`. Once
+// `CellRow.targetLang` exists, drop `LaneCellRow` and read `r.targetLang`.
+type LaneCellRow = CellRow & { targetLang?: string }
+/** The lane a row belongs to. Source rows and default-lane targets → `''`. */
+function laneOf(r: CellRow): string {
+  return (r as LaneCellRow).targetLang ?? ""
+}
+
 /**
  * Per-edit summary used by the validation popover timeline. Was previously
  * exported from `@/lib/codex-editor/edits/types`; inlined here when the
@@ -48,6 +59,8 @@ export interface CellData {
    *  When set, `translated` / `translatedHtml` reflect the *pending* value, not
    *  the server projection. UI can render a subtle "queued" indicator. */
   hasPendingEdit?: boolean
+  /** Current target head is machine-generated and has not been human-edited or approved. */
+  aiDrafted?: boolean
   cellLabel?: string
   original: string
   originalHtml?: string
@@ -151,6 +164,7 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.id === b.id &&
     a.fileId === b.fileId &&
     a.hasPendingEdit === b.hasPendingEdit &&
+    a.aiDrafted === b.aiDrafted &&
     a.cellLabel === b.cellLabel &&
     a.original === b.original &&
     a.originalHtml === b.originalHtml &&
@@ -190,15 +204,15 @@ function cellArraysEqual(a: readonly CellData[], b: readonly CellData[]): boolea
 }
 
 function pendingOverlayMapsEqual(
-  a: ReadonlyMap<string, { value: string; valueHtml?: string }>,
-  b: ReadonlyMap<string, { value: string; valueHtml?: string }>,
+  a: ReadonlyMap<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>,
+  b: ReadonlyMap<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>,
 ): boolean {
   if (a === b) return true
   if (a.size !== b.size) return false
   for (const [cellId, av] of a) {
     const bv = b.get(cellId)
     if (!bv) return false
-    if (av.value !== bv.value || av.valueHtml !== bv.valueHtml) return false
+    if (av.value !== bv.value || av.valueHtml !== bv.valueHtml || av.aiDrafted !== bv.aiDrafted) return false
   }
   return true
 }
@@ -255,7 +269,7 @@ export function buildCellData(
   // Prefer the target row's `validated` flag as the source of truth for the
   // simple "is it green?" UI. When no stats are present, this is the only
   // available signal — D1 encodes the "validators-meet-threshold" gate at the
-  // projection layer (FRO-279 made this threshold-aware; FRO-280 aligns all
+  // projection layer (AQU-279 made this threshold-aware; AQU-280 aligns all
   // client progress surfaces to consume this flag). Falls back to the
   // activeValidators count only when the server flag is absent (local projects
   // or mid-migration states).
@@ -287,6 +301,7 @@ export function buildCellData(
     originalHtml: source?.valueHtml ?? undefined,
     translated,
     translatedHtml: target?.valueHtml ?? undefined,
+    aiDrafted: target?.aiDrafted ?? false,
     sourceEventId: source?.eventId,
     targetEventId: target?.eventId,
     targetSourceEventId: target?.sourceEventId ?? null,
@@ -319,7 +334,7 @@ export function buildCellData(
  * iterating once over each side preserves the source chain for paired
  * cells, then appends any target-only cells at the tail.
  */
-function joinSourceAndTarget(rows: CellRow[]): {
+function joinSourceAndTarget(rows: CellRow[], lane: string): {
   ordered: string[]
   sources: Map<string, CellRow>
   targets: Map<string, CellRow>
@@ -335,6 +350,12 @@ function joinSourceAndTarget(rows: CellRow[]): {
         sourceOrder.push(r.cellId)
       }
     } else if (r.side === "target") {
+      // AQU-538: only the active lane's target row participates in the pair, so
+      // every downstream one-target-per-cell assumption holds per view. Rows
+      // from other lanes stay in `rowsRef` (for optimistic/merge bookkeeping)
+      // but never render in this lane's list. For `''` (default lane) with no
+      // non-default rows present, this filter keeps everything — N=1 identical.
+      if (laneOf(r) !== lane) continue
       if (!targets.has(r.cellId)) {
         targets.set(r.cellId, r)
         targetOrder.push(r.cellId)
@@ -362,6 +383,13 @@ export interface UseCellsOptions {
   getToken?: (fileId: string) => Promise<string | null>
   /** Disable the fetch (e.g. before identity loads). */
   enabled?: boolean
+  /**
+   * AQU-538: the active target LANE to render. `''` (default) shows the
+   * default-lane target row for each cell — byte-identical to the pre-lane
+   * behaviour when no non-default lanes exist. Switching lane re-fetches and
+   * re-derives the view against that lane's target rows.
+   */
+  lane?: string
 }
 
 export interface UseCellsResult {
@@ -378,7 +406,12 @@ export interface UseCellsResult {
    *  Used by the editor commit path so rule infractions + per-cell UI
    *  re-derive instantly (no round-trip wait). The follow-up server fetch
    *  (`revalidate()`) overwrites this with the authoritative projection. */
-  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
+  /** Bulk version of applyOptimisticTargetEdit. Stamps optimistic shadows for
+   *  every cell in the batch and calls rebuildFromCache ONCE at the end,
+   *  instead of once per cell (O(N) not O(N²)). Used by the bulk-import path
+   *  so imported cells don't flicker on flush-before-refetch. */
+  applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
   isLoading: boolean
   isError: boolean
 }
@@ -401,6 +434,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     auditStats = EMPTY_STATS,
     getToken,
     enabled = true,
+    lane = "",
   } = opts
 
   const [cells, setCells] = useState<CellData[]>([])
@@ -416,7 +450,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // on top of the server projection in rebuildFromCache so refreshes (and
   // initial loads) reflect locally-queued edits before sync lands. Cleared
   // entries roll off automatically as the flusher removes them from IDB.
-  const pendingOverlayRef = useRef<Map<string, { value: string; valueHtml?: string }>>(new Map())
+  const pendingOverlayRef = useRef<Map<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>>(new Map())
   // Optimistic-edit shadow: a local commit (AI predict, hand edit, promote) that
   // must stay visible even after its outbox event flushes — until a server read
   // actually shows the new value. The outbox overlay above clears the instant
@@ -429,11 +463,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // rebuildFromCache once the projection catches up (value matches).
   //
   // `seq` is the local-mutation clock value at which the shadow was recorded
-  // (FRO-247): a fetch may only confirm-and-clear a shadow it provably
+  // (AQU-247): a fetch may only confirm-and-clear a shadow it provably
   // postdates (fetch startSeq >= shadow seq), so a stale snapshot that
   // coincidentally carries the same value can never clear it.
-  const optimisticEditsRef = useRef<Map<string, { value: string; valueHtml?: string; seq: number }>>(new Map())
-  // Local-mutation clock (FRO-247). Bumped on every local rowsRef mutation:
+  const optimisticEditsRef = useRef<Map<string, { value: string; valueHtml?: string; aiDrafted?: boolean; seq: number }>>(new Map())
+  // Local-mutation clock (AQU-247). Bumped on every local rowsRef mutation:
   // an optimistic edit, or a targeted revalidateCell write-back. Fetches
   // record the clock when their server snapshot begins; any cell mutated
   // AFTER that point (cellFreshnessRef floor > fetch startSeq) is fresher
@@ -451,6 +485,9 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // entry, or explicit resync). Keyed to the current file — reset on switch.
   const maxServerSeqRef = useRef<number | null>(null)
   const statsRef = useRef<ReadonlyMap<string, CellAuditStats>>(auditStats)
+  // AQU-538: the active lane, read inside rebuild/merge/shadow paths (which run
+  // off refs, not props) so lane changes take effect without recreating them.
+  const laneRef = useRef(lane)
   const usernameRef = useRef(username)
   const requiredRef = useRef(requiredValidations)
   const tokenFetcherRef = useRef(getToken)
@@ -476,6 +513,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   const tokenAttemptsRef = useRef(0)
 
   statsRef.current = auditStats
+  laneRef.current = lane
   usernameRef.current = username
   requiredRef.current = requiredValidations
   tokenFetcherRef.current = getToken
@@ -494,7 +532,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       setCells((prev) => prev.length === 0 ? prev : [])
       return
     }
-    const { ordered, sources, targets } = joinSourceAndTarget(rows)
+    const { ordered, sources, targets } = joinSourceAndTarget(rows, laneRef.current)
     const fid = fileRef.current ?? ""
     const out: CellData[] = ordered.map((cellId) =>
       buildCellData(
@@ -513,6 +551,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (!o) continue
         cell.translated = o.value
         if (o.valueHtml !== undefined) cell.translatedHtml = o.valueHtml
+        cell.aiDrafted = o.aiDrafted ?? false
         // Pending edits are by definition unvalidated until they replay
         // through the server projection.
         cell.status = deriveStatus(o.value, false)
@@ -532,6 +571,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (!o) continue
         cell.translated = o.value
         if (o.valueHtml !== undefined) cell.translatedHtml = o.valueHtml
+        cell.aiDrafted = o.aiDrafted ?? false
         cell.status = deriveStatus(o.value, false)
         cell.hasPendingEdit = true
       }
@@ -545,18 +585,22 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // the cell. Only real server rows are passed here (never the optimistically
   // mutated rowsRef), so a confirm means the value genuinely round-tripped.
   // `fetchStartSeq` gates confirmation to fetches that postdate the shadow's
-  // write — a snapshot taken before the write can't confirm it (FRO-247).
+  // write — a snapshot taken before the write can't confirm it (AQU-247).
   const clearConfirmedShadows = useCallback((serverRows: CellRow[], fetchStartSeq: number) => {
     const shadows = optimisticEditsRef.current
     if (shadows.size === 0) return
     for (const r of serverRows) {
       if (r.side !== "target") continue
+      // AQU-538: a shadow belongs to the active-lane view; only a server row in
+      // that same lane may confirm it (a same-cellId row in another lane must
+      // not clear it). No-op for N=1 where every row is the default lane.
+      if (laneOf(r) !== laneRef.current) continue
       const o = shadows.get(r.cellId)
       if (o && o.seq <= fetchStartSeq && (r.value ?? "") === o.value) shadows.delete(r.cellId)
     }
   }, [])
 
-  // FRO-247: merge a completed soft-fetch buffer with the rows of any cell
+  // AQU-247: merge a completed soft-fetch buffer with the rows of any cell
   // mutated locally AFTER the fetch's snapshot began. The buffer predates
   // those mutations, so for each protected cell the current rowsRef rows
   // (optimistic edit or fresher targeted write-back) replace the buffer's —
@@ -584,10 +628,17 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     for (const [id, seq] of floors) if (seq > fetchStartSeq) protectedIds.add(id)
     for (const id of shadows.keys()) protectedIds.add(id)
     if (protectedIds.size === 0) return { rows: buffer, discardedCellIds }
-    // Current (fresher) rows for protected cells, keyed by cellId|side.
+    // AQU-538: qualify the target-side key by lane so a protected cell's rows in
+    // different lanes don't collide (source rows carry no lane → `''`). For N=1
+    // this is `${cellId}|target|` vs the old `${cellId}|target`; since the key
+    // is internal and symmetric across the keep-map + lookup, behaviour is
+    // identical.
+    const keyOf = (r: CellRow): string =>
+      r.side === "target" ? `${r.cellId}|target|${laneOf(r)}` : `${r.cellId}|source`
+    // Current (fresher) rows for protected cells, keyed by cellId|side|lane.
     const keep = new Map<string, CellRow>()
     for (const r of rowsRef.current) {
-      if (protectedIds.has(r.cellId)) keep.set(`${r.cellId}|${r.side}`, r)
+      if (protectedIds.has(r.cellId)) keep.set(keyOf(r), r)
     }
     const out: CellRow[] = []
     for (const r of buffer) {
@@ -599,7 +650,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // the fresher local row, or dropped) — record it so the caller holds
       // the watermark back (B1).
       discardedCellIds.add(r.cellId)
-      const k = `${r.cellId}|${r.side}`
+      const k = keyOf(r)
       const cur = keep.get(k)
       // No current row for this side means a fresher read said it doesn't
       // exist — drop the stale buffer row rather than resurrecting it.
@@ -714,7 +765,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // stays up and the next trigger retries (RES-6).
       const since = maxServerSeqRef.current
       if (since !== null) {
-        // Local-mutation clock at snapshot start (FRO-247): rows for any cell
+        // Local-mutation clock at snapshot start (AQU-247): rows for any cell
         // mutated after this point outrank the delta's and must survive it.
         const deltaStartSeq = writeSeqRef.current
         const result = await fetchCellsDelta(projectId, fileId, since, token)
@@ -782,7 +833,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           rebuildFromCache()
         }
       }
-      // FRO-247: the local-mutation clock at the moment the server snapshot
+      // AQU-247: the local-mutation clock at the moment the server snapshot
       // begins. Any cell mutated after this point is fresher than this
       // fetch's data — it can neither confirm that cell's shadow nor replace
       // its rows at the swap below.
@@ -852,7 +903,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // (and thus does not clear) an optimistic edit it predates.
         clearConfirmedShadows(buffer, startSeq)
         // Swap in the buffer, retaining rows for any cell mutated locally
-        // after this fetch's snapshot began (FRO-247).
+        // after this fetch's snapshot began (AQU-247).
         const { rows: kept, discardedCellIds } = mergeProtectedRows(buffer, startSeq)
         rowsRef.current = kept
         discardedProtected = discardedCellIds.size > 0
@@ -888,9 +939,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     }
   }, [rebuildFromCache, clearConfirmedShadows, mergeProtectedRows])
 
-  // Reload on (projectId, fileId, enabled) change. The optimistic-edit shadow
-  // and freshness floors are per-file local state — drop them so edits from
-  // the previous file can't bleed onto a same-id cell in the next one.
+  // Reload on (projectId, fileId, enabled, lane) change. The optimistic-edit
+  // shadow and freshness floors are per-file/per-lane local state — drop them
+  // so edits from the previous file/lane can't bleed onto a same-id cell in the
+  // next one. AQU-538: switching lane re-fetches and clears these shadows so a
+  // pending edit in the old lane never paints on the new lane's same-id cell.
   useEffect(() => {
     optimisticEditsRef.current.clear()
     cellFreshnessRef.current.clear()
@@ -898,7 +951,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     maxServerSeqRef.current = null
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, fileId, enabled])
+  }, [projectId, fileId, enabled, lane])
 
   // Re-derive when stats / username / threshold change without refetching.
   useEffect(() => {
@@ -912,7 +965,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // order, so iterating once and writing into a Map yields last-write-wins
   // per cellId — matching the order the server will eventually apply them in.
   //
-  // FRO-274: `failed` (quarantined) records are EXCLUDED from the overlay so a
+  // AQU-274: `failed` (quarantined) records are EXCLUDED from the overlay so a
   // 403-rejected commit no longer pins the rejected text as live cell content.
   // They remain visible in the outbox inspector (usePendingOutboxRecords keeps
   // all statuses for that purpose). When a record transitions to `failed`, we
@@ -930,7 +983,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       const all = await peekOutboxBatch(2000)
       if (cancelled) return
       const fid = fileRef.current
-      const next = new Map<string, { value: string; valueHtml?: string }>()
+      const next = new Map<string, { value: string; valueHtml?: string; aiDrafted?: boolean }>()
       let shadowChanged = false
       for (const r of all) {
         if (fid && r.event.fileId !== fid) continue
@@ -938,7 +991,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (k !== "target.cell.commit" && k !== "target.cell.create") continue
         const cellId = r.event.cellId
         if (!cellId) continue
-        // FRO-274: skip quarantined (failed) records — they must not drive cell
+        // AQU-538: a queued edit belongs to a specific lane ('' when omitted).
+        // Only overlay it onto the active-lane view — a pending commit in
+        // another lane must not paint on this lane's same-id cell. N=1 no-op.
+        const evLane = (r.event.payload as { targetLang?: string }).targetLang ?? ""
+        if (evLane !== laneRef.current) continue
+        // AQU-274: skip quarantined (failed) records — they must not drive cell
         // content in the overlay; the inspector still shows them.
         if ((r.status ?? "pending") === "failed") {
           // Clear the optimistic shadow for this cell so it reverts to the
@@ -957,21 +1015,33 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           }
           continue
         }
-        const p = r.event.payload as { value?: string; valueHtml?: string }
+        const p = r.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
         if (typeof p.value !== "string") continue
-        next.set(cellId, { value: p.value, valueHtml: p.valueHtml })
+        next.set(cellId, { value: p.value, valueHtml: p.valueHtml, aiDrafted: p.ai_suggestion === true })
       }
       const overlayChanged = !pendingOverlayMapsEqual(pendingOverlayRef.current, next)
       if (overlayChanged) pendingOverlayRef.current = next
       if (overlayChanged || shadowChanged) rebuildFromCache()
     }
-    void refresh()
-    const unsub = subscribeToOutbox(refresh)
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) return
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null
+        void refresh()
+      }, 50) // coalesce a drain burst into one read+rebuild
+    }
+    void refresh() // immediate first paint on mount / file change
+    const unsub = subscribeToOutbox(scheduleRefresh)
     return () => {
       cancelled = true
+      if (refreshTimer !== null) clearTimeout(refreshTimer)
       unsub()
     }
-  }, [enabled, fileId, rebuildFromCache])
+    // AQU-538: `lane` recomputes the overlay so a queued edit in the previous
+    // lane stops painting when the user switches lane (and the new lane's
+    // queued edits appear).
+  }, [enabled, fileId, lane, rebuildFromCache])
 
   // Cancel any pending token-retry on unmount.
   useEffect(() => () => {
@@ -1009,6 +1079,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   const revalidate = useCallback(() => {
     void doFetch(true)
   }, [doFetch])
+
+  const refreshCellsCacheFromRows = useCallback(() => {
+    const projectId = projectRef.current
+    const fileId = fileRef.current
+    if (!projectId || !fileId) return
+    void writeCellsCache(projectId, fileId, rowsRef.current, maxServerSeqRef.current ?? undefined)
+  }, [])
 
   // Targeted single-cell refetch. WS `event.applied` calls this with the
   // changed cellId so a remote validate/commit only pulls one row instead
@@ -1051,7 +1128,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       try {
         const token = await getToken(fileId)
         if (!token) return
-        // Bounded retry (FRO-247): if a local mutation lands while the fetch
+        // Bounded retry (AQU-247): if a local mutation lands while the fetch
         // is in flight, the response predates it and is discarded — try once
         // more against the newer state rather than stranding the cell until
         // the next WS poke / focus refetch.
@@ -1075,26 +1152,34 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           // Replace this cellId's rows IN PLACE — rows arrive as one source +
           // one target (either may be absent). The cell list renders in row
           // order, so filter-and-append would teleport the edited row to the
-          // bottom of the file (FRO-247's "row disappears"). A side the
+          // bottom of the file (AQU-247's "row disappears"). A side the
           // server no longer returns is dropped; a side the cache never had
           // (first commit's target row) appends at the tail, which doesn't
           // affect ordering (cells order by their source rows).
-          const bySide = new Map(rows.map((r) => [r.side, r]))
+          // AQU-538: key by side AND lane so a targeted refetch that returns
+          // this cell's rows across multiple lanes replaces each lane's row in
+          // place (rather than one target lane clobbering another). For N=1
+          // every target row is lane `''`, so this is the old `side`-only map.
+          const keyOf = (r: CellRow): string =>
+            r.side === "target" ? `target|${laneOf(r)}` : "source"
+          const byKey = new Map(rows.map((r) => [keyOf(r), r]))
           const next: CellRow[] = []
           for (const r of rowsRef.current) {
             if (r.cellId !== cellId) {
               next.push(r)
               continue
             }
-            const repl = bySide.get(r.side)
+            const k = keyOf(r)
+            const repl = byKey.get(k)
             if (repl) {
               next.push(repl)
-              bySide.delete(r.side)
+              byKey.delete(k)
             }
           }
-          for (const r of bySide.values()) next.push(r)
+          for (const r of byKey.values()) next.push(r)
           rowsRef.current = next
           rebuildFromCache()
+          refreshCellsCacheFromRows()
           return
         }
       } catch {
@@ -1114,7 +1199,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         }
       }
     })()
-  }, [doFetch, rebuildFromCache, clearConfirmedShadows])
+  }, [doFetch, rebuildFromCache, clearConfirmedShadows, refreshCellsCacheFromRows])
   revalidateCellRef.current = revalidateCell
 
   // Optimistic local patch for the target row of a single cell. We mutate
@@ -1128,32 +1213,38 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // The next `revalidate()` (called by the parent after outbox flush) will
   // overwrite this with the authoritative server projection.
   const applyOptimisticTargetEdit = useCallback(
-    (cellId: string, patch: { value: string; valueHtml?: string }) => {
+    (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => {
       // Record the shadow so a stale in-flight refetch's buffer swap can't wipe
       // this value before the projection catches up (see optimisticEditsRef).
       // The seq stamps this write on the local-mutation clock: only a fetch
       // whose snapshot began at-or-after it may confirm the shadow, and any
       // fetch that began before it must keep this cell's rows at its swap.
       const seq = ++writeSeqRef.current
-      optimisticEditsRef.current.set(cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+      optimisticEditsRef.current.set(cellId, { value: patch.value, valueHtml: patch.valueHtml, aiDrafted: patch.aiDrafted ?? false, seq })
       cellFreshnessRef.current.set(cellId, seq)
+      // AQU-538: the edit lands on the ACTIVE lane's target row. Match on
+      // (cellId, side, lane) so an edit in lane "es" never mutates the
+      // default-lane row that shares the cellId — and mint the synthetic row
+      // tagged with the active lane. N=1 (lane `''`) behaves identically.
+      const activeLane = laneRef.current
       const rows = rowsRef.current
       let touched = false
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i]
-        if (r.cellId !== cellId || r.side !== "target") continue
-        rows[i] = { ...r, value: patch.value, valueHtml: patch.valueHtml ?? null }
+        if (r.cellId !== cellId || r.side !== "target" || laneOf(r) !== activeLane) continue
+        rows[i] = { ...r, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false }
         touched = true
         break
       }
       if (!touched) {
-        // No target row yet — first commit against a source-only pair. Mint
-        // a synthetic target row by cloning the source row's anchor/cellId
-        // and replacing the value-bearing fields. event_id stays null until
-        // the server projection lands; useHealth doesn't care about event_id.
+        // No target row yet for this lane — first commit against a source-only
+        // (or other-lane-only) pair. Mint a synthetic target row by cloning the
+        // source row's anchor/cellId and replacing the value-bearing fields.
+        // event_id stays null until the server projection lands; useHealth
+        // doesn't care about event_id.
         const src = rows.find((r) => r.cellId === cellId && r.side === "source")
         if (!src) return // unknown cellId — nothing to optimise
-        rows.push({
+        const synthetic: LaneCellRow = {
           ...src,
           side: "target",
           value: patch.value,
@@ -1164,13 +1255,60 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           lastEditor: usernameRef.current,
           lastEditAt: Date.now(),
           validated: false,
+          aiDrafted: patch.aiDrafted ?? false,
           wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
-        })
+        }
+        // Tag the lane only when non-default so `''` rows stay byte-identical
+        // to the pre-lane shape.
+        if (activeLane) synthetic.targetLang = activeLane
+        rows.push(synthetic)
       }
       rebuildFromCache()
     },
     [rebuildFromCache],
   )
 
-  return { cells, revalidate, revalidateCell, applyOptimisticTargetEdit, isLoading, isError }
+  /** Bulk optimistic patch for imported translations. Stamps shadows for every
+   *  cellId (so flush-before-refetch can't flicker them back), mutates rowsRef in
+   *  place, and rebuilds ONCE. Shadows are cleared by clearConfirmedShadows when
+   *  a server fetch confirms the value (see revalidateCells reconciliation). */
+  const applyOptimisticTargetEdits = useCallback(
+    (patches: { cellId: string; value: string; valueHtml?: string }[]) => {
+      if (patches.length === 0) return
+      const rows = rowsRef.current
+      for (const patch of patches) {
+        const seq = ++writeSeqRef.current
+        optimisticEditsRef.current.set(patch.cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+        cellFreshnessRef.current.set(patch.cellId, seq)
+        let touched = false
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i]
+          if (r.cellId !== patch.cellId || r.side !== "target") continue
+          rows[i] = { ...r, value: patch.value, valueHtml: patch.valueHtml ?? null }
+          touched = true
+          break
+        }
+        if (!touched) {
+          const src = rows.find((r) => r.cellId === patch.cellId && r.side === "source")
+          if (!src) continue
+          rows.push({
+            ...src,
+            side: "target",
+            value: patch.value,
+            valueHtml: patch.valueHtml ?? null,
+            eventId: "",
+            sourceEventId: src.eventId,
+            lastEditor: usernameRef.current,
+            lastEditAt: Date.now(),
+            validated: false,
+            wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
+          })
+        }
+      }
+      rebuildFromCache()
+    },
+    [rebuildFromCache],
+  )
+
+  return { cells, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, isLoading, isError }
 }

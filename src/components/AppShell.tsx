@@ -5,7 +5,7 @@ import { BrandContext } from "@/branding/use-brand"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
 import { NavHistoryControls } from "./NavHistoryControls"
-// FRO-307: always-available report button (3 lines: import + mount in left rail)
+// AQU-307: always-available report button (3 lines: import + mount in left rail)
 import { ReportProblemButton } from "./ReportProblemButton/ReportProblemButton"
 import { ErrorBoundary } from "./ErrorBoundary"
 
@@ -25,7 +25,7 @@ import { ErrorBoundary } from "./ErrorBoundary"
 // Anything else is a bug. Don't reach for z-[999].
 
 interface Props {
-  /** FRO-308: The left dock (collapsible, resizable, multi-tab panel).
+  /** AQU-308: The left dock (collapsible, resizable, multi-tab panel).
    * Replaces the old fixed-width `sidebar` prop. The dock owns its own
    * width and collapse state so AppShell stays layout-only. */
   leftDock?: ReactNode
@@ -79,7 +79,7 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
     // it — inset on every side (top, sides, bottom) and fully rounded so the
     // chrome reads as a frame wrapping the whole editor.
     <div className="flex h-screen min-w-0 bg-sidebar">
-      {/* FRO-308: Left dock — width is controlled by LeftDock itself (resizable + collapsible).
+      {/* AQU-308: Left dock — width is controlled by LeftDock itself (resizable + collapsible).
           The aside wrapper is kept so the logo can live above the dock rail. */}
       <aside
         className={cn(
@@ -123,21 +123,14 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
             <div className="min-w-0 flex-1">
               <VersionTag />
             </div>
-            <ReportProblemButton /> {/* FRO-307 */}
+            <ReportProblemButton /> {/* AQU-307 */}
           </div>
         )}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Center the page header on the sidebar logo's baseline (~52px band:
-            pt-2 + 36px logo) so the breadcrumb row lines up with the top of the
-            rail. flex-col keeps the header full-width so its right-aligned
-            controls still push to the edge. */}
-        <div
-          className={cn(
-            "flex min-h-[52px] flex-col",
-            aboveCard ? "justify-end" : "justify-center",
-          )}
-        >
+        {/* Every route gets the same fixed header band. File tabs are a
+            separate row below it and must not move the breadcrumb baseline. */}
+        <div data-slot="app-shell-header" className="flex h-[52px] min-h-[52px] shrink-0 flex-col justify-center">
           {header}
         </div>
         {aboveCard ? (

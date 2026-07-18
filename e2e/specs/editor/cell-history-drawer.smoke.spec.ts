@@ -8,19 +8,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
- * Cell expansion panel — History tab → "Open full history" drawer.
+ * Cell action rail — "Edit history" button → full HistoryDrawer.
  *
- * Each cell row has a CellActionRail expand chevron button
- * (aria-label="Open cell details"). Clicking it opens CellExpansion with
- * multiple tabs. The "History" tab shows recent edit history; when there
- * are entries a button "Open full history" appears and opens the
- * full-page HistoryDrawer (heading "Edit history").
+ * The expansion panel no longer has a History tab; edit history is reached
+ * via the single "Edit history" button on the CellActionRail (revealed on
+ * row hover), which opens the full-page HistoryDrawer (heading
+ * "Edit history").
  *
- * This spec: import a file → edit a cell → expand the cell → switch to
- * History tab → assert "Open full history" button appears → click it →
- * assert HistoryDrawer heading "Edit history" is visible → close drawer.
+ * This spec: import a file → edit a cell → hover the row → click the
+ * "Edit history" rail button → assert HistoryDrawer heading "Edit history"
+ * is visible → close drawer.
  */
-test("cell expansion History tab opens full HistoryDrawer", async ({ alice }) => {
+test("cell rail Edit history button opens full HistoryDrawer", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `CellHist ${Date.now()}`
@@ -41,30 +40,17 @@ test("cell expansion History tab opens full HistoryDrawer", async ({ alice }) =>
 
   const row = ws.cellRow(0)
 
-  // Hover to reveal CellActionRail.
+  // Hover to reveal CellActionRail, then open the history drawer.
   await row.hover()
-
-  // Open cell details (expand chevron).
-  const expandBtn = row.getByRole("button", { name: /Open cell details/i })
-  await expect(expandBtn).toBeVisible({ timeout: 5_000 })
-  await expandBtn.click()
-
-  // The expansion panel opens — switch to the History tab.
-  const historyTab = alice.getByRole("button", { name: /^History$/i })
-    .or(alice.getByRole("tab", { name: /^History$/i }))
-  await expect(historyTab.first()).toBeVisible({ timeout: 5_000 })
-  await historyTab.first().click()
-
-  // "Open full history" button appears (requires at least one history entry).
-  const openHistoryBtn = alice.getByRole("button", { name: /Open full history/i })
-  await expect(openHistoryBtn).toBeVisible({ timeout: 8_000 })
-  await openHistoryBtn.click()
+  const historyBtn = row.locator('button[aria-label="Edit history"]')
+  await expect(historyBtn).toBeVisible({ timeout: 5_000 })
+  await historyBtn.click()
 
   // HistoryDrawer opens — heading "Edit history" is visible.
   await expect(alice.getByText(/Edit history/i).first()).toBeVisible({ timeout: 5_000 })
 
   // Close the drawer.
-  const closeBtn = alice.getByRole("button", { name: /Close/i }).first()
+  const closeBtn = alice.getByRole("button", { name: /Close history/i }).first()
   await closeBtn.click()
   await expect(alice.getByText(/Edit history/i).first()).not.toBeVisible({ timeout: 3_000 })
 })

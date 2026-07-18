@@ -1,8 +1,13 @@
 import { describe, it, expect } from "vitest"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT } from "../draft-context"
 
-const cell = (id: string, fileId: string, original: string, translated: string) =>
-  ({ id, fileId, original, translated })
+const cell = (
+  id: string,
+  fileId: string,
+  original: string,
+  translated: string,
+  status = translated ? "validated" : "empty",
+) => ({ id, fileId, original, translated, status })
 
 describe("gatherPrecedingContext", () => {
   const cells = [
@@ -69,6 +74,17 @@ describe("gatherPrecedingContext", () => {
     expect(gatherPrecedingContext(cells, "d", 3)).toEqual([
       { source: "v1 src", target: "v1 tgt" },
       { source: "v2 src", target: "v2 tgt" },
+    ])
+  })
+
+  it("never uses an unapproved target as prompt context", () => {
+    const withDraft = [
+      cell("a", "f1", "draft source", "raw machine output", "unvalidated"),
+      cell("b", "f1", "live source", ""),
+    ]
+    expect(gatherPrecedingContext(withDraft, "b", 3)).toEqual([])
+    expect(gatherPrecedingContext(withDraft, "b", 3, true)).toEqual([
+      { source: "draft source", target: "" },
     ])
   })
 

@@ -9,7 +9,7 @@ import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 const STORAGE_KEY = "org:active"
 const ALL_ORGS_VALUE = "all"
 
-/** FRO-473: an org the caller can reach only via a project-level grant —
+/** AQU-473: an org the caller can reach only via a project-level grant —
  *  not an org membership. Surfaced in the org switcher tagged "Guest". */
 export interface GuestOrg {
   id: number
@@ -56,12 +56,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     try {
       const list = await listMyOrgs(jwt)
       setOrgs(list)
-      setActiveOrgId((cur) => {
-        if (list.length === 0) return null
-        if (list.length === 1) return list[0].id
-        if (cur != null && list.some((o) => o.id === cur)) return cur
-        return null
-      })
+      setActiveOrgId((cur) =>
+        list.length === 0 ? null
+        : list.length === 1 ? list[0].id
+        : cur != null && list.some((o) => o.id === cur) ? cur
+        : null
+      )
       return list
     } catch (e) {
       if (e instanceof UserError && e.category === "session-expired") {
@@ -76,7 +76,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refresh() }, [refresh])
 
-  // FRO-473: derive guest orgs (accessible-project orgs the caller isn't a
+  // AQU-473: derive guest orgs (accessible-project orgs the caller isn't a
   // member of) so the org switcher can surface them tagged "Guest". Race-
   // guarded like the other org-scoped effects in this file/hooks.
   const refreshGuestOrgs = useCallback(async (): Promise<void> => {
@@ -98,6 +98,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => { void refreshGuestOrgs() }, [refreshGuestOrgs])
+
+  // FRO-367: persist the active-org selection whenever it settles, as an
+  // effect (state updaters must stay pure). This covers the clamp path: when
+  // another tab switches to an account that can't see the org this tab had
+  // active, refresh() drops it from state — but the stale id used to survive
+  // in localStorage, so a reload resurrected it (→ the "org I can't access"
+  // 403). The direct setters below also write the key; this write is
+  // idempotent alongside them.
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, activeOrgId == null ? ALL_ORGS_VALUE : String(activeOrgId))
+  }, [activeOrgId])
 
   useEffect(() => {
     if (location.pathname !== "/") return

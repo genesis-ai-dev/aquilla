@@ -2,14 +2,17 @@ import { useState } from "react"
 import {
   AlertTriangle,
   Clock,
+  Lock,
   Mail,
   UsersRound,
   X,
 } from "lucide-react"
+import { useSearchParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -17,15 +20,19 @@ import { useOrgMembers } from "@/hooks/useOrg"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
 import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel"
+import { MembersMatrixView } from "@/components/MembersMatrixView"
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
 import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
 import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollaboratorsSection"
 import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
+import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
 import { useActiveOrg } from "@/context/OrgContext"
+
+type MembersTab = "roster" | "matrix"
 
 const ORG_ROLE_DESCRIPTIONS: Record<number, string> = {
   [ROLE.VIEWER]: "Read-only across all projects",
@@ -130,13 +137,31 @@ interface MembersPageContentProps {
 function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const callerUserId = null // FrontierSession has no userId; server enforces self-block.
   const { activeOrg } = useActiveOrg()
-  // FRO-326: the External-collaborators governance view is maintainer+ only.
+  // AQU-326: the External-collaborators governance view is maintainer+ only.
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
-  const { members, isLoading: membersLoading, error: membersError, add, remove, listMemberProjects, refresh } =
+  const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
   const { projects: accessibleProjects, refresh: refreshProjects } = useAccessibleProjects()
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
   const [multiInviteOpen, setMultiInviteOpen] = useState(false)
+
+  // AQU-538 §3.4: "Roster" (the org-wide member list, default) vs "Matrix"
+  // (MembersMatrixView — members × projects role grid, previously mounted
+  // nowhere). Read/write via the URL so the tab is linkable
+  // (`/members?tab=matrix`) and survives a refresh.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab: MembersTab = searchParams.get("tab") === "matrix" ? "matrix" : "roster"
+  function setTab(next: MembersTab) {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev)
+        if (next === "matrix") params.set("tab", "matrix")
+        else params.delete("tab")
+        return params
+      },
+      { replace: true },
+    )
+  }
 
   const panelMembers: MembersPanelMember[] = members.map((m) => ({
     userId: m.userId,
@@ -178,51 +203,87 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
         }
       />
 
-      <div className="space-y-6">
-        {canInviteByEmail && (
-          <Section
-            title="Invite a teammate by email"
-            description="Bring someone new into this organization. They don't need an Aquilla account yet — they'll be guided to create one when they accept."
-          >
-            <OrgInviteByEmail orgId={orgId} />
-          </Section>
-        )}
+      <Tabs value={tab} onValueChange={(v) => setTab(v as MembersTab)}>
+        <TabsList aria-label="Members views">
+          <TabsTrigger value="roster">Roster</TabsTrigger>
+          <TabsTrigger value="matrix">Matrix</TabsTrigger>
+        </TabsList>
 
-        {membersError && (
-          <p className="text-xs text-destructive">{membersError}</p>
-        )}
-
-        {membersLoading && members.length === 0 ? (
-          <Section title="Roster">
-            <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <Spinner className="mr-2" />
-              <span className="text-sm">Loading members…</span>
-            </div>
-          </Section>
-        ) : (
-          <>
-            <RosterWithProjectChips
-              orgId={orgId}
-              panelMembers={panelMembers}
-              listMemberProjects={listMemberProjects}
-              add={add}
-              remove={remove}
-              callerUserId={callerUserId}
-              callerOrgRoleLevel={activeOrg?.role.level ?? null}
-              onRequestRemove={(userId, username) =>
-                setRemoveTarget({ userId, username })
-              }
-            />
-            <PendingInvitesSection orgId={orgId} />
-            {canGovern && (
-              <ExternalCollaboratorsSection
-                orgId={orgId}
-                orgMemberIds={members.map((m) => m.userId)}
-              />
+        <TabsContent value="roster">
+          <div className="space-y-6">
+            {canInviteByEmail && (
+              <Section
+                title="Invite a teammate by email"
+                description="Bring someone new into this organization. They don't need an Aquilla account yet — they'll be guided to create one when they accept."
+              >
+                <OrgInviteByEmail orgId={orgId} />
+              </Section>
             )}
-          </>
-        )}
-      </div>
+
+            {membersError && (
+              <p className="text-xs text-destructive">{membersError}</p>
+            )}
+
+            {membersLoading && members.length === 0 && !rosterHidden ? (
+              <Section title="Roster">
+                <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <Spinner className="mr-2" />
+                  <span className="text-sm">Loading members…</span>
+                </div>
+              </Section>
+            ) : rosterHidden ? (
+              // AQU-485: the org's rosterViewMinRole policy hides the roster (and
+              // count) from this caller. Render a distinct "hidden" state — never
+              // an empty roster, which would falsely imply zero members.
+              <Section title="Roster">
+                <EmptyState
+                  variant="inline"
+                  icon={Lock}
+                  title="Roster hidden"
+                  description="This organization has restricted who can view the member list. Ask an owner or maintainer if you need access."
+                />
+              </Section>
+            ) : (
+              <>
+                <RosterWithProjectChips
+                  orgId={orgId}
+                  panelMembers={panelMembers}
+                  listMemberProjects={listMemberProjects}
+                  add={add}
+                  remove={remove}
+                  callerUserId={callerUserId}
+                  callerOrgRoleLevel={activeOrg?.role.level ?? null}
+                  onRequestRemove={(userId, username) =>
+                    setRemoveTarget({ userId, username })
+                  }
+                />
+                <PendingInvitesSection orgId={orgId} />
+                {canGovern && (
+                  <ExternalCollaboratorsSection
+                    orgId={orgId}
+                    orgMemberIds={members.map((m) => m.userId)}
+                  />
+                )}
+              </>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="matrix">
+          {/* Mounted only while this tab is active — avoids firing the
+              batched matrix fetch (and its per-row lazy scope fetches) when
+              the operator is just looking at the roster. */}
+          {tab === "matrix" && (
+            <div className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Every member × every project you can see, at a glance. Click a
+                cell to change a role; hover a row to load its lane scopes.
+              </p>
+              <MembersMatrixView />
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {removeTarget && (
         <RemoveOrgMemberDialog
@@ -270,7 +331,7 @@ interface RosterProps {
   add: (username: string, role: number) => Promise<unknown>
   remove: (userId: number) => Promise<void>
   callerUserId: number | null
-  /** FRO-427: the current user's org-level role, forwarded to MemberAccessRow
+  /** AQU-427: the current user's org-level role, forwarded to MemberAccessRow
    *  so the Revoke button can be disabled-with-explanation for low roles. */
   callerOrgRoleLevel: number | null
   onRequestRemove: (userId: number, username: string) => void
@@ -293,7 +354,7 @@ function RosterWithProjectChips({
         <MembersPanel
           members={panelMembers}
           roleOptions={ORG_ROLE_OPTIONS}
-          defaultRole={ROLE.MAINTAINER}
+          newMemberDefaultRole={ROLE.MAINTAINER}
           callerUserId={callerUserId}
           callerMaxRole={ROLE.MAINTAINER}
           scopedUserSearch={false}
@@ -397,9 +458,7 @@ function PendingInviteRow({
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-medium truncate">{invite.projectName}</span>
           <span className="text-muted-foreground">·</span>
-          <span className="capitalize text-muted-foreground">
-            {invite.role.name.replace(/_/g, " ")}
-          </span>
+          <RoleLabel name={invite.role.name} className="text-muted-foreground" />
           {invite.email ? (
             <AppTooltip content="Targeted invite: sign-up form will be prefilled with this email">
               <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">

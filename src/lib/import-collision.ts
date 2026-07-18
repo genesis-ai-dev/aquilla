@@ -1,5 +1,5 @@
 /**
- * FRO-287 — Re-import collision detection.
+ * AQU-287 — Re-import collision detection.
  *
  * Pure helpers: no network I/O, no React, no side effects.
  *

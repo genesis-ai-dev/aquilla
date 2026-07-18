@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  .stage {
+    position: relative;
+    width: 1200px; height: 630px;
+    /* Zoom into the wordmark-free lower-right glow of the brand image */
+    background: url("../../public/aquilla-og-1200x630.png") no-repeat;
+    background-size: 260%;
+    background-position: 78% 100%;
+    font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  }
+  /* Darken so the headline owns the frame; keep the right-side light sweep alive */
+  .scrim {
+    position: absolute; inset: 0;
+    background:
+      linear-gradient(100deg, rgba(3, 8, 60, 0.72) 35%, rgba(3, 8, 60, 0.3) 70%, rgba(3, 8, 60, 0.08) 100%);
+  }
+  .content {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    justify-content: center;
+    padding-left: 96px;
+    color: #fff;
+  }
+  .eyebrow {
+    display: flex; align-items: center; gap: 18px;
+    font-size: 26px; font-weight: 600;
+    letter-spacing: 0.42em;
+    color: rgba(255, 255, 255, 0.85);
+    text-transform: uppercase;
+    margin-bottom: 34px;
+  }
+  .eyebrow .rule {
+    width: 64px; height: 2px;
+    background: linear-gradient(90deg, rgba(120, 170, 255, 0.9), rgba(120, 170, 255, 0));
+  }
+  h1 {
+    font-size: 96px; font-weight: 700;
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    text-shadow: 0 0 60px rgba(80, 130, 255, 0.55);
+    margin-bottom: 30px;
+  }
+  .sub {
+    font-size: 34px; font-weight: 400;
+    line-height: 1.4;
+    color: rgba(224, 233, 255, 0.92);
+    max-width: 720px;
+  }
+  .pill {
+    position: absolute; left: 96px; bottom: 64px;
+    display: inline-flex; align-items: center; gap: 14px;
+    padding: 16px 34px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #3b6cf6, #5f8bff);
+    box-shadow: 0 8px 40px rgba(70, 120, 255, 0.45);
+    font-size: 27px; font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .pill svg { display: block; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="scrim"></div>
+    <div class="content">
+      <div class="eyebrow"><span class="rule"></span>Aquilla</div>
+      <h1>You&rsquo;re invited</h1>
+      <div class="sub">Join your team&rsquo;s translation workspace &mdash; draft, review, and keep quality visible together.</div>
+    </div>
+    <div class="pill">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+        <line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/>
+      </svg>
+      Accept your invitation
+    </div>
+  </div>
+</body>
+</html>
+<!-- Source for public/aquilla-invite-og-1200x630.png (FRO-471).
+     Regenerate from the repo root with:
+       npx playwright screenshot --viewport-size=1200,630 worker/og/invite-og.html public/aquilla-invite-og-1200x630.png
+     (run from a checkout where the relative background path resolves) -->

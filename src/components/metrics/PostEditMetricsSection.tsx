@@ -1,8 +1,8 @@
 /**
- * PostEditMetricsSection — FRO-311 AI metrics panel.
+ * PostEditMetricsSection — AQU-311 AI metrics panel.
  *
  * Shows post-edit magnitude (normalized edit distance between AI drafts and
- * the final human-edited text) over time, with a by-user breakdown.
+ * the final approved text) over time, with a by-reviewer breakdown.
  *
  * Surfaces as a section within ProjectSettings, alongside other project-level
  * stats. Reachable via the "AI Metrics" nav entry.
@@ -20,9 +20,17 @@
 import { useMemo, useState } from "react"
 import { AlertTriangle, Cloud, Sparkles } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { EmptyState } from "@/components/ui/page"
+import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import type { PostEditMetrics, WeekBucket, UserBucket } from "@/lib/metrics/post-edit-metrics"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -51,6 +59,14 @@ function formatWeek(weekStart: string): string {
   // "2024-01-08" → "Jan 8"
   const d = new Date(weekStart + "T00:00:00Z")
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  return `${(minutes / 60).toFixed(1)}h`
 }
 
 // ── Bar chart (weekly trend) ──────────────────────────────────────────────────
@@ -99,43 +115,41 @@ function UserTable({ users, activeUser, onSelectUser }: {
   if (users.length === 0) return null
 
   return (
-    <div className="mt-2 overflow-hidden rounded border text-sm">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
-            <th className="py-1.5 pl-3 text-left font-medium">User</th>
-            <th className="py-1.5 pr-3 text-right font-medium">Edits</th>
-            <th className="py-1.5 pr-3 text-right font-medium">Avg edit distance</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div className="mt-2 overflow-hidden rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Reviewer</TableHead>
+            <TableHead className="text-right">Approvals</TableHead>
+            <TableHead className="text-right">Avg edit distance</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {users.map((u) => {
             const isActive = activeUser === u.author
             return (
-              <tr
+              <TableRow
                 key={u.author}
+                data-state={isActive ? "selected" : undefined}
                 onClick={() => onSelectUser(isActive ? null : u.author)}
-                className={[
-                  "cursor-pointer border-b last:border-0 transition-colors",
-                  isActive ? "bg-accent" : "hover:bg-muted/30",
-                ].join(" ")}
+                className="cursor-pointer"
               >
-                <td className="py-1.5 pl-3 font-mono text-xs">{u.author}</td>
-                <td className="py-1.5 pr-3 text-right text-muted-foreground">{u.count}</td>
-                <td className="py-1.5 pr-3 text-right">
+                <TableCell className="font-mono text-xs">{u.author}</TableCell>
+                <TableCell className="text-right text-muted-foreground">{u.count}</TableCell>
+                <TableCell className="text-right">
                   <span className="inline-flex items-center gap-1.5">
                     <span
-                      className={`inline-block h-2 w-2 rounded-full ${nedColor(u.avgNed)}`}
+                      className={`inline-block size-2 rounded-full ${nedColor(u.avgNed)}`}
                     />
                     <span>{pct(u.avgNed)}</span>
                     <span className="text-xs text-muted-foreground">({nedLabel(u.avgNed)})</span>
                   </span>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             )
           })}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   )
 }
@@ -151,7 +165,7 @@ function MetricsEmptyState({ reason }: { reason: "no-data" | "error" | "no-cloud
       icon: Sparkles,
       title: "No post-edit pairs yet",
       description:
-        "Pairs are recorded when an AI-drafted segment is later edited by a human. Use the AI completion feature (Sparkles) to generate drafts, then edit them — data will appear here.",
+        "Pairs are recorded only after a human approves an AI draft or an edited descendant. Generate a draft, review it, then approve it to add effort data here.",
     },
     error: {
       icon: AlertTriangle,
@@ -167,7 +181,8 @@ function MetricsEmptyState({ reason }: { reason: "no-data" | "error" | "no-cloud
   const { icon, title, description } = config[reason]
   return (
     <EmptyState
-      className="mt-3 border-0 bg-transparent px-0 py-4"
+      variant="inline"
+      className="mt-3 py-4"
       icon={icon}
       title={title}
       description={description}
@@ -235,7 +250,7 @@ export function PostEditMetricsSection({
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle id="ai-metrics-heading" className="text-base">
-              AI Post-Edit Magnitude
+              Approved AI Review Effort
             </CardTitle>
             {!isLoading && (
               <button
@@ -248,7 +263,7 @@ export function PostEditMetricsSection({
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Average edit distance between AI drafts and final human text.{" "}
+            Edit distance and elapsed time between machine drafts and final approved text.{" "}
             <span className="italic">0% = accepted as-is · 100% = completely replaced.</span>
           </p>
         </CardHeader>
@@ -281,7 +296,15 @@ export function PostEditMetricsSection({
                 </div>
                 <div className="rounded-md border px-3 py-2 text-center">
                   <div className="text-xl font-semibold tabular-nums">{metrics.totalCount}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">AI→human edit pairs</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">approved draft pairs</div>
+                </div>
+                <div className="rounded-md border px-3 py-2 text-center">
+                  <div className="text-xl font-semibold tabular-nums">{pct(metrics.acceptanceRate)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">accepted as-is</div>
+                </div>
+                <div className="rounded-md border px-3 py-2 text-center">
+                  <div className="text-xl font-semibold tabular-nums">{formatDuration(metrics.overallAvgReviewMs)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">avg draft→approval</div>
                 </div>
                 <div className="rounded-md border px-3 py-2 text-center">
                   <div className="text-xl font-semibold">
@@ -325,7 +348,7 @@ export function PostEditMetricsSection({
               {metrics.byUser.length > 0 && (
                 <div className="mt-5">
                   <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    By user
+                    By reviewer
                     <span className="ml-1 normal-case font-normal text-muted-foreground">
                       (click a row to filter the trend above)
                     </span>
@@ -341,8 +364,12 @@ export function PostEditMetricsSection({
               {/* Approximation disclosure */}
               <p className="mt-4 text-[11px] text-muted-foreground/70">
                 Metric: character-level normalized Levenshtein distance (NED).
-                Pairs require FRO-292 AI provenance (ai_suggestion=true on the commit event).
-                Historical commits before that feature are excluded.
+                Pairs require AQU-292 AI provenance (ai_suggestion=true on the commit event).
+                Only human-approved pairs are included. Character insertions, deletions,
+                substitutions, acceptance, model, prompt version, and retrieved example IDs
+                come from this project&apos;s private event history. Elapsed time runs from draft
+                commit to first approval and may include time away from the editor.
+                Historical commits before AQU-292 are excluded.
               </p>
             </>
           )}

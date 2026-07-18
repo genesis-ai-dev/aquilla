@@ -1,4 +1,4 @@
-// Left-context for a draft is the COMMITTED TARGET of the immediately preceding
+// Left-context for a draft is the APPROVED TARGET of the immediately preceding
 // cells, not their source: this is what gives real discourse flow — connectives
 // and participant reference that follow what was actually said in the target
 // language. v1 measures the budget in CELL COUNT (not tokens) to avoid a tokenizer
@@ -6,7 +6,7 @@
 // See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D4, D10).
 
 export interface DraftContextSettings {
-  /** How many preceding committed-target cells (same file, document order) to
+  /** How many preceding approved-target cells (same file, document order) to
    *  include as left-context. v1 unit is cell count; token budget is deferred. */
   precedingTargetCells: number
 }
@@ -15,10 +15,16 @@ export const DEFAULT_DRAFT_CONTEXT: DraftContextSettings = {
   precedingTargetCells: 3,
 }
 
-type MinimalCell = { id: string; fileId: string; original: string; translated: string }
+type MinimalCell = {
+  id: string
+  fileId: string
+  original: string
+  translated: string
+  status: string
+}
 
 /**
- * Collect the committed target of up to `count` cells immediately preceding
+ * Collect the approved target of up to `count` cells immediately preceding
  * `cellId` within the SAME file, in document order. Cells with an empty target
  * are skipped (nothing to learn from). `cells` is assumed to be in document order
  * (the order useCells/useProject already returns rows in).
@@ -28,9 +34,9 @@ export function gatherPrecedingContext(
   cellId: string,
   count: number,
   // D4 source-fallback: when true, a preceding cell that has source but no
-  // committed target yet is still included (target stays ""), so the first
+  // approved target yet is still included (target stays ""), so the first
   // paragraphs get SOME discourse context instead of none. Off by default — the
-  // shipped single-cell path keeps committed-target-only behavior; the paragraph
+  // shipped single-cell path keeps approved-target-only behavior; the paragraph
   // draft path opts in. See spec (D4), the deferred-to-Phase-1 note.
   sourceFallback = false,
 ): { source: string; target: string }[] {
@@ -44,8 +50,13 @@ export function gatherPrecedingContext(
     const c = cells[i]
     if (c.fileId !== fileId) break // do not cross a file boundary
     if (!c.original.trim()) continue // no source → nothing to show
-    if (!c.translated.trim() && !sourceFallback) continue // uncommitted, fallback off
-    out.push({ source: c.original, target: c.translated.trim() ? c.translated : "" })
+    const approvedTarget = c.status === "validated" && c.translated.trim()
+      ? c.translated
+      : ""
+    if (!approvedTarget && !sourceFallback) continue
+    // Unapproved target text is never prompt context. In paragraph fallback
+    // mode its source may still provide discourse information.
+    out.push({ source: c.original, target: approvedTarget })
   }
   return out.reverse() // restore document order (oldest → newest)
 }

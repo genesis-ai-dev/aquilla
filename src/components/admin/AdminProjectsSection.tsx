@@ -1,35 +1,38 @@
 import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
+import { type ColumnDef } from "@tanstack/react-table"
 import { FolderOpen } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { AdminDataTable, type AdminColumn } from "./AdminDataTable"
-import { AttentionBadges, ValidatedBar } from "./shared"
-import { fmtDate } from "@/lib/admin/format"
+import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { EmptyState } from "@/components/ui/empty"
+import { ProjectStatus } from "@/components/ProjectStatus"
+import { ValidatedBar } from "./ValidatedBar"
 import { attentionReasons, attentionScore, validatedFraction } from "@/lib/admin/insights"
 import type { AdminProject } from "@/lib/frontier/admin"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
-type Lens = "all" | "at-risk" | "active" | "archived"
+type Lens = "all" | "needs-attention" | "active" | "archived"
 const LENSES: { value: Lens; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "at-risk", label: "At risk" },
+  { value: "needs-attention", label: "Needs attention" },
   { value: "active", label: "Active" },
   { value: "archived", label: "Archived" },
 ]
 
 /**
- * Projects — searchable, sortable, and filterable by a lens (all / at-risk /
+ * Projects — searchable, sortable, and filterable by a lens (all / needs-attention /
  * active / archived). The Status column shows why a project needs attention
  * (overdue / due-soon / stalled) instead of a bare "Active", turning the old
  * flat table into something an operator can triage from.
  */
 export function AdminProjectsSection({ projects }: { projects: AdminProject[] }) {
+  const navigate = useNavigate()
   const [now] = useState(() => Date.now())
   const [lens, setLens] = useState<Lens>("all")
 
-  const rows = useMemo(() => {
+  const data = useMemo(() => {
     switch (lens) {
-      case "at-risk":
+      case "needs-attention":
         return projects.filter((p) => !p.archived && attentionReasons(p, now).length > 0)
       case "active":
         return projects.filter((p) => !p.archived)
@@ -40,66 +43,124 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
     }
   }, [projects, lens, now])
 
-  const columns: AdminColumn<AdminProject>[] = [
-    {
-      key: "name",
-      header: "Project",
-      sortValue: (p) => p.name.toLowerCase(),
-      render: (p) =>
-        p.archived ? (
-          <span className="text-muted-foreground">{p.name}</span>
-        ) : (
-          <Link to={`/projects/${p.id}`} className="font-medium text-primary hover:underline">
-            {p.name}
-          </Link>
-        ),
-    },
-    { key: "org", header: "Org", sortValue: (p) => (p.orgName ?? "").toLowerCase(), render: (p) => p.orgName ?? "—" },
-    {
-      key: "creator",
-      header: "Creator",
-      sortValue: (p) => (p.creatorUsername ?? "").toLowerCase(),
-      render: (p) => p.creatorUsername ?? "—",
-    },
-    {
-      key: "validated",
-      header: "Validated",
-      sortValue: (p) => validatedFraction(p),
-      render: (p) => <ValidatedBar fraction={validatedFraction(p)} />,
-    },
-    {
-      key: "words",
-      header: "Words",
-      align: "right",
-      sortValue: (p) => p.wordCount,
-      render: (p) => p.wordCount.toLocaleString(),
-    },
-    {
-      key: "edited",
-      header: "Last edit",
-      sortValue: (p) => p.lastEditAt ?? null,
-      render: (p) => (p.lastEditAt ? fmtDate(new Date(p.lastEditAt).toISOString()) : "—"),
-    },
-    {
-      key: "status",
-      header: "Status",
-      sortValue: (p) => (p.archived ? -1 : attentionScore(p, now)),
-      render: (p) => {
-        if (p.archived) return <Badge variant="secondary">Archived</Badge>
-        const reasons = attentionReasons(p, now)
-        return reasons.length > 0 ? (
-          <AttentionBadges reasons={reasons} />
-        ) : (
-          <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400">
-            On track
-          </Badge>
-        )
+  const columns = useMemo<ColumnDef<AdminProject>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        cell: ({ row }) => {
+          const p = row.original
+          return (
+            <span className={p.archived ? "text-muted-foreground" : "font-medium text-foreground"}>
+              {p.name}
+            </span>
+          )
+        },
       },
-    },
-  ]
+      {
+        id: "org",
+        accessorFn: (p) => (p.orgName ?? "").toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
+        cell: ({ row }) => row.original.orgName ?? "—",
+      },
+      {
+        id: "creator",
+        accessorFn: (p) => (p.creatorUsername ?? "").toLowerCase(),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Creator" />,
+        cell: ({ row }) => row.original.creatorUsername ?? "—",
+      },
+      {
+        id: "validated",
+        accessorFn: (p) => validatedFraction(p),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Validated" />,
+        cell: ({ row }) => <ValidatedBar fraction={validatedFraction(row.original)} />,
+      },
+      {
+        accessorKey: "wordCount",
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title="Words" className="justify-end" />
+        ),
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">{row.original.wordCount.toLocaleString()}</div>
+        ),
+      },
+      {
+        id: "edited",
+        accessorFn: (p) => p.lastEditAt ?? null,
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Last edit" />,
+        sortingFn: (a, b) => {
+          const av = a.original.lastEditAt
+          const bv = b.original.lastEditAt
+          if (av == null && bv == null) return 0
+          if (av == null) return 1
+          if (bv == null) return -1
+          return av < bv ? -1 : av > bv ? 1 : 0
+        },
+        cell: ({ row }) => (
+          <DateTooltip
+            value={row.original.lastEditAt}
+            label="Edited"
+            className="text-muted-foreground"
+          />
+        ),
+      },
+      {
+        id: "status",
+        accessorFn: (p) => (p.archived ? -1 : attentionScore(p, now)),
+        header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+        cell: ({ row }) => {
+          const p = row.original
+          return (
+            <ProjectStatus archived={p.archived} reasons={attentionReasons(p, now)} />
+          )
+        },
+      },
+    ],
+    [now],
+  )
+
+  const emptyCopy = useMemo(() => {
+    switch (lens) {
+      case "needs-attention":
+        return {
+          title: "Nothing needs attention",
+          description: "No active project is overdue, due soon, or stalled.",
+        }
+      case "active":
+        return {
+          title: "No active projects",
+          description: "Active projects appear here.",
+        }
+      case "archived":
+        return {
+          title: "No archived projects",
+          description: "Archived projects appear here.",
+        }
+      default:
+        return {
+          title: "No projects",
+          description: "Projects appear here as they're created.",
+        }
+    }
+  }, [lens])
+
+  const emptyState = (
+    <div
+      className="w-full overflow-hidden rounded-md border border-dashed"
+      data-testid="admin-projects-empty"
+    >
+      <EmptyState
+        variant="inline"
+        className="flex-none py-12"
+        icon={FolderOpen}
+        title={emptyCopy.title}
+        description={emptyCopy.description}
+      />
+    </div>
+  )
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-1">
         {LENSES.map((l) => (
           <Button
@@ -114,22 +175,34 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         ))}
       </div>
 
-      <AdminDataTable
+      <DataTable
         columns={columns}
-        rows={rows}
-        getRowKey={(p) => p.id}
-        searchText={(p) => `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`}
-        searchPlaceholder="Search projects…"
-        initialSort={{ key: "status", dir: "desc" }}
-        empty={{
-          icon: FolderOpen,
-          title: lens === "at-risk" ? "Nothing at risk" : "No projects",
-          description:
-            lens === "at-risk"
-              ? "No active project is overdue, due soon, or stalled."
-              : "Projects appear here as they're created.",
+        data={data}
+        getRowId={(p) => p.id}
+        onRowClick={(p) => {
+          if (!p.archived) navigate(`/projects/${p.id}`)
         }}
+        rowClassName={(p) => (p.archived ? undefined : "cursor-pointer")}
+        initialSorting={[{ id: "status", desc: true }]}
+        searchPlaceholder="Search projects…"
+        globalFilterFn={(row, _columnId, filterValue) => {
+          const q = String(filterValue).trim().toLowerCase()
+          if (!q) return true
+          const p = row.original
+          return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`
+            .toLowerCase()
+            .includes(q)
+        }}
+        toolbar={(table) => (
+          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+            {table.getFilteredRowModel().rows.length === data.length
+              ? `${data.length}`
+              : `${table.getFilteredRowModel().rows.length} of ${data.length}`}
+          </span>
+        )}
+        emptyState={emptyState}
         testId="admin-projects-table"
+        dense
       />
     </div>
   )

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { getOrgCredits, type OrgCredits } from "@/lib/sync/credits"
 import { formatCredits, capUsagePct } from "@/lib/credits"
 import { ROLE } from "@/lib/frontier/roles"
@@ -27,11 +27,13 @@ export function CreditsPanel({
   jwt,
   orgId,
   orgRoleLevel,
+  action,
 }: {
   jwt: string
   orgId: number
   /** The viewer's numeric org role level (from OrgSummary.role.level). */
   orgRoleLevel: number
+  action?: ReactNode
 }) {
   const [data, setData] = useState<OrgCredits | null>(null)
 
@@ -61,6 +63,7 @@ export function CreditsPanel({
     <Section
       title="Compute credits"
       description="Usage against daily & weekly caps, broken out by rail"
+      action={action}
       data-testid="credits-panel"
     >
       <div className="space-y-5">

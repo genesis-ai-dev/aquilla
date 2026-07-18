@@ -254,6 +254,118 @@ describe("GET /api/v2/projects/invite-preview/:token", () => {
   })
 })
 
+// ── AQU-347 follow-up (legacy single-project preview) ────────────────────────
+//
+// BUG: GET /invite-preview/:token returned 410 code:"used" whenever
+// invite.used_at was set — with no check for "is the caller the original
+// redeemer, and are they still a member?" — so a signed-in user re-opening
+// their own already-redeemed invite link hit a terminal "already been used"
+// error even though accept-invite is an idempotent no-op for them. Same bug
+// AQU-347 fixed in the multi-invite preview (routes/invites.ts); this mirrors
+// that fix for the legacy route.
+describe("invite-preview: still-member re-click is a friendly continue, not a hard error", () => {
+  async function seedAndRedeem(
+    token: string,
+    projectId: string,
+    leadId: number,
+    memberUsername: string,
+  ) {
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
+    )
+      .bind(projectId, "Legacy preview idempotent project", leadId)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(token, projectId, 400, leadId, new Date(Date.now() + 86400000).toISOString())
+      .run()
+    const acceptRes = await app.request(
+      "/api/v2/projects/accept-invite",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor(memberUsername)),
+        body: JSON.stringify({ token }),
+      },
+      env,
+    )
+    expect(acceptRes.status).toBe(200)
+  }
+
+  it("still-member redeemer previewing their own used link gets the normal preview (200)", async () => {
+    await seedUser(70, "lead70")
+    await seedUser(71, "stillmember71")
+    await seedAndRedeem("tok-347L-a", "p-fro347L-a", 70, "stillmember71")
+
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-347L-a",
+      { method: "GET", headers: authHeader(await jwtFor("stillmember71")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      projectId: string
+      projectName: string
+      role: { level: number; name: string }
+    }
+    expect(body.projectId).toBe("p-fro347L-a")
+    expect(body.projectName).toBe("Legacy preview idempotent project")
+    expect(body.role).toEqual({ level: 400, name: "contributor" })
+  })
+
+  it("removed redeemer previewing their old link still gets 410 used", async () => {
+    await seedUser(72, "lead72")
+    await seedUser(73, "removed73")
+    await seedAndRedeem("tok-347L-b", "p-fro347L-b", 72, "removed73")
+
+    await env.AQUILLA_PG.prepare(
+      "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+    )
+      .bind("p-fro347L-b", 73)
+      .run()
+
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-347L-b",
+      { method: "GET", headers: authHeader(await jwtFor("removed73")) },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { code?: string }
+    expect(body.code).toBe("used")
+  })
+
+  it("a different authenticated user previewing someone else's used link still gets 410 used", async () => {
+    await seedUser(74, "lead74")
+    await seedUser(75, "redeemer75")
+    await seedUser(76, "onlooker76")
+    await seedAndRedeem("tok-347L-c", "p-fro347L-c", 74, "redeemer75")
+
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-347L-c",
+      { method: "GET", headers: authHeader(await jwtFor("onlooker76")) },
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { code?: string }
+    expect(body.code).toBe("used")
+  })
+
+  it("an unauthenticated preview of a used link is unchanged — still 410 used", async () => {
+    await seedUser(77, "lead77")
+    await seedUser(78, "redeemer78")
+    await seedAndRedeem("tok-347L-d", "p-fro347L-d", 77, "redeemer78")
+
+    const res = await app.request(
+      "/api/v2/projects/invite-preview/tok-347L-d",
+      { method: "GET" }, // no Authorization header
+      env,
+    )
+    expect(res.status).toBe(410)
+    const body = (await res.json()) as { code?: string }
+    expect(body.code).toBe("used")
+  })
+})
+
 // ── Multi-project invite acceptance (RACE-7 fixes) ───────────────────────────
 
 describe("POST /api/v2/invites/:token/accept — idempotency and race guard", () => {
@@ -372,8 +484,8 @@ describe("POST /api/v2/invites/:token/accept — idempotency and race guard", ()
   })
 })
 
-// ── FRO-283: email enforcement ─────────────────────────────────────────────
-describe("accept-invite: email-bound enforcement (FRO-283)", () => {
+// ── AQU-283: email enforcement ─────────────────────────────────────────────
+describe("accept-invite: email-bound enforcement (AQU-283)", () => {
   async function seedProject(id: string, creatorId: number) {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, ?)",
@@ -439,8 +551,8 @@ describe("accept-invite: email-bound enforcement (FRO-283)", () => {
   })
 })
 
-// ── FRO-283: archived project guard ───────────────────────────────────────
-describe("accept-invite: archived project guard (FRO-283)", () => {
+// ── AQU-283: archived project guard ───────────────────────────────────────
+describe("accept-invite: archived project guard (AQU-283)", () => {
   it("rejects redeem for an archived project with 410", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
@@ -466,8 +578,8 @@ describe("accept-invite: archived project guard (FRO-283)", () => {
   })
 })
 
-// ── FRO-283: atomic double-redeem ─────────────────────────────────────────
-describe("accept-invite: double-redeem idempotency (FRO-283)", () => {
+// ── AQU-283: atomic double-redeem ─────────────────────────────────────────
+describe("accept-invite: double-redeem idempotency (AQU-283)", () => {
   it("second redeem by same user returns 200 (idempotent)", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
@@ -504,8 +616,8 @@ describe("accept-invite: double-redeem idempotency (FRO-283)", () => {
   })
 })
 
-// ── FRO-283: GET list active invites ──────────────────────────────────────
-describe("GET /api/v2/projects/:id/invites (FRO-283)", () => {
+// ── AQU-283: GET list active invites ──────────────────────────────────────
+describe("GET /api/v2/projects/:id/invites (AQU-283)", () => {
   it("returns active invites for project_lead+", async () => {
     await seedUser(1, "alice")
     await env.AQUILLA_PG.prepare(
@@ -579,13 +691,13 @@ describe("GET /api/v2/projects/:id/invites (FRO-283)", () => {
   })
 })
 
-// ── FRO-323: POST /api/v2/projects/:id/members → GET /api/v2/projects ─────
+// ── AQU-323: POST /api/v2/projects/:id/members → GET /api/v2/projects ─────
 //
 // Root cause confirmed: the direct-add path inserts into project_members and
 // the project-list query's WHERE includes `OR pm.user_id = ?` (bound to the
 // invitee's user.id). This test exercises the full round-trip to verify that
 // an invited user sees the project in their GET /api/v2/projects response.
-describe("FRO-323: add-member round-trip — invited user sees project in project list", () => {
+describe("AQU-323: add-member round-trip — invited user sees project in project list", () => {
   it("project appears in invitee GET /api/v2/projects after POST /projects/:id/members", async () => {
     await seedUser(100, "maintainer")
     await seedUser(101, "invitee")
@@ -638,7 +750,7 @@ describe("FRO-323: add-member round-trip — invited user sees project in projec
     expect(projects.some((p) => p.id === "proj-fro323-b")).toBe(false)
   })
 
-  it("project list honours ?minRole filter (FRO-321)", async () => {
+  it("project list honours ?minRole filter (AQU-321)", async () => {
     await seedUser(104, "multi-role-user")
     await seedUser(105, "owner-of-two")
     await env.AQUILLA_PG.prepare(
@@ -688,8 +800,8 @@ describe("FRO-323: add-member round-trip — invited user sees project in projec
   })
 })
 
-// ── FRO-283: expires_in_days honored ──────────────────────────────────────
-describe("POST /api/v2/projects/:id/invites: expires_in_days (FRO-283)", () => {
+// ── AQU-283: expires_in_days honored ──────────────────────────────────────
+describe("POST /api/v2/projects/:id/invites: expires_in_days (AQU-283)", () => {
   it("honors expires_in_days=1 from client", async () => {
     await seedUser(1, "alice")
     await env.AQUILLA_PG.prepare(
@@ -770,21 +882,21 @@ describe("POST /api/v2/projects/:id/invites: expires_in_days (FRO-283)", () => {
   })
 })
 
-// ── FRO-429: distinct error codes for used vs time-expired invites ─────────
+// ── AQU-429: distinct error codes for used vs time-expired invites ─────────
 //
 // The frontend needs to show a different message for:
 //   "already used" (single-use link was redeemed by someone else)
 //   "time expired" (the link's expiry date has passed)
 // Both return HTTP 410 but with a `code` field in the body.
 
-describe("FRO-429: invite-preview returns code field distinguishing used vs time-expired", () => {
+describe("AQU-429: invite-preview returns code field distinguishing used vs time-expired", () => {
   it("GET /invite-preview returns code:'used' when invite is already redeemed", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )
-      .bind("p-fro429-used", "FRO-429 Used")
+      .bind("p-fro429-used", "AQU-429 Used")
       .run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
@@ -807,7 +919,7 @@ describe("FRO-429: invite-preview returns code field distinguishing used vs time
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )
-      .bind("p-fro429-exp", "FRO-429 Expired")
+      .bind("p-fro429-exp", "AQU-429 Expired")
       .run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -832,7 +944,7 @@ describe("FRO-429: invite-preview returns code field distinguishing used vs time
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )
-      .bind("p-fro429-accept-used", "FRO-429 Accept Used")
+      .bind("p-fro429-accept-used", "AQU-429 Accept Used")
       .run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, used_by, used_at, expires_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
@@ -855,7 +967,7 @@ describe("FRO-429: invite-preview returns code field distinguishing used vs time
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 1)",
     )
-      .bind("p-fro429-accept-exp", "FRO-429 Accept Expired")
+      .bind("p-fro429-accept-exp", "AQU-429 Accept Expired")
       .run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at) VALUES (?, ?, ?, ?, ?)",
@@ -873,7 +985,7 @@ describe("FRO-429: invite-preview returns code field distinguishing used vs time
   })
 })
 
-describe("FRO-429: multi-invite preview returns code field distinguishing used vs time-expired", () => {
+describe("AQU-429: multi-invite preview returns code field distinguishing used vs time-expired", () => {
   it("GET /api/v2/invites/:token/preview returns code:'used' when all rows are redeemed", async () => {
     await seedUser(10, "alice10")
     await seedUser(11, "bob11")
@@ -920,7 +1032,7 @@ describe("FRO-429: multi-invite preview returns code field distinguishing used v
   })
 })
 
-// ── FRO-364: magic-link invite instantly invalid on accept ──────────────────
+// ── AQU-364: magic-link invite instantly invalid on accept ──────────────────
 //
 // Repro from the ticket: a project_lead mints a magic-link (email-bound,
 // single-project) invite via POST /:projectId/invites → the invitee clicks
@@ -929,7 +1041,7 @@ describe("FRO-429: multi-invite preview returns code field distinguishing used v
 // including single-project ones minted by the legacy endpoint — and only
 // falls back to the legacy accept if the multi accept returns nothing
 // accepted. This test drives that exact real path end-to-end.
-describe("FRO-364: magic-link invite accept — real redeem path via JoinPage's endpoint order", () => {
+describe("AQU-364: magic-link invite accept — real redeem path via JoinPage's endpoint order", () => {
   it("accepts a freshly-minted email-bound single-project invite via the multi accept endpoint immediately", async () => {
     await seedUser(20, "lead20") // project_lead, mints the invite
     await seedUser(21, "invitee21") // email: invitee21@example.com
@@ -937,7 +1049,7 @@ describe("FRO-364: magic-link invite accept — real redeem path via JoinPage's 
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 20)",
     )
-      .bind("p-fro364", "FRO-364 project")
+      .bind("p-fro364", "AQU-364 project")
       .run()
 
     // Mint the magic-link invite exactly as POST /:projectId/invites does:
@@ -966,7 +1078,7 @@ describe("FRO-364: magic-link invite accept — real redeem path via JoinPage's 
       env,
     )
 
-    // BUG (FRO-364): the multi accept endpoint queries project_invites by
+    // BUG (AQU-364): the multi accept endpoint queries project_invites by
     // token and finds the one row (single-project invites share the same
     // table), but the row's `email` column IS set — so the multi accept's
     // email-bound guard should pass. Expect success end-to-end: the real
@@ -988,7 +1100,7 @@ describe("FRO-364: magic-link invite accept — real redeem path via JoinPage's 
   })
 })
 
-// ── FRO-347: invite link stays redeemable forever by its original redeemer ──
+// ── AQU-347: invite link stays redeemable forever by its original redeemer ──
 //
 // Bug: both accept endpoints treated "this user already redeemed this
 // token" (used_by === user.id) as unconditional idempotent success and
@@ -998,7 +1110,7 @@ describe("FRO-364: magic-link invite accept — real redeem path via JoinPage's 
 // no-op that lands them back in the project; once membership has been
 // REMOVED, re-redemption must be refused. Regression tests for what already
 // worked (revoked-unused link, cross-user consumption) are kept alongside.
-describe("FRO-347: idempotent-while-member redeem semantics", () => {
+describe("AQU-347: idempotent-while-member redeem semantics", () => {
   describe("legacy single-project accept-invite", () => {
     it("re-clicking a redeemed link while still a member is a no-op success (option 2)", async () => {
       await seedUser(40, "lead40")
@@ -1069,7 +1181,7 @@ describe("FRO-347: idempotent-while-member redeem semantics", () => {
         .bind("p-fro347-b", 43)
         .run()
 
-      // BUG (FRO-347): re-clicking the same old link must NOT be a self-service
+      // BUG (AQU-347): re-clicking the same old link must NOT be a self-service
       // re-entry pass. The invite is dead for this (already-consumed-by-them,
       // now-removed) user.
       const second = await accept()
@@ -1209,7 +1321,7 @@ describe("FRO-347: idempotent-while-member redeem semantics", () => {
         .bind("p-fro347-multi-b", 53)
         .run()
 
-      // BUG (FRO-347): must not silently re-grant access after removal.
+      // BUG (AQU-347): must not silently re-grant access after removal.
       const second = await accept()
       expect(second.status).toBe(410)
       const body = (await second.json()) as { error: string; code?: string }
@@ -1222,7 +1334,7 @@ describe("FRO-347: idempotent-while-member redeem semantics", () => {
     })
   })
 
-  // ── FRO-347 (preview-side): a still-member re-click must not hard-error ──
+  // ── AQU-347 (preview-side): a still-member re-click must not hard-error ──
   //
   // BUG: GET /:token/preview returned 410 code:"used" whenever every row for
   // the token had used_at set — with no check for "is the caller the

@@ -7,7 +7,7 @@ import { useFrontierSession } from "./useFrontierSession";
  * Used by the multi-project invite flow on the Members page — only projects
  * where the caller can actually grant membership are shown.
  *
- * FRO-321: scoped to minRole=600 (maintainer) so the picker doesn't enumerate
+ * AQU-321: scoped to minRole=600 (maintainer) so the picker doesn't enumerate
  * every project on the instance. The server enforces the same threshold.
  *
  * `fetchAccessibleProjects` already swallows network errors and returns []
@@ -41,7 +41,7 @@ export function useAccessibleProjects(): UseAccessibleProjects {
     }
     setLoading(true);
     try {
-      // FRO-321: only fetch projects where caller >= maintainer (600)
+      // AQU-321: only fetch projects where caller >= maintainer (600)
       const next = await fetchAccessibleProjects(jwt, undefined, undefined, 600);
       if (aliveRef.current) setProjects(next);
     } finally {
@@ -55,7 +55,7 @@ export function useAccessibleProjects(): UseAccessibleProjects {
 }
 
 /**
- * FRO-428: All projects the current user can access (viewer 100+), including
+ * AQU-428: All projects the current user can access (viewer 100+), including
  * projects where the user has a direct project_members grant but is NOT a
  * member of the project's org.
  *

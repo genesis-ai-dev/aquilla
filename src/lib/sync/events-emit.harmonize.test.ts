@@ -1,5 +1,5 @@
 /**
- * FRO-186: Tests for emitCellHarmonize — the cell.commit.harmonize variant.
+ * AQU-186: Tests for emitCellHarmonize — the cell.commit.harmonize variant.
  *
  * Verifies:
  *  1. emitCellHarmonize enqueues a target.cell.commit with harmonize_origin.

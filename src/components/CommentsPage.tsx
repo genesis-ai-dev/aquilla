@@ -3,7 +3,7 @@
 //
 // Uses the v3 event-log backed useComments hook (comment.* event grammar).
 //
-// FRO-185: filter/sort/show-resolved/navigate/@mention/FTS
+// AQU-185: filter/sort/show-resolved/navigate/@mention/FTS
 
 import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"

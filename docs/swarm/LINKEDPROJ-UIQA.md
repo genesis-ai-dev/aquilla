@@ -24,7 +24,7 @@ Source edits in A were made via `POST :9789/events` with `source.cell.commit` (s
 
 ---
 
-## Check 1 — Core loop (FRO-476 + FRO-478 creation): **PARTIAL**
+## Check 1 — Core loop (AQU-476 + AQU-478 creation): **PARTIAL**
 
 Clicked: Dev Org → + New Project → name/langs → Advanced: project shape → **Linked target** →
 Upstream project picker (lists all accessible projects) → defaults Live + "Its source" → Create & Link.
@@ -53,7 +53,7 @@ Upstream project picker (lists all accessible projects) → defaults Live + "Its
 - Server gate: `GET /api/v1/projects/:B/files/:f/stale-source` →
   `staleCellIds:["6198bdba-…"]`, `upstreamStaleCellIds:[]`, `tombstonedCellIds:[]`. Exact match. **PASS**
 
-## Check 2 — Upstream changes review panel (FRO-478): **PASS**
+## Check 2 — Upstream changes review panel (AQU-478): **PASS**
 
 Clicked: `/project/:B/settings` → "Upstream changes" section (also linked in the settings nav rail).
 
@@ -66,7 +66,7 @@ Clicked: `/project/:B/settings` → "Upstream changes" section (also linked in t
 - After reload: 0 badges in the editor; `stale-source` returns `staleCellIds:[]`. **Server-verified.**
 - Not exercised: the row's "Open" navigation button; bulk-select checkboxes/bulk repin.
 
-## Check 3 — Clone mode (FRO-476): **PARTIAL**
+## Check 3 — Clone mode (AQU-476): **PARTIAL**
 
 Same dialog path with **Clone** selected (radio verified `clone` checked pre-submit).
 
@@ -78,7 +78,7 @@ Same dialog path with **Clone** selected (radio verified `clone` checked pre-sub
 - "C never shows stale flags after editing A": vacuously true (C has no content to flag) — could not
   be meaningfully tested until BUG-1 is fixed.
 
-## Check 4 — Push accelerator (FRO-479): **PARTIAL (badge live, text not)**
+## Check 4 — Push accelerator (AQU-479): **PARTIAL (badge live, text not)**
 
 Setup: B's file open in the browser, **no reloads**; A's cell 2 edited via `POST /events`
 (`…(PUSH-TEST edit)` @ 13:13:05).
@@ -93,7 +93,7 @@ Setup: B's file open in the browser, **no reloads**; A's cell 2 edited via `POST
   SWARM-TODO explicitly expects "stale badge + cell text update … no reload" — half met.
 - Console: clean (only the pre-existing font 403, see Stack incidents).
 
-## Check 5 — Chains (FRO-477): **PASS** (steps 1–7; final flip step not run)
+## Check 5 — Chains (AQU-477): **PASS** (steps 1–7; final flip step not run)
 
 - Created D via the same dialog: upstream = QA Downstream B, Live, **"Its translations"**.
   No gate picker exists in the dialog; server defaulted `gate='validated'` (PG verified). Noted.
@@ -118,7 +118,7 @@ Setup: B's file open in the browser, **no reloads**; A's cell 2 edited via `POST
    clone mode never heals. Fix candidates: fire the mirror/snapshot server-side inside
    `link-source` handling, or have ProjectWorkspace trigger `/link/sync` on mount for
    `source_link_mode='live'` projects with no files (clone still needs a birth snapshot).
-2. **MAJOR — FRO-479 text doesn't live-update.** After `link.upstream-changed`, the cells delta
+2. **MAJOR — AQU-479 text doesn't live-update.** After `link.upstream-changed`, the cells delta
    fetch races the mirror commit (empty `since` delta) and nothing revalidates after link/sync
    resolves. Badge is live; row text needs a reload. Sequence the revalidate after the link/sync
    POST resolves (it returns `cellsMirrored` — enough signal).
@@ -202,7 +202,7 @@ test the primary path locally and to stop the local dev auth-worker calling prod
 - After A2's cell 1 was edited twice (r2, r3): C2 shows **0 amber / 0 violet** badges and still
   renders the original text. Clone independence holds, non-vacuously this time.
 
-### Check 3 — Push text race (FRO-479) + first-open tone: **PASS**
+### Check 3 — Push text race (AQU-479) + first-open tone: **PASS**
 
 - Setup: translated B2 cell 1 (TipTap type + blur); PG target row pinned
   (`source_event_id = e5ee2d5f…`, B2's mirror event).

@@ -1,25 +1,26 @@
 /**
  * AgentDockView.tsx — Agent mode body for the chat dock.
  *
- * Holds the run list state: each composer send POSTs to the agent endpoint
- * (agent-client.ts), folds SSE frames into an AgentRunUi (run-state.ts), and
- * renders AgentRunView + ProposalCards per run. The composer and context pin
- * are the SAME shared chat components the chat mode uses; Chat mode behavior
- * is untouched (this component only mounts in Agent mode).
+ * A thin mount over the project's shared agent session
+ * (src/lib/agent/session-store.ts): the store owns runs/streaming/queueing
+ * and the server-session id, so the full-screen workbench renders the SAME
+ * conversation and an in-flight run survives dock unmounts. This component
+ * owns only presentation wiring: composer, context pin, proposal Apply.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Bot } from "lucide-react"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
 import type { CellContext } from "@/lib/cell-context"
 import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
+import { expandSlashCommand } from "@/lib/agent/slash-commands"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
-import { runAgent } from "@/lib/agent/agent-client"
 import type { ApplyContext } from "@/lib/agent/apply"
-import { createRun, failRun, reduceRunFrame, type AgentRunUi } from "@/lib/agent/run-state"
+import type { AgentProposal } from "@/lib/agent/protocol"
+import { useAgentSession } from "@/lib/agent/session-store"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -29,11 +30,10 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { AgentRunView } from "./AgentRunView"
+import { PassageCard } from "./cards/PassageCard"
+import { passageRowsFor } from "./cards/registry"
 import { ProposalCard } from "./ProposalCard"
 import { AquiferProposalCard } from "./AquiferProposalCard"
-
-/** ≤10 turns on the wire — the contract says the client truncates. */
-const MAX_WIRE_TURNS = 10
 
 export interface AgentDockViewProps {
   projectId: string
@@ -67,6 +67,10 @@ export interface AgentDockViewProps {
   pendingChip?: ContextChip | null
   /** Called once the pending chip has been inserted, so the parent clears it. */
   onPendingChipConsumed?: () => void
+  /** Workbench seam: render a proposal compactly (receipt) instead of the
+   *  full ProposalCard. Return null to fall back to the card (e.g. for
+   *  proposals the working set can't review). */
+  renderProposalOverride?: (proposal: AgentProposal) => ReactNode | null
 }
 
 export function AgentDockView({
@@ -85,95 +89,51 @@ export function AgentDockView({
   onPendingPromptConsumed,
   pendingChip,
   onPendingChipConsumed,
+  renderProposalOverride,
 }: AgentDockViewProps) {
-  const [runs, setRuns] = useState<AgentRunUi[]>([])
+  const { state, send, stop, noteActivity } = useAgentSession(projectId)
   const [includeContext, setIncludeContext] = useState(true)
-  const [isStreaming, setIsStreaming] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
   const composerRef = useRef<ChatComposerHandle>(null)
 
-  // Abort any in-flight run on unmount (mode switch / dock close).
-  useEffect(() => () => abortRef.current?.abort(), [])
-
-  const updateRun = useCallback((localId: string, next: (run: AgentRunUi) => AgentRunUi) => {
-    setRuns((prev) => prev.map((r) => (r.localId === localId ? next(r) : r)))
-  }, [])
-
   const sendPrompt = useCallback(
-    async (text: string, chips: ContextChip[] = []) => {
-      if ((!text.trim() && chips.length === 0) || !jwt || isStreaming) return
+    (text: string, chips: ContextChip[] = []) => {
+      if ((!text.trim() && chips.length === 0) || !jwt) return
+      // Slash commands expand into vetted prompts; the bubble keeps the typed
+      // command (CLI-style). Chips skip expansion — a chip message is already
+      // a specific ask, not a command.
+      const expanded = chips.length === 0 ? expandSlashCommand(text) : null
       // `display` (with [ref] chips) shows in the bubble; `wire` (tokens +
       // legend) is what the model receives.
-      const { wire, display } = serializeWithChips(text, chips)
-
-      const run = createRun(display, wire)
-      setRuns((prev) => [...prev, run])
-      setIsStreaming(true)
-      abortRef.current?.abort()
-      const controller = new AbortController()
-      abortRef.current = controller
-
-      // Prior turns: each finished run is one user + one assistant turn. Send
-      // the stored wire content so prior chip legends ride along (and evict
-      // naturally via the ≤10-turn slice).
-      const messages: { role: "user" | "assistant"; content: string }[] = []
-      for (const r of runs) {
-        messages.push({ role: "user", content: r.wireContent ?? r.prompt })
-        if (r.assistantText) messages.push({ role: "assistant", content: r.assistantText })
-      }
-      messages.push({ role: "user", content: wire })
-      const truncated = messages.slice(-MAX_WIRE_TURNS)
-
+      const { wire, display } = expanded
+        ? { wire: expanded, display: text.trim() }
+        : serializeWithChips(text, chips)
       // Read the profile at send time (fresh, no extra re-render). The server
       // re-caps every field; this just avoids sending an empty object.
       const translatorProfile = profileForPrompt(getTranslatorProfile())
-
-      try {
-        await runAgent({
-          request: {
-            projectId,
-            messages: truncated,
-            ...(includeContext && (context.fileId || context.cellId)
-              ? { context: { ...context } }
-              : {}),
-            ...(translatorProfile ? { translatorProfile } : {}),
-          },
-          jwt,
-          signal: controller.signal,
-          onFrame: (frame) => updateRun(run.localId, (r) => reduceRunFrame(r, frame)),
-        })
-        // Stream closed without a done frame → don't leave a forever-spinner.
-        updateRun(run.localId, (r) =>
-          r.status === "running" ? { ...r, status: "ok" } : r,
-        )
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          updateRun(run.localId, (r) =>
-            r.status === "running" ? failRun(r, "Stopped.") : r,
-          )
-        } else {
-          updateRun(run.localId, (r) =>
-            failRun(r, err instanceof Error ? err.message : String(err)),
-          )
-        }
-      } finally {
-        setIsStreaming(false)
-        if (abortRef.current === controller) abortRef.current = null
-      }
+      send({
+        wire,
+        display,
+        jwt,
+        request: {
+          projectId,
+          ...(includeContext && (context.fileId || context.cellId)
+            ? { context: { ...context } }
+            : {}),
+          ...(translatorProfile ? { translatorProfile } : {}),
+        },
+      })
     },
-    [jwt, isStreaming, runs, projectId, includeContext, context, updateRun],
+    [jwt, send, projectId, includeContext, context],
   )
 
-  const stop = useCallback(() => abortRef.current?.abort(), [])
-
   // Run a prompt handed in from a suggested action (tapped in chat mode, which
-  // flips the dock to agent mode). Waits out any in-flight run, then dispatches
-  // once and tells the parent to clear it so it fires exactly once.
+  // flips the dock to agent mode). The store queues it if a run is streaming,
+  // so dispatch immediately and clear exactly once.
   useEffect(() => {
-    if (!pendingPrompt || !jwt || isStreaming) return
-    void sendPrompt(pendingPrompt)
+    if (!pendingPrompt || !jwt) return
+    sendPrompt(pendingPrompt)
     onPendingPromptConsumed?.()
-  }, [pendingPrompt, jwt, isStreaming, sendPrompt, onPendingPromptConsumed])
+  }, [pendingPrompt, jwt, sendPrompt, onPendingPromptConsumed])
 
   // Insert a chip handed in from the editor's "Ask AI" selection action.
   useEffect(() => {
@@ -205,7 +165,7 @@ export function AgentDockView({
         compact
       />
 
-      {runs.length === 0 ? (
+      {state.runs.length === 0 ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
           <Bot className="h-5 w-5" />
           <p className="text-xs">
@@ -219,32 +179,53 @@ export function AgentDockView({
           <MessageScroller className="flex-1">
             <MessageScrollerViewport>
               <MessageScrollerContent className="px-3 py-2">
-                {runs.map((run) => (
+                {state.runs.map((run) => (
                   <MessageScrollerItem key={run.localId} messageId={run.localId} scrollAnchor>
-                    <div className="flex flex-col gap-2">
-                      <AgentRunView run={run} />
-                      {run.proposals.map((proposal) => (
-                        <ProposalCard
-                          key={proposal.proposalId}
-                          proposal={proposal}
-                          roleLevel={roleLevel}
-                          rules={rules}
-                          resolveCell={resolveCell}
-                          applyContext={applyContext}
-                          onApplied={onApplied}
-                        />
-                      ))}
-                      {(run.aquiferProposals ?? []).map((proposal) => (
+                    <AgentRunView
+                      run={run}
+                      renderProposal={(proposal) =>
+                        renderProposalOverride?.(proposal) ?? (
+                          <ProposalCard
+                            key={proposal.proposalId}
+                            proposal={proposal}
+                            roleLevel={roleLevel}
+                            rules={rules}
+                            resolveCell={resolveCell}
+                            applyContext={applyContext}
+                            onApplied={onApplied}
+                          />
+                        )
+                      }
+                      renderAquiferProposal={(proposal) => (
                         <AquiferProposalCard
                           key={proposal.proposalId}
                           proposal={proposal}
                           projectId={projectId}
                           jwt={jwt}
                         />
-                      ))}
-                    </div>
+                      )}
+                      renderToolCard={(item) => {
+                        const rows = passageRowsFor(item)
+                        return rows ? (
+                          <PassageCard
+                            cardKey={`${run.localId}:${item.id}`}
+                            rows={rows}
+                            projectId={projectId}
+                            jwt={jwt}
+                            onActivity={noteActivity}
+                          />
+                        ) : null
+                      }}
+                    />
                   </MessageScrollerItem>
                 ))}
+                {state.queued.length > 0 && (
+                  <div className="px-1 py-0.5 text-[11px] text-muted-foreground">
+                    {state.queued.length === 1
+                      ? "1 message queued — sends when the current run finishes."
+                      : `${state.queued.length} messages queued — send in order when the current run finishes.`}
+                  </div>
+                )}
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton />
@@ -254,12 +235,14 @@ export function AgentDockView({
 
       <ChatComposer
         ref={composerRef}
-        isStreaming={isStreaming}
+        isStreaming={state.isStreaming}
         isConfigured={Boolean(jwt)}
-        onSend={({ text, chips }) => void sendPrompt(text, chips)}
+        onSend={({ text, chips }) => sendPrompt(text, chips)}
         onStop={stop}
         compact
         suggestedActions={suggestedActions}
+        queueWhileStreaming
+        placeholder="Ask the agent… (/draft, /check, /find, /status)"
       />
     </div>
   )

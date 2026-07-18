@@ -1,4 +1,4 @@
-# FRO-152 — Round-Trip Fidelity Findings
+# AQU-152 — Round-Trip Fidelity Findings
 
 **Branch:** `swarm/fro-152`  
 **Date:** 2026-06-04  
@@ -55,7 +55,7 @@ Currently only **USFM** has a complete server-side serializer (`parseUsfmLossles
 
 ## Recommended Follow-Up Issues
 
-### FRO-152a — Server-side PPTX export serializer (high value, medium effort)
+### AQU-152a — Server-side PPTX export serializer (high value, medium effort)
 
 **Scope:** Add a `format === "pptx"` branch in `sync-worker/src/events/export-route.ts`.
 
@@ -70,13 +70,13 @@ Currently only **USFM** has a complete server-side serializer (`parseUsfmLossles
 
 **Test:** `import → translate → export → re-import structure matches original slide count + cell count`.
 
-### FRO-152b — Server-side DOCX export serializer (high value, medium effort)
+### AQU-152b — Server-side DOCX export serializer (high value, medium effort)
 
 **Scope:** Same as 152a but for DOCX. Replace `<w:t>` text in `word/document.xml` using `sourceLocation.blockPath` (e.g. `w:p[2]`).
 
 **Risk:** DOCX paragraph text is often split across multiple `<w:r>` runs (for mixed formatting). Same mitigation as PPTX: flatten to a single run per paragraph on export, accepting that per-run bold/italic is dropped for translated paragraphs.
 
-### FRO-152c — Large-file side-car (> 512 KB DOCX/PPTX)
+### AQU-152c — Large-file side-car (> 512 KB DOCX/PPTX)
 
 **Scope:** The current size guard silently skips side-car capture for files above 512 KB. Options:
 - R2 for side-car blobs (avoids D1 row limit entirely — same bucket as media).
@@ -85,7 +85,7 @@ Currently only **USFM** has a complete server-side serializer (`parseUsfmLossles
 
 **Recommendation:** R2 for side-car is the right long-term answer; D1 TEXT is a stopgap.
 
-### FRO-152d — VTT/SRT round-trip export (low effort)
+### AQU-152d — VTT/SRT round-trip export (low effort)
 
 **Scope:** Add a `vtt` export format that reconstructs a subtitle file from timed cells. Time codes (`start_ms`, `end_ms`) are already stored on cue cells. A simple serializer suffices. ExportDialog already has a VTT exporter for the *translated* VTT — the gap is exporting with original timing intact, which the existing exporter already does.
 
@@ -107,5 +107,5 @@ The following cannot be verified by tsc/vitest alone and require a running app:
 
 1. Import a `.pptx` file via the Import dialog in the dev app.
 2. Verify `file_source_blobs` row is created (check sync-worker D1 or the admin panel).
-3. Attempt USFM-style export for the PPTX file — confirm UI shows "501 Not Implemented" (expected until FRO-152a) rather than "404 no side-car" (the previous behavior for all newly-imported PPTX files).
+3. Attempt USFM-style export for the PPTX file — confirm UI shows "501 Not Implemented" (expected until AQU-152a) rather than "404 no side-car" (the previous behavior for all newly-imported PPTX files).
 4. Same flow for DOCX.

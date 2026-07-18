@@ -1,5 +1,5 @@
 /**
- * FRO-307: Dialog for "Report a problem" — free-text + auto-captured context.
+ * AQU-307: Dialog for "Report a problem" — free-text + auto-captured context.
  *
  * Consent-aware:
  * - If analytics are ON  → submits PostHog event (with session replay URL if available).
@@ -17,6 +17,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import {
@@ -41,15 +42,18 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
 
   const [description, setDescription] = useState("")
   const [state, setState] = useState<State>("idle")
+  const [attempted, setAttempted] = useState(false)
 
   const context: ReportContext = {
     route: pathname,
     projectId: params.id,
     fileId: params.fileId,
   }
+  const descriptionError = !description.trim() ? "Description is required" : null
 
   function handleSubmit() {
-    if (!description.trim()) return
+    setAttempted(true)
+    if (descriptionError) return
 
     const replayUrl = getSessionReplayUrl()
     captureReportProblem({ description: description.trim(), context, sessionReplayUrl: replayUrl })
@@ -57,6 +61,8 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
   }
 
   function handleCopy() {
+    setAttempted(true)
+    if (descriptionError) return
     const text = buildReportText({ description: description.trim(), context })
     void navigator.clipboard.writeText(text)
     setState("copied")
@@ -66,6 +72,7 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
     // Reset state on close so the dialog is fresh next time
     setDescription("")
     setState("idle")
+    setAttempted(false)
     onOpenChange(false)
   }
 
@@ -90,14 +97,22 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
           </div>
         ) : (
           <>
-            <div className="space-y-2 py-1">
-              <Textarea
-                placeholder="What went wrong?"
-                rows={4}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="resize-none"
-              />
+            <div className="flex flex-col gap-2 py-1">
+              <Field data-invalid={attempted && !!descriptionError}>
+                <FieldLabel htmlFor="report-problem-description" className="sr-only">
+                  Description
+                </FieldLabel>
+                <Textarea
+                  id="report-problem-description"
+                  placeholder="What went wrong?"
+                  rows={4}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="resize-none"
+                  aria-invalid={attempted && !!descriptionError}
+                />
+                {attempted && descriptionError && <FieldError>{descriptionError}</FieldError>}
+              </Field>
               <p className="text-xs text-muted-foreground">
                 Captured context: <span className="font-mono">{pathname}</span>
                 {params.id && (
@@ -124,7 +139,6 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
               {analyticsEnabled ? (
                 <Button
                   onClick={handleSubmit}
-                  disabled={!description.trim()}
                   className="w-full sm:w-auto"
                 >
                   Send report
@@ -133,7 +147,6 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
                 <Button
                   variant="secondary"
                   onClick={handleCopy}
-                  disabled={!description.trim()}
                   className="w-full sm:w-auto"
                 >
                   {state === "copied" ? "Copied!" : "Copy report"}

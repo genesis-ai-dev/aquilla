@@ -13,7 +13,7 @@
  * the draft — duplicating the note content, compounding on every save.
  * Leading scaffolding (caller, \fr reference) is preserved verbatim.
  *
- * FRO-317, FRO-472
+ * AQU-317, FRO-472
  */
 
 import { extractUsfmFootnotes } from "./extract"

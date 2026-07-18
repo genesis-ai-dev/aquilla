@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
-# Auto-link the Linear ticket (FRO-###) into the commit message.
+# Auto-link the Linear ticket (AQU-###) into the commit message.
 #
-# Why: QA reviews a PR-to-main by scanning which FRO tickets its commits carry
+# Why: QA reviews a PR-to-main by scanning which AQU tickets its commits carry
 # (see AGENTS.md → "Issue workflow"). Every commit should map to a ticket so the
 # board and the merge stay reconcilable. This hook derives the ticket from the
-# branch name (the `ryder/fro-###-…` convention Linear suggests) and injects it
+# branch name (the `ryder/aqu-###-…` convention Linear suggests) and injects it
 # when missing. It is **non-blocking**: if it can't derive a ticket it just warns.
 
 msg_file="$1"
@@ -16,16 +16,16 @@ case "$src" in
 esac
 
 # Already references a ticket anywhere in the message — leave it alone.
-if grep -qiE 'FRO-[0-9]+' "$msg_file"; then
+if grep -qiE 'AQU-[0-9]+' "$msg_file"; then
   exit 0
 fi
 
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-ticket=$(printf '%s' "$branch" | grep -oiE 'fro-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]')
+ticket=$(printf '%s' "$branch" | grep -oiE 'aqu-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]')
 
 if [ -z "$ticket" ]; then
-  echo "[prepare-commit-msg] ⚠ no FRO-### in message and none derivable from branch '$branch'."
-  echo "                     Add the ticket (e.g. 'fix(x): … (FRO-123)') so QA can map this commit to a ticket."
+  echo "[prepare-commit-msg] ⚠ no AQU-### in message and none derivable from branch '$branch'."
+  echo "                     Add the ticket (e.g. 'fix(x): … (AQU-123)') so QA can map this commit to a ticket."
   exit 0
 fi
 
@@ -33,7 +33,7 @@ first_line=$(sed -n '1p' "$msg_file")
 first_char=$(printf '%s' "$first_line" | cut -c1)
 
 if [ -n "$first_line" ] && [ "$first_char" != "#" ]; then
-  # Subject already typed (e.g. `git commit -m`) — append "(FRO-###)" to it,
+  # Subject already typed (e.g. `git commit -m`) — append "(AQU-###)" to it,
   # matching the repo's existing convention.
   awk -v t="$ticket" 'NR==1 { print $0 " (" t ")"; next } { print }' "$msg_file" > "$msg_file.tmp" \
     && mv "$msg_file.tmp" "$msg_file"

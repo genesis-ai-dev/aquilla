@@ -15,7 +15,7 @@
  *   { t: "event.stale", id, reason }
  *       Server rejected an incoming event as a stale sibling (parent-chain
  *       mismatch). Outbox uses this to dead-letter.
- *   { t: "presence", users: [{ userId, focusedCell?, ts }] }
+ *   { t: "presence", users: [{ userId, focusedCell?, currentFileId?, selection?, ts }] }
  *       Roster snapshot. Sent on connect + on roster change.
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
@@ -33,16 +33,22 @@
  *   { t: "focus.claim", cellId, leaseMs?: number }
  *   { t: "focus.renew", cellId }
  *   { t: "focus.release", cellId }
+ *   { t: "presence.update", currentFileId?, focusedCell?, selection? }
  *
  * This file is the *client*. The server-side DO ships in
  * `sync-worker/src/project-do.ts`. Both must remain wire-compatible.
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
+import type { TargetPresenceSelection } from "./presence-store"
+
+const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface PresenceUser {
   userId: string
   focusedCell?: string
+  currentFileId?: string
+  selection?: TargetPresenceSelection
   ts: number
 }
 
@@ -62,6 +68,8 @@ export type ProjectWsServerMessage =
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
+  | { t: "project.settings.updated"; project: string; version: number }
+  | { t: "file.progress.updated"; project: string; file: string; fileCreated: boolean }
   /** FRO-346: this user's membership was revoked; the DO closes the socket
    *  (code 4403) right after. `userId` is the presence identity (username). */
   | { t: "member.removed"; project: string; userId: string }
@@ -93,11 +101,29 @@ export function isOwnWriteEcho(msg: { by?: string }, currentUserId: string): boo
   return !!msg.by && msg.by === currentUserId
 }
 
+/**
+ * True when an `event.applied` frame is a validation-state change
+ * (`cell.validate` / `cell.unvalidate`). These events project into the
+ * audit-stats read (`activeValidators` → the validation pill), NOT the
+ * `/files/:fileId/cells` row that the targeted cell refetch pulls — so a
+ * remote validation must also poke the per-cell audit-stats read, or the
+ * pill shows a stale validated-by state until the next full stats poll.
+ */
+export function isValidationEvent(kind: string): boolean {
+  return kind === "cell.validate" || kind === "cell.unvalidate"
+}
+
 export type ProjectWsClientMessage =
   | { t: "outbox.event"; event: OutboxRawEvent }
   | { t: "focus.claim"; cellId: string; leaseMs?: number }
   | { t: "focus.renew"; cellId: string }
   | { t: "focus.release"; cellId: string }
+  | {
+      t: "presence.update"
+      currentFileId?: string | null
+      focusedCell?: string | null
+      selection?: TargetPresenceSelection | null
+    }
 
 export interface WsReconcilerHandlers {
   /** Fires for every parsed server frame. */
@@ -386,6 +412,8 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
         userId: r.userId,
         ts: r.ts,
         ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
+        ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
+        ...(isTargetPresenceSelection(r.selection) ? { selection: r.selection } : {}),
       })
     }
     return { t: "presence", users }
@@ -399,6 +427,20 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       cellId: m.cellId,
       by: { userId: b.userId, ts: b.ts },
     }
+  }
+  if (t === "project.settings.updated") {
+    if (typeof m.project !== "string" || typeof m.version !== "number" || !Number.isInteger(m.version)) {
+      return null
+    }
+    return { t, project: m.project, version: m.version }
+  }
+  if (t === "file.progress.updated") {
+    if (
+      typeof m.project !== "string"
+      || typeof m.file !== "string"
+      || typeof m.fileCreated !== "boolean"
+    ) return null
+    return { t, project: m.project, file: m.file, fileCreated: m.fileCreated }
   }
   if (t === "member.removed") {
     // FRO-346: the DO sends this to a removed member's sockets right before
@@ -427,6 +469,20 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     }
   }
   return null
+}
+
+function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelection {
+  if (!value || typeof value !== "object") return false
+  const v = value as Record<string, unknown>
+  return (
+    v.side === "target" &&
+    typeof v.anchor === "number" &&
+    Number.isFinite(v.anchor) &&
+    typeof v.head === "number" &&
+    Number.isFinite(v.head) &&
+    (v.draftText === undefined ||
+      (typeof v.draftText === "string" && v.draftText.length <= MAX_PRESENCE_DRAFT_LENGTH))
+  )
 }
 
 // ── FRO-479 push-accelerator client glue ──────────────────────────────────

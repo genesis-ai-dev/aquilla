@@ -1,5 +1,5 @@
 /**
- * FRO-293: lightweight session-expiry signal.
+ * AQU-293: lightweight session-expiry signal.
  *
  * When any fetch helper throws UserError(401 / session-expired), it calls
  * `notifySessionExpired()`. A React hook (`useSessionExpired`) subscribes to

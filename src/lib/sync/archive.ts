@@ -39,6 +39,7 @@ export interface ProjectStateResponse {
   id: string
   name: string
   gitlabProjectId: number | null
+  orgId: number | null
   archivedAt: string | null
   archivedBy: { id: number; username: string } | null
   /** Active/inactive lifecycle (migration 0033). Absent = active (compat). */
@@ -48,16 +49,16 @@ export interface ProjectStateResponse {
    * means self-contained (or is itself a source).
    */
   sourceProjectId?: string | null
-  /** FRO-476/478: link mode — 'clone' (one-time snapshot) | 'live' (subscribed,
+  /** AQU-476/478: link mode — 'clone' (one-time snapshot) | 'live' (subscribed,
    *  mirrors upstream changes). Null/absent for self-contained projects. */
   sourceLinkMode?: "clone" | "live" | null
-  /** FRO-476/478: which upstream lane becomes this project's source —
+  /** AQU-476/478: which upstream lane becomes this project's source —
    *  'source' (sibling-language case) | 'target' (chain case). */
   sourceLinkConsumes?: "source" | "target" | null
-  /** FRO-476/478: for target-consumption links, which upstream target state
+  /** AQU-476/478: for target-consumption links, which upstream target state
    *  propagates — 'head' (every commit) | 'validated' (only validated heads). */
   sourceLinkGate?: "head" | "validated" | null
-  /** FRO-476/478: max upstream server_seq this project has mirrored so far. */
+  /** AQU-476/478: max upstream server_seq this project has mirrored so far. */
   sourceLinkCursor?: number | null
   role: { level: number; name: string; source: string }
   /** Populated by the codex-db.files join. Optional only because old
@@ -131,7 +132,7 @@ export interface LinkProjectSourceResult {
   consumes: "source" | "target"
   gate: "head" | "validated"
   previousSourceProjectId: string | null
-  /** FRO-476/QA-BUG-1: true if the server-side seed (clone snapshot or the
+  /** AQU-476/QA-BUG-1: true if the server-side seed (clone snapshot or the
    *  first live mirror sync) actually ran. False means the caller should
    *  fall back to `triggerLinkSync` before assuming content is present —
    *  older servers that predate this field are treated as `false` (the
@@ -141,10 +142,10 @@ export interface LinkProjectSourceResult {
 }
 
 /**
- * FRO-478: POST /api/v2/projects/:id/link-source — create a project link.
+ * AQU-478: POST /api/v2/projects/:id/link-source — create a project link.
  * project_lead(500)+ on the DOWNSTREAM project (server-enforced). For
  * `mode: 'live'` the auth-worker seeds the new project via the first mirror
- * sync (FRO-476 §5) as part of this same call — files/cells arrive with
+ * sync (AQU-476 §5) as part of this same call — files/cells arrive with
  * provenance set. Throws `UserError` on non-2xx (mirrors createCloudProject).
  */
 export async function linkProjectSource(
@@ -177,7 +178,7 @@ export async function linkProjectSource(
 }
 
 /**
- * FRO-476/QA-BUG-1: client-side seed self-heal for `mode: 'live'` links.
+ * AQU-476/QA-BUG-1: client-side seed self-heal for `mode: 'live'` links.
  * `linkProjectSource` already triggers this server-side and awaits it — this
  * is the fallback for when that trigger reports `seeded: false` (sync-worker
  * unreachable, config drift, etc.) or when it's called from a project-open

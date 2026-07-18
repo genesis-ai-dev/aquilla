@@ -23,7 +23,7 @@ test("signup form password checklist shows strength indicator", async ({ alice }
   await accountBtn.click()
 
   // Add another account.
-  const addAccountBtn = alice.getByRole("button", { name: /Add another account/i })
+  const addAccountBtn = alice.getByRole("menuitem", { name: /Add another account/i })
   await expect(addAccountBtn).toBeVisible({ timeout: 3_000 })
   await addAccountBtn.click()
 

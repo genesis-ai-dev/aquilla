@@ -52,6 +52,7 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
+import { computeRailPinned } from "@/lib/editor/cell-rail-pin"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
@@ -4213,7 +4214,21 @@ function EditorRow({
   // Pins (expansion open, a rail control focused, a rail popover open) keep the
   // rail visible so an in-progress interaction is never yanked away.
   const railRevealTriggered = isHovering || hasFocusWithin
-  const railPinned = expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm
+  // AQU-621: a focused target cell also pins the rail, so clicking into a cell
+  // never leaves the user staring at a blank rail — the sparkle/generate
+  // affordance stays visible without hovering (a translated cell keeps its
+  // separate validation control beside the target). The lone exception is
+  // AQU-354's conflict banner: while a remote change is pending we must NOT pin
+  // on focus, or the rail would re-cover the banner's Discard button. See
+  // computeRailPinned for the reconciliation.
+  const railPinned = computeRailPinned({
+    expanded,
+    railHasFocus,
+    showMicDeniedHelp,
+    showGenerateConfirm,
+    hasFocusWithin,
+    remoteChangedWhileFocused,
+  })
   const { revealed: railRevealed, registerActivity: registerRailActivity } = useRailIdleHide({
     revealTriggered: railRevealTriggered,
     pinned: railPinned,

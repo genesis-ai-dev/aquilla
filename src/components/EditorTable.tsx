@@ -4396,6 +4396,76 @@ function EditorRow({
       />
     </button>
   )
+  // AQU-592: the validation control (health ring + validate toggle, with the
+  // validators popover) renders to the LEFT of the TARGET editing cell — see the
+  // target column below — instead of in the far-left gutter beside the source.
+  // A reviewer no longer has to cross the screen from the target to validate.
+  const validationControl = hasContent ? (
+    <div className="flex shrink-0 items-start pt-1">
+      {hasValidatorInfo ? (
+        <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
+          <PopoverTrigger
+            openOnHover
+            delay={400}
+            closeDelay={100}
+            render={renderValidationButton(
+              canValidate && !isSelfValidated
+                ? () => emitValidationChange(true)
+                : undefined,
+            )}
+          />
+          {vs !== "empty" && (
+            <PopoverContent
+              side="right"
+              align="start"
+              className="w-72 rounded-xl p-2"
+            >
+              <ul className="space-y-0.5">
+                <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Validated by
+                </li>
+                {displayedValidators.length === 0 ? (
+                  <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
+                ) : (
+                  displayedValidators.map((v) => (
+                    <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
+                      <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
+                      {v === username && canValidate && (
+                        <AppTooltip content="Remove your validation">
+                          <button
+                            type="button"
+                            aria-label="Remove your validation"
+                            className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => {
+                              emitValidationChange(false)
+                              setValidationPopoverOpen(false)
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </AppTooltip>
+                      )}
+                    </li>
+                  ))
+                )}
+              </ul>
+              {cell.validationHistory.length > 0 && (
+                <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
+              )}
+            </PopoverContent>
+          )}
+        </Popover>
+      ) : (
+        <AppTooltip content={validationTooltip}>
+          {renderValidationButton(
+            canValidate && !isSelfValidated
+              ? () => emitValidationChange(true)
+              : undefined,
+          )}
+        </AppTooltip>
+      )}
+    </div>
+  ) : null
   const cellStateLabel =
     cell.status === "validated" ? "validated" :
     cell.status === "empty" ? "empty" :
@@ -4495,72 +4565,10 @@ function EditorRow({
             range selection follows the text. */}
         <div className="flex h-full w-full flex-wrap items-start justify-center gap-1 pt-5">
           {numberPill}
-          {/* Validation circle — single bare icon until validated, with a
-              health ring appearing around it once there's a substantive score. */}
-          {hasContent && hasValidatorInfo && (
-            <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
-              <PopoverTrigger
-                openOnHover
-                delay={400}
-                closeDelay={100}
-                render={renderValidationButton(
-                  canValidate && !isSelfValidated
-                    ? () => emitValidationChange(true)
-                    : undefined,
-                )}
-              />
-              {vs !== "empty" && (
-                <PopoverContent
-                  side="right"
-                  align="start"
-                  className="w-72 rounded-xl p-2"
-                >
-                  <ul className="space-y-0.5">
-                    <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Validated by
-                    </li>
-                    {displayedValidators.length === 0 ? (
-                      <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
-                    ) : (
-                      displayedValidators.map((v) => (
-                        <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
-                          <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
-                          {v === username && canValidate && (
-                            <AppTooltip content="Remove your validation">
-                              <button
-                                type="button"
-                                aria-label="Remove your validation"
-                                className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                                onClick={() => {
-                                  emitValidationChange(false)
-                                  setValidationPopoverOpen(false)
-                                }}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
-                            </AppTooltip>
-                          )}
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                  {cell.validationHistory.length > 0 && (
-                    <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
-                  )}
-                </PopoverContent>
-              )}
-            </Popover>
-          )}
-          {hasContent && !hasValidatorInfo && (
-            <AppTooltip content={validationTooltip}>
-              {renderValidationButton(
-                canValidate && !isSelfValidated
-                  ? () => emitValidationChange(true)
-                  : undefined,
-              )}
-            </AppTooltip>
-          )}
-          {/* Stale-source indicator alongside validate button. Both flags
+          {/* The validation circle moved next to the TARGET editing cell
+              (AQU-592); the gutter now carries only the line number and the
+              stale-source / synth status affordances. */}
+          {/* Stale-source indicator. Both flags
               are already resolved per-row booleans (see isStaleSource's doc
               comment) — the singleton Set(s) just adapt them to the
               indicator's managed-mode membership-set contract. */}
@@ -4806,6 +4814,10 @@ function EditorRow({
             {/* Target is a cheap read surface at rest. It upgrades to TipTap
                 only for the active cell, which keeps scrolling from mounting
                 dozens of ProseMirror instances. */}
+            {/* AQU-592: the validate button sits to the LEFT of the editing cell
+                so validating keeps the reviewer's gaze on the TARGET. */}
+            <div className="flex flex-1 gap-1.5">
+              {validationControl}
             <div
               data-cell-type="target"
               className={cn(
@@ -4979,6 +4991,7 @@ function EditorRow({
                   )}
                 </div>
               )}
+            </div>
             </div>
             {hasInlineFootnotes && (
               <FootnoteInline

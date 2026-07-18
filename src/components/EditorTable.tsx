@@ -31,6 +31,7 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
+import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
@@ -700,7 +701,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
 }, ref) {
-  const { canEdit, canValidate, canEditSource, readOnlyLabel } = useEditorCapabilities(project)
+  // DCS lockdown: while this project is pinned to a Door43 upstream, the
+  // repair path treats any hand-edited source cell as damage and overwrites
+  // it, so the "Edit source" affordance must stay off. Loading counts as
+  // linked (default-locked) — see useDcsUpstreamCursor.
+  const { cursor: dcsCursor, loading: dcsCursorLoading } = useDcsUpstreamCursor(
+    project.id,
+    project.syncRole?.level ?? null,
+  )
+  const { canEdit, canValidate, canEditSource, readOnlyLabel } = useEditorCapabilities(project, {
+    hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
+  })
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)

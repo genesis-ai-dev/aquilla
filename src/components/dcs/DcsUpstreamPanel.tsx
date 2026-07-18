@@ -22,8 +22,9 @@
 // (stale-source-read + UpstreamChangesPanel). We do not touch those here.
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { RefreshCw, DownloadCloud, CheckCircle2, AlertTriangle, Wrench } from "lucide-react"
+import { RefreshCw, DownloadCloud, CheckCircle2, AlertTriangle, Wrench, Unlink } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
@@ -84,6 +85,11 @@ type RepairState =
   | { kind: "done"; repaired: number }
   | { kind: "error"; message: string }
 
+type DetachState =
+  | { kind: "idle" }
+  | { kind: "detaching" }
+  | { kind: "error"; message: string }
+
 /** True when the resolved prod release is ahead of the pinned cursor. */
 function isNewer(cursor: DcsCursor, latest: DcsCatalogEntry): boolean {
   // Prefer the commit SHA (authoritative); fall back to the ref/tag name.
@@ -116,6 +122,8 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
   const [check, setCheck] = useState<CheckState>({ kind: "idle" })
   const [importState, setImportState] = useState<ImportState>({ kind: "idle" })
   const [repairState, setRepairState] = useState<RepairState>({ kind: "idle" })
+  const [detachState, setDetachState] = useState<DetachState>({ kind: "idle" })
+  const [detachConfirmOpen, setDetachConfirmOpen] = useState(false)
   const busyRef = useRef(false)
 
   const canImport = (roleLevel ?? 0) >= IMPORT_MIN_ROLE
@@ -304,12 +312,45 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
     }
   }, [cursor, canImport, dcs, projectId, getToken, runApply])
 
-  // Not a DCS adapter project — render nothing.
+  // Detach: the ONLY sanctioned way out of the DCS lockdown. Persist the
+  // settings with the dcsUpstream key REMOVED. patch() merges shallowly (the
+  // client sends the full merged settings object), so we write an explicit
+  // `null` — readCursor treats null as absent, which unlocks source editing
+  // (useDcsUpstreamCursor → canEditSource) and makes this panel render its
+  // no-cursor state. Relinking requires a fresh Door43 import.
+  const handleDetach = useCallback(async () => {
+    if (!cursor || busyRef.current) return
+    if (!canImport) return
+    busyRef.current = true
+    setDetachState({ kind: "detaching" })
+    setCheck({ kind: "idle" })
+    setImportState({ kind: "idle" })
+    setRepairState({ kind: "idle" })
+    try {
+      const out = await patch({ [DCS_UPSTREAM_KEY]: null } as Record<string, unknown>)
+      if (out.kind === "ok") {
+        // The settings hook re-renders us with cursor === null; nothing to show.
+        setDetachState({ kind: "idle" })
+      } else {
+        setDetachState({
+          kind: "error",
+          message: out.kind === "error" ? out.message : `blocked (${out.kind})`,
+        })
+      }
+    } catch (err) {
+      setDetachState({ kind: "error", message: err instanceof Error ? err.message : String(err) })
+    } finally {
+      busyRef.current = false
+    }
+  }, [cursor, canImport, patch])
+
+  // Not a DCS adapter project (or just detached) — render nothing.
   if (!cursor) return null
 
   const checking = check.kind === "checking"
   const importing = importState.kind === "importing"
   const repairing = repairState.kind === "running"
+  const detaching = detachState.kind === "detaching"
 
   return (
     <Card id="section-dcs-upstream">
@@ -338,7 +379,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
             variant="outline"
             size="sm"
             onClick={handleCheck}
-            disabled={checking || importing || repairing || !jwt}
+            disabled={checking || importing || repairing || detaching || !jwt}
           >
             {checking ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
             Check for updates
@@ -365,7 +406,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
             </p>
             {canImport ? (
               <div className="flex justify-end">
-                <Button size="sm" onClick={handleImport} disabled={importing || repairing}>
+                <Button size="sm" onClick={handleImport} disabled={importing || repairing || detaching}>
                   {importing ? <Spinner className="h-4 w-4" /> : <DownloadCloud className="h-4 w-4" />}
                   Import changes
                 </Button>
@@ -409,7 +450,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
               variant="ghost"
               size="sm"
               onClick={handleRepair}
-              disabled={checking || importing || repairing || !jwt}
+              disabled={checking || importing || repairing || detaching || !jwt}
             >
               {repairing ? <Spinner className="h-4 w-4" /> : <Wrench className="h-4 w-4" />}
               Re-sync content
@@ -430,6 +471,40 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
                 Re-sync failed: {repairState.message}
               </p>
             )}
+          </div>
+        )}
+
+        {canImport && (
+          <div className="space-y-1 border-t pt-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setDetachConfirmOpen(true)}
+              disabled={checking || importing || repairing || detaching}
+            >
+              {detaching ? <Spinner className="h-4 w-4" /> : <Unlink className="h-4 w-4" />}
+              Detach from upstream
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Permanently unlink this project from {cursor.owner}/{cursor.repo} and
+              make source cells editable again.
+            </p>
+            {detachState.kind === "error" && (
+              <p className="text-xs text-destructive">
+                Detach failed: {detachState.message}
+              </p>
+            )}
+            <ConfirmActionDialog
+              open={detachConfirmOpen}
+              onOpenChange={setDetachConfirmOpen}
+              title="Detach from upstream?"
+              description={`This project will stop receiving updates from ${cursor.owner}/${cursor.repo}. Source cells become editable. This cannot be undone from here — relinking requires a fresh import.`}
+              confirmLabel="Detach"
+              checkboxLabel="I understand this permanently unlinks the project."
+              variant="destructive"
+              onConfirm={() => { void handleDetach() }}
+            />
           </div>
         )}
       </CardContent>

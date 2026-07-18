@@ -1,6 +1,7 @@
 import { v4 as uuid } from "uuid"
 import type { TranslatableString, CellType } from "./types"
 import { splitIntoSegments } from "./text-splitter"
+import { isBookTitleOrIntroMarker } from "./usfm-lossless"
 
 export interface UsfmBookResult {
   bookId: string
@@ -122,9 +123,14 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
 
     if (/^\\p\s*$/.test(trimmed)) continue
 
-    const paratextMatch = trimmed.match(/^\\(mt|ms|r)\d?\s+(.*)/)
+    const paratextMatch = trimmed.match(/^\\(mt|ms|r)(\d?)\s+(.*)/)
     if (paratextMatch) {
-      addString(paratextMatch[2], bookId, "paratext", `${bookId} intro`)
+      // AQU-585: the main title (\mt) is the book name — front matter, not a
+      // translatable source cell. Major-section (\ms) and parallel-reference
+      // (\r) headings are in-body content and stay.
+      if (!isBookTitleOrIntroMarker(paratextMatch[1] + paratextMatch[2])) {
+        addString(paratextMatch[3], bookId, "paratext", `${bookId} intro`)
+      }
       continue
     }
 

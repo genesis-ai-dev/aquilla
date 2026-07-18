@@ -4765,6 +4765,7 @@ export function ProjectWorkspace() {
                 projectId={project?.id ?? null}
                 fileId={activeFileId}
                 getTokenForFile={getTokenForFile}
+                isSynced={!!project?.syncRole}
                 onPromote={handlePromoteToCurrentCell}
               />
             )}

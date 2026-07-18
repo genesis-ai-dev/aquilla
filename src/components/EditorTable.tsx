@@ -47,12 +47,14 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
+import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
@@ -711,6 +713,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
   const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
+  // Mirror ref so the imperative handle (getCurrentIndex) reads current
+  // values without widening its dependency array — same pattern as
+  // displayCellsRef below.
+  const viewableIndexesRef = useRef(viewableIndexes)
+  viewableIndexesRef.current = viewableIndexes
+  // Last cell whose editor was activated (jump target or clicked-into cell).
+  // Deliberately NOT cleared on blur/deactivate: clicking the "Next
+  // unfinished" menu item blurs the editor before the click lands, and the
+  // user's position shouldn't evaporate at that instant. getCurrentIndex
+  // ignores it once the cell is off screen or no longer rendered.
+  const lastActiveEditorCellIdRef = useRef<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
@@ -759,6 +772,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleActivateEditor = useCallback((cellId: string) => {
     setActiveEditorCellId(cellId)
+    lastActiveEditorCellIdRef.current = cellId
   }, [])
 
   const handleDeactivateEditor = useCallback((cellId: string) => {
@@ -858,6 +872,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
     setActiveEditorCellId(targetId)
+    lastActiveEditorCellIdRef.current = targetId
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -902,7 +917,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     },
     focusCellEditorIndex: focusCellEditorByIndex,
-    getCurrentIndex: () => 0,
+    getCurrentIndex: () => {
+      // The last-active editor cell when it's on screen (so "Next unfinished"
+      // advances past a just-jumped-to cell instead of re-finding it),
+      // otherwise the first visible row — mapped from display space back to
+      // the `cells` prop space the search indexes into. Pure logic lives in
+      // lib/editor/current-index.ts where it's testable.
+      const state = listRef.current?.getState()
+      const scrollEl = parentRef.current ?? listRootRef.current
+      return resolveCurrentCellIndex({
+        displayCells: displayCellIdsRef.current.map((id) => ({ id })),
+        cells: cellStore.getAllSummaries(),
+        activeCellId: lastActiveEditorCellIdRef.current,
+        viewableIndexes: viewableIndexesRef.current,
+        measurements: state
+          ? {
+              scroll: state.scroll,
+              positionAtIndex: (index) => state.positionAtIndex(index),
+              sizeAtIndex: (index) => state.sizeAtIndex(index),
+            }
+          : null,
+        fallbackScrollTop: scrollEl?.scrollTop ?? 0,
+        estimatedRowHeight: ESTIMATED_ROW_HEIGHT_PX,
+      })
+    },
     flashCell(cellId, _searchTerm) {
       // Defer to next frame: the list may still be scrolling, so the
       // DOM node we want might not exist yet.
@@ -915,7 +953,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
       })
     },
-  }), [displayCellIds.length, focusCellEditorByIndex, getListQueryRoot])
+  }), [displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -5511,6 +5549,16 @@ function EditorRow({
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
                         </Button>
+                        {/* Surfaces model-download %, failures (click-to-expand
+                            with Retry), and a success flash. Errors previously
+                            existed in transcribe-status but were rendered
+                            nowhere — the button just reverted to "Transcribe". */}
+                        <CellTranscribeBadge
+                          audioId={cell.selectedAudioId}
+                          hasTimings={(cellAudioTimings?.length ?? 0) > 0}
+                          onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}
+                          onRetry={handleTranscribe}
+                        />
                         {cell.selectedAudioId && selectedAudio && (
                           <DenoiseButton
                             projectId={project.id}

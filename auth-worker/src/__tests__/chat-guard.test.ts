@@ -1,4 +1,4 @@
-// Contract tests for the AI budget + allowlist guard — FRO-265.
+// Contract tests for the AI budget + allowlist guard — AQU-265.
 //
 // Tests cover:
 //   1. Non-allowlisted model → 400 (always enforced).
@@ -231,16 +231,16 @@ describe("chat /api/v1/chat/completions — budget enforcement", () => {
   })
 })
 
-// ── FRO-414 follow-up: chat spend org attribution ────────────────────────────
+// ── AQU-414 follow-up: chat spend org attribution ────────────────────────────
 //
-// WHY: FRO-414's root cause was chat.ts hardcoding orgId=0 for every
+// WHY: AQU-414's root cause was chat.ts hardcoding orgId=0 for every
 // recordCredit call, making chat spend invisible in every real org's credits
 // view (total degenerated to agent-only). The fix: a chat request invoked
 // from a project-editing context carries `projectId`, and the route resolves
 // the project's org (membership-gated) for both the credit guard and the
 // ledger write. Attribution must be best-effort — it can change WHERE spend
 // lands, but must never break chat itself.
-describe("chat /api/v1/chat/completions — org credit attribution (FRO-414 follow-up)", () => {
+describe("chat /api/v1/chat/completions — org credit attribution (AQU-414 follow-up)", () => {
   const PROJECT = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
   /** wendi (user 1) is a maintainer on org 1's project; mallory (user 2) is a stranger. */
@@ -278,7 +278,7 @@ describe("chat /api/v1/chat/completions — org credit attribution (FRO-414 foll
     )
     expect(res.status).toBe(200)
     // The llm row must land at org 1 — this is exactly what makes chat spend
-    // visible in the org's Today/This week totals (the FRO-414 symptom).
+    // visible in the org's Today/This week totals (the AQU-414 symptom).
     expect(await llmLedger()).toEqual([{ org_id: 1, user_id: 1 }])
   })
 

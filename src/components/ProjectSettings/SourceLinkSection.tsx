@@ -11,7 +11,7 @@
 //      source event_id pointer; after detach the local source IS the upstream
 //      snapshot, so the pointer matches and all markers clear naturally.
 //
-// FRO-478: extended to also display the link's mode/consumes/gate/cursor
+// AQU-478: extended to also display the link's mode/consumes/gate/cursor
 // state (read-only — creation/mode are set at link time, not editable here).
 // Detach itself is unchanged.
 
@@ -31,13 +31,14 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FRONTIER_API_URL } from "@/lib/sync/sync-token"
+import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 
 export interface SourceLinkSectionProps {
   projectId: string
   /** Upstream source project id — only show when non-null. */
   sourceProjectId: string
-  /** FRO-476/478: link mode — 'clone' | 'live'. Null/undefined ⇒ legacy link
-   *  (pre-FRO-476) or unknown — rendered as "live" per the server's own
+  /** AQU-476/478: link mode — 'clone' | 'live'. Null/undefined ⇒ legacy link
+   *  (pre-AQU-476) or unknown — rendered as "live" per the server's own
    *  default-to-live-behavior fallback (COALESCE reasoning in stale-source-route.ts). */
   sourceLinkMode?: "clone" | "live" | null
   sourceLinkConsumes?: "source" | "target" | null
@@ -102,6 +103,10 @@ export function SourceLinkSection({
 
   return (
     <>
+      {/* DCS (Door43) freshness/delta — only renders when this project carries a
+          `dcsUpstream` cursor (i.e. it is a Door43 adapter project). Self-gated
+          inside the panel: readCursor() ⇒ null renders nothing. */}
+      <DcsUpstreamPanel projectId={projectId} roleLevel={roleLevel} />
       <Card id="section-source-link">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -121,7 +126,7 @@ export function SourceLinkSection({
               {sourceProjectId}
             </code>
           </div>
-          {/* FRO-478: mode/consumes/gate/cursor state, read-only — set at
+          {/* AQU-478: mode/consumes/gate/cursor state, read-only — set at
               link/creation time, not editable from here. */}
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <Badge variant={sourceLinkMode === "clone" ? "secondary" : "default"}>

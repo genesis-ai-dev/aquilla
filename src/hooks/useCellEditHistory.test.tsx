@@ -2,7 +2,7 @@
 // pattern as useCells.test.tsx — no React Query, no global fetch mocking.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { renderHook, waitFor, act } from "@testing-library/react"
+import { renderHook, waitFor, act, fireEvent } from "@testing-library/react"
 import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
 
 const fetchCellHistoryMock = vi.fn<
@@ -21,6 +21,7 @@ vi.mock("@/lib/sync/history-read", () => ({
 }))
 
 import { useCellEditHistory } from "./useCellEditHistory"
+import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 
 function makeEvent(
   over: Partial<CellHistoryEvent> & Pick<CellHistoryEvent, "id" | "serverSeq">,
@@ -193,5 +194,39 @@ describe("useCellEditHistory (Phase 2b)", () => {
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(result.current.history[0].value).toBe("new"))
     expect(fetchCellHistoryMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not refetch just because the browser regains focus", async () => {
+    fetchCellHistoryMock.mockResolvedValue(SERVER_EVENTS)
+    renderHook(() => useCellEditHistory({
+      enabled: true,
+      projectId: "proj-a",
+      fileId: "file-abc",
+      cellId: "cell-1",
+      getTokenForFile,
+    }))
+    await waitFor(() => expect(fetchCellHistoryMock).toHaveBeenCalledTimes(1))
+    fireEvent.focus(window)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(fetchCellHistoryMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("refetches only after an exact cell history invalidation", async () => {
+    fetchCellHistoryMock.mockResolvedValue(SERVER_EVENTS)
+    renderHook(() => useCellEditHistory({
+      enabled: true,
+      projectId: "proj-a",
+      fileId: "file-abc",
+      cellId: "cell-1",
+      getTokenForFile,
+    }))
+    await waitFor(() => expect(fetchCellHistoryMock).toHaveBeenCalledTimes(1))
+
+    act(() => invalidateCellHistory("proj-a", "file-abc", "other-cell"))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(fetchCellHistoryMock).toHaveBeenCalledTimes(1)
+
+    act(() => invalidateCellHistory("proj-a", "file-abc", "cell-1"))
+    await waitFor(() => expect(fetchCellHistoryMock).toHaveBeenCalledTimes(2))
   })
 })

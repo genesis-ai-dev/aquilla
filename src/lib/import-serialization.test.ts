@@ -1,5 +1,5 @@
 /**
- * FRO-249 fix — serialized handleImported read-modify-write.
+ * AQU-249 fix — serialized handleImported read-modify-write.
  *
  * WHY: The original handleImported did:
  *   1. await getProject(id)          ← fresh read
@@ -48,7 +48,7 @@ function makeSerializedImporter(
   }
 }
 
-describe("serialized import read-modify-write (FRO-249 Fix 2)", () => {
+describe("serialized import read-modify-write (AQU-249 Fix 2)", () => {
   it("serializes concurrent imports so both refs are preserved", async () => {
     // Simulate IDB: one read-write store.
     const store: { files: string[] } = { files: [] }
@@ -66,7 +66,7 @@ describe("serialized import read-modify-write (FRO-249 Fix 2)", () => {
     const { import: importRef } = makeSerializedImporter(getFiles, setFiles)
 
     // Fire A and B concurrently (simulates the "Esc flush fires while a
-    // second import is still in-flight" scenario described in FRO-249).
+    // second import is still in-flight" scenario described in AQU-249).
     const [resultA, resultB] = await Promise.all([importRef("A"), importRef("B")])
 
     // WHY: both refs must survive. Before the fix, B's read happened before

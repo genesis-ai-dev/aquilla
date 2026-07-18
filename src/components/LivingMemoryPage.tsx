@@ -6,9 +6,9 @@
  *
  * Edit access is gated at MAINTAINER (600) via useProjectSettings.canEdit.
  * Below-floor users see read-only affordances with a tooltip naming the
- * required role, mirroring the FRO-255 pattern in useProjectSettings.
+ * required role, mirroring the AQU-255 pattern in useProjectSettings.
  *
- * Layout: FRO-254 renders this page inside the ProjectWorkspace shell
+ * Layout: AQU-254 renders this page inside the ProjectWorkspace shell
  * (centerSurface === "memory"), so this component owns only the content
  * area — no full-page header, no back button.
  */
@@ -19,13 +19,7 @@ import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, ExternalLin
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -112,23 +106,17 @@ function LivingMemorySkeleton() {
 
 function RecentExamplesEmpty() {
   return (
-    <Empty
-      className="border-0 py-12"
+    <EmptyState
+      variant="inline"
+      className="py-12"
       role="status"
       aria-label="No validated translations"
-    >
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <BookOpen />
-        </EmptyMedia>
-        <EmptyTitle className="text-foreground/70">No validated translations yet</EmptyTitle>
-        <EmptyDescription className="max-w-xs text-xs leading-relaxed">
-          When translators and reviewers reach the required validation threshold on a cell, that
-          source&thinsp;&rarr;&thinsp;target pair appears here. The AI draws on these pairs in
-          every subsequent draft.
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
+      icon={BookOpen}
+      title="No validated translations yet"
+      titleClassName="text-foreground/70"
+      description="When translators and reviewers reach the required validation threshold on a cell, that source → target pair appears here. The AI draws on these pairs in every subsequent draft."
+      descriptionClassName="max-w-xs text-xs leading-relaxed"
+    />
   )
 }
 
@@ -441,7 +429,7 @@ function AuthoredEntriesSection({
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────
-// FRO-254: rendered inside ProjectWorkspace's AppShell (centerSurface===
+// AQU-254: rendered inside ProjectWorkspace's AppShell (centerSurface===
 // "memory") in a h-full overflow-y-auto wrapper. No full-page header or
 // back-button chrome here — the shell owns that. Content scrolls naturally.
 
@@ -457,7 +445,7 @@ export function LivingMemoryPage() {
 
   const { project, loading: projectLoading } = useProject(projectId ?? "")
 
-  // Role-aware edit gate: mirrors the FRO-255 pattern — get roleLevel from
+  // Role-aware edit gate: mirrors the AQU-255 pattern — get roleLevel from
   // syncRole, pass to useProjectSettings which enforces MAINTAINER (600) floor.
   const roleLevel = project?.syncRole?.level ?? null
   const { settings, canEdit, reasonCannotEdit, patch: patchSettings } = useProjectSettings(

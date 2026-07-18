@@ -7,7 +7,9 @@
  * `⟦chip:<id>⟧` placeholders — which AgentDockView turns into the wire message.
  *
  *  - Enter sends; Shift+Enter inserts a newline.
- *  - While streaming, typing stays enabled and Send is replaced by Stop.
+ *  - While streaming, typing stays enabled and Send is replaced by Stop —
+ *    unless `queueWhileStreaming`, where Send stays live (the session store
+ *    queues the prompt behind the in-flight run) next to Stop.
  *  - `insertChip` (imperative handle) inserts a chip at the caret, de-duped.
  *
  * Send is driven off the ProseMirror `view` (not a captured `editor` closure)
@@ -47,10 +49,14 @@ export interface ChatComposerProps {
   onStop: () => void
   compact?: boolean
   suggestedActions?: SuggestedAction[]
+  /** Keep Send live during a run — the caller queues the prompt (agent mode). */
+  queueWhileStreaming?: boolean
+  /** Empty-state hint; defaults to "Ask the agent…". */
+  placeholder?: string
 }
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
-  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions },
+  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions, queueWhileStreaming, placeholder },
   ref,
 ) {
   const [isEmpty, setIsEmpty] = useState(true)
@@ -59,12 +65,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // editor's keydown handler, which is bound once at editor creation).
   const onSendRef = useRef(onSend)
   onSendRef.current = onSend
-  const flagsRef = useRef({ isStreaming, isConfigured })
-  flagsRef.current = { isStreaming, isConfigured }
+  const flagsRef = useRef({ isStreaming, isConfigured, queueWhileStreaming })
+  flagsRef.current = { isStreaming, isConfigured, queueWhileStreaming }
 
   function sendFromView(view: EditorView) {
-    const { isStreaming, isConfigured } = flagsRef.current
-    if (isStreaming || !isConfigured) return
+    const { isStreaming, isConfigured, queueWhileStreaming } = flagsRef.current
+    if ((isStreaming && !queueWhileStreaming) || !isConfigured) return
     const { text, chips } = serializeDocJSON(view.state.doc.toJSON() as { type?: string; content?: unknown[] })
     if (!text.trim() && chips.length === 0) return
     onSendRef.current({ text, chips })
@@ -175,7 +181,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 )}
                 aria-hidden
               >
-                Ask the agent…
+                {placeholder ?? "Ask the agent…"}
               </span>
             )}
           </div>
@@ -184,12 +190,22 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               Enter to send · Shift+Enter for newline
             </InputGroupText>
             {isStreaming ? (
-              <InputGroupButton
-                type="button" variant="outline" size="icon-sm" onClick={onStop}
-                className="ml-auto" aria-label="Stop" title="Stop"
-              >
-                <Square />
-              </InputGroupButton>
+              <span className="ml-auto flex items-center gap-1">
+                {queueWhileStreaming && (
+                  <InputGroupButton
+                    type="button" variant="default" size="icon-sm" onClick={handleSendClick}
+                    disabled={isEmpty} aria-label="Queue message" title="Queue — sends when the current run finishes"
+                  >
+                    <ArrowUp />
+                  </InputGroupButton>
+                )}
+                <InputGroupButton
+                  type="button" variant="outline" size="icon-sm" onClick={onStop}
+                  aria-label="Stop" title="Stop"
+                >
+                  <Square />
+                </InputGroupButton>
+              </span>
             ) : (
               <InputGroupButton
                 type="button" variant="default" size="icon-sm" onClick={handleSendClick}

@@ -1,7 +1,7 @@
 // SDBH lexicon import orchestration: MARBLE JSON editions → per-letter source
 // files (+ the domain-label file), optionally pre-filling the target column
 // from a localized edition. Mirrors the paired-import flow: bulkUploadSource
-// seeds the source cells, then bulkUploadTargetCommits chains one
+// seeds the source cells, then enqueueTargetCommits chains one
 // target.cell.commit per translated cell onto the source event ids.
 import { v7 as uuidv7 } from "uuid"
 import type { FileReference } from "./parsers/types"
@@ -14,7 +14,7 @@ import {
 import { buildBulkCells, type ImportContext } from "./import"
 import {
   bulkUploadSource,
-  bulkUploadTargetCommits,
+  enqueueTargetCommits,
   type TargetCommit,
 } from "./sync/bulk-import"
 
@@ -119,7 +119,7 @@ export async function importSdbh(
       }
       if (commits.length > 0) {
         onProgress?.({ phase: "target", fileIndex: i + 1, fileCount: files.length, cellsEnqueued: 0, cellsTotal: commits.length })
-        await bulkUploadTargetCommits({
+        await enqueueTargetCommits({
           projectId: ctx.projectId,
           fileId,
           author: ctx.author,

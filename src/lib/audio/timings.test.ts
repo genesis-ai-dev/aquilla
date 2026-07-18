@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  activeWordRange,
   alignChunks,
   findActiveTimingIndex,
   tokenizeWords,
@@ -91,5 +92,29 @@ describe("findActiveTimingIndex", () => {
   it("returns -1 for missing timings", () => {
     expect(findActiveTimingIndex(undefined, 1)).toBe(-1)
     expect(findActiveTimingIndex([], 1)).toBe(-1)
+  })
+})
+
+describe("activeWordRange", () => {
+  const timings: WordTiming[] = [
+    { word: "hello", t0: 0, t1: 0.5, start: 0, end: 5 },
+    { word: "world", t0: 0.5, t1: 1.0, start: 6, end: 11 },
+  ]
+  it("returns the plain-text span of the active word", () => {
+    expect(activeWordRange(timings, 0.2)).toEqual({ start: 0, end: 5 })
+    expect(activeWordRange(timings, 0.7)).toEqual({ start: 6, end: 11 })
+  })
+  it("advances the span as playback crosses a word boundary", () => {
+    // The read-view karaoke highlight must move word-to-word, not stick.
+    expect(activeWordRange(timings, 0.49)).toEqual({ start: 0, end: 5 })
+    expect(activeWordRange(timings, 0.5)).toEqual({ start: 6, end: 11 })
+  })
+  it("returns null when no word is active (before/after/paused-past-end)", () => {
+    expect(activeWordRange(timings, -1)).toBeNull()
+    expect(activeWordRange(timings, 5)).toBeNull()
+    expect(activeWordRange(undefined, 0.2)).toBeNull()
+  })
+  it("returns null for a degenerate zero-width span", () => {
+    expect(activeWordRange([{ word: "", t0: 0, t1: 1, start: 3, end: 3 }], 0.5)).toBeNull()
   })
 })

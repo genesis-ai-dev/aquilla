@@ -1,5 +1,5 @@
 /**
- * FRO-266: Tests for global error boundary + crash telemetry.
+ * AQU-266: Tests for global error boundary + crash telemetry.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"

@@ -13,15 +13,12 @@
 //   * sync-worker   on 127.0.0.1:8789       (always)
 //   * Vite dev      on :5173                (the existing `vite` command)
 //
-// Wrangler's local D1 / R2 / DO state is persisted to a single shared
-// `<repo>/.wrangler-dev-state/` directory so auth-worker (writer for users
-// /orgs/projects) and sync-worker (writer for files/cells/events) see the
-// same `aquilla-db` rows — without `--persist-to`, each cwd gets its own
-// isolated sqlite and the two Workers drift apart immediately.
+// Wrangler's local R2 / DO state is persisted to a single shared
+// `<repo>/.wrangler-dev-state/` directory. Application data lives in the
+// local Postgres instance below; D1 is no longer part of the runtime stack.
 //
 // First-run side effects (idempotent):
 //   * Copies each backend's `.dev.vars.example` → `.dev.vars` if missing.
-//   * Applies auth-worker's D1 migrations to the local sqlite.
 //   * Loads db/postgres/schema.sql into the local Postgres on first create,
 //     and on every later boot reconciles drift additively (CREATE TABLE /
 //     ADD COLUMN IF NOT EXISTS for anything schema.sql has that the live
@@ -46,6 +43,7 @@ import {
   existsSync,
   copyFileSync,
   mkdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -77,8 +75,12 @@ const LOG_DIR = path.join(REPO_ROOT, ".dev-stack-logs")
 const IDENTITY_PORT = Number(process.env.DEV_STACK_IDENTITY_PORT) || 8788
 const SYNC_PORT = Number(process.env.DEV_STACK_SYNC_PORT) || 8789
 const DEFAULT_VITE_PORT = 5173
+// Scripted OpenRouter mock (scripts/mock-openrouter.ts) — booted when the
+// identity worker has no real OPENROUTER_API_KEY, so the agent/chat paths
+// work end-to-end locally with a deterministic model.
+const MOCK_LLM_PORT = Number(process.env.DEV_STACK_MOCK_LLM_PORT) || 9456
 
-// D1→Neon migration (FRO-146): auth-worker + sync-worker bind HYPERDRIVE and
+// D1→Neon migration (AQU-146): auth-worker + sync-worker bind HYPERDRIVE and
 // swap AQUILLA_PG for a Postgres shim (see auth-worker/src/index.ts). Under
 // `wrangler dev --local`, Hyperdrive is emulated against a real Postgres given
 // by WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING>. Without it the
@@ -165,6 +167,15 @@ function ensureDevVars(appDir: string, label: string): void {
   )
 }
 
+/** True when auth-worker/.dev.vars carries a real (non-mock) OpenRouter key. */
+function identityHasRealOpenRouterKey(): boolean {
+  const p = path.join(IDENTITY_DIR, ".dev.vars")
+  if (!existsSync(p)) return false
+  const m = readFileSync(p, "utf8").match(/^OPENROUTER_API_KEY\s*=\s*"?([^"\n]*)"?\s*$/m)
+  const key = m?.[1]?.trim() ?? ""
+  return key !== "" && key !== "mock"
+}
+
 async function freePort(port: number): Promise<void> {
   const pidsRaw =
     spawnSync("lsof", ["-ti", `:${port}`], { encoding: "utf8" }).stdout || ""
@@ -192,42 +203,6 @@ async function freePort(port: number): Promise<void> {
     } catch {
       // already gone
     }
-  }
-}
-
-function applyIdentityMigrations(): void {
-  // `wrangler d1 migrations apply` is idempotent — it tracks applied
-  // migrations in a `d1_migrations` row and skips already-applied files.
-  // Running it on every boot keeps the local sqlite in sync when the
-  // user pulls new migration files.
-  console.log("[dev-stack] applying identity migrations to local D1…")
-  const res = spawnSync(
-    "npx",
-    [
-      "wrangler",
-      "d1",
-      "migrations",
-      "apply",
-      "aquilla-db",
-      "--local",
-      "--persist-to",
-      PERSIST_DIR,
-    ],
-    {
-      cwd: IDENTITY_DIR,
-      stdio: VERBOSE ? "inherit" : ["ignore", "pipe", "pipe"],
-      encoding: "utf8",
-    },
-  )
-  if (res.status !== 0) {
-    if (!VERBOSE) {
-      process.stderr.write(res.stdout || "")
-      process.stderr.write(res.stderr || "")
-    }
-    // Don't throw — migrations may fail if auth-worker/migrations/ is still
-    // empty (Phase E not yet landed). Warn and continue so the rest of the
-    // dev stack still boots.
-    console.warn("[dev-stack] migration apply exited non-zero — continuing (Phase E may not be landed yet)")
   }
 }
 
@@ -336,10 +311,54 @@ async function ensurePgSchema(url: string): Promise<void> {
   }
 }
 
+function backfillMissingLocalProgress(): void {
+  const result = spawnSync(
+    "npx",
+    ["tsx", "scripts/neon-backfill-progress.ts", "--missing-only"],
+    {
+      cwd: REPO_ROOT,
+      env: { ...process.env, AQUILLA_DATABASE_URL: PG_URL },
+      encoding: "utf8",
+      stdio: VERBOSE ? "inherit" : ["ignore", "pipe", "pipe"],
+    },
+  )
+  if (result.status !== 0) {
+    throw new Error(
+      `[dev-stack] local progress backfill failed:\n${result.stderr || result.stdout}`,
+    )
+  }
+  const output = result.stdout?.trim()
+  if (output) console.log(`[dev-stack] ${output.replace(/\n/g, "\n[dev-stack] ")}`)
+}
+
 type SchemaTable = {
   /** Full CREATE TABLE block, with IF NOT EXISTS forced in. */
   createSql: string
   columns: Array<{ name: string; def: string }>
+}
+
+function sqlParenthesisDelta(line: string): number {
+  let delta = 0
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (inSingleQuote) {
+      if (char === "'" && line[i + 1] === "'") i++
+      else if (char === "'") inSingleQuote = false
+      continue
+    }
+    if (inDoubleQuote) {
+      if (char === '"' && line[i + 1] === '"') i++
+      else if (char === '"') inDoubleQuote = false
+      continue
+    }
+    if (char === "'") inSingleQuote = true
+    else if (char === '"') inDoubleQuote = true
+    else if (char === "(") delta++
+    else if (char === ")") delta--
+  }
+  return delta
 }
 
 /**
@@ -357,6 +376,7 @@ function parsePgSchema(sql: string): {
   const indexesByTable = new Map<string, string[]>()
   let current: SchemaTable | null = null
   let block: string[] = []
+  let tableDepth = 0
   for (const raw of sql.split("\n")) {
     const line = raw.replace(/--.*$/, "").trimEnd()
     const trimmed = line.trim()
@@ -367,6 +387,7 @@ function parsePgSchema(sql: string): {
       if (table) {
         current = { createSql: "", columns: [] }
         block = [`CREATE TABLE IF NOT EXISTS ${table[1]} (`]
+        tableDepth = 1
         tables.set(table[1].toLowerCase(), current)
         continue
       }
@@ -387,11 +408,16 @@ function parsePgSchema(sql: string): {
       continue
     }
     block.push(line)
-    if (trimmed.startsWith(")")) {
+    const depthBeforeLine = tableDepth
+    tableDepth += sqlParenthesisDelta(line)
+    if (tableDepth === 0) {
       current.createSql = block.join("\n")
       current = null
       continue
     }
+    // Only top-level entries are columns. Lines nested inside multiline
+    // CHECK/CONSTRAINT clauses must never become additive ALTER statements.
+    if (depthBeforeLine !== 1) continue
     const first = trimmed.split(/[\s(,]/)[0]
     if (!first) continue
     if (/^(PRIMARY|UNIQUE|CHECK|CONSTRAINT|FOREIGN|EXCLUDE)$/i.test(first)) continue
@@ -455,6 +481,63 @@ async function reconcilePgSchema(
       patched.push(`added column ${name}.${col.name}`)
     }
   }
+  // AQU-538 (migrations 0057 expand + 0061 contract): the cells PK gained the
+  // target_lang lane. The generic loop above adds the column, but a drifted
+  // container still carries the 4-column PK — and Postgres rejects
+  // `ON CONFLICT (…, target_lang)` without a matching unique constraint,
+  // 500-ing every commit. Local dev has no old workers serving, so we skip the
+  // production expand/contract dance and rebuild the PK straight to the 5-column
+  // form here; all pre-lane rows carry '' so it's trivially unique. Idempotent
+  // (skipped once target_lang is in the PK).
+  const { rows: pkCols } = await client.query(
+    `SELECT a.attname FROM pg_index i
+     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+     WHERE i.indrelid = 'cells'::regclass AND i.indisprimary`,
+  )
+  if (!(pkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+    await run(
+      `ALTER TABLE cells DROP CONSTRAINT cells_pkey;
+       ALTER TABLE cells ADD PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)`,
+      "rebuilding the cells primary key with target_lang (migrations 0057+0061)",
+    )
+    patched.push("rebuilt cells PK with target_lang")
+  }
+
+  // AQU-538 (migrations 0058 expand + 0062 contract): cell_validators and file_section_progress gained
+  // target_lang in their PKs so validations and progress rollups are per-lane.
+  // Same rationale as the cells rebuild above — the generic loop adds the
+  // column, but a drifted container keeps the pre-lane PK and Postgres rejects
+  // the lane-qualified `ON CONFLICT` / upsert. All pre-lane rows carry '' so
+  // the new key is trivially unique. Idempotent (skipped once target_lang is
+  // in the PK).
+  const { rows: validatorPkCols } = await client.query(
+    `SELECT a.attname FROM pg_index i
+     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+     WHERE i.indrelid = 'cell_validators'::regclass AND i.indisprimary`,
+  )
+  if (!(validatorPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+    await run(
+      `ALTER TABLE cell_validators DROP CONSTRAINT cell_validators_pkey;
+       ALTER TABLE cell_validators ADD PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)`,
+      "rebuilding the cell_validators primary key with target_lang (migrations 0058+0062)",
+    )
+    patched.push("rebuilt cell_validators PK with target_lang")
+  }
+
+  const { rows: progressPkCols } = await client.query(
+    `SELECT a.attname FROM pg_index i
+     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+     WHERE i.indrelid = 'file_section_progress'::regclass AND i.indisprimary`,
+  )
+  if (!(progressPkCols as { attname: string }[]).some((r) => r.attname === "target_lang")) {
+    await run(
+      `ALTER TABLE file_section_progress DROP CONSTRAINT file_section_progress_pkey;
+       ALTER TABLE file_section_progress ADD PRIMARY KEY (project_id, file_id, scope, section_key, target_lang)`,
+      "rebuilding the file_section_progress primary key with target_lang (migrations 0058+0062)",
+    )
+    patched.push("rebuilt file_section_progress PK with target_lang")
+  }
+
   if (patched.length) {
     console.log(
       `[dev-stack] local Postgres schema patched from db/postgres/schema.sql: ${patched.join(", ")}`,
@@ -509,8 +592,24 @@ async function main(): Promise<void> {
   if (!WITHOUT_SYNC) await freePort(SYNC_PORT)
   await freePort(VITE_PORT)
 
-  applyIdentityMigrations()
   await ensureLocalPostgres()
+  backfillMissingLocalProgress()
+
+  // Without a real OpenRouter key, boot the scripted mock so the agent and
+  // chat paths work end-to-end (deterministic model, zero cost). A real key
+  // in auth-worker/.dev.vars wins — no mock, no overrides.
+  const useMockLlm = !identityHasRealOpenRouterKey()
+  if (useMockLlm) {
+    await freePort(MOCK_LLM_PORT)
+    console.log(`[dev-stack] starting mock OpenRouter on :${MOCK_LLM_PORT}… (no real OPENROUTER_API_KEY in auth-worker/.dev.vars)`)
+    const mockLlm = spawn(
+      "npx",
+      ["tsx", "scripts/mock-openrouter.ts", String(MOCK_LLM_PORT)],
+      { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } },
+    )
+    attachOutput(mockLlm, "mock-llm", openLogFile(path.join(LOG_DIR, "mock-llm.log")), VERBOSE)
+    cleanup.push(() => killChildTree(mockLlm))
+  }
 
   console.log(`[dev-stack] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
   const identity: SpawnedWorker = await spawnWranglerDev({
@@ -532,7 +631,7 @@ async function main(): Promise<void> {
     // list only carries the real company emails. The email step-up gate is
     // already bypassed under WRANGLER_LOCAL=1 (middleware/platform-admin.ts).
     // Mirrors e2e-up.ts, which allowlists alice@example.test the same way.
-    // FRO-346: SYNC_WORKER_URL + ENVIRONMENT used to be passed via `env:`
+    // AQU-346: SYNC_WORKER_URL + ENVIRONMENT used to be passed via `env:`
     // (process env) like WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
     // above — but unlike that Hyperdrive var, these two ARE read from
     // `c.env` by application code (types.ts SYNC_WORKER_URL, ENVIRONMENT),
@@ -545,6 +644,13 @@ async function main(): Promise<void> {
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
       "--var", "ADMIN_EMAILS:dev@local.test",
+      // Route the model calls at the scripted mock when no real key exists.
+      ...(useMockLlm
+        ? [
+            "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${MOCK_LLM_PORT}/api/v1`,
+            "--var", "OPENROUTER_API_KEY:mock",
+          ]
+        : []),
       // identity calls the sync worker server-side (archive/member-removal
       // notifications, live-link seed sync). Must be --var — process env
       // never reaches c.env, so the prod URL from wrangler.toml [vars] would
@@ -644,7 +750,10 @@ async function main(): Promise<void> {
       ? `         sync     -> http://127.0.0.1:${SYNC_PORT}/  (logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "sync.log"))})`
       : `         sync     -> skipped (--no-sync)`,
     `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/chat/  (served by identity worker)`,
-    `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local D1)`,
+    useMockLlm
+      ? `         llm      -> http://127.0.0.1:${MOCK_LLM_PORT}/  (scripted mock — set OPENROUTER_API_KEY in auth-worker/.dev.vars for a real model)`
+      : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
+    `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local Wrangler state)`,
     "[dev-stack] press Ctrl+C to stop",
     "",
   ]

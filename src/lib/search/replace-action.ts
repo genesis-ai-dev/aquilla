@@ -18,7 +18,7 @@ export interface ReplaceCandidate {
   fileId: string
   /** The raw (possibly HTML) target text. */
   rawValue: string
-  /** Event-chain head for parent-chain fencing (FRO-247). */
+  /** Event-chain head for parent-chain fencing (AQU-247). */
   parentId: string | null
   /** Source-side event_id for AD-9 staleness pin. */
   sourceEventId?: string | null

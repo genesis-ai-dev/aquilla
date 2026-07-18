@@ -90,7 +90,7 @@ describe("OrgSwitcher", () => {
     await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
 
     expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
-    expect(screen.queryByText("Guest")).not.toBeInTheDocument()
+    expect(screen.queryByText("guest")).not.toBeInTheDocument()
   })
 
   it("guest entry visible with Guest tag below member orgs", async () => {
@@ -110,6 +110,6 @@ describe("OrgSwitcher", () => {
 
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     expect(screen.getByText("Guest Org")).toBeInTheDocument()
-    expect(screen.getByText("Guest")).toBeInTheDocument()
+    expect(screen.getByText("guest")).toBeInTheDocument()
   })
 })

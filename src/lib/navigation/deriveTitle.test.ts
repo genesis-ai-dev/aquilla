@@ -8,6 +8,8 @@ describe("deriveNavTitle", () => {
     expect(deriveNavTitle("/projects/archived")).toBe("Archived projects")
     expect(deriveNavTitle("/assigned")).toBe("Assigned to me")
     expect(deriveNavTitle("/settings")).toBe("Organization settings")
+    expect(deriveNavTitle("/settings/identity")).toBe("Identity")
+    expect(deriveNavTitle("/settings/export")).toBe("Export permissions")
     expect(deriveNavTitle("/teams")).toBe("Teams")
   })
 

@@ -3,11 +3,13 @@ import "fake-indexeddb/auto"
 import {
   buildRawEvent,
   emitTargetCellCommit,
+  emitSourceCellCommit,
   emitCellValidate,
   emitCellUnvalidate,
   emitSourceCellCreate,
   emitFileCreate,
   enqueueEvent,
+  enqueueEvents,
   InsufficientRoleError,
 } from "./events-emit"
 import {
@@ -129,6 +131,69 @@ describe("events-emit", () => {
       expect(ev.payload.value).toBe("hello")
       expect(ev.payload.valueHtml).toBe("<p>hello</p>")
       expect(ev.payload.sourceEventId).toBe("src-event-1")
+      // AQU-538: no targetLang input → the field is OMITTED entirely, so
+      // default-lane events stay byte-identical to pre-lane events.
+      expect("targetLang" in ev.payload).toBe(false)
+    })
+
+    it("AQU-538: includes targetLang in the payload for a non-default lane", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head",
+        value: "bonjour",
+        targetLang: "fr",
+        author: "alice",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(ev.payload.targetLang).toBe("fr")
+    })
+
+    it("AQU-538: an explicit empty-string targetLang is omitted (default lane)", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head",
+        value: "hallo",
+        targetLang: "",
+        author: "alice",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect("targetLang" in ev.payload).toBe(false)
+    })
+
+    it("AQU-538: carries targetLang for a non-default lane", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "prev",
+        value: "hola",
+        author: "alice",
+        targetLang: "es",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(ev.payload.targetLang).toBe("es")
+    })
+
+    it("AQU-538: OMITS targetLang for the default lane ('' never crosses the wire)", async () => {
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "prev",
+        value: "hello",
+        author: "alice",
+        targetLang: "",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect("targetLang" in ev.payload).toBe(false)
     })
 
     it("accepts null parentId for first-ever commit (genesis-shape fallback)", async () => {
@@ -149,6 +214,82 @@ describe("events-emit", () => {
       expect(
         (peek[0].event as unknown as OutboxRawEvent<"target.cell.commit">).parentId,
       ).toBe(null)
+    })
+
+    it("persists model, prompt, retrieval, and project-state provenance for AI drafts", async () => {
+      const aiDraft = {
+        model: "test/model",
+        provider: "frontier",
+        promptVersion: "translation-draft-v1",
+        exampleIds: ["approved-1"],
+        generatedAt: 1234,
+        mode: "single" as const,
+        projectState: {
+          sourceLanguage: "English",
+          targetLanguage: "Spanish",
+          approvedExampleCount: 1,
+        },
+      }
+      await emitTargetCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c-ai",
+        parentId: "head",
+        value: "borrador",
+        author: "test/model",
+        aiSuggestion: true,
+        aiDraft,
+      })
+      const [record] = await peekOutboxBatch(10)
+      const event = record.event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(event.payload.ai_suggestion).toBe(true)
+      expect(event.payload.ai_draft).toEqual(aiDraft)
+    })
+  })
+
+  describe("emitSourceCellCommit", () => {
+    it("enqueues a chain-mutating source.cell.commit with no sourceEventId pin", async () => {
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head-1",
+        value: "fixed English line",
+        valueHtml: "<p>fixed English line</p>",
+        author: "lead",
+      })
+      expect(typeof id).toBe("string")
+      expect(await outboxPendingCount()).toBe(1)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.kind).toBe("source.cell.commit")
+      // Chains off the source row's current head (advances cells.event_id).
+      expect(ev.parentId).toBe("src-head-1")
+      expect(ev.cellId).toBe("c")
+      expect(ev.fileId).toBe("f")
+      expect(ev.payload.value).toBe("fixed English line")
+      expect(ev.payload.valueHtml).toBe("<p>fixed English line</p>")
+      // Source rows carry no AD-9 staleness pin.
+      expect((ev.payload as Record<string, unknown>).sourceEventId).toBeUndefined()
+    })
+
+    it("refuses to enqueue below the PROJECT_LEAD (500) floor — never reaches the outbox", async () => {
+      setCqrsOutboxBridge({ projectId: "p", activeFileId: "f", username: "u", roleLevel: ROLE.CONTRIBUTOR })
+      try {
+        await expect(
+          emitSourceCellCommit({
+            projectId: "p",
+            fileId: "f",
+            cellId: "c",
+            parentId: null,
+            value: "nope",
+            author: "u",
+          }),
+        ).rejects.toBeInstanceOf(InsufficientRoleError)
+        expect(await outboxPendingCount()).toBe(0)
+      } finally {
+        setCqrsOutboxBridge(null)
+      }
     })
   })
 
@@ -178,6 +319,49 @@ describe("events-emit", () => {
       })
       const peek = await peekOutboxBatch(10)
       expect(peek[0].event.kind).toBe("cell.unvalidate")
+    })
+
+    it("AQU-538: emitCellValidate carries targetLang for a non-default lane", async () => {
+      await emitCellValidate({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        editEventId: "commit-evt-1",
+        author: "alice",
+        targetLang: "es",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"cell.validate">
+      expect(ev.payload.editEventId).toBe("commit-evt-1")
+      expect(ev.payload.targetLang).toBe("es")
+    })
+
+    it("AQU-538: emitCellValidate OMITS targetLang for the default lane", async () => {
+      await emitCellValidate({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        editEventId: "commit-evt-1",
+        author: "alice",
+        targetLang: "",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"cell.validate">
+      expect("targetLang" in ev.payload).toBe(false)
+    })
+
+    it("AQU-538: emitCellUnvalidate carries targetLang for a non-default lane", async () => {
+      await emitCellUnvalidate({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        editEventId: "commit-evt-1",
+        author: "alice",
+        targetLang: "es",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"cell.unvalidate">
+      expect(ev.payload.targetLang).toBe("es")
     })
   })
 
@@ -212,6 +396,50 @@ describe("events-emit", () => {
       expect(second.payload.anchorCellId).toBe("cell-1")
     })
 
+    it("emitSourceCellCommit advances the source chain head chained on parentId", async () => {
+      // The DCS delta path: a content-changed upstream cell commits on the
+      // source lane, chained on its current head, carrying a deterministic id
+      // for idempotent re-runs.
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "TIT-1-1",
+        parentId: "source-head-1",
+        value: "verse 1 (v89)",
+        valueHtml: "<p>verse 1 (v89)</p>",
+        id: "det-event-1",
+        author: "import-bot",
+      })
+      expect(id).toBe("det-event-1")
+      expect(await outboxPendingCount()).toBe(1)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.kind).toBe("source.cell.commit")
+      expect(ev.id).toBe("det-event-1")
+      expect(ev.parentId).toBe("source-head-1")
+      expect(ev.cellId).toBe("TIT-1-1")
+      expect(ev.fileId).toBe("f")
+      expect(ev.payload.value).toBe("verse 1 (v89)")
+      expect(ev.payload.valueHtml).toBe("<p>verse 1 (v89)</p>")
+    })
+
+    it("emitSourceCellCommit omits valueHtml when not supplied and defaults its id", async () => {
+      const id = await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "TIT-1-2",
+        parentId: "source-head-2",
+        value: "verse 2 (v89)",
+        author: "import-bot",
+      })
+      expect(typeof id).toBe("string")
+      expect(id.length).toBeGreaterThan(0)
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.payload.value).toBe("verse 2 (v89)")
+      expect("valueHtml" in ev.payload).toBe(false)
+    })
+
     it("emitFileCreate is project-scoped and genesis", async () => {
       await emitFileCreate({
         projectId: "p",
@@ -229,6 +457,27 @@ describe("events-emit", () => {
       expect(ev.fileId).toBe("f")
       expect(ev.payload.name).toBe("Genesis")
       expect(ev.payload.sourceLanguage).toBe("en")
+    })
+  })
+
+  describe("enqueueEvents (bulk builder)", () => {
+    it("enqueueEvents builds typed events and bulk-enqueues them", async () => {
+      const res = await enqueueEvents([
+        { kind: "target.cell.commit", projectId: "p", fileId: "f", cellId: "c1",
+          parentId: "s1", author: "u", payload: { value: "hello" } },
+        { kind: "target.cell.commit", projectId: "p", fileId: "f", cellId: "c2",
+          parentId: "s2", author: "u", payload: { value: "world" } },
+      ])
+      expect(res).toHaveLength(2)
+      expect(res[0].eventId).toBeTruthy()
+      const rows = await peekOutboxBatch(100)
+      expect(rows.map((r) => r.event.cellId).sort()).toEqual(["c1", "c2"])
+    })
+
+    it("returns empty array for empty input without writing to outbox", async () => {
+      const res = await enqueueEvents([])
+      expect(res).toEqual([])
+      expect(await outboxPendingCount()).toBe(0)
     })
   })
 })

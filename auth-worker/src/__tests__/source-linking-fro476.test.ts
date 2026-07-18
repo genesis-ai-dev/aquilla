@@ -1,4 +1,4 @@
-// FRO-476: source-linking route extension tests (mode/consumes/gate persist,
+// AQU-476: source-linking route extension tests (mode/consumes/gate persist,
 // seeding trigger best-effort, detach clears link metadata).
 
 import { env } from "cloudflare:test"
@@ -17,7 +17,7 @@ async function seedProjectWithLead(projectId: string, name: string, leadUserId: 
     .run()
 }
 
-describe("POST /:projectId/link-source — FRO-476 mode/consumes/gate", () => {
+describe("POST /:projectId/link-source — AQU-476 mode/consumes/gate", () => {
   it("persists mode='live'/consumes/gate and triggers the seed sync (best-effort)", async () => {
     await seedUser(1, "lead")
     await seedProjectWithLead("proj-down", "Downstream", 1)
@@ -99,7 +99,7 @@ describe("POST /:projectId/link-source — FRO-476 mode/consumes/gate", () => {
   })
 })
 
-describe("POST /:projectId/detach-source — FRO-476 clears link metadata", () => {
+describe("POST /:projectId/detach-source — AQU-476 clears link metadata", () => {
   it("clears mode/consumes/gate/cursor alongside source_project_id", async () => {
     await seedUser(3, "lead3")
     await seedProjectWithLead("proj-down3", "Downstream3", 3)

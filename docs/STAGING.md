@@ -1,84 +1,76 @@
-# Staging environment (dev.aquilla.app)
+# Staging environment
 
-Staging mirrors production so fixes can be validated on a real deploy before QA. It is the
-`Ready for Review` → `Ready for QA` target in the `/issue` workflow (see `AGENTS.md`).
+Staging mirrors production on isolated infrastructure so fixes can be validated
+before QA. It is the `Ready for Review` -> `Ready for QA` target in the
+`/issue` workflow.
 
 | Surface | Worker / resource | URL |
 | --- | --- | --- |
-| SPA | `aquilla-web-staging` | https://dev.aquilla.app |
-| Identity + chat | `aquilla-dev-identity` | https://api.dev.aquilla.app/identity/*, `/chat/*` |
-| Sync | `aquilla-sync-worker-staging` | https://api.dev.aquilla.app/sync/* |
-| Data | Neon `staging` branch via Hyperdrive | project `sweet-paper-88472094`, branch `br-old-credit-aja5brf7` |
-| Media | R2 `aquilla-snapshots-staging` | — |
+| SPA | `aquilla-web-staging` | https://staging.aquilla.app |
+| Identity + chat | `aquilla-staging-identity` | https://api.staging.aquilla.app/identity/*, `/chat/*` |
+| Sync | `aquilla-sync-worker-staging` | https://api.staging.aquilla.app/sync/* |
+| Data | Neon `staging` branch via Hyperdrive | project `sweet-paper-88472094`, branch `staging` |
+| Media | R2 `aquilla-snapshots-staging` | - |
 
-Account: **Frontier R&D** (`6a80496d1e59948a9cbaa3c643ba81d7`). Staging has **no** dev auth
-bypass (`WRANGLER_LOCAL`/`__dev__` routes are local-only) — sign in with a real account.
+Account: **Frontier R&D** (`6a80496d1e59948a9cbaa3c643ba81d7`). Staging has
+no dev auth bypass (`WRANGLER_LOCAL` / `__dev__` routes are local-only), so sign
+in with a real account.
 
 ## Routine deploy
 
-From repo root, with a Cloudflare token that has zone-route perms (same as prod deploys):
+From repo root, with a Cloudflare token that has zone-route permissions:
 
 ```bash
-pnpm run deploy:aquilla:staging          # SPA + sync + auth
+pnpm run deploy:aquilla:staging
+
 # or piecemeal:
 pnpm run deploy:aquilla:staging:spa
 pnpm run deploy:aquilla:staging:sync
 pnpm run deploy:aquilla:staging:auth
 ```
 
-The SPA script builds with `VITE_AUTH_BASE` / `VITE_SYNC_WORKER_HOST` / `VITE_CHAT_BASE`
-pointed at `api.dev.aquilla.app`. (CI also deploys on push to the `dev` branch — see
-`.github/workflows/deploy.yml` — but that path uses CI's non-zone token.)
+The staging SPA is built with `VITE_AUTH_BASE`, `VITE_SYNC_WORKER_HOST`, and
+`VITE_CHAT_BASE` pointed at `api.staging.aquilla.app`. Worker deploys run a
+target-aware Neon schema guard before publishing.
 
-## One-time provisioning (FRO-146)
+## Neon refresh model
 
-Staging worker envs, the staging D1, R2, and DO namespace already exist in the
-`wrangler.toml` files. The remaining steps move staging onto Neon (to match prod) and wire
-the missing pieces. Run these once:
+Staging is a writable Neon child branch of `production`. Neon uses copy-on-write
+storage, so the branch shares production pages and only accrues storage for
+staging-specific deltas.
 
-1. **Neon staging branch** — already created: `staging` (`br-old-credit-aja5brf7`), forked
-   from prod. Grab its **pooled** connection string from the Neon console or MCP. Treat it
-   as a secret; do not commit it.
+Reset staging from production manually:
 
-2. **Create the staging Hyperdrive config** and paste its id into BOTH
-   `auth-worker/wrangler.toml` and `sync-worker/wrangler.toml` (`[[env.staging.hyperdrive]]`,
-   replacing `REPLACE_WITH_STAGING_HYPERDRIVE_ID`):
+```bash
+pnpm neon:refresh:staging
+```
 
-   ```bash
-   wrangler hyperdrive create aquilla-staging \
-     --connection-string="<neon staging pooled connection string>" \
-     --caching-disabled
-   ```
+GitHub Actions also runs the same command weekly on Sunday at 4:07 a.m.
+America/New_York (`.github/workflows/staging-neon-refresh.yml`). The refresh
+restores the `staging` branch from `production`, applies any pending repo
+migrations, then checks the staging API health endpoint.
 
-3. **Load the schema** onto the Neon staging branch if the fork didn't already carry it
-   (the branch inherits prod data at fork time, so usually nothing to do):
+## Credentials and bindings
 
-   ```bash
-   # only if needed:
-   psql "<neon staging connection string>" -f db/postgres/schema.sql
-   ```
+- CI needs `NEON_API_KEY` to resolve branch connection strings dynamically.
+- Optional project-read health checks use `STAGING_API_PROJECT_READ_URL` and
+  `STAGING_API_PROJECT_READ_TOKEN`.
+- Static `NEON_STAGING_PG_*` secrets are supported as fallback for direct local
+  migration checks, but should not be the primary CI path because branch
+  endpoints can change during one-time branch replacement.
+- Existing workers keep the Hyperdrive binding id
+  `822231ade4da4db5b1955702e13d1ac3`; update the Hyperdrive origin connection
+  string instead of changing `wrangler.toml`.
 
-4. **Set worker secrets** for both staging workers (same signing keys as prod so tokens
-   interoperate during cross-env testing):
+## Verification
 
-   ```bash
-   cd auth-worker
-   wrangler secret put SECRET_KEY        --env staging
-   wrangler secret put SYNC_SECRET_KEY   --env staging
-   wrangler secret put OPENROUTER_API_KEY --env staging
-   cd ../sync-worker
-   wrangler secret put SYNC_SECRET_KEY   --env staging
-   ```
+After a reset or branch replacement:
 
-5. **DNS** — ensure `dev.aquilla.app` and `api.dev.aquilla.app` resolve on the `aquilla.app`
-   zone (proxied CNAME/A records). The Workers Routes in the `[env.staging]` blocks attach
-   on the first `--env=staging` deploy with a zone-perm token.
+```bash
+pnpm neon:status:staging
+curl https://api.staging.aquilla.app/identity/api/v2/health
+```
 
-6. **Deploy** (`pnpm run deploy:aquilla:staging`) and **verify**:
-   - `https://dev.aquilla.app` loads the SPA.
-   - Sign in with a real account; create a project; confirm the write lands in the Neon
-     `staging` branch (not prod) and `aquilla-snapshots-staging`.
-   - Confirm the `__dev__` bypass routes 404 on staging.
-
-When all six are done, FRO-146 is complete. The `/issue ... --deploy` flow then has a live
-target.
+Then load https://staging.aquilla.app, sign in with a real account, open a
+project, and confirm writes land in the Neon `staging` branch and
+`aquilla-snapshots-staging`, not production.

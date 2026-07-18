@@ -52,7 +52,7 @@ export const env = {
   DEFAULT_LLM_MODEL: "anthropic/claude-sonnet-4.5",
   OPENROUTER_API_KEY: undefined as string | undefined,
   ENVIRONMENT: "test",
-  // AI budget controls (FRO-265). Tests override these per-suite as needed.
+  // AI budget controls (AQU-265). Tests override these per-suite as needed.
   AI_BUDGET_ENFORCE: undefined as string | undefined,
   AI_ALLOWED_MODELS: undefined as string | undefined,
   AI_USER_DAILY_REQUEST_LIMIT: undefined as string | undefined,

@@ -1,5 +1,5 @@
 /**
- * Tests for RuleEditor logic helpers (FRO-195).
+ * Tests for RuleEditor logic helpers (AQU-195).
  * Tests pattern→RuleCheck mapping, literal escaping, and regex validation.
  * No React render required — pure logic tests.
  */

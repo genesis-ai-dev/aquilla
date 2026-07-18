@@ -1,4 +1,4 @@
-// FRO-214: Project active/inactive lifecycle toggle endpoint tests.
+// AQU-214: Project active/inactive lifecycle toggle endpoint tests.
 //
 // Tests:
 //  1. project_lead+ can deactivate a project (PATCH returns isActive: false)

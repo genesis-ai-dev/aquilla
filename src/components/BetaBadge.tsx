@@ -7,6 +7,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { MessageCircleIcon } from "lucide-react"
 
@@ -17,9 +18,7 @@ export function BetaBadge() {
 
   return (
     <Dialog>
-      <DialogTrigger className="inline-flex cursor-pointer items-center rounded-full bg-gradient-to-r from-violet-500 to-pink-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm transition-transform hover:scale-105 active:scale-95">
-        Beta
-      </DialogTrigger>
+      <DialogTrigger render={<Badge className="cursor-pointer">Beta</Badge>} />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Heads up — we're in beta</DialogTitle>

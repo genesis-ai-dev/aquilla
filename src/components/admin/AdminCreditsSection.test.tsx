@@ -116,8 +116,8 @@ describe("AdminCreditsSection — agent spend is visually highlighted", () => {
   })
 })
 
-describe("AdminCreditsSection — FRO-414 regression: each column binds to its own distinct bucket", () => {
-  // WHY: FRO-414 was reported as Day-spend / Agent(day) / Week-spend / Agent(wk)
+describe("AdminCreditsSection — AQU-414 regression: each column binds to its own distinct bucket", () => {
+  // WHY: AQU-414 was reported as Day-spend / Agent(day) / Week-spend / Agent(wk)
   // showing duplicated values. Four distinct fixture numbers make a future
   // transposition between these columns fail loudly rather than passing by
   // coincidence (as it could if two of the four happened to share a value).

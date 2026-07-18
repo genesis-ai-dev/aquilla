@@ -1,8 +1,9 @@
 /**
  * AgentRunView tests — the run timeline must show the user what the agent
- * DID (steps with verdicts + expandable results), what it SAID (markdown),
- * what it COST (usage line), and when it FAILED or got CAPPED — the
- * transparency half of the propose-then-apply trust model.
+ * DID (tool chips with verdicts + expandable results) IN THE ORDER it did it
+ * (chips interleaved with prose, not stacked), what it SAID (markdown), what
+ * it COST (usage line), and when it FAILED or got CAPPED — the transparency
+ * half of the propose-then-apply trust model.
  */
 
 import { describe, it, expect } from "vitest"
@@ -15,28 +16,28 @@ function makeRun(overrides: Partial<AgentRunUi> = {}): AgentRunUi {
     localId: "run-local-1",
     prompt: "Draft the untranslated verses in this chapter",
     runId: "run-1",
-    assistantText: "",
-    steps: [],
-    proposals: [],
+    items: [],
     status: "ok",
     ...overrides,
   }
 }
 
 describe("AgentRunView", () => {
-  it("renders the prompt, steps with verdicts, and expandable result summaries", () => {
+  it("renders the prompt, tool chips with verdicts, and expandable result summaries", () => {
     render(
       <AgentRunView
         run={makeRun({
-          steps: [
+          items: [
             {
+              id: "i0",
+              kind: "tool",
               step: 1,
-              kind: "sql",
+              tool: "sql",
               summary: "SELECT cell_id FROM cells WHERE …",
               ok: true,
               resultSummary: "#c1|MRK 4:1|∅\n#c2|MRK 4:2|∅",
             },
-            { step: 2, kind: "emit", summary: "2 events" }, // still running
+            { id: "i1", kind: "tool", step: 2, tool: "emit", summary: "2 events" }, // still running
           ],
         })}
       />,
@@ -52,10 +53,52 @@ describe("AgentRunView", () => {
     expect(screen.getByText(/#c1\|MRK 4:1/)).toBeInTheDocument()
   })
 
+  it("interleaves prose and tool chips in timeline order", () => {
+    const { container } = render(
+      <AgentRunView
+        run={makeRun({
+          items: [
+            { id: "i0", kind: "text", text: "Reading the chapter first." },
+            { id: "i1", kind: "tool", step: 1, tool: "read", summary: "MRK 4 · 32 cells", ok: true },
+            { id: "i2", kind: "text", text: "Now drafting." },
+          ],
+        })}
+      />,
+    )
+    const text = container.textContent ?? ""
+    const first = text.indexOf("Reading the chapter first.")
+    const chip = text.indexOf("MRK 4 · 32 cells")
+    const second = text.indexOf("Now drafting.")
+    expect(first).toBeGreaterThan(-1)
+    expect(chip).toBeGreaterThan(first)
+    expect(second).toBeGreaterThan(chip)
+  })
+
+  it("renders proposals inline through the renderProposal seam, in order", () => {
+    render(
+      <AgentRunView
+        run={makeRun({
+          items: [
+            { id: "i0", kind: "text", text: "Staged the drafts:" },
+            {
+              id: "i1",
+              kind: "proposal",
+              proposal: { proposalId: "p1", runId: "run-1", events: [], summary: "Draft 2 cells" },
+            },
+          ],
+        })}
+        renderProposal={(p) => <div data-testid="proposal-slot">{p.summary}</div>}
+      />,
+    )
+    expect(screen.getByTestId("proposal-slot")).toHaveTextContent("Draft 2 cells")
+  })
+
   it("renders assistant text as markdown", () => {
     render(
       <AgentRunView
-        run={makeRun({ assistantText: "## Findings\n\n- **3 cells** untranslated" })}
+        run={makeRun({
+          items: [{ id: "i0", kind: "text", text: "## Findings\n\n- **3 cells** untranslated" }],
+        })}
       />,
     )
     expect(screen.getByRole("heading", { name: "Findings" })).toBeInTheDocument()
@@ -75,7 +118,7 @@ describe("AgentRunView", () => {
     ).toBeInTheDocument()
   })
 
-  it("renders error and capped states, and a running indicator", () => {
+  it("renders error and capped states, and a running indicator with progress", () => {
     const { unmount } = render(
       <AgentRunView run={makeRun({ status: "error", errorMessage: "Out of credits." })} />,
     )
@@ -86,7 +129,15 @@ describe("AgentRunView", () => {
     expect(screen.getByText(/hit its step\/token cap/)).toBeInTheDocument()
     second.unmount()
 
-    render(<AgentRunView run={makeRun({ status: "running" })} />)
+    const third = render(<AgentRunView run={makeRun({ status: "running" })} />)
     expect(screen.getByText("Agent working…")).toBeInTheDocument()
+    third.unmount()
+
+    render(
+      <AgentRunView
+        run={makeRun({ status: "running", progress: { label: "Drafting MRK 4", done: 3, total: 12 } })}
+      />,
+    )
+    expect(screen.getByText("Drafting MRK 4 — 3/12")).toBeInTheDocument()
   })
 })

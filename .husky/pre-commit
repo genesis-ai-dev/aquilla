@@ -1,26 +1,26 @@
 #!/usr/bin/env sh
 # Warn-only scope guard: a branch should carry commits for ONE ticket.
 #
-# When QA reviews a PR-to-main they map it by the FRO-### its commits carry
-# (AGENTS.md → "Issue workflow"). A branch named for FRO-A that also holds
-# FRO-B commits makes that mapping a lie and is the usual symptom of agents
+# When QA reviews a PR-to-main they map it by the AQU-### its commits carry
+# (AGENTS.md → "Issue workflow"). A branch named for AQU-A that also holds
+# AQU-B commits makes that mapping a lie and is the usual symptom of agents
 # piling unrelated work onto whatever branch happens to be checked out.
 #
 # This never blocks (prototyping fast-path stays smooth) — it just surfaces the
 # drift so you can move the unrelated work to its own branch/worktree.
 
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-bt=$(printf '%s' "$branch" | grep -oiE 'fro-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]')
+bt=$(printf '%s' "$branch" | grep -oiE 'aqu-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]')
 
 # No ticket in the branch name → nothing to compare against.
 [ -z "$bt" ] && exit 0
 
 # Tickets referenced by commits already on this branch (vs origin/main).
-# `|| true`: husky runs hooks with `sh -e`, and grep -v exits 1 when nothing
-# survives (the normal single-ticket case) — without it the guard aborts the
-# commit it was designed to merely warn about.
+# `|| true`: husky runs hooks with `sh -e`, and grep exits 1 when it selects
+# nothing — i.e. on every clean single-ticket branch — which turned this
+# warn-only guard into a hard commit blocker. Guarantee the promise above.
 others=$(git log --pretty=%s origin/main..HEAD 2>/dev/null \
-  | grep -oiE 'FRO-[0-9]+' | tr '[:lower:]' '[:upper:]' | sort -u | grep -v "^${bt}$" || true)
+  | grep -oiE 'AQU-[0-9]+' | tr '[:lower:]' '[:upper:]' | sort -u | grep -v "^${bt}$" || true)
 
 if [ -n "$others" ]; then
   echo "[pre-commit] ⚠ branch '$branch' (ticket $bt) already has commits for OTHER tickets:"

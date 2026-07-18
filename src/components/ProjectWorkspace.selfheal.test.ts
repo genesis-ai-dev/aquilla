@@ -8,7 +8,7 @@
  * `shouldSelfHealZeroFileLink` is the pure gating guard ProjectWorkspace's
  * zero-file self-heal effect uses to decide whether to fire POST /link/sync
  * on project load. These tests cover the guard directly (same pattern as
- * `shouldPatchSystemPrompt` — FRO-234) rather than rendering the full
+ * `shouldPatchSystemPrompt` — AQU-234) rather than rendering the full
  * component, which requires no live-UI verification for the LOGIC (the
  * network call + refresh() side effect still needs a dev-stack check).
  */

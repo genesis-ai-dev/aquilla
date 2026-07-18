@@ -124,7 +124,7 @@ export function BiblicaCaseStudy() {
             </p>
           </div>
           <div className="aq-reveal" style={{ maxWidth: "min(760px, 90vw)", margin: "36px auto 0" }}>
-            <blockquote className="aq-quote aq-display" style={{ color: "var(--aq-text)", textAlign: "center" }}>
+            <blockquote className="aq-quote aq-display" style={{ color: "var(--aq-text)", textAlign: "center", marginInline: "auto" }}>
               It's been an amazing experience to move outside our comfort zone and not feel threatened.
             </blockquote>
           </div>
@@ -164,7 +164,7 @@ export function BiblicaCaseStudy() {
             </p>
           </div>
           <div className="aq-reveal" style={{ maxWidth: "min(760px, 90vw)", margin: "36px auto 0" }}>
-            <blockquote className="aq-quote aq-display" style={{ color: "var(--aq-text)", textAlign: "center" }}>
+            <blockquote className="aq-quote aq-display" style={{ color: "var(--aq-text)", textAlign: "center", marginInline: "auto" }}>
               In a situation where AI can be seen as impersonal, the Frontier team provide an incredibly
               personal experience.
             </blockquote>
@@ -238,7 +238,7 @@ export function BiblicaCaseStudy() {
         <section className="aq-container aq-section" style={{ paddingTop: 0 }}>
           <div className="aq-reveal" style={{ maxWidth: "min(760px, 90vw)", margin: "0 auto", textAlign: "center" }}>
             <span className="aq-eyebrow">Why speed matters</span>
-            <blockquote className="aq-quote aq-display" style={{ marginTop: 22, color: "var(--aq-text)" }}>
+            <blockquote className="aq-quote aq-display" style={{ marginTop: 22, color: "var(--aq-text)", marginInline: "auto" }}>
               As organisations move into last-mile-first areas, you can't take up to ten years to translate
               a Bible. New ways are going to have to be found to speed up Bible translation if we are to
               meet Last-Mile-First goals.
@@ -253,8 +253,8 @@ export function BiblicaCaseStudy() {
             <h2 className="aq-display">Scale your translation, <span className="aq-gold-text aq-display-italic">not your team.</span></h2>
             <p>Whether you're chasing a print-ready output or a faster path into last-mile languages, Aquilla gives one expert maximum leverage. It's free, and it's live today.</p>
             <div className="aq-cta-actions">
-              <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Start translating free</a>
-              <a href="/homepage" className="aq-btn aq-btn-ghost aq-btn-lg">Back to homepage</a>
+              <a href="https://calendar.app.google/etybAvBtu7Vm6BDb8" target="_blank" rel="noopener noreferrer" className="aq-btn aq-btn-gold aq-btn-lg">Book a call with our team</a>
+              <a href="/onboarding" className="aq-btn aq-btn-ghost aq-btn-lg">Or start free today</a>
             </div>
           </div>
         </section>

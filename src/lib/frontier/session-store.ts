@@ -23,7 +23,38 @@ type Listener = () => void
 const listeners = new Set<Listener>()
 function notify() { for (const l of listeners) l() }
 
+// Cross-tab reconciliation (FRO-367). The session lives in IndexedDB, which
+// (unlike localStorage) emits no cross-tab events, so signing into account B
+// in one tab left every other tab showing account A — and an org switcher
+// listing orgs the now-active account can't access — until a manual reload.
+// We ping a localStorage key on every write; other tabs hear the `storage`
+// event and re-run notify(), which drives the same re-read path the writing
+// tab already uses (useAccounts → useFrontierSession → OrgContext). The
+// browser never delivers `storage` to the writer, so there's no echo, and
+// notify() performs no writes, so there's no loop. Mirrors the existing
+// cross-tab pattern in lib/store/user-api-keys.ts.
+const PING_KEY = "frontier:session-ping"
+
+function pingOtherTabs(): void {
+  try {
+    localStorage.setItem(PING_KEY, `${Date.now()}:${crypto.randomUUID()}`)
+  } catch {
+    // localStorage unavailable (quota, private mode) — cross-tab sync degrades
+    // to the pre-fix behavior (reload to reconcile); this tab is unaffected.
+  }
+}
+
+let crossTabInstalled = false
+function ensureCrossTabListener(): void {
+  if (crossTabInstalled || typeof window === "undefined") return
+  crossTabInstalled = true
+  window.addEventListener("storage", (e) => {
+    if (e.key === PING_KEY) notify()
+  })
+}
+
 export function subscribeSession(listener: Listener): () => void {
+  ensureCrossTabListener()
   listeners.add(listener)
   return () => { listeners.delete(listener) }
 }
@@ -77,6 +108,7 @@ async function writeEnvelope(env: Envelope): Promise<void> {
     clearAuthHint()
   }
   notify()
+  pingOtherTabs()
 }
 
 export interface SessionSummary {

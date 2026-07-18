@@ -31,19 +31,19 @@ describe("GET /api/v2/orgs/:orgId/groups", () => {
     expect(res.status).toBe(403)
   })
 
-  // Regression: FRO-158 — GET /orgs/:id/groups returned 500 after the Postgres
+  // Regression: AQU-158 — GET /orgs/:id/groups returned 500 after the Postgres
   // cutover because the is_internal column was missing from the live Neon DB.
   // This test verifies: (a) the endpoint returns 200 (not 500), (b) is_internal /
   // isInternal is present and has the correct default value (true), and (c) an
   // org with subgroups (teams) populates the list correctly.
-  it("FRO-158 regression: returns 200 with isInternal field for orgs with subgroups", async () => {
+  it("AQU-158 regression: returns 200 with isInternal field for orgs with subgroups", async () => {
     await seedGroups()
     // Seed a second group explicitly marked as non-internal (public team)
     await env.AQUILLA_PG.prepare(
       "INSERT INTO groups (id, org_id, name, created_by, is_internal) VALUES (11, 1, 'East Africa', 1, false)",
     ).run()
     const res = await app.request("/api/v2/orgs/1/groups", { headers: authHeader(await jwtFor("wendi")) }, env)
-    // Must be 200 — was 500 before FRO-158 fix (missing is_internal column on Neon)
+    // Must be 200 — was 500 before AQU-158 fix (missing is_internal column on Neon)
     expect(res.status).toBe(200)
     const body = (await res.json()) as { groups: Array<{ id: number; name: string; isInternal: boolean; viewerIsMember: boolean }> }
     // Org has two subgroups — both must appear
@@ -67,12 +67,12 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     const body = (await res.json()) as { id: number; name: string; description: string | null; members: Array<{ username: string }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number }> }
     expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "wendi"])
     expect(body.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }])
-    // FRO-264: description must be present in the detail response (null when not set)
+    // AQU-264: description must be present in the detail response (null when not set)
     expect(Object.keys(body)).toContain("description")
     expect(body.description).toBeNull()
   })
 
-  it("FRO-264: returns description from group detail when set", async () => {
+  it("AQU-264: returns description from group detail when set", async () => {
     await seedGroups()
     await env.AQUILLA_PG.prepare("UPDATE groups SET description = 'West Africa translation team' WHERE id = 10").run()
     const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)

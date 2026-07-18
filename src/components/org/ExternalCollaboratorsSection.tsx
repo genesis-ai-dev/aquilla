@@ -10,10 +10,11 @@ import {
   deriveExternalCollaborators,
   type ExternalCollaborator,
 } from "@/lib/frontier/external-collaborators"
+import { RoleLabel } from "@/components/RoleLabel"
 import { toUserFacingError } from "@/lib/errors/user-error"
 
 /**
- * FRO-326: org-level governance view of everyone who reaches this org's
+ * AQU-326: org-level governance view of everyone who reaches this org's
  * projects WITHOUT being an org member (invite-link redeem, bulk-add,
  * group). Derived on read from the members matrix — see
  * lib/frontier/external-collaborators.ts for why this is never a stored
@@ -96,7 +97,7 @@ export function ExternalCollaboratorsSection({
                   className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
                 >
                   <span className="max-w-40 truncate">{g.projectName}</span>
-                  <span className="text-muted-foreground">· {g.roleName}</span>
+                  <span className="text-muted-foreground">· <RoleLabel name={g.roleName} /></span>
                   {g.source === "override" ? (
                     <Button
                       size="icon"

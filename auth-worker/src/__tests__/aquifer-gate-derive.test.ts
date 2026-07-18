@@ -1,4 +1,4 @@
-// FRO-460 — the Bible Aquifer gate's derive-on-read logic.
+// AQU-460 — the Bible Aquifer gate's derive-on-read logic.
 //
 // WHY: the prior design persisted `bibleResourcesEnabled` via a client
 // load-time effect, which silently re-enabled an explicit OFF (a trust bug).
@@ -43,7 +43,7 @@ function freshProjectId(): string {
   return `11111111-1111-4111-8${String(counter).padStart(3, "0")}-111111111111`
 }
 
-describe("isBibleResourcesEnabled — FRO-460 derive-on-read matrix", () => {
+describe("isBibleResourcesEnabled — AQU-460 derive-on-read matrix", () => {
   it("unset + scripture file (usfm) -> true (derived default-on)", async () => {
     const p = freshProjectId()
     await seedProject(p)

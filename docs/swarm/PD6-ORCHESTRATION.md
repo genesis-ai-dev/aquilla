@@ -1,4 +1,4 @@
-# PD6 Swarm — Prototype Debugging wave 6 (FRO-262 / FRO-263 / FRO-264)
+# PD6 Swarm — Prototype Debugging wave 6 (AQU-262 / AQU-263 / AQU-264)
 
 Started: 2026-06-10. Orchestrator session: ccd e88edca8.
 Scope: **user-specified** — only the three issues filed 2026-06-10 from voice-dictated
@@ -6,9 +6,9 @@ walkthrough feedback. NOT a full project drain.
 
 ## §0 STOP checklist (the goal) — CONVERGED 2026-06-10, promoted main@9628782
 
-- [x] FRO-262, FRO-263, FRO-264 each at **Fixed** (verified) or honestly **blocked** with a Linear note.
+- [x] AQU-262, AQU-263, AQU-264 each at **Fixed** (verified) or honestly **blocked** with a Linear note.
 - [x] Integration green: `npx tsc -b --noEmit` + `npx vitest run` (2510/2510); `npm run build` ✓ before promotion.
-- [x] `cd auth-worker && npx tsc --noEmit && npm test` green (256/256) — FRO-264 server commit included.
+- [x] `cd auth-worker && npx tsc --noEmit && npm test` green (256/256) — AQU-264 server commit included.
 - [x] Each fix verified on the **real dev stack (live UI)** by the singleton UI-QA agent — 262 PASS,
       263 PASS, 264 PARTIAL (description-prefill + sub-600 gating residuals traced in TRACES.md).
 - [x] Promoted to main with main's tree clean apart from protected files (--no-ff merge 9628782;
@@ -19,8 +19,8 @@ walkthrough feedback. NOT a full project drain.
 ## §EXCLUDED
 
 - **Out of user scope** (project has other open issues; user said "swarm these [three]"):
-  FRO-183, FRO-173, FRO-209, FRO-259, FRO-257, FRO-193, FRO-246, FRO-221 (Todo/Backlog — untouched).
-- **Dispatched locks held by other actors** (skip per claim rule): FRO-179, FRO-227, FRO-224.
+  AQU-183, AQU-173, AQU-209, AQU-259, AQU-257, AQU-193, AQU-246, AQU-221 (Todo/Backlog — untouched).
+- **Dispatched locks held by other actors** (skip per claim rule): AQU-179, AQU-227, AQU-224.
 
 ## §1 Operating model
 
@@ -37,7 +37,7 @@ walkthrough feedback. NOT a full project drain.
     `src/pages/AdminConsole.tsx`
   - untracked: `auth-worker/src/__tests__/platform-admin-access.test.ts`, `pd5-settings-text.txt`, `tn-fixture.tsv`
 - **CAUTION exception**: `auth-worker/src/services/org-permissions.ts` is also dirty in main
-  (hunks at ~L2 and ~L131 only). FRO-264 needs a 3-line change to `getOrgGroupDetail` (~L640,
+  (hunks at ~L2 and ~L131 only). AQU-264 needs a 3-line change to `getOrgGroupDetail` (~L640,
   disjoint hunks) to return `description`. Agent puts that change in an **isolated, clearly
   labeled commit**; frontend written defensively (works with or without it). At promotion, if
   the dirty file blocks the merge, the server commit is held back on the branch and traced —
@@ -51,18 +51,18 @@ Single wave — all three surfaces are file-disjoint, no dependency edges.
 
 | WS | Issue | Branch | Worktree | Owns (surface) | Agent | Status |
 |----|-------|--------|----------|----------------|-------|--------|
-| WS-262 | FRO-262 tour copy + org-switcher step | `swarm/fro-262` | `.worktrees/fro-262` | `src/components/onboarding/ProductTour.tsx`, `src/components/org/OrgSidebar.tsx`, `src/components/org/OrgSwitcher.tsx`, new test files under those dirs | a615e7d (sonnet) | agent done @743c78e · 13/13 tests · Linear Fixed |
-| WS-263 | FRO-263 hero subtitle centering | `swarm/fro-263` | `.worktrees/fro-263` | `src/pages/Homepage/homepage.css`, `src/pages/Homepage/Homepage.tsx` | a6499e4 (sonnet) | agent done @de03d11 (+bonus: `.aq-blitz-verse` same-reset fix) · 2308 tests green · Linear Fixed |
-| WS-264 | FRO-264 team edit discoverability + project links | `swarm/fro-264` | `.worktrees/fro-264` | `src/components/org/TeamDetail.tsx`, `src/lib/frontier/teams.ts`; CAUTION isolated commit: `auth-worker/src/services/org-permissions.ts` | a213c8f (sonnet) | agent done @a25de34 (frontend) + db0a005 (server, isolated) · root 2308 + aw 193 tests green · spec members-and-sharing.md updated · Linear Fixed |
+| WS-262 | AQU-262 tour copy + org-switcher step | `swarm/fro-262` | `.worktrees/fro-262` | `src/components/onboarding/ProductTour.tsx`, `src/components/org/OrgSidebar.tsx`, `src/components/org/OrgSwitcher.tsx`, new test files under those dirs | a615e7d (sonnet) | agent done @743c78e · 13/13 tests · Linear Fixed |
+| WS-263 | AQU-263 hero subtitle centering | `swarm/fro-263` | `.worktrees/fro-263` | `src/pages/Homepage/homepage.css`, `src/pages/Homepage/Homepage.tsx` | a6499e4 (sonnet) | agent done @de03d11 (+bonus: `.aq-blitz-verse` same-reset fix) · 2308 tests green · Linear Fixed |
+| WS-264 | AQU-264 team edit discoverability + project links | `swarm/fro-264` | `.worktrees/fro-264` | `src/components/org/TeamDetail.tsx`, `src/lib/frontier/teams.ts`; CAUTION isolated commit: `auth-worker/src/services/org-permissions.ts` | a213c8f (sonnet) | agent done @a25de34 (frontend) + db0a005 (server, isolated) · root 2308 + aw 193 tests green · spec members-and-sharing.md updated · Linear Fixed |
 
 Root-cause notes handed to agents (verified by orchestrator pre-dispatch):
-- FRO-262: wrong copy at ProductTour.tsx L64-68 ("Switch organizations…" on `account-switcher`
+- AQU-262: wrong copy at ProductTour.tsx L64-68 ("Switch organizations…" on `account-switcher`
   anchor); AccountSwitcher menu = Preferences / Add another account / Log out / Sign out of all.
   OrgSwitcher (OrgSidebar.tsx L27) has no `data-tour` anchor.
-- FRO-263: `.aq-root p { margin: 0 }` reset (homepage.css L110, specificity 0-1-1) beats
+- AQU-263: `.aq-root p { margin: 0 }` reset (homepage.css L110, specificity 0-1-1) beats
   `.aq-hero-sub` (L279, 0-1-0) → `margin: 26px auto 0` never applies → 60ch block pinned left.
   Confirmed live via computed style (margin 0).
-- FRO-264: Edit affordance exists (TeamDetail.tsx L191, tiny underlined link, isAdmin ≥600);
+- AQU-264: Edit affordance exists (TeamDetail.tsx L191, tiny underlined link, isAdmin ≥600);
   `handleEditOpen` seeds description with "" (L170) and `getOrgGroupDetail` (org-permissions.ts
   L640) doesn't select description → silent wipe on save. Projects rendered as plain spans
   (~L449); org ProjectsList navigates to `/projects/${id}`.
@@ -82,8 +82,8 @@ Root-cause notes handed to agents (verified by orchestrator pre-dispatch):
   profile-lock interference (see reference_dev_qa_stale_vite_profile_lock).
 - 2026-06-10 · integration @6bc4851 build ✓ (brand check OK).
 - 2026-06-10 · UI-QA (agent a724ffa, singleton, vite :5174 from pd6 worktree, stale-vite check ✓):
-  FRO-262 **PASS** (all items) · FRO-263 **PASS** (all items incl. 390px + `.aq-blitz-verse` bonus) ·
-  FRO-264 **PARTIAL** — buttons/name-prefill/rename-persist/project-links PASS; **description-prefill
+  AQU-262 **PASS** (all items) · AQU-263 **PASS** (all items incl. 390px + `.aq-blitz-verse` bonus) ·
+  AQU-264 **PARTIAL** — buttons/name-prefill/rename-persist/project-links PASS; **description-prefill
   not live-verified**: port 8788 was held by the user's main-checkout auth-worker, so browser auth
   traffic hit the OLD server — which incidentally verified the defensive no-wipe PATCH path for real.
   Server half covered by auth-worker unit test (groups-read.test.ts). Sub-600 gating NOT VERIFIED
@@ -98,10 +98,10 @@ Root-cause notes handed to agents (verified by orchestrator pre-dispatch):
   201/201 ✓ (previous 16 runtime skips ran this time) · build ✓. (First attempt of this gate
   was killed silently at 10min by an erroneous timeout param — re-run with stage markers.)
 - 2026-06-10 · FF promotion REFUSED — main advanced again: the concurrent session promoted its
-  entire UXA wave (FRO-265…FRO-295, ~60 commits, main → e83c5f8). Overlap check vs wave files:
+  entire UXA wave (AQU-265…AQU-295, ~60 commits, main → e83c5f8). Overlap check vs wave files:
   **NO_OVERLAP**. Merged main into integration again → d717bbc; re-gating before promotion.
 - 2026-06-10 · gate on d717bbc: root tsc ✓ · vitest 2456/2456 ✓ · build ✓ · **aw tsc RED** —
-  TS7022 in `auth-worker/src/__tests__/rls-backstop.test.ts` (UXA FRO-289 file, PRE-EXISTING on
+  TS7022 in `auth-worker/src/__tests__/rls-backstop.test.ts` (UXA AQU-289 file, PRE-EXISTING on
   main; their gate evidently skipped `cd auth-worker && tsc`). Surgical orchestrator fix 7cdb650
   (annotate pgliteExec as PgExecutor, 3 lines). aw then GREEN: tsc ✓ · vitest 256/256 ✓.
 - 2026-06-10 · second FF attempt REFUSED — main → 03286f1 (UXA still promoting). Delta overlaps

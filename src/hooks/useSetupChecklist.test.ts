@@ -12,13 +12,13 @@ describe("deriveChecklistState", () => {
     expect(state.totalCount).toBe(4)
   })
 
-  // FRO-302: import files is the first step and completes when fileCount > 0
-  it("FRO-302: marks importFiles complete when fileCount > 0", () => {
+  // AQU-302: import files is the first step and completes when fileCount > 0
+  it("AQU-302: marks importFiles complete when fileCount > 0", () => {
     const state = deriveChecklistState({}, 0, false, 1)
     expect(state.importFiles).toBe(true)
   })
 
-  it("FRO-302: importFiles is false when fileCount is 0", () => {
+  it("AQU-302: importFiles is false when fileCount is 0", () => {
     const state = deriveChecklistState({}, 0, false, 0)
     expect(state.importFiles).toBe(false)
   })
@@ -53,9 +53,9 @@ describe("deriveChecklistState", () => {
     expect(state.totalCount).toBe(4)
   })
 
-  // FRO-234: saving instructions must mark the step complete. The systemPrompt
+  // AQU-234: saving instructions must mark the step complete. The systemPrompt
   // must be non-empty for aiInstructions to flip — empty string means unsaved.
-  it("FRO-234: aiInstructions requires a non-empty, non-whitespace systemPrompt", () => {
+  it("AQU-234: aiInstructions requires a non-empty, non-whitespace systemPrompt", () => {
     expect(deriveChecklistState({ systemPrompt: "" }, 0, false).aiInstructions).toBe(false)
     expect(deriveChecklistState({ systemPrompt: "   " }, 0, false).aiInstructions).toBe(false)
     expect(deriveChecklistState({ systemPrompt: "Translate carefully." }, 0, false).aiInstructions).toBe(true)
@@ -63,38 +63,38 @@ describe("deriveChecklistState", () => {
 })
 
 describe("wasSetupAutoShown / markSetupAutoShown", () => {
-  // FRO-244: localStorage helpers for auto-surface shown-once tracking.
+  // AQU-244: localStorage helpers for auto-surface shown-once tracking.
   beforeEach(() => {
     // Clear only the keys this test group uses so other tests are unaffected.
     localStorage.removeItem("codex.setupAutoShown.p-unit-1")
     localStorage.removeItem("codex.setupAutoShown.p-unit-2")
   })
 
-  it("FRO-244: returns false before first mark, true after", () => {
+  it("AQU-244: returns false before first mark, true after", () => {
     expect(wasSetupAutoShown("p-unit-1")).toBe(false)
     markSetupAutoShown("p-unit-1")
     expect(wasSetupAutoShown("p-unit-1")).toBe(true)
   })
 
-  it("FRO-244: different projects have independent shown flags", () => {
+  it("AQU-244: different projects have independent shown flags", () => {
     markSetupAutoShown("p-unit-1")
     expect(wasSetupAutoShown("p-unit-2")).toBe(false)
   })
 
-  // FRO-244: the shouldAutoOpen guard reads wasSetupAutoShown() directly at
+  // AQU-244: the shouldAutoOpen guard reads wasSetupAutoShown() directly at
   // render time — NOT via mirrored state — so project A→B switches don't
   // inherit A's stale flag. Verify the raw helpers compose correctly for the
   // scenario the panel described:
   //   - Switch to already-shown project → wasSetupAutoShown returns true →
   //     shouldAutoOpen would be false → no pop, flag NOT burned.
-  it("FRO-244: already-shown project returns true immediately (no state lag)", () => {
+  it("AQU-244: already-shown project returns true immediately (no state lag)", () => {
     markSetupAutoShown("p-unit-1")
     // Simulates switching back to the same project: reading at render time
     // returns true immediately, no React state update cycle needed.
     expect(wasSetupAutoShown("p-unit-1")).toBe(true)
   })
 
-  it("FRO-244: unshown project returns false even after another project is marked", () => {
+  it("AQU-244: unshown project returns false even after another project is marked", () => {
     markSetupAutoShown("p-unit-1")
     // B was never shown — switching A→B should NOT inherit A's flag.
     expect(wasSetupAutoShown("p-unit-2")).toBe(false)

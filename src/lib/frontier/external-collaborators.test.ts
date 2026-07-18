@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { deriveExternalCollaborators } from "./external-collaborators"
 import type { ProjectMember } from "@/lib/frontier/members"
 
-// FRO-326: externals must be DERIVED (project/group grant on an org project,
+// AQU-326: externals must be DERIVED (project/group grant on an org project,
 // not an org member) so the list self-heals when the last grant is revoked
 // and the role resolver is never touched.
 

@@ -171,6 +171,41 @@ export async function revokeOrgInvite(jwt: string, orgId: number, token: string)
   if (!res.ok) throw new UserError(res.status, "", "org");
 }
 
+/** Public preview of an org invite (AQU-471) — what JoinOrgPage shows before
+ * the recipient signs in / accepts. */
+export interface OrgInvitePreview {
+  orgId: number;
+  orgName: string | null;
+  /** Inviter's display name (fallback username); null if the account is gone. */
+  invitedBy: string | null;
+  role: OrgRole;
+  expiresAt: string | null;
+  email: string | null;
+}
+
+/**
+ * GET /api/v2/orgs/invite-preview/:token — public, no JWT. Returns null on ANY
+ * failure (unknown/expired/used token, old server, network): JoinOrgPage falls
+ * back to its generic copy and the accept endpoint stays the authority on
+ * token validity.
+ */
+export async function previewOrgInvite(token: string): Promise<OrgInvitePreview | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `${FRONTIER_BASE}/api/v2/orgs/invite-preview/${encodeURIComponent(token)}`,
+      {},
+    );
+    if (!res.ok) {
+      console.warn(`[org-invites] previewOrgInvite → HTTP ${res.status}`);
+      return null;
+    }
+    return (await res.json()) as OrgInvitePreview;
+  } catch (err) {
+    console.warn("[org-invites] previewOrgInvite failed:", err);
+    return null;
+  }
+}
+
 export interface AcceptOrgInviteResult {
   orgId: number;
   orgName: string | null;
@@ -222,6 +257,35 @@ export async function listOrgMembers(jwt: string, orgId: number): Promise<OrgMem
   });
   if (!res.ok) throw new UserError(res.status, "", "org");
   return ((await res.json()) as { members: OrgMember[] }).members;
+}
+
+/**
+ * AQU-485: discriminated result for the org roster fetch, distinguishing
+ * "not an org member at all" from "org policy hides the roster" — both are
+ * 403s server-side, but surfaces that render the Members page need to show
+ * "hidden by org policy" rather than a generic error or an empty roster.
+ * Prefer this over `listOrgMembers` wherever that distinction matters.
+ */
+export type OrgRosterResult =
+  | { kind: "ok"; members: OrgMember[] }
+  | { kind: "no-access" }
+  | { kind: "roster-hidden" };
+
+/**
+ * GET /api/v2/orgs/:orgId/members, preserving the AQU-485
+ * roster-hidden-by-policy signal (`rosterHidden: true` in the 403 body).
+ */
+export async function fetchOrgRoster(jwt: string, orgId: number): Promise<OrgRosterResult> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
+    headers: authHeaders(jwt),
+  });
+  if (res.status === 403) {
+    const body = (await res.json().catch(() => null)) as { rosterHidden?: boolean } | null;
+    return body?.rosterHidden ? { kind: "roster-hidden" } : { kind: "no-access" };
+  }
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  const members = ((await res.json()) as { members: OrgMember[] }).members;
+  return { kind: "ok", members };
 }
 
 export async function addOrgMember(

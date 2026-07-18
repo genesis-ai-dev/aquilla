@@ -135,6 +135,13 @@ export interface FetchFileCellsOptions {
   limit?: number
   /** Resume cursor from a previous page. */
   cursor?: string
+  /**
+   * AQU-538: restrict target rows to a single target-language lane. Source
+   * rows are always included regardless of this filter. Omit (or '') for the
+   * default/all-lanes behavior — never appended to the wire when empty, so
+   * N=1 (no non-default lanes) requests are byte-identical to pre-lane ones.
+   */
+  lane?: string
 }
 
 /** Full-read page plus the M2-1 watermark. Extends the shared `CellsPage`
@@ -160,6 +167,7 @@ export async function fetchFileCells(
   if (opts.side) params.set("side", opts.side)
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
   if (opts.cursor) params.set("cursor", opts.cursor)
+  if (opts.lane) params.set("lane", opts.lane)
   const qs = params.toString()
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
@@ -194,10 +202,14 @@ export async function fetchCellsDelta(
   fileId: string,
   since: number,
   jwt: string,
+  lane?: string,
 ): Promise<CellsDeltaResult> {
+  const params = new URLSearchParams()
+  params.set("since", String(since))
+  if (lane) params.set("lane", lane)
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
-    `/files/${encodeURIComponent(fileId)}/cells?since=${encodeURIComponent(String(since))}`
+    `/files/${encodeURIComponent(fileId)}/cells?${params.toString()}`
   const res = await fetch(url, fetchInit(jwt))
   const body = await readJson<{
     delta?: boolean
@@ -229,10 +241,12 @@ export async function fetchCellsByIds(
   fileId: string,
   cellIds: string[],
   jwt: string,
+  lane?: string,
 ): Promise<CellRow[]> {
   if (cellIds.length === 0) return []
   const params = new URLSearchParams()
   params.set("cellIds", cellIds.join(","))
+  if (lane) params.set("lane", lane)
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}/cells?${params.toString()}`
@@ -266,13 +280,14 @@ export async function streamFileCells(
   onPage: (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>,
   side?: "source" | "target",
   onMeta?: (meta: { maxServerSeq?: number | null }) => void,
+  lane?: string,
 ): Promise<void> {
   let cursor: string | undefined
   // Hard cap on page iterations as a safety belt against a malformed nextCursor
   // loop. At max page size (2000) this allows up to 200k cells per file.
   const MAX_PAGES = 100
   for (let i = 0; i < MAX_PAGES; i++) {
-    const page = await fetchFileCells(projectId, fileId, { side, cursor }, jwt)
+    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane }, jwt)
     if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
@@ -296,6 +311,7 @@ export async function fetchAllFileCells(
   fileId: string,
   jwt: string,
   side?: "source" | "target",
+  lane?: string,
 ): Promise<CellRow[]> {
   const out: CellRow[] = []
   await streamFileCells(
@@ -306,6 +322,8 @@ export async function fetchAllFileCells(
       out.push(...rows)
     },
     side,
+    undefined,
+    lane,
   )
   return out
 }

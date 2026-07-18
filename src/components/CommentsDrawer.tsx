@@ -55,7 +55,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   // Use liveComments (from useComments hook) when available; fall back to cell.threads
   const threads = liveComments !== undefined ? recordsToThreads(liveComments) : cell.threads
 
-  // FRO-427: for cloud projects, gate comment creation by syncRole level so a
+  // AQU-427: for cloud projects, gate comment creation by syncRole level so a
   // viewer (100) doesn't see the "New thread" input only to have the server
   // reject it. The legacy ProjectPermissions path (git-imported) is preserved
   // via `permissions.canEditComments`. Cloud projects have no `project.permissions`
@@ -143,7 +143,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
         </div>
       ) : (
         <div className="border-t p-3">
-          {/* FRO-427: show a human-readable denial for roles that cannot comment. */}
+          {/* AQU-427: show a human-readable denial for roles that cannot comment. */}
           <p className="text-xs text-muted-foreground" data-testid="comments-drawer-denial">
             {commentDenialReason ?? "Read-only (imported from git)"}
           </p>

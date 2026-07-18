@@ -1,5 +1,5 @@
 /**
- * Tests for InterlinearAlignmentPanel — FRO-241 / FRO-240
+ * Tests for InterlinearAlignmentPanel — AQU-241 / AQU-240
  *
  * Covers:
  *   1. Below-threshold (pairCount < MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT) → shows
@@ -7,7 +7,7 @@
  *   2. Low-confidence alignments are filtered: only links ≥ CONFIDENCE_HIGH (0.6)
  *      are surfaced; amber/low links are suppressed.
  *   3. ✓/✕ buttons carry descriptive aria-labels that explain the glosser feedback
- *      loop (FRO-240).
+ *      loop (AQU-240).
  *   4. HelpCircle tooltip text is present on the section header.
  */
 
@@ -47,9 +47,9 @@ function stubModelWithPairCount(pairCount: number): AlignmentModel {
 const noop = () => undefined
 const noSeeds: AlignmentSeed[] = []
 
-// ── FRO-241: insufficient-data empty state ────────────────────────────────────
+// ── AQU-241: insufficient-data empty state ────────────────────────────────────
 
-describe("InterlinearAlignmentPanel — insufficient data (FRO-241)", () => {
+describe("InterlinearAlignmentPanel — insufficient data (AQU-241)", () => {
   it("shows the empty-state message when pairCount < MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT", () => {
     const model = stubModelWithPairCount(MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT - 1)
     render(
@@ -112,9 +112,9 @@ describe("InterlinearAlignmentPanel — insufficient data (FRO-241)", () => {
   })
 })
 
-// ── FRO-241: low-confidence filtering ────────────────────────────────────────
+// ── AQU-241: low-confidence filtering ────────────────────────────────────────
 
-describe("InterlinearAlignmentPanel — low-confidence filtering (FRO-241)", () => {
+describe("InterlinearAlignmentPanel — low-confidence filtering (AQU-241)", () => {
   it("surfaces only high-confidence links (≥0.6) from a warm corpus", () => {
     // Build a real model with enough pairs to be above the threshold.
     // Use repetitive pairs so Dice/EM can accumulate strong associations.
@@ -145,9 +145,9 @@ describe("InterlinearAlignmentPanel — low-confidence filtering (FRO-241)", () 
   })
 })
 
-// ── FRO-240: ✓/✕ aria-labels ─────────────────────────────────────────────────
+// ── AQU-240: ✓/✕ aria-labels ─────────────────────────────────────────────────
 
-describe("InterlinearAlignmentPanel — ✓/✕ button explanations (FRO-240)", () => {
+describe("InterlinearAlignmentPanel — ✓/✕ button explanations (AQU-240)", () => {
   it("confirm button aria-label explains the glosser training loop", () => {
     // Build a real warm model with well-known associations so links appear.
     const n = MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT + 10
@@ -200,9 +200,9 @@ describe("InterlinearAlignmentPanel — ✓/✕ button explanations (FRO-240)", 
   })
 })
 
-// ── FRO-241: section header tooltip ──────────────────────────────────────────
+// ── AQU-241: section header tooltip ──────────────────────────────────────────
 
-describe("InterlinearAlignmentPanel — section header tooltip (FRO-241)", () => {
+describe("InterlinearAlignmentPanel — section header tooltip (AQU-241)", () => {
   it("HelpCircle tooltip on insufficient-data state mentions confirm and reject actions", () => {
     const model = stubModelWithPairCount(0)
     render(
@@ -216,7 +216,7 @@ describe("InterlinearAlignmentPanel — section header tooltip (FRO-241)", () =>
     )
     // AppTooltip is mocked to render its content unconditionally (see mock above) —
     // Base UI's real hover/focus tooltip isn't reliably driveable in happy-dom.
-    // The text must mention both confirm and reject/invalidate to satisfy FRO-240.
+    // The text must mention both confirm and reject/invalidate to satisfy AQU-240.
     const tooltipContents = screen.getAllByTestId("tooltip-content")
     const helpTooltip = tooltipContents.find((el) =>
       /confirm.*reject|reject.*confirm/i.test(el.textContent ?? ""),

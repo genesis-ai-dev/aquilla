@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { useNavigate } from "react-router-dom"
 import { Plus, Search, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
@@ -6,7 +8,12 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Spinner } from "@/components/ui/spinner"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { optionalString, requiredString } from "@/lib/forms/schemas"
+import { useSubmitError } from "@/lib/forms/submit-error"
 import {
   InputGroup,
   InputGroupAddon,
@@ -26,6 +33,11 @@ import {
 } from "@/components/ui/select"
 
 type SortOption = "name" | "members" | "projects"
+
+const createTeamSchema = z.object({
+  name: requiredString("Team name"),
+  description: optionalString,
+})
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "name", label: "Name (A–Z)" },
@@ -49,12 +61,39 @@ export function TeamsList() {
   const [teams, setTeams] = useState<TeamSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
-  const [name, setName] = useState("")
-  const [description, setDescription] = useState("")
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<SortOption>("name")
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const createTeamForm = useForm({
+    defaultValues: { name: "", description: "" },
+    validators: { onSubmit: createTeamSchema },
+    onSubmit: async ({ value }) => {
+      if (!jwt || activeOrgId == null) return
+      clearSubmitError()
+      try {
+        const t = await createTeam(
+          jwt,
+          activeOrgId,
+          value.name.trim(),
+          value.description.trim() || undefined,
+        )
+        setCreating(false)
+        createTeamForm.reset()
+        navigate(`/teams/${t.id}`)
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Couldn't create team.")
+      }
+    },
+  })
 
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
+
+  useEffect(() => {
+    if (!creating) return
+    createTeamForm.reset()
+    clearSubmitError()
+  }, [creating, createTeamForm, clearSubmitError])
 
   useEffect(() => {
     if (!jwt || activeOrgId == null) {
@@ -100,7 +139,7 @@ export function TeamsList() {
           {isAdmin && (
             <Dialog
               open={creating}
-              onOpenChange={(o) => { if (!o) { setCreating(false); setName(""); setDescription("") } }}
+              onOpenChange={(o) => { if (!o) setCreating(false) }}
             >
               <DialogContent className="max-w-md">
                 <DialogHeader>
@@ -108,31 +147,65 @@ export function TeamsList() {
                 </DialogHeader>
                 <form
                   id="create-team-form"
-                  onSubmit={async (e) => {
+                  onSubmit={(e) => {
                     e.preventDefault()
-                    if (!jwt || activeOrgId == null || !name.trim()) return
-                    const t = await createTeam(jwt, activeOrgId, name.trim(), description.trim() || undefined)
-                    navigate(`/teams/${t.id}`)
+                    void createTeamForm.handleSubmit()
                   }}
-                  className="space-y-2"
                 >
-                  <Input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Team name"
-                    autoFocus
-                  />
-                  <Input
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Description (optional)"
-                  />
+                  <FieldGroup>
+                    <createTeamForm.Field
+                      name="name"
+                      children={(field) => {
+                        const invalid = isFieldInvalid(field)
+                        return (
+                          <Field data-invalid={invalid}>
+                            <FieldLabel htmlFor="create-team-name">Team name</FieldLabel>
+                            <Input
+                              id="create-team-name"
+                              name={field.name}
+                              value={field.state.value}
+                              onBlur={field.handleBlur}
+                              onChange={(e) => field.handleChange(e.target.value)}
+                              placeholder="Team name"
+                              aria-invalid={invalid}
+                              autoFocus
+                            />
+                            {invalid && <FieldError errors={field.state.meta.errors} />}
+                          </Field>
+                        )
+                      }}
+                    />
+                    <createTeamForm.Field
+                      name="description"
+                      children={(field) => (
+                        <Field>
+                          <FieldLabel htmlFor="create-team-desc">Description (optional)</FieldLabel>
+                          <Input
+                            id="create-team-desc"
+                            name={field.name}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => field.handleChange(e.target.value)}
+                            placeholder="Description (optional)"
+                          />
+                        </Field>
+                      )}
+                    />
+                  </FieldGroup>
+                  {submitError && (
+                    <FieldError role="alert" className="mt-3">
+                      {submitError}
+                    </FieldError>
+                  )}
                 </form>
                 <DialogFooter>
-                  <Button type="button" variant="outline" onClick={() => { setCreating(false); setName(""); setDescription("") }}>
+                  <Button type="button" variant="outline" onClick={() => setCreating(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" form="create-team-form" disabled={!name.trim()}>Create</Button>
+                  <Button type="submit" form="create-team-form">
+                    {createTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
+                    {createTeamForm.state.isSubmitting ? "Creating…" : "Create"}
+                  </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>

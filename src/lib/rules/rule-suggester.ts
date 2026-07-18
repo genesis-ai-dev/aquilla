@@ -45,7 +45,7 @@ Output ONLY valid JSON. No markdown, no code fences, no explanation.`
 export type UsageCallback = (meta: { kind: string; model?: string; provider: string }) => void
 
 // ---------------------------------------------------------------------------
-// FRO-198: suggest rules from mined edit candidates
+// AQU-198: suggest rules from mined edit candidates
 // ---------------------------------------------------------------------------
 
 /**
@@ -67,7 +67,7 @@ function buildCandidatePrompt(
 }
 
 /**
- * FRO-198 entry point: given mined candidates (from edit-miner.ts), run the
+ * AQU-198 entry point: given mined candidates (from edit-miner.ts), run the
  * LLM and return RuleSuggestion drafts with an aligned evidence[] string array.
  *
  * Returns `{ suggestions, evidence }` where both arrays are index-aligned.

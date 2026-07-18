@@ -13,7 +13,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES="43200"
 # sync-worker compromise cannot forge access tokens).
 SYNC_SECRET_KEY="test-sync-secret-key"
 
-# FRO-346: base URL auth-worker calls to notify sync-worker of admin events
+# AQU-346: base URL auth-worker calls to notify sync-worker of admin events
 # (member removal -> live WS eject, project archive, file delete). Without
 # this (or if it's wrong), those notifications silently no-op — see
 # notifySyncWorkerOfMemberRemoval's early-return on a missing SYNC_WORKER_URL.

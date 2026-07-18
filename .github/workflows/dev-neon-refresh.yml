@@ -27,12 +27,16 @@ jobs:
             exit 0
           fi
 
-          eastern_hour="$(TZ=America/New_York date +%H)"
-          if [ "$eastern_hour" = "04" ]; then
+          # GitHub cron is UTC and can start late. Gate by the cron expression
+          # plus today's Eastern offset instead of the runtime clock hour.
+          eastern_offset="$(TZ=America/New_York date +%z)"
+          schedule="${{ github.event.schedule }}"
+          if { [ "$schedule" = "7 8 * * *" ] && [ "$eastern_offset" = "-0400" ]; } || \
+             { [ "$schedule" = "7 9 * * *" ] && [ "$eastern_offset" = "-0500" ]; }; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping: current America/New_York hour is $eastern_hour, not 04."
+            echo "Skipping: schedule '$schedule' does not match today's Eastern offset ($eastern_offset)."
           fi
 
       - uses: actions/checkout@v4
@@ -50,14 +54,32 @@ jobs:
       - run: pnpm install --frozen-lockfile
         if: steps.eastern_gate.outputs.should_run == 'true'
 
+      - name: Verify Neon refresh credentials are configured
+        if: steps.eastern_gate.outputs.should_run == 'true'
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
+          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
+        run: |
+          if [ -z "$NEON_API_KEY" ]; then
+            echo "::error::NEON_API_KEY is required to restore the dev Neon branch from production."
+            exit 1
+          fi
+          if [ -n "$DEV_API_PROJECT_READ_URL" ] && [ -z "$DEV_API_PROJECT_READ_TOKEN" ]; then
+            echo "::error::DEV_API_PROJECT_READ_TOKEN is required when DEV_API_PROJECT_READ_URL is set."
+            exit 1
+          fi
+
       - name: Restore dev branch from production and apply dev migrations
         if: steps.eastern_gate.outputs.should_run == 'true'
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: sweet-paper-88472094
           NEON_DEV_BRANCH: dev
-          NEON_SOURCE_BRANCH: production
+          NEON_PRODUCTION_BRANCH: production
           NEON_DEV_DATABASE: neondb
           NEON_DEV_ROLE: neondb_owner
           DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
-        run: pnpm neon:refresh-dev
+          DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
+          DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
+        run: pnpm neon:refresh:dev

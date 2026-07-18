@@ -10,7 +10,7 @@
 // the lost cell forever.
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { streamFileCells, fetchFileCells } from "./cells-read"
+import { streamFileCells, fetchFileCells, fetchCellsDelta, fetchCellsByIds } from "./cells-read"
 import type { CellRow } from "./cells-read-types"
 
 function makeRow(cellId: string): CellRow {
@@ -96,6 +96,60 @@ describe("streamFileCells onMeta (B2)", () => {
       },
     )
     expect(metas).toEqual([undefined, undefined])
+  })
+})
+
+describe("AQU-538: lane query param", () => {
+  it("fetchFileCells appends lane only when set", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [], nextCursor: null, total: 0 }))
+      .mockResolvedValueOnce(pageResponse({ cells: [], nextCursor: null, total: 0 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await fetchFileCells("proj", "file", {}, "jwt")
+    expect(fetchMock.mock.calls[0][0] as string).not.toContain("lane=")
+
+    await fetchFileCells("proj", "file", { lane: "fr" }, "jwt")
+    expect(fetchMock.mock.calls[1][0] as string).toContain("lane=fr")
+  })
+
+  it("fetchCellsDelta appends lane only when set", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse({ delta: true, changedCellIds: [], cells: [], maxServerSeq: 1 }))
+      .mockResolvedValueOnce(pageResponse({ delta: true, changedCellIds: [], cells: [], maxServerSeq: 1 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await fetchCellsDelta("proj", "file", 1, "jwt")
+    expect(fetchMock.mock.calls[0][0] as string).not.toContain("lane=")
+
+    await fetchCellsDelta("proj", "file", 1, "jwt", "fr")
+    expect(fetchMock.mock.calls[1][0] as string).toContain("lane=fr")
+  })
+
+  it("fetchCellsByIds appends lane only when set", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [], nextCursor: null, total: 0 }))
+      .mockResolvedValueOnce(pageResponse({ cells: [], nextCursor: null, total: 0 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await fetchCellsByIds("proj", "file", ["c1"], "jwt")
+    expect(fetchMock.mock.calls[0][0] as string).not.toContain("lane=")
+
+    await fetchCellsByIds("proj", "file", ["c1"], "jwt", "fr")
+    expect(fetchMock.mock.calls[1][0] as string).toContain("lane=fr")
+  })
+
+  it("streamFileCells / fetchAllFileCells thread the lane through every page", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse({ cells: [makeRow("a")], nextCursor: null, total: 1 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await streamFileCells("proj", "file", "jwt", () => {}, "target", undefined, "fr")
+    expect(fetchMock.mock.calls[0][0] as string).toContain("lane=fr")
   })
 })
 

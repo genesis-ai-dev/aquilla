@@ -35,7 +35,7 @@ export class SourceExportError extends Error {
 }
 
 export interface DownloadSourceResult {
-  /** FRO-276: number of translated verses whose original USFM span contained
+  /** AQU-276: number of translated verses whose original USFM span contained
    *  intra-verse markers (footnotes, poetry, character markers) that were
    *  dropped by plain-text substitution. 0 = genuinely lossless round-trip.
    *  `null` if the server did not return the header (older route version). */
@@ -60,7 +60,7 @@ export async function downloadSourceFile(args: DownloadSourceArgs): Promise<Down
       res.status,
     )
   }
-  // FRO-276: read the lossy-verse count header before consuming the body.
+  // AQU-276: read the lossy-verse count header before consuming the body.
   const lossyHeader = res.headers.get("X-Usfm-Lossy-Verse-Count")
   const lossyVerseCount = lossyHeader !== null ? parseInt(lossyHeader, 10) : null
 
@@ -70,7 +70,7 @@ export async function downloadSourceFile(args: DownloadSourceArgs): Promise<Down
 }
 
 /**
- * FRO-233: Fetch the raw source side-car bytes for a non-USFM file (e.g. DOCX).
+ * AQU-233: Fetch the raw source side-car bytes for a non-USFM file (e.g. DOCX).
  * The server returns the raw binary bytes with X-Export-Mode: raw-sidecar.
  * Returns an ArrayBuffer so the caller can do client-side XML injection.
  */

@@ -20,7 +20,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import { useOutboxFlusher } from "./useOutboxFlusher"
+import { useOutboxFlusher, drainCycle } from "./useOutboxFlusher"
 
 // ---------------------------------------------------------------------------
 // Mock flushOutboxBatch and outboxPendingCount
@@ -138,7 +138,9 @@ describe("useOutboxFlusher", () => {
       value: undefined,
       configurable: true,
     })
-    mockFlush.mockResolvedValue(SUCCESS)
+    // Use NOTHING so drainCycle terminates in 1 call per cycle (posted:0 → break).
+    // This tests that the interval path calls flush — not how many times per cycle.
+    mockFlush.mockResolvedValue(NOTHING)
 
     renderHook(() =>
       useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }),
@@ -149,7 +151,8 @@ describe("useOutboxFlusher", () => {
       await vi.advanceTimersByTimeAsync(0)
     })
 
-    expect(mockFlush).toHaveBeenCalledTimes(1)
+    // At least one call from the initial tick
+    expect(mockFlush.mock.calls.length).toBeGreaterThanOrEqual(1)
 
     // Advance one more interval
     await act(async () => {
@@ -444,6 +447,82 @@ describe("useOutboxFlusher", () => {
     })
 
     expect(result.current.pendingCount).toBe(3)
+  })
+
+  // -- drainCycle: loop-until-drained pure helper ----------------------------
+
+  describe("drainCycle (bounded drain loop)", () => {
+    it("loops until posted===0: stub returning 100 accepted twice then 50 then 0 → madeProgress=true, 3 productive iterations", async () => {
+      // Simulates 250-record drain: first call posts 100 & accepts 100,
+      // second posts 100 & accepts 100, third posts 50 & accepts 50,
+      // fourth returns posted:0 → loop exits. Total productive: 3 iterations.
+      const flush = vi
+        .fn()
+        .mockResolvedValueOnce({ posted: 100, accepted: 100, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 })
+        .mockResolvedValueOnce({ posted: 100, accepted: 100, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 })
+        .mockResolvedValueOnce({ posted: 50, accepted: 50, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 })
+        .mockResolvedValueOnce({ posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 })
+
+      const result = await drainCycle(flush)
+
+      expect(result.madeProgress).toBe(true)
+      expect(result.sawAuthError).toBe(false)
+      // 3 productive calls + 1 terminating call (posted:0)
+      expect(flush).toHaveBeenCalledTimes(4)
+      expect(result.iterations).toBe(4)
+    })
+
+    it("no-busy-spin: breaks after 1 iteration when accepted===0 (all rejected, no forward progress)", async () => {
+      const flush = vi.fn().mockResolvedValue({
+        posted: 10, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+      })
+
+      const result = await drainCycle(flush)
+
+      // Must NOT keep calling flush in a busy loop — break immediately on no-progress
+      expect(flush).toHaveBeenCalledTimes(1)
+      expect(result.madeProgress).toBe(false)
+      expect(result.iterations).toBe(1)
+    })
+
+    it("authError: breaks immediately and sets sawAuthError=true", async () => {
+      const flush = vi.fn().mockResolvedValue({
+        posted: 5, accepted: 0, networkError: false, authError: true, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+      })
+
+      const result = await drainCycle(flush)
+
+      expect(flush).toHaveBeenCalledTimes(1)
+      expect(result.sawAuthError).toBe(true)
+      expect(result.madeProgress).toBe(false)
+    })
+
+    it("empty queue (posted===0 on first call): 0 iterations, madeProgress=false", async () => {
+      const flush = vi.fn().mockResolvedValue({
+        posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+      })
+
+      const result = await drainCycle(flush)
+
+      // posted:0 on first call → loop breaks immediately (0 iterations means we broke at iter=0)
+      expect(flush).toHaveBeenCalledTimes(1)
+      expect(result.madeProgress).toBe(false)
+      expect(result.sawAuthError).toBe(false)
+    })
+
+    it("MAX_DRAIN_ITERATIONS backstop: stops at 200 iterations even if flush always returns accepted>0", async () => {
+      // Simulates a pathological case where records keep appearing — the backstop must prevent infinite loop
+      const flush = vi.fn().mockResolvedValue({
+        posted: 100, accepted: 100, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+      })
+
+      const result = await drainCycle(flush)
+
+      // Should have been called exactly MAX_DRAIN_ITERATIONS (200) times and then stopped
+      expect(flush).toHaveBeenCalledTimes(200)
+      expect(result.iterations).toBe(200)
+      expect(result.madeProgress).toBe(true)
+    })
   })
 
   // -- Dead exponent cap (QA finding F) --------------------------------------

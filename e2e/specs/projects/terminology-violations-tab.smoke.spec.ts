@@ -1,5 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { Glossary } from "../../helpers/page-objects/Glossary"
 
 /**
  * TerminologyViolationsInbox — Violations tab on the Terminology page.
@@ -25,13 +26,9 @@ test("Violations tab on terminology page shows inbox content", async ({ alice })
   const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/terminology`)
-  await alice.waitForLoadState("networkidle")
-
-  // Click the "Violations" tab.
-  const violationsTab = alice.getByRole("button", { name: /^Violations$/i })
-  await expect(violationsTab).toBeVisible({ timeout: 10_000 })
-  await violationsTab.click()
+  const glossary = new Glossary(alice)
+  await glossary.goto(projectId!)
+  await glossary.openViolations()
 
   // The TerminologyViolationsInbox mounts.
   // With no cells / concepts it shows "No terminology violations."

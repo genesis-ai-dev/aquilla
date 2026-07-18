@@ -284,6 +284,172 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     expect(run!.steps).toBe(12)
   })
 
+  it("read → draft: semantic tools with typed result frames, progress, and a staged proposal", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+
+    const namedCall = (id: string, name: string, args: Record<string, unknown>) => ({
+      role: "assistant",
+      content: null,
+      tool_calls: [{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }],
+    })
+    const script = [
+      namedCall("tc1", "read", { filter: "untranslated" }),
+      namedCall("tc2", "draft", {}),
+      { role: "assistant", content: "Staged 1 draft — review and apply." },
+    ]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { tools?: unknown }
+      // The draft tool's INTERNAL model call carries no tools array.
+      if (!body.tools) {
+        return modelTurn({ role: "assistant", content: '[{"i":1,"t":"En el principio"}]' })
+      }
+      return modelTurn(script.shift()!)
+    })
+
+    const res = await postRun(jwt)
+    const frames = parseFrames(await res.text())
+
+    const starts = frames.filter((f) => f.type === "code_start")
+    expect(starts.map((f) => f.kind)).toEqual(["read", "draft"])
+
+    // read's code_result carries the typed working-set payload.
+    const readResult = frames.find((f) => f.type === "code_result")!
+    const data = readResult.data as { cells: { ref: string; status?: string; cellId: string }[] }
+    expect(data.cells[0]).toMatchObject({ ref: "GEN 1:1", status: "untranslated", cellId: CELL })
+
+    // draft emitted progress frames and staged through emit-stage (provenance intact).
+    expect(frames.filter((f) => f.type === "progress").length).toBeGreaterThanOrEqual(2)
+    const proposalFrame = frames.find((f) => f.type === "proposal")!
+    const proposal = proposalFrame.proposal as {
+      events: { kind: string; cellId: string; payload: Record<string, unknown> }[]
+    }
+    expect(proposal.events).toHaveLength(1)
+    expect(proposal.events[0]).toMatchObject({
+      kind: "target.cell.commit",
+      cellId: CELL,
+    })
+    expect(proposal.events[0].payload).toMatchObject({
+      value: "En el principio",
+      ai_suggestion: true,
+    })
+
+    expect(frames.find((f) => f.type === "done")!.status).toBe("ok")
+  })
+
+  it("streams SSE upstreams as per-token assistant_delta frames", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+
+    const encoder = new TextEncoder()
+    const sseChunks = [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "Token " } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "by " } }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "token." } }] })}\n\n`,
+      `data: ${JSON.stringify({ usage: { prompt_tokens: 42, completion_tokens: 7, cost: 0.0002 } })}\n\n`,
+      "data: [DONE]\n\n",
+    ]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const c of sseChunks) controller.enqueue(encoder.encode(c))
+          controller.close()
+        },
+      })
+      return new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    })
+
+    const res = await postRun(jwt)
+    const frames = parseFrames(await res.text())
+    const deltas = frames.filter((f) => f.type === "assistant_delta").map((f) => f.text)
+    expect(deltas).toEqual(["Token ", "by ", "token."])
+    expect(frames.find((f) => f.type === "usage")).toMatchObject({ promptTokens: 42, completionTokens: 7 })
+    expect(frames.find((f) => f.type === "done")!.status).toBe("ok")
+  })
+
+  it("session runs persist the convo (incl. tool results) and replay it on the next turn", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+    const sessionId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+    const upstreamBodies: { messages: { role: string; content: string | null }[] }[] = []
+    const script = [
+      toolCall("tc1", { sql: "SELECT cell_id, value FROM cells WHERE project_id = :project AND side = 'source'" }),
+      { role: "assistant", content: "The chapter has 1 source cell." },
+      // Second run (same session): answers directly from remembered context.
+      { role: "assistant", content: "As I found earlier, it is GEN 1:1." },
+    ]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      upstreamBodies.push(JSON.parse(String(init?.body)))
+      return modelTurn(script.shift()!)
+    })
+
+    // Run 1 — establishes the session.
+    const res1 = await postRun(jwt, {
+      projectId: PROJECT,
+      sessionId,
+      messages: [{ role: "user", content: "How many source cells?" }],
+    })
+    const frames1 = parseFrames(await res1.text())
+    expect(frames1[0]).toMatchObject({ type: "run_start", sessionId })
+    expect(frames1.find((f) => f.type === "done")!.status).toBe("ok")
+
+    // The session row persists user, assistant(tool_calls), tool, assistant.
+    const row = await env.AQUILLA_PG.prepare("SELECT convo FROM agent_sessions WHERE session_id = ?")
+      .bind(sessionId)
+      .first<{ convo: string }>()
+    const stored = JSON.parse(row!.convo) as { role: string }[]
+    expect(stored.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"])
+
+    // Run 2 — sends ONLY the new user turn; the server replays the history.
+    const res2 = await postRun(jwt, {
+      projectId: PROJECT,
+      sessionId,
+      messages: [{ role: "user", content: "Which ref was it?" }],
+    })
+    parseFrames(await res2.text())
+    const run2Messages = upstreamBodies[2].messages
+    expect(run2Messages.map((m) => m.role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "assistant",
+      "user",
+    ])
+    const replayedTool = run2Messages.find((m) => m.role === "tool")!
+    expect(replayedTool.content).toContain("cell_id|value") // prior tool result rode along
+
+    // agent_runs rows carry the session id.
+    const runs = await env.AQUILLA_PG.prepare(
+      "SELECT session_id FROM agent_runs WHERE session_id = ?",
+    )
+      .bind(sessionId)
+      .all<{ session_id: string }>()
+    expect(runs.results).toHaveLength(2)
+  })
+
+  it("403 when the session belongs to another user", async () => {
+    await seedProjectWorld()
+    const sessionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO agent_sessions (session_id, project_id, user_id, title, convo, created_at, updated_at)
+       VALUES (?, ?, 2, 'boss session', '[]', 0, 0)`,
+    )
+      .bind(sessionId, PROJECT)
+      .run()
+
+    const res = await postRun(await jwtFor("alice"), {
+      projectId: PROJECT,
+      sessionId,
+      messages: [{ role: "user", content: "hi" }],
+    })
+    expect(res.status).toBe(403)
+  })
+
   it("surfaces upstream failure as error frame + done:error + ledger status", async () => {
     await seedProjectWorld()
     const jwt = await jwtFor("alice")
@@ -297,5 +463,82 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     const run = await env.AQUILLA_PG.prepare("SELECT status FROM agent_runs")
       .first<{ status: string }>()
     expect(run!.status).toBe("error")
+  })
+})
+
+describe("GET /api/v1/ai/agent/runs — acceptance ledger", () => {
+  /** Insert a target.cell.commit event with the given provenance payload. */
+  let seq = 0
+  async function insertCommitEvent(id: string, payload: Record<string, unknown>) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq)
+       VALUES (?, 1, ?, ?, ?, 'target.cell.commit', 'alice', ?, 0, 0, NULL, ?)`,
+    )
+      .bind(id, PROJECT, FILE, CELL, JSON.stringify(payload), ++seq)
+      .run()
+  }
+
+  it("requires auth, membership, and a projectId", async () => {
+    await seedProjectWorld()
+    await seedUser(3, "stranger")
+
+    const unauth = await app.request(`/api/v1/ai/agent/runs?projectId=${PROJECT}`, {}, testEnv())
+    expect(unauth.status).toBe(401)
+
+    const noProject = await app.request(
+      "/api/v1/ai/agent/runs",
+      { headers: authHeader(await jwtFor("alice")) },
+      testEnv(),
+    )
+    expect(noProject.status).toBe(400)
+
+    const outsider = await app.request(
+      `/api/v1/ai/agent/runs?projectId=${PROJECT}`,
+      { headers: authHeader(await jwtFor("stranger")) },
+      testEnv(),
+    )
+    expect(outsider.status).toBe(403)
+  })
+
+  it("rolls up staged (ledger) vs applied/undone (event-log provenance) per run", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+
+    // A scripted run that stages ONE commit → staged_count = 1 on the ledger.
+    const script = [
+      toolCall("tc1", {
+        emit: [
+          { kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "drafted" } },
+        ],
+      }),
+      { role: "assistant", content: "Staged 1 draft." },
+    ]
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => modelTurn(script.shift() as Record<string, unknown>))
+    const runRes = await postRun(jwt)
+    const frames = parseFrames(await runRes.text())
+    const runId = frames.find((f) => f.type === "run_start")!.runId as string
+    vi.restoreAllMocks()
+
+    // The user Applies (event carries agent_run_id), then regrets it (the
+    // undo carries undo_of_agent_run_id — it must NOT count as applied).
+    await insertCommitEvent("e-applied", { value: "drafted", ai_suggestion: true, agent_run_id: runId })
+    await insertCommitEvent("e-undone", { value: "", undo_of_agent_run_id: runId })
+    await insertCommitEvent("e-human", { value: "a plain human edit" })
+
+    const res = await app.request(
+      `/api/v1/ai/agent/runs?projectId=${PROJECT}`,
+      { headers: authHeader(jwt) },
+      testEnv(),
+    )
+    expect(res.status).toBe(200)
+    const { runs } = (await res.json()) as { runs: Record<string, unknown>[] }
+    const run = runs.find((r) => r.runId === runId)!
+    expect(run).toMatchObject({
+      username: "alice",
+      status: "ok",
+      stagedCount: 1,
+      appliedCount: 1,
+      undoneCount: 1,
+    })
   })
 })

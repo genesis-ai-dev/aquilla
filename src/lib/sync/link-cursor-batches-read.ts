@@ -1,4 +1,4 @@
-// Typed fetch wrapper for the sync-worker link-cursor-batches read API (FRO-478).
+// Typed fetch wrapper for the sync-worker link-cursor-batches read API (AQU-478).
 //
 //   GET /api/v1/projects/:projectId/link/cursor-batches
 //

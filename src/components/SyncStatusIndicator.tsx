@@ -23,7 +23,10 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
   return (
     <AppTooltip content={tooltip}>
       <span
-        className={cn("inline-flex min-w-[5.5rem] items-center gap-1.5 text-xs shrink-0", className)}
+        className={cn(
+          "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground",
+          className,
+        )}
         aria-label={tooltip}
       >
         <span
@@ -33,7 +36,7 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
             status === "connecting" && "animate-pulse"
           )}
         />
-        <span className="text-muted-foreground">{label}</span>
+        <span className="leading-none">{label}</span>
       </span>
     </AppTooltip>
   )

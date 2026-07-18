@@ -1,4 +1,4 @@
-// Macula Hebrew + Greek parser (FRO-178)
+// Macula Hebrew + Greek parser (AQU-178)
 //
 // Parses Clear Bible's Macula TSV word-level morphology data into:
 //   1. TranslatableString[] — one entry per verse, value = reconstructed verse text

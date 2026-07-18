@@ -1,4 +1,4 @@
-// FRO-361: CompletionBulkProgressBanner must surface an honest failure
+// AQU-361: CompletionBulkProgressBanner must surface an honest failure
 // summary when a batch run ends with skipped cells, instead of quietly
 // disappearing (the store keeps `finished: true` progress around for this).
 
@@ -30,7 +30,7 @@ describe("CompletionBulkProgressBanner", () => {
     expect(screen.getByText("0/90")).toBeInTheDocument()
   })
 
-  it("shows an honest failure summary once the run finishes with skipped cells (FRO-361)", () => {
+  it("shows an honest failure summary once the run finishes with skipped cells (AQU-361)", () => {
     const runId = resetBatchCompletionState(90)
     for (let i = 0; i < 60; i++) incrementBatchCompletionDone(runId)
     incrementBatchCompletionFailed(runId, 30)

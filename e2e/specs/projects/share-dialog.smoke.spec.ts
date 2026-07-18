@@ -33,8 +33,9 @@ test("share dialog opens with Members and Invite link tabs", async ({ alice }) =
   await expect(shareBtn).toBeVisible({ timeout: 5_000 })
   await shareBtn.click()
 
-  // The SharePanel renders as a Dialog.
-  const dialog = alice.getByRole("dialog")
+  // The SharePanel renders as a named Dialog. Scope to it because other
+  // portaled UI, such as the sidebar More menu, may also expose role=dialog.
+  const dialog = alice.getByRole("dialog", { name: /Share Project/i })
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await expect(dialog.getByRole("heading", { name: /Share Project/i })).toBeVisible()
 

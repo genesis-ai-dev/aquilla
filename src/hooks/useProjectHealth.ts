@@ -1,4 +1,4 @@
-// FRO-190 — thin wrapper around useHealthRollup for use in ProjectCard.
+// AQU-190 — thin wrapper around useHealthRollup for use in ProjectCard.
 //
 // Called with a projectId that is null when:
 //   - the card is in the trashed variant (irrelevant), OR
@@ -6,7 +6,7 @@
 //
 // In both cases projectHealth stays null and the caller hides the ring.
 //
-// FRO-190 fix: the original implementation passed the raw auth-worker JWT
+// AQU-190 fix: the original implementation passed the raw auth-worker JWT
 // (`session.jwt`) directly. The sync-worker rejects raw auth JWTs with 401
 // "invalid token signature" because it only accepts tokens with `aud=sync`
 // (minted by POST /api/v2/sync-token). This fix mints a proper project-scoped

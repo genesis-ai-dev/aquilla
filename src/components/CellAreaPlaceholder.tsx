@@ -16,7 +16,7 @@ interface CellAreaPlaceholderProps {
   fileName?: string
   /** True when the project has no files at all (not just none selected). */
   hasFiles?: boolean
-  /** FRO-149: true once the file list has been fetched from the server.
+  /** AQU-149: true once the file list has been fetched from the server.
    *  Until this is true, we must NOT show the "No files yet — Import a file"
    *  CTA because projectFiles is transiently empty even on populated projects
    *  (the server fetch hasn't resolved yet). Showing the CTA too early risks a
@@ -86,7 +86,7 @@ function NoFileEmpty({
   filesLoaded?: boolean
   onImportClick?: () => void
 }) {
-  // FRO-149: while the file list hasn't loaded yet, show the neutral "No file
+  // AQU-149: while the file list hasn't loaded yet, show the neutral "No file
   // selected" copy. We must NOT show "No files yet — Import a file" here because
   // projectFiles is transiently empty (server fetch still in flight) even on
   // projects that already have files — showing the CTA would risk a spurious
@@ -95,7 +95,8 @@ function NoFileEmpty({
   if (!filesLoaded) {
     return (
       <EmptyState
-        className="h-full border-0 bg-transparent p-8"
+        variant="inline"
+        className="h-full p-8"
         icon={FolderOpen}
         title="No file selected"
         description="Pick a file from the sidebar to start translating."
@@ -108,7 +109,8 @@ function NoFileEmpty({
   if (!hasFiles) {
     return (
       <EmptyState
-        className="h-full border-0 bg-transparent p-8"
+        variant="inline"
+        className="h-full p-8"
         icon={Upload}
         title="No files yet"
         description="Import a file to get started."
@@ -125,7 +127,8 @@ function NoFileEmpty({
   }
   return (
     <EmptyState
-      className="h-full border-0 bg-transparent p-8"
+      variant="inline"
+      className="h-full p-8"
       icon={FolderOpen}
       title="No file selected"
       description="Pick a file from the sidebar to start translating."
@@ -142,7 +145,8 @@ function ReadyEmpty({
 }) {
   return (
     <EmptyState
-      className="h-full border-0 bg-transparent p-8"
+      variant="inline"
+      className="h-full p-8"
       icon={FileText}
       title={fileName ? `${fileName} is empty` : "This file has no cells yet"}
       description="Import content, or start typing in the first cell."

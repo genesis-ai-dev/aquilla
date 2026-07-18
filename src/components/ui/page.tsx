@@ -1,13 +1,6 @@
 import * as React from "react"
 
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
+import { EmptyState } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 
 /**
@@ -178,44 +171,79 @@ function StatTile({
 }
 
 /**
- * A composed empty state — a beat of guidance instead of a blank panel.
- * Dashed border distinguishes "nothing here yet" from a populated Section.
- * Wraps the shadcn `Empty` primitives so org/account/admin surfaces share one API.
+ * A labelled settings block: a floating group header (same weight as NavList's
+ * group label) above a bordered card. Use on detail sub-pages so the page title
+ * lives in PageHeader and only the controls sit in the card — matching the
+ * Linear-style settings layout.
  */
-function EmptyState({
-  icon: Icon,
-  title,
-  description,
-  action,
+function SettingsGroup({
+  label,
   className,
+  children,
 }: {
-  icon?: React.ComponentType<{ className?: string }>
-  title: React.ReactNode
-  description?: React.ReactNode
-  action?: React.ReactNode
+  label?: React.ReactNode
   className?: string
+  children: React.ReactNode
 }) {
   return (
-    <Empty
-      className={cn(
-        "rounded-2xl border bg-card/40 px-6 py-12",
-        className,
-      )}
-    >
-      <EmptyHeader>
-        {Icon ? (
-          <EmptyMedia variant="icon">
-            <Icon />
-          </EmptyMedia>
-        ) : null}
-        <EmptyTitle className="text-foreground">{title}</EmptyTitle>
-        {description ? (
-          <EmptyDescription className="max-w-sm">{description}</EmptyDescription>
-        ) : null}
-      </EmptyHeader>
-      {action ? <EmptyContent>{action}</EmptyContent> : null}
-    </Empty>
+    <div className={cn("space-y-2", className)}>
+      {label ? (
+        <p className="px-1 font-heading text-base font-medium tracking-tight text-foreground">
+          {label}
+        </p>
+      ) : null}
+      <div className="divide-y overflow-hidden rounded-2xl border bg-card">
+        {children}
+      </div>
+    </div>
   )
 }
 
-export { Page, PageHeader, Section, StatTile, EmptyState }
+/**
+ * One setting inside a SettingsGroup card. Default layout is label/description
+ * on the left and a control on the right; pass `block` (or `children`) when the
+ * control needs the full row width (a select, a form, etc.).
+ */
+function SettingsRow({
+  label,
+  description,
+  control,
+  children,
+  block = false,
+  className,
+}: {
+  label: React.ReactNode
+  description?: React.ReactNode
+  control?: React.ReactNode
+  children?: React.ReactNode
+  block?: boolean
+  className?: string
+}) {
+  const body = children ?? control
+  if (block || children) {
+    return (
+      <div className={cn("space-y-3 px-5 py-4", className)}>
+        <div className="min-w-0 space-y-1">
+          <p className="text-sm font-medium text-foreground">{label}</p>
+          {description ? (
+            <p className="text-xs text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+        {body}
+      </div>
+    )
+  }
+  return (
+    <div className={cn("flex items-start justify-between gap-4 px-5 py-4", className)}>
+      <div className="min-w-0 space-y-1">
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        {description ? (
+          <p className="text-xs text-muted-foreground">{description}</p>
+        ) : null}
+      </div>
+      {body ? <div className="shrink-0 pt-0.5">{body}</div> : null}
+    </div>
+  )
+}
+
+export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, EmptyState }

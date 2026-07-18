@@ -1,8 +1,8 @@
-// FRO-346: removing a member must terminate their WRITE access on their very
+// AQU-346: removing a member must terminate their WRITE access on their very
 // next flush — not at token expiry.
 //
 // WHY these tests exist: sync-token verification is pure JWT, so a token
-// proves membership at MINT time only. Before FRO-346, deleting a user's
+// proves membership at MINT time only. Before AQU-346, deleting a user's
 // project_members row left their outstanding (≤15 min) token fully
 // write-capable — observed in the wild as "he kicked me from the project and
 // I'm still on it". The membership re-check in events/route.ts is the fix;
@@ -89,7 +89,7 @@ const projectRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-describe('FRO-346 — membership re-check on POST /events', () => {
+describe('AQU-346 — membership re-check on POST /events', () => {
   it('refuses a removed member on the very next flush, while the token is still valid', async () => {
     const { db, pg } = await makeTestDb({
       projects: [projectRow()],

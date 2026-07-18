@@ -21,7 +21,7 @@
 import type { CellRow } from "./cells-read-types"
 
 const DB_NAME = "aquilla-cells-cache"
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE = "cells"
 
 export interface CellsCacheEntry {
@@ -54,8 +54,12 @@ async function openDb(): Promise<IDBDatabase> {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       req.onerror = () => reject(req.error ?? new Error("IDB open failed"))
       req.onsuccess = () => resolve(req.result)
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (event) => {
         const db = req.result
+        const oldVersion = event.oldVersion
+        if (oldVersion > 0 && oldVersion < DB_VERSION && db.objectStoreNames.contains(STORE)) {
+          db.deleteObjectStore(STORE)
+        }
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE, { keyPath: "key" })
         }

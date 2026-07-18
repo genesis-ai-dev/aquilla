@@ -15,7 +15,7 @@
  */
 
 import { v7 as uuidv7 } from "uuid"
-import { enqueueOutboxEvent } from "./outbox"
+import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canPerform, requiredRoleFor, ROLE } from "./role-policy"
 import {
@@ -140,6 +140,26 @@ export async function enqueueEvent<K extends OutboxEventKind>(
   return { event, eventId: event.id }
 }
 
+/** Build + bulk-enqueue many typed events in one outbox transaction.
+ *  Mirrors enqueueEvent's role gate per input, then writes the whole batch at
+ *  once via enqueueOutboxEvents (one notify → one overlay rebuild). */
+export async function enqueueEvents<K extends OutboxEventKind>(
+  inputs: BuildEventInput<K>[],
+): Promise<{ event: OutboxRawEvent<K>; eventId: string }[]> {
+  if (inputs.length === 0) return []
+  const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
+  const events = inputs.map((input) => {
+    if (!canPerform(input.kind, roleLevel) && roleLevel != null) {
+      throw new InsufficientRoleError(input.kind, roleLevel, requiredRoleFor(input.kind) ?? 0)
+    }
+    return buildRawEvent(input)
+  })
+  await enqueueOutboxEvents(
+    events as unknown as Parameters<typeof enqueueOutboxEvents>[0],
+  )
+  return events.map((event) => ({ event, eventId: event.id }))
+}
+
 // ── Convenience builders for common writer flows ──────────────────────────
 
 export interface CellCommitInput {
@@ -150,6 +170,13 @@ export interface CellCommitInput {
   parentId: string | null
   /** AD-9 staleness pin: source row's `event_id`. Null for target-owned cells. */
   sourceEventId?: string | null
+  /**
+   * AQU-538: target-language lane this commit addresses. Omit (or pass '')
+   * for the file's single configured target language — the default lane;
+   * every pre-lane caller. Non-'' lanes commit to that lane's own row and
+   * chain slot server-side.
+   */
+  targetLang?: string
   value: string
   valueHtml?: string
   author: string
@@ -158,8 +185,10 @@ export interface CellCommitInput {
    *  `cell.commit.llm-accept` provenance. Normal (human-typed) commits
    *  omit this field entirely — the generic commit path is unaffected. */
   aiSuggestion?: boolean
+  /** Required context for research-aligned machine-draft telemetry. */
+  aiDraft?: import("./outbox-types").AiDraftProvenance
   /**
-   * FRO-177: audit metadata for replace-all operations. Records the find and
+   * AQU-177: audit metadata for replace-all operations. Records the find and
    * replace strings so the per-cell history drawer can show the replace context.
    */
   searchQuery?: string
@@ -174,7 +203,7 @@ export interface CellCommitInput {
 export async function emitTargetCellCommit(
   input: CellCommitInput,
 ): Promise<string> {
-  // FRO-267: once-per-session first-commit funnel event.
+  // AQU-267: once-per-session first-commit funnel event.
   if (!_firstCommitFired) {
     _firstCommitFired = true
     posthog.capture(FIRST_CELL_COMMIT, {
@@ -218,7 +247,11 @@ export async function emitTargetCellCommit(
       ...(input.sourceEventId !== undefined
         ? { sourceEventId: input.sourceEventId }
         : {}),
+      // AQU-538: '' (default lane) is omitted so default-lane events stay
+      // byte-identical to pre-lane events (idempotency ids, replay, history).
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
       ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
+      ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
       ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
       ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
     },
@@ -233,6 +266,11 @@ export interface CellValidateInput {
   cellId: string
   /** The target.cell.commit (or target.cell.create) event being validated. */
   editEventId: string
+  /**
+   * AQU-538: the active target LANE. `''`/undefined = default lane and is
+   * OMITTED from the wire payload, so N=1 validations are byte-identical.
+   */
+  targetLang?: string
   author: string
   clientTs?: number
 }
@@ -243,7 +281,7 @@ export interface CellValidateInput {
  * `cell_validators`), so parentId is omitted.
  */
 export async function emitCellValidate(input: CellValidateInput): Promise<string> {
-  // FRO-267: once-per-session first-validate funnel event.
+  // AQU-267: once-per-session first-validate funnel event.
   if (!_firstValidateFired) {
     _firstValidateFired = true
     posthog.capture(FIRST_CELL_VALIDATE, {
@@ -261,7 +299,11 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { editEventId: input.editEventId },
+    payload: {
+      editEventId: input.editEventId,
+      // AQU-538: '' (default lane) is omitted from the wire.
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -276,7 +318,11 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { editEventId: input.editEventId },
+    payload: {
+      editEventId: input.editEventId,
+      // AQU-538: '' (default lane) is omitted from the wire.
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -531,12 +577,12 @@ export async function emitCellBacktranslationSet(
   return eventId
 }
 
-// ── Harmonize helper (FRO-186) ────────────────────────────────────────────
+// ── Harmonize helper (AQU-186) ────────────────────────────────────────────
 // Emits a `target.cell.commit` with a `harmonize_origin` payload field —
 // the `cell.commit.harmonize` variant per AD-2. Using a payload field (not
 // a new event kind) mirrors how `ai_suggestion` tags the llm-accept variant
 // and how `search_query` tags the replace-all variant
-// (FRO-177). The server reads `harmonize_origin` to trigger the AD-14
+// (AQU-177). The server reads `harmonize_origin` to trigger the AD-14
 // endorsement-revocation cascade; the projector otherwise treats the commit
 // identically to a human commit (chain-mutating, advances cells.event_id).
 
@@ -712,6 +758,52 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
   return eventId
 }
 
+export interface SourceCellCommitInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Current chain-head event_id for this source cell row (the parent this
+   *  commit chains on — from `cells.event_id`). */
+  parentId: string | null
+  value: string
+  valueHtml?: string
+  /** Pre-generated event id (deterministic uuidv5 for the DCS delta path so a
+   *  re-run dedupes idempotently). Defaults to a fresh UUIDv7. */
+  id?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `source.cell.commit` — advances the SOURCE-side chain head with new
+ * upstream content, chained on the cell's current head (`parentId`). Symmetric
+ * with `emitSourceCellDelete`; the mirror of `emitTargetCellCommit` on the
+ * source lane.
+ *
+ * The DCS delta importer (Slice C) is the primary caller: when an adapter
+ * project is re-pinned to a newer Door43 release, each content-changed source
+ * cell emits one of these so `cells.source event_id` advances — which is what
+ * flags downstream linked targets stale (AD-9 / linked-projects invalidation
+ * is inherited, not rebuilt here).
+ */
+export async function emitSourceCellCommit(input: SourceCellCommitInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.commit",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: input.parentId ?? null,
+    author: input.author,
+    payload: {
+      value: input.value,
+      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
+    },
+    ...(input.id !== undefined ? { id: input.id } : {}),
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileCreateInput {
   projectId: string
   fileId: string
@@ -719,6 +811,8 @@ export interface FileCreateInput {
   fileType: string
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** Timeline-segment-model order lens: 'time' | 'sequence'. */
   orderedBy?: string
   author: string
@@ -741,6 +835,8 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
       fileType: input.fileType,
       ...(input.sourceLanguage !== undefined ? { sourceLanguage: input.sourceLanguage } : {}),
       ...(input.targetLanguage !== undefined ? { targetLanguage: input.targetLanguage } : {}),
+      ...(input.sourceTextDirection !== undefined ? { sourceTextDirection: input.sourceTextDirection } : {}),
+      ...(input.targetTextDirection !== undefined ? { targetTextDirection: input.targetTextDirection } : {}),
       ...(input.orderedBy !== undefined ? { orderedBy: input.orderedBy } : {}),
     },
     clientTs: input.clientTs,
@@ -799,7 +895,7 @@ export async function emitFileRestore(input: FileRestoreInput): Promise<string> 
   return eventId
 }
 
-// ── Cast/label helper (FRO-438) ───────────────────────────────────────────
+// ── Cast/label helper (AQU-438) ───────────────────────────────────────────
 // Non-chain-mutating (parentId omitted), like cell.waive/cell.backtranslation.set.
 // Writes cast_name into the source-side cell's metadata JSONB bucket without
 // touching target text or cells.event_id.
@@ -811,7 +907,7 @@ export interface CastAssignInput {
   /** The cast/character name to assign. Null clears the label. */
   castName: string | null
   /**
-   * FRO-439: Optional camera-angle for the cell. When provided, the projection
+   * AQU-439: Optional camera-angle for the cell. When provided, the projection
    * also updates cells.camera_state so angle-embedded label strings (e.g.
    * "Mary Magdalene   (on)") can be fully split on import.
    */
@@ -823,7 +919,7 @@ export interface CastAssignInput {
 /**
  * Emit a `cast.assign` event — sets the cast/character name on a cell's
  * metadata WITHOUT writing to target text. Non-chain-mutating (parentId = null).
- * FRO-439: also accepts an optional cameraState to set camera_state in the
+ * AQU-439: also accepts an optional cameraState to set camera_state in the
  * same atomic event.
  */
 export async function emitCastAssign(input: CastAssignInput): Promise<string> {
@@ -874,7 +970,7 @@ export async function emitFileRename(input: FileRenameInput): Promise<string> {
   return eventId
 }
 
-// ── FRO-478: repin ("accept upstream change as-is") ────────────────────────
+// ── AQU-478: repin ("accept upstream change as-is") ────────────────────────
 
 export interface TargetCellRepinInput {
   projectId: string

@@ -1,4 +1,4 @@
-// FRO-365 regression pin: a VIEWER (role 100) must never be able to write
+// AQU-365 regression pin: a VIEWER (role 100) must never be able to write
 // through the real POST /events route, for the exact event kinds the client
 // surfaces affordances for (selection-toolbar Translate, header "Run AI
 // completions", validate). These floors already existed in role-policy.ts
@@ -86,7 +86,7 @@ async function seedFileAndTargetCell(db: AquillaDb): Promise<string> {
   return commitEventId
 }
 
-describe('FRO-365: viewer (role 100) write floor — target.cell.commit', () => {
+describe('AQU-365: viewer (role 100) write floor — target.cell.commit', () => {
   it('rejects a viewer-role target.cell.commit (RED #1: selection-toolbar Translate)', async () => {
     const { db } = await makeTestDb()
     await seedFileAndTargetCell(db)
@@ -133,7 +133,7 @@ describe('FRO-365: viewer (role 100) write floor — target.cell.commit', () => 
   })
 })
 
-describe('FRO-365: viewer (role 100) write floor — cell.validate', () => {
+describe('AQU-365: viewer (role 100) write floor — cell.validate', () => {
   it('rejects a viewer-role cell.validate', async () => {
     const { db } = await makeTestDb()
     const commitEventId = await seedFileAndTargetCell(db)
@@ -158,7 +158,7 @@ describe('FRO-365: viewer (role 100) write floor — cell.validate', () => {
   })
 })
 
-describe('FRO-365: viewer (role 100) write floor — comment.create', () => {
+describe('AQU-365: viewer (role 100) write floor — comment.create', () => {
   it('rejects a viewer-role comment.create', async () => {
     const { db } = await makeTestDb()
     await seedFileAndTargetCell(db)

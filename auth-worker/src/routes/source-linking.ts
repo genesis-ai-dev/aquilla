@@ -36,7 +36,7 @@ const sourceLinking = new Hono<AuthHonoEnv>()
 
 const LINK_MIN_ROLE = ROLE.PROJECT_LEAD // 500
 
-// FRO-476: mode/consumes/gate are optional so existing callers (pre-FRO-476
+// AQU-476: mode/consumes/gate are optional so existing callers (pre-AQU-476
 // clients) keep working — defaulting to 'clone' preserves today's behavior
 // (no mirror sync runs) rather than silently opting an old client into live
 // mirroring. `consumes`/`gate` default per the design spec §2 ('source' /
@@ -102,7 +102,7 @@ sourceLinking.post(
     }
 
     try {
-      // FRO-476: persist link metadata alongside source_project_id. Cursor
+      // AQU-476: persist link metadata alongside source_project_id. Cursor
       // resets to 0 on (re)link so a fresh live link always seeds from
       // scratch via the mirror sync (§5 — "seeding IS the first mirror
       // sync"), regardless of any prior link's cursor position.
@@ -131,7 +131,7 @@ sourceLinking.post(
       sourceProjectId,
     })
 
-    // FRO-476/QA-BUG-1: seeding must happen at link time — a linked project
+    // AQU-476/QA-BUG-1: seeding must happen at link time — a linked project
     // born with 0 files/cells has no way to self-heal (live's lazy-pull is
     // keyed to an open FILE; clone never syncs again after this call).
     //
@@ -162,7 +162,7 @@ sourceLinking.post(
       consumes,
       gate,
       previousSourceProjectId: project.source_project_id,
-      // FRO-476/QA-BUG-1: best-effort signal — false means the client
+      // AQU-476/QA-BUG-1: best-effort signal — false means the client
       // should not assume content is present yet (e.g. the sync-worker
       // call failed) and may fall back to its own self-heal trigger.
       seeded,
@@ -202,7 +202,7 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   const upstreamId = project.source_project_id
 
   try {
-    // FRO-476: clear link metadata too — detach makes the project fully
+    // AQU-476: clear link metadata too — detach makes the project fully
     // self-contained (mode/consumes/gate no longer apply; cursor resets so
     // a future re-link starts clean).
     await c.env.AQUILLA_PG.prepare(

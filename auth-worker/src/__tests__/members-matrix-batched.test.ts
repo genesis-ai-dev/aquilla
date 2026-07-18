@@ -1,5 +1,5 @@
 /**
- * FRO-218: Batched members-matrix endpoint.
+ * AQU-218: Batched members-matrix endpoint.
  *
  * Verifies that GET /api/v2/orgs/:orgId/members-matrix produces per-project
  * effective-member rows IDENTICAL to what GET /api/v2/projects/:id/members
@@ -88,7 +88,7 @@ interface MatrixBody {
 
 // ---------------------------------------------------------------------------
 
-describe("GET /api/v2/orgs/:orgId/members-matrix (FRO-218 batched endpoint)", () => {
+describe("GET /api/v2/orgs/:orgId/members-matrix (AQU-218 batched endpoint)", () => {
   it("returns identical role/source/secondarySources as per-project endpoint for each project", async () => {
     await seedFixture()
     const jwt = await jwtFor("wendi")
@@ -209,6 +209,15 @@ describe("GET /api/v2/orgs/:orgId/members-matrix (FRO-218 batched endpoint)", ()
     // return only the projects she has any effective access to, and the per-project
     // reference (called as anna) must agree on role/source for each project.
     await seedFixture()
+    // AQU-485: rosterViewMinRole defaults to maintainer(600), which would 403
+    // the per-project /members reference call below (anna's winning role on
+    // "pa" is contributor=400, below the default floor) — that's an
+    // orthogonal, deliberate visibility gate, not something this test's
+    // matrix-vs-per-project EQUIVALENCE check is about. Open the roster floor
+    // for this fixture's org so both endpoints are directly comparable again.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (1, '{\"rosterViewMinRole\":100}', 1, 1)",
+    ).run()
     const annaJwt = await jwtFor("anna")
 
     // --- per-project reference (anna calling) --------------------------------

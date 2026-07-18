@@ -97,7 +97,7 @@ export function AccountSwitcher({
   variant = "sidebar",
   compact = false,
 }: { variant?: "sidebar" | "header"; compact?: boolean } = {}) {
-  const { active, sessions, activate, remove } = useAccounts()
+  const { active, sessions, activate } = useAccounts()
   const qc = useQueryClient()
   const location = useLocation()
   const [open, setOpen] = useState(false)
@@ -165,7 +165,6 @@ export function AccountSwitcher({
             key={s.key}
             summary={s}
             onSelect={s.active ? undefined : () => { setOpen(false); activate(s.key) }}
-            onRemove={s.active ? undefined : () => remove(s.key)}
           />
         ))}
       </DropdownMenuGroup>
@@ -281,11 +280,9 @@ interface EntrySummary {
 function AccountMenuEntry({
   summary,
   onSelect,
-  onRemove,
 }: {
   summary: EntrySummary
   onSelect?: () => void
-  onRemove?: () => void
 }) {
   return (
     <DropdownMenuItem
@@ -305,23 +302,7 @@ function AccountMenuEntry({
           <span className="truncate text-xs text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
         )}
       </div>
-      <span className="flex shrink-0 items-center gap-1.5">
-        {summary.active && <Check className="size-4 opacity-60" />}
-        {onRemove && !summary.active && (
-          <Button
-            type="button"
-            variant="destructive"
-            size="xs"
-            className="shrink-0"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => { event.stopPropagation(); onRemove() }}
-            aria-label={`Remove ${summary.username}`}
-          >
-            Remove
-          </Button>
-        )}
-        {!summary.active && !onRemove && <span aria-hidden />}
-      </span>
+      {summary.active && <Check className="size-4 shrink-0 opacity-60" />}
     </DropdownMenuItem>
   )
 }

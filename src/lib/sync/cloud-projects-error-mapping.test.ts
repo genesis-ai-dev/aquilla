@@ -146,8 +146,8 @@ describe("resolveCloudProjectResult", () => {
     expect(result.reason).toBe("not-found")
   })
 
-  it("returns ok:false reason:'forbidden' on 403 + not in list (FRO-346 revoked access)", async () => {
-    // FRO-346: when a removed member reloads, the direct endpoint 403s. That
+  it("returns ok:false reason:'forbidden' on 403 + not in list (AQU-346 revoked access)", async () => {
+    // AQU-346: when a removed member reloads, the direct endpoint 403s. That
     // must NOT collapse into 'not-found' — the project exists; the workspace
     // must show "you no longer have access", not "project not found".
     global.fetch = vi.fn(async (input) => {

@@ -1,9 +1,9 @@
 /**
- * RulesPage.test.tsx — FRO-186 regression guard + FRO-291 delete-confirm guard.
+ * RulesPage.test.tsx — AQU-186 regression guard + AQU-291 delete-confirm guard.
  *
- * FRO-186: Verifies that the "Harmonize all (N)" trigger in BuiltinChecksList renders
+ * AQU-186: Verifies that the "Harmonize all (N)" trigger in BuiltinChecksList renders
  * with N > 0 when validated project cells contain real violations.
- * FRO-291: Verifies that rule delete is gated by checkbox-confirm dialog.
+ * AQU-291: Verifies that rule delete is gated by checkbox-confirm dialog.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -49,7 +49,7 @@ vi.mock("@/hooks/useLivingMemory", () => ({
 // Expose a project stub so useRules sees a real builtinRules array.
 // We use the real resolveBuiltinRules path, but short-circuit the hook's
 // refresh / patch helpers so they don't need IDB.
-// userRulesStub and deleteRuleMock are controllable per-test for FRO-291 tests.
+// userRulesStub and deleteRuleMock are controllable per-test for AQU-291 tests.
 let userRulesStub: TranslationRule[] = []
 const deleteRuleMock = vi.fn()
 vi.mock("@/hooks/useRules", async (importOriginal) => {
@@ -134,7 +134,7 @@ function renderRulesPage() {
 
 // ── tests ──────────────────────────────────────────────────────────────────
 
-describe("RulesPage infraction derivation (FRO-186)", () => {
+describe("RulesPage infraction derivation (AQU-186)", () => {
   beforeEach(async () => {
     cellsStub = []
     userRulesStub = []
@@ -188,7 +188,7 @@ describe("RulesPage infraction derivation (FRO-186)", () => {
   })
 })
 
-// ── FRO-291: rule delete confirmation guard ────────────────────────────────
+// ── AQU-291: rule delete confirmation guard ────────────────────────────────
 
 function makeUserRule(overrides: Partial<TranslationRule> = {}): TranslationRule {
   return {
@@ -202,7 +202,7 @@ function makeUserRule(overrides: Partial<TranslationRule> = {}): TranslationRule
   } as TranslationRule
 }
 
-describe("RulesPage rule delete confirm (FRO-291)", () => {
+describe("RulesPage rule delete confirm (AQU-291)", () => {
   beforeEach(async () => {
     cellsStub = []
     userRulesStub = []
@@ -275,5 +275,43 @@ describe("RulesPage rule delete confirm (FRO-291)", () => {
     // Now confirm
     fireEvent.click(confirmBtn)
     expect(deleteRuleMock).toHaveBeenCalledWith("rule-1")
+  })
+})
+
+// ── AQU-480: rule management is gated at MAINTAINER (600) ────────────────────
+
+describe("RulesPage rule-management gating (AQU-480)", () => {
+  beforeEach(() => {
+    cellsStub = []
+    userRulesStub = []
+    deleteRuleMock.mockReset()
+  })
+
+  async function renderAtRole(level: number) {
+    const { getProject } = await import("@/lib/store/project-index")
+    vi.mocked(getProject).mockResolvedValue(
+      makeProject({ syncRole: { level, source: "creator" } } as Partial<ProjectRecord>),
+    )
+    userRulesStub = [makeUserRule()]
+    renderRulesPage()
+    await new Promise((r) => setTimeout(r, 0))
+  }
+
+  it("shows a read-only banner and disables the delete control for a contributor (400)", async () => {
+    await renderAtRole(400)
+    expect(
+      screen.getByText(/Only maintainers and owners can add or change translation rules/i),
+    ).toBeInTheDocument()
+    const deleteBtn = await screen.findByRole("button", { name: /Delete rule Test rule/i })
+    expect(deleteBtn).toBeDisabled()
+  })
+
+  it("shows no banner and leaves the delete control enabled for an owner (700)", async () => {
+    await renderAtRole(700)
+    expect(
+      screen.queryByText(/Only maintainers and owners can add or change translation rules/i),
+    ).toBeNull()
+    const deleteBtn = await screen.findByRole("button", { name: /Delete rule Test rule/i })
+    expect(deleteBtn).not.toBeDisabled()
   })
 })

@@ -320,6 +320,66 @@ describe("DcsUpstreamPanel", () => {
     expect(screen.queryByRole("button", { name: /re-sync content/i })).not.toBeInTheDocument()
   })
 
+  it("hides Detach from upstream below maintainer (600)", () => {
+    const client = makeClient(V89, [])
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={500} client={client} />)
+    expect(screen.queryByRole("button", { name: /detach from upstream/i })).not.toBeInTheDocument()
+  })
+
+  it("Detach: confirm flow persists dcsUpstream removal (null) and the panel unlinks", async () => {
+    // The detach write must go through the settings patch with the dcsUpstream
+    // key EXPLICITLY nulled — patch merges shallowly, so omitting the key would
+    // leave the pin in place. readCursor(null) reads as absent, so after the
+    // settings round-trip the panel renders its no-cursor state and
+    // canEditSource unlocks via useDcsUpstreamCursor.
+    mockPatch.mockImplementation(async (partial: Record<string, unknown>) => {
+      settingsBag = { ...settingsBag, ...partial }
+      return { kind: "ok" }
+    })
+    const client = makeClient(V89, [])
+    const { container, rerender } = render(
+      <DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /detach from upstream/i }))
+
+    // Confirm dialog states exactly what happens, gated behind a checkbox.
+    expect(
+      screen.getByText(
+        /stop receiving updates from unfoldingWord\/en_ult\. Source cells become editable\. This cannot be undone from here — relinking requires a fresh import\./i,
+      ),
+    ).toBeInTheDocument()
+    const confirmButton = screen.getByRole("button", { name: /^detach$/i })
+    expect(confirmButton).toBeDisabled()
+    // Click the label text: happy-dom re-dispatches label-wrapped clicks back
+    // onto the control, so clicking the checkbox itself double-toggles there.
+    fireEvent.click(screen.getByText(/I understand this permanently unlinks/i))
+    expect(confirmButton).toBeEnabled()
+    fireEvent.click(confirmButton)
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledTimes(1))
+    expect(mockPatch.mock.calls[0][0]).toEqual({ dcsUpstream: null })
+
+    // No source events were emitted — detach only rewrites settings.
+    expect(mockEmitCommit).not.toHaveBeenCalled()
+    expect(mockEmitDelete).not.toHaveBeenCalled()
+    expect(mockEnqueue).not.toHaveBeenCalled()
+
+    // The settings hook now serves the nulled bag → no-cursor state (nothing).
+    rerender(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
+  })
+
+  it("Detach: cancelling the confirm dialog persists nothing", () => {
+    const client = makeClient(V89, [])
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+    fireEvent.click(screen.getByRole("button", { name: /detach from upstream/i }))
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(mockPatch).not.toHaveBeenCalled()
+    // Still linked (badge + detach caption both still render the repo).
+    expect(screen.getAllByText(/unfoldingWord\/en_ult/).length).toBeGreaterThan(0)
+  })
+
   it("disables Import changes below maintainer (600)", async () => {
     const client = makeClient(V89, ["57-TIT.usfm"])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={500} client={client} />)

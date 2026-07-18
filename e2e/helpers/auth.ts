@@ -213,3 +213,53 @@ export async function injectSessionFromDisk(
   await injectSession(page, session)
   return session
 }
+
+/** Add a SECOND session to the page's IDB envelope WITHOUT changing which one
+ * is active — the "add another account" end-state, so the account switcher
+ * lists it under "Switch to". Read-merge-write (unlike injectSession, which
+ * overwrites the envelope and activates). Reloads so the app re-reads.
+ * Used by the cross-tab reconciliation spec (FRO-367). */
+export async function injectAdditionalSession(
+  page: Page,
+  session: PersistedSession,
+): Promise<void> {
+  await page.evaluate(async (s) => {
+    const DB = "frontier"
+    const STORE = "session"
+    const ENVELOPE_KEY = "envelope"
+    const key = s.username
+
+    const open = indexedDB.open(DB, 1)
+    open.onupgradeneeded = () => {
+      if (!open.result.objectStoreNames.contains(STORE)) {
+        open.result.createObjectStore(STORE)
+      }
+    }
+    await new Promise<void>((resolve, reject) => {
+      open.onsuccess = () => resolve()
+      open.onerror = () => reject(open.error)
+    })
+    const db = open.result
+
+    // Read current envelope, add the session, keep `active` untouched.
+    const readTx = db.transaction(STORE, "readonly")
+    const existing = await new Promise<{ active: string | null; sessions: Record<string, unknown> } | undefined>((resolve, reject) => {
+      const req = readTx.objectStore(STORE).get(ENVELOPE_KEY)
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    const env = existing ?? { active: null, sessions: {} }
+    env.sessions[key] = s
+
+    const writeTx = db.transaction(STORE, "readwrite")
+    writeTx.objectStore(STORE).put(env, ENVELOPE_KEY)
+    await new Promise<void>((resolve, reject) => {
+      writeTx.oncomplete = () => resolve()
+      writeTx.onerror = () => reject(writeTx.error)
+    })
+    db.close()
+  }, session)
+
+  await page.reload()
+  await page.waitForLoadState("networkidle")
+}

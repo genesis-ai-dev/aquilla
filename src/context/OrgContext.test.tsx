@@ -3,6 +3,25 @@ import { render, screen, waitFor, act } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider, useActiveOrg } from "./OrgContext"
 
+// This vitest/happy-dom env doesn't provide localStorage (the reason this
+// suite was red before FRO-367 added the shim). OrgContext reads/writes it
+// synchronously, so install a minimal in-memory Storage — the browser always
+// has one.
+if (typeof globalThis.localStorage === "undefined") {
+  const map = new Map<string, string>()
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+      setItem: (k: string, v: string) => { map.set(k, String(v)) },
+      removeItem: (k: string) => { map.delete(k) },
+      clear: () => { map.clear() },
+      key: (i: number) => Array.from(map.keys())[i] ?? null,
+      get length() { return map.size },
+    },
+  })
+}
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }),
 }))
@@ -117,5 +136,20 @@ describe("OrgProvider", () => {
       await waitFor(() => expect(screen.getByTestId("guest-count").textContent).toBe("1"))
       expect(screen.getByTestId("count").textContent).toBe("1")
     })
+  })
+
+  // FRO-367: when a cross-tab account switch leaves a persisted org id the new
+  // account can't see, the clamp must ALSO rewrite localStorage — otherwise a
+  // reload resurrects the stale id and hits a "no access to org" 403.
+  it("re-persists to all-orgs when the persisted id vanishes from a multi-org list", async () => {
+    localStorage.setItem("org:active", "2")
+    listMyOrgs.mockResolvedValue([
+      { id: 3, name: "C", role: { level: 700, name: "owner" } },
+      { id: 4, name: "D", role: { level: 600, name: "maintainer" } },
+    ])
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByTestId("all").textContent).toBe("yes"))
+    expect(screen.getByTestId("active").textContent).toBe("none")
+    expect(localStorage.getItem("org:active")).toBe("all")
   })
 })

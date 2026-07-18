@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { saveSession, loadSession, clearSession } from "./session-store";
 import type { FrontierSession } from "./types";
@@ -30,7 +30,7 @@ describe("session-store", () => {
 
 import {
   listSessions, addSession, activateSession, removeSession,
-  loadActiveSession, sessionKey,
+  loadActiveSession, sessionKey, subscribeSession,
 } from "./session-store"
 
 function mkSession(overrides: Partial<FrontierSession> = {}): FrontierSession {
@@ -185,5 +185,58 @@ describe("aq_hint cookie", () => {
     await addSession(b)
     await activateSession(sessionKey(b))
     expect(getHint()).toBe("1")
+  })
+})
+
+describe("cross-tab reconciliation (FRO-367)", () => {
+  // This vitest/happy-dom env doesn't provide localStorage (the reason the
+  // repo's org/localStorage suites are red), while the browser always does.
+  // Install a minimal in-memory shim so the ping path is exercisable; the
+  // source guards the real call in try/catch either way.
+  let storageShimInstalled = false
+  beforeEach(async () => {
+    if (!storageShimInstalled && typeof globalThis.localStorage === "undefined") {
+      const map = new Map<string, string>()
+      Object.defineProperty(globalThis, "localStorage", {
+        configurable: true,
+        value: {
+          getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+          setItem: (k: string, v: string) => { map.set(k, String(v)) },
+          removeItem: (k: string) => { map.delete(k) },
+          clear: () => { map.clear() },
+          key: (i: number) => Array.from(map.keys())[i] ?? null,
+          get length() { return map.size },
+        },
+      })
+      storageShimInstalled = true
+    }
+    const { _resetDbForTesting } = await import("./session-store")
+    await _resetDbForTesting()
+    localStorage.clear()
+  })
+
+  it("bumps the session-ping localStorage key on every write with a distinct value", async () => {
+    await addSession(mkSession({ username: "alice" }))
+    const first = localStorage.getItem("frontier:session-ping")
+    expect(first).not.toBeNull()
+
+    await addSession(mkSession({ username: "bob" }))
+    const second = localStorage.getItem("frontier:session-ping")
+    expect(second).not.toBeNull()
+    expect(second).not.toBe(first) // forces a `storage` event on every write
+  })
+
+  it("a session-ping storage event fires subscribers; other keys don't", async () => {
+    const seen = vi.fn()
+    const un = subscribeSession(seen)
+    seen.mockClear() // subscribe itself doesn't fire
+
+    window.dispatchEvent(new StorageEvent("storage", { key: "frontier:session-ping", newValue: "x" }))
+    expect(seen).toHaveBeenCalledTimes(1)
+
+    window.dispatchEvent(new StorageEvent("storage", { key: "some-other-key", newValue: "y" }))
+    expect(seen).toHaveBeenCalledTimes(1) // unchanged
+
+    un()
   })
 })

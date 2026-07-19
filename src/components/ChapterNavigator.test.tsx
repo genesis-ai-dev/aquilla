@@ -12,10 +12,18 @@ const chapters: ChapterNavigationItem[] = [
   { label: "MAT 31", displayLabel: "Matthew 31", verseRange: "1–12", translated: 12, validated: 4, total: 12 },
 ]
 
+function openChapterPicker(activeDisplayLabel = "Matthew 1") {
+  fireEvent.click(screen.getByRole("combobox", { name: new RegExp(`Current chapter: ${activeDisplayLabel}`) }))
+}
+
+function chapterSearch() {
+  return screen.getByRole("combobox", { name: "Find a chapter" })
+}
+
 describe("ChapterNavigator", () => {
   it("keeps the current chapter and verse range visible", () => {
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={() => {}} />)
-    expect(screen.getByRole("button", { name: /Current chapter: Matthew 1/ })).toHaveTextContent("Verses 1–25")
+    expect(screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })).toHaveTextContent("Verses 1–25")
     expect(screen.getByText("Verses 1–25")).toHaveClass("justify-self-center")
     expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
   })
@@ -30,16 +38,16 @@ describe("ChapterNavigator", () => {
   it("opens an anchored searchable picker and selects a chapter", () => {
     const onSelect = vi.fn()
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={onSelect} />)
-    fireEvent.click(screen.getByRole("button", { name: /Current chapter: Matthew 1/ }))
-    expect(screen.getByRole("combobox", { name: "Find a chapter" })).toBeInTheDocument()
-    fireEvent.click(screen.getByText("Matthew 2"))
+    openChapterPicker()
+    expect(chapterSearch()).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("option", { name: /Matthew 2/ }))
     expect(onSelect).toHaveBeenCalledWith("MAT 2")
   })
 
   it.each(["13", "31"])("matches complete chapter number %s instead of a fuzzy digit sequence", (chapterNumber) => {
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={() => {}} />)
-    fireEvent.click(screen.getByRole("button", { name: /Current chapter: Matthew 1/ }))
-    fireEvent.change(screen.getByRole("combobox", { name: "Find a chapter" }), {
+    openChapterPicker()
+    fireEvent.change(chapterSearch(), {
       target: { value: chapterNumber },
     })
 
@@ -51,11 +59,85 @@ describe("ChapterNavigator", () => {
 
   it("shows no result when an exact numeric chapter does not exist", () => {
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={() => {}} />)
-    fireEvent.click(screen.getByRole("button", { name: /Current chapter: Matthew 1/ }))
-    fireEvent.change(screen.getByRole("combobox", { name: "Find a chapter" }), {
+    openChapterPicker()
+    fireEvent.change(chapterSearch(), {
       target: { value: "30" },
     })
 
     expect(screen.getByText("No chapters found.")).toBeInTheDocument()
+  })
+
+  it("virtualizes a whole-Bible chapter list instead of mounting every option", () => {
+    const manyChapters: ChapterNavigationItem[] = Array.from({ length: 1189 }, (_, index) => {
+      const n = index + 1
+      return {
+        label: `GEN ${n}`,
+        displayLabel: `Genesis ${n}`,
+        verseRange: "1–1",
+        translated: 0,
+        validated: 0,
+        total: 1,
+      }
+    })
+    render(<ChapterNavigator chapters={manyChapters} activeLabel="GEN 1" onSelect={() => {}} />)
+    openChapterPicker("Genesis 1")
+
+    const options = screen.getAllByRole("option")
+    expect(options.length).toBeGreaterThan(0)
+    expect(options.length).toBeLessThan(manyChapters.length)
+    expect(screen.getByRole("option", { name: /Genesis 1 / })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /Genesis 1189 / })).not.toBeInTheDocument()
+  })
+
+  it("keeps Combobox keyboard navigation: ArrowDown then Enter selects the next chapter", () => {
+    const onSelect = vi.fn()
+    render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={onSelect} />)
+    openChapterPicker()
+
+    const search = chapterSearch()
+    fireEvent.focus(search)
+    fireEvent.keyDown(search, { key: "ArrowDown" })
+    fireEvent.keyDown(search, { key: "Enter" })
+
+    expect(onSelect).toHaveBeenCalledWith("MAT 2")
+  })
+
+  it("keeps Combobox keyboard navigation after filtering", () => {
+    const onSelect = vi.fn()
+    render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={onSelect} />)
+    openChapterPicker()
+
+    const search = chapterSearch()
+    fireEvent.change(search, { target: { value: "13" } })
+    expect(screen.getByRole("option", { name: /Matthew 13 / })).toHaveAttribute("data-highlighted")
+    fireEvent.focus(search)
+    fireEvent.keyDown(search, { key: "Enter" })
+
+    expect(onSelect).toHaveBeenCalledWith("MAT 13")
+  })
+
+  it("selects a far chapter via filter autoHighlight and Enter", () => {
+    const onSelect = vi.fn()
+    const manyChapters: ChapterNavigationItem[] = Array.from({ length: 80 }, (_, index) => {
+      const n = index + 1
+      return {
+        label: `PSA ${n}`,
+        displayLabel: `Psalm ${n}`,
+        verseRange: "1–1",
+        translated: 0,
+        validated: 0,
+        total: 1,
+      }
+    })
+    render(<ChapterNavigator chapters={manyChapters} activeLabel="PSA 1" onSelect={onSelect} />)
+    openChapterPicker("Psalm 1")
+
+    const search = chapterSearch()
+    fireEvent.change(search, { target: { value: "31" } })
+    expect(screen.getByRole("option", { name: /Psalm 31 / })).toHaveAttribute("data-highlighted")
+    fireEvent.focus(search)
+    fireEvent.keyDown(search, { key: "Enter" })
+
+    expect(onSelect).toHaveBeenCalledWith("PSA 31")
   })
 })

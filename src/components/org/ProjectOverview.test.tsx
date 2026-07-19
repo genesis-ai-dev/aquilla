@@ -381,6 +381,61 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
       await waitFor(() => expect(screen.getAllByText(label).length).toBeGreaterThan(0))
     }
   })
+
+  // AQU-593: managers can hide stat widgets they don't find helpful. The
+  // preference is a per-user localStorage setting, honored at render time.
+  it("hides a stat widget when its key is persisted as hidden (AQU-593)", async () => {
+    localStorage.setItem("aquilla:hiddenStats", JSON.stringify(["validated"]))
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0,
+      recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    // Translated still shows; Validated is hidden by the persisted preference.
+    await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(screen.queryByText("Validated")).not.toBeInTheDocument()
+    // The Customize control is present so the user can bring it back.
+    expect(screen.getByTestId("customize-stats-trigger")).toBeInTheDocument()
+  })
+
+  it("Customize menu toggles a stat off and persists the choice (AQU-593)", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 80, validatedCells: 50,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0,
+      recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    const card = await screen.findByTestId("progress-card")
+    await waitFor(() => expect(within(card).getAllByText("Validated").length).toBeGreaterThan(0))
+    fireEvent.click(screen.getByTestId("customize-stats-trigger"))
+    const validatedToggle = await screen.findByTestId("customize-stat-validated")
+    fireEvent.click(validatedToggle)
+
+    // The Validated tile + bar disappear from the Progress card (the menu item,
+    // portaled outside the card, keeps its own "Validated" label) and the
+    // choice is persisted for next mount.
+    await waitFor(() => expect(within(card).queryByText("Validated")).not.toBeInTheDocument())
+    expect(JSON.parse(localStorage.getItem("aquilla:hiddenStats") ?? "[]")).toContain("validated")
+    // Translated is untouched.
+    expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0)
+  })
 })
 
 // ── File list show-more ────────────────────────────────────────────────────

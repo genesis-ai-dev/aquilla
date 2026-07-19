@@ -91,7 +91,7 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
       )}
     >
       {/* Soft tone bar instead of a hard bordered box. */}
-      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px] rounded-full", accent)} />
+      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px] rounded-md", accent)} />
 
       <div className="flex items-center gap-1.5">
         <Icon className={cn("h-3.5 w-3.5 shrink-0", iconTone)} />

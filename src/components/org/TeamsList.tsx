@@ -6,6 +6,7 @@ import { Plus, Search, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -336,14 +337,14 @@ export function TeamsList() {
                   </span>
                   <span className="mt-2 flex flex-wrap gap-1">
                     {!t.isInternal && (
-                      <span className="inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                      <Badge variant="secondary">
                         Public
-                      </span>
+                      </Badge>
                     )}
                     {t.viewerIsMember && (
-                      <span className="inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                      <Badge variant="secondary">
                         Member
-                      </span>
+                      </Badge>
                     )}
                   </span>
                 </button>

@@ -4,6 +4,7 @@ import { z } from "zod"
 import { v4 as uuid } from "uuid"
 import { Info, Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
   DialogBody,
@@ -780,17 +781,18 @@ function ExtraTargetLanguages({
             <li
               key={lang}
               data-testid={`create-extra-lang-chip-${lang}`}
-              className="flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-xs"
             >
-              {lang}
-              <button
-                type="button"
-                aria-label={`Remove ${lang}`}
-                className="text-muted-foreground hover:text-foreground"
-                onClick={() => onChange(languages.filter((l) => l !== lang))}
-              >
-                <X className="h-3 w-3" aria-hidden="true" />
-              </button>
+              <Badge variant="secondary" className="gap-1">
+                {lang}
+                <button
+                  type="button"
+                  aria-label={`Remove ${lang}`}
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => onChange(languages.filter((l) => l !== lang))}
+                >
+                  <X className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </Badge>
             </li>
           ))}
         </ul>

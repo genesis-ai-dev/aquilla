@@ -13,7 +13,7 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { Badge, badgeVariants } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -293,7 +293,7 @@ function SynthStatusBadge({
         : "Loading voice model"
     return (
       <AppTooltip content={tooltip}>
-        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
           <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
           {isTranslating
             ? "Translating"
@@ -307,7 +307,7 @@ function SynthStatusBadge({
   if (status.kind === "synthesizing") {
     return (
       <AppTooltip content="Generating audio…">
-        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
           <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
           Voicing
         </span>
@@ -346,7 +346,7 @@ function SynthStatusBadge({
     if (dismissed) {
       return (
         <AppTooltip content="Audio generation failed — click Generate to retry">
-          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-full bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
             Not voiced
           </span>
         </AppTooltip>
@@ -363,7 +363,7 @@ function SynthStatusBadge({
         trigger={
           <button
             type="button"
-            className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+            className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-md bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
           >
             Audio failed
           </button>
@@ -1666,9 +1666,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex items-center gap-2">
             {audioLens ? "Controls" : "Source"}
             {!audioLens && project.sourceLanguage && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+              <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                 {project.sourceLanguage}
-              </span>
+              </Badge>
             )}
           </div>
           <div className="flex items-center gap-2 pl-3">
@@ -1686,7 +1686,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       data-testid="lane-switcher"
                       data-active-lane={activeLane}
                       aria-label="Active translation lane"
-                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className={cn(
+                        badgeVariants({ variant: "secondary" }),
+                        "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
+                      )}
                     />
                   }
                 >
@@ -1713,9 +1716,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : project.targetLanguage ? (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+              <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                 {project.targetLanguage}
-              </span>
+              </Badge>
             ) : null}
           </div>
         </div>
@@ -2405,7 +2408,7 @@ function UsfmNoteChip({
     <button
       type="button"
       className={cn(
-        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-md bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
         panelActive ? "cursor-default" : "cursor-help",
       )}
       aria-label={`${kindLabel}${note.ref ? ` ${note.ref}` : ""}`}
@@ -4878,7 +4881,7 @@ function EditorRow({
                     /* Pre-stream spinner — centered so it doesn't overlap
                        any existing target text peeking through the dimmed
                        editor underneath. */
-                    <div className="m-auto flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-muted-foreground">
+                    <div className="m-auto flex items-center gap-1.5 rounded-md bg-card px-2.5 py-1 text-muted-foreground">
                       <Spinner className="size-3.5" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
@@ -5325,7 +5328,7 @@ function EditorRow({
                               type="button"
                               onClick={() => onBacktranslate?.(cell, "refresh")}
                               disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
                               Refresh
@@ -5351,7 +5354,7 @@ function EditorRow({
                             <button
                               type="button"
                               onClick={handleBtCancel}
-                              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
+                              className="rounded-md px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
                             >
                               Cancel
                             </button>
@@ -5359,7 +5362,7 @@ function EditorRow({
                               type="button"
                               onClick={handleBtSave}
                               disabled={btSaving || !btEditValue.trim()}
-                              className="rounded-full bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {btSaving ? "Saving…" : "Save"}
                             </button>
@@ -5370,7 +5373,7 @@ function EditorRow({
                            and leading, in a soft well with a gentle tone bar
                            (rhymes with the recording's transcript). */
                         <div className="relative overflow-hidden rounded-xl bg-muted/50 py-3 pr-4 pl-4">
-                          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-full bg-primary/35" />
+                          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-md bg-primary/35" />
                           <p className="text-[15px] leading-relaxed text-foreground/90">
                             {cell.backtranslation}
                           </p>
@@ -5391,7 +5394,7 @@ function EditorRow({
                             type="button"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
                             disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {isBacktranslating ? (
                               <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { getMemberAccess, type MemberEffectiveAccess, type ProjectAccessBreakdown } from "@/lib/frontier/orgs"
 import { removeProjectMember } from "@/lib/frontier/members"
@@ -177,12 +178,26 @@ function AccessProjectRow({
         </span>
       </div>
       <div className="mt-1 flex flex-wrap gap-1">
-        {p.direct != null && <Chip>direct: <RoleLevelLabel level={p.direct} /></Chip>}
+        {p.direct != null && (
+          <Badge variant="secondary" className="text-[10px]">
+            direct: <RoleLevelLabel level={p.direct} />
+          </Badge>
+        )}
         {p.groups.map((g) => (
-          <Chip key={g.groupId}>team {g.name}: <RoleLevelLabel level={g.roleLevel} /></Chip>
+          <Badge key={g.groupId} variant="secondary" className="text-[10px]">
+            team {g.name}: <RoleLevelLabel level={g.roleLevel} />
+          </Badge>
         ))}
-        {p.org != null && <Chip>org: <RoleLevelLabel level={p.org} /></Chip>}
-        {p.creator && <Chip>creator</Chip>}
+        {p.org != null && (
+          <Badge variant="secondary" className="text-[10px]">
+            org: <RoleLevelLabel level={p.org} />
+          </Badge>
+        )}
+        {p.creator && (
+          <Badge variant="secondary" className="text-[10px]">
+            creator
+          </Badge>
+        )}
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {p.direct != null && (
@@ -208,13 +223,5 @@ function AccessProjectRow({
         )}
       </div>
     </li>
-  )
-}
-
-function Chip({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border bg-muted px-2 py-0.5 text-[10px]">
-      {children}
-    </span>
   )
 }

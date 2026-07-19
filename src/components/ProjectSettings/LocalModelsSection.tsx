@@ -190,7 +190,7 @@ function DownloadBar({ loaded, total }: { loaded: number; total: number }) {
     <div className="mt-1.5 flex items-center gap-2">
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-primary transition-[width] duration-150"
+          className="h-full rounded-md bg-primary transition-[width] duration-150"
           style={{ width: `${pct ?? 8}%` }}
         />
       </div>

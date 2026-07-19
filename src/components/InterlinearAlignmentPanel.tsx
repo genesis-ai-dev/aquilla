@@ -118,7 +118,7 @@ function AlignmentRow({
       <AppTooltip content={`${pct}% confidence`}>
         <span
           className={cn(
-            "shrink-0 rounded-full px-1.5 py-px text-[9px] font-medium",
+            "shrink-0 rounded-md px-1.5 py-px text-[9px] font-medium",
             band === "high"
               ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
               : "bg-amber-500/15 text-amber-700 dark:text-amber-400",

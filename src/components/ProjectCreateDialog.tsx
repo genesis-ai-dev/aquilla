@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
@@ -111,6 +111,9 @@ const projectSchema = z
     name: requiredString("Project name"),
     sourceLanguage: requiredString("Source language"),
     targetLanguage: optionalString,
+    // Self-contained shape only (spec §5): extras beyond the primary target,
+    // applied as settings.targetLanes after create. Ignored for other shapes.
+    extraLanguages: z.array(z.string()),
     shape: z.enum(["self-contained", "source-only", "linked-target"]),
     upstreamProjectId: optionalString,
     linkMode: z.enum(["clone", "live"]),
@@ -139,10 +142,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const linkableProjects = suppliedProjects ?? discoveredProjects
   const [open, setOpen] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
-  // Self-contained shape only (spec §5 "creation fix"): extra target
-  // languages beyond the primary one, applied as settings.targetLanes after
-  // the project itself is created.
-  const [extraLanguages, setExtraLanguages] = useState<string[]>([])
   const [submitWarning, setSubmitWarning] = useState<string | null>(null)
 
   const upstreamOptions = useMemo(
@@ -155,6 +154,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       name: "",
       sourceLanguage: "",
       targetLanguage: "",
+      extraLanguages: [] as string[],
       shape: "self-contained" as ProjectShape,
       upstreamProjectId: "",
       linkMode: "live" as LinkMode,
@@ -182,7 +182,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       }
 
       let extraLanguagesFailed = false
-      const extrasToApply = value.shape === "self-contained" ? extraLanguages : []
+      const extrasToApply = value.shape === "self-contained" ? value.extraLanguages : []
 
       try {
         await createCloudProject(jwt, { id: project.id, name: project.name, orgId })
@@ -242,7 +242,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       onCreated(project)
       form.reset()
       clearSubmitError()
-      setExtraLanguages([])
 
       if (extraLanguagesFailed) {
         // The project exists and onCreated already fired — leave the dialog
@@ -260,8 +259,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     form.reset()
     clearSubmitError()
     setSubmitWarning(null)
-    // Preserve the existing array reference when there is nothing to reset.
-    setExtraLanguages((prev) => (prev.length === 0 ? prev : []))
   }, [open, form, clearSubmitError])
 
   function pickShape(next: ProjectShape) {
@@ -363,10 +360,15 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                             />
                             {invalid && <FieldError errors={field.state.meta.errors} />}
                             {shape === "self-contained" && (
-                              <ExtraTargetLanguages
-                                primaryLanguage={field.state.value}
-                                languages={extraLanguages}
-                                onChange={setExtraLanguages}
+                              <form.Field
+                                name="extraLanguages"
+                                children={(extrasField) => (
+                                  <ExtraTargetLanguages
+                                    primaryLanguage={field.state.value}
+                                    languages={extrasField.state.value}
+                                    onChange={extrasField.handleChange}
+                                  />
+                                )}
                               />
                             )}
                           </Field>
@@ -710,13 +712,11 @@ function AddAsLaneRecommendation({
         {status === "loading" && <Spinner data-icon="inline-start" />}
         {status === "loading" ? "Adding lane…" : `Add as lane on ${upstreamProject.name}`}
       </Button>
-      {message && (
-        <p
-          role={status === "error" ? "alert" : undefined}
-          className={
-            status === "error" ? "mt-2 text-xs text-destructive" : "mt-2 text-xs text-muted-foreground"
-          }
-        >
+      {message && status === "error" && (
+        <FieldError className="mt-2 text-xs">{message}</FieldError>
+      )}
+      {message && status !== "error" && (
+        <p role="status" className="mt-2 text-xs text-muted-foreground">
           {message}
         </p>
       )}
@@ -733,6 +733,26 @@ function AddAsLaneRecommendation({
  * lane" (trim, <=64 chars, case-insensitive dedupe — including against the
  * primary language, which isn't itself a lane).
  */
+function validateExtraLanguageDraft(
+  candidate: string,
+  primaryLanguage: string,
+  languages: string[],
+): string | null {
+  const trimmed = candidate.trim()
+  if (!trimmed) return "Enter a language tag."
+  if (trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) {
+    return `Must be ${MAX_EXTRA_LANGUAGE_LENGTH} characters or fewer.`
+  }
+  const lower = trimmed.toLowerCase()
+  if (lower === primaryLanguage.trim().toLowerCase()) {
+    return "This is already the primary target language."
+  }
+  if (languages.some((l) => l.toLowerCase() === lower)) {
+    return "Already added."
+  }
+  return null
+}
+
 function ExtraTargetLanguages({
   primaryLanguage,
   languages,
@@ -746,35 +766,24 @@ function ExtraTargetLanguages({
   const [error, setError] = useState<string | null>(null)
 
   function handleAdd() {
-    const trimmed = input.trim()
-    if (!trimmed) {
-      setError("Enter a language tag.")
-      return
-    }
-    if (trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) {
-      setError(`Must be ${MAX_EXTRA_LANGUAGE_LENGTH} characters or fewer.`)
-      return
-    }
-    const lower = trimmed.toLowerCase()
-    if (lower === primaryLanguage.trim().toLowerCase()) {
-      setError("This is already the primary target language.")
-      return
-    }
-    if (languages.some((l) => l.toLowerCase() === lower)) {
-      setError("Already added.")
+    const validationError = validateExtraLanguageDraft(input, primaryLanguage, languages)
+    if (validationError) {
+      setError(validationError)
       return
     }
     setError(null)
-    onChange([...languages, trimmed])
+    onChange([...languages, input.trim()])
     setInput("")
   }
 
+  const invalid = error != null
+
   return (
     <div className="mt-2 flex flex-col gap-2">
-      <p className="text-xs text-muted-foreground">
+      <FieldDescription>
         Optional — add more target languages for this project (e.g. dialect variants
         or parallel drafts of the same source).
-      </p>
+      </FieldDescription>
       {languages.length > 0 && (
         <ul className="flex flex-wrap gap-1.5">
           {languages.map((lang) => (
@@ -797,29 +806,32 @@ function ExtraTargetLanguages({
           ))}
         </ul>
       )}
-      <div className="flex items-center gap-2">
-        <Input
-          data-testid="create-extra-lang-input"
-          className={`${FIELD_CLASS} flex-1`}
-          value={input}
-          onChange={(e) => {
-            setInput(e.target.value)
-            setError(null)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              handleAdd()
-            }
-          }}
-          placeholder="e.g. fr-CA"
-        />
-        <Button type="button" variant="secondary" size="sm" data-testid="create-extra-lang-add" onClick={handleAdd}>
-          <Plus className="mr-1 h-3.5 w-3.5" />
-          Add
-        </Button>
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      <Field data-invalid={invalid}>
+        <div className="flex items-center gap-2">
+          <Input
+            data-testid="create-extra-lang-input"
+            className={`${FIELD_CLASS} flex-1`}
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value)
+              setError(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                handleAdd()
+              }
+            }}
+            placeholder="e.g. fr-CA"
+            aria-invalid={invalid}
+          />
+          <Button type="button" variant="secondary" size="sm" data-testid="create-extra-lang-add" onClick={handleAdd}>
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add
+          </Button>
+        </div>
+        {error && <FieldError className="text-xs">{error}</FieldError>}
+      </Field>
     </div>
   )
 }

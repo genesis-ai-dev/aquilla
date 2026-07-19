@@ -33,6 +33,8 @@ interface Props {
   settings: ProjectTtsSettings | undefined
   /** Scroll a line into view when the queue advances to it. */
   onActiveCell?: (cellId: string) => void
+  /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
+  below?: ReactNode
 }
 
 function fmtTime(s: number): string {
@@ -42,7 +44,9 @@ function fmtTime(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`
 }
 
-export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings, onActiveCell }: Props) {
+export function VoicePlaybackBar({
+  cells: rawCells, projectId, session, settings, onActiveCell, below,
+}: Props) {
   const queue = useQueueState()
   const { currentTime, duration, rate, volume } = useQueueProgress()
 
@@ -89,7 +93,7 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 
   return (
-    <div className="border-t bg-background">
+    <div className="border-t">
       {/* Full-width progress line doubling as a scrubber. */}
       <BarScrubber
         fraction={progressFraction}
@@ -97,26 +101,31 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
         onSeek={(f) => seekQueue(f * duration)}
       />
 
-      <div className="flex items-center gap-3 px-4 py-1.5">
-        {/* Now playing */}
-        <div className="flex min-w-0 flex-[1.2] items-center gap-2">
-          {activeVoice && <VoiceAvatar voice={activeVoice} size={26} />}
-          <div className="min-w-0">
-            <div className="truncate text-xs font-medium leading-tight">
-              {activeCell ? (activeCell.cellLabel || "Line") : "Nothing playing"}
-            </div>
-            <div className="truncate text-[10px] leading-tight text-muted-foreground">
-              {queue.kind === "error"
-                ? queue.message
-                : activeVoice
-                  ? activeVoice.name
-                  : canPlay ? "Press play to listen" : "No voiced lines yet"}
+      {/* Equal flex side columns keep the transport truly centered; stretch +
+          self-center let it sit mid-height when status chips/stats nest below. */}
+      <div className="flex items-stretch gap-3 px-4 py-1.5">
+        {/* Now playing (+ optional status stack) */}
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            {activeVoice && <VoiceAvatar voice={activeVoice} size={26} />}
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium leading-tight">
+                {activeCell ? (activeCell.cellLabel || "Line") : "Nothing playing"}
+              </div>
+              <div className="truncate text-[10px] leading-tight text-muted-foreground">
+                {queue.kind === "error"
+                  ? queue.message
+                  : activeVoice
+                    ? activeVoice.name
+                    : canPlay ? "Press play to listen" : "No voiced lines yet"}
+              </div>
             </div>
           </div>
+          {below}
         </div>
 
         {/* Transport */}
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5 self-center">
           <SpeedButton rate={rate} onChange={setQueueRate} />
           <IconButton title="Previous line" disabled={!canPlay} onClick={skipBack}>
             <SkipBack className="h-4 w-4" />
@@ -131,18 +140,18 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
             aria-label={isPlaying ? "Pause" : "Play all"}
             className="bg-foreground text-background hover:bg-foreground/90"
           >
-            {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
+            {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
           </Button>
           <IconButton title="Next line" disabled={!canPlay} onClick={skipForward}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
-          <span className="ml-1 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          <span className="ml-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
             {fmtTime(currentTime)} / {fmtTime(duration)}
           </span>
         </div>
 
-        {/* Volume */}
-        <div className="flex min-w-0 flex-1 items-center justify-end">
+        {/* Volume — matching flex-1 balances the left column for true center */}
+        <div className="flex min-w-0 flex-1 items-center justify-end self-center">
           <VolumeControl volume={volume} onChange={setQueueVolume} />
         </div>
       </div>

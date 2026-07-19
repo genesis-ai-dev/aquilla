@@ -4789,44 +4789,64 @@ export function ProjectWorkspace() {
           </>
         }
         statusBar={
-          <>
-            {lens === "audio" && project && centerSurface !== "agent" && (
-              <VoicePlaybackBar
-                cells={legacyCells}
-                projectId={project.id}
-                session={frontierSession ?? null}
-                settings={tts.settings}
-                onActiveCell={jumpToCellId}
+          (() => {
+            const syncStatus = (
+              <WorkspaceStatusBar
+                className={lens === "audio" && project && centerSurface !== "agent" ? "px-0 py-0.5" : undefined}
+                left={
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
+                    <SyncStatusIndicator status={fileSyncStatus} />
+                    <OutboxSyncIndicator
+                      pendingCount={Math.max(0, outboxPending - outboxFailed)}
+                      failureStreak={outboxFailures}
+                      failedCount={outboxFailed}
+                      records={outboxRecords}
+                      onRetryNow={outboxFlushNow}
+                    />
+                  </div>
+                }
               />
-            )}
-            <WorkspaceStatusBar
-              left={
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
-                  <SyncStatusIndicator status={fileSyncStatus} />
-                  <OutboxSyncIndicator
-                    pendingCount={Math.max(0, outboxPending - outboxFailed)}
-                    failureStreak={outboxFailures}
-                    failedCount={outboxFailed}
-                    records={outboxRecords}
-                    onRetryNow={outboxFlushNow}
-                  />
-                </div>
-              }
-            />
-            {/* File translation stats belong to the editor; the workbench has
-                its own working-set summary. Sync/outbox status above stays —
-                agent Apply flushes through the same outbox. */}
-            {centerSurface !== "agent" && (
+            )
+            // File translation stats belong to the editor; the workbench has
+            // its own working-set summary. Sync/outbox status above stays —
+            // agent Apply flushes through the same outbox.
+            const fileStats = centerSurface !== "agent" ? (
               <StatusBar
+                className={lens === "audio" && project ? "px-0 py-0.5" : undefined}
                 cells={cellSummaries}
                 projectHealth={projectHealth}
                 healthMap={healthMap}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}
               />
-            )}
-          </>
+            ) : null
+
+            if (lens === "audio" && project && centerSurface !== "agent") {
+              return (
+                <VoicePlaybackBar
+                  cells={legacyCells}
+                  projectId={project.id}
+                  session={frontierSession ?? null}
+                  settings={tts.settings}
+                  onActiveCell={jumpToCellId}
+                  below={
+                    <>
+                      {syncStatus}
+                      {fileStats}
+                    </>
+                  }
+                />
+              )
+            }
+
+            return (
+              <>
+                {syncStatus}
+                {fileStats}
+              </>
+            )
+          })()
         }
       />
       {project && (

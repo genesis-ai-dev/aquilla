@@ -1,5 +1,6 @@
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
 
@@ -10,10 +11,11 @@ interface StatusBarProps {
   healthMap: Map<string, number>
   staleSourceCount?: number
   onJumpToCell?: (cellId: string) => void
+  className?: string
 }
 
 export function StatusBar({
-  cells, projectHealth, healthMap, staleSourceCount, onJumpToCell,
+  cells, projectHealth, healthMap, staleSourceCount, onJumpToCell, className,
 }: StatusBarProps) {
   const total = cells.length
   const empty = cells.filter((c) => c.status === "empty").length
@@ -29,7 +31,10 @@ export function StatusBar({
   }))
 
   return (
-    <footer className="relative z-10 flex items-center gap-2.5 px-4 py-2 text-sm text-muted-foreground">
+    <footer className={cn(
+      "relative z-10 flex items-center gap-2.5 px-4 py-2 text-sm text-muted-foreground",
+      className,
+    )}>
       <DecayBreakdown
         health={projectHealth}
         scopeLabel="project health"

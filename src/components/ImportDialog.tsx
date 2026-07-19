@@ -1892,11 +1892,11 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
 
       <div className="flex justify-end">
         {mode === "source" ? (
-          <Button onClick={handleImport} disabled={!selected || importing}>
+          <Button onClick={handleImport} loading={importing} disabled={!selected}>
             {importing ? "Importing..." : "Import"}
           </Button>
         ) : (
-          <Button onClick={handlePrepareTarget} disabled={!selected || importing || !sourceCells?.length}>
+          <Button onClick={handlePrepareTarget} loading={importing} disabled={!selected || !sourceCells?.length}>
             {importing ? "Preparing…" : "Next: Review matches"}
           </Button>
         )}

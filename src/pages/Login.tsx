@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { RevealableInput } from "@/components/ui/revealable-input"
-import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError } from "@/lib/frontier/auth"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
@@ -124,8 +123,7 @@ export function Login() {
               />
             </FieldGroup>
             {submitError && <FieldError>{submitError}</FieldError>}
-            <Button type="submit" form="login-form" className="w-full">
-              {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
+            <Button type="submit" form="login-form" className="w-full" loading={form.state.isSubmitting}>
               {form.state.isSubmitting ? "Signing in…" : "Sign in"}
             </Button>
           </form>

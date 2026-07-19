@@ -33,6 +33,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { DisabledFieldTooltip } from "./ProjectSettings/DisabledFieldTooltip"
+import { AppShell } from "@/components/AppShell"
+import { OrgSidebar } from "@/components/org/OrgSidebar"
+import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { Page, PageHeader } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
@@ -198,7 +202,15 @@ const ITEM_CLASS =
 export function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { project, loading, refresh } = useProject(id!)
+
+  // Workspace handoff (`?return=…`) — only accept same-origin relative paths.
+  const returnParam = searchParams.get("return")
+  const editorPath =
+    returnParam && returnParam.startsWith("/") && !returnParam.startsWith("//")
+      ? returnParam
+      : `/project/${id}`
 
   const [conflictBy, setConflictBy] = useState<string | null>(null)
   useEffect(() => {
@@ -725,16 +737,16 @@ export function ProjectSettings() {
     // `saveError` from the render closure is stale (set inside handleSave
     // during this same tick); rely on the returned boolean instead.
     if (!ok) return
-    navigate(`/project/${id}`)
-  }, [handleSave, navigate, id])
+    navigate(editorPath)
+  }, [handleSave, navigate, editorPath])
 
   const handleDiscardConfirm = useCallback(() => {
     if (baseline) applyBaseline(baseline)
     setDiscardOpen(false)
-    const target = pendingNav ?? `/project/${id}`
+    const target = pendingNav ?? editorPath
     setPendingNav(null)
     navigate(target)
-  }, [baseline, applyBaseline, pendingNav, navigate, id])
+  }, [baseline, applyBaseline, pendingNav, navigate, editorPath])
 
   const handleDiscardCancel = useCallback(() => {
     setDiscardOpen(false)
@@ -786,7 +798,6 @@ export function ProjectSettings() {
   // `…/settings?q=gemini`, which filters to the Voice card so the key entry is
   // visible immediately with nothing to hunt for or scroll past. Seeded once on
   // mount; the box stays user-editable/clearable afterward.
-  const [searchParams] = useSearchParams()
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") ?? "")
   const lowerQuery = searchQuery.trim().toLowerCase()
   const visibleSections = lowerQuery
@@ -823,7 +834,12 @@ export function ProjectSettings() {
       label: "Source & sync",
       description: "Linked source project, upstream changes, git sync",
       icon: Link2,
-      sectionIds: ["section-source-link", "section-upstream-changes", "section-git-sync"],
+      sectionIds: [
+        "section-source-link",
+        "section-upstream-changes",
+        "section-dcs-upstream",
+        "section-git-sync",
+      ],
     },
     {
       id: "ai",
@@ -880,99 +896,181 @@ export function ProjectSettings() {
       ? visibleSections.filter((s) => activeGroup.sectionIds.includes(s.id))
       : []
 
-  if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
+  // Search-only: place each main-section label above the first matching card
+  // in that group (same labels as the index NavList). Non-search panes stay
+  // flat — the PageHeader already names the active group.
+  const searchGroupHeaderBefore = (() => {
+    if (!lowerQuery) return new Map<string, string>()
+    const shown = new Set(sectionsToRender.map((s) => s.id))
+    // DOM render order of section cards (must stay in sync with JSX below).
+    const renderOrder = [
+      "section-source-link",
+      "section-upstream-changes",
+      "section-dcs-upstream",
+      "section-project-info",
+      "section-languages",
+      "section-bible-resources",
+      "section-user",
+      "section-ai-instructions",
+      "section-draft-context",
+      "section-advanced-llm",
+      "section-voice",
+      "section-local-models",
+      "section-decay",
+      "section-validation",
+      "section-audio-media",
+      "section-git-sync",
+      "section-terminology",
+      "section-termbase-sharing",
+      "section-ai-metrics",
+    ]
+    const headers = new Map<string, string>()
+    const claimedGroups = new Set<string>()
+    for (const sectionId of renderOrder) {
+      if (!shown.has(sectionId)) continue
+      const group = visibleGroups.find((g) => g.sectionIds.includes(sectionId))
+      if (!group || claimedGroups.has(group.id)) continue
+      claimedGroups.add(group.id)
+      headers.set(sectionId, group.label)
+    }
+    return headers
+  })()
 
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 flex items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur supports-backdrop-filter:bg-background/80">
-        {isDirty ? (
-          <ButtonGroup>
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saving ? (
-                <Spinner data-icon="inline-start" />
-              ) : (
-                <Save data-icon="inline-start" />
-              )}
-              Save changes
-            </Button>
-            <ButtonGroupSeparator />
-            <Menu.Root>
-              <Menu.Trigger
-                render={
-                  <Button
-                    size="sm"
-                    disabled={saving}
-                    className="px-2"
-                    aria-label="More save options"
-                  >
-                    <ChevronDown />
-                  </Button>
-                }
-              />
-              <Menu.Portal>
-                <Menu.Positioner sideOffset={4} align="start" className="z-40">
-                  <Menu.Popup className="min-w-56 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
-                    <Menu.Item onClick={handleSaveAndClose} className={ITEM_CLASS}>
-                      Save and close
-                    </Menu.Item>
-                    <Menu.Item onClick={() => setDiscardOpen(true)} className={ITEM_CLASS}>
-                      Close without saving
-                    </Menu.Item>
-                  </Menu.Popup>
-                </Menu.Positioner>
-              </Menu.Portal>
-            </Menu.Root>
-          </ButtonGroup>
-        ) : (
-          <Button variant="ghost" size="sm" onClick={() => requestNavigate(`/project/${id}`)}>
-            <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
+  const searchGroupLabel = (sectionId: string) => {
+    const label = searchGroupHeaderBefore.get(sectionId)
+    if (!label) return null
+    return (
+      <p className="px-1 font-heading text-lg font-semibold tracking-tight text-foreground">
+        {label}
+      </p>
+    )
+  }
+
+  const pageTitle = lowerQuery || !activeGroup
+    ? "Project settings"
+    : activeGroup.label
+  const pageDescription = lowerQuery || !activeGroup
+    ? "Configure this project. Changes apply to everyone with access."
+    : activeGroup.description
+
+  const headerActions = (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {isDirty ? (
+        <ButtonGroup>
+          <Button size="sm" onClick={handleSave} disabled={saving}>
+            {saving ? (
+              <Spinner data-icon="inline-start" />
+            ) : (
+              <Save data-icon="inline-start" />
+            )}
+            Save changes
           </Button>
+          <ButtonGroupSeparator />
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button
+                  size="sm"
+                  disabled={saving}
+                  className="px-2"
+                  aria-label="More save options"
+                >
+                  <ChevronDown />
+                </Button>
+              }
+            />
+            <Menu.Portal>
+              <Menu.Positioner sideOffset={4} align="end" className="z-40">
+                <Menu.Popup className="min-w-56 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
+                  <Menu.Item onClick={handleSaveAndClose} className={ITEM_CLASS}>
+                    Save and close
+                  </Menu.Item>
+                  <Menu.Item onClick={() => setDiscardOpen(true)} className={ITEM_CLASS}>
+                    Close without saving
+                  </Menu.Item>
+                </Menu.Popup>
+              </Menu.Positioner>
+            </Menu.Portal>
+          </Menu.Root>
+        </ButtonGroup>
+      ) : (
+        <Button variant="ghost" size="sm" onClick={() => requestNavigate(editorPath)}>
+          <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
+        </Button>
+      )}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        {isDirty && !saving && <span>Unsaved changes</span>}
+        {!isDirty && savedMessage && (
+          <span
+            role="status"
+            className="flex items-center gap-1 text-green-600 dark:text-green-400"
+          >
+            <Check className="size-3.5" /> {savedMessage}
+          </span>
         )}
-        <h2 className="font-semibold">Project Settings</h2>
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
-          {isDirty && !saving && <span>Unsaved changes</span>}
-          {!isDirty && savedMessage && (
-            <span
-              role="status"
-              className="flex items-center gap-1 text-green-600 dark:text-green-400"
-            >
-              <Check className="size-3.5" /> {savedMessage}
-            </span>
-          )}
-          {saveError && <span className="text-destructive">{saveError}</span>}
-        </div>
-      </header>
-      <div className="mx-auto max-w-3xl px-4 py-6">
-        {/* Search — filters across every group, mirrors the old scroll-spy filter */}
-        <div className="mb-4">
-          <SettingsNav onSearch={setSearchQuery} searchQuery={searchQuery} />
-        </div>
+        {saveError && <span className="text-destructive">{saveError}</span>}
+      </div>
+    </div>
+  )
 
-        {/* Main content */}
-        <main className="min-w-0 flex-1 space-y-6">
-        {showIndex ? (
-          !lowerQuery ? (
-            <NavList label="Settings">
-              {visibleGroups.map((g) => (
-                <NavRow
-                  key={g.id}
-                  to={`?section=${g.id}`}
-                  icon={g.icon}
-                  title={g.label}
-                  description={g.description}
-                />
-              ))}
-            </NavList>
-          ) : sectionsToRender.length === 0 ? (
-            <p className="px-2 py-1.5 text-sm text-muted-foreground">No matching settings.</p>
-          ) : null
-        ) : (
-          <BackLink to="?" label="Settings" />
-        )}
+  const breadcrumb = (
+    <OrgBreadcrumb
+      section={project?.name ?? "Project"}
+      sectionTo={id ? `/projects/${id}` : undefined}
+      orgId={project?.orgId}
+      trail={[{ label: "Settings" }]}
+    />
+  )
+
+  if (loading) {
+    return (
+      <AppShell
+        sidebar={<OrgSidebar />}
+        header={breadcrumb}
+        statusBar={null}
+        main={
+          <Page>
+            <p className="text-muted-foreground">Loading...</p>
+          </Page>
+        }
+      />
+    )
+  }
+
+  const shell = (
+    <AppShell
+      sidebar={<OrgSidebar />}
+      header={breadcrumb}
+      statusBar={null}
+      main={
+        <Page>
+          <div className="space-y-6">
+            {!showIndex && <BackLink to="?" label="Settings" />}
+            <PageHeader
+              title={pageTitle}
+              description={pageDescription}
+              actions={headerActions}
+            />
+
+            <SettingsNav onSearch={setSearchQuery} searchQuery={searchQuery} />
+
+            {showIndex && !lowerQuery ? (
+              <NavList>
+                {visibleGroups.map((g) => (
+                  <NavRow
+                    key={g.id}
+                    to={`?section=${g.id}`}
+                    icon={g.icon}
+                    title={g.label}
+                    description={g.description}
+                  />
+                ))}
+              </NavList>
+            ) : null}
+
+            {showIndex && lowerQuery && sectionsToRender.length === 0 ? (
+              <p className="px-2 py-1.5 text-sm text-muted-foreground">No matching settings.</p>
+            ) : null}
 
         {permissionBlocked && (
           <PermissionDeniedAlert
@@ -996,6 +1094,7 @@ export function ProjectSettings() {
             </button>
           </div>
         )}
+        {searchGroupLabel("section-source-link")}
         {hasSourceLink && project?.sourceProjectId && sectionsToRender.some((s) => s.id === "section-source-link") && (
           <SourceLinkSection
             projectId={id!}
@@ -1008,6 +1107,7 @@ export function ProjectSettings() {
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}
+        {searchGroupLabel("section-upstream-changes")}
         {hasLiveSourceLink && sectionsToRender.some((s) => s.id === "section-upstream-changes") && (
           <UpstreamChangesPanel
             projectId={id!}
@@ -1017,9 +1117,11 @@ export function ProjectSettings() {
             username={session?.username ?? "local"}
           />
         )}
+        {searchGroupLabel("section-dcs-upstream")}
         {hasDcsUpstream && sectionsToRender.some((s) => s.id === "section-dcs-upstream") && (
           <DcsUpstreamPanel projectId={id!} roleLevel={project?.syncRole?.level ?? null} />
         )}
+        {searchGroupLabel("section-project-info")}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <Card id="section-project-info">
             <CardHeader><CardTitle>Project Info</CardTitle></CardHeader>
@@ -1074,6 +1176,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-languages")}
         {sectionsToRender.some((s) => s.id === "section-languages") && (
           <LanguagesSection
             defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
@@ -1084,6 +1187,7 @@ export function ProjectSettings() {
           />
         )}
 
+        {searchGroupLabel("section-bible-resources")}
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <Card id="section-bible-resources">
             <CardHeader>
@@ -1129,6 +1233,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-user")}
         {sectionsToRender.some((s) => s.id === "section-user") && (
           <Card id="section-user">
             <CardHeader><CardTitle>User</CardTitle></CardHeader>
@@ -1140,6 +1245,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-ai-instructions")}
         {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
           <Card id="section-ai-instructions">
             <CardHeader>
@@ -1266,6 +1372,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-draft-context")}
         {sectionsToRender.some((s) => s.id === "section-draft-context") && (
           <Card id="section-draft-context">
             <CardHeader>
@@ -1297,6 +1404,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-advanced-llm")}
         {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
           <details id="section-advanced-llm" className="group rounded-lg border bg-card">
             <summary className="cursor-pointer select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
@@ -1475,6 +1583,7 @@ export function ProjectSettings() {
           </details>
         )}
 
+        {searchGroupLabel("section-voice")}
         {sectionsToRender.some((s) => s.id === "section-voice") && (
           <Card id="section-voice">
             <CardHeader>
@@ -1508,6 +1617,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-local-models")}
         {sectionsToRender.some((s) => s.id === "section-local-models") && (
           <Card id="section-local-models">
             <CardHeader>
@@ -1534,6 +1644,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-decay")}
         {sectionsToRender.some((s) => s.id === "section-decay") && (
           <div id="section-decay">
             <DecaySettingsSection
@@ -1543,6 +1654,7 @@ export function ProjectSettings() {
           </div>
         )}
 
+        {searchGroupLabel("section-validation")}
         {sectionsToRender.some((s) => s.id === "section-validation") && (
           <div id="section-validation">
             <ValidationSettingsSection
@@ -1604,6 +1716,7 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-audio-media")}
         {sectionsToRender.some((s) => s.id === "section-audio-media") && (
           <div id="section-audio-media">
             <AudioMediaStrategySection
@@ -1613,6 +1726,7 @@ export function ProjectSettings() {
           </div>
         )}
 
+        {searchGroupLabel("section-git-sync")}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <Card id="section-git-sync">
             <CardHeader><CardTitle>Git Sync</CardTitle></CardHeader>
@@ -1643,6 +1757,7 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
+        {searchGroupLabel("section-terminology")}
         {sectionsToRender.some((s) => s.id === "section-terminology") && (
           <Card id="section-terminology">
             <CardHeader>
@@ -1660,6 +1775,7 @@ export function ProjectSettings() {
             </CardContent>
           </Card>
         )}
+        {searchGroupLabel("section-termbase-sharing")}
         {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && sectionsToRender.some((s) => s.id === "section-termbase-sharing") && (
           <TermbaseSharingSection
             projectId={id}
@@ -1668,6 +1784,7 @@ export function ProjectSettings() {
           />
         )}
 
+        {searchGroupLabel("section-ai-metrics")}
         {sectionsToRender.some((s) => s.id === "section-ai-metrics") && (
           <PostEditMetricsSection
             metrics={postEditMetrics}
@@ -1677,10 +1794,17 @@ export function ProjectSettings() {
             onRevalidate={revalidateMetrics}
           />
         )}
+          </div>
+        </Page>
+      }
+    />
+  )
 
-        </main>
-      </div>
-
+  // Dialogs / toasts portal above the shell; keep them as siblings so they
+  // aren't clipped by the Page scroll container.
+  return (
+    <>
+      {shell}
       <Dialog open={discardOpen} onOpenChange={(open) => (open ? setDiscardOpen(true) : handleDiscardCancel())}>
         <DialogContent>
           <DialogHeader>
@@ -1704,6 +1828,6 @@ export function ProjectSettings() {
           Synced settings update from <span className="font-medium">{conflictBy}</span>.
         </div>
       )}
-    </div>
+    </>
   )
 }

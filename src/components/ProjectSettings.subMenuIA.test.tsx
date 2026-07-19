@@ -23,6 +23,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+
+
+vi.mock("@/components/org/OrgSidebar", () => ({
+  OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
+}))
+vi.mock("@/components/org/OrgBreadcrumb", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  OrgBreadcrumb: ({ section, trail }: any) => (
+    <div data-testid="org-breadcrumb">
+      {section}
+      {(trail ?? []).map((t: { label: string }) => ` › ${t.label}`).join("")}
+    </div>
+  ),
+}))
+
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const PROJECT_ID = "proj-submenu-ia"
@@ -182,6 +197,20 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByLabelText(/project name/i)).toBeNull()
   })
 
+  it("search results are grouped under main section headers", () => {
+    renderAt(`/project/${PROJECT_ID}/settings`)
+
+    const search = screen.getByLabelText(/search settings/i)
+    fireEvent.change(search, { target: { value: "language" } })
+
+    // Matching cards appear under their index section label — not a flat dump.
+    expect(screen.getByText("General")).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    // Unrelated groups that have no keyword match stay out of the document.
+    expect(screen.queryByText("AI metrics")).toBeNull()
+    expect(screen.queryByText(/approved ai review effort/i)).toBeNull()
+  })
+
   // No setting lost: every section that used to live on the single scroll is
   // still reachable through exactly one sub-menu pane.
   it("every settings group renders its expected controls (no section dropped)", () => {
@@ -194,7 +223,8 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // This project has a git origin but no source link, so only Git Sync
     // renders in this pane — confirms the group still mounts correctly when
     // some of its member sections are conditionally hidden.
-    expect(screen.getByText(/git sync/i)).toBeTruthy()
+    // PageHeader description also mentions "git sync", so match the card title exactly.
+    expect(screen.getByText("Git Sync")).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings?section=ai`)
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()

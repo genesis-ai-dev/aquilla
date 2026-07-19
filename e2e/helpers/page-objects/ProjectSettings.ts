@@ -17,7 +17,7 @@ export class ProjectSettings {
   }
 
   /**
-   * Navigate from the open workspace ("/project/:id") into Settings →
+   * Navigate from the open workspace ("/project/:id/editor") into Settings →
    * General, where the Languages section renders. Mirrors the sidebar
    * "More project options" → "Settings" flow already exercised by
    * `workspace-settings-navigate.smoke.spec.ts`.
@@ -70,6 +70,6 @@ export class ProjectSettings {
   /** Navigate back to the project's workspace editor. */
   async backToEditor(): Promise<void> {
     await this.page.getByRole("button", { name: /^Editor$/i }).click()
-    await this.page.waitForURL(/\/project\/[^/]+(?:\/file\/[^/]+)?$/, { timeout: 10_000 })
+    await this.page.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 10_000 })
   }
 }

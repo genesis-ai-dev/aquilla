@@ -60,7 +60,7 @@ test("cell expansion Issues tab shows rule infractions", async ({ alice }) => {
   await expect(patInput).not.toBeVisible({ timeout: 5_000 })
 
   // Import file and open editor.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)

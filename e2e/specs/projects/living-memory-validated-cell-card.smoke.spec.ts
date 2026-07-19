@@ -33,7 +33,7 @@ test("living memory Recent Examples shows ValidatedCellCard with Source and Tran
   expect(projectId).toBeTruthy()
 
   // Import a file.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)

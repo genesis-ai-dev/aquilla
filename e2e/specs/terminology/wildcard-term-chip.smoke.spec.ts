@@ -51,7 +51,7 @@ test("wildcard source term creates chip matches in the editor", async ({ alice }
   await glossary.addTerm("samp*", "échantillon")
 
   // Navigate back to the editor / file.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 

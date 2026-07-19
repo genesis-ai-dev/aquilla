@@ -1,6 +1,6 @@
 import { type Page, type Locator, expect } from "@playwright/test"
 
-/** Page object for the project workspace route ("/project/:id"). */
+/** Page object for the project workspace route ("/project/:id/editor"). */
 export class Workspace {
   private readonly page: Page
 

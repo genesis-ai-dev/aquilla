@@ -12,13 +12,13 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * CommentsPage.tsx renders an "Open file" button with a "Go to cell in editor" tooltip
  * for each cell-scoped comment thread. Clicking it calls onNavigate(root)
- * which navigates to /project/:id/file/:fileId?cell=:cellId.
+ * which navigates to /project/:id/editor/file/:fileId?cell=:cellId.
  *
  * Setup:
  *   1. Post a comment on cell 0 via the editor CommentsDrawer.
  *   2. Navigate to /project/:id/comments.
  *   3. Find the "Open file" button on the comment thread.
- *   4. Click it and verify the URL changes to /project/:id/file/:fileId.
+ *   4. Click it and verify the URL changes to /project/:id/editor/file/:fileId.
  */
 test("comments page Go to cell navigates to the cell in editor", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -83,7 +83,7 @@ test("comments page Go to cell navigates to the cell in editor", async ({ alice 
 
   // URL should navigate to the file in the workspace editor.
   await alice.waitForURL(
-    new RegExp(`/project/${projectId}/file/`),
+    new RegExp(`/project/${projectId}/editor/file/`),
     { timeout: 8_000 }
   )
 })

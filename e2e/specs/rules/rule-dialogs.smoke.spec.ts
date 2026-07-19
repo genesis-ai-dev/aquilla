@@ -16,8 +16,8 @@ test("Import from doc and Suggest from edits dialogs open on rules page", async 
   await dash.createProject({ name })
   await dash.openProject(name)
 
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/rules`)

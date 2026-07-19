@@ -14,7 +14,7 @@ test("term detail occurrence opens an inline target editor", async ({ alice }) =
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await new Workspace(alice).importFile(SAMPLE_MD)
 
   const glossary = new Glossary(alice)

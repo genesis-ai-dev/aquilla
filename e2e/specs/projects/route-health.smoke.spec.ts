@@ -11,7 +11,7 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
 const SEEDED_PROJECT_ID = "41ee4729-6862-51b1-b89c-47401d1a7850" // bestalu-bible
 
 const PROJECT_ROUTES = [
-  `/project/${SEEDED_PROJECT_ID}`,
+  `/project/${SEEDED_PROJECT_ID}/editor`,
   `/project/${SEEDED_PROJECT_ID}/settings`,
   `/project/${SEEDED_PROJECT_ID}/rules`,
   `/project/${SEEDED_PROJECT_ID}/terminology`,

@@ -49,7 +49,7 @@ test("waive and unwaive a rule violation via violation popover", async ({ alice 
   }
 
   // Import file and create a violation.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")

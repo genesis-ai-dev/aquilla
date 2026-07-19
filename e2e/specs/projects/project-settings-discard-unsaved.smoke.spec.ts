@@ -32,8 +32,8 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   await dash.createProject({ name })
   await dash.openProject(name)
 
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   // Navigate to project settings.
@@ -82,8 +82,8 @@ test("project settings discard dialog: Discard navigates away from settings", as
   await dash.createProject({ name })
   await dash.openProject(name)
 
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   // AQU-501: Project name lives in the "General" sub-menu pane.

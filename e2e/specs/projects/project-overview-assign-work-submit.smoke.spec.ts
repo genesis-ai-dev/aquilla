@@ -42,7 +42,7 @@ test("assign work form with seeded member enables Assign button", async ({ alice
   expect(projectId).toBeTruthy()
 
   // Import a file so the Book select has options.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)

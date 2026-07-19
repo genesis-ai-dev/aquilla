@@ -13,8 +13,8 @@ test("member presence popover is fully visible above workspace chrome", async ({
   })
 
   await Promise.all([
-    alice.goto(`/project/${projectId}`),
-    bob.goto(`/project/${projectId}`),
+    alice.goto(`/project/${projectId}/editor`),
+    bob.goto(`/project/${projectId}/editor`),
   ])
 
   const presenceTrigger = alice.getByRole("button", { name: /bob/i }).first()

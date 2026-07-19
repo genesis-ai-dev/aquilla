@@ -365,9 +365,9 @@ export function ProjectWorkspace() {
     if (!projectId) return
     setSelectedFileId(fileId)
     if (fileId) {
-      navigate(`/project/${projectId}/file/${fileId}`)
+      navigate(`/project/${projectId}/editor/file/${fileId}`)
     } else {
-      navigate(`/project/${projectId}`)
+      navigate(`/project/${projectId}/editor`)
     }
   }, [projectId, navigate])
   useEffect(() => {
@@ -614,7 +614,7 @@ export function ProjectWorkspace() {
         pendingNavRef.current = null
         return
       }
-      redirectTo(`/project/${projectId}`)
+      redirectTo(`/project/${projectId}/editor`)
       return
     }
 
@@ -647,7 +647,7 @@ export function ProjectWorkspace() {
     if (savedLoc?.cellId && savedLoc.fileId === nextFileId) {
       pendingCellScrollRef.current = savedLoc.cellId
     }
-    const target = `/project/${projectId}/file/${nextFileId}`
+    const target = `/project/${projectId}/editor/file/${nextFileId}`
     if (redirectTo(target)) setSelectedFileId(nextFileId)
   }, [
     project,
@@ -1223,7 +1223,7 @@ export function ProjectWorkspace() {
     },
     [projectId],
   )
-  // AQU-538 deep link: `/project/:id?lane=<tag>` — PM surfaces link into the
+  // AQU-538 deep link: `/project/:id/editor?lane=<tag>` — PM surfaces link into the
   // editor at the lane they were viewing. Read the param ONCE per project (after
   // the lane registry loads so an unknown tag can be told apart from a
   // not-yet-loaded one); a valid tag selects that lane, an unknown tag falls
@@ -4327,7 +4327,7 @@ export function ProjectWorkspace() {
                     label: "Rules",
                     // Navigating to the bare project route lets the
                     // restore-location effect re-open the last active file.
-                    onClose: () => navigate(`/project/${projectId}`),
+                    onClose: () => navigate(`/project/${projectId}/editor`),
                   }
                 : null
             }
@@ -4534,7 +4534,7 @@ export function ProjectWorkspace() {
           />
         ) : centerSurface === "comments" ? (
           // FRO-254: Comments page inside the shell — back button in the page
-          // navigates to /project/:id, which the restore-location effect turns
+          // navigates to /project/:id,/editor which the restore-location effect turns
           // into the user's last open file (including scroll position).
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading comments…</div>}>
@@ -4581,9 +4581,9 @@ export function ProjectWorkspace() {
               resolveCell: resolveCellById,
               onApplied: handleAgentApplied,
             }}
-            onClose={() => navigate(`/project/${projectId}`)}
+            onClose={() => navigate(`/project/${projectId}/editor`)}
             onJumpToCell={(fileId, cellId) =>
-              navigate(`/project/${projectId}/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
+              navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }
           />
         ) : cellAreaState.kind === "ready" ? (

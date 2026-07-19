@@ -37,7 +37,7 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   await addProjectMember(aliceSession.jwt, projectId, "bob", ROLE.CONTRIBUTOR)
 
   // 2. Alice navigates to the project, imports the sample file, opens it.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
 
   // Server-side-created projects have no source/target language, so the import
@@ -59,7 +59,7 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
 
   // 3. Bob opens the same project and file BEFORE alice edits — both need to
   //    be connected to the ProjectSync DO to receive the broadcast.
-  await bob.goto(`/project/${projectId}/file/${fileId}`)
+  await bob.goto(`/project/${projectId}/editor/file/${fileId}`)
   await bob.waitForLoadState("networkidle")
   const bobWs = new Workspace(bob)
   await bobWs.waitForEditor()

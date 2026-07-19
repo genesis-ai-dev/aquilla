@@ -40,7 +40,7 @@ export function hasChromeVersionTag(pathname: string): boolean {
     return true
   }
 
-  // Project workspace (LeftDock footer VersionTag) — every /project/* route except
+  // Project workspace (LeftDock footer VersionTag) — every /project/*/editor route except
   // centred shells that don't mount the dock (settings, debug dumps).
   if (root === "project" && segs.length >= 2) {
     if (segs.length >= 3 && segs[2] === "settings") return false

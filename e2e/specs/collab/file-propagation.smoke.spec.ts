@@ -39,7 +39,7 @@ test("alice imports a file; bob (added via API) sees it in his workspace", async
   // 2. Alice navigates to the project workspace directly and imports the file.
   //    useProject reads from the server (thin client), so direct navigation
   //    works even though the project was registered server-side, not via the UI.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
 
   // Server-side-created projects have no source/target language, so the import
@@ -76,7 +76,7 @@ test("alice imports a file; bob (added via API) sees it in his workspace", async
   expect(fileVisible, "file should appear in bob's project API response within 10s").toBe(true)
 
   // 4. UI: bob navigates to the project; sidebar should list the file.
-  await bob.goto(`/project/${projectId}`)
+  await bob.goto(`/project/${projectId}/editor`)
   await bob.waitForLoadState("networkidle")
   await expect(
     bob.locator("aside").locator("div").filter({ hasText: /sample/i }).first(),

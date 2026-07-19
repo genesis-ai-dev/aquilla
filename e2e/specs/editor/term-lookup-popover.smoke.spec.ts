@@ -45,7 +45,7 @@ test("term lookup popover appears for terminology-matched source word", async ({
   await glossary.addTerm("content", "échantillon")
 
   // Open the workspace and import the file.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
 
   const ws = new Workspace(alice)

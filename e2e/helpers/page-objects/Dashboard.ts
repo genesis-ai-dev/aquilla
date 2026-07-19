@@ -77,7 +77,7 @@ export class Dashboard {
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
     // A project card now lands on the project Overview (/projects/:id). Enter
-    // the editor workspace (/project/:id) via its "Open project" action when
+    // the editor workspace (/project/:id/editor) via its "Open project" action when
     // present (older UIs went straight to the editor).
     const openInEditor = this.page.getByRole("button", { name: /^Open project$/i })
     if (!(await openInEditor.isVisible({ timeout: 1_000 }).catch(() => false))) {

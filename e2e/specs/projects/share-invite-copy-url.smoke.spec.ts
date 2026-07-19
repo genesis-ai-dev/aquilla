@@ -23,7 +23,7 @@ test("share panel Copy URL button shows Copied confirmation", async ({ alice }) 
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
 
   // Open Share panel.

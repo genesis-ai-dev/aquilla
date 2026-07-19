@@ -15,12 +15,12 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * the center). The page's own "Back to project" button was removed —
  * LivingMemoryPage.tsx: "no back button: shell owns nav". Navigation back to
  * the editor is via the persistent sidebar: clicking a file row calls
- * setActiveFileId → navigate(`/project/:id/file/:fileId`).
+ * setActiveFileId → navigate(`/project/:id/editor/file/:fileId`).
  *
  * This spec: create a project → import a file → open Memory via the sidebar
  * "More" menu → verify the Living Memory page renders inside the shell →
  * click the file row in the sidebar → URL returns to the editor
- * (/project/:id/file/:fileId).
+ * (/project/:id/editor/file/:fileId).
  */
 test("living memory shell nav returns to the project editor", async ({ alice }) => {
   const dash = new Dashboard(alice)

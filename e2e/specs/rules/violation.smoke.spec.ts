@@ -39,7 +39,7 @@ test("alice enables 'Extra whitespace' rule and sees a violation surfaced in edi
   }
 
   // Back to workspace, import, type a violation.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")

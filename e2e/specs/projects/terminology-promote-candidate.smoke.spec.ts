@@ -14,7 +14,7 @@ test("accepting a suggested term promotes its inline row to active", async ({ al
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await new Workspace(alice).importFile(SAMPLE_MD)
   await new Glossary(alice).goto(projectId!)
   await alice.getByRole("button", { name: "Suggest terms" }).click()

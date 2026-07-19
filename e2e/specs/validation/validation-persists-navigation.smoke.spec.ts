@@ -32,7 +32,7 @@ test("validated cell stays validated after navigating away and back", async ({ a
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
 
   const ws = new Workspace(alice)
@@ -54,7 +54,7 @@ test("validated cell stays validated after navigating away and back", async ({ a
   })
 
   // Navigate back to the project workspace.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
 
   const ws2 = new Workspace(alice)

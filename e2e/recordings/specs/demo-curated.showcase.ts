@@ -43,7 +43,7 @@ test("Demo · Curated John translation — a populated project, instantly", asyn
 
   let verified = false
   try {
-    await page.goto("/project/demo-john")
+    await page.goto("/project/demo-john/editor")
     await page.waitForLoadState("networkidle")
     await show.chapter("John — Plainspeak Draft", "A curated project, already full of work.")
     await show.caption("No empty states — real source, real translation.")

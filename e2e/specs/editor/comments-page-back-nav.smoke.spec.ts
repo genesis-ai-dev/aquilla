@@ -5,10 +5,10 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * CommentsPage — "Back to project" button navigates to the workspace.
  *
  * CommentsPage.tsx has a "Back to project" button (ghost, sm, ArrowLeft icon)
- * in the page header. Clicking it calls navigate(`/project/${projectId}`).
+ * in the page header. Clicking it calls navigate(`/project/${projectId}/editor`).
  *
  * This spec: navigate to /project/:id/comments → click "Back to project" →
- * verify URL returns to /project/:id.
+ * verify URL returns to /project/:id/editor
  */
 test("CommentsPage Back to project navigates to workspace", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -27,8 +27,8 @@ test("CommentsPage Back to project navigates to workspace", async ({ alice }) =>
   const backBtn = alice.getByRole("button", { name: /Back to project/i })
   await expect(backBtn).toBeVisible({ timeout: 10_000 })
 
-  // Click it — navigates to /project/:id.
+  // Click it — navigates to /project/:id/editor
   await backBtn.click()
-  await alice.waitForURL(new RegExp(`/project/${projectId}$`), { timeout: 5_000 })
-  expect(alice.url()).toMatch(/\/project\/[^/]+$/)
+  await alice.waitForURL(new RegExp(`/project/${projectId}/editor`), { timeout: 5_000 })
+  expect(alice.url()).toMatch(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/)
 })

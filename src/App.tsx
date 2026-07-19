@@ -210,9 +210,11 @@ function AppRoutes() {
           <Route path="settings/providers" element={<OrgSettingsProviders />} />
         </Route>
 
-        {/* Project routes stay flat (not nested under /orgs). */}
-        <Route path="/project/:id" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
+        {/* Project routes stay flat (not nested under /orgs).
+            Default work surface is explicit: /project/:id/editor[/file/:fileId].
+            Bare /project/:id and /project/:id/file/:fileId are intentionally dead. */}
+        <Route path="/project/:id/editor" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
         <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
         <Route path="/project/:id/rules" element={<ProjectWorkspace />} />

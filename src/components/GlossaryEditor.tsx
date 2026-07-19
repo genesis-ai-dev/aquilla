@@ -416,7 +416,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
               concepts={concepts}
               cells={detailCells}
               onJumpToCell={({ cellId, fileId }) => {
-                navigate(`/project/${id}/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
+                navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
               }}
             />
           )}

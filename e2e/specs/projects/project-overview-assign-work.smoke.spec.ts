@@ -28,7 +28,7 @@ test("project overview assign work form opens and Cancel collapses it", async ({
   expect(projectId).toBeTruthy()
 
   // Import a file so the assign picker has files to show.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)

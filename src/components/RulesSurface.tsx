@@ -422,7 +422,7 @@ export function RulesSurface({
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => navigate(`/project/${projectId}?openRule=${rule.id}`)}
+                          onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
                           title="Opens the editor with this rule's drawer"
                         >
                           <Wand2 data-icon="inline-start" />

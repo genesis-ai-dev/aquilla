@@ -33,7 +33,7 @@ test("bob can validate alice's edit in a shared project", async ({ alice, bob })
   })
 
   // Alice imports the file and edits cell 0.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.waitForLoadState("networkidle")
 
   // Server-side-created projects have no source/target language, so the import
@@ -54,7 +54,7 @@ test("bob can validate alice's edit in a shared project", async ({ alice, bob })
   await alice.waitForTimeout(2_000)
 
   // Bob opens the same file.
-  await bob.goto(`/project/${projectId}`)
+  await bob.goto(`/project/${projectId}/editor`)
   await bob.waitForLoadState("networkidle")
   const bobWs = new Workspace(bob)
   await bobWs.openFileBySubstring("sample")

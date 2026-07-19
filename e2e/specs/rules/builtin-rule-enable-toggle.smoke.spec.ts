@@ -18,7 +18,7 @@ test("builtin rule enabled switch toggles the rule on and off", async ({ alice }
   await dash.createProject({ name })
   await dash.openProject(name)
 
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/rules`)

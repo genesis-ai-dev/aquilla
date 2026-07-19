@@ -9,10 +9,10 @@ import { test, expect } from "../../helpers/multi-user"
  *   Step 3: SignInStep → "Already have an account" / "Sign in" (already signed in)
  *   Step 4: NameStep → fill display name → "Continue"
  *   Step 5: ProjectStep → fill project name + langs → "Create Project"
- *   Step 6: ReadyStep → "Start Translating" → navigate to /project/:id
+ *   Step 6: ReadyStep → "Start Translating" → navigate to /project/:id/editor
  *
  * This spec drives through all steps to reach ReadyStep, then clicks
- * "Start Translating" and verifies the URL becomes /project/:id.
+ * "Start Translating" and verifies the URL becomes /project/:id/editor
  *
  * Note: alice is already authenticated, so the SignInStep auto-advances or
  * shows a bypass option.
@@ -79,7 +79,7 @@ test("ReadyStep 'Start Translating' navigates to the created project", async ({ 
   await expect(startBtn).toBeVisible({ timeout: 3_000 })
   await startBtn.click()
 
-  // Should navigate to /project/:id.
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 10_000 })
-  expect(alice.url()).toMatch(/\/project\/[^/]+$/)
+  // Should navigate to /project/:id/editor
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 10_000 })
+  expect(alice.url()).toMatch(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/)
 })

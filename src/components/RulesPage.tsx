@@ -187,7 +187,7 @@ export function RulesPage() {
         />
       )}
       <header className="flex items-center gap-4 border-b px-4 py-2">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${id}`)}>
+        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${id}/editor`)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
         </Button>
         <h2 className="font-semibold">Translation Rules</h2>
@@ -255,7 +255,7 @@ export function RulesPage() {
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
-                        <Button size="sm" variant="outline" onClick={() => navigate(`/project/${id}?openRule=${rule.id}`)} title="Opens the editor with this rule's drawer">
+                        <Button size="sm" variant="outline" onClick={() => navigate(`/project/${id}/editor?openRule=${rule.id}`)} title="Opens the editor with this rule's drawer">
                           <Wand2 className="mr-1 h-3.5 w-3.5" />
                           Try to fix all
                         </Button>

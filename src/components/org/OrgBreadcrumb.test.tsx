@@ -27,7 +27,7 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
-function renderBreadcrumb(ui: React.ReactNode, initialEntry = "/project/project-1") {
+function renderBreadcrumb(ui: React.ReactNode, initialEntry = "/project/project-1/editor") {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       {ui}

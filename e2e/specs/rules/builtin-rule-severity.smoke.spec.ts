@@ -23,7 +23,7 @@ test("builtin rule severity select changes from minor to major", async ({ alice 
   await dash.createProject({ name })
   await dash.openProject(name)
 
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/rules`)

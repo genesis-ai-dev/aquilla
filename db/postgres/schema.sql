@@ -162,6 +162,10 @@ CREATE TABLE project_invites (
     used_by    BIGINT,
     used_at    TIMESTAMPTZ,
     email      TEXT,
+    -- AQU-528: optional JSON array of lane (target-language) values to
+    -- auto-grant as kind='lane' project_member_scopes on accept. NULL =
+    -- unscoped invite (grants access across every lane the role allows).
+    scope_lanes TEXT,
     PRIMARY KEY (token, project_id)
 );
 

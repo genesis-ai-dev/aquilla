@@ -276,6 +276,12 @@ export interface ProjectInviteRow {
   used_at: string | null
   /** Optional recipient the invite was minted for; null for open links. */
   email: string | null
+  /**
+   * AQU-528: optional JSON array of lane (target-language) values to
+   * auto-grant as kind='lane' project_member_scopes when the link is redeemed.
+   * null = unscoped invite (grants access across every lane the role allows).
+   */
+  scope_lanes: string | null
 }
 
 /** Row shape of `project_members`. */

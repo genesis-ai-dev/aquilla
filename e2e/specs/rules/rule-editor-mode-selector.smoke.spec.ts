@@ -29,7 +29,7 @@ test("rule editor mode selector toggles source pattern input visibility", async 
   await alice.waitForLoadState("networkidle")
 
   // Open inline RuleEditor.
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

@@ -30,7 +30,7 @@ test("add rule inline editor appears and Cancel dismisses", async ({ alice }) =>
   await alice.waitForLoadState("networkidle")
 
   // "+ Add Rule" button opens the inline editor.
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

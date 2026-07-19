@@ -44,7 +44,7 @@ test("Org owner can dismiss a rule promotion request", async ({ alice, bob }) =>
   await bob.goto(`/project/${projectId}/rules`)
   await bob.waitForLoadState("networkidle")
 
-  const addRuleBtn = bob.getByRole("button", { name: /\+ Add Rule|New rule|Add rule/i }).first()
+  const addRuleBtn = bob.getByRole("button", { name: /Add Rule|New rule|Add rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

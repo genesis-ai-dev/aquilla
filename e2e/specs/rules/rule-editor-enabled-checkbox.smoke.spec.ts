@@ -28,7 +28,7 @@ test("rule editor Enabled switch toggles", async ({ alice }) => {
   await alice.waitForLoadState("networkidle")
 
   // Open the inline RuleEditor via the header "+ Add Rule" button.
-  const createBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const createBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(createBtn).toBeVisible({ timeout: 10_000 })
   await createBtn.click()
 

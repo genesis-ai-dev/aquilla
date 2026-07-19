@@ -32,7 +32,7 @@ test("rule editor severity toggle switches between Minor and Major", async ({ al
   await alice.waitForLoadState("networkidle")
 
   // "+ Add Rule" opens the inline RuleEditor (no dialog).
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
   await expect(alice.locator("#re-name")).toBeVisible({ timeout: 5_000 })

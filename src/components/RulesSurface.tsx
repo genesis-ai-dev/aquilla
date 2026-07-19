@@ -7,7 +7,7 @@
  */
 import { useState, useMemo, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/page"
 import { Input } from "@/components/ui/input"
@@ -237,7 +237,8 @@ export function RulesSurface({
                     onClick={() => setEditingOrgRuleId("new")}
                     disabled={editingOrgRuleId !== null}
                   >
-                    + Add Org Rule
+                    <Plus className="size-4" aria-hidden />
+                    Add Org Rule
                   </Button>
                 )}
                 {!canEditOrgRules && (

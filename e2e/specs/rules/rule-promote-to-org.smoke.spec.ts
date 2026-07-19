@@ -27,7 +27,7 @@ test("Promote to org button opens confirmation dialog", async ({ alice }) => {
   await alice.waitForLoadState("networkidle")
 
   // Create a rule so the "Promote to org" button appears.
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule|New rule|Add rule/i }).first()
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule|New rule|Add rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

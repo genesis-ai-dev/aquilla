@@ -265,7 +265,10 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button />}>+ New Project</DialogTrigger>
+      <DialogTrigger render={<Button />}>
+        <Plus className="size-4" aria-hidden />
+        New Project
+      </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Create New Project</DialogTitle>

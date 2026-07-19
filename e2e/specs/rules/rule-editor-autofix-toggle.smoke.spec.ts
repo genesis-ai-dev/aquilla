@@ -30,7 +30,7 @@ test("rule editor autofix toggle shows and hides autofix form", async ({ alice }
   await alice.waitForLoadState("networkidle")
 
   // Open the inline RuleEditor.
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

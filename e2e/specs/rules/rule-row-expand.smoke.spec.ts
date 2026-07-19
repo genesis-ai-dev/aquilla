@@ -25,7 +25,7 @@ test("rule row chevron expands and collapses autofix editor", async ({ alice }) 
   await alice.waitForLoadState("networkidle")
 
   // Create a rule first.
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

@@ -29,7 +29,7 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   await alice.waitForLoadState("networkidle")
 
   // Create a rule via + Add Rule.
-  const addBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addBtn).toBeVisible({ timeout: 10_000 })
   await addBtn.click()
 

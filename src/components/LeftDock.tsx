@@ -31,7 +31,7 @@ import {
   PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { ReportProblemButton } from "@/components/ReportProblemButton/ReportProblemButton"
+import { HelpMenu } from "@/components/HelpMenu"
 import { VersionTag } from "@/components/VersionBadge"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
@@ -351,23 +351,24 @@ export function LeftDock({
         )}
       </div>
 
-      {/* Account picker lives at the dock root so it's present in every tab
-          and even when collapsed (compact avatar on the 40px rail). */}
+      {/* Help + account live at the dock root so they're present in every tab
+          and even when collapsed (compact icon / avatar on the 40px rail). */}
       <div
         className={cn(
           "shrink-0 border-t pt-2",
-          isOpen ? "px-2 pb-1" : "flex flex-col items-center pb-1",
+          isOpen ? "flex flex-col gap-1 px-2 pb-1" : "flex flex-col items-center gap-1 pb-1",
         )}
-        data-tour="account-switcher"
       >
-        <AccountSwitcher variant="sidebar" compact={!isOpen} />
+        <HelpMenu compact={!isOpen} />
+        <div data-tour="account-switcher">
+          <AccountSwitcher variant="sidebar" compact={!isOpen} />
+        </div>
       </div>
 
       <div className="flex shrink-0 items-center">
         <div className="min-w-0 flex-1">
           <VersionTag />
         </div>
-        <ReportProblemButton />
       </div>
     </div>
   )

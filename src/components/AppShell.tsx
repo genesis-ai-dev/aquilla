@@ -5,8 +5,6 @@ import { BrandContext } from "@/branding/use-brand"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
 import { NavHistoryControls } from "./NavHistoryControls"
-// AQU-307: always-available report button (3 lines: import + mount in left rail)
-import { ReportProblemButton } from "./ReportProblemButton/ReportProblemButton"
 import { ErrorBoundary } from "./ErrorBoundary"
 
 // Project-wide z-index scale (Tailwind v4 dynamic):
@@ -123,7 +121,6 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
             <div className="min-w-0 flex-1">
               <VersionTag />
             </div>
-            <ReportProblemButton /> {/* AQU-307 */}
           </div>
         )}
       </aside>

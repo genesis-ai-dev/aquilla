@@ -67,6 +67,7 @@ import orgSettingsRoutes from "./routes/org-settings"
 import sourceLinkingRoutes from "./routes/source-linking"
 import mergeSiblingRoutes from "./routes/merge-sibling"
 import invitesRoutes from "./routes/invites"
+import accessLinksRoutes from "./routes/access-links"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
 import adminRoutes from "./routes/admin"
@@ -185,6 +186,9 @@ app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
+// AQU-626: per-user deep link + PIN (fresh-browser / diode-zone flow). Mint is
+// project_lead-gated; redeem is public (the link + PIN is the credential).
+app.route("/api/v2/access-links", accessLinksRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)

@@ -284,6 +284,26 @@ export interface ProjectInviteRow {
   scope_lanes: string | null
 }
 
+/** Row shape of `project_access_links` (AQU-626: per-user deep link + PIN). */
+export interface ProjectAccessLinkRow {
+  token: string
+  project_id: string
+  /** The pre-provisioned account this link + PIN logs into. */
+  user_id: number
+  /** scrypt hash of the PIN — never the plain PIN. */
+  pin_hash: string
+  role_level: number
+  created_by: number
+  created_at: string
+  expires_at: string | null
+  /** Soft-kill for a leaked link; redemption treats a revoked link as dead. */
+  revoked_at: string | null
+  failed_attempts: number
+  /** Lockout window end; while in the future the link redeems as if dead. */
+  locked_until: string | null
+  last_used_at: string | null
+}
+
 /** Row shape of `project_members`. */
 export interface ProjectMemberRow {
   project_id: string

@@ -15,11 +15,11 @@ describe("isOrgScopedRoute", () => {
 
   // AQU-370: switching org (or "All organizations") from inside a project
   // workspace must re-navigate to the new org's overview. Before the fix the
-  // `/project/:id` routes were not recognised as org-scoped, so the org
+  // `/project/:id/editor` routes were not recognised as org-scoped, so the org
   // context changed but the view stayed on the stale project route.
   it("treats the project workspace routes as org-scoped", () => {
-    expect(isOrgScopedRoute("/project/abc")).toBe(true)
-    expect(isOrgScopedRoute("/project/abc/file/xyz")).toBe(true)
+    expect(isOrgScopedRoute("/project/abc/editor")).toBe(true)
+    expect(isOrgScopedRoute("/project/abc/editor/file/xyz")).toBe(true)
     expect(isOrgScopedRoute("/project/abc/settings")).toBe(true)
     expect(isOrgScopedRoute("/project/abc/settings/ai")).toBe(true)
     expect(isOrgScopedRoute("/project/abc/comments")).toBe(true)

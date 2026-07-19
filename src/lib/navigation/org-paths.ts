@@ -81,3 +81,9 @@ export function projectSettingsPath(projectId: string, section?: string): string
     ? `/project/${projectId}/settings/${section}`
     : `/project/${projectId}/settings`
 }
+
+/** Default work surface — paired cell editor (`/project/$id/editor`). */
+export function projectEditorPath(projectId: string, fileId?: string | null): string {
+  const base = `/project/${projectId}/editor`
+  return fileId ? `${base}/file/${fileId}` : base
+}

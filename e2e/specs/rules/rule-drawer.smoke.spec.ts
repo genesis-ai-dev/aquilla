@@ -6,7 +6,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * RulesPage renders a "Open in editor" Button (title="Opens the editor with
  * this rule's drawer") for each rule. Clicking it navigates to:
- *   /project/<id>?openRule=<ruleId>
+ *   /project/<id>/editor?openRule=<ruleId>
  *
  * ProjectWorkspace reads `searchParams.get("openRule")` and opens the
  * RuleDrawer panel (w-80 side panel with the rule name as an h3).
@@ -21,8 +21,8 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   await dash.createProject({ name })
   await dash.openProject(name)
 
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/rules`)

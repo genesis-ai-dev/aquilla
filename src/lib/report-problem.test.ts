@@ -21,7 +21,7 @@ import {
   type ReportProblemPayload,
 } from "./report-problem"
 
-const baseContext = { route: "/project/proj-1/file/file-2", projectId: "proj-1", fileId: "file-2" }
+const baseContext = { route: "/project/proj-1/editor/file/file-2", projectId: "proj-1", fileId: "file-2" }
 const basePayload: ReportProblemPayload = {
   description: "Something broke",
   context: baseContext,
@@ -91,7 +91,7 @@ describe("captureReportProblem", () => {
 describe("buildReportText", () => {
   it("includes route, project, file, and description", () => {
     const text = buildReportText(basePayload)
-    expect(text).toContain("Route: /project/proj-1/file/file-2")
+    expect(text).toContain("Route: /project/proj-1/editor/file/file-2")
     expect(text).toContain("Project: proj-1")
     expect(text).toContain("File: file-2")
     expect(text).toContain("Something broke")

@@ -13,7 +13,7 @@ interface FilePayload {
   buffer: Buffer
 }
 
-/** Page object for the project workspace route ("/project/:id"). */
+/** Page object for the project workspace route ("/project/:id/editor"). */
 export class Workspace {
   private readonly page: Page
 

@@ -1105,7 +1105,7 @@ export function TerminologyPage() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate(`/project/${id}`)}
+          onClick={() => navigate(`/project/${id}/editor`)}
         >
           <ArrowLeft className="mr-1 h-4 w-4" />
           Back to Editor
@@ -1233,7 +1233,7 @@ export function TerminologyPage() {
           <TerminologyViolationsInbox
             concepts={concepts}
             cells={allCells}
-            onJumpToCell={() => navigate(`/project/${id}`)}
+            onJumpToCell={() => navigate(`/project/${id}/editor`)}
           />
         ) : tab === "queue" ? (
           <Card>

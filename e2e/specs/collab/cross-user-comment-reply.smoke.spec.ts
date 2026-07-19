@@ -87,7 +87,7 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   // Replies are intentionally NOT wired from the comments page (CommentsPage's
   // composer says "Replies from this view are not yet wired — open the cell in
   // the editor to reply"), so bob replies from the cell's comments drawer.
-  await bob.goto(`/project/${projectId}`)
+  await bob.goto(`/project/${projectId}/editor`)
   const bobWs = new Workspace(bob)
   await bobWs.openFileBySubstring("sample")
   await bobWs.waitForEditor()

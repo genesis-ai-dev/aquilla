@@ -17,8 +17,8 @@ describe("deriveNavTitle", () => {
   })
 
   it("maps project workspace surfaces by their suffix", () => {
-    expect(deriveNavTitle("/project/abc")).toBe("Editor")
-    expect(deriveNavTitle("/project/abc/file/7")).toBe("File")
+    expect(deriveNavTitle("/project/abc/editor")).toBe("Editor")
+    expect(deriveNavTitle("/project/abc/editor/file/7")).toBe("File")
     expect(deriveNavTitle("/project/abc/settings")).toBe("Project settings")
     expect(deriveNavTitle("/project/abc/settings/ai")).toBe("Project settings")
     expect(deriveNavTitle("/project/abc/rules")).toBe("Checks & rules")

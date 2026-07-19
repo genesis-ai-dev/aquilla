@@ -790,7 +790,7 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
 
   // AQU-416: the overview rendering (no redirect) is necessary but not
   // sufficient — a guest must be able to actually ENTER the workspace from
-  // here. "Open project" navigates unconditionally to `/project/:id`; this
+  // here. "Open project" navigates unconditionally to `/project/:id/editor`; this
   // locks in that the button still fires for a project whose org the caller
   // does not belong to (the exact "Shared with you" scenario), so a future
   // regression that guards this button on org membership fails loudly here
@@ -808,7 +808,7 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     const openButton = await screen.findByRole("button", { name: "Open project" })
     fireEvent.click(openButton)
 
-    expect(navigate).toHaveBeenCalledWith("/project/p1")
+    expect(navigate).toHaveBeenCalledWith("/project/p1/editor")
   })
 })
 
@@ -1514,9 +1514,9 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
-    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1?lane=es")
+    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
     // The default lane opens the workspace with no lane param (today's behavior).
-    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1")
+    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
   })
 
   it("Assign… on a lane row mounts AssignModal pinned to that lane", async () => {

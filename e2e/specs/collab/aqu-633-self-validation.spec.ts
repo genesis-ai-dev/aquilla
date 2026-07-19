@@ -37,7 +37,7 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
 
   // Alice imports the file (skip the "Set translation direction" gate for
   // server-created projects, per the cross-user-validate spec).
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   await alice.evaluate(
     (id) => localStorage.setItem(`codex.importDirectionSkipped.${id}`, "true"),
     projectId,
@@ -74,7 +74,7 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   // Navigate directly to the imported file and let Workspace's editor and
   // target-commit response waits provide the readiness boundaries. This avoids
   // `networkidle` and elapsed-time guesses on slower machines.
-  await bob.goto(`/project/${projectId}/file/${fileId}`)
+  await bob.goto(`/project/${projectId}/editor/file/${fileId}`)
   const bobWs = new Workspace(bob)
   await bobWs.waitForEditor()
   await bobWs.editCell(0, "Bob's translation of cell zero")

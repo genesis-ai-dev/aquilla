@@ -82,7 +82,7 @@ export function ProjectMembersPage() {
           variant="ghost"
           size="sm"
           className="gap-1.5 text-muted-foreground"
-          onClick={() => navigate(`/project/${projectId}`)}
+          onClick={() => navigate(`/project/${projectId}/editor`)}
         >
           <ArrowLeft className="h-4 w-4" />
           Back to project

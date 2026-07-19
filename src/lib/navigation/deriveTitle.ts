@@ -59,10 +59,8 @@ export function deriveNavTitle(pathname: string): string {
   // /project/:id[/<surface>] — workspace shell and its content surfaces.
   if (seg[0] === "project" && seg.length >= 2) {
     switch (seg[2]) {
-      case undefined:
-        return "Editor"
-      case "file":
-        return "File"
+      case "editor":
+        return seg[3] === "file" ? "File" : "Editor"
       case "settings":
         return "Project settings"
       case "rules":

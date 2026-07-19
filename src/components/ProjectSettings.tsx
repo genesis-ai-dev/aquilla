@@ -221,7 +221,7 @@ export function ProjectSettings() {
   const editorPath =
     returnParam && returnParam.startsWith("/") && !returnParam.startsWith("//")
       ? returnParam
-      : `/project/${id}`
+      : `/project/${id}/editor`
 
   const [conflictBy, setConflictBy] = useState<string | null>(null)
   useEffect(() => {
@@ -1062,7 +1062,10 @@ export function ProjectSettings() {
       section={project?.name ?? "Project"}
       sectionTo={id ? `/projects/${id}` : undefined}
       orgId={project?.orgId}
-      trail={[{ label: "Settings" }]}
+      trail={[
+        { label: "Editor", onClick: () => requestNavigate(editorPath) },
+        { label: "Settings" },
+      ]}
     />
   )
 
@@ -1089,13 +1092,11 @@ export function ProjectSettings() {
       main={
         <Page>
           <div className="space-y-6">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <BackLink
-                label="Editor"
-                onClick={() => requestNavigate(editorPath)}
-              />
-              {!showIndex && <BackLink to={projectSettingsPath(id!)} label="Settings" />}
-            </div>
+            {!showIndex && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <BackLink to={projectSettingsPath(id!)} label="Settings" />
+              </div>
+            )}
             <PageHeader
               title={pageTitle}
               description={pageDescription}
@@ -1703,7 +1704,7 @@ export function ProjectSettings() {
                 <Button variant="outline" onClick={() => {
                   // Set the Audio lens preference before navigating so the workspace opens in audio mode.
                   try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
-                  requestNavigate(`/project/${id}`)
+                  requestNavigate(`/project/${id}/editor`)
                 }} className="shrink-0">
                   Open Voice Studio
                 </Button>

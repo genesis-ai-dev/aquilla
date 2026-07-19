@@ -26,8 +26,8 @@ describe("hasChromeVersionTag", () => {
 
   it("suppresses the floating badge on project workspace routes", () => {
     for (const path of [
-      "/project/p1",
-      "/project/p1/file/f1",
+      "/project/p1/editor",
+      "/project/p1/editor/file/f1",
       "/project/p1/rules",
       "/project/p1/comments",
       "/project/p1/agent",

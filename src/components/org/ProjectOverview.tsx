@@ -993,7 +993,7 @@ export function ProjectOverview() {
                     <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" onClick={() => navigate(`/project/${id}`)}>
+                    <Button size="sm" onClick={() => navigate(`/project/${id}/editor`)}>
                       Open project
                     </Button>
                     {isOwner && isArchived && (

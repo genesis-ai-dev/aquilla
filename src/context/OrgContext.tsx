@@ -45,7 +45,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const location = useLocation()
   const jwt = session?.jwt ?? null
   const [orgs, setOrgs] = useState<OrgSummary[]>([])
-  // Seed from localStorage for non-/orgs routes (e.g. /project/...) until
+  // Seed from localStorage for non-/orgs routes (e.g. /project/...)/editor until
   // the user navigates into an org shell; `/orgs/...` always wins (below).
   const [activeOrgId, setActiveOrgId] = useState<number | null>(() => {
     const raw = localStorage.getItem(ORG_STORAGE_KEY)

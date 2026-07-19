@@ -903,7 +903,7 @@ export function CommentsPage() {
     const params = root.cellId
       ? `?cellId=${encodeURIComponent(root.cellId)}`
       : ""
-    navigate(`/project/${projectId}/file/${encodeURIComponent(root.fileId)}${params}`)
+    navigate(`/project/${projectId}/editor/file/${encodeURIComponent(root.fileId)}${params}`)
   }
 
   const activeFilterCount = countActiveFilters(filter)
@@ -911,7 +911,7 @@ export function CommentsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
       <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}`)}>
+        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}/editor`)}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to project
         </Button>
         <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>

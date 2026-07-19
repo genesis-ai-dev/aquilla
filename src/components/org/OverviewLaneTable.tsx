@@ -191,8 +191,8 @@ export function OverviewLaneTable({
             ? formatRelativeTime(new Date(lane.lastEditAt).toISOString(), now)
             : null
           const openTo = lane.lane
-            ? `/project/${projectId}?lane=${encodeURIComponent(lane.lane)}`
-            : `/project/${projectId}`
+            ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane.lane)}`
+            : `/project/${projectId}/editor`
           return (
             <li
               key={tagId}

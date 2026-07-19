@@ -7,6 +7,7 @@ import {
   orgPath,
   orgSettingsPath,
   parseOrgPath,
+  projectEditorPath,
   projectSettingsPath,
   resumeOrgPath,
   swapOrgInPath,
@@ -83,5 +84,20 @@ describe("resumeOrgPath", () => {
   it("reads last concrete org", () => {
     localStorage.setItem(ORG_STORAGE_KEY, "42")
     expect(resumeOrgPath()).toBe("/orgs/42")
+  })
+})
+
+describe("projectEditorPath", () => {
+  it("returns the editor root", () => {
+    expect(projectEditorPath("abc")).toBe("/project/abc/editor")
+  })
+
+  it("nests a file under the editor", () => {
+    expect(projectEditorPath("abc", "GEN.sfm")).toBe("/project/abc/editor/file/GEN.sfm")
+  })
+
+  it("treats null/undefined fileId as the editor root", () => {
+    expect(projectEditorPath("abc", null)).toBe("/project/abc/editor")
+    expect(projectEditorPath("abc", undefined)).toBe("/project/abc/editor")
   })
 })

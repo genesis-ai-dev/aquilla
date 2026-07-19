@@ -338,7 +338,7 @@ export function Dashboard() {
                 <ProjectCard
                   key={p.id}
                   project={p}
-                  onClick={() => navigate(`/project/${p.id}`)}
+                  onClick={() => navigate(`/project/${p.id}/editor`)}
                   canTrash={canTrash(p)}
                   onTrash={() => setPendingTrashId(p.id)}
                   canToggleLifecycle={canToggleLifecycle(p)}
@@ -382,7 +382,7 @@ export function Dashboard() {
                 <ProjectCard
                   key={cp.id}
                   project={minimalProjectRecord(cp)}
-                  onClick={() => navigate(`/project/${cp.id}`)}
+                  onClick={() => navigate(`/project/${cp.id}/editor`)}
                 />
               ))}
             </div>

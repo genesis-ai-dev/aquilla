@@ -6,7 +6,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * RulesSurface.tsx renders a "Try to fix all" button per rule (title="Opens
  * the editor with this rule's drawer"). Clicking it calls:
- *   navigate(`/project/${projectId}?openRule=${rule.id}`)
+ *   navigate(`/project/${projectId}/editor?openRule=${rule.id}`)
  *
  * ProjectWorkspace picks up the `?openRule=` search param and sets the rule
  * drawer open for that rule.

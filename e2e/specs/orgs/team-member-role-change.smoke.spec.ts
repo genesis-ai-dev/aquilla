@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
@@ -22,7 +22,7 @@ test("team member role select changes member role", async ({ alice }) => {
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
   // Create a team.
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   await alice.waitForLoadState("networkidle")
 
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })

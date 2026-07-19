@@ -26,6 +26,7 @@ import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
+import { ALL_ORGS_PARAM, orgHomePath } from "@/lib/navigation/org-paths"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
@@ -323,10 +324,13 @@ export function ProjectWorkspace() {
   const navigate = useNavigate()
   const { orgs, activeOrg, activeOrgId, isAllOrgs, refresh: refreshOrgs } = useActiveOrg()
   const goToProjects = useCallback(() => {
-    navigate({
-      pathname: "/",
-      search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "",
-    })
+    navigate(
+      isAllOrgs
+        ? orgHomePath(ALL_ORGS_PARAM)
+        : activeOrgId != null
+          ? orgHomePath(activeOrgId)
+          : orgHomePath(ALL_ORGS_PARAM),
+    )
   }, [activeOrgId, isAllOrgs, navigate])
   const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)

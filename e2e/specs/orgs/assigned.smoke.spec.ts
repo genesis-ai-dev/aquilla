@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Assigned to me (/assigned).
@@ -11,7 +11,7 @@ import { test, expect } from "../../helpers/multi-user"
  * This spec verifies the route loads and the empty-state renders.
  */
 test("assigned-to-me page renders empty state", async ({ alice }) => {
-  await alice.goto("/assigned")
+  await alice.goto(orgRoute(alice, "/assigned"))
   await alice.waitForLoadState("networkidle")
 
   await expect(alice.locator("h1").filter({ hasText: /Assigned to me/i })).toBeVisible({

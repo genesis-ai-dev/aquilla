@@ -5,9 +5,11 @@ import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
-
-const STORAGE_KEY = "org:active"
-const ALL_ORGS_VALUE = "all"
+import {
+  ALL_ORGS_PARAM,
+  ORG_STORAGE_KEY,
+  parseOrgPath,
+} from "@/lib/navigation/org-paths"
 
 /** AQU-473: an org the caller can reach only via a project-level grant —
  *  not an org membership. Surfaced in the org switcher tagged "Guest". */
@@ -39,9 +41,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const location = useLocation()
   const jwt = session?.jwt ?? null
   const [orgs, setOrgs] = useState<OrgSummary[]>([])
+  // Seed from localStorage for non-/orgs routes (e.g. /project/...) until
+  // the user navigates into an org shell; `/orgs/...` always wins (below).
   const [activeOrgId, setActiveOrgId] = useState<number | null>(() => {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw || raw === ALL_ORGS_VALUE) return null
+    const raw = localStorage.getItem(ORG_STORAGE_KEY)
+    if (!raw || raw === ALL_ORGS_PARAM) return null
     const parsed = Number(raw)
     return Number.isFinite(parsed) ? parsed : null
   })
@@ -56,6 +60,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     try {
       const list = await listMyOrgs(jwt)
       setOrgs(list)
+      // When the URL already names an org, don't clamp away from it here —
+      // OrgRouteGate owns unauthorized/missing UX. Only auto-pick when the
+      // path isn't driving org context (project routes, etc.).
+      const fromPath = parseOrgPath(location.pathname)
+      if (fromPath) return list
       setActiveOrgId((cur) =>
         list.length === 0 ? null
         : list.length === 1 ? list[0].id
@@ -72,7 +81,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [jwt])
+  }, [jwt, location.pathname])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -99,40 +108,48 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refreshGuestOrgs() }, [refreshGuestOrgs])
 
-  // FRO-367: persist the active-org selection whenever it settles, as an
-  // effect (state updaters must stay pure). This covers the clamp path: when
-  // another tab switches to an account that can't see the org this tab had
-  // active, refresh() drops it from state — but the stale id used to survive
-  // in localStorage, so a reload resurrected it (→ the "org I can't access"
-  // 403). The direct setters below also write the key; this write is
-  // idempotent alongside them.
+  // Path is authoritative on `/orgs/...`. localStorage only resumes `/`.
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, activeOrgId == null ? ALL_ORGS_VALUE : String(activeOrgId))
-  }, [activeOrgId])
-
-  useEffect(() => {
-    if (location.pathname !== "/") return
-    const value = new URLSearchParams(location.search).get("org")
-    if (!value) return
-    if (value === ALL_ORGS_VALUE) {
+    const parsed = parseOrgPath(location.pathname)
+    if (!parsed) return
+    if (parsed.orgKey === ALL_ORGS_PARAM) {
       setActiveOrgId(null)
-      localStorage.setItem(STORAGE_KEY, ALL_ORGS_VALUE)
       return
     }
-    const nextId = Number(value)
-    if (!Number.isFinite(nextId)) return
-    setActiveOrgId(nextId)
-    localStorage.setItem(STORAGE_KEY, String(nextId))
-  }, [location.pathname, location.search])
+    setActiveOrgId(parsed.orgKey)
+  }, [location.pathname])
+
+  // Persist for `/` resume. Skip writing a stale id when the URL names an
+  // org the user can't access — OrgRouteGate shows not-found, and we don't
+  // want reload to resurrect that id as the resume target. Guest + member
+  // orgs are both "known".
+  useEffect(() => {
+    const parsed = parseOrgPath(location.pathname)
+    if (parsed?.orgKey === ALL_ORGS_PARAM) {
+      localStorage.setItem(ORG_STORAGE_KEY, ALL_ORGS_PARAM)
+      return
+    }
+    if (typeof parsed?.orgKey === "number") {
+      const known =
+        orgs.some((o) => o.id === parsed.orgKey) ||
+        guestOrgs.some((o) => o.id === parsed.orgKey)
+      // Still loading membership — don't clobber storage yet.
+      if (isLoading) return
+      if (!known) return
+      localStorage.setItem(ORG_STORAGE_KEY, String(parsed.orgKey))
+      return
+    }
+    localStorage.setItem(ORG_STORAGE_KEY, activeOrgId == null ? ALL_ORGS_PARAM : String(activeOrgId))
+  }, [activeOrgId, guestOrgs, isLoading, location.pathname, orgs])
 
   const setActiveOrg = useCallback((id: number) => {
     setActiveOrgId(id)
-    localStorage.setItem(STORAGE_KEY, String(id))
+    localStorage.setItem(ORG_STORAGE_KEY, String(id))
   }, [])
 
   const setAllOrgs = useCallback(() => {
     setActiveOrgId(null)
-    localStorage.setItem(STORAGE_KEY, ALL_ORGS_VALUE)
+    localStorage.setItem(ORG_STORAGE_KEY, ALL_ORGS_PARAM)
   }, [])
 
   const isAllOrgs = orgs.length > 1 && activeOrgId == null

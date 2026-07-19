@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Team delete — TeamDetail page inline confirmation.
@@ -12,7 +12,7 @@ import { test, expect } from "../../helpers/multi-user"
  * Cancel, then tests the full delete flow.
  */
 test("team delete confirm workflow navigates back to teams list", async ({ alice }) => {
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   await alice.waitForLoadState("networkidle")
 
   // Create a team to delete.

@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
@@ -24,7 +24,7 @@ test("share panel invite mode toggles between @user and email", async ({ alice }
   await dash.createProject({ name, source: "en", target: "fr" })
 
   // The mode toggle lives in the Members page "Add to projects" dialog.
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   await alice.waitForLoadState("networkidle")
 
   const addToProjectsBtn = alice.getByRole("button", { name: /Add to projects/i })

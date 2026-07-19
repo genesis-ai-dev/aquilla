@@ -21,7 +21,7 @@ test("project settings User section username input makes form dirty", async ({ a
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings?section=general`)
+  await alice.goto(`/project/${projectId}/settings/general`)
   await alice.waitForLoadState("networkidle")
 
   // Scroll to the User section to ensure it's visible.

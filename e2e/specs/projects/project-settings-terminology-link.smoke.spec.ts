@@ -20,7 +20,7 @@ test("project settings Terminology Library button navigates to terminology page"
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
+  await alice.goto(`/project/${projectId}/settings/ai`)
   await alice.waitForLoadState("networkidle")
 
   // Scroll to the Terminology Library card.

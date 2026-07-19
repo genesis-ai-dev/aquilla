@@ -55,8 +55,8 @@ describe("OrgBreadcrumb", () => {
       />,
     )
 
-    expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/?org=all")
-    expect(screen.getByRole("link", { name: "Dev Org" })).toHaveAttribute("href", "/?org=7")
+    expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/orgs/all")
+    expect(screen.getByRole("link", { name: "Dev Org" })).toHaveAttribute("href", "/orgs/7")
     expect(screen.getByRole("link", { name: "Dev Project" })).toHaveAttribute("href", "/projects/project-1")
     expect(screen.getByText("Editor")).toHaveAttribute("aria-current", "page")
   })
@@ -67,14 +67,14 @@ describe("OrgBreadcrumb", () => {
     fireEvent.click(screen.getByRole("link", { name: "All organizations" }))
 
     expect(orgContext.setAllOrgs).toHaveBeenCalledOnce()
-    expect(screen.getByTestId("location")).toHaveTextContent("/?org=all")
+    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/all")
   })
 
   it("renders the all-organizations landing crumb as the current page", () => {
     orgContext.activeOrgId = null
     orgContext.isAllOrgs = true
 
-    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/?org=all")
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/all")
 
     expect(screen.queryByRole("link", { name: "All organizations" })).not.toBeInTheDocument()
     expect(screen.getByText("All organizations")).toHaveAttribute("aria-current", "page")

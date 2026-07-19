@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
+import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import {
-  ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
+  Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines,
 } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
@@ -200,7 +201,7 @@ const ITEM_CLASS =
   "flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
 
 export function ProjectSettings() {
-  const { id } = useParams<{ id: string }>()
+  const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { project, loading, refresh } = useProject(id!)
@@ -812,9 +813,9 @@ export function ProjectSettings() {
   // AQU-501: sub-menu IA — group the flat section list into labeled panes so
   // picking a sub-section shows only that pane, matching the org Settings
   // index → detail pattern (src/pages/Settings.tsx) instead of one long
-  // scroll. Internal `?section=` search-param state (no new route — App.tsx
-  // untouched); search still filters within the active pane, and clears the
-  // pane to show cross-group matches (mirrors the old scroll-spy filter).
+  // scroll. Pane identity lives in `/settings/:section`; search still
+  // filters within the active pane, and clears the pane to show cross-group
+  // matches (mirrors the old scroll-spy filter).
   const SETTINGS_GROUPS: {
     id: string
     label: string
@@ -879,10 +880,9 @@ export function ProjectSettings() {
     .map((g) => ({ ...g, sectionIds: g.sectionIds.filter((id) => visibleSectionIdSet.has(id)) }))
     .filter((g) => g.sectionIds.length > 0)
 
-  // Navigation between the index and a pane is a plain in-page Link to
-  // `?section=<id>` (read via `searchParams` above) — no new route, App.tsx
-  // untouched, and the pane is deep-linkable / back-button friendly.
-  const activeGroupId = searchParams.get("section")
+  // Navigation between the index and a pane uses `/settings/:section` —
+  // deep-linkable and back-button friendly.
+  const activeGroupId = sectionParam ?? null
   const activeGroup = visibleGroups.find((g) => g.id === activeGroupId) ?? null
   // An unknown/stale group id (e.g. its only section just became invisible)
   // falls back to the index instead of rendering an empty pane.
@@ -993,11 +993,7 @@ export function ProjectSettings() {
             </Menu.Portal>
           </Menu.Root>
         </ButtonGroup>
-      ) : (
-        <Button variant="ghost" size="sm" onClick={() => requestNavigate(editorPath)}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
-        </Button>
-      )}
+      ) : null}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         {isDirty && !saving && <span>Unsaved changes</span>}
         {!isDirty && savedMessage && (
@@ -1045,7 +1041,13 @@ export function ProjectSettings() {
       main={
         <Page>
           <div className="space-y-6">
-            {!showIndex && <BackLink to="?" label="Settings" />}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <BackLink
+                label="Editor"
+                onClick={() => requestNavigate(editorPath)}
+              />
+              {!showIndex && <BackLink to={projectSettingsPath(id!)} label="Settings" />}
+            </div>
             <PageHeader
               title={pageTitle}
               description={pageDescription}
@@ -1059,7 +1061,7 @@ export function ProjectSettings() {
                 {visibleGroups.map((g) => (
                   <NavRow
                     key={g.id}
-                    to={`?section=${g.id}`}
+                    to={projectSettingsPath(id!, g.id)}
                     icon={g.icon}
                     title={g.label}
                     description={g.description}

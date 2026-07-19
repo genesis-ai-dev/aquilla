@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
+import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -95,8 +96,15 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   const showSection = section !== "Projects" || parent != null
   const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
   const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
-  const isRootLanding = location.pathname === "/" && !showSection && resolvedOrg == null
-  const isOrgLanding = location.pathname === "/" && !showSection && resolvedOrg != null
+  const parsed = parseOrgPath(location.pathname)
+  const isRootLanding =
+    parsed?.orgKey === ALL_ORGS_PARAM && !showSection && resolvedOrg == null
+  const isOrgLanding =
+    typeof parsed?.orgKey === "number" &&
+    parsed.rest === "" &&
+    !showSection &&
+    resolvedOrg != null &&
+    parsed.orgKey === resolvedOrg.id
 
   function handleAllOrgs() {
     setAllOrgs()
@@ -104,7 +112,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
 
   const crumbs: Crumb[] = [{
     label: "All organizations",
-    to: isRootLanding ? undefined : "/?org=all",
+    to: isRootLanding ? undefined : orgHomePath(ALL_ORGS_PARAM),
     onClick: isRootLanding ? undefined : handleAllOrgs,
     isCurrent: isRootLanding,
     isRoot: true,
@@ -113,7 +121,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   if (resolvedOrg) {
     crumbs.push({
       label: resolvedOrg.name ?? "Organization",
-      to: isOrgLanding ? undefined : `/?org=${resolvedOrg.id}`,
+      to: isOrgLanding ? undefined : orgHomePath(resolvedOrg.id),
       onClick: isOrgLanding ? undefined : () => setActiveOrg(resolvedOrg.id),
       isCurrent: isOrgLanding,
     })

@@ -23,19 +23,19 @@ const title = `${label}\nbuild: ${BRANCH}@${SHA}`
 // of the in-rail tag and covers the account switcher / report button.
 export function hasChromeVersionTag(pathname: string): boolean {
   const segs = pathname.split("/").filter(Boolean)
-  if (segs.length === 0) return true // "/" — org overview
+  if (segs.length === 0) return true // "/" — resumes org overview
 
   const root = segs[0]
 
-  // Org-level AppShell pages (OrgSidebar + footer VersionTag).
+  // Org shell (OrgSidebar + footer VersionTag).
+  if (root === "orgs") return true
+
+  // Remaining AppShell pages that keep the floating badge suppressed.
   if (
     root === "projects" ||
-    root === "teams" ||
-    root === "members" ||
-    root === "assigned" ||
     root === "preferences" ||
-    root === "settings" ||
-    root === "admin"
+    root === "admin" ||
+    root === "shared"
   ) {
     return true
   }

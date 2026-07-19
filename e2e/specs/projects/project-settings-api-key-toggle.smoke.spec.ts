@@ -28,7 +28,7 @@ test("project settings API key toggle shows and hides key", async ({ alice }) =>
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
+  await alice.goto(`/project/${projectId}/settings/ai`)
   await alice.waitForLoadState("networkidle")
 
   // The Gemini ApiKeyField lives inside the Voice card.

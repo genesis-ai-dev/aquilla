@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
@@ -21,7 +21,7 @@ test("team detach project removes project from team", async ({ alice }) => {
   await dash.createProject({ name: projName })
 
   // Navigate to teams and create a new team.
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   await alice.waitForLoadState("networkidle")
 
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })

@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, createProjectServerSide, ROLE } from "../../helpers/frontier-api"
@@ -31,7 +31,7 @@ test("multi-project invite submits and closes the dialog", async ({ alice }) => 
   await dash.createProject({ name: projName })
 
   // Navigate to members page.
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   await alice.waitForLoadState("networkidle")
 
   // Open MultiProjectInviteDialog.
@@ -88,7 +88,7 @@ test("email mode sends per-project invites from the org view", async ({ alice })
     name: `EmailInv ${Date.now()}`,
   })
 
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   await alice.waitForLoadState("networkidle")
 
   const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })

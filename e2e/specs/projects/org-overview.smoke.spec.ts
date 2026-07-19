@@ -67,7 +67,7 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   // the row, while ordinary names are not squeezed to one or two characters.
   const aliceSession = await ensureAuthState("alice")
   await createOrg(aliceSession.jwt, `A second organization with a long name ${Date.now()}`)
-  await alice.goto("/?org=all")
+  await alice.goto("/orgs/all")
   await alice.waitForLoadState("networkidle")
 
   const projectRow = alice.locator(`[data-project-id]`).filter({ hasText: name }).first()

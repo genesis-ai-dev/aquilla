@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Team rename — TeamDetail page.
@@ -11,7 +11,7 @@ import { test, expect } from "../../helpers/multi-user"
  *   4. Verifying the new name appears in the h1
  */
 test("team rename saves new name on team detail page", async ({ alice }) => {
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   await alice.waitForLoadState("networkidle")
 
   // Create a new team.

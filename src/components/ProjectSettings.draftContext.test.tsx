@@ -130,9 +130,10 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
 // deep-link straight there via `?section=`.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=ai`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/ai`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
       </Routes>
     </MemoryRouter>,
   )

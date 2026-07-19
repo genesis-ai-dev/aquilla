@@ -9,6 +9,11 @@ import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { RoleLabel } from "@/components/RoleLabel"
 import {
+  ALL_ORGS_PARAM,
+  orgHomePath,
+  swapOrgInPath,
+} from "@/lib/navigation/org-paths"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -82,14 +87,14 @@ export function OrgSwitcher() {
   function handleAllOrgs() {
     setAllOrgs()
     setOpen(false)
-    navigate({ pathname: "/", search: "?org=all" })
+    navigate(swapOrgInPath(location.pathname, ALL_ORGS_PARAM))
   }
 
   function handleActiveOrg(orgId: number) {
     setActiveOrg(orgId)
     setOpen(false)
     if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
-      navigate({ pathname: "/", search: `?org=${orgId}` })
+      navigate(swapOrgInPath(location.pathname, orgId))
     }
   }
 
@@ -106,14 +111,16 @@ export function OrgSwitcher() {
         return
       }
     }
-    navigate({ pathname: "/", search: "?org=all" })
+    navigate(orgHomePath(ALL_ORGS_PARAM))
   }
 
   async function handleCreated(orgId: number) {
     await refresh()
     setActiveOrg(orgId)
     if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
-      navigate({ pathname: "/", search: `?org=${orgId}` })
+      navigate(swapOrgInPath(location.pathname, orgId))
+    } else {
+      navigate(orgHomePath(orgId))
     }
   }
 

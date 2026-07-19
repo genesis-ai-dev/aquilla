@@ -27,7 +27,7 @@ test("project settings AI context controls mark form dirty", async ({ alice }) =
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
+  await alice.goto(`/project/${projectId}/settings/ai`)
   await alice.waitForLoadState("networkidle")
 
   // #context-size select defaults to "Medium" — change to "Large".

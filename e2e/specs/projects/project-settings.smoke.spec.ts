@@ -18,7 +18,7 @@ test("project settings keeps synced name read-only and saves source language", a
   expect(projectId).toBeTruthy()
 
   // Navigate directly to the settings page.
-  await alice.goto(`/project/${projectId}/settings?section=general`)
+  await alice.goto(`/project/${projectId}/settings/general`)
   await alice.waitForLoadState("networkidle")
 
   const nameInput = alice.locator("#pname")

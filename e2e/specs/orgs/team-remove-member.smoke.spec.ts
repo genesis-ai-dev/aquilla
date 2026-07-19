@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { ensureAuthState } from "../../helpers/auth"
@@ -20,7 +20,7 @@ test("team remove member button removes the member from the team", async ({ alic
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
   // Navigate to teams and create a team.
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   await alice.waitForLoadState("networkidle")
 
   const dash = new Dashboard(alice)

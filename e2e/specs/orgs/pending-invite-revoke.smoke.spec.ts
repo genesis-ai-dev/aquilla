@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import path from "node:path"
@@ -55,7 +55,7 @@ test("pending invite appears on /members and can be revoked", async ({ alice }) 
   await alice.keyboard.press("Escape")
 
   // Navigate to /members.
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   await alice.waitForLoadState("networkidle")
 
   // The PendingInvitesSection should show the invite row for our project.

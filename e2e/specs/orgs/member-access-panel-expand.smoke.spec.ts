@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
 
@@ -19,7 +19,7 @@ test("member access row expands and collapses project access details", async ({ 
   const acme = await getMyOrg(aliceSession.jwt)
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   await alice.waitForLoadState("networkidle")
 
   // bob's MemberAccessRow toggle — the only button whose accessible name

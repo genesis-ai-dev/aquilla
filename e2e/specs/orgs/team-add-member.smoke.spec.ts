@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
@@ -19,7 +19,7 @@ test("team add member workflow shows new member in members list", async ({ alice
   const acme = await getMyOrg(aliceSession.jwt)
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   await alice.waitForLoadState("networkidle")
 
   // Create a team.

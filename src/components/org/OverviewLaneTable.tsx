@@ -19,6 +19,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Languages, Plus } from "lucide-react"
+import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -249,7 +250,7 @@ export function OverviewLaneTable({
       {canAddLanguage && (
         <div className="mt-3 border-t pt-3">
           <Link
-            to={`/project/${projectId}/settings?section=general`}
+            to={projectSettingsPath(projectId, "general")}
             data-testid="overview-lane-add-language"
             className={cn(
               buttonVariants({ size: "sm", variant: "ghost" }),

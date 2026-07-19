@@ -19,7 +19,7 @@ test("project settings audio loading strategy selection marks form dirty", async
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings?section=audio-media`)
+  await alice.goto(`/project/${projectId}/settings/audio-media`)
   await alice.waitForLoadState("networkidle")
 
   // "Audio loading" card title is visible.

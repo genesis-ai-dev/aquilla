@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * TeamDetail — editing the team description.
@@ -12,7 +12,7 @@ import { test, expect } from "../../helpers/multi-user"
  * save → verify the new description text appears on the team detail page.
  */
 test("team edit saves description on team detail page", async ({ alice }) => {
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   await alice.waitForLoadState("networkidle")
 
   // Create a new team.

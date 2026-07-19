@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
@@ -47,7 +47,7 @@ test("targeted invite surfaces in bob's inbox; after accept, alice sees and revo
   await bob.waitForURL(/\/project\//, { timeout: 15_000 })
 
   // ── alice: bob now appears as an external collaborator, revocable ──
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   const section = alice.getByTestId("external-collaborators")
   await expect(section).toBeVisible({ timeout: 10_000 })
   const bobRow = section.locator("li").filter({ hasText: "bob" })

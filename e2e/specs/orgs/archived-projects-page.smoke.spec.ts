@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * ArchivedProjects page — renders at /projects/archived.
@@ -11,7 +11,7 @@ import { test, expect } from "../../helpers/multi-user"
  * Alice has no archived projects, so this verifies the empty-state message.
  */
 test("archived projects page renders breadcrumb and empty state", async ({ alice }) => {
-  await alice.goto("/projects/archived")
+  await alice.goto(orgRoute(alice, "/archived"))
   await alice.waitForLoadState("networkidle")
 
   // OrgBreadcrumb shows "Archived".

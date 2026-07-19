@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
@@ -19,7 +19,7 @@ test("invite to projects dialog opens from members page", async ({ alice }) => {
   await dash.goto()
   await dash.createProject({ name: `InviteOpenProj ${Date.now()}` })
 
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   await alice.waitForLoadState("networkidle")
 
   // "Add to projects" button — only visible to org owners/admins.

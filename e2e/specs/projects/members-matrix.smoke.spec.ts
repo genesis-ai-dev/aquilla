@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Members page (/members) — roster with expandable per-member project access.
@@ -11,7 +11,7 @@ import { test, expect } from "../../helpers/multi-user"
  * The Matrix tab was removed (AQU-218); project access is via expandable rows.
  */
 test("members page renders roster with expandable project access", async ({ alice }) => {
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   await alice.waitForLoadState("networkidle")
 
   await expect(alice.locator("h1").filter({ hasText: /Members/i }).first()).toBeVisible({

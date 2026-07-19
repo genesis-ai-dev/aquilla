@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
@@ -17,7 +17,7 @@ test("team detail shows Access level definitions help indicator", async ({ alice
   await expect(alice.getByRole("link", { name: /^Teams$/i })).toBeVisible({ timeout: 10_000 })
 
   // Navigate to the teams list at /teams.
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   await alice.waitForLoadState("networkidle")
 
   // Create a new team.

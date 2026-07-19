@@ -135,9 +135,10 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
 // to click through the settings index first.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=general`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/general`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -214,9 +215,10 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
 
     const rerenderSettings = () =>
       rerender(
-        <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=general`]}>
+        <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/general`]}>
           <Routes>
             <Route path="/project/:id/settings" element={<ProjectSettings />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
           </Routes>
         </MemoryRouter>,
       )

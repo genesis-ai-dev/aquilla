@@ -78,7 +78,7 @@ export type EventKind =
   // detached). sync-worker receives this via the shared events table and uses
   // it to invalidate any cached upstream-resolution in the stale-source route.
   | 'project.link-source'
-  // FRO-438: Cast/character label assignment. Non-chain-mutating (does NOT move
+  // AQU-438: Cast/character label assignment. Non-chain-mutating (does NOT move
   // cells.event_id). Writes cast_name into cells.metadata JSONB without touching
   // target text. Contributor-level — a PM/project-lead labels cells for voice actors.
   | 'cast.assign'
@@ -88,7 +88,7 @@ export type EventKind =
   // Timeline editor: set/clear a file's core video URL (timeline preview master
   // clock), stored in files.meta JSON. Non-chain-mutating; file-level.
   | 'file.video.set'
-  // FRO-476: live source links — mirror engine. Server-emitted only (the
+  // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
   // carry parentId: null and are EXEMPT from CHAIN_MUTATING_KINDS / the
@@ -101,9 +101,9 @@ export type EventKind =
   | 'file.mirror'
   // Audit-trail record of a non-empty mirror batch (an empty fold advances
   // `projects.source_link_cursor` directly with no event). No cells
-  // projection — purely a history record for the review panel (FRO-478).
+  // projection — purely a history record for the review panel (AQU-478).
   | 'link.cursor.advance'
-  // FRO-478: "accept upstream change as-is" — reviewer(300)+ asserts a
+  // AQU-478: "accept upstream change as-is" — reviewer(300)+ asserts a
   // translation still stands against the new source. Non-chain-mutating:
   // the chain head does NOT move, so validations/endorsements survive
   // (deliberate — spec §7). Guarded: the projection only applies when the
@@ -123,6 +123,20 @@ export type CommentScope =
   | { kind: 'cell'; fileId: string; cellId: string }
   | { kind: 'file'; fileId: string }
   | { kind: 'project' }
+
+export interface AiDraftProvenance {
+  model: string
+  provider: string
+  promptVersion: string
+  exampleIds: string[]
+  generatedAt: number
+  mode: 'single' | 'batch' | 'paragraph' | 'agent'
+  projectState: {
+    sourceLanguage: string
+    targetLanguage: string
+    approvedExampleCount: number
+  }
+}
 
 // Payload shape per event kind. Using an interface (not Record) so that
 // EventPayloads[K] gives type-safe lookups without `as` casts.
@@ -154,6 +168,15 @@ export interface EventPayloads {
   }
 
   // ── Target-side ────────────────────────────────────────────────────────
+  //
+  // AQU-538 lanes: every target-side chain-mutating payload MAY carry
+  // `targetLang` — the target-language lane this event addresses. Absent or
+  // '' = the file's single configured target language (the legacy/default
+  // lane; every pre-lane event). The lane is part of the cells row key
+  // (PRIMARY KEY …, side, target_lang) AND of the AD-2 chain slot for
+  // non-default lanes (see chain-claims.ts laneQualifiedParentKey): two
+  // lanes' first commits both chain on the same source head and must not
+  // compete for one slot. Source-side rows/events never carry a lane.
   'target.cell.create': {
     cellId: string
     anchorCellId?: string | null
@@ -167,10 +190,14 @@ export interface EventPayloads {
     sequenceIndex?: number
     transcription?: string
     cameraState?: string
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
   }
   'target.cell.commit': {
     value: string
     valueHtml?: string
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
     /**
      * UUIDv7 of the source row's `event_id` as observed by the editor at
      * commit time. Stored on `cells.source_event_id` and used for AD-9
@@ -179,7 +206,7 @@ export interface EventPayloads {
      */
     sourceEventId?: string | null
     /**
-     * FRO-292 / AI provenance: when true, tags this commit as machine-drafted
+     * AQU-292 / AI provenance: when true, tags this commit as machine-drafted
      * (the `cell.commit.llm-accept` variant per AD-2). Set by the AI completion
      * path (useCompletion → commitCompletedCell). Human edits omit this field
      * entirely — the projection tracks `cells.ai_drafted` until a human edit
@@ -187,6 +214,8 @@ export interface EventPayloads {
      * field are treated as human-authored (ai_drafted = 0).
      */
     ai_suggestion?: true
+    /** Reproducibility and effort-analysis context for the original draft. */
+    ai_draft?: AiDraftProvenance
     /**
      * Translation agent provenance: id of the agent_runs row whose staged
      * proposal produced this commit (always paired with ai_suggestion). Links
@@ -202,7 +231,7 @@ export interface EventPayloads {
      */
     undo_of_agent_run_id?: string
     /**
-     * FRO-186 / harmonization: when present, tags this commit as a harmonize
+     * AQU-186 / harmonization: when present, tags this commit as a harmonize
      * sweep event (cell.commit.harmonize variant per AD-2). The route layer
      * uses this field to enforce harmonize_min_role and to trigger the AD-14
      * endorsement-revocation cascade. Only set by the harmonize sweep path.
@@ -216,15 +245,27 @@ export interface EventPayloads {
       parent_proposal_id?: string
     }
   }
-  'target.cell.delete': Record<string, never>
+  'target.cell.delete': {
+    /** AQU-538: target-language lane whose row is deleted. Absent/'' = default lane. */
+    targetLang?: string
+  }
   'target.cell.reorder': {
     anchorCellId: string | null
+    /** AQU-538: target-language lane. Absent/'' = default lane. */
+    targetLang?: string
   }
 
   // ── Validation ─────────────────────────────────────────────────────────
   'cell.validate': {
     /** The target.cell.commit / target.cell.create event being validated. */
     editEventId: string
+    /**
+     * AQU-538: target-language lane of the validated commit. Absent/'' =
+     * default lane — same convention as target.cell.commit. A user's standing
+     * validation is per-lane: validating the same cell in two lanes yields two
+     * cell_validators rows.
+     */
+    targetLang?: string
   }
   'cell.unvalidate': {
     /** The target commit event whose validation is being withdrawn. */
@@ -237,6 +278,11 @@ export interface EventPayloads {
      * caller must have maintainer (600) or above.
      */
     targetUsername?: string
+    /**
+     * AQU-538: target-language lane whose validation is withdrawn. Absent/'' =
+     * default lane — same convention as target.cell.commit.
+     */
+    targetLang?: string
   }
 
   // ── QA rule waivers ────────────────────────────────────────────────────
@@ -296,6 +342,8 @@ export interface EventPayloads {
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
+    sourceTextDirection?: 'ltr' | 'rtl'
+    targetTextDirection?: 'ltr' | 'rtl'
     /** Timeline-segment-model: order lens — 'time' | 'sequence'. Stored in
      *  files.meta (JSON). Absent ⇒ client treats as 'sequence'. */
     orderedBy?: string
@@ -365,6 +413,12 @@ export interface EventPayloads {
     scopeLabel: string
     /** Frontier user id of the assignee. */
     assigneeUserId: number
+    /**
+     * AQU-538 (§3.5): target-language lane this assignment is pinned to.
+     * Absent/'' = the default lane (same convention as every other lane field).
+     * Stored on assignments.target_lang; omitted on the wire when ''.
+     */
+    targetLang?: string
     /** Optional ISO date string deadline. */
     deadline?: string | null
     /** Optional instruction note. */
@@ -373,6 +427,12 @@ export interface EventPayloads {
   'assignment.reassign': {
     assignmentId: string
     assigneeUserId: number
+    /**
+     * AQU-538 (§3.5): optionally re-pin the assignment to a different lane.
+     * Absent (undefined) = leave the stored lane untouched — a plain reassign
+     * only changes the assignee. Present (including '') = set the lane.
+     */
+    targetLang?: string
   }
   'assignment.unassign': {
     assignmentId: string
@@ -389,12 +449,12 @@ export interface EventPayloads {
     sourceProjectId: string | null
   }
 
-  // ── FRO-438: Cast/character label assignment (non-chain-mutating) ──────────
+  // ── AQU-438: Cast/character label assignment (non-chain-mutating) ──────────
   // Sets cells.metadata.cast_name WITHOUT touching target text or cells.event_id.
   // Emitted by the label import panel when a PM uploads a filled cast template.
   // Idempotent JSONB merge: repeated assigns for the same cell overwrite the
   // cast_name; clearing requires a null value.
-  // FRO-439: extended with optional cameraState so angle-embedded labels
+  // AQU-439: extended with optional cameraState so angle-embedded labels
   // ("Mary Magdalene   (on)") can be split on import. The projection updates
   // cells.camera_state when cameraState is present in the payload.
   'cast.assign': {
@@ -404,7 +464,7 @@ export interface EventPayloads {
      */
     castName: string | null
     /**
-     * FRO-439: Optional camera-angle override ("on" | "mixed" | "off").
+     * AQU-439: Optional camera-angle override ("on" | "mixed" | "off").
      * When present, the projection also updates cells.camera_state.
      * Null clears the column; omitting this field (undefined) is a no-op.
      */
@@ -424,7 +484,7 @@ export interface EventPayloads {
     coreMediaUrl: string | null
   }
 
-  // ── FRO-476: live source links — mirror engine (server-emitted) ────────
+  // ── AQU-476: live source links — mirror engine (server-emitted) ────────
   // Advances a downstream source cell to match the upstream. Full
   // create-grade shape (structural fields for a cell with no local row yet)
   // PLUS the fields source.cell.commit carries (value/valueHtml) — a mirror
@@ -471,7 +531,7 @@ export interface EventPayloads {
     }
   }
   // Audit-trail record of one non-empty mirror sync batch. No cells
-  // projection; purely a history row for the review panel (FRO-478).
+  // projection; purely a history row for the review panel (AQU-478).
   'link.cursor.advance': {
     upstreamProjectId: string
     fromSeq: number
@@ -479,7 +539,7 @@ export interface EventPayloads {
     cellCount: number
   }
 
-  // ── FRO-478: repin (accept upstream change as-is) ──────────────────────
+  // ── AQU-478: repin (accept upstream change as-is) ──────────────────────
   // Reviewer-level "translation still correct against the new source."
   // Updates ONLY cells.source_event_id on the target row — never value,
   // event_id, validated, or endorsement_count. Guarded by
@@ -545,7 +605,7 @@ export interface EventClaims {
   /** Numeric role level (100=viewer..700=owner). */
   roleLevel: number
   /**
-   * FRO-346: role-resolution source stamped at mint time. `"platform"`
+   * AQU-346: role-resolution source stamped at mint time. `"platform"`
    * exempts the token from the live membership re-check (ADMIN_EMAILS
    * operators have no membership rows). Absent on older tokens.
    */

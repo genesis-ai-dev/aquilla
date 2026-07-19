@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import { partitionSharedProjects } from "./shared-projects"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
-// FRO-335: a magic-link invite accept grants project_members on a project in
+// AQU-335: a magic-link invite accept grants project_members on a project in
 // the INVITER's org. The invitee is not an org member, so org-scoped lists
 // hid the project entirely — URL-accessible, dashboard-invisible. These tests
 // encode the contract that such projects must surface as "shared with me".
@@ -57,7 +57,7 @@ describe("partitionSharedProjects", () => {
   })
 })
 
-// FRO-475: the all-orgs aggregate overview builds its project list from
+// AQU-475: the all-orgs aggregate overview builds its project list from
 // getPortfolios(orgs the caller is a MEMBER of) — a project reached purely
 // via a project-level grant (zero org memberships, or a grant in an org the
 // caller doesn't belong to) never appears there. The "all-orgs" scope must

@@ -1,5 +1,5 @@
 /**
- * FRO-427 — Unit tests for the shared permission-denial helpers.
+ * AQU-427 — Unit tests for the shared permission-denial helpers.
  */
 import { describe, it, expect } from "vitest"
 import { denialMessage, actionGateProps } from "./denial"

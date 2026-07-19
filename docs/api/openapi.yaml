@@ -1,0 +1,942 @@
+openapi: 3.1.0
+info:
+  title: Aquilla Agent API (external REST surface)
+  version: "1.1.0"
+  description: >
+    Minimal, verified-against-code OpenAPI description of Aquilla's external Agent API
+    (AQU-533, v1.1). Covers credential management and changeset approval (identity host,
+    auth-worker) and reads/artifacts/changesets (sync host, sync-worker), including the
+    v1.1 CreateProject/UpdateProjectSettings/LinkMedia commands, audio artifact upload,
+    and the changeset "committing" status. Deliberately excludes anything not implemented
+    in code as of this wave — see docs/api/agent-api.md §8 "What's not yet available" for
+    the omitted surface (jobs, export, run_checks, OAuth, rate limiting; MCP is described
+    in docs/api/agent-api.md, not schema'd here beyond its single JSON-RPC endpoint).
+    Accuracy over completeness: every path/schema field here exists in
+    sync-worker/src/external/*.ts, auth-worker/src/routes/{credentials,
+    changeset-approvals}.ts, db/shared/projects.ts, or db/postgres/schema.sql.
+servers:
+  - url: https://api.aquilla.app/identity
+    description: identity host (auth-worker) — credentials, changeset approval
+  - url: https://api.aquilla.app/sync
+    description: sync host (sync-worker) — reads, artifacts, changesets (agent-facing)
+
+components:
+  securitySchemes:
+    sessionBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Aquilla browser-session JWT (authMiddleware). Used for credential mint/list/revoke and changeset approval.
+    apiCredentialBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: aqk_...
+      description: >
+        API credential token minted via POST /api/v2/credentials, prefix "aqk_".
+        Re-validated (hash lookup + revocation/expiry check) on every request.
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - permission_denied
+                - scope_denied
+                - plan_stale
+                - confirmation_required
+                - validation_failed
+                - conflict
+                - job_failed
+                - rate_limited
+                - not_found
+            message:
+              type: string
+            details:
+              description: Present on some errors (e.g. plan_stale drift list, oversize artifact sizes). Shape varies by code.
+
+    Credential:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mode: { type: string, enum: [ask, act] }
+        orgId: { type: [string, "null"] }
+        projectId: { type: [string, "null"] }
+        tokenPrefix: { type: string, description: "First 12 chars of the token, incl. the aqk_ tag. Display-only." }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: [string, "null"], format: date-time }
+        lastUsedAt: { type: [string, "null"], format: date-time }
+        revokedAt: { type: [string, "null"], format: date-time }
+
+    MintedCredentialResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Plaintext token (aqk_...). Returned exactly once; never retrievable again.
+        credential:
+          $ref: "#/components/schemas/Credential"
+
+    ChangesetSummary:
+      type: object
+      description: >
+        Server-computed effect summary. SetTranslation changesets populate
+        translationsAdded/translationsModified; PlanImport changesets populate
+        filesCreated/sourceCellsAdded/artifactLinked; LinkMedia changesets populate
+        mediaLinked. CreateProject/UpdateProjectSettings changesets are receipt-only
+        and have an empty summary (just warnings: []). Nothing here is agent-narrated.
+      properties:
+        translationsAdded: { type: integer }
+        translationsModified: { type: integer }
+        filesCreated: { type: integer }
+        sourceCellsAdded: { type: integer }
+        artifactLinked: { type: string }
+        mediaLinked:
+          type: integer
+          description: "LinkMedia: number of cells an audio artifact is attached to."
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangesetWarning"
+      required: [warnings]
+
+    ChangesetWarning:
+      type: object
+      properties:
+        code:
+          type: string
+          enum: [missing_cell, duplicate_command, stale_pin, rejected, duplicate_file]
+        fileId: { type: string }
+        cellId: { type: string }
+        message: { type: string }
+      required: [code, fileId, cellId, message]
+
+    ChangesetReceipt:
+      type: object
+      properties:
+        eventIds:
+          type: array
+          items: { type: string }
+        appliedCount: { type: integer }
+        staleCount: { type: integer }
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChangesetWarning"
+        committedAt: { type: string, format: date-time }
+        fileId:
+          type: string
+          description: Present only on a committed PlanImport — the created file's id.
+      required: [eventIds, appliedCount, staleCount, warnings, committedAt]
+
+    ReceiptOnlyReceipt:
+      type: object
+      description: >
+        Receipt for the receipt-only commands (CreateProject, UpdateProjectSettings — v1.1),
+        which apply a plain row write, not events, so the event-shaped ChangesetReceipt does
+        not fit. This IS the provenance record for these commands; there is no
+        events.provenance row to cross-reference.
+      properties:
+        credentialId: { type: string }
+        channel: { type: string, enum: [mcp, rest] }
+        changesetId: { type: string }
+        command: { type: string, enum: [CreateProject, UpdateProjectSettings] }
+        appliedAt: { type: string, format: date-time }
+        projectId:
+          type: string
+          description: CreateProject — the created project id. UpdateProjectSettings — the updated project's id.
+        version:
+          type: integer
+          description: UpdateProjectSettings only — the new settings version after the write.
+      required: [credentialId, channel, changesetId, command, appliedAt, projectId]
+
+    Changeset:
+      type: object
+      properties:
+        id: { type: string }
+        projectId: { type: string }
+        createdByUserId: { type: string }
+        credentialId: { type: string }
+        autonomyMode: { type: string, enum: [ask, act] }
+        status:
+          type: string
+          enum: [staged, committing, committed, discarded, stale, expired]
+          description: >
+            "committing" is the mid-commit state (v1.1): set the instant a commit starts
+            applying, flipped to "committed" once every write has landed. A changeset found
+            in "committing" is a crash-retry — POST .../commit accepts it and resumes,
+            replaying the exact ids stored at prepare rather than minting fresh ones.
+        commands:
+          type: array
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/SetTranslationCommand"
+              - $ref: "#/components/schemas/PlanImportCommand"
+              - $ref: "#/components/schemas/CreateProjectCommand"
+              - $ref: "#/components/schemas/UpdateProjectSettingsCommand"
+              - $ref: "#/components/schemas/LinkMediaCommand"
+          description: Normalized command objects, as staged.
+        preconditions:
+          type: array
+          items: {}
+        summary:
+          $ref: "#/components/schemas/ChangesetSummary"
+        digest:
+          type: string
+          description: SHA-256 over canonicalized commands + preconditions.
+        receipt:
+          oneOf:
+            - $ref: "#/components/schemas/ChangesetReceipt"
+            - $ref: "#/components/schemas/ReceiptOnlyReceipt"
+            - type: "null"
+        confirmationId: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        committedAt: { type: [string, "null"], format: date-time }
+      required: [id, projectId, autonomyMode, status, summary, digest]
+
+    SetTranslationCommand:
+      type: object
+      properties:
+        kind: { type: string, enum: [SetTranslation] }
+        fileId: { type: string }
+        cellId: { type: string }
+        value: { type: string }
+        valueHtml: { type: string }
+      required: [kind, fileId, cellId, value]
+
+    PlanImportCell:
+      type: object
+      properties:
+        id: { type: string, description: "Cell chain-key id; a fresh UUIDv7 is minted when omitted." }
+        content: { type: string }
+        canonicalRef: { type: string }
+        section: { type: string }
+        type: { type: string }
+      required: [content]
+
+    PlanImportCommand:
+      type: object
+      properties:
+        kind: { type: string, enum: [PlanImport] }
+        fileName: { type: string }
+        fileType: { type: string }
+        sourceLanguage: { type: string }
+        targetLanguage: { type: string }
+        artifactId: { type: string, description: "Must reference an artifact already uploaded to this project." }
+        cells:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          items:
+            $ref: "#/components/schemas/PlanImportCell"
+      required: [kind, fileName, fileType, cells]
+
+    CreateProjectCommand:
+      type: object
+      description: >
+        Receipt-only (v1.1) — applies a plain row write via db/shared/projects.ts, not an
+        event. Must be the sole command in its changeset. Requires an unscoped or
+        org-scoped credential with org role >= MAINTAINER in the target org (a
+        project-scoped credential is 403 scope_denied); a project id claimed by another
+        caller between prepare and commit is 409 conflict.
+      properties:
+        kind: { type: string, enum: [CreateProject] }
+        name: { type: string }
+        projectId:
+          type: string
+          description: >
+            Optional. When omitted, the DEFINITIVE new project id is the changeset's URL
+            project id (the :projectId path segment) — pin the SAME value in both places
+            to avoid ambiguity.
+        orgId:
+          type: [string, integer]
+          description: Target org id. Omit for a personal (org-less) project.
+      required: [kind, name]
+
+    UpdateProjectSettingsCommand:
+      type: object
+      description: >
+        Receipt-only (v1.1) — a version-guarded settings write via the same shared module
+        auth-worker's internal route uses. Must be the sole command in its changeset.
+        Requires project role >= MAINTAINER.
+      properties:
+        kind: { type: string, enum: [UpdateProjectSettings] }
+        projectId: { type: string, description: Must equal the changeset's URL project id. }
+        settings: { type: object, description: Settings blob to write (replaces the stored blob). }
+        ifMatchVersion:
+          type: integer
+          description: Must equal the live settings version at both prepare and commit, else plan_stale.
+      required: [kind, projectId, settings, ifMatchVersion]
+
+    LinkMediaCommand:
+      type: object
+      description: >
+        Event-native (v1.1) — compiles to cell.audio.attach + cell.audio.select, requires
+        CONTRIBUTOR at commit. artifactId must reference an audio-kind artifact already
+        uploaded to the same project (see POST .../artifacts with x-artifact-kind: audio).
+        Multiple LinkMedia commands may share one changeset; cannot mix with any other
+        command kind.
+      properties:
+        kind: { type: string, enum: [LinkMedia] }
+        fileId: { type: string }
+        cellId: { type: string }
+        artifactId: { type: string, description: An audio-kind artifact id from the artifact upload endpoint. }
+      required: [kind, fileId, cellId, artifactId]
+
+    PrepareChangesetRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Optional client-supplied UUIDv7 for idempotent retries.
+        autonomyMode:
+          type: string
+          enum: [ask, act]
+          description: >
+            May only downgrade an act-mode credential to ask for this changeset; cannot
+            upgrade an ask-mode credential to act.
+        commands:
+          type: array
+          minItems: 1
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/SetTranslationCommand"
+              - $ref: "#/components/schemas/PlanImportCommand"
+              - $ref: "#/components/schemas/CreateProjectCommand"
+              - $ref: "#/components/schemas/UpdateProjectSettingsCommand"
+              - $ref: "#/components/schemas/LinkMediaCommand"
+          description: >
+            PlanImport, CreateProject, UpdateProjectSettings must each be the sole command
+            in the array; LinkMedia commands may repeat but cannot mix with any other kind.
+      required: [commands]
+
+    PrepareChangesetResponse:
+      type: object
+      properties:
+        changeset:
+          $ref: "#/components/schemas/Changeset"
+        summary:
+          $ref: "#/components/schemas/ChangesetSummary"
+        digest: { type: string }
+        approvalUrl:
+          type: string
+          description: "Present on every prepare response, regardless of mode; only meaningful for ask mode."
+
+    CommitChangesetResponse:
+      type: object
+      properties:
+        receipt:
+          oneOf:
+            - $ref: "#/components/schemas/ChangesetReceipt"
+            - $ref: "#/components/schemas/ReceiptOnlyReceipt"
+      required: [receipt]
+
+    Artifact:
+      type: object
+      properties:
+        artifactId: { type: string }
+        projectId: { type: string }
+        uploadedByUserId: { type: string }
+        credentialId: { type: string }
+        name: { type: string }
+        contentType: { type: [string, "null"] }
+        sizeBytes: { type: integer }
+        sha256: { type: string }
+        fileId: { type: [string, "null"] }
+        kind:
+          type: string
+          enum: [source, audio]
+          description: "'source' (default) preserves a verbatim import original; 'audio' is a clip a LinkMedia changeset attaches to a cell."
+        audioId:
+          type: [string, "null"]
+          description: "audio-kind artifacts only: the R2 object name (<artifactId>.<ext>) LinkMedia's compiled cell.audio.attach payload references."
+        createdAt: { type: string, format: date-time }
+
+    UploadArtifactResponse:
+      type: object
+      properties:
+        artifactId: { type: string }
+        sha256: { type: string }
+        sizeBytes: { type: integer }
+      required: [artifactId, sha256, sizeBytes]
+
+    InspectArtifactResponse:
+      type: object
+      properties:
+        detectedFormat:
+          type: string
+          enum: [usfm, xliff, tmx, json, csv, tsv, plaintext]
+        details:
+          type: object
+          properties:
+            byteCount: { type: integer }
+            sniffedBytes: { type: integer }
+            lineCount: { type: integer }
+            truncated: { type: boolean }
+          additionalProperties: true
+
+    PaginatedResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {}
+        nextCursor:
+          type: [string, "null"]
+      required: [data, nextCursor]
+
+    ChangesetApprovalView:
+      type: object
+      properties:
+        changesetId: { type: string }
+        projectId: { type: string }
+        projectName: { type: [string, "null"] }
+        status: { type: string }
+        autonomyMode: { type: string, enum: [ask, act] }
+        summary:
+          $ref: "#/components/schemas/ChangesetSummary"
+        digest: { type: string }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+
+    ApproveChangesetResponse:
+      type: object
+      properties:
+        confirmationId: { type: string }
+        expiresAt: { type: string, format: date-time }
+        message: { type: string }
+      required: [confirmationId, expiresAt]
+
+    DiscardOrRejectResponse:
+      type: object
+      properties:
+        changesetId: { type: string }
+        status: { type: string }
+
+paths:
+  /api/v2/credentials:
+    post:
+      summary: Mint an API credential (personal access token)
+      security: [{ sessionBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, mode]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                mode: { type: string, enum: [ask, act] }
+                orgId: { type: string, description: "Mutually exclusive with projectId." }
+                projectId: { type: string, description: "Mutually exclusive with orgId." }
+                expiresAt: { type: string, format: date-time, description: "Must be in the future." }
+      responses:
+        "201":
+          description: Credential minted. Token shown exactly once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MintedCredentialResponse" }
+        "403":
+          description: scope_denied — insufficient live role on the requested scope.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "400":
+          description: validation_failed — bad expiresAt.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    get:
+      summary: List the caller's credentials (never returns hashes or tokens)
+      security: [{ sessionBearer: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  credentials:
+                    type: array
+                    items: { $ref: "#/components/schemas/Credential" }
+
+  /api/v2/credentials/{id}:
+    delete:
+      summary: Revoke a credential (owner or platform admin; idempotent)
+      security: [{ sessionBearer: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Revoked (or already revoked).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "403":
+          description: permission_denied — not the owner or a platform admin.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v2/changesets/{id}/approval:
+    get:
+      summary: Load a staged changeset for the human approval page
+      security: [{ sessionBearer: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChangesetApprovalView" }
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "403":
+          description: permission_denied — caller is not the changeset's owning human.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v2/changesets/{id}/approve:
+    post:
+      summary: One-time human approval assertion (idempotent within the confirmation TTL)
+      security: [{ sessionBearer: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [digest]
+              properties:
+                digest:
+                  type: string
+                  description: Must equal the changeset's stored digest, fetched from GET .../approval — never read from the URL.
+      responses:
+        "200":
+          description: Approved (or an existing unconsumed confirmation returned idempotently).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApproveChangesetResponse" }
+        "409":
+          description: validation_failed — wrong status, expired changeset, or digest mismatch.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v2/changesets/{id}/reject:
+    post:
+      summary: Discard a staged changeset (irreversible)
+      security: [{ sessionBearer: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DiscardOrRejectResponse" }
+
+  /api/v1/external/projects/{projectId}/search:
+    get:
+      summary: Full-text search a project's cells
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: side
+          in: query
+          schema: { type: string, enum: [source, target] }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedResponse" }
+        "403":
+          description: permission_denied / scope_denied
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v1/external/projects/{projectId}/files:
+    get:
+      summary: List a project's files
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedResponse" }
+
+  /api/v1/external/projects/{projectId}/files/{fileId}/cells:
+    get:
+      summary: Read a file's cells (supports incremental reads via since)
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: fileId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: since
+          in: query
+          schema: { type: integer }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedResponse" }
+        "304":
+          description: Not modified.
+
+  /api/v1/external/projects/{projectId}/cells/{cellId}/history:
+    get:
+      summary: Append-only event history for one cell
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: cellId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, maximum: 200 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedResponse" }
+
+  /api/v1/external/projects/{projectId}/artifacts:
+    post:
+      summary: Upload an artifact (raw bytes, max 25MB) — source (default) or audio
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: x-artifact-name
+          in: header
+          required: true
+          schema: { type: string }
+        - name: x-artifact-kind
+          in: header
+          required: false
+          schema: { type: string, enum: [source, audio], default: source }
+          description: >
+            'source' (default, omit the header) preserves a verbatim import original
+            unchanged from v1. 'audio' validates content-type against
+            audio/wav, audio/mpeg, audio/mp4, audio/x-m4a, audio/ogg and lands the bytes
+            in the per-file audio R2 layout for a later LinkMedia command to attach.
+        - name: content-type
+          in: header
+          required: false
+          schema: { type: string }
+          description: Required (and checked against the allowlist above) when x-artifact-kind is 'audio'.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadArtifactResponse" }
+        "400":
+          description: validation_failed — missing name, empty body, or over 25MB.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v1/external/projects/{projectId}/artifacts/{artifactId}:
+    get:
+      summary: Artifact metadata
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: artifactId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artifact: { $ref: "#/components/schemas/Artifact" }
+
+  /api/v1/external/projects/{projectId}/artifacts/{artifactId}/content:
+    get:
+      summary: Raw artifact bytes
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: artifactId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Raw bytes, Content-Type of the original upload.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+
+  /api/v1/external/projects/{projectId}/artifacts/{artifactId}/inspect:
+    get:
+      summary: Lightweight format detection (first 64KB sniff)
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: artifactId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InspectArtifactResponse" }
+
+  /api/v1/external/projects/{projectId}/changesets:
+    post:
+      summary: >
+        Prepare (stage) a changeset — a SetTranslation batch, one or more LinkMedia,
+        or a sole PlanImport/CreateProject/UpdateProjectSettings
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PrepareChangesetRequest" }
+      responses:
+        "200":
+          description: Staged.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PrepareChangesetResponse" }
+        "400":
+          description: validation_failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v1/external/projects/{projectId}/changesets/{id}:
+    get:
+      summary: Fetch a changeset (status, summary, digest, receipt, approvalUrl)
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changeset: { $ref: "#/components/schemas/Changeset" }
+                  approvalUrl: { type: string }
+        "404":
+          description: not_found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v1/external/projects/{projectId}/changesets/{id}/commit:
+    post:
+      summary: Commit a staged changeset (ask requires a consumed human approval; act auto-confirms)
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: >
+            Committed (or idempotently re-returned if already committed; a changeset found
+            in "committing" — a crash-retry — resumes and completes rather than erroring).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommitChangesetResponse" }
+        "428":
+          description: confirmation_required — ask-mode changeset with no valid, unconsumed approval.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: >
+            plan_stale — project state (or, for UpdateProjectSettings, the settings version)
+            drifted since prepare; OR conflict — CreateProject only, the chosen project id
+            was claimed by a different caller since prepare.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v1/external/projects/{projectId}/changesets/{id}/discard:
+    post:
+      summary: Discard a staged/stale/expired changeset (cannot discard a committed or committing one)
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changeset:
+                    oneOf:
+                      - $ref: "#/components/schemas/Changeset"
+                      - type: "null"
+        "400":
+          description: validation_failed — cannot discard a committed or committing changeset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v1/external/mcp:
+    post:
+      summary: MCP JSON-RPC 2.0 endpoint (initialize, ping, tools/list, tools/call)
+      security: [{ apiCredentialBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A single JSON-RPC 2.0 request object. See docs/api/agent-api.md §2 for the tool catalog.
+      responses:
+        "200":
+          description: JSON-RPC 2.0 response (result or error).
+        "401":
+          description: Missing/invalid/revoked/expired API credential (returned as the standard error envelope, not JSON-RPC).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+    get:
+      summary: Not supported — this MCP server is tools-only, no SSE stream
+      responses:
+        "405":
+          description: method not allowed

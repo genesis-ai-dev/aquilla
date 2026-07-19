@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { extractUsfmStrings } from "./usfm"
+import ultTitRaw from "./__fixtures__/ult-tit-1.usfm?raw"
+import uhbExoRaw from "./__fixtures__/uhb-exo-1.usfm?raw"
 
 describe("extractUsfmStrings", () => {
   it("parses verses with book/chapter/verse context", () => {
@@ -114,6 +116,87 @@ describe("extractUsfmStrings — section labels", () => {
     const [book] = extractUsfmStrings(usfm)
     const paratext = book.strings.find(s => s.type === "paratext")
     expect(paratext?.section).toBe("GEN intro")
+  })
+})
+
+// unfoldingWord's aligned repos (en_ult/en_ust/hbo_uhb/el-x-koine_ugnt) wrap every word
+// in \zaln-s ...\* / \zaln-e\* milestones and \w word|attrs\w* on its own physical line.
+// Before AQU-615 the line-based parser dropped every continuation line starting with "\",
+// importing one word per verse (and losing hbo_uhb's bare "\v N" verses entirely).
+describe("extractUsfmStrings — aligned USFM3 (unfoldingWord)", () => {
+  it("reconstructs the full ULT verse text from word-per-line alignment markup", () => {
+    const [book] = extractUsfmStrings(ultTitRaw)
+    expect(book.bookId).toBe("TIT")
+    const v1 = book.strings.find((s) => s.context === "TIT 1:1")
+    // Full verse — words joined with spaces, punctuation attached (no space before
+    // the commas that sit outside the \w...\w* wrappers).
+    expect(v1?.original).toBe(
+      "Paul, a servant of God and an apostle of Jesus Christ, for the faith of the chosen people of God and knowledge of the truth that agrees with godliness,",
+    )
+    // Hyphenated compound split across two \w wrappers must not gain spaces.
+    const v2 = book.strings.find((s) => s.context === "TIT 1:2")
+    expect(v2?.original).toContain("the non-lying God promised")
+    expect(v2?.original?.endsWith("all the ages of time.")).toBe(true)
+  })
+
+  it("leaves no alignment markup or attribute residue in any cell", () => {
+    const [book] = extractUsfmStrings(ultTitRaw)
+    expect(book.strings.length).toBeGreaterThanOrEqual(4)
+    for (const s of book.strings) {
+      expect(s.original).not.toMatch(/\\zaln|\\w|x-occurrence|x-strong|\|/)
+      expect(s.original).not.toMatch(/\s[,.;:!?]/)
+    }
+  })
+
+  it("parses UHB bare \\v markers whose Hebrew words follow on separate lines", () => {
+    const [book] = extractUsfmStrings(uhbExoRaw)
+    expect(book.bookId).toBe("EXO")
+    const verses = book.strings.filter((s) => s.type === "verse")
+    // All six verses of the excerpt survive even though every "\v N" line is bare.
+    expect(verses.map((s) => s.context)).toEqual([
+      "EXO 1:1",
+      "EXO 1:2",
+      "EXO 1:3",
+      "EXO 1:4",
+      "EXO 1:5",
+      "EXO 1:6",
+    ])
+    // Hebrew content untouched: word-joiners (⁠) intact, maqqef (־) still binds its
+    // word pair without inserted spaces, sof pasuq (׃) attached to the last word.
+    // "רְאוּבֵ֣ן שִׁמְע֔וֹן לֵוִ֖י וִ⁠יהוּדָֽה׃" — written as escapes so editors cannot
+    // reorder the combining marks away from the fixture's byte order.
+    expect(verses[1].original).toBe(
+      "\u{5e8}\u{5b0}\u{5d0}\u{5d5}\u{5bc}\u{5d1}\u{5b5}\u{5a3}\u{5df}\u{20}\u{5e9}\u{5c1}\u{5b4}\u{5de}\u{5b0}\u{5e2}\u{594}\u{5d5}\u{5b9}\u{5df}\u{20}\u{5dc}\u{5b5}\u{5d5}\u{5b4}\u{596}\u{5d9}\u{20}\u{5d5}\u{5b4}\u{2060}\u{5d9}\u{5d4}\u{5d5}\u{5bc}\u{5d3}\u{5b8}\u{5bd}\u{5d4}\u{5c3}",
+    )
+    // "כָּל־נֶ֛פֶשׁ" as escapes (same editor-normalization hazard as above).
+    expect(verses[4].original).toContain(
+      "\u{5db}\u{5bc}\u{5b8}\u{5dc}\u{5be}\u{5e0}\u{5b6}\u{59b}\u{5e4}\u{5b6}\u{5e9}\u{5c1}",
+    )
+    for (const v of verses) {
+      expect(v.original.endsWith("׃")).toBe(true)
+      expect(v.original).not.toMatch(/lemma=|strong=|x-morph/)
+    }
+  })
+
+  it("does not alter plain (non-aligned) USFM output — byte-identical regression", () => {
+    // Continuation lines, space-before-punctuation, and bare formatting are all
+    // preserved exactly: normalization must skip files without alignment markup,
+    // because src/lib/dcs/routes/usfm.ts seeds stable cell ids from these strings.
+    const plain = `\\id GEN
+\\mt Genesis
+\\c 1
+\\s The Creation
+\\p
+\\v 1 In the beginning God created
+the heavens , and the earth.
+\\v 2 The earth was without form.`
+    const [book] = extractUsfmStrings(plain)
+    expect(book.strings.map((s) => s.original)).toEqual([
+      "Genesis",
+      "The Creation",
+      "In the beginning God created the heavens , and the earth.",
+      "The earth was without form.",
+    ])
   })
 })
 

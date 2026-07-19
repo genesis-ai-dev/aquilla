@@ -96,9 +96,15 @@ function buildCheck(
 
 interface RuleCreateDialogProps {
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void
+  canManage?: boolean
+  deniedReason?: string | null
 }
 
-export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
+export function RuleCreateDialog({
+  onAdd,
+  canManage = true,
+  deniedReason,
+}: RuleCreateDialogProps) {
   const [open, setOpen] = useState(false)
   const [testSource, setTestSource] = useState("")
   const [testTarget, setTestTarget] = useState("")
@@ -202,7 +208,15 @@ export function RuleCreateDialog({ onAdd }: RuleCreateDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger render={<Button size="sm" />}>
+      <DialogTrigger
+        render={
+          <Button
+            size="sm"
+            disabled={!canManage}
+            title={!canManage ? (deniedReason ?? undefined) : undefined}
+          />
+        }
+      >
         + Add Rule
       </DialogTrigger>
       <DialogContent className="max-w-lg">

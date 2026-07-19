@@ -13,11 +13,13 @@ import {
 import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
+  LINK_ROLE_OPTIONS,
   roleName,
   roleDisplayText,
   type RoleLevel,
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
+import { createServerInvite } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
@@ -36,16 +38,16 @@ interface MultiProjectInviteDialogProps {
 }
 
 /**
- * FRO-322: Unified add-to-projects dialog.
+ * AQU-322: Unified add-to-projects dialog.
  *
  * - Username mode (existing Aquilla user): multi-select projects, pick a
  *   role per project, hit Invite. Each project gets a direct membership grant
  *   via POST /projects/:id/members.
  *
- * - Email mode (new user): the dialog explains that email-based invites are
- *   per-project (one magic-link per project) and shows a CTA to the per-project
- *   Share panel for each selected project. This is honest about what the path is
- *   rather than silently routing them back to username.
+ * - Email mode (new user): AQU-471 — one email-bound single-use invite link is
+ *   minted per selected project via POST /projects/:id/invites; the server
+ *   delivers each invite email. Roles are capped at the link-share ceiling
+ *   (contributor), same as the per-project Share panel.
  *
  * Why per-project role (not "set all to role X"): translation projects
  * have meaningful per-project role variation — someone might be Translator
@@ -73,8 +75,13 @@ export function MultiProjectInviteDialog({
 
   const selectedIds = useMemo(() => Object.keys(selections), [selections])
   const isEmailMode = recipient.mode === "email"
-  // Email mode: no server action — guide the operator to per-project Share panels.
-  const canShowEmailGuide = isEmailMode && selectedIds.length > 0
+  const emailLooksValid = /\S+@\S+\.\S+/.test(recipient.raw.trim())
+  const canSubmit =
+    !busy &&
+    recipient.raw.trim().length > 0 &&
+    (!isEmailMode || emailLooksValid) &&
+    selectedIds.length > 0 &&
+    Boolean(session?.jwt)
 
   function toggleProject(projectId: string) {
     setSelections((prev) => {
@@ -110,6 +117,32 @@ export function MultiProjectInviteDialog({
     setPerProjectError({})
     setDone(null)
     try {
+      // Email mode (AQU-471): mint one email-bound invite link per project —
+      // the server sends each invite email. No pre-existing account needed.
+      if (isEmailMode) {
+        const email = recipient.raw.trim()
+        const jwt = session.jwt
+        const results = await Promise.all(
+          selectedIds.map((projectId) =>
+            createServerInvite(jwt, projectId, selections[projectId]!, undefined, email)
+          )
+        )
+        const errors: Record<string, string> = {}
+        const successes: Record<string, "ok"> = {}
+        results.forEach((created, i) => {
+          const id = selectedIds[i]!
+          if (created) {
+            successes[id] = "ok"
+          } else {
+            errors[id] =
+              "Couldn't send the invite — you need project-lead access on this project."
+          }
+        })
+        setPerProjectError(errors)
+        setDone(successes)
+        if (Object.keys(successes).length > 0) onSuccess?.()
+        return
+      }
       // If the typeahead already verified the user, skip the redundant
       // round-trip. Otherwise (operator typed and hit Add without picking
       // a suggestion) fall back to a definitive lookup.
@@ -157,9 +190,27 @@ export function MultiProjectInviteDialog({
     onOpenChange(false)
   }
 
-  // Cap role picker at maintainer; owner is conferred on creation, never via
-  // bulk add. Mirrors PROJECT_ROLE_OPTIONS but only the levels we want here.
-  const roleChoices = PROJECT_ROLE_OPTIONS
+  // Username mode: cap role picker at maintainer; owner is conferred on
+  // creation, never via bulk add. Email mode: link-share invites are capped at
+  // contributor server-side, so only offer the link roles.
+  const roleChoices = isEmailMode ? LINK_ROLE_OPTIONS : PROJECT_ROLE_OPTIONS
+
+  // Switching to email mode clamps any managerial selections down to the
+  // link-share ceiling so the picker value always matches what the server
+  // would grant.
+  function handleRecipientChange(next: RecipientValue) {
+    setRecipient(next)
+    if (next.mode === "email") {
+      setSelections((prev) =>
+        Object.fromEntries(
+          Object.entries(prev).map(([id, lvl]) => [
+            id,
+            lvl > ROLE.CONTRIBUTOR ? ROLE.CONTRIBUTOR : lvl,
+          ])
+        ) as Record<string, RoleLevel>
+      )
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(v) : handleClose())}>
@@ -168,7 +219,7 @@ export function MultiProjectInviteDialog({
           <DialogTitle>Add to projects</DialogTitle>
           <DialogDescription>
             {recipient.mode === "email"
-              ? "Email invites are per-project. Select projects below — each will get its own invite link via the Share panel."
+              ? "Invite someone by email to multiple projects in one step. Each selected project sends its own single-use invite link — no Aquilla account needed yet."
               : "Add an existing Aquilla user to multiple projects in one step. They get project-only access — org-wide membership is unchanged."}
           </DialogDescription>
         </DialogHeader>
@@ -180,14 +231,14 @@ export function MultiProjectInviteDialog({
             </FieldLabel>
             <UsernameTypeahead
               value={recipient}
-              onChange={setRecipient}
+              onChange={handleRecipientChange}
               disabled={busy}
               inputId="invite-recipient"
               showModeToggle={true}
             />
             {recipient.mode === "email" && (
               <FieldDescription className="text-[10px]">
-                Select projects below, then use each project&apos;s Share panel to send the invite link.
+                They&apos;ll receive one email per selected project with a single-use invite link.
               </FieldDescription>
             )}
           </Field>
@@ -241,7 +292,7 @@ export function MultiProjectInviteDialog({
                         </AppTooltip>
                         {isDone ? (
                           <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
-                            <Check className="h-3 w-3" /> added
+                            <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
                           </span>
                         ) : isSelected ? (
                           <Select
@@ -303,35 +354,6 @@ export function MultiProjectInviteDialog({
             )}
           </Field>
 
-          {/* FRO-322: email-mode guide — direct operator to per-project Share panels */}
-          {canShowEmailGuide && (
-            <div className="rounded border bg-muted/30 p-3 space-y-2 text-xs">
-              <p className="font-medium text-muted-foreground">
-                Email invites are sent per-project via each project&apos;s Share panel.
-                Open each project and use the Share tab to send a magic-link invite.
-              </p>
-              <ul className="space-y-1">
-                {selectedIds.map((id) => {
-                  const p = projects.find((x) => x.id === id)
-                  if (!p) return null
-                  return (
-                    <li key={id}>
-                      <a
-                        href={`/project/${id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-primary hover:underline"
-                        onClick={handleClose}
-                      >
-                        Open {p.name} →
-                      </a>
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-          )}
-
           {topError && (
             <FieldError className="text-xs">{topError}</FieldError>
           )}
@@ -341,18 +363,18 @@ export function MultiProjectInviteDialog({
               <X className="mr-1 h-4 w-4" />
               {done ? "Close" : "Cancel"}
             </Button>
-            {!isEmailMode && (
-              <Button onClick={handleInvite} disabled={busy}>
-                {busy ? (
-                  <>
-                    <Spinner className="mr-1" />
-                    Adding…
-                  </>
-                ) : (
-                  <>Add to projects</>
-                )}
-              </Button>
-            )}
+            <Button onClick={handleInvite} disabled={!canSubmit}>
+              {busy ? (
+                <>
+                  <Spinner className="mr-1" />
+                  {isEmailMode ? "Sending…" : "Adding…"}
+                </>
+              ) : isEmailMode ? (
+                <>Send invites</>
+              ) : (
+                <>Add to projects</>
+              )}
+            </Button>
           </div>
         </div>
       </DialogContent>

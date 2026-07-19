@@ -1,5 +1,5 @@
 /**
- * FRO-270: /reset-password page
+ * AQU-270: /reset-password page
  *
  * Reads `token` + `username` from the query string (set by the auth-worker when
  * it sends the reset email). On mount it verifies the token is still valid; if

@@ -9,10 +9,11 @@
  *   deprecated → Restore (rendered dimmed)
  * Presentational only; all mutations bubble through callbacks.
  */
-import { useState } from "react"
-import { ChevronDown, ChevronRight, Archive, RotateCcw, Check, X, Plus } from "lucide-react"
+import { useEffect, useState } from "react"
+import { ChevronDown, ChevronRight, Archive, RotateCcw, Check, X, Plus, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -36,11 +37,47 @@ export interface GlossaryRowProps {
   canManage: boolean
   onEditSource: (id: string, sourceTerm: string) => void
   onEditPrimary: (id: string, text: string) => void
-  onEditRenderings: (id: string, renderings: TermRendering[]) => void
+  onEditRenderings: (
+    id: string,
+    update: (current: TermRendering[]) => TermRendering[],
+  ) => void
+  onEditNotes: (id: string, notes: string) => void
+  onOpenDetails: (id: string) => void
   onArchive: (id: string) => void
   onRestore: (id: string) => void
   onAccept: (id: string) => void
   onDismiss: (id: string) => void
+}
+
+function ExpanderNotes({
+  concept,
+  canManage,
+  onCommit,
+}: {
+  concept: Concept
+  canManage: boolean
+  onCommit: (notes: string) => void
+}) {
+  const [draft, setDraft] = useState(concept.notes ?? "")
+  return (
+    <Textarea
+      value={draft}
+      aria-label={`Notes for ${concept.sourceTerm}`}
+      placeholder="Contextual notes for translators"
+      disabled={!canManage}
+      className="min-h-16 resize-y text-sm"
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft !== (concept.notes ?? "")) onCommit(draft)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setDraft(concept.notes ?? "")
+          event.currentTarget.blur()
+        }
+      }}
+    />
+  )
 }
 
 /** A single inline-editable text cell: click to edit, commit on blur/Enter. */
@@ -122,10 +159,16 @@ function ExpanderRenderingRow({
   onRemove: () => void
 }) {
   const [draft, setDraft] = useState(rendering.rendering)
+
+  useEffect(() => {
+    setDraft(rendering.rendering)
+  }, [rendering.rendering])
+
   return (
     <div className="flex items-center gap-2">
       <Input
         value={draft}
+        aria-label={`Rendering ${index + 1} text`}
         placeholder="rendering"
         disabled={!canManage}
         className="h-7 flex-1 text-sm"
@@ -171,6 +214,8 @@ export function GlossaryRow({
   onEditSource,
   onEditPrimary,
   onEditRenderings,
+  onEditNotes,
+  onOpenDetails,
   onArchive,
   onRestore,
   onAccept,
@@ -182,16 +227,16 @@ export function GlossaryRow({
   const updateRendering = (index: number, next: TermRendering) =>
     onEditRenderings(
       concept.id,
-      concept.renderings.map((r, i) => (i === index ? next : r)),
+      (current) => current.map((r, i) => (i === index ? next : r)),
     )
   const removeRendering = (index: number) =>
     onEditRenderings(
       concept.id,
-      concept.renderings.filter((_, i) => i !== index),
+      (current) => current.filter((_, i) => i !== index),
     )
   const addRendering = () =>
-    onEditRenderings(concept.id, [
-      ...concept.renderings,
+    onEditRenderings(concept.id, (current) => [
+      ...current,
       { rendering: "", status: "admitted" },
     ])
 
@@ -203,6 +248,8 @@ export function GlossaryRow({
         concept.status === "deprecated" && "opacity-60",
       )}
       data-status={concept.status}
+      data-testid="glossary-row"
+      data-concept-id={concept.id}
     >
       <div className="flex items-start gap-3 px-3 py-2">
         {/* Expander toggle */}
@@ -237,6 +284,14 @@ export function GlossaryRow({
 
         {/* Lifecycle affordances */}
         <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Open details for ${concept.sourceTerm}`}
+            onClick={() => onOpenDetails(concept.id)}
+          >
+            <Info />
+          </Button>
           {concept.status === "draft" && canManage && (
             <>
               <Button variant="ghost" size="icon-sm" aria-label="Accept term" onClick={() => onAccept(concept.id)}>
@@ -279,9 +334,14 @@ export function GlossaryRow({
           ))}
           {canManage && (
             <Button variant="ghost" size="sm" className="text-xs" onClick={addRendering}>
-              <Plus className="mr-1 h-3.5 w-3.5" /> Add rendering
+              <Plus data-icon="inline-start" /> Add rendering
             </Button>
           )}
+          <ExpanderNotes
+            concept={concept}
+            canManage={canManage}
+            onCommit={(notes) => onEditNotes(concept.id, notes)}
+          />
         </div>
       )}
     </div>

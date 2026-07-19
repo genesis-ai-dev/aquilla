@@ -6,7 +6,14 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { AgentSessionStore, type AgentSendOptions } from "./session-store"
+import {
+  AgentSessionStore,
+  localStoragePersistence,
+  type AgentSendOptions,
+  type PersistedSession,
+  type SessionPersistence,
+} from "./session-store"
+import { createRun } from "./run-state"
 import type { RunAgentOptions } from "./agent-client"
 
 function sendOptions(text: string): AgentSendOptions {
@@ -180,5 +187,117 @@ describe("AgentSessionStore", () => {
     store.noteActivity("passage:a", "stale note")
     store.reset()
     expect(store.getState().activity).toHaveLength(0)
+  })
+})
+
+/**
+ * Persistence (AQU-415): the agent conversation must survive a page reload —
+ * chat already persisted, the agent did not. A fresh store (the reload) reads
+ * the same persistence and rehydrates the transcript, sessionId, and review
+ * decisions; transient stream state never persists; an interrupted run lands
+ * terminal instead of a forever-spinner.
+ */
+describe("AgentSessionStore persistence", () => {
+  /** In-memory persistence adapter with a peek at what was last written. */
+  function memoryPersistence(initial: PersistedSession | null = null) {
+    let saved = initial
+    const persistence: SessionPersistence = {
+      load: () => saved,
+      save: (s) => {
+        saved = s
+      },
+    }
+    return { persistence, get: () => saved }
+  }
+
+  it("persists a settled conversation and a fresh store rehydrates it", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const mem = memoryPersistence()
+    const store = new AgentSessionStore(impl, mem.persistence)
+    const sessionId = store.getState().sessionId
+
+    store.send(sendOptions("Draft GEN 1"))
+    await flush()
+    calls[0].onFrame({ type: "assistant_delta", text: "Dios" })
+    calls[0].onFrame({ type: "done", runId: "r1", status: "ok" })
+    finish(0)
+    await flush()
+    store.decide([["p1:c1", { outcome: "accepted", value: "Dios", appliedEventId: "e1" }]])
+
+    // A brand-new store — the reload — reads the same persistence.
+    const revived = new AgentSessionStore(impl, mem.persistence)
+    const s = revived.getState()
+    expect(s.sessionId).toBe(sessionId) // same server session → follow-ups continue it
+    expect(s.runs).toHaveLength(1)
+    expect(s.runs[0].prompt).toBe("Draft GEN 1")
+    expect(s.runs[0].status).toBe("ok")
+    expect(s.decided.get("p1:c1")).toMatchObject({ outcome: "accepted", appliedEventId: "e1" })
+    expect(s.isStreaming).toBe(false)
+  })
+
+  it("does not persist mid-stream; flushes the final state when the run settles", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const mem = memoryPersistence()
+    const store = new AgentSessionStore(impl, mem.persistence)
+
+    store.send(sendOptions("hello"))
+    await flush()
+    calls[0].onFrame({ type: "assistant_delta", text: "partial" })
+    expect(mem.get()).toBeNull() // still streaming → nothing written yet
+
+    calls[0].onFrame({ type: "done", runId: "r1", status: "ok" })
+    finish(0)
+    await flush()
+    expect(mem.get()?.runs).toHaveLength(1)
+    expect(mem.get()?.runs[0].status).toBe("ok")
+  })
+
+  it("normalizes a run frozen mid-stream by the reload to a terminal error", () => {
+    const running = createRun("draft")
+    expect(running.status).toBe("running")
+    const persisted: PersistedSession = {
+      sessionId: "sess-1",
+      runs: [running],
+      decided: [],
+      activity: [],
+    }
+    const store = new AgentSessionStore(vi.fn(), memoryPersistence(persisted).persistence)
+    const run = store.getState().runs[0]
+    expect(run.status).toBe("error")
+    expect(run.errorMessage).toContain("reload")
+  })
+
+  it("reset persists a fresh empty session so no stale conversation returns after reload", async () => {
+    const { impl, finish } = deferredRunAgent()
+    const mem = memoryPersistence()
+    const store = new AgentSessionStore(impl, mem.persistence)
+
+    store.send(sendOptions("hello"))
+    await flush()
+    finish(0)
+    await flush()
+    expect(mem.get()?.runs).toHaveLength(1)
+
+    store.reset()
+    expect(mem.get()?.runs).toEqual([])
+    const revived = new AgentSessionStore(impl, mem.persistence)
+    expect(revived.getState().runs).toEqual([])
+    expect(revived.getState().sessionId).toBe(store.getState().sessionId)
+  })
+
+  it("localStoragePersistence round-trips and isolates by project id", () => {
+    const p = localStoragePersistence("proj-persist-test")
+    expect(p.load()).toBeNull()
+
+    const session: PersistedSession = {
+      sessionId: "s9",
+      runs: [],
+      decided: [["k", { outcome: "rejected" }]],
+      activity: [{ key: "a", note: "n" }],
+    }
+    p.save(session)
+    expect(p.load()).toEqual(session)
+    // A different project is a different bucket.
+    expect(localStoragePersistence("proj-other-test").load()).toBeNull()
   })
 })

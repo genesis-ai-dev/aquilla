@@ -37,7 +37,7 @@ plus per-book checkboxes from `books.json`) → confirm → progress → done.
   their API (1 request vs up to 1,189 per-chapter calls) and simplest code.
 - **Source files only** — `role: "source"` via the existing `emitParsedFile`
   → `bulkUploadSource` streaming path. No target-matching flow in v1 (eBible's
-  FRO-191 flow can be generalized later).
+  AQU-191 flow can be generalized later).
 - One imported file per import (like eBible), `fileType: "helloao"`, added to
   `SCRIPTURE_FILE_TYPES` so chapter sections/sidebar work.
 

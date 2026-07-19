@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest"
-import { extractJsonStrings, exportJson } from "./json-i18n"
+import {
+  extractJsonStrings,
+  exportJson,
+  listJsonStringPaths,
+  matchesJsonSelection,
+} from "./json-i18n"
 import type { CellData } from "@/hooks/useCells"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -194,5 +199,117 @@ describe("round-trip", () => {
     expect(reparsed.n).toBe(1)
     expect(reparsed.ok).toBe(false)
     expect(reparsed.messages[1]).toBe("")
+  })
+})
+
+// ─── key selection (AQU-525) ────────────────────────────────────────────────
+
+/** A cell whose `context` carries its JSON path, for keyed export. */
+function makeCellAt(path: string, original: string, translated: string): CellData {
+  return { ...makeCell(original, translated), context: path, group: path }
+}
+
+describe("listJsonStringPaths", () => {
+  it("enumerates every non-empty string leaf as {path, value} in walk order", () => {
+    const content = JSON.stringify({
+      app: { title: "My App", count: 3 },
+      messages: ["Hello", ""],
+      footer: "Copyright",
+    })
+    expect(listJsonStringPaths(content)).toEqual([
+      { path: "app.title", value: "My App" },
+      { path: "messages[0]", value: "Hello" },
+      { path: "footer", value: "Copyright" },
+    ])
+  })
+
+  it("throws on invalid JSON", () => {
+    expect(() => listJsonStringPaths("{ nope")).toThrow(/Invalid JSON/)
+  })
+})
+
+describe("matchesJsonSelection", () => {
+  it("matches the selected leaf and its descendants at a separator boundary", () => {
+    expect(matchesJsonSelection("app", ["app"])).toBe(true) // exact leaf
+    expect(matchesJsonSelection("app.title", ["app"])).toBe(true) // object descendant
+    expect(matchesJsonSelection("messages[0]", ["messages"])).toBe(true) // array descendant
+    expect(matchesJsonSelection('nested["dash-key"]', ["nested"])).toBe(true) // bracketed key
+  })
+
+  it("does not match a sibling that merely shares a prefix, or an empty selection", () => {
+    expect(matchesJsonSelection("application.title", ["app"])).toBe(false)
+    expect(matchesJsonSelection("appointment", ["app"])).toBe(false)
+    expect(matchesJsonSelection("app.title", [])).toBe(false)
+  })
+})
+
+describe("extractJsonStrings with include selection", () => {
+  const content = JSON.stringify({
+    app: { title: "Title", subtitle: "Sub" },
+    messages: ["One", "Two"],
+    version: "1.0.0",
+  })
+
+  it("extracts only leaves under the selected keys", () => {
+    const strings = extractJsonStrings(content, { include: ["app", "messages"] })
+    expect(strings.map((s) => ({ path: s.context, original: s.original }))).toEqual([
+      { path: "app.title", original: "Title" },
+      { path: "app.subtitle", original: "Sub" },
+      { path: "messages[0]", original: "One" },
+      { path: "messages[1]", original: "Two" },
+    ])
+  })
+
+  it("supports selecting a single nested leaf path exactly", () => {
+    const strings = extractJsonStrings(content, { include: ["app.title"] })
+    expect(strings.map((s) => s.context)).toEqual(["app.title"])
+  })
+
+  it("yields no cells for an empty selection and every leaf for no selection", () => {
+    expect(extractJsonStrings(content, { include: [] })).toHaveLength(0)
+    expect(extractJsonStrings(content)).toHaveLength(5)
+  })
+})
+
+describe("exportJson keyed (partial-selection round-trip)", () => {
+  it("replaces only selected leaves by path and preserves untranslated structure", async () => {
+    const original = JSON.stringify(
+      {
+        app: { title: "Title", subtitle: "Sub" },
+        messages: ["One", "Two"],
+        version: "1.0.0",
+      },
+      null,
+      2,
+    )
+    // User selected only `app.*`; `messages` and `version` are left as source.
+    const selected = extractJsonStrings(original, { include: ["app"] })
+    const cells = selected.map((s) => makeCellAt(s.context, s.original, `«${s.original}»`))
+
+    const out = JSON.parse(await blobText(exportJson(original, cells, { keyed: true })))
+    expect(out).toEqual({
+      app: { title: "«Title»", subtitle: "«Sub»" },
+      messages: ["One", "Two"], // untouched — never selected
+      version: "1.0.0", // untouched
+    })
+  })
+
+  it("is order-independent and falls back to original on empty translation", async () => {
+    const original = JSON.stringify({ a: "one", b: "two", c: "three" })
+    // Deliberately out of document order; b has no translation.
+    const cells = [
+      makeCellAt("c", "three", "trois"),
+      makeCellAt("a", "one", "un"),
+      makeCellAt("b", "two", ""),
+    ]
+    const out = JSON.parse(await blobText(exportJson(original, cells, { keyed: true })))
+    expect(out).toEqual({ a: "un", b: "two", c: "trois" })
+  })
+
+  it("preserves indentation like the positional path", async () => {
+    const original = JSON.stringify({ a: { b: "x" } }, null, 4)
+    const cells = [makeCellAt("a.b", "x", "y")]
+    const text = await blobText(exportJson(original, cells, { keyed: true }))
+    expect(text).toBe('{\n    "a": {\n        "b": "y"\n    }\n}\n')
   })
 })

@@ -19,10 +19,18 @@ import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
 import { MembersTab } from "@/components/ProjectMembersPage"
 import { MemberActivityPanel } from "./MemberActivityPanel"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
-import { fetchProjectFiles, fetchAllFileCells, type FileSummary } from "@/lib/sync/cells-read"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { OverviewLaneTable } from "./OverviewLaneTable"
+import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
-import { buildCanonicalRollup, type BookRollup, type ChapterRollup } from "@/lib/progress/canonical-rollup"
+import {
+  progressToCanonicalRollup,
+  sectionProgressToVerseRollup,
+  type BookRollup,
+  type ChapterRollup,
+  type VerseRollup,
+} from "@/lib/progress/canonical-rollup"
+import { getFileProgress, getFileSectionProgress } from "@/lib/progress/file-progress-resource"
 import { sortFiles, filterFilesByName, FILE_SORT_MODES, type FileSortMode } from "@/lib/progress/file-sort"
 import { progressRowsToCsv, progressCsvFilename } from "@/lib/progress/progress-csv"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -60,6 +68,23 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
+
+type FileProgressSnapshot = Awaited<ReturnType<typeof getFileProgress>>
+type ProgressSection = FileProgressSnapshot["sections"][number]
+
+interface FlatSectionRollup {
+  key: string
+  totalCount: number
+  filledCount: number
+  approvedCount: number
+  filledPct: number
+  approvedPct: number
+}
+
+interface FileRollup {
+  books: BookRollup[] | null
+  sections: FlatSectionRollup[]
+}
 
 function ProjectOverviewSkeleton() {
   return (
@@ -162,6 +187,32 @@ function StatTile({ label, pct, colorClass, tooltip, display }: {
   return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
 }
 
+// ── Lane filter pill (AQU-538 §3.3) ───────────────────────────────────────────
+
+function LanePill({ active, onClick, testId, children }: {
+  active: boolean
+  onClick: () => void
+  testId: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+        active
+          ? "border-transparent bg-primary text-primary-foreground"
+          : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 // ── Stat bar ──────────────────────────────────────────────────────────────────
 
 function StatBar({ label, value, total, fillClass, suffix }: {
@@ -221,15 +272,83 @@ function MiniRollupBar({ filledPct, approvedPct }: { filledPct: number; approved
   )
 }
 
-function ChapterRow({ chapter }: { chapter: ChapterRollup }) {
+function toFlatSectionRollup(section: ProgressSection): FlatSectionRollup {
+  const filledPct = section.totalCount > 0
+    ? Math.round((section.filledCount / section.totalCount) * 100)
+    : 0
+  const approvedPct = section.totalCount > 0
+    ? Math.round((section.validatedCount / section.totalCount) * 100)
+    : 0
+  return {
+    key: section.key,
+    totalCount: section.totalCount,
+    filledCount: section.filledCount,
+    approvedCount: section.validatedCount,
+    filledPct,
+    approvedPct,
+  }
+}
+
+function progressToFileRollup(progress: FileProgressSnapshot): FileRollup {
+  return {
+    books: progressToCanonicalRollup(progress),
+    sections: progress.sections.map(toFlatSectionRollup),
+  }
+}
+
+function FlatSectionRow({ section }: { section: FlatSectionRollup }) {
+  return (
+    <li
+      data-testid="section-row"
+      className="flex w-full items-center gap-2 py-0.5 text-xs"
+    >
+      <span className="w-10 shrink-0 font-medium">{section.key}</span>
+      <MiniRollupBar filledPct={section.filledPct} approvedPct={section.approvedPct} />
+      <span className="text-[10px] tabular-nums text-muted-foreground">
+        {section.filledCount}/{section.approvedCount}/{section.totalCount}
+      </span>
+    </li>
+  )
+}
+
+function ChapterRow({
+  chapter,
+  loadVerses,
+}: {
+  chapter: ChapterRollup
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
   const [open, setOpen] = useState(false)
+  const [verses, setVerses] = useState<VerseRollup[] | null>(chapter.verses.length > 0 ? chapter.verses : null)
+  const [loading, setLoading] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  const load = useCallback(async () => {
+    if (verses != null || loading) return
+    setLoading(true)
+    setFailed(false)
+    try {
+      setVerses(await loadVerses(chapter.chapter))
+    } catch {
+      setFailed(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [chapter.chapter, loadVerses, loading, verses])
+
+  const toggle = useCallback(() => {
+    const nextOpen = !open
+    setOpen(nextOpen)
+    if (nextOpen) void load()
+  }, [load, open])
+
   return (
     <li>
       <button
         type="button"
         data-testid="chapter-row"
-        className="flex w-full items-center gap-2 py-0.5 text-left text-xs hover:text-foreground"
-        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-sm py-0.5 text-left text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={toggle}
         aria-expanded={open}
       >
         <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
@@ -239,21 +358,27 @@ function ChapterRow({ chapter }: { chapter: ChapterRollup }) {
           {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
         </span>
       </button>
-      {open && (
+      {open && loading && <p className="ml-5 py-1 text-[10px] text-muted-foreground">Loading verses…</p>}
+      {open && failed && (
+        <button type="button" className="ml-5 py-1 text-[10px] text-destructive underline" onClick={() => void load()}>
+          Verse progress unavailable. Retry
+        </button>
+      )}
+      {open && verses != null && (
         <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
-          {chapter.verses.map((v) => (
+          {verses.map((verse, index) => (
             <li
-              key={v.ref}
+              key={`${verse.ref}:${index}`}
               data-testid="verse-cell"
-              title={v.ref}
+              title={verse.ref}
               className={cn(
                 "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
-                v.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                  : v.filled ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                verse.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                  : verse.filled ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                   : "bg-muted text-muted-foreground",
               )}
             >
-              {v.verseLabel}
+              {verse.verseLabel}
             </li>
           ))}
         </ul>
@@ -262,7 +387,13 @@ function ChapterRow({ chapter }: { chapter: ChapterRollup }) {
   )
 }
 
-function BookRow({ book }: { book: BookRollup }) {
+function BookRow({
+  book,
+  loadVerses,
+}: {
+  book: BookRollup
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
   const [open, setOpen] = useState(false)
   return (
     <li>
@@ -283,7 +414,7 @@ function BookRow({ book }: { book: BookRollup }) {
       {open && (
         <ul className="ml-5 mt-0.5" aria-label={`${book.book} chapters`}>
           {book.chapters.map((c) => (
-            <ChapterRow key={c.chapter} chapter={c} />
+            <ChapterRow key={c.chapter} chapter={c} loadVerses={loadVerses} />
           ))}
         </ul>
       )}
@@ -292,33 +423,55 @@ function BookRow({ book }: { book: BookRollup }) {
 }
 
 /**
- * Nested book › chapter › verse progress rollup shown under a file row once
- * expanded. `books === null` means the file's cells carry no parseable
- * canonical reference (AQU-493 detection is generic — see
- * lib/progress/canonical-rollup.ts) — render an explanatory note instead of
- * an empty tree, per the acceptance criteria.
- *
- * SWARM-TODO(AQU-493): verify live — open a Scripture project overview,
- * click a file row's chevron to expand it, confirm chapter rows appear and
- * their filled/approved counts sum to the file row's totals, then drill
- * into a chapter to see the per-verse grid.
+ * Nested book › chapter progress rollup shown under a file row once expanded,
+ * with a flat section fallback for files whose sections are meaningful but
+ * not chapter-shaped. Verse progress is fetched separately only when a
+ * chapter opens.
  */
-function FileCanonicalRollup({ books, loading }: { books: BookRollup[] | null | undefined; loading: boolean }) {
+function FileCanonicalRollup({
+  rollup,
+  loading,
+  error,
+  onRetry,
+  loadVerses,
+}: {
+  rollup: FileRollup | undefined
+  loading: boolean
+  error: boolean
+  onRetry: () => void
+  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+}) {
   if (loading) {
-    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter/verse breakdown…</p>
+    return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
   }
-  if (books === null) {
+  if (error) {
+    return (
+      <button type="button" className="ml-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
+        Chapter progress unavailable. Retry
+      </button>
+    )
+  }
+  if (!rollup || (rollup.books === null && rollup.sections.length === 0)) {
     return (
       <p className="ml-7 mt-1 text-xs text-muted-foreground">
-        No chapter/verse structure detected for this file.
+        No chapter structure detected for this file.
       </p>
     )
   }
-  if (books === undefined || books.length === 0) return null
+  if (rollup.books === null) {
+    return (
+      <ul className="ml-7 mt-1 border-l pl-3" data-testid="flat-section-rollup" aria-label="Section breakdown">
+        {rollup.sections.map((section) => (
+          <FlatSectionRow key={section.key} section={section} />
+        ))}
+      </ul>
+    )
+  }
+  if (rollup.books.length === 0) return null
   return (
-    <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter/verse breakdown">
-      {books.map((b) => (
-        <BookRow key={b.book} book={b} />
+    <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter breakdown">
+      {rollup.books.map((b) => (
+        <BookRow key={b.book} book={b} loadVerses={loadVerses} />
       ))}
     </ul>
   )
@@ -395,6 +548,19 @@ export function ProjectOverview() {
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
+  // AQU-538 §3.3: the lane filter pill selection. `null` = "All" — today's
+  // cross-lane behavior, byte-identical (StatTiles read the PortfolioProject
+  // scalars, file drill-down reads with no lane param). A non-null value is a
+  // real lane tag ('' = the default lane) selected from the pill row; the tiles
+  // recompute from that lane's PortfolioLane and the drill-down re-reads with
+  // `?lane=`.
+  const [selectedLaneTag, setSelectedLaneTag] = useState<string | null>(null)
+  // The lane passed to the per-file progress reads. "All" (null) and the
+  // default lane pill both map to '' server-side (the default lane == the
+  // no-param request), so the drill-down only ever diverges for a selected
+  // non-default lane.
+  const fileLane = selectedLaneTag ?? ""
+
   // AQU-498: which teammate's activity detail is expanded in the Team card
   // (null = none selected). Username, not userId, since that's the events
   // log's author key (see MemberActivityPanel's doc comment).
@@ -424,14 +590,16 @@ export function ProjectOverview() {
   // copy button).
   const [csvCopied, setCsvCopied] = useState(false)
 
-  // AQU-493: chapter/verse rollup, lazily fetched per file on first expand.
-  // `undefined` = not yet fetched, `null` = fetched but no canonical refs
-  // found (flat-view fallback), `BookRollup[]` = ready to render.
+  // AQU-493/AQU-517: compact progress rollup, lazily fetched per file on
+  // first expand. `undefined` = not yet fetched; loaded values choose between
+  // canonical book/chapter rows, flat section rows, or a true no-structure note.
   const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
-  const [rollups, setRollups] = useState<Record<string, BookRollup[] | null>>({})
+  const [rollups, setRollups] = useState<Record<string, FileRollup>>({})
   const [rollupLoading, setRollupLoading] = useState<Record<string, boolean>>({})
+  const [rollupErrors, setRollupErrors] = useState<Record<string, boolean>>({})
+  const chapterVerseRequests = useRef(new Map<string, Promise<VerseRollup[]>>())
 
-  // FRO-474: project-only invitees (direct project_members grant, no org
+  // AQU-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
   // project's org. The portfolio endpoint is org-scoped, so fall back to the
   // project's own (server-verified) orgId when it differs from the active
@@ -468,9 +636,9 @@ export function ProjectOverview() {
   // `useProject` is server-verified per-project (not org-scoped): a
   // project-only invitee (no org membership, or org mismatch) still resolves
   // to "ready" here when they hold a direct grant. Redirecting on org
-  // mismatch alone (pre-FRO-474 behavior) sent guests right back to "/".
+  // mismatch alone (pre-AQU-474 behavior) sent guests right back to "/".
   useEffect(() => {
-    // FRO-346: "forbidden" (access revoked) leaves the overview the same way
+    // AQU-346: "forbidden" (access revoked) leaves the overview the same way
     // a missing project does — back to the dashboard.
     if (status === "not-found" || status === "forbidden") {
       navigate("/", { replace: true })
@@ -525,29 +693,62 @@ export function ProjectOverview() {
     }
   }, [jwt, id, firstFileId, project?.name])
 
-  // AQU-493: expand/collapse a file row's chapter/verse rollup. Fetches the
-  // file's full cell set (paired source+target) once per file, on demand —
-  // the aggregate `/files` rollup used above has no per-cell reference data,
-  // so this is a separate lazy fetch scoped to whichever file is expanded.
-  const toggleFileRollup = useCallback(async (file: FileSummary) => {
+  // AQU-517: expand/collapse a file row's compact server progress. This never
+  // downloads cell text or rich HTML.
+  const loadFileRollup = useCallback(async (file: FileSummary) => {
+    if (!jwt) return
+    setRollupLoading((s) => ({ ...s, [file.fileId]: true }))
+    setRollupErrors((s) => ({ ...s, [file.fileId]: false }))
+    try {
+      const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
+      const progress = await getFileProgress(id, file.fileId, async () => tok.token, fileLane)
+      setRollups((r) => ({ ...r, [file.fileId]: progressToFileRollup(progress) }))
+    } catch (e) {
+      console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
+      setRollupErrors((s) => ({ ...s, [file.fileId]: true }))
+    } finally {
+      setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
+    }
+  }, [jwt, id, project?.name, fileLane])
+
+  const toggleFileRollup = useCallback((file: FileSummary) => {
     if (expandedFileId === file.fileId) {
       setExpandedFileId(null)
       return
     }
     setExpandedFileId(file.fileId)
-    if (file.fileId in rollups || !jwt) return
-    setRollupLoading((s) => ({ ...s, [file.fileId]: true }))
-    try {
-      const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
-      const rows = await fetchAllFileCells(id, file.fileId, tok.token)
-      setRollups((r) => ({ ...r, [file.fileId]: buildCanonicalRollup(rows) }))
-    } catch (e) {
-      console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
-      setRollups((r) => ({ ...r, [file.fileId]: null }))
-    } finally {
-      setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
-    }
-  }, [expandedFileId, rollups, jwt, id, project?.name])
+    if (!(file.fileId in rollups)) void loadFileRollup(file)
+  }, [expandedFileId, loadFileRollup, rollups])
+
+  const loadChapterVerses = useCallback((fileId: string, sectionKey: string): Promise<VerseRollup[]> => {
+    const cacheKey = `${fileId}:${sectionKey}`
+    const existing = chapterVerseRequests.current.get(cacheKey)
+    if (existing) return existing
+    const request = (async () => {
+      if (!jwt) throw new Error("session unavailable")
+      const tok = await fetchSyncToken(jwt, id, fileId, { projectName: project?.name })
+      const detail = await getFileSectionProgress(id, fileId, sectionKey, async () => tok.token, fileLane)
+      return sectionProgressToVerseRollup(detail)
+    })().catch((error) => {
+      chapterVerseRequests.current.delete(cacheKey)
+      throw error
+    })
+    chapterVerseRequests.current.set(cacheKey, request)
+    return request
+  }, [id, jwt, project?.name, fileLane])
+
+  // AQU-538 §3.3: the per-file rollup + verse caches are lane-agnostic keys, so
+  // switching lanes must drop them (and collapse any open row) — otherwise a
+  // re-expand would show the previous lane's chapter/verse breakdown. Resetting
+  // on `fileLane` keeps the drill-down lane-true. On first mount fileLane is ''
+  // and these are already empty, so this is a no-op for the default view.
+  useEffect(() => {
+    setExpandedFileId(null)
+    setRollups({})
+    setRollupLoading({})
+    setRollupErrors({})
+    chapterVerseRequests.current.clear()
+  }, [fileLane])
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
@@ -576,6 +777,19 @@ export function ProjectOverview() {
   const hasAudio = audio != null && audio.audioCells > 0
   const showText = hasText
   const showAudio = hasAudio
+
+  // AQU-538 §3.3: lane pills + tile recompute. Pills only surface once a project
+  // has more than one lane (N=1 stays byte-identical). `activeLane` is the
+  // PortfolioLane the pills are filtered to (null = "All"); when set, the
+  // Translated/Validated tiles + bars read that lane, and the cross-language
+  // tiles (AI Drafted, audio) grey out — they have no per-lane breakdown.
+  const projectLanes: PortfolioLane[] = audio?.lanes ?? []
+  const showLanePills = projectLanes.length > 1
+  const activeLane: PortfolioLane | null =
+    selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+  const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
+  const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
+  const CROSS_LANE_TOOLTIP = "Cross-language stat — not broken down per language."
 
   async function saveDeadline(value: string | null) {
     if (!jwt) return
@@ -681,7 +895,7 @@ export function ProjectOverview() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={project?.name ?? "Project"} />}
+      header={<OrgBreadcrumb section={project?.name ?? "Project"} orgId={project?.orgId} />}
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
@@ -790,20 +1004,49 @@ export function ProjectOverview() {
                     <SectionVisibilityBadge minRole={ROLE.VIEWER} />
                   </div>
 
+                  {/* AQU-538 §3.3: lane filter pills — All + one per lane
+                      (default lane labeled with the project's targetLanguage).
+                      Only rendered when the project has >1 lane. */}
+                  {showLanePills && (
+                    <div className="mb-3 flex flex-wrap items-center gap-1.5" data-testid="lane-filter-pills">
+                      <LanePill
+                        active={selectedLaneTag === null}
+                        onClick={() => setSelectedLaneTag(null)}
+                        testId="lane-pill-all"
+                      >
+                        All
+                      </LanePill>
+                      {projectLanes.map((l) => {
+                        const tagId = l.lane === "" ? "default" : l.lane
+                        const label = l.lane === "" ? (project?.targetLanguage || "Default") : l.lane
+                        return (
+                          <LanePill
+                            key={tagId}
+                            active={selectedLaneTag === l.lane}
+                            onClick={() => setSelectedLaneTag(l.lane)}
+                            testId={`lane-pill-${tagId}`}
+                          >
+                            {label}
+                          </LanePill>
+                        )
+                      })}
+                    </div>
+                  )}
+
                   {/* Big-number tiles lead the section */}
                   <div className="flex flex-wrap gap-3 mb-4">
                     {showText && (
                       <>
-                        <StatTile label="Translated" pct={translatedPct(audio)} colorClass="text-amber-600" />
+                        <StatTile label="Translated" pct={tileTranslatedPct} colorClass="text-amber-600" />
                         {audio.aiDraftedCells > 0 && (
                           <StatTile
                             label="AI Drafted"
                             pct={aiDraftedPct(audio)}
-                            colorClass="text-violet-600"
-                            tooltip="Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."
+                            colorClass={activeLane ? "text-muted-foreground/60" : "text-violet-600"}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."}
                           />
                         )}
-                        <StatTile label="Validated" pct={validatedPct(audio)} colorClass="text-emerald-600" />
+                        <StatTile label="Validated" pct={tileValidatedPct} colorClass="text-emerald-600" />
                       </>
                     )}
                     {showAudio && (
@@ -811,11 +1054,11 @@ export function ProjectOverview() {
                         <StatTile
                           label="Has Audio"
                           pct={audioPct(audio)}
-                          colorClass="text-sky-600"
-                          tooltip="Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."
+                          colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
+                          tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."}
                         />
                         {/*
-                         * AQU-490 (was TODO(FRO-168)): a distinct audio-VALIDATION metric
+                         * AQU-490 (was TODO(AQU-168)): a distinct audio-VALIDATION metric
                          * is not reachable today. Investigated 2026-07-08:
                          *   - `cells.validated` (db/postgres/schema.sql) is ONE boolean per
                          *     cell, shared by text and audio review — there is no per-medium
@@ -848,18 +1091,20 @@ export function ProjectOverview() {
                     )}
                   </div>
 
-                  {/* Detail bars below tiles */}
+                  {/* Detail bars below tiles. AQU-538: Translated/Validated
+                      follow the active lane; the cross-language AI/audio bars
+                      only render in the "All" view (no per-lane breakdown). */}
                   <div className="space-y-2.5">
                     {showText && (
                       <>
                         <StatBar
                           label="Translated"
-                          value={audio.filledCells}
-                          total={audio.totalCells}
+                          value={activeLane ? activeLane.filledCells : audio.filledCells}
+                          total={activeLane ? activeLane.totalCells : audio.totalCells}
                           fillClass="bg-amber-500"
                           suffix=" cells"
                         />
-                        {audio.aiDraftedCells > 0 && (
+                        {!activeLane && audio.aiDraftedCells > 0 && (
                           <StatBar
                             label="AI Drafted"
                             value={audio.aiDraftedCells}
@@ -870,14 +1115,14 @@ export function ProjectOverview() {
                         )}
                         <StatBar
                           label="Validated"
-                          value={audio.validatedCells}
-                          total={audio.totalCells}
+                          value={activeLane ? activeLane.validatedCells : audio.validatedCells}
+                          total={activeLane ? activeLane.totalCells : audio.totalCells}
                           fillClass="bg-emerald-500"
                           suffix=" cells"
                         />
                       </>
                     )}
-                    {showAudio && (
+                    {showAudio && !activeLane && (
                       <>
                         <StatBar
                           label="Has Audio"
@@ -886,17 +1131,37 @@ export function ProjectOverview() {
                           fillClass="bg-sky-500"
                           suffix=" cells"
                         />
-                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see FRO-160 data gap */}
+                        {/* TODO: confirm whether legacy GitLab project import populated audio (cell_audio) — see AQU-160 data gap */}
                       </>
                     )}
                   </div>
-                  {audio.recordedMs > 0 && (
+                  {!activeLane && audio.recordedMs > 0 && (
                     <p className="mt-3 text-xs text-muted-foreground">
                       {recordedMinutes(audio)} min recorded ·{" "}
                       {Math.round(audioPct(audio) * 100)}% of cells have audio
                     </p>
                   )}
                 </div>
+              )}
+
+              {/* ── Languages / lane table (AQU-538 §3.3) ── */}
+              {/* Rendered only when the project has more than one target
+                  language lane — N=1 projects are byte-identical to before. */}
+              {showLanePills && audio && (
+                <OverviewLaneTable
+                  projectId={id}
+                  orgId={portfolioOrgId}
+                  jwt={jwt}
+                  lanes={projectLanes}
+                  defaultLanguageLabel={project?.targetLanguage || "Default"}
+                  extraLanes={project?.targetLanes ?? []}
+                  files={project?.files ?? []}
+                  roleLevel={project?.syncRole?.level ?? 0}
+                  author={session?.username ?? ""}
+                  canManageLanes={canAssign}
+                  canAddLanguage={canManage}
+                  onChanged={handleAssigned}
+                />
               )}
 
               {/* ── Per-file rows (always fully visible per user decision) ── */}
@@ -1080,7 +1345,10 @@ export function ProjectOverview() {
                                 </AppTooltip>
                                 <FileProgressBars tPct={tPct} vPct={vPct} />
                                 <AppTooltip content="Cells filled / cells approved / total cells · word count">
-                                  <span className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground">
+                                  <span
+                                    className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground"
+                                    aria-label={`${f.filledCount} filled, ${f.approvedCount} approved, ${f.cellCount} total cells, ${f.wordCount} words`}
+                                  >
                                     <span className="w-10 text-right">{f.filledCount}</span>
                                     <span className="w-14 text-right">{f.approvedCount}</span>
                                     <span className="w-10 text-right">{f.cellCount}</span>
@@ -1089,7 +1357,13 @@ export function ProjectOverview() {
                                 </AppTooltip>
                               </div>
                               {isExpanded && (
-                                <FileCanonicalRollup books={rollups[f.fileId]} loading={rollupLoading[f.fileId] ?? false} />
+                                <FileCanonicalRollup
+                                  rollup={rollups[f.fileId]}
+                                  loading={rollupLoading[f.fileId] ?? false}
+                                  error={rollupErrors[f.fileId] ?? false}
+                                  onRetry={() => void loadFileRollup(f)}
+                                  loadVerses={(sectionKey) => loadChapterVerses(f.fileId, sectionKey)}
+                                />
                               )}
                             </li>
                           )
@@ -1290,7 +1564,7 @@ export function ProjectOverview() {
                 </div>
               </SectionVisibilityGate>
 
-              {/* ── Members card (FRO-335) — same add / change-role / revoke
+              {/* ── Members card (AQU-335) — same add / change-role / revoke
                   surface as the in-project members page, so access can be
                   managed from the overview without opening the workspace. ──
                   AQU-486: gated by AQU-485's rosterViewMinRole — the same

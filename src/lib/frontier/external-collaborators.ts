@@ -1,4 +1,4 @@
-// FRO-326: org-level "External collaborators" — users who reach this org's
+// AQU-326: org-level "External collaborators" — users who reach this org's
 // projects only via project-level grants (invite-link redeem, bulk-add,
 // group) without being org members.
 //

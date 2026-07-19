@@ -6,6 +6,7 @@ import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
+import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
 import { JoinPage } from "@/components/JoinPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
 import { VerifyEmailPage } from "@/components/VerifyEmailPage"
@@ -41,7 +42,7 @@ const ProjectWorkspace = lazy(() =>
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
 )
-// FRO-254: CommentsPage / LivingMemoryPage / TerminologyPage are now rendered
+// AQU-254: CommentsPage / LivingMemoryPage / TerminologyPage are now rendered
 // inside ProjectWorkspace shell (lazy-imported there). The routes below all
 // point to ProjectWorkspace; the shell detects the path suffix and swaps only
 // the main content area. These top-level lazy imports are intentionally removed.
@@ -77,6 +78,11 @@ const AdminConsole = lazy(() =>
 )
 const DebugView = lazy(() =>
   import("@/components/DebugView").then((m) => ({ default: m.DebugView })),
+)
+// Agent API (AQU-533 §3) — standalone ask-mode approval page; works without
+// the workspace shell (mirrors JoinPage's standalone-page precedent).
+const ApproveChangeset = lazy(() =>
+  import("@/pages/ApproveChangeset/ApproveChangeset").then((m) => ({ default: m.ApproveChangeset })),
 )
 void hydratePrefetchStatus()
 void probeOpfsAvailability()
@@ -142,12 +148,12 @@ export default function App() {
     <TooltipProvider delay={600}>
       <SyncingProvider>
         <PrivateModeBanner />
-        {/* FRO-293: session-expiry banner — must be inside Router (uses useLocation) */}
+        {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
         <SessionExpiredBanner />
         <SyncFreezeOverlay />
         <OrgProvider>
           <OutboxProvider>
-            {/* FRO-243: ProductTourProvider mounts once here; the tour portal
+            {/* AQU-243: ProductTourProvider mounts once here; the tour portal
                 renders into document.body so it is route-agnostic. The context
                 value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
             <ProductTourProvider>
@@ -177,13 +183,16 @@ function AppRoutes() {
         <Route path="/projects" element={<Navigate to="/" replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
         <Route path="/assigned" element={<AssignedToMe />} />
+        <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
+        {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
+        <Route path="/approve/:changesetId" element={<ApproveChangeset />} />
         <Route path="/join-org/:token" element={<JoinOrgPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/onboarding" element={<OnboardingWizard />} />
-        {/* FRO-282: dedicated login — eagerly loaded (public, no auth required) */}
+        {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
-        {/* FRO-270: account recovery — eagerly loaded (public, no auth required) */}
+        {/* AQU-270: account recovery — eagerly loaded (public, no auth required) */}
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
@@ -202,19 +211,19 @@ function AppRoutes() {
         <Route path="/project/:id" element={<ProjectWorkspace />} />
         <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
-        {/* FRO-194: /rules deep-link renders inside ProjectWorkspace shell — shell stays mounted. */}
+        {/* AQU-194: /rules deep-link renders inside ProjectWorkspace shell — shell stays mounted. */}
         <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
         {/* Agent workbench — full-screen agent surface inside the shell (agent-mode-v2 §4). */}
         <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
         {/* ISSUE-3 fix: /voice deep-link — workspace detects suffix and activates audio lens. */}
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
-        {/* FRO-254: terminology/comments/memory now render inside the ProjectWorkspace shell
+        {/* AQU-254: terminology/comments/memory now render inside the ProjectWorkspace shell
             (fixed sidebar + top bar + bottom status bar). The shell detects the path suffix
             and swaps only the main content area, same pattern as /rules. */}
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
         <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
-        {/* FRO-180: per-project members management inside the ProjectWorkspace shell. */}
+        {/* AQU-180: per-project members management inside the ProjectWorkspace shell. */}
         <Route path="/project/:id/members" element={<ProjectWorkspace />} />
 
         {/* Lazy — org admin pages */}
@@ -238,7 +247,7 @@ function AppRoutes() {
         <Route path="/project/:id/settings/debug" element={<DebugView />} />
         <Route path="/project/:id/comments/debug" element={<DebugView />} />
 
-        {/* FRO-270: catch-all 404 — must be last (audit finding F-IA3) */}
+        {/* AQU-270: catch-all 404 — must be last (audit finding F-IA3) */}
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>

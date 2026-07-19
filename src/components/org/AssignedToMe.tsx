@@ -53,7 +53,7 @@ export function AssignedToMe() {
       header={<OrgBreadcrumb section="Assigned to me" />}
       statusBar={null}
       main={
-        // FRO-366: see ProjectsList.tsx for why `h-full overflow-y-auto` is the
+        // AQU-366: see ProjectsList.tsx for why `h-full overflow-y-auto` is the
         // correct (and only) scroll surface inside AppShell's main slot;
         // `overscroll-contain` prevents wheel/trackpad chaining to an ancestor.
         <div className="h-full overflow-y-auto overscroll-contain space-y-4 p-6" data-testid="assigned-to-me-scroll">
@@ -80,12 +80,16 @@ export function AssignedToMe() {
                 return (
                   <Link
                     key={a.assignmentId}
-                    to={`/project/${a.projectId}`}
+                    to={a.targetLang ? `/project/${a.projectId}?lane=${encodeURIComponent(a.targetLang)}` : `/project/${a.projectId}`}
                     className="block p-4 transition-colors hover:bg-muted/50"
                   >
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{a.scopeLabel}</p>
                       <span className="shrink-0 text-xs text-muted-foreground">{a.projectName}</span>
+                      {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
+                      {a.targetLang && (
+                        <Badge variant="outline" className="shrink-0">{a.targetLang}</Badge>
+                      )}
                       {a.deadline && (
                         <Badge variant="secondary" className="shrink-0">
                           Due {a.deadline}

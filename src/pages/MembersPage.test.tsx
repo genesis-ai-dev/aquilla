@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
@@ -73,7 +73,7 @@ vi.mock("@/hooks/useAccessibleProjects", () => ({
     isLoading: false,
     refresh: vi.fn(async () => {}),
   })),
-  // FRO-474: OrgSidebar's "Shared with you" nav section uses this hook.
+  // AQU-474: OrgSidebar's "Shared with you" nav section uses this hook.
   useProjectsForNavigation: vi.fn(() => ({
     projects: [],
     isLoading: false,
@@ -87,7 +87,7 @@ afterEach(() => vi.restoreAllMocks())
 describe("MembersPage active-org", () => {
   it("renders members for the active org (42)", async () => {
     // QueryClientProvider: the org shell's AccountSwitcher reaches useAccounts,
-    // which clears the React Query cache on account switch (FRO-212).
+    // which clears the React Query cache on account switch (AQU-212).
     render(
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
@@ -146,5 +146,60 @@ describe("MembersPage — AQU-485 roster visibility", () => {
     // hidden. Match the section heading exactly (a page description sentence
     // elsewhere mentions "project access" in unrelated prose).
     expect(screen.queryByRole("heading", { name: /^project access$/i })).not.toBeInTheDocument()
+  })
+})
+
+describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
+  // MembersMatrixView existed but was mounted nowhere. It's now a tab on
+  // this page: Roster is the default (byte-identical to today), Matrix is
+  // reachable both by clicking the tab and by deep-linking ?tab=matrix.
+  it("renders the Roster tab by default", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/members"]}>
+          <OrgProvider>
+            <MembersPage />
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /^roster$/i })).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/no projects yet/i)).not.toBeInTheDocument()
+  })
+
+  it("switches to the Matrix tab (MembersMatrixView) on click", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/members"]}>
+          <OrgProvider>
+            <MembersPage />
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: /^roster$/i })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole("tab", { name: /matrix/i }))
+
+    // No accessible projects in this test's mocks → MembersMatrixView's
+    // empty state, which is proof the component actually mounted.
+    await waitFor(() => expect(screen.getByText(/no projects yet/i)).toBeInTheDocument())
+  })
+
+  it("deep-links directly to the Matrix tab via ?tab=matrix", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/members?tab=matrix"]}>
+          <OrgProvider>
+            <MembersPage />
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(screen.getByText(/no projects yet/i)).toBeInTheDocument())
   })
 })

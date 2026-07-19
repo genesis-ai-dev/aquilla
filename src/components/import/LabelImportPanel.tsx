@@ -1,10 +1,18 @@
 /**
- * FRO-438: Cell-label / cast import via downloadable spreadsheet template.
- * FRO-439: Now splits angle-embedded labels ("Mary Magdalene   (on)") into
+ * AQU-438: Cell-label / cast import via downloadable spreadsheet template.
+ * AQU-439: Now splits angle-embedded labels ("Mary Magdalene   (on)") into
  *           voice name + cameraState before emitting cast.assign.
+ * AQU-314: Step 1 now has an explicit file picker. The panel fetches the
+ *           selected file's source cells from the server on demand, so the
+ *           template and the ref-matching no longer silently depend on which
+ *           file happened to be open in the editor (the old `sourceCells`
+ *           prop was the active file's cells only — downloading a template
+ *           for one file and importing while another was active matched
+ *           nothing).
  *
  * Flow:
- *   1. User downloads a pre-populated CSV template (one row per source cell ref)
+ *   1. User picks a file and downloads a pre-populated CSV template
+ *      (one row per source cell ref)
  *   2. PM fills in the cast_name (and optionally note) column.
  *      cast_name may contain a trailing "(angle)" group, e.g. "Mary (on)".
  *   3. User re-uploads the filled template
@@ -13,13 +21,18 @@
  *      set on cameraState in the same event.
  *
  * This panel is shown from the ImportDialog landing (new "Cell Labels" card).
- * It requires `sourceCells` to generate the template and to match incoming
- * cast data back to cell ids.
  */
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -28,23 +41,47 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { SourceCellRef } from "@/lib/import"
+import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import { generateLabelTemplate, parseCsvRows, splitCastName } from "@/lib/parsers/spreadsheet"
 import { emitCastAssign } from "@/lib/sync/events-emit"
+
+/** Outcome of an apply run, surfaced by the host as a result notice after the
+ *  dialog closes (the panel itself unmounts on completion). */
+export interface LabelImportResult {
+  /** cast.assign events emitted (refs that matched a cell). */
+  applied: number
+  /** CSV refs that matched no cell in the selected file. */
+  unmatched: number
+  /** Display name of the file the labels were applied to. */
+  fileName: string
+}
 
 export interface LabelImportPanelProps {
   projectId: string
   username: string
-  sourceCells: SourceCellRef[]
+  /** Project files selectable in step 1. */
+  files: { id: string; name: string }[]
+  /** Pre-selected file — the workspace's active file when the dialog opened. */
+  defaultFileId?: string | null
+  /** Mints a sync token scoped to (projectId, fileId) for the cell read. */
   getToken: (fileId: string) => Promise<string | null>
-  onImported: () => void
+  onImported: (result: LabelImportResult) => void
   onCancel: () => void
+}
+
+/** The slice of a source cell the label importer needs. */
+interface LabelCellRef {
+  cellId: string
+  fileId: string
+  canonicalRef: string | null
 }
 
 export function LabelImportPanel({
   projectId,
   username,
-  sourceCells,
+  files,
+  defaultFileId,
+  getToken,
   onImported,
   onCancel,
 }: LabelImportPanelProps) {
@@ -53,14 +90,57 @@ export function LabelImportPanel({
   const [preview, setPreview] = useState<{
     ref: string
     castName: string
-    /** FRO-439: camera angle extracted from the cast_name string, or undefined */
+    /** AQU-439: camera angle extracted from the cast_name string, or undefined */
     cameraState: "on" | "mixed" | "off" | undefined
   }[] | null>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
 
-  /** Download the template CSV. */
+  // AQU-314: file picker + server-fresh cells for the selected file.
+  const [selectedFileId, setSelectedFileId] = useState<string>(() =>
+    defaultFileId && files.some((f) => f.id === defaultFileId)
+      ? defaultFileId
+      : files[0]?.id ?? "",
+  )
+  const [fileCells, setFileCells] = useState<LabelCellRef[] | null>(null)
+  const [cellsError, setCellsError] = useState<string | null>(null)
+
+  const selectedFile = files.find((f) => f.id === selectedFileId)
+
+  useEffect(() => {
+    if (!selectedFileId) return
+    let cancelled = false
+    setFileCells(null)
+    setCellsError(null)
+    void (async () => {
+      try {
+        const token = await getToken(selectedFileId)
+        if (!token) throw new Error("Could not mint a sync token for this file.")
+        const rows = await fetchAllFileCells(projectId, selectedFileId, token, "source")
+        if (cancelled) return
+        setFileCells(
+          rows.map((r) => ({
+            cellId: r.cellId,
+            fileId: selectedFileId,
+            canonicalRef: r.canonicalRef,
+          })),
+        )
+      } catch (err) {
+        if (!cancelled) {
+          setCellsError(err instanceof Error ? err.message : "Failed to load cells for this file")
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId, selectedFileId, getToken])
+
+  const refCount = fileCells?.filter((c) => c.canonicalRef).length ?? 0
+
+  /** Download the template CSV for the selected file. */
   function handleDownloadTemplate() {
-    const refs = sourceCells
+    if (!fileCells) return
+    const refs = fileCells
       .map((c) => c.canonicalRef)
       .filter((r): r is string => Boolean(r))
     const csv = generateLabelTemplate(refs)
@@ -68,7 +148,9 @@ export function LabelImportPanel({
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = "cell-labels-template.csv"
+    // Name the download after the file so a template can't silently be
+    // filled for one file and re-imported against another.
+    a.download = selectedFile ? `cell-labels-${selectedFile.name}.csv` : "cell-labels-template.csv"
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -100,7 +182,7 @@ export function LabelImportPanel({
         const ref = (row[refCol] ?? "").trim()
         const rawCast = (row[castCol] ?? "").trim()
         if (ref && rawCast) {
-          // FRO-439: split angle suffix from name ("Mary (on)" → voice + cameraState)
+          // AQU-439: split angle suffix from name ("Mary (on)" → voice + cameraState)
           const { voice, cameraState } = splitCastName(rawCast)
           entries.push({ ref, castName: voice, cameraState })
         }
@@ -111,21 +193,21 @@ export function LabelImportPanel({
     }
   }, [])
 
-  /** Apply the cast labels via cast.assign events (FRO-438).
+  /** Apply the cast labels via cast.assign events (AQU-438).
    *
    * For each row in the preview:
-   *   - Look up the cellId from sourceCells by canonicalRef.
+   *   - Look up the cellId from the selected file's cells by canonicalRef.
    *   - Emit a cast.assign event (non-chain-mutating; does NOT write target text).
    *   - Collect unmatched refs and report them to the user.
    */
   async function handleImport() {
-    if (!preview || preview.length === 0) return
+    if (!preview || preview.length === 0 || !fileCells) return
     setPhase("importing")
     setError(null)
 
     // Build a lookup: canonicalRef → { cellId, fileId }
     const byRef = new Map<string, { cellId: string; fileId: string }>()
-    for (const cell of sourceCells) {
+    for (const cell of fileCells) {
       if (cell.canonicalRef && !byRef.has(cell.canonicalRef)) {
         byRef.set(cell.canonicalRef, { cellId: cell.cellId, fileId: cell.fileId })
       }
@@ -146,7 +228,7 @@ export function LabelImportPanel({
           fileId: cell.fileId,
           cellId: cell.cellId,
           castName,
-          // FRO-439: forward camera angle when it was present in the import row
+          // AQU-439: forward camera angle when it was present in the import row
           ...(cameraState !== undefined ? { cameraState } : {}),
           author: username,
         }),
@@ -161,17 +243,15 @@ export function LabelImportPanel({
       return
     }
 
-    const matched = preview.length - unmatched.length
-    if (unmatched.length > 0) {
-      setError(
-        `Applied ${matched} label${matched !== 1 ? "s" : ""}. ` +
-        `${unmatched.length} ref${unmatched.length !== 1 ? "s" : ""} not matched to any cell: ` +
-        unmatched.slice(0, 10).join(", ") +
-        (unmatched.length > 10 ? ` …and ${unmatched.length - 10} more` : ""),
-      )
-    }
+    // The host closes the dialog on completion, so the outcome (including
+    // unmatched refs) is reported via the result callback — an inline error
+    // here would unmount before it could be read.
     setPhase("done")
-    onImported()
+    onImported({
+      applied: preview.length - unmatched.length,
+      unmatched: unmatched.length,
+      fileName: selectedFile?.name ?? "",
+    })
   }
 
   return (
@@ -179,17 +259,42 @@ export function LabelImportPanel({
       <div>
         <p className="text-sm font-medium">Cell Labels / Cast Import</p>
         <p className="text-xs text-muted-foreground">
-          Download a template with your project's cell references, fill in cast names, then re-upload.
+          Download a template with a file's cell references, fill in cast names, then re-upload.
         </p>
       </div>
 
-      {/* Step 1: Download template */}
+      {/* Step 1: Pick file + download template */}
       <div className="rounded-lg border p-4 flex flex-col gap-2">
-        <p className="text-xs font-semibold">Step 1 — Download template</p>
+        <p className="text-xs font-semibold">Step 1 — Choose file &amp; download template</p>
+        <Select
+          items={files.map((f) => ({ value: f.id, label: f.name }))}
+          value={selectedFileId}
+          onValueChange={(v) => setSelectedFileId(v ?? "")}
+        >
+          <SelectTrigger size="sm" className="w-full text-xs">
+            <SelectValue placeholder="Choose a file…" />
+          </SelectTrigger>
+          <SelectContent>
+            {files.map((f) => (
+              <SelectItem key={f.id} value={f.id}>
+                {f.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <p className="text-xs text-muted-foreground">
-          {sourceCells.filter(c => c.canonicalRef).length} cells with references found in this project.
+          {fileCells === null && !cellsError
+            ? "Loading cells…"
+            : `${refCount} cells with references in ${selectedFile?.name ?? "this file"}.`}
         </p>
-        <Button variant="outline" size="sm" className="w-fit" onClick={handleDownloadTemplate}>
+        {cellsError && <p className="text-xs text-destructive">{cellsError}</p>}
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-fit"
+          onClick={handleDownloadTemplate}
+          disabled={refCount === 0}
+        >
           Download CSV template
         </Button>
       </div>
@@ -253,7 +358,7 @@ export function LabelImportPanel({
           Cancel
         </Button>
         {preview && preview.length > 0 && phase === "idle" && (
-          <Button size="sm" onClick={handleImport}>
+          <Button size="sm" onClick={handleImport} disabled={fileCells === null}>
             Import {preview.length} label{preview.length !== 1 ? "s" : ""}
           </Button>
         )}

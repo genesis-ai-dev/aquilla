@@ -248,7 +248,7 @@ mode = "smart"
 # from the Postgres shim over Hyperdrive → the Neon `staging` branch (project
 # sweet-paper-88472094, branch `staging`).
 #
-# ONE-TIME PROVISIONING (FRO-146) — create the staging Hyperdrive config, then
+# ONE-TIME PROVISIONING (AQU-146) — create the staging Hyperdrive config, then
 # paste its id below (replace the placeholder):
 #   wrangler hyperdrive create aquilla-staging \
 #     --connection-string="<neon staging branch pooled connection string>" \
@@ -300,7 +300,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@local.test"
 BASE_URL = "http://127.0.0.1:5173"
-# FRO-346: this used to be 8788 — auth-worker's OWN port, not sync-worker's
+# AQU-346: this used to be 8788 — auth-worker's OWN port, not sync-worker's
 # (8789; see scripts/dev-stack.ts IDENTITY_PORT/SYNC_PORT) — so member-removal
 # eject notifications silently no-op'd (notifySyncWorkerOfMemberRemoval early-
 # returns without SYNC_WORKER_URL... this just pointed it at the wrong worker).

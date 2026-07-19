@@ -255,8 +255,8 @@ describe("fetchTranslationsList – downloadable filter", () => {
   })
 })
 
-describe("fetchTranslationText — retry/backoff on the download driver (FRO-325)", () => {
-  // FRO-325: Berean Standard Bible download is slow then 401s before completion,
+describe("fetchTranslationText — retry/backoff on the download driver (AQU-325)", () => {
+  // AQU-325: Berean Standard Bible download is slow then 401s before completion,
   // with the progress bar just stopping and no actionable error. The download goes
   // straight to raw.githubusercontent.com — no sync token / session JWT is involved —
   // so a 401 here is an upstream rate-limit/abuse heuristic, not our auth expiring.
@@ -397,7 +397,7 @@ describe("fetchTranslationText — retry/backoff on the download driver (FRO-325
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("applies the same retry/backoff path to the Berean Standard Bible id and to a second, smaller title (FRO-325 acceptance)", async () => {
+  it("applies the same retry/backoff path to the Berean Standard Bible id and to a second, smaller title (AQU-325 acceptance)", async () => {
     // The download driver has no per-translation special-casing — the retry/backoff
     // fix applies uniformly by id/URL-slug. This asserts both a Berean-shaped id
     // ('eng-engBSB') and a different, smaller title id ('eng-eng-web') resolve to

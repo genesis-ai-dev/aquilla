@@ -8,7 +8,7 @@ languages. They need to (a) pull any Door43 resource into Aquilla as translatabl
 **Builds on:** `2026-07-06-linked-projects-provenance-invalidation-design.md` — specifically
 its **§11 "External upstreams: the unfoldingWord pattern"**. This spec *is* Slice 6 of that
 design. The linked-projects invalidation engine (mirror + pin + derive-on-read staleness +
-review panel) is assumed shipped (FRO-476/477/478/479) and is **reused unchanged**.
+review panel) is assumed shipped (AQU-476/477/478/479) and is **reused unchanged**.
 
 ---
 

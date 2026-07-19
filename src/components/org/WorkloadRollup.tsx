@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { getWorkload, unassignAssignment, type OrgWorkloadAssignment } from "@/lib/sync/assignments"
 import { Section } from "@/components/ui/page"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -29,7 +30,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
  * label so a manager with assignments across multiple projects can tell
  * them apart.
  */
-export function WorkloadRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
+export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: number; action?: ReactNode }) {
   const [rows, setRows] = useState<OrgWorkloadAssignment[] | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
@@ -73,7 +74,7 @@ export function WorkloadRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
   if (!rows || rows.length === 0) return null
 
   return (
-    <Section title="Team workload" contentClassName="pt-0">
+    <Section title="Team workload" action={action} contentClassName="pt-0">
       <div className="divide-y">
         {rows.map((a) => {
           const pct = a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
@@ -83,6 +84,10 @@ export function WorkloadRollup({ jwt, orgId }: { jwt: string; orgId: number }) {
                 <div className="flex items-center gap-2">
                   <p className="truncate font-medium">{a.username ?? `User ${a.assigneeUserId}`}</p>
                   <span className="shrink-0 truncate text-xs text-muted-foreground">{a.projectName}</span>
+                  {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
+                  {a.targetLang && (
+                    <Badge variant="outline" className="shrink-0">{a.targetLang}</Badge>
+                  )}
                 </div>
                 <p className="truncate text-xs text-muted-foreground">{a.scopeLabel}</p>
                 <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">

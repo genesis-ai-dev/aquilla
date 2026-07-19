@@ -8,7 +8,7 @@ interface Props {
   children?: ReactNode
   extraMenuItems?: OverflowMenuItem[]
   /**
-   * FRO-428: When provided, the project name in the breadcrumb becomes a
+   * AQU-428: When provided, the project name in the breadcrumb becomes a
    * clickable link to the project overview page (`/projects/:id`), giving
    * project-only invitees (and all users) a direct path back to the overview
    * without having to navigate through the full dashboard.
@@ -33,13 +33,15 @@ export function WorkspaceHeader({
   if (surfaceLabel) trail.push({ label: surfaceLabel })
   if (bookLabel) trail.push({ label: bookLabel })
   return (
-    <header className="relative z-30 flex items-center justify-between gap-3 pr-4">
-      <OrgBreadcrumb
-        section={project.name}
-        sectionTo={overviewHref}
-        workspace
-        trail={trail.length > 0 ? trail : undefined}
-      />
+    <header className="relative z-30 flex h-full min-w-0 items-center justify-between gap-3 pr-4">
+      <div className="min-w-0 flex-1">
+        <OrgBreadcrumb
+          section={project.name}
+          sectionTo={overviewHref}
+          orgId={project.orgId}
+          trail={trail.length > 0 ? trail : undefined}
+        />
+      </div>
       <div className="flex shrink-0 items-center gap-1">
         {children}
         {items.length > 0 ? <OverflowMenu items={items} /> : null}

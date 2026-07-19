@@ -58,6 +58,17 @@ describe("buildViolationDecorationSet", () => {
     expect(cls).not.toContain("violation-blot-term")
   })
 
+  it("does not create inline decorations for zero-width target spans", () => {
+    const doc = makeDoc("missing punctuation")
+    const state = EditorState.create({ schema: basicSchema, doc })
+    const infractions: RuleInfraction[] = [{
+      ruleId: "builtin:end-punctuation-mismatch", cellId: "c1", fileId: "f1", message: "",
+      spans: [{ side: "target", start: 19, end: 19, matchedText: "" }],
+    }]
+    const set = buildViolationDecorationSet(state.doc, infractions, new Map(), new Set())
+    expect(set.find()).toHaveLength(0)
+  })
+
   it("ignores source-side spans", () => {
     const doc = makeDoc("anything")
     const state = EditorState.create({ schema: basicSchema, doc })

@@ -1,7 +1,7 @@
 /**
  * Tests for replace-action.ts — pure search-and-replace logic.
  *
- * FRO-177: Search-and-replace across passages.
+ * AQU-177: Search-and-replace across passages.
  */
 
 import { describe, it, expect } from "vitest"

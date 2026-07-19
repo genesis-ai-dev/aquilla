@@ -105,7 +105,7 @@ export function SectionVisibilityBadge({
   const Icon = isRestrictedFloor(minRole) ? Lock : Eye
   const interactive = canEdit && typeof onChangeMinRole === "function"
 
-  const badge = (
+  const badgeContent = (
     <Badge
       variant="outline"
       className={cn(
@@ -113,7 +113,6 @@ export function SectionVisibilityBadge({
         interactive && "cursor-pointer hover:bg-muted",
         className,
       )}
-      data-testid="section-visibility-badge"
     >
       <Icon className="size-3" />
       {label}
@@ -121,7 +120,9 @@ export function SectionVisibilityBadge({
     </Badge>
   )
 
-  if (!interactive) return badge
+  if (!interactive) {
+    return <span data-testid="section-visibility-badge">{badgeContent}</span>
+  }
 
   async function handleChange(value: string | null) {
     if (!value || !onChangeMinRole) return
@@ -137,7 +138,18 @@ export function SectionVisibilityBadge({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={badge} />
+      <PopoverTrigger
+        render={(
+          <button
+            type="button"
+            data-testid="section-visibility-badge"
+            className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            aria-label={`${label}. Change section visibility`}
+          >
+            {badgeContent}
+          </button>
+        )}
+      />
       <PopoverContent align="end" className="w-64">
         <Field>
           <FieldLabel className="text-xs font-medium">Who can see this section</FieldLabel>

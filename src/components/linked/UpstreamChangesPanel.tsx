@@ -1,6 +1,6 @@
-// FRO-478: "Upstream changes" review panel.
+// AQU-478: "Upstream changes" review panel.
 //
-// Per-project surface listing cells flagged by the FRO-476 mirror engine —
+// Per-project surface listing cells flagged by the AQU-476 mirror engine —
 // direct-stale + tombstoned — grouped by mirror-sync batch, with an old→new
 // diff and per-cell / bulk actions:
 //   - Open to retranslate: navigates to the cell in the editor.
@@ -12,7 +12,7 @@
 // reviewer(300)+ can repin one cell at a time; project_lead(500)+ can
 // bulk-repin a selection.
 //
-// SWARM-TODO(FRO-478): live-UI walk once FRO-476 is deployed to a dev stack —
+// SWARM-TODO(AQU-478): live-UI walk once AQU-476 is deployed to a dev stack —
 //   1. Seed A (upstream) → B (downstream) via POST /api/v2/projects/:B/link-source
 //      { sourceProjectId: A, mode: 'live' }; translate a few cells in B.
 //   2. Edit several source cells in A (source.cell.commit); trigger

@@ -40,7 +40,7 @@ export function VoiceSidebar({
 }: VoiceSidebarProps) {
   // `username` is part of the rail's contract (the studio is project-scoped)
   // but the cast roster reads everything else it needs off `tts`.
-  // FRO-365: `project.syncRole?.level` gates character CRUD in VoiceLibraryPanel.
+  // AQU-365: `project.syncRole?.level` gates character CRUD in VoiceLibraryPanel.
   void username
 
   // Translate the host's open/close clone signal into a monotonically rising

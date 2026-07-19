@@ -1,4 +1,4 @@
-// Client-side PPTX export with translation injection (FRO-152a).
+// Client-side PPTX export with translation injection (AQU-152a).
 //
 // Mirrors the DOCX skeleton-injection exporter (./docx.ts): the server serves
 // the raw PPTX side-car bytes; the client opens the zip with JSZip, walks the

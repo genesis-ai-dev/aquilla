@@ -26,11 +26,13 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { JWTService } from "../auth/jwt"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
   ROLE,
   type AuthUser,
+  type Env,
   type ProjectInviteRow,
   type ProjectRow,
 } from "../types"
@@ -56,8 +58,28 @@ import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
+import { createProjectShared } from "../../../db/shared/projects"
 
 const projects = new Hono<AuthHonoEnv>()
+
+/**
+ * FRO-347 follow-up: best-effort caller identity for the (otherwise public)
+ * invite-preview route. Unlike `authMiddleware`, a missing/invalid/expired
+ * token is NOT an error here — it just means "treat this preview as
+ * anonymous", since the route must stay reachable for signed-out visitors
+ * following a share link. Mirrors `optionalCaller` in routes/invites.ts.
+ */
+async function optionalCaller(env: Env, authHeader: string | null): Promise<AuthUser | null> {
+  if (!authHeader) return null
+  const jwtService = new JWTService(env)
+  const token = jwtService.extractTokenFromHeader(authHeader)
+  if (!token) return null
+  const payload = await jwtService.verifyToken(token)
+  if (!payload) return null
+  const now = Math.floor(Date.now() / 1000)
+  if (payload.exp < now) return null
+  return jwtService.getUserByUsername(payload.sub)
+}
 
 function roleNameFor(level: number): string {
   return ROLE_NAMES[level] ?? `level_${level}`
@@ -71,6 +93,10 @@ interface FileProjection {
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
+  sourceLanguage?: string
+  targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
 }
 
 /**
@@ -89,6 +115,7 @@ async function loadFilesByProject(
     `SELECT id, project_id, name, kind, role, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
+        AND deleted_at IS NULL
       ORDER BY LOWER(name)`,
   )
     .bind(...projectIds)
@@ -106,10 +133,28 @@ async function loadFilesByProject(
     const list = byProject.get(f.project_id) ?? []
     // Timeline-segment-model: order lens lives in meta (JSON), same as langs.
     let orderedBy: string | undefined
+    let sourceLanguage: string | undefined
+    let targetLanguage: string | undefined
+    let sourceTextDirection: "ltr" | "rtl" | undefined
+    let targetTextDirection: "ltr" | "rtl" | undefined
     if (f.meta) {
       try {
-        const m = JSON.parse(f.meta) as { orderedBy?: string }
+        const m = JSON.parse(f.meta) as {
+          orderedBy?: string
+          source_language?: string
+          target_language?: string
+          sourceLanguage?: string
+          targetLanguage?: string
+          source_text_direction?: string
+          target_text_direction?: string
+          sourceTextDirection?: string
+          targetTextDirection?: string
+        }
         if (m.orderedBy) orderedBy = m.orderedBy
+        sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
+        targetLanguage = normalizeLanguage(m.target_language ?? m.targetLanguage)
+        sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
+        targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -121,10 +166,23 @@ async function loadFilesByProject(
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
       ...(orderedBy ? { orderedBy } : {}),
+      ...(sourceLanguage ? { sourceLanguage } : {}),
+      ...(targetLanguage ? { targetLanguage } : {}),
+      ...(sourceTextDirection ? { sourceTextDirection } : {}),
+      ...(targetTextDirection ? { targetTextDirection } : {}),
     })
     byProject.set(f.project_id, list)
   }
   return byProject
+}
+
+function normalizeTextDirection(value: string | undefined): "ltr" | "rtl" | undefined {
+  return value === "ltr" || value === "rtl" ? value : undefined
+}
+
+function normalizeLanguage(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed || undefined
 }
 
 /** Best-effort notify aquilla-sync-worker that a project was (un)archived. */
@@ -188,13 +246,17 @@ projects.post(
     }
 
     try {
-      await c.env.AQUILLA_PG.prepare(
-        `INSERT INTO projects (id, name, org_id, created_by)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO NOTHING`,
-      )
-        .bind(body.id, body.name, orgId, user.id)
-        .run()
+      // Row write is shared with sync-worker's receipt-only CreateProject
+      // command (db/shared/projects.ts). The internal route leaves
+      // writeCreatorMembership unset: the creator resolves to owner (700) via
+      // the resolver's implicit creator path, so the hardcoded response below
+      // and later role resolutions are unchanged.
+      await createProjectShared(c.env.AQUILLA_PG, {
+        projectId: body.id,
+        name: body.name,
+        orgId,
+        createdBy: user.id,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error("project create failed:", err)
@@ -228,7 +290,7 @@ projects.get("/", authMiddleware, async (c) => {
   const wantArchived = archivedParam === "true" || archivedParam === "1"
   const archivedClause = wantArchived ? "p.archived_at IS NOT NULL" : "p.archived_at IS NULL"
 
-  // FRO-321: minRole filter — callers can pass ?minRole=600 to see only
+  // AQU-321: minRole filter — callers can pass ?minRole=600 to see only
   // projects where their resolved role >= the threshold (e.g. maintainer for
   // the invite picker). Ignored when isAdmin (admins resolve as 700 everywhere).
   const minRoleParam = c.req.query("minRole")
@@ -324,7 +386,7 @@ projects.get("/", authMiddleware, async (c) => {
       role_source: "creator" | "override" | "org" | "group"
     }>()
 
-  // FRO-321: apply minRole filter before loading files (avoid extra DB round-trip).
+  // AQU-321: apply minRole filter before loading files (avoid extra DB round-trip).
   const allRows = rows.results ?? []
   const filteredRows = minRole !== null && !isAdmin
     ? allRows.filter((r) => r.role_level >= minRole)
@@ -352,7 +414,7 @@ projects.get("/", authMiddleware, async (c) => {
         orgName: row.org_name,
         archivedAt: row.archived_at,
         isActive: row.is_active,
-        // FRO-478: see the single-project route's comment — this field was
+        // AQU-478: see the single-project route's comment — this field was
         // declared on CloudProjectSummary but never actually populated.
         sourceProjectId: row.source_project_id,
         role,
@@ -412,7 +474,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? { id: row.archived_by, username: row.archived_by_username }
       : null,
     isActive: row.is_active,
-    // FRO-478: surface the AD-9/FRO-476 link state so the client's
+    // AQU-478: surface the AD-9/AQU-476 link state so the client's
     // SourceLinkSection actually renders (it gates on sourceProjectId, which
     // this route previously never selected — the section was effectively
     // unreachable in production despite the client plumbing existing).
@@ -689,7 +751,7 @@ projects.post(
       return c.json({ error: "cannot grant role to self" }, 400)
     }
 
-    // FRO-285 (F-B6): target-level cap — you cannot add-over (change the role
+    // AQU-285 (F-B6): target-level cap — you cannot add-over (change the role
     // of) a member whose current level is >= yours, unless you are owner (700).
     // Owners may modify any member. For a new member (no existing row), this
     // check is a no-op (existing.role_level will be 0).
@@ -759,7 +821,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     )
   }
 
-  // FRO-285 (F-B6): target-level cap — you cannot delete the project_members
+  // AQU-285 (F-B6): target-level cap — you cannot delete the project_members
   // row of a user whose current level is >= yours, unless you are owner (700).
   const targetCurrentLevel = Number(existing.role_level)
   if (callerRole.level < ROLE.OWNER && targetCurrentLevel >= callerRole.level) {
@@ -785,7 +847,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
     .bind(projectId, targetUserId)
     .run()
 
-  // FRO-346: when NO grant path survives the delete (AD-12: org / group /
+  // AQU-346: when NO grant path survives the delete (AD-12: org / group /
   // creator paths are additive and unaffected by removing the direct row),
   // eject the removed user's live WS sessions + denylist their still-valid
   // sync tokens. Users who retain access via another path must NOT be
@@ -813,7 +875,7 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
 
 // ──────────────────────────────────────────────────────────────────────────
 // DELETE /api/v2/projects/:projectId/files/:fileId — drop projection
-// FRO-271: raised from contributor(400) to project_lead(500) — this hard-
+// AQU-271: raised from contributor(400) to project_lead(500) — this hard-
 // deletes all cells and R2 audio objects; contributors must not be able to
 // wipe data they cannot recover.
 // ──────────────────────────────────────────────────────────────────────────
@@ -937,16 +999,23 @@ projects.post(
     if (email) {
       const baseUrl = c.env.BASE_URL || "https://aquilla.app"
       const joinUrl = `${baseUrl}/join/${token}`
+      // AQU-471: also resolve the org name so the invite email can read
+      // "{inviter} invited you to {project} in {org}". LEFT JOIN so a
+      // personal (org-less) project still returns the project row.
       const proj = await c.env.AQUILLA_PG.prepare(
-        "SELECT name FROM projects WHERE id = ?",
+        `SELECT p.name AS name, o.name AS org_name
+           FROM projects p
+           LEFT JOIN organizations o ON o.id = p.org_id
+          WHERE p.id = ?`,
       )
         .bind(projectId)
-        .first<{ name: string }>()
+        .first<{ name: string; org_name: string | null }>()
       const emailPromise = sendProjectInviteEmail(
         c.env,
         email,
         joinUrl,
         proj?.name ?? "a project",
+        { invitedBy: user.username, orgName: proj?.org_name ?? null },
       ).catch((err) => console.warn("[invites] invite email failed:", err))
       // waitUntil only exists with a real ExecutionContext (prod); the test
       // harness has none and the getter throws, so fall back to letting the
@@ -1031,16 +1100,37 @@ projects.get("/invite-preview/:token", async (c) => {
       return c.json({ error: "Invite expired", code: "time_expired" }, 410)
     }
   }
+  // FRO-347 follow-up: a used link isn't necessarily dead for THIS caller.
+  // If the authenticated caller is the original redeemer (used_by) AND is
+  // still a member of the project, re-clicking the link should read as
+  // "you're already in — continue", not a terminal error: the normal 200
+  // preview lets JoinPage render the ordinary confirm card, and accept-invite
+  // is already an idempotent no-op for a still-member redeemer. Everyone
+  // else (removed redeemer, a different user, anonymous) still gets 410.
   if (invite.used_at) {
-    return c.json({ error: "Invite already used", code: "used" }, 410)
+    const caller = await optionalCaller(c.env, c.req.header("Authorization") ?? null)
+    const callerIsStillMemberRedeemer =
+      caller != null &&
+      invite.used_by === caller.id &&
+      (await c.env.AQUILLA_PG.prepare(
+        `SELECT 1 AS present FROM project_members WHERE project_id = ? AND user_id = ?`,
+      )
+        .bind(invite.project_id, caller.id)
+        .first()) != null
+    if (!callerIsStillMemberRedeemer) {
+      return c.json({ error: "Invite already used", code: "used" }, 410)
+    }
   }
 
   const project = await c.env.AQUILLA_PG.prepare(
-    `SELECT id, name, org_id, created_by, archived_at
-     FROM projects WHERE id = ?`,
+    `SELECT p.id, p.name, p.org_id, p.created_by, p.archived_at,
+            o.name AS org_name
+     FROM projects p
+     LEFT JOIN organizations o ON o.id = p.org_id
+     WHERE p.id = ?`,
   )
     .bind(invite.project_id)
-    .first<ProjectRow>()
+    .first<ProjectRow & { org_name: string | null }>()
   if (!project) {
     return c.json({ error: "Project not found" }, 404)
   }
@@ -1048,9 +1138,20 @@ projects.get("/invite-preview/:token", async (c) => {
     return c.json({ error: "Project is archived" }, 410)
   }
 
+  // Who invited you (AQU-471): safe to expose to token holders — the page
+  // already shows the project name, and the name helps the recipient trust
+  // the link. Null when the inviter's account no longer exists.
+  const inviter = await c.env.AQUILLA_PG.prepare(
+    "SELECT COALESCE(display_name, username) AS name FROM users WHERE id = ?",
+  )
+    .bind(invite.created_by)
+    .first<{ name: string | null }>()
+
   return c.json({
     projectId: invite.project_id,
     projectName: project.name,
+    orgName: project.org_name ?? null,
+    invitedBy: inviter?.name ?? null,
     role: {
       level: invite.role_level,
       name: roleNameFor(invite.role_level),
@@ -1121,7 +1222,7 @@ projects.post(
       .bind(invite.project_id, user.id)
       .first<{ role_level: number }>()
 
-    // FRO-347: "idempotent-while-member" (option 2). A same-user re-click
+    // AQU-347: "idempotent-while-member" (option 2). A same-user re-click
     // (invite.used_at already stamped to this user) used to unconditionally
     // re-grant/re-insert project_members — including after the owner removed
     // them, turning the old link into a permanent self-service re-entry pass.

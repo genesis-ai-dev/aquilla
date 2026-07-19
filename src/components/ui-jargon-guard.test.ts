@@ -1,5 +1,5 @@
 /**
- * FRO-290: Lint guard — no internal spec IDs or jargon in user-facing string literals.
+ * AQU-290: Lint guard — no internal spec IDs or jargon in user-facing string literals.
  *
  * WHY: Spec IDs like "AD-14" and jargon like "retrieval neighborhood" are trust-damaging
  * with non-technical SIL/UBS translation consultants. This test fails loudly if any
@@ -92,7 +92,7 @@ function extractStringLiterals(source: string): string[] {
 
 // ── Test ───────────────────────────────────────────────────────────────────────
 
-describe("FRO-290 — no internal spec IDs or jargon in user-facing strings", () => {
+describe("AQU-290 — no internal spec IDs or jargon in user-facing strings", () => {
   const allFiles = SRC_ROOTS.flatMap(collectFiles)
 
   for (const { pattern, reason } of BANNED_PATTERNS) {

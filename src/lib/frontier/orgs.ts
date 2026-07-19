@@ -171,6 +171,41 @@ export async function revokeOrgInvite(jwt: string, orgId: number, token: string)
   if (!res.ok) throw new UserError(res.status, "", "org");
 }
 
+/** Public preview of an org invite (AQU-471) — what JoinOrgPage shows before
+ * the recipient signs in / accepts. */
+export interface OrgInvitePreview {
+  orgId: number;
+  orgName: string | null;
+  /** Inviter's display name (fallback username); null if the account is gone. */
+  invitedBy: string | null;
+  role: OrgRole;
+  expiresAt: string | null;
+  email: string | null;
+}
+
+/**
+ * GET /api/v2/orgs/invite-preview/:token — public, no JWT. Returns null on ANY
+ * failure (unknown/expired/used token, old server, network): JoinOrgPage falls
+ * back to its generic copy and the accept endpoint stays the authority on
+ * token validity.
+ */
+export async function previewOrgInvite(token: string): Promise<OrgInvitePreview | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `${FRONTIER_BASE}/api/v2/orgs/invite-preview/${encodeURIComponent(token)}`,
+      {},
+    );
+    if (!res.ok) {
+      console.warn(`[org-invites] previewOrgInvite → HTTP ${res.status}`);
+      return null;
+    }
+    return (await res.json()) as OrgInvitePreview;
+  } catch (err) {
+    console.warn("[org-invites] previewOrgInvite failed:", err);
+    return null;
+  }
+}
+
 export interface AcceptOrgInviteResult {
   orgId: number;
   orgName: string | null;

@@ -29,9 +29,10 @@ import type { EventKind } from '../types'
 import {
   buildEventProjectionStmts,
   isChainMutatingKind,
+  laneOfEvent,
   type PersistedEvent,
 } from '../event-projection'
-import { buildChainClaimStmt, parentKeyOf, type ChainSlot } from '../chain-claims'
+import { buildChainClaimStmt, laneQualifiedParentKey, type ChainSlot } from '../chain-claims'
 import { buildEventInsertStmt } from '../event-insert'
 import type { DispatchResult } from './types'
 
@@ -49,7 +50,7 @@ export interface HandleCellEventOptions {
    */
   deferFileCounters?: boolean
   /**
-   * FRO-279: project-level threshold for cells.validated.
+   * AQU-279: project-level threshold for cells.validated.
    * Forwarded to buildEventProjectionStmts for cell.validate / cell.unvalidate.
    * Default 1 (N=1 projects: byte-identical behavior).
    */
@@ -105,11 +106,17 @@ export function handleCellEvent(
     event.fileId &&
     event.cellId
   ) {
+    // AQU-538: the chain slot is lane-qualified for non-default target lanes
+    // — two lanes' first commits share a parent (the source head) and must
+    // not compete for one slot. Default-lane events keep the legacy key.
     chainGate = {
       projectId: event.projectId,
       fileId: event.fileId,
       cellId: event.cellId,
-      parentKey: parentKeyOf(event.parentId),
+      parentKey: laneQualifiedParentKey(
+        event.parentId,
+        laneOfEvent(event.kind, event.payload) || undefined,
+      ),
     }
     stmts.push(buildChainClaimStmt(db, chainGate, event.id))
   }

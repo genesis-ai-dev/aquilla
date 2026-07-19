@@ -12,11 +12,34 @@
 // validations); only the initial bulk source load uses this.
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { enqueueOutboxEvents } from "./outbox"
+import { uploadSourceOriginal } from "./source-upload"
 
-/** Cells per HTTP request. Each cell = 2 D1 statements server-side; the worker
- *  batches them ≤100/batch, so 1500 cells ≈ 30 D1 batches per request — well
- *  under Workers' subrequest ceiling, with smooth progress. */
+/** Cells per HTTP request. The worker turns each chunk into bounded multi-row
+ *  Postgres inserts, keeping request bodies manageable while still amortizing
+ *  Hyperdrive/network latency. */
 const CHUNK = 1500
+const IMPORT_ATTEMPTS = 3
+const IMPORT_RETRY_DELAYS_MS = [200, 800] as const
+
+function isRetryableImportStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+async function waitForImportRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new Error("Import cancelled")
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timeout)
+      reject(new Error("Import cancelled"))
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
 
 export interface BulkImportCell {
   /** Client-minted event id (UUIDv7); becomes the cell's chain head. */
@@ -57,6 +80,8 @@ export interface BulkImportFileMeta {
   parserVersion?: string
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** USFM book code (\id) — lets the server projection group/order by book. */
   bookCode?: string
   /** Timeline-segment-model order lens ('time' | 'sequence'). Stored in
@@ -69,11 +94,14 @@ export interface BulkUploadArgs {
   fileId: string
   file: BulkImportFileMeta
   cells: BulkImportCell[]
-  /** Raw bytes of the source file for round-trip-fidelity formats (USFM
-   *  today). Sent with the first chunk so the worker can stash it in
-   *  `file_source_blobs` for export. */
+  /** Raw source text for round-trip-fidelity formats (USFM). Sent with the
+   *  first chunk so the worker can stash it in `file_source_blobs`. */
   rawSource?: string
   rawSourceFormat?: string
+  /** Raw binary bytes for binary formats (DOCX, PPTX). Uploaded to R2 via
+   *  PUT …/files/{fileId}/source after the first chunk lands. Not bundled in
+   *  the JSON payload. */
+  rawBytes?: ArrayBuffer
   /** Mints a sync-token scoped to (projectId, fileId). */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired after each chunk lands — drives the progress UI. */
@@ -89,7 +117,7 @@ export interface BulkUploadArgs {
  */
 export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const fetchFn = args.fetchImpl ?? fetch
-  const token = await args.getToken(args.fileId)
+  let token = await args.getToken(args.fileId)
   if (!token) {
     throw new Error(
       "Couldn't get an upload token — you may be signed out. Sign in and import again.",
@@ -126,32 +154,122 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
       }
     }
 
-    let res: Response
-    try {
-      res = await fetchFn(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-        signal: args.signal,
-      })
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : "network error"
-      throw new Error(`Upload failed: ${reason}`)
-    }
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "")
-      throw new Error(
-        `Upload failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-      )
+    let lastError: Error | null = null
+    for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      let response: Response | null = null
+      try {
+        response = await fetchFn(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+          signal: args.signal,
+        })
+      } catch (err) {
+        if (args.signal?.aborted) throw new Error("Import cancelled")
+        const reason = err instanceof Error ? err.message : "network error"
+        lastError = new Error(`Upload failed: ${reason}`)
+      }
+
+      if (response) {
+        if (response.ok) {
+          uploaded += chunk.length
+          args.onProgress?.(uploaded, total)
+          return
+        }
+
+        const detail = await response.text().catch(() => "")
+        lastError = new Error(
+          `Upload failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+        )
+
+        // Large imports can outlive their original file token. Refresh it and
+        // retry the exact same idempotent chunk once the server returns 401.
+        if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+          const refreshed = await args.getToken(args.fileId)
+          if (refreshed) {
+            token = refreshed
+            continue
+          }
+        }
+        if (!isRetryableImportStatus(response.status)) throw lastError
+      }
+
+      if (attempt < IMPORT_ATTEMPTS - 1) {
+        await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+      }
     }
 
-    uploaded += chunk.length
-    args.onProgress?.(uploaded, total)
+    throw lastError ?? new Error("Upload failed")
+  }
+
+  const finalize = async (): Promise<void> => {
+    let lastError: Error | null = null
+
+    for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      let response: Response | null = null
+      try {
+        response = await fetchFn(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            projectId: args.projectId,
+            fileId: args.fileId,
+            cells: [],
+            complete: true,
+            clientTs: Date.now(),
+          }),
+          signal: args.signal,
+        })
+      } catch (err) {
+        if (err instanceof Error && err.message === "Import cancelled") throw err
+        lastError = err instanceof Error ? err : new Error(String(err))
+      }
+
+      if (response) {
+        if (response.ok) return
+        const detail = await response.text().catch(() => "")
+        lastError = new Error(
+          `Import finalization failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+        )
+
+        // A long-running upload can outlive its original sync token. Refresh
+        // once through the normal token provider before treating 401 as fatal.
+        if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+          const refreshed = await args.getToken(args.fileId)
+          if (refreshed) {
+            token = refreshed
+            continue
+          }
+        }
+        if (!isRetryableImportStatus(response.status)) throw lastError
+      }
+
+      if (attempt < IMPORT_ATTEMPTS - 1) {
+        await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+      }
+    }
+
+    throw lastError ?? new Error("Import finalization failed")
   }
 
   // The first chunk carries file.create (+ side-car raw source) and must land
   // before the rest so the file row exists. Send it alone.
   await sendChunk(offsets[0], true)
+
+  // After the first chunk lands (file.create projected), upload raw binary
+  // bytes to R2 for DOCX/PPTX round-trip. Runs before subsequent chunks so the
+  // source blob is available as soon as any cell is written.
+  if (args.rawBytes && args.rawSourceFormat) {
+    await uploadSourceOriginal({
+      projectId: args.projectId,
+      fileId: args.fileId,
+      bytes: args.rawBytes,
+      format: args.rawSourceFormat as "docx" | "pptx",
+      getToken: args.getToken,
+    })
+  }
 
   // The remaining chunks are independent genesis source.cell.create batches:
   // the /import endpoint allocates each request's server_seq range atomically,
@@ -164,17 +282,47 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const rest = offsets.slice(1)
   const POOL = 4
   let cursor = 0
+  let uploadFailure: unknown | null = null
   const worker = async (): Promise<void> => {
-    while (cursor < rest.length) {
+    while (uploadFailure === null && cursor < rest.length) {
       const i = cursor++
-      await sendChunk(rest[i], false)
+      try {
+        await sendChunk(rest[i], false)
+      } catch (err) {
+        // Stop assigning new chunks as soon as one fails. Requests already in
+        // flight are allowed to settle before the partial state is finalized.
+        uploadFailure ??= err
+      }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(POOL, rest.length) }, () => worker()))
+  await Promise.all(
+    Array.from({ length: Math.min(POOL, rest.length) }, () => worker()),
+  )
+
+  // Finalization is a required, idempotent part of the import now: it performs
+  // the single authoritative counter/progress rebuild after all concurrent
+  // chunks settle. It also runs after a partial failure so whatever did land
+  // remains internally consistent and recoverable.
+  try {
+    await finalize()
+  } catch (finalizeError) {
+    if (uploadFailure !== null) {
+      const uploadMessage = uploadFailure instanceof Error
+        ? uploadFailure.message
+        : String(uploadFailure)
+      const finalizeMessage = finalizeError instanceof Error
+        ? finalizeError.message
+        : String(finalizeError)
+      throw new Error(`${uploadMessage}; additionally, ${finalizeMessage}`)
+    }
+    throw finalizeError
+  }
+
+  if (uploadFailure !== null) throw uploadFailure
 }
 
 // ---------------------------------------------------------------------------
-// Macula morph-row upload (FRO-178)
+// Macula morph-row upload (AQU-178)
 // ---------------------------------------------------------------------------
 
 export interface MorphRow {
@@ -248,10 +396,6 @@ export async function bulkUploadMorphRows(args: BulkMorphUploadArgs): Promise<vo
   }
 }
 
-/** Commits per chunk for target.cell.commit. Smaller than source CHUNK: the
- *  /events route does per-event AD-2 guards (heavier than /import's fast path). */
-const TARGET_CHUNK = 200
-
 export interface TargetCommit {
   /** Client-minted event id (UUIDv7). */
   id: string
@@ -276,57 +420,34 @@ export interface BulkTargetCommitArgs {
 }
 
 /**
- * Pre-fill target translations for a bilingual import: emit one
- * target.cell.commit per cell through the regular /events route, in chunks.
- * Used after bulkUploadSource has seeded the paired source cells (the source
- * event ids become these commits' parentId). Throws on the first failure.
+ * Pre-fill target translations for a bilingual import by ENQUEUING one
+ * target.cell.commit per cell to the outbox (not a direct POST). Used after
+ * bulkUploadSource has seeded the paired source cells (the source event ids
+ * become these commits' parentId).
+ *
+ * Enqueue is local + instant: the background flusher drains the events
+ * (idempotent by deterministic id), the pending-overlay renders them
+ * immediately, and the sync badge / inspector surface progress + retry +
+ * dead-letter. This is why a large import now feels instant — content shows
+ * before the network settles.
+ *
+ * NOTE: `getToken`, `signal`, and `fetchImpl` remain on the args type for
+ * caller compatibility but are unused now — the flusher owns the network.
  */
-export async function bulkUploadTargetCommits(args: BulkTargetCommitArgs): Promise<void> {
-  const fetchFn = args.fetchImpl ?? fetch
+export async function enqueueTargetCommits(args: BulkTargetCommitArgs): Promise<void> {
   if (args.commits.length === 0) return
-  const token = await args.getToken(args.fileId)
-  if (!token) {
-    throw new Error("Couldn't get an upload token — you may be signed out. Sign in and import again.")
-  }
-  const url = `${syncWorkerHttpOrigin()}/events`
-  const total = args.commits.length
-  let uploaded = 0
-
-  for (let offset = 0; offset < args.commits.length; offset += TARGET_CHUNK) {
-    if (args.signal?.aborted) throw new Error("Import cancelled")
-    const chunk = args.commits.slice(offset, offset + TARGET_CHUNK)
-    const events = chunk.map((c) => ({
-      id: c.id,
-      schemaVersion: 1,
-      kind: "target.cell.commit",
-      projectId: args.projectId,
-      fileId: args.fileId,
-      cellId: c.cellId,
-      parentId: c.parentId,
-      author: args.author,
-      payload: { value: c.value, sourceEventId: c.parentId },
-      clientTs: Date.now(),
-    }))
-
-    let res: Response
-    try {
-      res = await fetchFn(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ events }),
-        signal: args.signal,
-      })
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : "network error"
-      throw new Error(`Target commit failed: ${reason}`)
-    }
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "")
-      throw new Error(
-        `Target commit failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
-      )
-    }
-    uploaded += chunk.length
-    args.onProgress?.(uploaded, total)
-  }
+  const events = args.commits.map((c) => ({
+    id: c.id,
+    schemaVersion: 1 as const,
+    kind: "target.cell.commit" as const,
+    projectId: args.projectId,
+    fileId: args.fileId,
+    cellId: c.cellId,
+    parentId: c.parentId,
+    author: args.author,
+    payload: { value: c.value, sourceEventId: c.parentId },
+    clientTs: Date.now(),
+  }))
+  await enqueueOutboxEvents(events as unknown as Parameters<typeof enqueueOutboxEvents>[0])
+  args.onProgress?.(args.commits.length, args.commits.length)
 }

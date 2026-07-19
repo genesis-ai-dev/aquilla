@@ -14,10 +14,20 @@ import type { CqrsEventKind } from "@/lib/sync/outbox-types"
 interface Props {
   trigger: React.ReactNode
   records: OutboxRecord[]
+  /** True total of queued records (may exceed `records.length`, which the
+   *  source caps for the overlay). Drives the "+N more" overflow note so a
+   *  large bulk import doesn't appear to have fewer pending than it does.
+   *  Falls back to `records.length` when omitted. */
+  pendingCount?: number
   /** Reset backoff + force an immediate flush. When provided, the inspector
    *  shows a "Retry now" control and revives quarantined records on retry. */
   onRetryNow?: () => void
 }
+
+/** Cap the number of record rows rendered at once. The records list is already
+ *  bounded upstream, but a large bulk import can still queue hundreds — render
+ *  a slice and summarise the rest so the popover stays light. */
+const DISPLAY_CAP = 100
 
 /**
  * needs-signin  → 401: the session JWT is dead; signing in again fixes it.
@@ -214,7 +224,7 @@ function formatRelativeTime(ts: number, now: number): string {
   return `${d}d ago`
 }
 
-export function OutboxInspectorPopover({ trigger, records, onRetryNow }: Props) {
+export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetryNow }: Props) {
   // Capture "now" once per mount. The popover is short-lived, so we don't
   // tick it forward — "5s ago" briefly drifting to "10s ago" while the user
   // reads is fine and avoids a per-second re-render.
@@ -272,6 +282,12 @@ export function OutboxInspectorPopover({ trigger, records, onRetryNow }: Props) 
     onRetryNow?.()
   }
   const retryAll = () => retry(rows.map((r) => r.rec.id))
+
+  // Render at most DISPLAY_CAP rows; summarise the remainder. `pendingCount` is
+  // the true queue size (records is capped by the overlay source), so the
+  // overflow reflects everything still queued, not just what's shown here.
+  const shownRows = rows.slice(0, DISPLAY_CAP)
+  const overflow = Math.max(0, (pendingCount ?? rows.length) - shownRows.length)
 
   return (
     <Popover>
@@ -388,7 +404,7 @@ export function OutboxInspectorPopover({ trigger, records, onRetryNow }: Props) 
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <ul className="divide-y divide-border" role="list">
-              {rows.map(({ rec, status, preview, fullText }) => {
+              {shownRows.map(({ rec, status, preview, fullText }) => {
                 const isOpen = !!expanded[rec.id]
                 const hasMore = !!(fullText || rec.lastError || rec.event.cellId)
                 return (
@@ -520,6 +536,11 @@ export function OutboxInspectorPopover({ trigger, records, onRetryNow }: Props) 
                 )
               })}
             </ul>
+            {overflow > 0 && (
+              <p className="px-3 py-2 text-center text-xs text-muted-foreground" role="status">
+                +{overflow} more queued…
+              </p>
+            )}
           </div>
         )}
 

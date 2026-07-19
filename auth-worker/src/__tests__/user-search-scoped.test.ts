@@ -1,4 +1,4 @@
-// FRO-321: scoped user search — /api/v2/users/search?scoped=1 must only
+// AQU-321: scoped user search — /api/v2/users/search?scoped=1 must only
 // return users that share an org or a maintainer-accessible project with the
 // caller. This prevents global user enumeration via the invite picker.
 
@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
-describe("GET /api/v2/users/search?scoped=1 (FRO-321)", () => {
+describe("GET /api/v2/users/search?scoped=1 (AQU-321)", () => {
   it("returns org-overlap users (both in the same org)", async () => {
     await seedUser(200, "alice-org")
     await seedUser(201, "bob-org")

@@ -40,7 +40,7 @@ const getToken = async () => "jwt"
 
 beforeEach(() => {
   fetchMock.mockReset()
-  // FRO-476: the hook fires a fire-and-forget lazy-pull trigger
+  // AQU-476: the hook fires a fire-and-forget lazy-pull trigger
   // (POST .../link/sync) alongside the stale-source fetch — stub the global
   // fetch so that call resolves quietly instead of hitting the network.
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }))
@@ -89,7 +89,7 @@ describe("useStaleSourceCells", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it("surfaces tombstonedCellIds and behindSeq from the response (FRO-476)", async () => {
+  it("surfaces tombstonedCellIds and behindSeq from the response (AQU-476)", async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse(["c1"], { tombstonedCellIds: ["c9"], behindSeq: { upstream: 10, cursor: 5 } }),
     )
@@ -100,7 +100,7 @@ describe("useStaleSourceCells", () => {
     expect(result.current.behindSeq).toEqual({ upstream: 10, cursor: 5 })
   })
 
-  it("surfaces upstreamStaleCellIds and ancestorBehind from the response (FRO-477)", async () => {
+  it("surfaces upstreamStaleCellIds and ancestorBehind from the response (AQU-477)", async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse(["c1"], { upstreamStaleCellIds: ["c2"], ancestorBehind: true }),
     )
@@ -112,7 +112,7 @@ describe("useStaleSourceCells", () => {
     expect(result.current.ancestorBehind).toBe(true)
   })
 
-  it("fires the mirror-sync lazy-pull trigger alongside the stale-source fetch (FRO-476 §7)", async () => {
+  it("fires the mirror-sync lazy-pull trigger alongside the stale-source fetch (AQU-476 §7)", async () => {
     fetchMock.mockResolvedValueOnce(makeResponse([]))
     renderHook(() => useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
@@ -195,7 +195,7 @@ describe("useStaleSourceCells", () => {
     }
   })
 
-  // QA-BUG-2 (FRO-479 push accelerator): syncNow is the awaitable path the
+  // QA-BUG-2 (AQU-479 push accelerator): syncNow is the awaitable path the
   // link.upstream-changed handler uses so it can revalidate CELLS after the
   // sync resolves, not just the staleness badge.
   it("syncNow() awaits the mirror-sync POST, THEN revalidates staleness", async () => {

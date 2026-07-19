@@ -1,4 +1,4 @@
-// ProjectAssignedToMe — per-project "Assigned to me" pickup panel (FRO-192).
+// ProjectAssignedToMe — per-project "Assigned to me" pickup panel (AQU-192).
 //
 // Shows the current user's open assignments within ONE project. On row click,
 // jumps to the first cell matching the assignment's scopeLabel (using the same
@@ -96,7 +96,15 @@ export function ProjectAssignedToMe({
                     )}
                   >
                     <div className="flex items-center justify-between gap-1">
-                      <span className="truncate text-xs font-medium leading-tight">{a.scopeLabel}</span>
+                      <span className="flex min-w-0 items-center gap-1">
+                        <span className="truncate text-xs font-medium leading-tight">{a.scopeLabel}</span>
+                        {/* AQU-538 (§3.5): lane chip when pinned to a lane. */}
+                        {a.targetLang && (
+                          <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] leading-none">
+                            {a.targetLang}
+                          </Badge>
+                        )}
+                      </span>
                       <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
                     </div>
                     {/* Progress bar */}

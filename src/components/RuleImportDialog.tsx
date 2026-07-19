@@ -1,5 +1,5 @@
 /**
- * RuleImportDialog — FRO-196
+ * RuleImportDialog — AQU-196
  *
  * "Import from document" entry on the Rules surface.
  * Accepts paste or dropped .txt/.md files, enforces 200 KB size cap,
@@ -75,7 +75,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
 
   // SWARM-TODO: if RulesSurface doesn't receive completionSettings as a prop,
   // this dialog falls back to FALLBACK_SETTINGS (frontier provider).
-  // FRO-195 owns ProjectWorkspace — once it threads completionSettings through,
+  // AQU-195 owns ProjectWorkspace — once it threads completionSettings through,
   // remove the fallback.
   const effectiveSettings = completionSettings ?? FALLBACK_SETTINGS
 

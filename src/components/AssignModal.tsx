@@ -1,4 +1,4 @@
-// AssignModal — "Assign…" workspace action (FRO-192).
+// AssignModal — "Assign…" workspace action (AQU-192).
 //
 // Scope kinds:
 //   selection  → cells in the current editor selection (Set<string>)
@@ -41,6 +41,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -77,6 +78,20 @@ interface AssignModalProps {
   activeFileId: string | null
   /** All project files. Used for the books scope. */
   projectFiles: FileReference[]
+  /**
+   * AQU-538 (§3.5): the project's extra target-language lanes (project.targetLanes,
+   * overlaid by useProject). When non-empty, the modal shows a lane select so a
+   * PM can pin the assignment to a lane; the default lane ('') is always the
+   * first option. Omitted/empty ⇒ no lane select (N=1 projects are byte-identical
+   * to the pre-lane flow).
+   */
+  targetLanes?: string[]
+  /**
+   * AQU-538 (§3.5): lane to pre-select — the surface's active lane (workspace)
+   * or the lane row the modal was launched from (PM surfaces). Defaults to ''
+   * (the default lane).
+   */
+  defaultLane?: string
   /** Members eligible to be assigned (already fetched by parent). */
   members: ProjectMember[]
   /** Current user's role level — used to gate the modal. */
@@ -115,6 +130,8 @@ export function AssignModal({
   projectId,
   activeFileId,
   projectFiles,
+  targetLanes,
+  defaultLane = "",
   members,
   roleLevel,
   allowSelfAssignment = false,
@@ -131,6 +148,9 @@ export function AssignModal({
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("verses")
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
+  // AQU-538 (§3.5): the target-language lane this assignment is pinned to. '' =
+  // default lane. Only surfaced when the project has extra lanes.
+  const [selectedLane, setSelectedLane] = useState<string>(defaultLane)
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [availableChapters, setAvailableChapters] = useState<string[]>([])
   const [selectedChapters, setSelectedChapters] = useState<Set<string>>(new Set())
@@ -147,6 +167,7 @@ export function AssignModal({
     if (open) {
       setScopeKind(selectedCellIds.size > 0 ? "selection" : "verses")
       setSelectedMemberId(isSelfAssignMode && callerUserId != null ? String(callerUserId) : "")
+      setSelectedLane(defaultLane)
       setSelectedFileIds(new Set())
       setSelectedChapters(new Set())
       setAvailableChapters([])
@@ -154,12 +175,24 @@ export function AssignModal({
       setNote("")
       setDeadlineDate(undefined)
     }
-  }, [open, selectedCellIds.size, isSelfAssignMode, callerUserId])
+  }, [open, selectedCellIds.size, isSelfAssignMode, callerUserId, defaultLane])
 
   // AQU-497: group the books-scope file list by corpusMarker (real season/
   // testament grouping — see file banner) so a whole season can be selected
   // in one click via the per-group "Select all".
   const fileGroups = useMemo(() => groupByCorpus(projectFiles), [projectFiles])
+
+  // AQU-538 (§3.5): lane options — the default lane ('') first, then each extra
+  // lane. Only rendered (length > 1) when the project actually has extra lanes,
+  // keeping N=1 projects byte-identical to the pre-lane flow.
+  const laneItems = useMemo(() => {
+    const extra = targetLanes ?? []
+    if (extra.length === 0) return [] as { value: string; label: string }[]
+    return [
+      { value: "", label: "Default language" },
+      ...extra.map((lane) => ({ value: lane, label: lane })),
+    ]
+  }, [targetLanes])
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.
@@ -248,6 +281,7 @@ export function AssignModal({
           author,
           assigneeUserId: member.userId,
           entries,
+          targetLang: selectedLane || undefined,
           deadline,
           note: note.trim() || null,
         })
@@ -306,6 +340,7 @@ export function AssignModal({
         scope,
         scopeKind: apiScopeKind,
         scopeLabel,
+        targetLang: selectedLane || undefined,
         deadline,
         note: note.trim() || null,
       })
@@ -325,6 +360,7 @@ export function AssignModal({
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, callerUserId, deadlineDate, groupLabelByFileId,
+    selectedLane,
   ])
 
   // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
@@ -354,6 +390,10 @@ export function AssignModal({
           </DialogTitle>
         </DialogHeader>
 
+        {/* Scroll region: header + footer stay fixed while a tall body (e.g. a
+            large Files/Books list) scrolls, instead of overflowing the clipped
+            max-h-[85dvh] DialogContent. */}
+        <DialogBody>
         <FieldGroup className="py-1">
           <Field>
             <FieldLabel htmlFor="assign-modal-scope">Scope</FieldLabel>
@@ -388,6 +428,37 @@ export function AssignModal({
               </SelectContent>
             </Select>
           </Field>
+
+          {/* AQU-538 (§3.5): lane select — only when the project has extra
+              lanes. Assigning routes WORK to a lane; it is not a permission
+              wall (that's a scope — see §3.5). */}
+          {laneItems.length > 1 && (
+            <Field>
+              <FieldLabel htmlFor="assign-modal-lane">Language lane</FieldLabel>
+              <Select
+                items={laneItems}
+                value={selectedLane}
+                onValueChange={(v) => setSelectedLane(v ?? "")}
+              >
+                <SelectTrigger id="assign-modal-lane" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {laneItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                Routes this work to a language lane. Restricting who <em>can</em> edit a
+                lane is separate (staffing).
+              </FieldDescription>
+            </Field>
+          )}
 
           {scopeKind === "books" && (
             <Field>
@@ -516,6 +587,7 @@ export function AssignModal({
 
           {error && <FieldError>{error}</FieldError>}
         </FieldGroup>
+        </DialogBody>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>

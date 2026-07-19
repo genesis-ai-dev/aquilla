@@ -1,4 +1,4 @@
-// FRO-214: Banner shown inside a frozen (inactive) project.
+// AQU-214: Banner shown inside a frozen (inactive) project.
 //
 // Mounted by ProjectOverview (and via SWARM-TODO by ProjectWorkspace when
 // is_active=false). Blocks the "feel of working" by surfacing a full-width
@@ -29,7 +29,7 @@ interface InactiveProjectBannerProps {
  *
  * ProjectWorkspace.tsx integration (SWARM-TODO — forbidden this wave):
  *
- *   SWARM-TODO(FRO-214): Mount InactiveProjectBanner in ProjectWorkspace.tsx.
+ *   SWARM-TODO(AQU-214): Mount InactiveProjectBanner in ProjectWorkspace.tsx.
  *   Suggested location: just below the workspace header, above the file tab strip.
  *   Suggested JSX (after importing InactiveProjectBanner and useProjectLifecycle):
  *

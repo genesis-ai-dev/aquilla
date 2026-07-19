@@ -52,7 +52,7 @@ interface Props {
   seedCellId?: string | null
   seedSignal?: number
   /**
-   * FRO-365: the caller's resolved project role level (project.syncRole?.level),
+   * AQU-365: the caller's resolved project role level (project.syncRole?.level),
    * or null/undefined for local projects with no live role (fail-open — same
    * convention as canPerform/resolveEditorCapabilities). Character/voice writes
    * mirror the server's `PUT/PATCH /projects/:id/settings` floor — maintainer
@@ -80,7 +80,7 @@ export function VoiceLibraryPanel({
   const [editing, setEditing] = useState<Editing>({ kind: "closed" })
   const [query, setQuery] = useState("")
 
-  // FRO-365: character/voice writes flow through PUT/PATCH /settings, which
+  // AQU-365: character/voice writes flow through PUT/PATCH /settings, which
   // the server gates at maintainer (600). Fail-open (null roleLevel) for
   // local projects that never resolve a syncRole — same convention as
   // resolveEditorCapabilities / canPerform.
@@ -105,7 +105,7 @@ export function VoiceLibraryPanel({
     onSelectVoice?.(id)
   }, [onSelectVoice])
 
-  // FRO-365: writeBack/saveVoice are the character-CRUD write path (mirrors
+  // AQU-365: writeBack/saveVoice are the character-CRUD write path (mirrors
   // PUT/PATCH /settings, maintainer-gated server-side). A below-floor caller
   // must not get even a LOCAL echo of the write — otherwise their own
   // localStorage/IDB looks like it "saved" even though the server 403s the
@@ -204,7 +204,7 @@ export function VoiceLibraryPanel({
       </div>
 
       {/* One button — the modal carries both ways to make a voice.
-          FRO-365: disabled below the maintainer floor (viewers/contributors
+          AQU-365: disabled below the maintainer floor (viewers/contributors
           get a tooltip explaining why, not a silent no-op after a modal). */}
       <div className="border-t p-3">
         <AppTooltip content={voiceDenialReason ?? undefined}>
@@ -256,7 +256,7 @@ function VoiceRow({
   active: boolean
   isDefault: boolean
   stats?: CastMemberStats
-  /** FRO-365: whether the caller may edit/delete/set-narrator. Selecting a
+  /** AQU-365: whether the caller may edit/delete/set-narrator. Selecting a
    *  voice (to assign to lines) is always allowed — only the ⋯ menu (character
    *  CRUD) is gated. */
   canEdit: boolean
@@ -310,7 +310,7 @@ function VoiceRow({
           <Star className="h-2.5 w-2.5" /> Narrator
         </span>
       )}
-      {/* FRO-365: the ⋯ menu is character CRUD (edit/set-narrator/delete) —
+      {/* AQU-365: the ⋯ menu is character CRUD (edit/set-narrator/delete) —
           hidden below the maintainer floor. Selecting/dragging a voice to
           assign it to a line stays available (a separate, lower-floor
           concern this ticket doesn't touch). */}

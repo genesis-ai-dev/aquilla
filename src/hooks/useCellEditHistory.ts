@@ -19,7 +19,12 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { fetchCellHistory } from "@/lib/sync/history-read"
 import type { CellHistoryEvent } from "@/lib/sync/history-read-types"
-import { subscribeToOutbox } from "@/lib/sync/outbox"
+import {
+  getOutboxRecordsForCell,
+  subscribeToOutbox,
+  type OutboxRecord,
+} from "@/lib/sync/outbox"
+import { subscribeToCellHistoryInvalidation } from "@/lib/sync/history-invalidation"
 
 export interface UseCellEditHistoryOptions {
   enabled: boolean
@@ -131,6 +136,37 @@ function mapEventsToEntries(
   return entries
 }
 
+function mapOutboxToEntries(records: OutboxRecord[]): CellHistoryEntry[] {
+  const entries: CellHistoryEntry[] = []
+  for (const record of records) {
+    const event = record.event
+    if (event.kind !== "target.cell.commit" && event.kind !== "source.cell.commit") continue
+    const payload = event.payload as { value?: string; ai_suggestion?: true }
+    entries.push({
+      timestamp: new Date(event.clientTs || record.enqueuedAt).toISOString(),
+      value: payload.value ?? "",
+      source: payload.ai_suggestion ? "llm" : "human",
+      author: event.author,
+      validated: false,
+      eventId: event.id,
+      isStale: false,
+      syncState: record.status === "failed" ? "failed" : "pending",
+    })
+  }
+  return entries
+}
+
+function mergeHistoryEntries(
+  serverEntries: CellHistoryEntry[],
+  localEntries: CellHistoryEntry[],
+): CellHistoryEntry[] {
+  const serverIds = new Set(serverEntries.flatMap((entry) => entry.eventId ? [entry.eventId] : []))
+  return [
+    ...serverEntries,
+    ...localEntries.filter((entry) => !entry.eventId || !serverIds.has(entry.eventId)),
+  ].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+}
+
 export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEditHistoryResult {
   const { enabled, projectId, fileId, cellId, limit, getTokenForFile, currentEventId } = opts
 
@@ -169,6 +205,14 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
     setIsLoading(true)
     setIsError(false)
     try {
+      // IndexedDB is the local durability point. Show those commits even when
+      // auth, network, or server projection is temporarily unavailable.
+      const localEntries = mapOutboxToEntries(
+        await getOutboxRecordsForCell(pid, fid, cid),
+      )
+      if (generationRef.current !== gen) return
+      setHistory(localEntries)
+
       const token = await tokenFetcherRef.current(fid)
       if (!token) {
         if (generationRef.current !== gen) return
@@ -178,7 +222,10 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
       }
       const rows = await fetchCellHistory(pid, fid, cid, token, { limit: limitRef.current })
       if (generationRef.current !== gen) return
-      setHistory(mapEventsToEntries(rows, headRef.current))
+      setHistory(mergeHistoryEntries(
+        mapEventsToEntries(rows, headRef.current),
+        localEntries,
+      ))
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -193,46 +240,33 @@ export function useCellEditHistory(opts: UseCellEditHistoryOptions): UseCellEdit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, cellId, enabled, limit])
 
+  // Refresh from durable local changes and exact server event.applied frames.
+  // Both sources share one timer, coalescing an outbox write + its WS echo.
+  // Browser focus/visibility is deliberately not an invalidation source: it
+  // caused duplicate, visibly slow reads every time the user switched apps.
   useEffect(() => {
-    if (typeof window === "undefined") return
-    function onFocus() { void doFetch() }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void doFetch()
-      }
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis)
-    }
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis)
-      }
-    }
-  }, [doFetch])
-
-  // Auto-revalidate when the local outbox changes — covers the case where the
-  // user commits/validates/unvalidates this cell from the same window: the
-  // remove-after-flush notification triggers a refetch so the drawer keeps up.
-  // Debounced to coalesce burst notifications and to give the server projection
-  // a beat to land after the flusher posts the event.
-  useEffect(() => {
-    if (!enabledRef.current) return
+    if (!enabledRef.current || !projectId || !fileId || !cellId) return
     let timer: number | null = null
-    const unsubscribe = subscribeToOutbox(() => {
+    const schedule = () => {
       if (timer !== null) window.clearTimeout(timer)
       timer = window.setTimeout(() => {
         timer = null
         void doFetch()
-      }, 400)
-    })
+      }, 75)
+    }
+    const unsubscribeOutbox = subscribeToOutbox(schedule)
+    const unsubscribeServer = subscribeToCellHistoryInvalidation(
+      projectId,
+      fileId,
+      cellId,
+      schedule,
+    )
     return () => {
       if (timer !== null) window.clearTimeout(timer)
-      unsubscribe()
+      unsubscribeOutbox()
+      unsubscribeServer()
     }
-  }, [doFetch, enabled])
+  }, [doFetch, enabled, projectId, fileId, cellId])
 
   const revalidate = useCallback(() => {
     void doFetch()

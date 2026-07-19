@@ -1,5 +1,5 @@
 /**
- * SearchResultsView.tsx — FRO-309
+ * SearchResultsView.tsx — AQU-309
  *
  * "Expand all results" view — VS Code "open search results as editor" style.
  * Renders in the main content area as an overlay over the editor.

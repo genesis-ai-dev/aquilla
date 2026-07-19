@@ -51,9 +51,20 @@ describe("WorkloadRollup", () => {
 
   it("renders nothing when there are no open assignments", async () => {
     mockGetWorkload.mockResolvedValue([])
-    const { container } = render(<WorkloadRollup jwt="jwt" orgId={1} />)
+    const { container } = render(<WorkloadRollup jwt="jwt" orgId={1} action={<span>Visibility control</span>} />)
     await waitFor(() => expect(mockGetWorkload).toHaveBeenCalled())
     expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText("Visibility control")).not.toBeInTheDocument()
+  })
+
+  it("places section actions in the rendered section header", async () => {
+    mockGetWorkload.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", assigneeUserId: 2, username: "anna", scopeLabel: "Genesis", cellsTotal: 10, cellsDone: 4, deadline: null },
+    ])
+    render(<WorkloadRollup jwt="jwt" orgId={1} action={<span>Visibility control</span>} />)
+
+    const heading = await screen.findByText("Team workload")
+    expect(heading.closest("section")).toHaveTextContent("Visibility control")
   })
 
   it("removes a completed (100%) assignment on click — it disappears (AQU-494 bug 1)", async () => {

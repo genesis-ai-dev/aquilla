@@ -47,6 +47,8 @@ export function handleFileCreate(
   const langMeta: Record<string, string> = {}
   if (event.payload.sourceLanguage) langMeta.sourceLanguage = event.payload.sourceLanguage
   if (event.payload.targetLanguage) langMeta.targetLanguage = event.payload.targetLanguage
+  if (event.payload.sourceTextDirection) langMeta.sourceTextDirection = event.payload.sourceTextDirection
+  if (event.payload.targetTextDirection) langMeta.targetTextDirection = event.payload.targetTextDirection
 
   const fileUpsert = db
     .prepare(

@@ -39,13 +39,13 @@ describe("ProjectsList", () => {
     })
     render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("John")).toBeInTheDocument())
-    // FRO-335: the fetch must NOT be org-filtered — cross-org grants
+    // AQU-335: the fetch must NOT be org-filtered — cross-org grants
     // (invite-link / bulk-add) are partitioned client-side instead.
     expect(fetchAccessibleProjectsResultMock).toHaveBeenCalledWith("jwt")
     expect(screen.queryByTestId("shared-with-you")).not.toBeInTheDocument()
   })
 
-  // FRO-335: a project joined via magic-link invite lives in the INVITER's
+  // AQU-335: a project joined via magic-link invite lives in the INVITER's
   // org. The invitee isn't an org member, so an org-scoped list hid it —
   // URL-accessible but unreachable from the dashboard. It must render under
   // "Shared with you".
@@ -66,7 +66,7 @@ describe("ProjectsList", () => {
     expect(shared).not.toHaveTextContent("John")
   })
 
-  // FRO-416: clicking a "Shared with you" row must actually navigate — this
+  // AQU-416: clicking a "Shared with you" row must actually navigate — this
   // was the literal repro ("clicking reloads the page / doesn't navigate").
   // The row's onOpen and the own-project row's onOpen both call the same
   // navigate(`/projects/${id}`); assert the shared row fires it too so a
@@ -89,7 +89,7 @@ describe("ProjectsList", () => {
     expect(navigate).toHaveBeenCalledWith("/projects/p503")
   })
 
-  // FRO-293: no infinite spinner when no session / org
+  // AQU-293: no infinite spinner when no session / org
   it("resolves to a sign-in prompt (not an infinite spinner) when there is no session", async () => {
     // Why: /projects must never stay in a perpetual Loading… state when the
     // user is signed out — that's a dead end with no recovery path.
@@ -114,7 +114,7 @@ describe("ProjectsList", () => {
     expect(link.getAttribute("href")).toMatch(/\/login\?next=.*projects/)
   })
 
-  // FRO-366: the projects list must scroll natively (h-full + overflow-y-auto
+  // AQU-366: the projects list must scroll natively (h-full + overflow-y-auto
   // inside AppShell's height-constrained main slot) rather than clip. jsdom
   // can't compute real layout, so this asserts the structural contract
   // instead of pixel scroll behavior — see AppShell.tsx / this file for the
@@ -131,7 +131,7 @@ describe("ProjectsList", () => {
     expect(scrollContainer.className).toMatch(/\bh-full\b/)
     expect(scrollContainer.className).toMatch(/\boverflow-y-auto\b/)
     // Must not clip via overflow-hidden (the ScrollArea/flex footgun this
-    // guards against — see FRO-164).
+    // guards against — see AQU-164).
     expect(scrollContainer.className).not.toMatch(/overflow-hidden/)
   })
 })

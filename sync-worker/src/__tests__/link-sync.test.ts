@@ -1,4 +1,4 @@
-// FRO-476: mirror sync engine tests (link-sync.ts).
+// AQU-476: mirror sync engine tests (link-sync.ts).
 //
 // Covers the acceptance criteria enumerated on the issue:
 //   - seeding: linking live materializes upstream files+cells with provenance

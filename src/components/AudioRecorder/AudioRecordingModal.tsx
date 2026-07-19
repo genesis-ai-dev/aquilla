@@ -24,6 +24,7 @@ import { DurationBar } from "./DurationBar"
 import { TakesStrip } from "./TakesStrip"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
+import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -135,7 +136,7 @@ export function AudioRecordingModal({
     }
     // Probe mic permission BEFORE starting the countdown so we never count
     // down into a failed recording. If permission is denied, surface a clear
-    // message instead of starting the 3-2-1 sequence. (FRO-155)
+    // message instead of starting the 3-2-1 sequence. (AQU-155)
     setErrorMessage(null)
     void probeMicPermission().then((permState) => {
       if (permState === "denied") {
@@ -184,6 +185,14 @@ export function AudioRecordingModal({
       const blob = recorder.state.blob
       const ext = recorder.state.ext
       const audioId = buildAudioId(activeCell.id)
+      // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
+      // transcribeCell/useCellAudio look bytes up (audioId+ext of the
+      // frontier-audio:// URL). Once the attach lands, the take transcribes
+      // and plays from local bytes — no network, no JWT — and the post-save
+      // auto-transcribe below gets a deterministic cache hit. (If the upload
+      // throws, save() aborts before the attach, so the orphaned cache entry
+      // is unreachable and simply ages out of the LRU.)
+      await audioCachePutBlob(audioId, ext, blob)
       const result = await uploadCellAudio({
         projectId: project.id,
         fileId: activeCell.fileId,
@@ -322,7 +331,7 @@ export function AudioRecordingModal({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      {/* FRO-230: max-h constrains the dialog to the viewport (with 4vh margin)
+      {/* AQU-230: max-h constrains the dialog to the viewport (with 4vh margin)
           so it never clips at 100% zoom on 1280×800 or smaller viewports.
           The dialog is split into a fixed header, a scrollable stage+takes
           middle, and a fixed footer so navigation buttons stay reachable. */}

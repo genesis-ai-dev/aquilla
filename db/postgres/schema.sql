@@ -124,7 +124,7 @@ CREATE TABLE projects (
     -- deliberate reactivation required to edit. DISTINCT from archived_at
     -- (Trash): inactive projects remain visible in the list but block edits.
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    -- FRO-476: link metadata (migration 0050). mode distinguishes a one-time
+    -- AQU-476: link metadata (migration 0050). mode distinguishes a one-time
     -- snapshot ('clone', detach-snapshot applied at birth) from a subscribed
     -- link ('live', mirror sync keeps it current). NULL = legacy/self-contained.
     source_link_mode     TEXT,
@@ -185,7 +185,17 @@ CREATE TABLE project_settings (
     settings   TEXT NOT NULL DEFAULT '{}',
     version    INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT now(),
-    updated_by BIGINT
+    updated_by BIGINT,
+    -- Language pair extracted from the settings JSON at write time (0054).
+    -- settings blobs run to multiple MB; reads must use these columns, never
+    -- (settings::jsonb)->>'…' inline (org-dashboard timeout, see
+    -- getOrgPortfolio in auth-worker/src/services/org-permissions.ts).
+    source_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'sourceLanguage') STORED,
+    target_language TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'targetLanguage') STORED,
+    -- AQU-575: compact portfolio projections. Never load the multi-MB settings
+    -- blob merely to read validationCount or targetLanes.
+    validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
+    target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED
 );
 
 CREATE TABLE org_settings (
@@ -266,7 +276,14 @@ CREATE TABLE events (
     client_ts      BIGINT NOT NULL,
     server_ts      BIGINT NOT NULL,
     parent_id      TEXT,
-    server_seq     BIGINT NOT NULL DEFAULT 0
+    server_seq     BIGINT NOT NULL DEFAULT 0,
+    -- AQU-533: server-stamped provenance envelope for externally-originated
+    -- events (Agent API). NULL for all internal (in-app / mirror / import)
+    -- writes — the canonical event insert never populates it; only the
+    -- external changeset commit path stamps it after events land. Shape:
+    -- { origin, human_authority:{user_id,credential_id}, agent, channel,
+    --   autonomy_mode, changeset_id, confirmation_id? }.
+    provenance     JSONB
 );
 
 -- Per-project server_seq allocator (audit RACE-1 / M1-1). One row per project,
@@ -324,10 +341,10 @@ CREATE TABLE files (
     updated_at     BIGINT,
     meta           TEXT NOT NULL DEFAULT '{}',
     filled_count   INTEGER NOT NULL DEFAULT 0,
-    -- FRO-272: soft-delete tombstone. NULL = active; epoch-ms = tombstoned.
+    -- AQU-272: soft-delete tombstone. NULL = active; epoch-ms = tombstoned.
     -- Cells + audio retained; R2 wipe deferred (see migration 0036).
     deleted_at     BIGINT DEFAULT NULL,
-    -- FRO-292: target cells currently marked ai_drafted=1 (machine-drafted, not yet
+    -- AQU-292: target cells currently marked ai_drafted=1 (machine-drafted, not yet
     -- human-edited or validated). Recomputed by fileCountersRecomputeStmt on every
     -- target.cell.commit or cell.validate projection. Forward-only: 0 for all cells
     -- predating migration 0037.
@@ -352,7 +369,7 @@ CREATE TABLE cells (
     word_count        INTEGER NOT NULL DEFAULT 0,
     content_hash      TEXT,
     endorsement_count INTEGER NOT NULL DEFAULT 0,
-    -- FRO-292: 1 when this target cell was machine-drafted (ai_suggestion=true on the
+    -- AQU-292: 1 when this target cell was machine-drafted (ai_suggestion=true on the
     -- committing event) and has not yet been human-edited or validated. Cleared to 0
     -- by any subsequent human target.cell.commit or cell.validate. Forward-only:
     -- historical commits without the ai_suggestion field default to 0.
@@ -369,7 +386,7 @@ CREATE TABLE cells (
     -- future keys (gif/video/audio attachments, etc.) need no schema change.
     metadata          JSONB,
     source_location   TEXT,
-    -- FRO-476: mirror provenance (migration 0050). Set on a downstream's
+    -- AQU-476: mirror provenance (migration 0050). Set on a downstream's
     -- source-side row by source.cell.mirror — the upstream event id/seq this
     -- row currently reflects (monotonic apply-guard key, see link-sync.ts) and,
     -- if the upstream deleted the cell, when this row was tombstoned (never
@@ -377,19 +394,50 @@ CREATE TABLE cells (
     upstream_event_id TEXT,
     upstream_seq      BIGINT,
     tombstoned_at     BIGINT,
+    -- AQU-538: target-language lane (migration 0054). '' = the file's single
+    -- configured target language (every pre-lane row, and the default lane for
+    -- projects that never add a second language — N=1 back-compat). Source-side
+    -- rows are ALWAYS '' (the source is shared by all lanes; that is the point
+    -- of the TMS-style model). Non-'' lanes are BCP-47-ish tags chosen by the
+    -- add-a-language flow; the projection treats the value as opaque.
+    target_lang       TEXT NOT NULL DEFAULT '',
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
-    PRIMARY KEY (project_id, file_id, cell_id, side)
+    PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
 );
 
+-- AQU-517: compact derived progress. One file row plus one row per meaningful
+-- canonical section; validator_histogram keys are exact endorsement counts,
+-- capped at 15 (the 15 key means 15+).
+CREATE TABLE file_section_progress (
+    project_id          TEXT NOT NULL,
+    file_id             TEXT NOT NULL,
+    scope               TEXT NOT NULL CHECK (scope IN ('file', 'section')),
+    section_key         TEXT NOT NULL DEFAULT '',
+    target_lang         TEXT NOT NULL DEFAULT '',
+    total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
+    filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
+    validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
+    revision            BIGINT NOT NULL DEFAULT 0,
+    updated_at          BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),
+    CHECK (
+      (scope = 'file' AND section_key = '') OR
+      (scope = 'section' AND section_key <> '')
+    )
+);
+
+CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
+
 CREATE TABLE cell_validators (
-    project_id TEXT NOT NULL,
-    file_id    TEXT NOT NULL,
-    cell_id    TEXT NOT NULL,
-    event_id   TEXT NOT NULL,
-    username   TEXT NOT NULL,
-    decided_ts BIGINT NOT NULL,
-    PRIMARY KEY (project_id, file_id, cell_id, username)
+    project_id  TEXT NOT NULL,
+    file_id     TEXT NOT NULL,
+    cell_id     TEXT NOT NULL,
+    target_lang TEXT NOT NULL DEFAULT '',
+    event_id    TEXT NOT NULL,
+    username    TEXT NOT NULL,
+    decided_ts  BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, cell_id, target_lang, username)
 );
 
 CREATE TABLE cell_waivers (
@@ -472,6 +520,10 @@ CREATE TABLE assignments (
     assignee_user_id BIGINT NOT NULL,
     scope_kind       TEXT NOT NULL,
     scope_label      TEXT NOT NULL,
+    -- AQU-538 (§3.5 / migration 0057): target-language lane this assignment is
+    -- pinned to. '' = the default lane (every pre-lane assignment). Not part of
+    -- the PK — assignment_id stays the key; a lane is a property of the unit.
+    target_lang      TEXT NOT NULL DEFAULT '',
     cells_total      INTEGER NOT NULL DEFAULT 0,
     deadline         TEXT,
     note             TEXT,
@@ -522,7 +574,7 @@ CREATE TABLE checkpoints (
     r2_key     TEXT NOT NULL
 );
 
--- Migration 0032: per-word morphology for Macula Hebrew + Greek (FRO-178)
+-- Migration 0032: per-word morphology for Macula Hebrew + Greek (AQU-178)
 CREATE TABLE cell_word_morph (
     project_id  TEXT NOT NULL,
     file_id     TEXT NOT NULL,
@@ -556,7 +608,7 @@ CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_a
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);
 CREATE INDEX idx_cells_validated ON cells(project_id, file_id, side, validated);
--- FRO-476: mirror provenance lookup (only mirrored rows carry this).
+-- AQU-476: mirror provenance lookup (only mirrored rows carry this).
 CREATE INDEX idx_cells_upstream_event ON cells(upstream_event_id) WHERE upstream_event_id IS NOT NULL;
 -- FTS replacement: GIN over the generated tsvector.
 CREATE INDEX idx_cells_value_tsv ON cells USING GIN (value_tsv);
@@ -599,7 +651,7 @@ CREATE INDEX idx_projects_source_project ON projects(source_project_id) WHERE so
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
 
--- FRO-265: AI budget counters (0034_ai_usage_daily.sql)
+-- AQU-265: AI budget counters (0034_ai_usage_daily.sql)
 CREATE TABLE IF NOT EXISTS ai_usage_daily (
   user_id       INTEGER     NOT NULL,
   date_utc      DATE        NOT NULL,
@@ -697,6 +749,117 @@ CREATE TABLE IF NOT EXISTS model_ab_events (
 );
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_created ON model_ab_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_model_ab_events_user ON model_ab_events(user_id);
+
+-- Lane-scoped reviewer permissions (0059_project_member_scopes.sql, AQU-553).
+-- ADDITIVE restrictions on a member's role floor. No rows for a (project,user)
+-- pair = unscoped = today's behavior. 'lane' rows restrict target-side writes
+-- to those lanes (default lane stored as literal ''); 'file' rows restrict
+-- writes to those fileIds. Kinds compose with AND. Enforced in sync-worker
+-- authorize; source/comment/audio/file-level events are never gated. Leads
+-- (role >= 500) must stay unscoped (auth-worker CRUD rejects scoping them).
+CREATE TABLE IF NOT EXISTS project_member_scopes (
+    project_id TEXT NOT NULL,
+    user_id    BIGINT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('lane','file')),
+    value      TEXT NOT NULL,
+    created_by TEXT,
+    created_at BIGINT NOT NULL,
+    PRIMARY KEY (project_id, user_id, kind, value)
+);
+
+-- AQU-533 Agent API: immutable changeset execution plans (0055). External
+-- callers submit domain commands; prepare compiles them into a staged plan
+-- with server-computed preconditions, effect summary, and content digest.
+-- Commit re-checks preconditions (plan_stale on drift), routes compiled events
+-- through the existing /events perimeter, and records an execution receipt.
+CREATE TABLE IF NOT EXISTS changesets (
+    id                 TEXT PRIMARY KEY,          -- client-supplied UUIDv7
+    project_id         TEXT NOT NULL,
+    created_by_user_id TEXT NOT NULL,             -- the credential's owning user
+    credential_id      TEXT NOT NULL,
+    autonomy_mode      TEXT NOT NULL CHECK (autonomy_mode IN ('ask', 'act')),
+    status             TEXT NOT NULL DEFAULT 'staged'
+                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'expired')),
+    commands           JSONB NOT NULL,            -- normalized domain commands
+    preconditions      JSONB NOT NULL,            -- per-cell head/source pins resolved at prepare
+    summary            JSONB NOT NULL,            -- server-computed effect summary
+    digest             TEXT NOT NULL,             -- SHA-256 over canonical(commands + preconditions)
+    receipt            JSONB,                     -- execution receipt (after commit)
+    confirmation_id    TEXT,                      -- consumed ask-mode approval (after commit)
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at         TIMESTAMPTZ NOT NULL,
+    committed_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_changesets_project_status ON changesets(project_id, status);
+
+-- One-time human approval assertions for ask-mode commits (AQU-533 §3). A row
+-- binds a specific changeset digest + credential; commit consumes it exactly
+-- once (UPDATE ... SET consumed_at WHERE consumed_at IS NULL RETURNING).
+CREATE TABLE IF NOT EXISTS changeset_confirmations (
+    id            TEXT PRIMARY KEY,               -- UUIDv7
+    changeset_id  TEXT NOT NULL,
+    user_id       TEXT NOT NULL,                  -- approving human (browser session)
+    credential_id TEXT NOT NULL,
+    digest        TEXT NOT NULL,                  -- must match the changeset digest at commit
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at    TIMESTAMPTZ NOT NULL,
+    consumed_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_changeset_confirmations_changeset
+  ON changeset_confirmations(changeset_id);
+
+-- External API credentials (0054_api_credentials.sql): personal access tokens
+-- for the Agent API (AQU-533 §2). Per-user, optionally scoped to an org and/or
+-- project, with an autonomy ceiling ('ask' | 'act'). Only a SHA-256 hash is
+-- stored; token_prefix (first 12 chars, incl. the 'aqk_' tag) is display-only.
+-- User-scoped like agent_sessions; live role is re-resolved per call.
+CREATE TABLE IF NOT EXISTS api_credentials (
+    id           UUID PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    mode         TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
+    org_id       TEXT,
+    project_id   TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at   TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    revoked_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_api_credentials_user ON api_credentials(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(token_hash);
+
+-- Uploaded source artifacts (0056_artifacts.sql): agent-uploaded original files
+-- (USFM, JSON, XLIFF, …) preserved verbatim in R2 for round-trip fidelity and
+-- format inspection (AQU-533 §5). Bytes live in SNAPSHOTS under
+-- `{prefix}artifacts/{projectId}/{artifactId}`; this row is metadata +
+-- provenance + integrity digest. `file_id` is linked when a PlanImport
+-- changeset referencing the artifact commits.
+--
+-- 0064_artifacts_audio.sql (Agent API v1.1 §3, W2-B): `kind` distinguishes a
+-- verbatim source artifact ('source') from an uploaded audio clip ('audio').
+-- Audio bytes are stored in the EXISTING per-file audio R2 layout used by
+-- audio.ts (`{prefix}projects/{projectId}/files/{artifactId}/audio/{audio_id}`)
+-- so a LinkMedia commit can serve them through the app's native /audio route;
+-- `audio_id` is the full object name (`<artifactId>.<ext>`) the audio layout +
+-- the cell.audio.attach payload expect.
+CREATE TABLE IF NOT EXISTS artifacts (
+    id                  UUID PRIMARY KEY,
+    project_id          TEXT NOT NULL,
+    uploaded_by_user_id TEXT NOT NULL,
+    credential_id       TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    content_type        TEXT,
+    size_bytes          BIGINT NOT NULL,
+    sha256              TEXT NOT NULL,
+    r2_key              TEXT NOT NULL,
+    file_id             TEXT,
+    kind                TEXT NOT NULL DEFAULT 'source',
+    audio_id            TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

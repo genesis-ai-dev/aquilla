@@ -1,7 +1,7 @@
-# FRO-215 — Homepage Audit
+# AQU-215 — Homepage Audit
 
 **Audited:** 2026-06-09
-**Agent:** FRO-215 swarm subagent
+**Agent:** AQU-215 swarm subagent
 **Branch:** `swarm/fro-215`
 **Source:** `src/pages/Homepage/Homepage.tsx` + `src/pages/Homepage/MultimodalWorkspace.tsx`
 
@@ -80,11 +80,11 @@ Open `aquilla.app` in a fresh incognito window with no auth cookie:
 
 > Note: an earlier audit was written by a prior research agent at `docs/swarm/CLAIMS-AUDIT.md`
 > (dated 2026-05-30). Three prior fixes have landed since then:
-> - **FRO-225** (`3de4092`, `666355d`) — video hero claim softened to "caption and subtitle
+> - **AQU-225** (`3de4092`, `666355d`) — video hero claim softened to "caption and subtitle
 >   translation for video"; MultimodalWorkspace image/story tabs labeled "coming soon".
-> - **FRO-226** (`6f605d5`) — open-source badge removed; "Free, forever · open source"
+> - **AQU-226** (`6f605d5`) — open-source badge removed; "Free, forever · open source"
 >   pricing tag removed.
-> - **FRO-245** (`3de4092`) — enterprise pricing language dropped; reframed as mission
+> - **AQU-245** (`3de4092`) — enterprise pricing language dropped; reframed as mission
 >   support reach-out.
 >
 > This audit verifies those edits are live and re-audits the full homepage against the
@@ -94,12 +94,12 @@ Open `aquilla.app` in a fresh incognito window with no auth cookie:
 
 | Fix | Expected | In current copy? |
 |-----|----------|-----------------|
-| FRO-225: hero no longer claims full "video translation" | "caption and subtitle translation for video" | YES — Homepage.tsx:137 |
-| FRO-225: manifesto body accurate | "Translate text and audio, add captions and subtitles to video" | YES — Homepage.tsx:178 |
-| FRO-225: image/story tabs labeled coming soon in MultimodalWorkspace | MODE_NOTE and panel headers say "coming soon" | YES — MultimodalWorkspace.tsx:38-39, ImagePanel heading, StoryPanel header |
-| FRO-226: open-source badge removed | No "open source" anywhere in Homepage.tsx | YES — grep confirms absent |
-| FRO-226: "Free, forever · open source" pricing tag removed | Pricing tag is "Free, forever" without "open source" | YES — Homepage.tsx:413 |
-| FRO-245: enterprise pricing language gone | Enterprise tier says "We want to see your mission succeed", no price | YES — Homepage.tsx:424-432 |
+| AQU-225: hero no longer claims full "video translation" | "caption and subtitle translation for video" | YES — Homepage.tsx:137 |
+| AQU-225: manifesto body accurate | "Translate text and audio, add captions and subtitles to video" | YES — Homepage.tsx:178 |
+| AQU-225: image/story tabs labeled coming soon in MultimodalWorkspace | MODE_NOTE and panel headers say "coming soon" | YES — MultimodalWorkspace.tsx:38-39, ImagePanel heading, StoryPanel header |
+| AQU-226: open-source badge removed | No "open source" anywhere in Homepage.tsx | YES — grep confirms absent |
+| AQU-226: "Free, forever · open source" pricing tag removed | Pricing tag is "Free, forever" without "open source" | YES — Homepage.tsx:413 |
+| AQU-245: enterprise pricing language gone | Enterprise tier says "We want to see your mission succeed", no price | YES — Homepage.tsx:424-432 |
 
 All six prior edits are confirmed live.
 

@@ -21,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { humanRoleName } from "@/lib/frontier/roles"
 import {
   getTeam,
   addTeamMember,
@@ -64,7 +65,7 @@ const editTeamSchema = z.object({
 })
 
 /**
- * Canonical descriptions for each access level (from AD-6 / permission-semantics.md, FRO-138).
+ * Canonical descriptions for each access level (from AD-6 / permission-semantics.md, AQU-138).
  * Shown as tooltips next to the member's role display.
  */
 const ROLE_DESCRIPTIONS: Record<number, string> = {
@@ -79,8 +80,9 @@ const ROLE_DESCRIPTIONS: Record<number, string> = {
 
 function roleLabel(roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
+  // Fall back to the canonical humanized name — never a raw numeric (FRO-368).
   const name = ROLE_OPTIONS.find((role) => role.level === roleLevel)?.name
-  return name ? roleDisplayText(name) : `Level ${roleLevel}`
+  return name ? roleDisplayText(name) : humanRoleName(roleLevel)
 }
 
 function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
@@ -651,7 +653,7 @@ export function TeamDetail() {
                                   </button>
                                 </>
                               ) : (
-                                <span className="text-xs tabular-nums text-muted-foreground">Level {p.grantedRoleLevel}</span>
+                                <span className="text-xs capitalize text-muted-foreground">{roleLabel(p.grantedRoleLevel)}</span>
                               )}
                             </div>
                           </li>

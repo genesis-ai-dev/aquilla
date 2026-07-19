@@ -1,24 +1,13 @@
-import type { ReactNode } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
-import { Button } from "@/components/ui/button"
 import {
   Breadcrumb,
-  BreadcrumbEllipsis,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { isOrgScopedRoute } from "./org-route-scope"
 
 interface OrgBreadcrumbParent {
   label: string
@@ -36,11 +25,8 @@ interface OrgBreadcrumbProps {
   section: string
   /** When set, the section label is a link (e.g. project name → overview). */
   sectionTo?: string
-  /**
-   * Project workspace layout: org segments (when present) collapse into a
-   * leading ellipsis menu; section + trail stay visible.
-   */
-  workspace?: boolean
+  /** Owning organization for project routes, which may not match the dashboard filter. */
+  orgId?: number | null
   /** Segments after section (e.g. open file, current book/chapter). Last is current page. */
   trail?: OrgBreadcrumbTrailSegment[]
 }
@@ -50,20 +36,36 @@ interface Crumb {
   onClick?: () => void
   to?: string
   isCurrent?: boolean
+  isRoot?: boolean
 }
 
 function CrumbLink({ crumb }: { crumb: Crumb }) {
+  const labelClass = crumb.isRoot
+    ? "block shrink-0 whitespace-nowrap rounded-md px-1.5 py-1"
+    : "block max-w-[clamp(7rem,20vw,18rem)] truncate rounded-md px-1.5 py-1"
   if (crumb.isCurrent) {
-    return <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+    return <BreadcrumbPage className={labelClass} title={crumb.label}>{crumb.label}</BreadcrumbPage>
   }
   if (crumb.to) {
     return (
-      <BreadcrumbLink render={<Link to={crumb.to} />}>{crumb.label}</BreadcrumbLink>
+      <BreadcrumbLink
+        className={`${labelClass} hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50`}
+        render={<Link to={crumb.to} />}
+        onClick={crumb.onClick}
+        title={crumb.label}
+      >
+        {crumb.label}
+      </BreadcrumbLink>
     )
   }
   if (crumb.onClick) {
     return (
-      <BreadcrumbLink render={<button type="button" />} onClick={crumb.onClick}>
+      <BreadcrumbLink
+        className={`${labelClass} hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50`}
+        render={<button type="button" />}
+        onClick={crumb.onClick}
+        title={crumb.label}
+      >
         {crumb.label}
       </BreadcrumbLink>
     )
@@ -79,74 +81,50 @@ function CrumbSeparator() {
   )
 }
 
-function EllipsisMenu({ crumbs }: { crumbs: Crumb[] }) {
-  return (
-    <BreadcrumbItem>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button size="icon-sm" variant="ghost">
-              <BreadcrumbEllipsis />
-              <span className="sr-only">Show breadcrumb path</span>
-            </Button>
-          }
-        />
-        <DropdownMenuContent align="start">
-          <DropdownMenuGroup>
-            {crumbs.map((crumb) =>
-              crumb.to ? (
-                <DropdownMenuItem key={crumb.label} render={<Link to={crumb.to} />}>
-                  {crumb.label}
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem key={crumb.label} onClick={crumb.onClick}>
-                  {crumb.label}
-                </DropdownMenuItem>
-              ),
-            )}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </BreadcrumbItem>
-  )
-}
-
 function renderCrumbItem(crumb: Crumb, key: string) {
   return (
-    <BreadcrumbItem key={key}>
+    <BreadcrumbItem key={key} className={crumb.isRoot ? "shrink-0" : "min-w-0"}>
       <CrumbLink crumb={crumb} />
     </BreadcrumbItem>
   )
 }
 
-export function OrgBreadcrumb({ parent, section, sectionTo, workspace, trail = [] }: OrgBreadcrumbProps) {
-  const { activeOrg, activeOrgId, isAllOrgs, orgs, setAllOrgs } = useActiveOrg()
+export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }: OrgBreadcrumbProps) {
+  const { activeOrgId, isAllOrgs, orgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   const location = useLocation()
-  const navigate = useNavigate()
-  const orgLabel = isAllOrgs ? "All organizations" : (activeOrg?.name ?? "Workspace")
-  const canNavigateToOrg = !workspace && !isAllOrgs && activeOrgId != null && section !== "Projects"
   const showSection = section !== "Projects" || parent != null
+  const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
+  const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
+  const isRootLanding = location.pathname === "/" && !showSection && resolvedOrg == null
+  const isOrgLanding = location.pathname === "/" && !showSection && resolvedOrg != null
 
   function handleAllOrgs() {
     setAllOrgs()
-    if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
-      navigate({ pathname: "/", search: "?org=all" })
-    }
   }
 
-  function handleOrg() {
-    if (!canNavigateToOrg) return
-    navigate({ pathname: "/", search: `?org=${activeOrgId}` })
-  }
+  const crumbs: Crumb[] = [{
+    label: "All organizations",
+    to: isRootLanding ? undefined : "/?org=all",
+    onClick: isRootLanding ? undefined : handleAllOrgs,
+    isCurrent: isRootLanding,
+    isRoot: true,
+  }]
 
-  const tailCrumbs: Crumb[] = []
+  if (resolvedOrg) {
+    crumbs.push({
+      label: resolvedOrg.name ?? "Organization",
+      to: isOrgLanding ? undefined : `/?org=${resolvedOrg.id}`,
+      onClick: isOrgLanding ? undefined : () => setActiveOrg(resolvedOrg.id),
+      isCurrent: isOrgLanding,
+    })
+  }
 
   if (parent) {
-    tailCrumbs.push({ label: parent.label, to: parent.to })
+    crumbs.push({ label: parent.label, to: parent.to })
   }
 
   if (showSection) {
-    tailCrumbs.push({
+    crumbs.push({
       label: section,
       to: sectionTo,
       isCurrent: !sectionTo && trail.length === 0,
@@ -155,7 +133,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, workspace, trail = [
 
   trail.forEach((segment, index) => {
     const isLast = index === trail.length - 1
-    tailCrumbs.push({
+    crumbs.push({
       label: segment.label,
       to: segment.to,
       onClick: segment.onClick,
@@ -163,60 +141,15 @@ export function OrgBreadcrumb({ parent, section, sectionTo, workspace, trail = [
     })
   })
 
-  if (workspace) {
-    const orgCrumbs: Crumb[] = []
-    if (orgs.length > 1 && !isAllOrgs) {
-      orgCrumbs.push({ label: "All organizations", onClick: handleAllOrgs })
-    }
-    if (!isAllOrgs && activeOrg) {
-      orgCrumbs.push({
-        label: activeOrg.name ?? "Workspace",
-        onClick: () => navigate({ pathname: "/", search: `?org=${activeOrgId}` }),
-      })
-    }
-
-    if (tailCrumbs.length === 0) return null
-
-    const items: ReactNode[] = []
-    let sep = 0
-    if (orgCrumbs.length > 0) {
-      items.push(<EllipsisMenu key="ellipsis" crumbs={orgCrumbs} />)
-      items.push(<CrumbSeparator key={`sep-${sep++}`} />)
-    }
-    tailCrumbs.forEach((crumb, index) => {
-      if (index > 0) items.push(<CrumbSeparator key={`sep-${sep++}`} />)
-      items.push(renderCrumbItem(crumb, `tail-${index}`))
-    })
-
-    return (
-      <Breadcrumb className="px-3 py-2">
-        <BreadcrumbList>{items}</BreadcrumbList>
-      </Breadcrumb>
-    )
-  }
-
-  const crumbs: Crumb[] = []
-  if (orgs.length > 1 && !isAllOrgs) {
-    crumbs.push({ label: "All organizations", onClick: handleAllOrgs })
-  }
-  if (canNavigateToOrg) {
-    crumbs.push({ label: orgLabel, onClick: handleOrg })
-  } else {
-    crumbs.push({ label: orgLabel })
-  }
-  crumbs.push(...tailCrumbs)
-
-  if (crumbs.length === 0) return null
-
-  const items: ReactNode[] = []
+  const items: Array<ReturnType<typeof renderCrumbItem> | ReturnType<typeof CrumbSeparator>> = []
   crumbs.forEach((crumb, index) => {
     if (index > 0) items.push(<CrumbSeparator key={`sep-${index}`} />)
     items.push(renderCrumbItem(crumb, `${crumb.label}-${index}`))
   })
 
   return (
-    <Breadcrumb className="px-3 py-2">
-      <BreadcrumbList>{items}</BreadcrumbList>
+    <Breadcrumb className="min-w-0 overflow-hidden px-3">
+      <BreadcrumbList className="min-w-0 flex-nowrap overflow-hidden whitespace-nowrap">{items}</BreadcrumbList>
     </Breadcrumb>
   )
 }

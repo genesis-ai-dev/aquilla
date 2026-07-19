@@ -41,7 +41,7 @@ test("export dialog shows lossy warning for lossy formats and hides it for non-l
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open Export dialog from the header overflow menu (FRO-331).
+  // Open Export dialog from the header overflow menu (AQU-331).
   await ws.openExportDialog()
 
   const dialog = alice.getByRole("dialog")

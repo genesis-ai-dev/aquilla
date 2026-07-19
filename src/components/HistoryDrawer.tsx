@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch } from "lucide-react"
+import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff, LoaderCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
@@ -20,6 +20,10 @@ interface HistoryDrawerProps {
   fileId?: string | null
   /** Fetches a file-scoped sync token (same as Phase 2 outbox flusher). */
   getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** Whether this project has cloud (D1) history at all. Gates the
+   *  fetch-error state: tokenless local projects legitimately fall back to
+   *  cell.history and must not see a scary "couldn't load" message. */
+  isSynced?: boolean
   /** Called when the user confirms promoting a stale-branch entry to current.
    *  AD-2: the caller should emit a new target-cell commit whose parentId is
    *  the current chain head, making the promoted text the new current value. */
@@ -70,6 +74,7 @@ function isSameEditSession(a: CellHistoryEntry, b: CellHistoryEntry): boolean {
   // versa). A "session" collapses keystroke-level edits that ended in one
   // committed value — mixing a bumped branch into that obscures both.
   if ((a.isStale ?? false) !== (b.isStale ?? false)) return false
+  if (a.syncState !== b.syncState) return false
   // Within 2 minutes
   const aTime = new Date(a.timestamp).getTime()
   const bTime = new Date(b.timestamp).getTime()
@@ -112,7 +117,7 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
   return i
 }
 
-export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, onPromote }: HistoryDrawerProps) {
+export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, isSynced = false, onPromote }: HistoryDrawerProps) {
   const enabled = !!projectId && !!fileId && !!getTokenForFile
   // Target side is the typical edit surface in this translation app, so we
   // use `targetEventId` as the AD-2 chain head when computing stale-branch
@@ -124,6 +129,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
     history: d1History,
     isLoading: d1Loading,
     isError: d1Error,
+    revalidate,
   } = useCellEditHistory({
     enabled,
     projectId: projectId ?? null,
@@ -133,9 +139,9 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
     currentEventId,
   })
 
-  // Prefer D1 history when available; fall back to Y.Doc history when D1 is
-  // loading, errored, or returned no entries (cell may not have D1 records yet).
-  const history = enabled && !d1Loading && !d1Error && d1History.length > 0
+  // Prefer server + locally durable outbox history whenever either has an
+  // entry. Fall back only for legacy cells without event-log history.
+  const history = enabled && d1History.length > 0
     ? d1History
     : cell.history || []
 
@@ -146,7 +152,9 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   // head (offline-reconnect scenario) — calling that the current value
   // would be a lie. Falls back to the first group if no on-chain group
   // exists (legacy entries without an `isStale` flag).
-  const currentGroupIndex = groups.findIndex((g) => !(g.terminal.isStale ?? false))
+  const currentGroupIndex = groups.findIndex((g) => (
+    !(g.terminal.isStale ?? false) && g.terminal.syncState !== "failed"
+  ))
   const hasAnyStale = groups.some((g) => g.terminal.isStale ?? false)
   const firstStaleGroupRef = useRef<HTMLLIElement | null>(null)
   // When the drawer opens with a stale-branch commit present (typical
@@ -172,7 +180,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
         <h3 className="text-sm font-semibold">
           Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="sm" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close history">
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -183,10 +191,37 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-2">
-        {history.length === 0 ? (
+        {isSynced && d1Loading && history.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Loading history…</p>
+        ) : isSynced && d1Error && history.length === 0 ? (
+          // A failed D1 fetch on a synced project used to fall through to
+          // "No edits yet." — confidently wrong for cells with real history.
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">Couldn't load edit history.</p>
+            <button
+              type="button"
+              onClick={revalidate}
+              className="text-[11px] font-medium text-primary hover:text-primary/80 underline underline-offset-2"
+            >
+              Retry
+            </button>
+          </div>
+        ) : history.length === 0 ? (
           <p className="text-xs text-muted-foreground">No edits yet.</p>
         ) : (
           <>
+            {isSynced && d1Error && (
+              <p className="text-[10px] text-muted-foreground">
+                Couldn't refresh from the server — showing local edits.{" "}
+                <button
+                  type="button"
+                  onClick={revalidate}
+                  className="font-medium text-primary hover:text-primary/80 underline underline-offset-2"
+                >
+                  Retry
+                </button>
+              </p>
+            )}
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               {groups.length} significant {groups.length === 1 ? "revision" : "revisions"}
               {hiddenCount > 0 && (
@@ -282,6 +317,20 @@ function GroupItem({
             <span className="flex items-center gap-0.5 rounded bg-amber-200/60 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-800/50 dark:text-amber-200">
               <GitBranch className="h-3 w-3" />
               stale branch
+            </span>
+          </AppTooltip>
+        )}
+        {terminal.syncState === "pending" && (
+          <span className="flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
+            <LoaderCircle className="h-3 w-3 animate-spin" />
+            syncing
+          </span>
+        )}
+        {terminal.syncState === "failed" && (
+          <AppTooltip content="This edit is safe in this browser, but it could not sync to the server. Use the sync indicator to retry or inspect the failure.">
+            <span className="flex items-center gap-0.5 rounded bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive">
+              <CloudOff className="h-3 w-3" />
+              sync failed
             </span>
           </AppTooltip>
         )}

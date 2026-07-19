@@ -4,7 +4,7 @@ import type {
 } from "./types"
 import { canPerform } from "@/lib/sync/role-policy"
 
-// FRO-365: viewers (and any role below the action's server floor) must not
+// AQU-365: viewers (and any role below the action's server floor) must not
 // see these buttons at all — clicking them either persists a write server
 // can't refuse in time to avoid a confusing UX, or (pre-fix) looked like a
 // silent no-op. canPerform fails OPEN when the role is unknown (local/legacy
@@ -13,12 +13,10 @@ function roleAllows(ctx: WorkspaceActionContext, kind: string): boolean {
   return canPerform(kind, ctx.project.syncRole?.level ?? null)
 }
 
-// Cap on cells generated per "Run AI completions" click. Set to 50 so a
-// single scripture chapter (typically 25-50 verses) completes in one pass —
-// consultants re-run for the next chapter. Large enough to be useful for
-// Matthew; small enough that a misclick on a 1000-verse Psalms isn't
-// catastrophic. Revisit when spend controls are in place.
-export const MAX_BATCH_COMPLETIONS = 50
+// A deliberate human-review package, not a project scheduler. Research found
+// 5–10 consecutive items to be a practical unit for workload estimation and
+// review; larger files are advanced by running the next package.
+export const MAX_BATCH_COMPLETIONS = 10
 
 export function getVisibleActions(
   actions: WorkspaceAction[], ctx: WorkspaceActionContext,
@@ -57,14 +55,14 @@ export const workspaceActions: WorkspaceAction[] = [
         const p = c.fileProgress.get(c.activeFileId)
         const untranslated = p ? p.total - p.translated : 0
         const next = Math.min(MAX_BATCH_COMPLETIONS, untranslated)
-        return `Generate translations for the next ${next} untranslated cell${next === 1 ? "" : "s"}${untranslated > next ? ` (${untranslated - next} more after this)` : ""}. Uses few-shot examples from validated cells — re-run to continue through the file.`
+        return `Generate an approved-example draft package for the next ${next} untranslated cell${next === 1 ? "" : "s"}${untranslated > next ? ` (${untranslated - next} more after this)` : ""}. Every draft still needs individual human review.`
       },
       confirmLabel: "Run AI completions",
     },
     run: (_c, args) => args.runCompletions(),
   },
   {
-    id: "complete-all", label: "Complete all", icon: Sparkles, group: "primary",
+    id: "complete-all", label: "Draft all (review required)", icon: Sparkles, group: "primary",
     isAvailable: (c) => {
       if (!c.activeFileId) return false
       if (!roleAllows(c, "target.cell.commit")) return false
@@ -72,17 +70,14 @@ export const workspaceActions: WorkspaceAction[] = [
       return !!p && p.total > 0 && p.translated < p.total
     },
     requiresConfirmation: {
-      title: "Complete all untranslated cells",
+      title: "Draft all untranslated cells",
       description: (c) => {
         if (!c.activeFileId) return ""
         const p = c.fileProgress.get(c.activeFileId)
         const untranslated = p ? p.total - p.translated : 0
-        // SWARM-TODO(complete-all-spend-dollars): replace ~N AI calls with a
-        //   precise dollar estimate once per-model pricing constants are
-        //   available here (needs model name + token-count estimate per cell).
-        return `Draft AI translations for all ${untranslated} untranslated cell${untranslated === 1 ? "" : "s"} in this file (~${untranslated} AI call${untranslated === 1 ? "" : "s"}). This may take a while for large files.`
+        return `Generate drafts for all ${untranslated} untranslated cell${untranslated === 1 ? "" : "s"}, split into packages of at most ${MAX_BATCH_COMPLETIONS}. Packaging preserves context but is not a quality guarantee; every draft remains unapproved until a human reviews it individually.`
       },
-      confirmLabel: "Complete all",
+      confirmLabel: "Draft all",
     },
     run: (_c, args) => args.runCompleteAll(),
   },
@@ -100,7 +95,7 @@ export const workspaceActions: WorkspaceAction[] = [
         if (!c.activeFileId) return ""
         const p = c.fileProgress.get(c.activeFileId)
         const unvalidated = p ? p.total - p.validated : 0
-        return `This marks ${unvalidated} translated cell${unvalidated === 1 ? "" : "s"} as validated under your name.`
+        return `This marks eligible human-authored or human-edited cells as validated under your name. Untouched AI drafts are excluded and still need individual review. (${unvalidated} cells are currently unvalidated.)`
       },
       confirmLabel: "Validate all",
     },

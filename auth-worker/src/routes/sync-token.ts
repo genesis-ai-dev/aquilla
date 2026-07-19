@@ -70,7 +70,7 @@ syncToken.post(
     // Cheap existence + lifecycle check first so we can short-circuit on
     // archived/frozen and branch to auto-register when the project is unknown.
     //
-    // FRO-285 (Open Question 11): is_active=false means "frozen/dormant" per
+    // AQU-285 (Open Question 11): is_active=false means "frozen/dormant" per
     // the schema comment. Token TTL is 15 min (SYNC_TOKEN_TTL_SECONDS=900), so
     // a mint-time check is sufficient — any token minted before a freeze
     // expires within 15 min naturally. Reads are not blocked by the sync-token
@@ -88,7 +88,7 @@ syncToken.post(
       if (project.archived_at) {
         return c.json({ error: "Project is archived" }, 403)
       }
-      // FRO-285: frozen projects block new write-capable token mints.
+      // AQU-285: frozen projects block new write-capable token mints.
       // is_active is a BOOLEAN NOT NULL DEFAULT TRUE column (migration 0033).
       if (!project.is_active) {
         return c.json({ error: "Project is frozen" }, 403)
@@ -121,6 +121,19 @@ syncToken.post(
       return c.json({ error: "No access to project" }, 403)
     }
 
+    // AQU-553: load the user's lane/file scopes for this project. No rows =
+    // unscoped; the claim is OMITTED entirely in that case so an absent claim
+    // means "exactly today's behavior" on the sync-worker side.
+    const scopeRows = await c.env.AQUILLA_PG.prepare(
+      "SELECT kind, value FROM project_member_scopes WHERE project_id = ? AND user_id = ? ORDER BY kind, value",
+    )
+      .bind(projectId, user.id)
+      .all<{ kind: "lane" | "file"; value: string }>()
+    const scopes = (scopeRows.results ?? []).map((r) => ({
+      kind: r.kind,
+      value: r.value,
+    }))
+
     const now = Math.floor(Date.now() / 1000)
     const claims: SyncTokenClaims = {
       userId: user.id,
@@ -128,11 +141,13 @@ syncToken.post(
       projectId,
       fileId,
       role: resolved.level,
-      // FRO-346: the sync-worker's write-path membership re-check exempts
+      // AQU-346: the sync-worker's write-path membership re-check exempts
       // `src === "platform"` tokens (ADMIN_EMAILS operators have no
       // membership rows to re-check). Every other source is re-verified
       // against the live grant tables on each POST /events flush.
       src: resolved.source,
+      // AQU-553: omit entirely when unscoped (no rows).
+      ...(scopes.length > 0 ? { scopes } : {}),
       aud: "sync",
       iat: now,
       exp: now + SYNC_TOKEN_TTL_SECONDS,

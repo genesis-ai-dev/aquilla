@@ -25,7 +25,7 @@ const DEV_PROJECT_ID = "dev-project"
 const DEV_PROJECT_NAME = "Dev Project"
 
 // Extra projects + collaborators so the org Members matrix has something to
-// render locally (FRO-218). All under the dev org, created_by dev. The access
+// render locally (AQU-218). All under the dev org, created_by dev. The access
 // configs below deliberately exercise each of the four resolution paths:
 //   - creator: dev on every project
 //   - org:     alice (org maintainer) inherits on every project

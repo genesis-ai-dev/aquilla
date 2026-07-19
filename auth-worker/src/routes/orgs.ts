@@ -7,7 +7,8 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
-import { ROLE } from "../types"
+import { JWTService } from "../auth/jwt"
+import { ROLE, type AuthUser, type Env } from "../types"
 import {
   addGroupMember,
   attachGroupProject,
@@ -46,6 +47,109 @@ import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services
 import { sendOrgInviteEmail } from "../services/email"
 
 const orgs = new Hono<AuthHonoEnv>()
+
+/**
+ * Compare two user ids that may arrive as a number or, from a Postgres BIGINT
+ * column (e.g. org_invites.used_by), a string. Comparing across those types
+ * with `===` silently fails, so a still-member redeemer re-clicking a used
+ * invite would wrongly get a 410 instead of the continue-preview. Normalize
+ * both sides before comparing.
+ */
+export function isSameUserId(
+  a: number | string | null | undefined,
+  b: number | string | null | undefined,
+): boolean {
+  return a != null && b != null && String(a) === String(b)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// PUBLIC route — registered BEFORE the router-wide authMiddleware below so a
+// signed-out invite recipient can see what they were invited to. Mirrors
+// GET /api/v2/projects/invite-preview/:token: the token itself is the
+// credential; the payload only names what accepting would already reveal.
+// Everything registered after orgs.use("*") stays authed. (AQU-471)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * AQU-347: best-effort caller identity for the (otherwise public) preview
+ * route. A missing/invalid/expired token is NOT an error here — it just means
+ * "treat this preview as anonymous", so the route stays reachable for
+ * signed-out visitors following a share link. Mirrors `optionalCaller` in
+ * routes/invites.ts / routes/projects.ts.
+ */
+async function optionalCaller(env: Env, authHeader: string | null): Promise<AuthUser | null> {
+  if (!authHeader) return null
+  const jwtService = new JWTService(env)
+  const token = jwtService.extractTokenFromHeader(authHeader)
+  if (!token) return null
+  const payload = await jwtService.verifyToken(token)
+  if (!payload) return null
+  const now = Math.floor(Date.now() / 1000)
+  if (payload.exp < now) return null
+  return jwtService.getUserByUsername(payload.sub)
+}
+
+orgs.get("/invite-preview/:token", async (c) => {
+  const token = c.req.param("token")
+  if (!token || token.length < 8) {
+    return c.json({ error: "Invalid token" }, 404)
+  }
+
+  const invite = await c.env.AQUILLA_PG.prepare(
+    `SELECT token, org_id, role_level, created_by, created_at,
+            expires_at, used_by, used_at, email
+     FROM org_invites WHERE token = ?`,
+  )
+    .bind(token)
+    .first<OrgInviteRow>()
+  if (!invite) return c.json({ error: "Invite not found" }, 404)
+  if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
+    return c.json({ error: "Invite expired", code: "time_expired" }, 410)
+  }
+  // AQU-347: a used link isn't necessarily dead for THIS caller. If the
+  // authenticated caller is the original redeemer (used_by) AND is still an
+  // org member, re-clicking reads as "you're already in — continue" (a normal
+  // 200 preview; accept-invite is an idempotent no-op for a still-member
+  // redeemer). Everyone else (removed redeemer, a different user, anonymous)
+  // still gets 410.
+  if (invite.used_at) {
+    const caller = await optionalCaller(c.env, c.req.header("Authorization") ?? null)
+    const callerIsStillMemberRedeemer =
+      caller != null &&
+      isSameUserId(invite.used_by, caller.id) &&
+      (await c.env.AQUILLA_PG.prepare(
+        "SELECT 1 AS present FROM org_members WHERE org_id = ? AND user_id = ?",
+      )
+        .bind(invite.org_id, caller.id)
+        .first()) != null
+    if (!callerIsStillMemberRedeemer) {
+      return c.json({ error: "Invite already used", code: "used" }, 410)
+    }
+  }
+
+  const org = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, name FROM organizations WHERE id = ?",
+  )
+    .bind(invite.org_id)
+    .first<{ id: number; name: string | null }>()
+  if (!org) return c.json({ error: "Organization not found" }, 404)
+
+  // Who invited you (AQU-471) — best-effort; null when the account is gone.
+  const inviter = await c.env.AQUILLA_PG.prepare(
+    "SELECT COALESCE(display_name, username) AS name FROM users WHERE id = ?",
+  )
+    .bind(invite.created_by)
+    .first<{ name: string | null }>()
+
+  return c.json({
+    orgId: invite.org_id,
+    orgName: org.name,
+    invitedBy: inviter?.name ?? null,
+    role: { level: invite.role_level, name: ROLE_NAMES[invite.role_level] ?? "unknown" },
+    expiresAt: invite.expires_at,
+    email: invite.email ?? null,
+  })
+})
 
 orgs.use("*", authMiddleware)
 
@@ -228,7 +332,7 @@ orgs.get("/:orgId/assignments/mine", async (c) => {
 
 /**
  * GET /api/v2/orgs/:orgId/members-matrix — effective members for every project
- * the caller can access in the org, in ONE request (FRO-218). Replaces the
+ * the caller can access in the org, in ONE request (AQU-218). Replaces the
  * client's per-project /:projectId/members fan-out that flooded the connection
  * pool and 500'd the page. Any org member.
  */
@@ -524,6 +628,7 @@ orgs.post("/:orgId/invites", zValidator("json", createOrgInviteBody), async (c) 
       email,
       joinUrl,
       org?.name ?? "an organization",
+      { invitedBy: user.username },
     ).catch((err) => console.warn("[org-invites] invite email failed:", err))
     try {
       c.executionCtx.waitUntil(emailPromise)

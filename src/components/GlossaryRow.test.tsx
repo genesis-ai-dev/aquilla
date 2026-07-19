@@ -19,6 +19,8 @@ function noopHandlers() {
     onEditSource: vi.fn(),
     onEditPrimary: vi.fn(),
     onEditRenderings: vi.fn(),
+    onEditNotes: vi.fn(),
+    onOpenDetails: vi.fn(),
     onArchive: vi.fn(),
     onRestore: vi.fn(),
     onAccept: vi.fn(),
@@ -66,12 +68,32 @@ describe("GlossaryRow", () => {
     expect(h.onEditRenderings).not.toHaveBeenCalled()
     fireEvent.blur(input)
     expect(h.onEditRenderings).toHaveBeenCalledTimes(1)
-    expect(h.onEditRenderings).toHaveBeenCalledWith("c1", [{ rendering: "favora", status: "preferred" }])
+    const update = h.onEditRenderings.mock.calls[0][1]
+    expect(update([{ rendering: "favor", status: "preferred" }])).toEqual([
+      { rendering: "favora", status: "preferred" },
+    ])
   })
 
   it("hides edit affordances when canManage is false", () => {
     render(<GlossaryRow concept={c({})} canManage={false} {...noopHandlers()} />)
     fireEvent.click(screen.getByText("favor"))
     expect(screen.queryByDisplayValue("favor")).toBeNull()
+  })
+
+  it("commits notes from the row expander", () => {
+    const h = noopHandlers()
+    render(<GlossaryRow concept={c({})} canManage {...h} />)
+    fireEvent.click(screen.getByLabelText("Expand renderings"))
+    const notes = screen.getByLabelText("Notes for grace")
+    fireEvent.change(notes, { target: { value: "Use in covenant contexts." } })
+    fireEvent.blur(notes)
+    expect(h.onEditNotes).toHaveBeenCalledWith("c1", "Use in covenant contexts.")
+  })
+
+  it("opens term details without turning the source cell into an editor", () => {
+    const h = noopHandlers()
+    render(<GlossaryRow concept={c({})} canManage {...h} />)
+    fireEvent.click(screen.getByRole("button", { name: "Open details for grace" }))
+    expect(h.onOpenDetails).toHaveBeenCalledWith("c1")
   })
 })

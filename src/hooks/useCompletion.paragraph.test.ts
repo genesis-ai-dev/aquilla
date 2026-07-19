@@ -172,6 +172,17 @@ describe("completeParagraph (D3)", () => {
     expect(calledTexts).toContain("Translation three")
     // Author is the model id (or frontier-default).
     expect(commitMock.mock.calls[0][2]).toBe("test-model")
+    expect(commitMock.mock.calls[0][3]).toMatchObject({
+      model: "test-model",
+      provider: "custom",
+      mode: "paragraph",
+      projectState: {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        approvedExampleCount: 0,
+      },
+    })
+    expect(commitMock.mock.calls[0][3].promptVersion).toMatch(/^translation-draft-v1:[0-9a-f]{8}$/)
   })
 
   it("does NOT commit a cell that is MISSING from the model response (D11)", async () => {
@@ -346,9 +357,11 @@ describe("completeParagraph (D3)", () => {
     expect(result.current.errors.has("cell-1")).toBe(false)
   })
 
-  it("includes preceding committed TARGET (not source) in the prompt when available (D4)", async () => {
-    // Set up a preceding cell with a committed translation.
-    const precedingCell = makeCell("cell-0", FILE_A, "Verse zero source", "Verse zero TARGET", true)
+  it("includes a preceding approved TARGET (not raw draft text) in the prompt (D4)", async () => {
+    const precedingCell = {
+      ...makeCell("cell-0", FILE_A, "Verse zero source", "Verse zero TARGET", true),
+      status: "validated",
+    }
     const allWithPreceding = [precedingCell, ...ALL_CELLS]
 
     // Capture the prompt sent to fetch so we can inspect it.

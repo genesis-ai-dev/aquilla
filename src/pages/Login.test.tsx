@@ -1,5 +1,5 @@
 /**
- * FRO-282: Login page tests
+ * AQU-282: Login page tests
  *
  * Covers:
  *  - Page renders username + password fields and a Sign in button
@@ -174,7 +174,7 @@ describe("Login page — forgot password flow", () => {
   })
 })
 
-// FRO-293: ?next= param — post-login navigation returns to the originating route
+// AQU-293: ?next= param — post-login navigation returns to the originating route
 describe("Login page — next param", () => {
   it("navigates to ?next= path after successful login", async () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })

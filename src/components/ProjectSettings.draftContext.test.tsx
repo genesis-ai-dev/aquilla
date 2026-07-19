@@ -67,6 +67,10 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "tester" }, loading: false }),
 }))
 
+vi.mock("@/hooks/useAccounts", () => ({
+  useAccounts: () => ({ active: null, sessions: [], loading: false, add: vi.fn(), activate: vi.fn(), remove: vi.fn() }),
+}))
+
 vi.mock("@/hooks/useCompletionSettings", () => ({
   buildCompletionSettings: vi.fn((existing: unknown, updates: unknown) => ({ ...Object(existing), ...Object(updates) })),
   DEFAULT_SYSTEM_PROMPT: "Translate accurately.",
@@ -75,7 +79,7 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
 vi.mock("@/lib/completion/completion-service", () => ({
   fetchModels: vi.fn().mockResolvedValue([]),
   resolveProvider: vi.fn(() => "frontier"),
-  // FRO-478: ProjectSettings now transitively imports events-emit.ts (via
+  // AQU-478: ProjectSettings now transitively imports events-emit.ts (via
   // UpstreamChangesPanel) → src/lib/ab/feedback.ts, which reads this export
   // at module-eval time.
   FRONTIER_CHAT_URL: "https://api.aquilla.app/chat/api/v1/chat/completions",

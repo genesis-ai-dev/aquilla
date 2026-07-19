@@ -4,7 +4,7 @@
 // user-facing message.
 //
 // Pattern mirrors src/lib/audio/ai-error.ts but for the general network layer
-// (sync-worker, frontier, auth-worker). See FRO-281.
+// (sync-worker, frontier, auth-worker). See AQU-281.
 
 export type NetworkErrorCategory =
   | "forbidden"

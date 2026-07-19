@@ -3,11 +3,11 @@ import { describe, it, expect, beforeEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
-// FRO-326: GET /api/v2/invites/mine — the invitee-side "received invites"
+// AQU-326: GET /api/v2/invites/mine — the invitee-side "received invites"
 // surface. Email is the only recipient identity an invite carries, so the
 // endpoint must return exactly the unredeemed, unexpired, email-matching
 // invites — and nothing else (open links and other users' invites would be
-// a privacy leak per FRO-321).
+// a privacy leak per AQU-321).
 
 interface MineResponse {
   invites: Array<{
@@ -96,7 +96,7 @@ describe("GET /api/v2/invites/mine", () => {
   it("excludes open links, other users' invites, used and expired invites", async () => {
     // Open link (no recipient identity) — never attributable to bob.
     await seedInvite({ token: "tok-open-aaaa", projectId: "proj-1", email: null })
-    // Addressed to someone else — privacy per FRO-321.
+    // Addressed to someone else — privacy per AQU-321.
     await seedInvite({ token: "tok-alice-aaa", projectId: "proj-1", email: "alice@example.com" })
     // Already redeemed.
     await seedInvite({ token: "tok-used-aaaa", projectId: "proj-1", email: "bob@example.com", usedBy: 2 })
@@ -123,8 +123,8 @@ describe("GET /api/v2/invites/mine", () => {
   })
 })
 
-// FRO-326 hardening: JoinPage prefers the multi accept endpoint even for
-// single-project tokens, so the FRO-283 email binding (and the archived-
+// AQU-326 hardening: JoinPage prefers the multi accept endpoint even for
+// single-project tokens, so the AQU-283 email binding (and the archived-
 // project guard) must be enforced HERE, not just in the legacy accept.
 describe("POST /api/v2/invites/:token/accept — email binding + archived guard", () => {
   beforeEach(async () => {

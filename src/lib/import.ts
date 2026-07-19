@@ -32,7 +32,7 @@ import {
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
-import { bulkUploadTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
+import { enqueueTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -63,7 +63,7 @@ export interface EBibleProgress {
 }
 
 // ---------------------------------------------------------------------------
-// eBible → target column (FRO-191)
+// eBible → target column (AQU-191)
 // ---------------------------------------------------------------------------
 
 /**
@@ -259,7 +259,7 @@ export async function applyEBibleTargetImport(
         value: c.incomingText,
       }))
 
-    await bulkUploadTargetCommits({
+    await enqueueTargetCommits({
       projectId: ctx.projectId,
       fileId,
       author: ctx.author,
@@ -298,11 +298,10 @@ export interface TnProgress {
 }
 
 /**
- * Encode an ArrayBuffer to a base64 string. Used to capture binary source
- * blobs (DOCX, PPTX) as the round-trip side-car — the same mechanism USFM
- * uses for text. The server stores this in `file_source_blobs.raw_source`
- * (a TEXT column); the export route decodes it to reconstruct the original
- * file with translations substituted.
+ * Encode an ArrayBuffer to a base64 string. Retained because the acceptance
+ * parity suite imports it; the DOCX/PPTX import path no longer base64-encodes
+ * source bytes — it uploads the raw bytes to R2 via
+ * PUT …/files/{fileId}/source (see `rawBytes` below).
  */
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
@@ -321,6 +320,10 @@ export interface ImportResult {
    *  translations substituted. */
   rawSource?: string
   rawSourceFormat?: string
+  /** Raw binary bytes for binary formats (DOCX, PPTX). Uploaded directly to R2
+   *  via PUT …/files/{fileId}/source instead of being base64-encoded in the
+   *  import event payload. Not subject to the old 512 KB cap. */
+  rawBytes?: ArrayBuffer
   /** USFM book code (\id), when known. Persisted on the file projection so the
    *  sidebar can group + order by canonical book. */
   bookCode?: string
@@ -339,6 +342,8 @@ export interface ImportContext {
   /** Optional language pair to stamp on the `file.create` payload. */
   sourceLanguage?: string
   targetLanguage?: string
+  sourceTextDirection?: "ltr" | "rtl"
+  targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired as cells upload — drives the dialog progress UI. */
@@ -346,7 +351,7 @@ export interface ImportContext {
   /** Aborts the in-flight upload (dialog close / cancel). */
   signal?: AbortSignal
   /**
-   * FRO-287: Books (or files) the user chose to skip on collision.
+   * AQU-287: Books (or files) the user chose to skip on collision.
    * Keys are USFM bookCodes (uppercase, e.g. "GEN") for Paratext imports, or
    * normalised file names (lowercase trimmed) for single-file imports.
    * `importParatextProject`, `importParatextAsTarget`, and `importFile` all
@@ -354,6 +359,11 @@ export interface ImportContext {
    * "skipped by user" rather than being uploaded.
    */
   skipKeys?: ReadonlySet<string>
+}
+
+function normalizeImportedDirection(value: string | undefined | null): "ltr" | "rtl" | undefined {
+  const normalized = value?.trim().toLowerCase()
+  return normalized === "ltr" || normalized === "rtl" ? normalized : undefined
 }
 
 export interface ImportFileResult {
@@ -388,7 +398,7 @@ export async function importFile(
     return { refs: [ref], speakerPairs: [] }
   }
 
-  // FRO-287: single-file skip — key is normalized file name (lowercase trimmed).
+  // AQU-287: single-file skip — key is normalized file name (lowercase trimmed).
   const fileNameKey = file.name.trim().toLowerCase()
   if (ctx.skipKeys?.has(fileNameKey)) {
     return { refs: [], speakerPairs: [] }
@@ -399,7 +409,7 @@ export async function importFile(
   const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
 
   for (const result of results) {
-    // FRO-287: per-result skip — key is normalized display name (for USFM parsed
+    // AQU-287: per-result skip — key is normalized display name (for USFM parsed
     // results the name is the book display name; fall back to bookCode key too).
     const resultNameKey = result.name.trim().toLowerCase()
     const resultCodeKey = result.bookCode?.toUpperCase()
@@ -453,6 +463,7 @@ export async function importEBible(
     "ebible",
     {
       ...ctx,
+      sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
       onCellEnqueued: (count, total) => {
         onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
@@ -627,6 +638,7 @@ export async function importHelloao(
     "helloao",
     {
       ...ctx,
+      sourceTextDirection: normalizeImportedDirection(translation.textDirection) ?? ctx.sourceTextDirection,
       signal: signal ?? ctx.signal,
       onCellEnqueued: (count, total) => {
         onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
@@ -912,12 +924,15 @@ export async function emitParsedFile(
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
+      sourceTextDirection: ctx.sourceTextDirection,
+      targetTextDirection: ctx.targetTextDirection,
       orderedBy,
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
     },
     cells,
     rawSource: result.rawSource,
     rawSourceFormat: result.rawSourceFormat,
+    rawBytes: result.rawBytes,
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
@@ -931,6 +946,10 @@ export async function emitParsedFile(
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
       orderedBy,
+      ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
+      ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
+      ...(ctx.sourceTextDirection ? { sourceTextDirection: ctx.sourceTextDirection } : {}),
+      ...(ctx.targetTextDirection ? { targetTextDirection: ctx.targetTextDirection } : {}),
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
     },
@@ -1015,6 +1034,8 @@ export async function emitMediaFile(
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
+      sourceTextDirection: ctx.sourceTextDirection,
+      targetTextDirection: ctx.targetTextDirection,
       orderedBy: "time",
     },
     cells,
@@ -1147,7 +1168,7 @@ export interface ParatextBookPlan {
 
 /** A fully client-side-parsed Paratext project: everything the preview screen
  *  needs, and everything the commit phase uploads. Nothing has touched the
- *  network when this exists (FRO-310 preview-before-confirm). */
+ *  network when this exists (AQU-310 preview-before-confirm). */
 export interface ParatextPlan {
   project: ParatextProject
   books: ParatextBookPlan[]
@@ -1219,6 +1240,7 @@ export async function commitParatextProject(
   const baseCtx: ImportContext = {
     ...ctx,
     sourceLanguage: plan.project.settings.languageIsoCode || ctx.sourceLanguage,
+    sourceTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.sourceTextDirection,
   }
   const isSkipped = (bookId: string) => ctx.skipKeys?.has(bookId.toUpperCase()) ?? false
   const cellsTotal = plan.books.reduce(
@@ -1234,7 +1256,7 @@ export async function commitParatextProject(
       phase: "save", book: book.displayName, booksDone: done, booksTotal: total,
       cellsDone: cellsUploaded, cellsTotal,
     })
-    // FRO-287 / preview toggles: honour skip decisions.
+    // AQU-287 / preview toggles: honour skip decisions.
     if (isSkipped(book.bookId)) {
       skipped.push({ book: book.displayName, reason: "skipped by user" })
       done++
@@ -1316,7 +1338,7 @@ export async function importParatextAsTarget(
       phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total,
       cellsDone: cellsUploaded, cellsTotal,
     })
-    // FRO-287 / preview toggles: honour skip decisions.
+    // AQU-287 / preview toggles: honour skip decisions.
     if (isSkipped(bookPlan.bookId)) {
       skipped.push({ book: bookPlan.displayName, reason: "skipped by user" })
       done++
@@ -1367,6 +1389,7 @@ export async function importParatextAsTarget(
           parserVersion: "paratext-target-v1",
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
+          targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
           bookCode: bookPlan.bookId,
         },
         cells,
@@ -1377,7 +1400,7 @@ export async function importParatextAsTarget(
         signal: ctx.signal,
       })
 
-      await bulkUploadTargetCommits({
+      await enqueueTargetCommits({
         projectId: ctx.projectId,
         fileId,
         author: ctx.author,
@@ -1393,6 +1416,9 @@ export async function importParatextAsTarget(
         type: "usfm",
         createdAt: new Date().toISOString(),
         cellCount: cells.length,
+        ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
+        ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
+        ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
         ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
       })
       cellsUploaded = cellsBefore + cells.length + targets.length
@@ -1434,23 +1460,14 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
     case "docx": {
       const buffer = await file.arrayBuffer()
       const strings = await extractDocxStrings(buffer)
-      // Preserve raw bytes as the round-trip side-car so a future server-side
-      // DOCX serializer can inject translations back into the original markup.
-      // Guard: D1 TEXT rows are capped at ~1 MB; skip side-car for files above
-      // 512 KB (base64 overhead ~1.37×) to avoid exceeding that limit.
-      const rawSource = buffer.byteLength <= 512 * 1024
-        ? arrayBufferToBase64(buffer)
-        : undefined
-      return [{ name: file.name, strings, rawSource, rawSourceFormat: rawSource ? "docx" : undefined }]
+      // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
+      return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "docx" }]
     }
     case "pptx": {
       const buffer = await file.arrayBuffer()
       const strings = await extractPptxStrings(buffer)
-      // Same side-car strategy as DOCX above.
-      const rawSource = buffer.byteLength <= 512 * 1024
-        ? arrayBufferToBase64(buffer)
-        : undefined
-      return [{ name: file.name, strings, rawSource, rawSourceFormat: rawSource ? "pptx" : undefined }]
+      // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
+      return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
     }
     case "xliff": {
       const text = await file.text()

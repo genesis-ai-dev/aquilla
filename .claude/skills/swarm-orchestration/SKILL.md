@@ -20,9 +20,17 @@ The fan-out can run two ways. They share the same git lifecycle, state files, an
 2. **Stand up the integration branch** — `git worktree add -b swarm/integration .worktrees/swarm-integration HEAD && ln -s <root>/node_modules .worktrees/swarm-integration/node_modules`.
 3. **Write durable state** — create `docs/swarm/ORCHESTRATION.md` (backlog, operating model, forbidden paths, merge log) and `docs/swarm/TRACES.md` (open TODOs for the next agent to pick up). These survive context compaction; treat them as the source of truth, not your context window.
 4. **Fan out 4–6 sonnet agents** — each in its own worktree off the integration tip, with a self-contained brief. Always keep one agent driving the real UI. Accept 3-way merges. In Workflow mode this is a `parallel()`/`pipeline()` call with `isolation: 'worktree'` and `schema`-validated returns (see REFERENCE §6b); in cron/AFK mode these are cron-spawned `Agent` calls off manually-created worktrees (REFERENCE §1).
-5. **Verify every merge** — `tsc --noEmit` + vitest on integration before promoting to main.
-6. **Promote to main** — only when main's working tree is clean (no uncommitted work from another actor). Use FF if possible; squash-merge if histories diverged deeply.
-7. **Verify, then push to staging when the work is deemed complete** — once the backlog is drained, the orchestrator runs its **own** full verification on the integration branch (`tsc -b --noEmit` + `vitest run` + `npm run build` + worker `tsc`/tests, and the e2e smoke/specs where applicable) — do not delegate this final gate to the subagents. Only when that gate is green does the orchestrator push to the **`dev`** branch, which triggers the **staging preview deploy** (`dev.aquilla.app` — see `docs/STAGING.md` / `package.json` `deploy:aquilla:staging`). Validate on staging before advancing issues past `Fixed`/`Ready for Review`.
+5. **Verify every merge** — audit the diff for journey impact and matching E2E changes, then run
+   `npm run build` plus the directly affected Vitest/worker/smoke tests on integration. `tsc --noEmit` is not
+   the repository's build gate. Do not run the complete smoke suite after every wave.
+6. **Run the delivery gate only when delivery is next** — once the backlog is drained and a push, merge,
+   promotion, or deploy is actually next, the orchestrator runs the complete smoke suite once on the final
+   integration result. During implementation it runs only the build and directly affected tests. Do not
+   delegate the push/release gate to subagents.
+7. **Promote or push only after that gate** — require a clean main working tree before promotion. Use FF if
+   possible; squash-merge if histories diverged deeply. A staging push targets the **`dev`** branch and triggers
+   the preview deploy (`dev.aquilla.app`; see `docs/STAGING.md` and `package.json`
+   `deploy:aquilla:staging`). Validate on staging before advancing issues.
 8. **STOP when done** — convergence is the success state. Don't manufacture work.
 
 See [REFERENCE.md](REFERENCE.md) for patterns, templates, and lessons learned.
@@ -31,11 +39,27 @@ See [REFERENCE.md](REFERENCE.md) for patterns, templates, and lessons learned.
 
 - **Never clobber uncommitted work** of another actor in main. Check `git status` before any merge into main. If dirty files overlap your changes, hold — don't force.
 - **Never push branches** from subagents — only the orchestrator promotes to main.
-- **Verify before promoting** — tsc + vitest must be green on the integration branch before touching main.
+- **Tests ship with behavior** — each workstream owns its relevant smoke spec/page object. Changed journeys
+  require changed tests; new journeys require a new `e2e/JOURNEYS.md` row and smoke spec. Never defer this to
+  a later "test agent" or let overlapping ownership prevent the implementation agent from updating coverage.
+  Non-UI behavior must update the nearest unit/integration/worker test. Only genuinely non-behavioral docs,
+  config, or mechanical work may claim no test, and the workstream and merge log must justify that exception.
+- **Never weaken tests to get green** — investigate implementation, commits/issues/specs, and intended behavior
+  first. Fix regressions in product code; update tests only for intentional behavior changes. Do not delete,
+  skip, broaden, or soften assertions merely to pass.
+- **Use two verification scopes** — during implementation, run `npm run build` and only the directly affected
+  Vitest/worker/smoke tests. Before push, promotion, merge, or deploy, run the complete E2E smoke suite once on
+  the final integration result. `tsc --noEmit` does not replace `npm run build`.
 - **Orchestrator owns the final gate + the staging push** — when the work is deemed complete, the orchestrator (not a subagent) re-verifies the integration branch end-to-end, then pushes to the `dev` branch for the staging preview deploy. Never push to `dev`/staging on an unverified or red integration branch.
-- **Subagent briefs must be self-contained** — assume the agent has no memory of this conversation. Include: owned files, forbidden files, verify commands, SWARM-TODO requirement, no-push instruction.
+- **Subagent briefs must be self-contained** — assume the agent has no memory of this conversation. Include:
+  owned implementation and test files, affected `e2e/JOURNEYS.md` rows, the testing contract from `AGENTS.md`,
+  verify commands, SWARM-TODO requirement, and no-push instruction.
 - **Plan for failure** — revert a red merge and respawn a fixer agent rather than leaving integration broken.
 
 ## Acceptance criteria
 
-Set the goal as a concrete STOP checklist at the top of ORCHESTRATION.md before dispatching any agents. For a "production-ready" goal, the checklist includes: tsc clean, tests green, full build passes, worker tests pass, e2e smoke, and — critically — **every homepage/marketing claim is demonstrably true on the golden path**, or honestly dialed back (not silently broken).
+Set the goal as a concrete STOP checklist at the top of ORCHESTRATION.md before dispatching any agents. During
+implementation, the checklist requires matching coverage plus the build and directly affected tests. For a
+push/release-ready goal, it additionally requires the complete E2E smoke suite to pass once on the integrated
+result. Critically, **every homepage/marketing claim must be demonstrably true on the golden path**, or honestly
+dialed back (not silently broken).

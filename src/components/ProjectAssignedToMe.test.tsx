@@ -1,4 +1,4 @@
-// FRO-192: ProjectAssignedToMe tests — pickup list rendering + jump.
+// AQU-192: ProjectAssignedToMe tests — pickup list rendering + jump.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
@@ -17,6 +17,7 @@ function makeAssignment(overrides: Partial<MyAssignment> = {}): MyAssignment {
     projectId: "proj-1",
     scopeKind: "books",
     scopeLabel: "Genesis",
+    targetLang: "",
     deadline: null,
     note: null,
     cellsTotal: 10,
@@ -56,6 +57,19 @@ describe("ProjectAssignedToMe", () => {
     expect(screen.getByText("5/5 cells")).toBeTruthy()
     expect(screen.getByText("30%")).toBeTruthy()
     expect(screen.getByText("100%")).toBeTruthy()
+  })
+
+  // AQU-538 (§3.5): a lane-pinned assignment renders a lane chip; the default
+  // lane ('') renders none.
+  it("renders a lane chip only for a lane-pinned assignment", async () => {
+    mockGetMyAssignments.mockResolvedValue([
+      makeAssignment({ assignmentId: "asgn-es", scopeLabel: "Genesis", targetLang: "es" }),
+      makeAssignment({ assignmentId: "asgn-def", scopeLabel: "Exodus", targetLang: "" }),
+    ])
+    render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
+    await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
+    // The pinned lane's tag renders as a chip; there is exactly one "es".
+    expect(screen.getByText("es")).toBeTruthy()
   })
 
   it("calls onJumpToScopeLabel when a row is clicked", async () => {

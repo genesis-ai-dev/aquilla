@@ -27,8 +27,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 export const RAIL_IDLE_MS = 2200
 
 export interface RailIdleHideOptions {
-  /** Ephemeral reveal triggers OR'd together (row hover / focus-within /
-   *  tap-selected). When true the rail wants to be revealed. */
+  /** Ephemeral reveal triggers OR'd together (row hover / focus-within).
+   *  When true the rail wants to be revealed. */
   revealTriggered: boolean
   /** In-flight interactions that must never be idle-collapsed (expansion panel
    *  open, a rail control focused, a rail popover open). While true the rail is
@@ -41,7 +41,7 @@ export interface RailIdleHideOptions {
 export interface RailIdleHideResult {
   /** Whether the rail should render in its revealed state. */
   revealed: boolean
-  /** Call on a fresh reveal gesture (row mouse-enter / focus / tap-select) to
+  /** Call on a fresh reveal gesture (row mouse-enter / focus) to
    *  bring the rail back and restart the idle countdown. */
   registerActivity: () => void
 }

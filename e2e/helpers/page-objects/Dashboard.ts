@@ -36,12 +36,29 @@ export class Dashboard {
     // while /i tolerates label casing ("Project name" vs "Project Name").
     await dialog.getByLabel(/^Project name$/i).fill(name)
     await dialog.getByLabel(/^Source language$/i).fill(source)
-    await dialog.getByLabel(/^Target language$/i).fill(target)
-    await dialog.getByRole("button", { name: /^Create Project$/i }).click()
+    // Self-contained projects support extra target-language lanes and label
+    // the primary field "Target language(s)"; linked-target projects retain
+    // the singular label. Accept both accessible names.
+    await dialog.getByLabel(/^Target language(?:\(s\))?$/i).fill(target)
+    const createResponse = this.page.waitForResponse((response) => {
+      const request = response.request()
+      if (request.method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/api/v2/projects")
+      } catch {
+        return false
+      }
+    }, { timeout: 15_000 })
+    await Promise.all([
+      createResponse,
+      dialog.getByRole("button", { name: /^Create Project$/i }).click(),
+    ])
 
     // The project name renders in more than one place after creation (card +
     // heading), so scope to the first match to avoid strict-mode violations.
-    await expect(this.page.getByText(name).first()).toBeVisible({ timeout: 5_000 })
+    await expect(dialog).toBeHidden({ timeout: 10_000 })
+    await expect(this.page).toHaveURL(/\/projects\/[^/?#]+(?:[?#].*)?$/, { timeout: 15_000 })
+    await expect(this.page.getByText(name).first()).toBeVisible({ timeout: 15_000 })
     return name
   }
 

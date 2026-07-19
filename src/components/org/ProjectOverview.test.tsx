@@ -44,13 +44,33 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   aiDraftedPct: (p: { aiDraftedCells: number; totalCells: number }) => (p.totalCells > 0 ? p.aiDraftedCells / p.totalCells : 0),
   recordedMinutes: (p: { recordedMs: number }) => Math.round(p.recordedMs / 60000),
   deadlineStatus: () => _deadlineStatusResult,
+  // AQU-538 §3.3: real per-lane helpers so the lane table/tiles compute true %s.
+  laneTranslatedPct: (l: { filledCells: number; totalCells: number }) => (l.totalCells > 0 ? l.filledCells / l.totalCells : 0),
+  laneValidatedPct: (l: { validatedCells: number; totalCells: number }) => (l.totalCells > 0 ? l.validatedCells / l.totalCells : 0),
+}))
+
+// AQU-538 §3.3: the lane table mounts AssignModal + StaffLanePopover per lane.
+// Stub both to capture the lane they were handed (defaultLane / lane) without
+// pulling their whole fetch surface into this suite.
+vi.mock("@/components/AssignModal", () => ({
+  AssignModal: ({ open, defaultLane }: { open: boolean; defaultLane?: string }) =>
+    open ? <div data-testid="assign-modal-mock" data-lane={defaultLane ?? ""} /> : null,
+}))
+vi.mock("@/components/StaffLanePopover", () => ({
+  StaffLanePopover: ({ lane, laneLabel }: { lane: string; laneLabel: string }) => (
+    <div data-testid="staff-lane-mock" data-lane={lane} data-label={laneLabel} />
+  ),
+}))
+vi.mock("@/lib/sync/member-scopes", () => ({
+  fetchMemberScopes: vi.fn(async () => []),
+  putMemberScopes: vi.fn(async () => []),
 }))
 vi.mock("@/lib/sync/cloud-projects", () => ({
   setProjectDeadline: vi.fn(),
   // OrgSidebar (rendered by ProjectOverview's AppShell) calls
   // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
-  // you" nav section (FRO-474). Default to empty so it never interferes with
-  // pre-existing tests; individual FRO-474 tests override via mockResolvedValue.
+  // you" nav section (AQU-474). Default to empty so it never interferes with
+  // pre-existing tests; individual AQU-474 tests override via mockResolvedValue.
   fetchAccessibleProjects: vi.fn(async () => []),
 }))
 const downloadProjectBundle = vi.fn()
@@ -70,10 +90,14 @@ vi.mock("@/lib/sync/sync-token", () => ({
   fetchSyncToken: (...a: unknown[]) => fetchSyncToken(...a),
 }))
 const fetchProjectFiles = vi.fn()
-const fetchAllFileCells = vi.fn()
 vi.mock("@/lib/sync/cells-read", () => ({
   fetchProjectFiles: (...a: unknown[]) => fetchProjectFiles(...a),
-  fetchAllFileCells: (...a: unknown[]) => fetchAllFileCells(...a),
+}))
+const getFileProgress = vi.fn()
+const getFileSectionProgress = vi.fn()
+vi.mock("@/lib/progress/file-progress-resource", () => ({
+  getFileProgress: (...a: unknown[]) => getFileProgress(...a),
+  getFileSectionProgress: (...a: unknown[]) => getFileSectionProgress(...a),
 }))
 
 // Mock assignments workload so Team card doesn't break tests
@@ -153,7 +177,7 @@ function renderOverview() {
 beforeEach(async () => {
   localStorage.clear()
   _deadlineStatusResult = null
-  // Some FRO-474 tests override this to simulate a user with no orgs;
+  // Some AQU-474 tests override this to simulate a user with no orgs;
   // vi.clearAllMocks() clears call history but not mockResolvedValue
   // implementations, so restore the default (single org, auto-selected) here.
   const { listMyOrgs } = await import("@/lib/frontier/orgs")
@@ -194,7 +218,8 @@ describe("deriveProjectStatus", () => {
   function makePortfolio(opts: Partial<PortfolioProject> = {}): PortfolioProject {
     return {
       id: "p1", name: "Test", totalCells: 100, filledCells: 50, validatedCells: 20,
-      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null, ...opts,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null, ...opts,
     }
   }
 
@@ -260,7 +285,7 @@ describe("ProjectOverview load states", () => {
 
 // ── Per-metric conditionality ──────────────────────────────────────────────
 
-describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
+describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
   // WHY: audio-only projects must hide text metrics; text-only must hide audio.
   // Showing irrelevant metrics confuses managers scanning project state.
 
@@ -277,6 +302,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
       audioCells: 0, // no audio
       validatedAudioCells: 0,
       recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
     }])
     renderOverview()
 
@@ -305,6 +331,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
       audioCells: 60, // audio present
       validatedAudioCells: 0,
       recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
     }])
     renderOverview()
 
@@ -314,7 +341,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
     // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
     // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
     // For audio-only: filledCells=0 but totalCells=100, so text bars still show.
-    // Per FRO-168 spec: hide text metrics only when "no text content (translatable cells > 0)".
+    // Per AQU-168 spec: hide text metrics only when "no text content (translatable cells > 0)".
     // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
     // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
     // This test therefore confirms Has Audio appears when audioCells > 0.
@@ -346,6 +373,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
       audioCells: 60,
       validatedAudioCells: 0,
       recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
     }])
     renderOverview()
 
@@ -359,7 +387,7 @@ describe("ProjectOverview per-metric conditionality (FRO-168)", () => {
 
 describe("ProjectOverview file list show-more", () => {
   it("shows only the first 12 files when there are more than 12, then reveals all after clicking show-all", async () => {
-    // WHY: the file list was silently capped at 12 with no way to reach the rest (FRO-136).
+    // WHY: the file list was silently capped at 12 with no way to reach the rest (AQU-136).
     // This asserts that all files become reachable via the show-more toggle.
     const totalFiles = 16
     const fileList = Array.from({ length: totalFiles }, (_, i) => fileSummary(i + 1))
@@ -533,7 +561,7 @@ describe("ProjectOverview archive/restore", () => {
 
 // ── Audio progress ─────────────────────────────────────────────────────────
 
-describe("ProjectOverview audio progress (FRO-160)", () => {
+describe("ProjectOverview audio progress (AQU-160)", () => {
   // WHY: audio progress was showing 0% on all projects even when recordings
   // existed. The portfolio endpoint computes audioCells from the cell_audio
   // table; if it returns non-zero, the overview MUST display a non-zero
@@ -558,6 +586,8 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
         recordedMs: 90000,
         lastEditAt: Date.now(),
         deadlineAt: null,
+        sourceLanguage: null,
+        targetLanguage: null,
       },
     ])
 
@@ -592,6 +622,8 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
         recordedMs: 0,
         lastEditAt: Date.now(),
         deadlineAt: null,
+        sourceLanguage: null,
+        targetLanguage: null,
       },
     ])
 
@@ -606,9 +638,9 @@ describe("ProjectOverview audio progress (FRO-160)", () => {
   })
 })
 
-// ── FRO-474: project-only invitee navigation ────────────────────────────────
+// ── AQU-474: project-only invitee navigation ────────────────────────────────
 
-describe("ProjectOverview project-only invitee access (FRO-474)", () => {
+describe("ProjectOverview project-only invitee access (AQU-474)", () => {
   // WHY: a user with a direct project_members grant but no org membership
   // (activeOrgId == null, or an org that doesn't include this project) was
   // being redirected straight back to "/" — they could never open their own
@@ -636,7 +668,7 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
 
   it("renders the overview (no redirect) when the project's orgId does not match activeOrgId", async () => {
     // OrgProvider auto-selects the single org (id 1) from listMyOrgs (default mock).
-    // The project belongs to org 99 — a mismatch that pre-FRO-474 triggered a redirect.
+    // The project belongs to org 99 — a mismatch that pre-AQU-474 triggered a redirect.
     useProject.mockReturnValue({
       project: projectRecord({ level: 400, orgId: 99, files: [] }),
       status: "ready",
@@ -662,6 +694,7 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
     getPortfolio.mockResolvedValue([{
       id: "p1", name: "John", totalCells: 100, filledCells: 50, validatedCells: 20,
       aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
     }])
 
     renderOverview()
@@ -679,7 +712,7 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }))
   })
 
-  // FRO-416: the overview rendering (no redirect) is necessary but not
+  // AQU-416: the overview rendering (no redirect) is necessary but not
   // sufficient — a guest must be able to actually ENTER the workspace from
   // here. "Open project" navigates unconditionally to `/project/:id`; this
   // locks in that the button still fires for a project whose org the caller
@@ -703,9 +736,9 @@ describe("ProjectOverview project-only invitee access (FRO-474)", () => {
   })
 })
 
-// ── FRO-292: AI-drafted segment ─────────────────────────────────────────────
+// ── AQU-292: AI-drafted segment ─────────────────────────────────────────────
 
-describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
+describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
   // WHY: manager-facing overview must surface AI-drafted volume as a distinct
   // third segment so owners (Wendi/Anna) know how much AI batch output is
   // awaiting human review, not counting it as "human-translated" work.
@@ -725,6 +758,7 @@ describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
       audioCells: 0,
       validatedAudioCells: 0,
       recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
     }])
     renderOverview()
 
@@ -749,6 +783,7 @@ describe("ProjectOverview AI-drafted segment (FRO-292)", () => {
       filledCells: 80, validatedCells: 50,
       aiDraftedCells: 0, // no tracked AI drafts
       audioCells: 0, validatedAudioCells: 0, recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
     }])
     renderOverview()
 
@@ -915,28 +950,15 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
 // ── AQU-493: chapter/verse progress rollup ──────────────────────────────────
 
 describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
-  // WHY: Randall's dashboard walkthrough asked for a per-file breakdown that
-  // drills into book -> chapter -> verse progress for Scripture files, while
-  // leaving non-canonical files on the flat cell/file view (no crash, no
-  // empty tree). These tests exercise the expand affordance end-to-end
-  // against a mocked cells fetch, proving the rollup is real data (not a
-  // stub) and that percentages reconcile with the underlying cell counts.
-
-  type CellRow = import("@/lib/sync/cells-read-types").CellRow
-
-  function cellRow(over: Partial<CellRow> & { cellId: string; side: "source" | "target" }): CellRow {
+  function progress(sections: Array<{ key: string; totalCount: number; filledCount: number; validatedCount: number }>) {
     return {
-      value: "", valueHtml: null, type: null, canonicalRef: null, anchorCellId: null,
-      eventId: "evt", sourceEventId: null, lastEditor: null, lastEditAt: 0,
-      validated: false, wordCount: 0, ...over,
-    } as CellRow
-  }
-
-  function versePair(cellId: string, ref: string, filled: boolean, approved: boolean): CellRow[] {
-    return [
-      cellRow({ cellId, side: "source", canonicalRef: ref, value: "source" }),
-      cellRow({ cellId, side: "target", canonicalRef: ref, value: filled ? "target text" : "", validated: approved }),
-    ]
+      fileId: "f1",
+      revision: 10,
+      validationCount: 1,
+      file: { totalCount: 2, filledCount: 2, validatedCount: 2, validationLevels: [2] },
+      sections: sections.map((section) => ({ ...section, validationLevels: [section.validatedCount] })),
+      source: "projection" as const,
+    }
   }
 
   beforeEach(() => {
@@ -945,10 +967,16 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
 
   it("expanding a file with Bible references reveals a book row with reconciling chapter/verse progress", async () => {
     fetchProjectFiles.mockResolvedValue([fileSummary(1)])
-    fetchAllFileCells.mockResolvedValue([
-      ...versePair("c1", "GEN 1:1", true, true),
-      ...versePair("c2", "GEN 1:2", true, true),
-    ])
+    getFileProgress.mockResolvedValue(progress([
+      { key: "GEN 1", totalCount: 2, filledCount: 2, validatedCount: 2 },
+    ]))
+    getFileSectionProgress.mockResolvedValue({
+      fileId: "f1", sectionKey: "GEN 1", revision: 10, validationCount: 1,
+      verses: [
+        { ref: "GEN 1:1", filled: true, validated: true },
+        { ref: "GEN 1:2", filled: true, validated: true },
+      ],
+    })
     useProject.mockReturnValue({
       project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
       status: "ready", refresh,
@@ -971,14 +999,13 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     fireEvent.click(chapterRow)
     const verseCells = await screen.findAllByTestId("verse-cell")
     expect(verseCells).toHaveLength(2)
+    expect(getFileProgress).toHaveBeenCalledTimes(1)
+    expect(getFileSectionProgress).toHaveBeenCalledTimes(1)
   })
 
   it("expanding a file without Bible references shows a fallback note, not an empty tree", async () => {
     fetchProjectFiles.mockResolvedValue([fileSummary(1)])
-    fetchAllFileCells.mockResolvedValue([
-      cellRow({ cellId: "c1", side: "source", value: "hello", canonicalRef: null }),
-      cellRow({ cellId: "c1", side: "target", value: "bonjour", canonicalRef: null }),
-    ])
+    getFileProgress.mockResolvedValue(progress([]))
     useProject.mockReturnValue({
       project: projectRecord({ level: 400, files: [{ id: "f1", name: "Notes.txt", type: "txt", createdAt: "x", cellCount: 10 }] }),
       status: "ready", refresh,
@@ -989,14 +1016,41 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     const row = await screen.findByTestId("file-row")
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
 
-    expect(await screen.findByText(/no chapter\/verse structure detected/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no chapter structure detected/i)).toBeInTheDocument()
     expect(screen.queryByTestId("book-row")).not.toBeInTheDocument()
     expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
   })
 
-  it("collapsing and re-expanding a file does not re-fetch its cells", async () => {
+  it("expanding a file with book-level sections renders a flat section list", async () => {
     fetchProjectFiles.mockResolvedValue([fileSummary(1)])
-    fetchAllFileCells.mockResolvedValue(versePair("c1", "GEN 1:1", true, true))
+    getFileProgress.mockResolvedValue(progress([
+      { key: "GEN", totalCount: 2, filledCount: 1, validatedCount: 0 },
+      { key: "EXO", totalCount: 3, filledCount: 2, validatedCount: 1 },
+    ]))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "Bible.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    const sectionRows = await within(row).findAllByTestId("section-row")
+    expect(sectionRows).toHaveLength(2)
+    expect(sectionRows[0]).toHaveTextContent("GEN")
+    expect(sectionRows[0]).toHaveTextContent("1/0/2")
+    expect(sectionRows[1]).toHaveTextContent("EXO")
+    expect(screen.queryByText(/no chapter structure detected/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
+  })
+
+  it("collapsing and re-expanding a file does not re-fetch its compact progress", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    getFileProgress.mockResolvedValue(progress([
+      { key: "GEN 1", totalCount: 1, filledCount: 1, validatedCount: 1 },
+    ]))
     useProject.mockReturnValue({
       project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
       status: "ready", refresh,
@@ -1013,7 +1067,31 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i })) // re-expand
     await screen.findByTestId("book-row")
 
-    expect(fetchAllFileCells).toHaveBeenCalledTimes(1)
+    expect(getFileProgress).toHaveBeenCalledTimes(1)
+  })
+
+  it("distinguishes a failed progress request from a flat file and retries in place", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    getFileProgress
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(progress([
+        { key: "GEN 1", totalCount: 1, filledCount: 1, validatedCount: 1 },
+      ]))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    const retry = await within(row).findByRole("button", { name: /chapter progress unavailable/i })
+    expect(within(row).queryByText(/no chapter structure detected/i)).not.toBeInTheDocument()
+    fireEvent.click(retry)
+
+    expect(await within(row).findByTestId("book-row")).toBeInTheDocument()
+    expect(getFileProgress).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -1109,10 +1187,12 @@ describe("ProjectOverview file list sort/filter (AQU-499)", () => {
 
   it("keeps AQU-493's expanded chapter/verse rollup on the same file after re-sorting moves its row", async () => {
     useFiles([fileWith("f1", "EXO.usfm", 50), fileWith("f2", "GEN.usfm", 100)])
-    fetchAllFileCells.mockResolvedValue([
-      { cellId: "c1", side: "source", canonicalRef: "GEN 1:1", value: "src", valueHtml: null, type: null, anchorCellId: null, eventId: "e", sourceEventId: null, lastEditor: null, lastEditAt: 0, validated: false, wordCount: 0 },
-      { cellId: "c1", side: "target", canonicalRef: "GEN 1:1", value: "tgt", valueHtml: null, type: null, anchorCellId: null, eventId: "e", sourceEventId: null, lastEditor: null, lastEditAt: 0, validated: true, wordCount: 0 },
-    ] as import("@/lib/sync/cells-read-types").CellRow[])
+    getFileProgress.mockResolvedValue({
+      fileId: "f2", revision: 1, validationCount: 1,
+      file: { totalCount: 1, filledCount: 1, validatedCount: 1, validationLevels: [1] },
+      sections: [{ key: "GEN 1", totalCount: 1, filledCount: 1, validatedCount: 1, validationLevels: [1] }],
+      source: "projection",
+    })
 
     renderOverview()
     await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(2))
@@ -1131,9 +1211,9 @@ describe("ProjectOverview file list sort/filter (AQU-499)", () => {
     const newGenRow = screen.getAllByTestId("file-row")[1]
     expect(within(newGenRow).getByRole("button", { name: /^collapse GEN\.usfm$/i })).toBeInTheDocument()
     expect(within(newGenRow).getByTestId("book-row")).toBeInTheDocument()
-    // Re-sorting must never re-trigger the lazy per-file cell fetch for an
+    // Re-sorting must never re-trigger the lazy compact progress fetch for an
     // already-expanded file.
-    expect(fetchAllFileCells).toHaveBeenCalledTimes(1)
+    expect(getFileProgress).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -1142,12 +1222,12 @@ describe("ProjectOverview file list sort/filter (AQU-499)", () => {
 describe("ProjectOverview CSV export (AQU-500)", () => {
   // WHY: PMs want the progress table out into a spreadsheet. The control must
   // (a) only appear when the org's export permission (useOrgSettings.canExport
-  // — the pre-existing FRO-253 primitive) allows it, and (b) export exactly
+  // — the pre-existing AQU-253 primitive) allows it, and (b) export exactly
   // the rows/order the PM currently sees, honoring AQU-499's sort/filter.
 
   beforeEach(() => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
-    // happy-dom's navigator.clipboard is getter-only — define it per FRO-277's
+    // happy-dom's navigator.clipboard is getter-only — define it per AQU-277's
     // ImportDialog.partial-import.test.tsx pattern.
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -1249,5 +1329,180 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     const [blob, filename] = downloadBlob.mock.calls[0]
     expect(blob).toBeInstanceOf(Blob)
     expect(filename).toBe("My-Project-progress.csv")
+  })
+})
+
+// ── AQU-538 §3.3: per-project lane table + lane filter pills ─────────────────
+
+describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
+  // WHY: once a project has more than one target-language lane, a PM must see
+  // per-lane progress + people + quick actions directly on the overview, and be
+  // able to filter the header StatTiles / per-file drill-down to one lane. N=1
+  // projects must be byte-identical to the pre-lane overview (no table, no pills).
+
+  const NOW = new Date("2026-07-14T12:00:00Z").getTime()
+
+  type PL = NonNullable<PortfolioProject["lanes"]>[number]
+  const TWO_LANES: PL[] = [
+    { lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW - 2 * 3600 * 1000 },
+    { lane: "es", totalCells: 100, filledCells: 20, validatedCells: 8, lastEditAt: NOW - 3 * 24 * 3600 * 1000 },
+  ]
+
+  function laneProject(over: Partial<PortfolioProject> = {}): PortfolioProject {
+    return {
+      id: "p1", name: "John", totalCells: 200, filledCells: 100, validatedCells: 58,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0,
+      lastEditAt: NOW, deadlineAt: null, lanes: TWO_LANES, ...over,
+    }
+  }
+
+  function useLaneProject(
+    files: ProjectRecord["files"] =
+      [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "x", cellCount: 10 }],
+  ) {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, targetLanguage: "Bambara", targetLanes: ["es"], files }),
+      status: "ready", refresh,
+    })
+  }
+
+  /** The StatTile whose visible label is `label` (distinct from the StatBar row
+   *  which reuses the same word) — filtered by the tile-label's unique class. */
+  function statTile(label: string): HTMLElement {
+    const node = screen.getAllByText(label).find((n) => n.className.includes("text-[11px]"))
+    return node!.parentElement as HTMLElement
+  }
+
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+  })
+
+  it("renders the lane table with one row per lane and correct percentages when lanes > 1", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const defaultRow = within(table).getByTestId("overview-lane-row-default")
+    const esRow = within(table).getByTestId("overview-lane-row-es")
+
+    // Default lane labeled with the project's targetLanguage; es keeps its tag.
+    expect(defaultRow).toHaveTextContent("Bambara")
+    expect(esRow).toHaveTextContent("es")
+
+    // Translated 80% / Validated 50% (default), 20% / 8% (es).
+    expect(defaultRow).toHaveTextContent("80%")
+    expect(defaultRow).toHaveTextContent("50%")
+    expect(esRow).toHaveTextContent("20%")
+    expect(esRow).toHaveTextContent("8%")
+  })
+
+  it("does not render the lane table (or pills) for a single-lane project", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
+    })])
+    renderOverview()
+
+    // The progress card still renders (Translated tile present) — just no lane UI.
+    await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lane-filter-pills")).not.toBeInTheDocument()
+  })
+
+  it("selecting a lane pill swaps the header StatTile percentages to that lane's numbers", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("lane-filter-pills")
+
+    // "All" (default) — cross-lane scalars: 100/200 = 50% translated, 58/200 = 29% validated.
+    expect(statTile("Translated")).toHaveTextContent("50%")
+    expect(statTile("Validated")).toHaveTextContent("29%")
+
+    // Filter to es — laneTranslatedPct(es) = 20/100 = 20%, laneValidatedPct = 8/100 = 8%.
+    fireEvent.click(screen.getByTestId("lane-pill-es"))
+    await waitFor(() => expect(statTile("Translated")).toHaveTextContent("20%"))
+    expect(statTile("Validated")).toHaveTextContent("8%")
+
+    // Back to All restores the cross-lane figures.
+    fireEvent.click(screen.getByTestId("lane-pill-all"))
+    await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("each lane row's Open link deep-links the workspace at that lane (?lane=)", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1?lane=es")
+    // The default lane opens the workspace with no lane param (today's behavior).
+    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1")
+  })
+
+  it("Assign… on a lane row mounts AssignModal pinned to that lane", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    // Closed until launched.
+    expect(screen.queryByTestId("assign-modal-mock")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("overview-lane-assign-es"))
+    const modal = await screen.findByTestId("assign-modal-mock")
+    expect(modal.getAttribute("data-lane")).toBe("es")
+  })
+
+  it("Staff… on a lane row mounts StaffLanePopover for that lane", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const esStaff = within(within(table).getByTestId("overview-lane-row-es")).getByTestId("staff-lane-mock")
+    expect(esStaff.getAttribute("data-lane")).toBe("es")
+
+    const defaultStaff = within(within(table).getByTestId("overview-lane-row-default")).getByTestId("staff-lane-mock")
+    expect(defaultStaff.getAttribute("data-lane")).toBe("")
+    expect(defaultStaff.getAttribute("data-label")).toBe("Bambara")
+  })
+
+  it("the '+ Add language' link routes to the project settings Languages section", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    await screen.findByTestId("overview-lane-table")
+    expect(screen.getByTestId("overview-lane-add-language").getAttribute("href"))
+      .toBe("/project/p1/settings?section=general")
+  })
+
+  it("re-reads the per-file drill-down with the selected lane param", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    getFileProgress.mockResolvedValue({
+      fileId: "f1", revision: 1, validationCount: 1,
+      file: { totalCount: 1, filledCount: 1, validatedCount: 1, validationLevels: [1] },
+      sections: [{ key: "GEN 1", totalCount: 1, filledCount: 1, validatedCount: 1, validationLevels: [1] }],
+      source: "projection",
+    })
+    renderOverview()
+
+    await screen.findByTestId("lane-filter-pills")
+    fireEvent.click(screen.getByTestId("lane-pill-es"))
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    await waitFor(() =>
+      expect(getFileProgress.mock.calls.some((c) => c[3] === "es")).toBe(true),
+    )
+    // And never with the default lane once es is selected (lane-true drill-down).
+    expect(getFileProgress.mock.calls.every((c) => c[3] === "es")).toBe(true)
   })
 })

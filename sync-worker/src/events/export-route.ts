@@ -12,7 +12,7 @@
 // Auth: sync-token JWT scoped to projectId; role floor = max(MAINTAINER, org
 // exportMinRole setting). Default org floor = MAINTAINER (600) per spec Q32.
 // Org owners can RAISE the floor (e.g., OWNER only) or LOWER it (e.g.,
-// CONTRIBUTOR) via org settings — see FRO-253. Current behavior (maintainer)
+// CONTRIBUTOR) via org settings — see AQU-253. Current behavior (maintainer)
 // is preserved when no exportMinRole is set.
 //
 // Returns null if the URL doesn't match (chainable in the fetch dispatcher).
@@ -30,6 +30,7 @@ import {
 export interface ExportRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  SNAPSHOTS: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
@@ -60,7 +61,7 @@ export async function handleExportSourceRequest(
   if (!auth.ok) {
     return withCors(new Response(auth.reason, { status: auth.status }), request)
   }
-  // FRO-253: resolve the org-level export floor. Default = MAINTAINER (600).
+  // AQU-253: resolve the org-level export floor. Default = MAINTAINER (600).
   // The org may raise it (e.g., OWNER) or lower it (e.g., CONTRIBUTOR).
   const exportFloor = await resolveExportFloor(db, projectId)
   if (auth.claims.role < exportFloor) {
@@ -73,11 +74,11 @@ export async function handleExportSourceRequest(
 
   const blob = await db
     .prepare(
-      `SELECT format, raw_source FROM file_source_blobs
+      `SELECT format, raw_source, r2_key FROM file_source_blobs
         WHERE file_id = ? AND project_id = ?`,
     )
     .bind(fileId, projectId)
-    .first<{ format: string; raw_source: string }>()
+    .first<{ format: string; raw_source: string | null; r2_key: string | null }>()
   if (!blob) {
     return withCors(
       new Response(
@@ -96,14 +97,14 @@ export async function handleExportSourceRequest(
   const fileName = fileMeta?.name || `${fileId}.sfm`
 
   if (blob.format === "docx" || blob.format === "pptx") {
-    // FRO-233: For binary Office formats (DOCX/PPTX) the server serves the
+    // AQU-233: For binary Office formats (DOCX/PPTX) the server serves the
     // raw side-car bytes as-is (base64-decoded back to binary). The client is
     // responsible for XML-injection of translations using JSZip + DOMParser —
     // the worker lacks a ZIP reader library and adding jszip would be a new
     // heavy dependency (flagged per HARD LIMITS). The raw bytes are sufficient
     // for a client-side "open in Word with structure intact" export.
     //
-    // SWARM-TODO(FRO-233-server-inject): if a future wave adds jszip to the
+    // SWARM-TODO(AQU-233-server-inject): if a future wave adds jszip to the
     // sync-worker (or implements a DecompressionStream-based ZIP reader), the
     // client-side injection path can be replaced by a lossless server-side
     // serializer that mirrors serializeUsfmLossless.
@@ -113,16 +114,33 @@ export async function handleExportSourceRequest(
     const ext = blob.format === "docx" ? ".docx" : ".pptx"
     const downloadName = fileName.endsWith(ext) ? fileName : `${fileName}${ext}`
 
-    // Decode base64 side-car back to binary.
+    // Resolve binary bytes: prefer R2 (r2_key), fall back to legacy base64 raw_source.
     let binary: Uint8Array
-    try {
-      const cleaned = blob.raw_source.replace(/\s/g, "")
-      const b64 = atob(cleaned)
-      binary = new Uint8Array(b64.length)
-      for (let i = 0; i < b64.length; i++) binary[i] = b64.charCodeAt(i)
-    } catch {
+    if (blob.r2_key) {
+      const obj = await env.SNAPSHOTS.get(blob.r2_key)
+      if (!obj) {
+        return withCors(
+          new Response("source bytes missing from storage — re-import", { status: 404 }),
+          request,
+        )
+      }
+      binary = new Uint8Array(await obj.arrayBuffer())
+    } else if (blob.raw_source) {
+      // Legacy path: base64-encoded bytes stored inline in file_source_blobs.
+      try {
+        const cleaned = blob.raw_source.replace(/\s/g, "")
+        const b64 = atob(cleaned)
+        binary = new Uint8Array(b64.length)
+        for (let i = 0; i < b64.length; i++) binary[i] = b64.charCodeAt(i)
+      } catch {
+        return withCors(
+          new Response("side-car bytes corrupted — re-import to restore", { status: 500 }),
+          request,
+        )
+      }
+    } else {
       return withCors(
-        new Response("side-car bytes corrupted — re-import to restore", { status: 500 }),
+        new Response("no source bytes recorded — re-import to enable export", { status: 404 }),
         request,
       )
     }
@@ -176,7 +194,14 @@ export async function handleExportSourceRequest(
     overrides.set(row.canonical_ref, row.value)
   }
 
-  const doc = parseUsfmLossless(blob.raw_source)
+  const rawSource = blob.raw_source
+  if (!rawSource) {
+    return withCors(
+      new Response("no source text recorded — re-import to enable export", { status: 404 }),
+      request,
+    )
+  }
+  const doc = parseUsfmLossless(rawSource)
   const lossyVerseCount = countLossyVerses(doc, overrides)
   const out = serializeUsfmLossless(doc, overrides)
 
@@ -192,7 +217,7 @@ export async function handleExportSourceRequest(
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "Content-Disposition": `attachment; filename="${downloadName.replace(/"/g, "")}"`,
-        // FRO-276: number of translated verses whose original span contained
+        // AQU-276: number of translated verses whose original span contained
         // intra-verse markers (footnotes, poetry, character markers) that the
         // plain-text substitution dropped. 0 = clean round-trip. The client
         // reads this to surface a per-export warning in ExportDialog.
@@ -204,4 +229,4 @@ export async function handleExportSourceRequest(
 }
 
 // resolveExportFloor is now in ./export-floor.ts (shared with export-bundle-route.ts).
-// Imported above — see FRO-253 note in that module for behavior and caveats.
+// Imported above — see AQU-253 note in that module for behavior and caveats.

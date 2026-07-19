@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { Button } from "@/components/ui/button"
@@ -119,13 +119,20 @@ const signupSchema = z
     }
   })
 
-export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
+interface FrontierSignupFormProps {
+  onSuccess: () => void
+  /** Prefills invite-bound signup forms without overriding user edits. */
+  initialEmail?: string | null
+}
+
+export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFormProps) {
   const { register } = useFrontierSession()
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [isOnline, setIsOnline] = useState(() => navigator.onLine)
+  const emailEditedRef = useRef(false)
 
   const form = useForm({
-    defaultValues: { username: "", email: "", password: "" },
+    defaultValues: { username: "", email: initialEmail ?? "", password: "" },
     validators: { onSubmit: signupSchema },
     onSubmit: async ({ value }) => {
       clearSubmitError()
@@ -137,6 +144,12 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
       }
     },
   })
+
+  useEffect(() => {
+    if (!emailEditedRef.current && initialEmail) {
+      form.setFieldValue("email", initialEmail)
+    }
+  }, [form, initialEmail])
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
@@ -199,7 +212,10 @@ export function FrontierSignupForm({ onSuccess }: { onSuccess: () => void }) {
                   type="email"
                   value={field.state.value}
                   onBlur={field.handleBlur}
-                  onChange={(e) => field.handleChange(e.target.value)}
+                  onChange={(e) => {
+                    emailEditedRef.current = true
+                    field.handleChange(e.target.value)
+                  }}
                   aria-invalid={invalid}
                   autoComplete="email"
                 />

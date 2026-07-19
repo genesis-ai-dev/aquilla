@@ -1,8 +1,8 @@
 /**
- * PostEditMetricsSection — FRO-311 AI metrics panel.
+ * PostEditMetricsSection — AQU-311 AI metrics panel.
  *
  * Shows post-edit magnitude (normalized edit distance between AI drafts and
- * the final human-edited text) over time, with a by-user breakdown.
+ * the final approved text) over time, with a by-reviewer breakdown.
  *
  * Surfaces as a section within ProjectSettings, alongside other project-level
  * stats. Reachable via the "AI Metrics" nav entry.
@@ -61,6 +61,14 @@ function formatWeek(weekStart: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
 }
 
+function formatDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  return `${(minutes / 60).toFixed(1)}h`
+}
+
 // ── Bar chart (weekly trend) ──────────────────────────────────────────────────
 
 function WeeklyChart({ weeks }: { weeks: WeekBucket[] }) {
@@ -111,8 +119,8 @@ function UserTable({ users, activeUser, onSelectUser }: {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>User</TableHead>
-            <TableHead className="text-right">Edits</TableHead>
+            <TableHead>Reviewer</TableHead>
+            <TableHead className="text-right">Approvals</TableHead>
             <TableHead className="text-right">Avg edit distance</TableHead>
           </TableRow>
         </TableHeader>
@@ -157,7 +165,7 @@ function MetricsEmptyState({ reason }: { reason: "no-data" | "error" | "no-cloud
       icon: Sparkles,
       title: "No post-edit pairs yet",
       description:
-        "Pairs are recorded when an AI-drafted segment is later edited by a human. Use the AI completion feature (Sparkles) to generate drafts, then edit them — data will appear here.",
+        "Pairs are recorded only after a human approves an AI draft or an edited descendant. Generate a draft, review it, then approve it to add effort data here.",
     },
     error: {
       icon: AlertTriangle,
@@ -242,7 +250,7 @@ export function PostEditMetricsSection({
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle id="ai-metrics-heading" className="text-base">
-              AI Post-Edit Magnitude
+              Approved AI Review Effort
             </CardTitle>
             {!isLoading && (
               <button
@@ -255,7 +263,7 @@ export function PostEditMetricsSection({
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            Average edit distance between AI drafts and final human text.{" "}
+            Edit distance and elapsed time between machine drafts and final approved text.{" "}
             <span className="italic">0% = accepted as-is · 100% = completely replaced.</span>
           </p>
         </CardHeader>
@@ -288,7 +296,15 @@ export function PostEditMetricsSection({
                 </div>
                 <div className="rounded-md border px-3 py-2 text-center">
                   <div className="text-xl font-semibold tabular-nums">{metrics.totalCount}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">AI→human edit pairs</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">approved draft pairs</div>
+                </div>
+                <div className="rounded-md border px-3 py-2 text-center">
+                  <div className="text-xl font-semibold tabular-nums">{pct(metrics.acceptanceRate)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">accepted as-is</div>
+                </div>
+                <div className="rounded-md border px-3 py-2 text-center">
+                  <div className="text-xl font-semibold tabular-nums">{formatDuration(metrics.overallAvgReviewMs)}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">avg draft→approval</div>
                 </div>
                 <div className="rounded-md border px-3 py-2 text-center">
                   <div className="text-xl font-semibold">
@@ -332,7 +348,7 @@ export function PostEditMetricsSection({
               {metrics.byUser.length > 0 && (
                 <div className="mt-5">
                   <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    By user
+                    By reviewer
                     <span className="ml-1 normal-case font-normal text-muted-foreground">
                       (click a row to filter the trend above)
                     </span>
@@ -348,8 +364,12 @@ export function PostEditMetricsSection({
               {/* Approximation disclosure */}
               <p className="mt-4 text-[11px] text-muted-foreground/70">
                 Metric: character-level normalized Levenshtein distance (NED).
-                Pairs require FRO-292 AI provenance (ai_suggestion=true on the commit event).
-                Historical commits before that feature are excluded.
+                Pairs require AQU-292 AI provenance (ai_suggestion=true on the commit event).
+                Only human-approved pairs are included. Character insertions, deletions,
+                substitutions, acceptance, model, prompt version, and retrieved example IDs
+                come from this project&apos;s private event history. Elapsed time runs from draft
+                commit to first approval and may include time away from the editor.
+                Historical commits before AQU-292 are excluded.
               </p>
             </>
           )}

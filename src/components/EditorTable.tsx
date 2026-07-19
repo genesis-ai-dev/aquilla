@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import {
   LegendList,
   type LegendListRef,
@@ -9,15 +9,17 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, Music,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
   type CellFootnoteDetails,
   type CellStore,
+  readAtVersion,
   useCellIds,
   useCellStoreVersion,
   useCellView,
@@ -31,6 +33,7 @@ import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
@@ -44,12 +47,15 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
-import { tokenizeWords } from "@/lib/audio/timings"
+import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
+import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
+import { KaraokeReadText } from "./KaraokeReadText"
+import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -64,11 +70,17 @@ import {
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
+import { ChapterNavigator, type ChapterNavigationItem } from "./ChapterNavigator"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -81,7 +93,22 @@ import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
+import {
+  cellNumberLabel,
+  chapterLabelFromCanonical,
+  verseLabelFromCanonical,
+} from "@/lib/scripture-reference"
+import {
+  firstActuallyVisibleIndex,
+  rowMatchesChapterHeading,
+  sectionLabelAtViewportStart,
+} from "@/lib/chapter-navigation"
 import { isPerfLogEnabled } from "@/lib/perf-log"
+import {
+  type DirectionMode,
+  type TextDirection,
+  resolveTextDirection,
+} from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
@@ -95,7 +122,7 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
-import { FootnoteInline, FootnotedTextValue } from "./footnotes/FootnoteInline"
+import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
   type AddFootnoteMarkerOption,
@@ -114,6 +141,12 @@ import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
+import {
+  useCellPresence,
+  type CellPresencePeer,
+  type ProjectPresenceStore,
+  type TargetPresenceSelection,
+} from "@/lib/sync/presence-store"
 
 // Per-row render counter. Always accumulated when perf logging is on (cheap)
 // but NOT auto-logged — render logs would flood the console and push the
@@ -125,6 +158,7 @@ import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 const rowRenders = new Map<string, number>()
 const ESTIMATED_ROW_HEIGHT_PX = 140
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
+const EMPTY_CONCEPTS: Concept[] = []
 
 function clampIndex(index: number, length: number): number {
   if (length <= 0) return 0
@@ -232,8 +266,10 @@ function SynthStatusBadge({
   // A2: "Open audio setup" must DO something. When the callback is provided we
   // call it (host may already be in audio mode); otherwise we navigate directly
   // to the project settings page which contains the Gemini API key section.
+  // AQU-522: deep-link with `?q=gemini` so the settings search filters to the
+  // Voice card and the key entry is visible immediately (no scrolling/hunting).
   const openVoiceSetup = () =>
-    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings`)
+    onOpenAudioSetup ? onOpenAudioSetup() : navigate(`/project/${projectId}/settings?q=gemini`)
   // A4: track whether the user dismissed the popover without fixing the error.
   // Dismissed = popover hidden but cell is still unvoiced — show a muted badge
   // so the row doesn't look falsely clean.
@@ -465,6 +501,28 @@ interface EditorTableProps {
   project: ProjectRecord
   cellStore: CellStore
   username: string
+  /**
+   * AQU-538: the active target LANE. Threaded down to each row so target-side
+   * emits (`target.cell.commit`, `cell.validate`/`cell.unvalidate`) carry
+   * `targetLang`. `''`/undefined = the default lane, OMITTED from the wire by
+   * the emit helpers, so N=1 is byte-identical.
+   */
+  activeLane?: string
+  /**
+   * AQU-602: all selectable target lanes, default lane FIRST as `''` (callers
+   * build `['', ...targetLanes]`). When more than one is offered AND
+   * `onLaneChange` is provided, the TARGET language tag in the column header
+   * becomes a dropdown that switches the active lane. With one lane (or no
+   * handler) the tag stays a static pill — byte-identical to the N=1 header.
+   */
+  lanes?: string[]
+  /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
+   *  is used. Omit to keep the tag non-interactive. */
+  onLaneChange?: (lane: string) => void
+  /** Human label for the default (`''`) lane in the TARGET tag dropdown — the
+   *  project/file's default target-language name. Non-default lanes label
+   *  themselves with their own tag string. */
+  defaultLaneLabel?: string
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
@@ -482,7 +540,8 @@ interface EditorTableProps {
    *  refetches the cells projection. `committedEventId` is the event id the
    *  commit was assigned (known only here, before the projection round-trip);
    *  the parent's auto-BT pins to it so the BT isn't instantly stale. */
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  getPendingTargetEventId?: (cellId: string) => string | null
   /** Optimistic local patch fired BEFORE the outbox enqueue so the editor's
    *  rule infractions + per-cell UI re-derive instantly without waiting for
    *  the projection round-trip. The follow-up `onCellCommitted` -> revalidate
@@ -491,12 +550,16 @@ interface EditorTableProps {
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
+  /** Project-wide presence store fed by the existing ProjectSync DO. Rows
+   *  subscribe per-cell so target cursor motion does not rerender the table. */
+  presenceStore?: ProjectPresenceStore | null
   /** Cell ids whose remote value changed while this client held the focus
    *  lock — surfaces the discard-and-reload banner. */
   cellsWithRemoteChange?: ReadonlySet<string>
   /** Parent-managed focus claim/release (per-cell). */
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
@@ -535,8 +598,10 @@ interface EditorTableProps {
   onSeekToCue?: (cellId: string) => void
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode?: DirectionMode
+  targetDirectionMode?: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   // onAiSetupNeeded/onOpenRecording moved to EditorActionsContext (FRO perf
@@ -601,7 +666,8 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, isCompletionConfigured, isCompletionAvailable,
+  project, cellStore, username, activeLane = "", lanes, onLaneChange, defaultLaneLabel,
+  isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
@@ -610,23 +676,24 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   activeCueIndex, onSeekToCue,
-  lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection,
+  lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
   onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
+  getPendingTargetEventId,
   onOptimisticEdit,
   cellLockHolders,
+  presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
-  assignmentsByCellId,
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
@@ -644,7 +711,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const listRef = useRef<LegendListRef | null>(null)
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
+  const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
+  // Mirror ref so the imperative handle (getCurrentIndex) reads current
+  // values without widening its dependency array — same pattern as
+  // displayCellsRef below.
+  const viewableIndexesRef = useRef(viewableIndexes)
+  viewableIndexesRef.current = viewableIndexes
+  // Last cell whose editor was activated (jump target or clicked-into cell).
+  // Deliberately NOT cleared on blur/deactivate: clicking the "Next
+  // unfinished" menu item blurs the editor before the click lands, and the
+  // user's position shouldn't evaporate at that instant. getCurrentIndex
+  // ignores it once the cell is off screen or no longer rendered.
+  const lastActiveEditorCellIdRef = useRef<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
@@ -661,6 +740,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   } | null>(null)
   const selectionDragAbortRef = useRef<AbortController | null>(null)
   const selectionAutoScrollFrameRef = useRef<number | null>(null)
+  const chapterScrollFrameRef = useRef<number | null>(null)
   const selectionPointerYRef = useRef<number | null>(null)
   const previousBodyUserSelectRef = useRef<string | null>(null)
 
@@ -692,6 +772,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleActivateEditor = useCallback((cellId: string) => {
     setActiveEditorCellId(cellId)
+    lastActiveEditorCellIdRef.current = cellId
   }, [])
 
   const handleDeactivateEditor = useCallback((cellId: string) => {
@@ -727,8 +808,50 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [])
   const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
 
+  const updateChapterVisibleIndex = useCallback(() => {
+    const viewport = listRootRef.current
+    const root = getListQueryRoot()
+    if (!viewport || !root) return
+
+    const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-cell-id][data-index]"))
+      .map((row) => {
+        const index = Number(row.dataset.index)
+        if (!Number.isInteger(index)) return null
+        const rect = row.getBoundingClientRect()
+        return { index, top: rect.top, bottom: rect.bottom }
+      })
+      .filter((row): row is { index: number; top: number; bottom: number } => row !== null)
+    const nextIndex = firstActuallyVisibleIndex(
+      rows,
+      viewport.getBoundingClientRect().top,
+      firstVisibleIndex,
+    )
+    setChapterVisibleIndex((current) => current === nextIndex ? current : nextIndex)
+  }, [firstVisibleIndex, getListQueryRoot])
+
+  const handleListScroll = useCallback(() => {
+    if (chapterScrollFrameRef.current !== null) return
+    chapterScrollFrameRef.current = requestAnimationFrame(() => {
+      // Legend List applies its row transforms after the scroll callback.
+      // Read geometry on the following frame so positions are settled.
+      chapterScrollFrameRef.current = requestAnimationFrame(() => {
+        chapterScrollFrameRef.current = null
+        updateChapterVisibleIndex()
+      })
+    })
+  }, [updateChapterVisibleIndex])
+
+  useEffect(() => () => {
+    if (chapterScrollFrameRef.current !== null) {
+      cancelAnimationFrame(chapterScrollFrameRef.current)
+    }
+  }, [])
+
   useEffect(() => {
     setFirstVisibleIndex((current) => clampIndex(current, displayCellIds.length))
+    setChapterVisibleIndex((current) => current === null
+      ? null
+      : clampIndex(current, displayCellIds.length))
     setViewableIndexes((current) => {
       const next = current.filter((index) => index >= 0 && index < displayCellIds.length)
       return next.length === current.length ? current : next
@@ -749,6 +872,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
     setActiveEditorCellId(targetId)
+    lastActiveEditorCellIdRef.current = targetId
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -793,7 +917,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     },
     focusCellEditorIndex: focusCellEditorByIndex,
-    getCurrentIndex: () => 0,
+    getCurrentIndex: () => {
+      // The last-active editor cell when it's on screen (so "Next unfinished"
+      // advances past a just-jumped-to cell instead of re-finding it),
+      // otherwise the first visible row — mapped from display space back to
+      // the `cells` prop space the search indexes into. Pure logic lives in
+      // lib/editor/current-index.ts where it's testable.
+      const state = listRef.current?.getState()
+      const scrollEl = parentRef.current ?? listRootRef.current
+      return resolveCurrentCellIndex({
+        displayCells: displayCellIdsRef.current.map((id) => ({ id })),
+        cells: cellStore.getAllSummaries(),
+        activeCellId: lastActiveEditorCellIdRef.current,
+        viewableIndexes: viewableIndexesRef.current,
+        measurements: state
+          ? {
+              scroll: state.scroll,
+              positionAtIndex: (index) => state.positionAtIndex(index),
+              sizeAtIndex: (index) => state.sizeAtIndex(index),
+            }
+          : null,
+        fallbackScrollTop: scrollEl?.scrollTop ?? 0,
+        estimatedRowHeight: ESTIMATED_ROW_HEIGHT_PX,
+      })
+    },
     flashCell(cellId, _searchTerm) {
       // Defer to next frame: the list may still be scrolling, so the
       // DOM node we want might not exist yet.
@@ -806,7 +953,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
       })
     },
-  }), [displayCellIds.length, focusCellEditorByIndex, getListQueryRoot])
+  }), [displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1128,14 +1275,99 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [cellStore])
 
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const currentSectionLabel = firstVisibleCellId ? cellStore.getSectionLabelForCellId(firstVisibleCellId) : ""
+  const currentSectionLabel = useMemo(() => {
+    const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
+    const baseLabel = sectionLabelAtViewportStart(
+      displayCellIds,
+      visibleIndex,
+      (cellId) => cellStore.getSectionLabelForCellId(cellId),
+    )
+    const nextSection = cellStore.getNavigationIndex().find(
+      (entry) => entry.firstIndex > visibleIndex,
+    )
+    const cellId = displayCellIds[visibleIndex]
+    const cell = cellId ? cellStore.getCellView(cellId) : null
+    const nextDisplayLabel = chapterLabelFromCanonical(nextSection?.label)
+    if (
+      nextSection
+      && nextDisplayLabel
+      && cell
+      && rowMatchesChapterHeading([cell.original, cell.translated], nextDisplayLabel)
+    ) {
+      return nextSection.label
+    }
+    return baseLabel
+  }, [cellStore, cellStoreVersion, chapterVisibleIndex, displayCellIds, firstVisibleIndex])
+
+  const chapterNavigationItems = useMemo<ChapterNavigationItem[]>(() =>
+    readAtVersion(cellStoreVersion, () => {
+      const navigation = cellStore.getNavigationIndex()
+      const summaries = cellStore.getAllSummaries()
+      return navigation
+        .map((entry, index) => {
+          const displayLabel = chapterLabelFromCanonical(entry.label)
+          if (looksLikeUuid(entry.label) || !displayLabel) return null
+          const endIndex = navigation[index + 1]?.firstIndex ?? summaries.length
+          const verseLabels = summaries
+            .slice(entry.firstIndex, endIndex)
+            .map((cell) => verseLabelFromCanonical(cell.group))
+            .filter((label): label is string => Boolean(label))
+          const firstVerse = verseLabels[0] ?? null
+          const lastVerse = verseLabels[verseLabels.length - 1] ?? null
+          return {
+            label: entry.label,
+            displayLabel,
+            verseRange: firstVerse && lastVerse
+              ? firstVerse === lastVerse ? firstVerse : `${firstVerse}–${lastVerse}`
+              : null,
+            translated: entry.translated,
+            validated: entry.validated,
+            total: entry.total,
+          }
+        })
+        .filter((entry): entry is ChapterNavigationItem => entry !== null)
+    }),
+  [cellStore, cellStoreVersion])
+
+  // AQU-610: sequential (non-scripture) numbering counts only *numbered*
+  // (non-paratext) cells, so the count starts at 1 at the first real content
+  // cell and stays gap-free even when front matter, introductions, or other
+  // paratextual cells sit before/among the content. Scripture files number by
+  // canonical verse ref and don't consult this map.
+  const sequentialNumberByCellId = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => {
+      const map = new Map<string, number>()
+      let ordinal = 0
+      for (const id of displayCellIds) {
+        if (cellStore.getCellView(id)?.type === "paratext") continue
+        map.set(id, ++ordinal)
+      }
+      return map
+    }),
+  [cellStore, cellStoreVersion, displayCellIds])
+
+  const activeChapterLabel = chapterNavigationItems.some((chapter) => chapter.label === currentSectionLabel)
+    ? currentSectionLabel
+    : chapterNavigationItems[0]?.label ?? ""
+
+  const handleChapterSelect = useCallback((label: string) => {
+    const index = cellStore.findIndexBySection(label)
+    if (index < 0) return
+    setFirstVisibleIndex(index)
+    setChapterVisibleIndex(index)
+    void listRef.current?.scrollToIndex({
+      index,
+      viewPosition: 0,
+      animated: true,
+    })
+  }, [cellStore])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
   // so the effect only fires on actual row changes, not every scrolled pixel.
   const firstVisibleRef = useMemo(() => {
     if (!firstVisibleCellId) return null
-    return cellStore.getCellView(firstVisibleCellId)?.group || null
+    return readAtVersion(cellStoreVersion, () => cellStore.getCellView(firstVisibleCellId)?.group || null)
   }, [cellStore, cellStoreVersion, firstVisibleCellId])
   useEffect(() => {
     onVisibleRefChange?.(firstVisibleRef)
@@ -1145,7 +1377,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (!onVisibleFootnotesChange || displayCellIds.length === 0) return []
 
     const indexes = viewableIndexes.length > 0 ? viewableIndexes : [firstVisibleIndex]
-    return indexes
+    return readAtVersion(cellStoreVersion, () => indexes
       .map((index) => {
         const cellId = displayCellIds[index]
         const cell = cellId ? cellStore.getCellView(cellId) : null
@@ -1165,7 +1397,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           numberOffset: offsets.target,
         }
       })
-      .filter((entry): entry is VisibleFootnoteEntry => entry !== null)
+      .filter((entry): entry is VisibleFootnoteEntry => entry !== null))
   }, [cellStore, cellStoreVersion, displayCellIds, firstVisibleIndex, hoveredFootnote, onVisibleFootnotesChange, viewableIndexes])
 
   useEffect(() => {
@@ -1234,15 +1466,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           isStaleSource={staleCellIds?.has(cell.id) ?? false}
           isUpstreamStaleSource={upstreamStaleCellIds?.has(cell.id) ?? false}
           username={username}
+          activeLane={activeLane}
           editable={canEdit}
           canValidate={canValidate}
           canEditSource={canEditSource}
           onCellCommitted={onCellCommitted}
+          getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
           onClaimCell={onClaimCell}
           onReleaseCell={onReleaseCell}
+          onTargetPresenceSelection={onTargetPresenceSelection}
           onAckRemoteChange={onAckRemoteChange}
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
@@ -1265,8 +1501,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
           rowIndex={index}
+          contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
+          scriptureNumbering={chapterNavigationItems.length > 0}
           cellLabelsEnabled={cellLabelsEnabled}
+          sourceDirectionMode={sourceDirectionMode}
+          targetDirectionMode={targetDirectionMode}
           sourceTextDirection={sourceTextDirection}
           targetTextDirection={targetTextDirection}
           gridCols={gridCols}
@@ -1291,8 +1531,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAlignmentSeedChange={onAlignmentSeedChange}
           sourceFontSize={sourceFontSize}
           targetFontSize={targetFontSize}
-          assigneeLabel={assignmentsByCellId?.get(cell.id)?.username ?? null}
-          assigneeNote={assignmentsByCellId?.get(cell.id)?.scopeLabel ?? null}
           checkLockHolder={checkLockHolder}
           showFootnotesInline={showFootnotesInline}
           footnotePanelActive={footnotePanelActive}
@@ -1310,7 +1548,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
-    assignmentsByCellId,
+    activeLane,
     audioByCellId,
     audioLens,
     backtranslationByCellId,
@@ -1349,6 +1587,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionAvailable,
     isCompletionConfigured,
     isTimeOrdered,
+    chapterNavigationItems.length,
+    sequentialNumberByCellId,
     lineNumbersEnabled,
     micDenied,
     onAckRemoteChange,
@@ -1362,6 +1602,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onFootnoteCreated,
     onJumpToCell,
     onOpenAudioSetup,
+    getPendingTargetEventId,
     onOptimisticEdit,
     onProjectChanged,
     onReleaseCell,
@@ -1373,13 +1614,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     ruleMap,
     showFootnotesInline,
     sourceFontSize,
+    sourceDirectionMode,
     sourceTextDirection,
     staleCellIds,
     upstreamStaleCellIds,
     targetFontSize,
+    targetDirectionMode,
     targetTextDirection,
     username,
   ])
+  const listExtraData = useMemo(
+    () => ({ cellStoreVersion, renderListItem }),
+    [cellStoreVersion, renderListItem],
+  )
 
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
@@ -1391,15 +1638,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
-          {/* FRO-250: sticky chapter label — left gutter, does not shift Source */}
-          <div className="flex w-full items-center justify-center overflow-visible">
-            {currentSectionLabel && !looksLikeUuid(currentSectionLabel) && (
-              <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                {currentSectionLabel}
-              </span>
-            )}
+        {chapterNavigationItems.length > 0 && activeChapterLabel && (
+          <div className="border-b border-border bg-background/90 px-4 py-2 backdrop-blur-xl">
+            <ChapterNavigator
+              chapters={chapterNavigationItems}
+              activeLabel={activeChapterLabel}
+              onSelect={handleChapterSelect}
+            />
           </div>
+        )}
+        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+          <div aria-hidden="true" />
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
           <div className="flex items-center gap-2">
@@ -1412,11 +1661,50 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
           <div className="flex items-center gap-2 pl-3">
             Target
-            {project.targetLanguage && (
+            {/* AQU-602: the target-language tag doubles as the lane switcher.
+                With >1 lane (and a change handler) it's a dropdown that switches
+                the active target lane; otherwise it's a static pill. `''` = the
+                default lane, labelled with the project/file default language. */}
+            {project.targetLanguage && lanes && lanes.length > 1 && onLaneChange ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      data-testid="lane-switcher"
+                      data-active-lane={activeLane}
+                      aria-label="Active translation lane"
+                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                  }
+                >
+                  {project.targetLanguage}
+                  <ChevronDown className="h-2.5 w-2.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[8rem]">
+                  {lanes.map((lane) => {
+                    const active = lane === activeLane
+                    const label = lane === "" ? (defaultLaneLabel || "Target") : lane
+                    return (
+                      <DropdownMenuItem
+                        key={lane || "__default__"}
+                        data-testid={`lane-option-${lane}`}
+                        data-active={active ? "true" : undefined}
+                        onClick={() => onLaneChange(lane)}
+                        className="justify-between gap-2 text-xs"
+                      >
+                        {label}
+                        {active && <Check className="h-3.5 w-3.5" />}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : project.targetLanguage ? (
               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
                 {project.targetLanguage}
               </span>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -1427,13 +1715,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             ref={listRef}
             refScrollView={setListScrollElement}
             data={displayCellIds}
+            dataVersion={cellStoreVersion}
             renderItem={renderListItem}
-            extraData={renderListItem}
+            extraData={listExtraData}
             keyExtractor={(cellId) => cellId}
             estimatedItemSize={ESTIMATED_ROW_HEIGHT_PX}
             drawDistance={LEGEND_LIST_DRAW_DISTANCE_PX}
             recycleItems
             maintainVisibleContentPosition
+            onScroll={handleListScroll}
             onFirstVisibleItemChanged={handleFirstVisibleItemChanged}
             onViewableItemsChanged={handleViewableItemsChanged}
             viewabilityConfig={{ viewAreaCoveragePercentThreshold: 0 }}
@@ -1514,6 +1804,8 @@ interface MemoizedRowProps {
   onActivateEditor: (cellId: string) => void
   onDeactivateEditor: (cellId: string) => void
   username: string
+  /** AQU-538: active target lane, carried into target-side emits. */
+  activeLane: string
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
@@ -1528,12 +1820,15 @@ interface MemoizedRowProps {
    *  hop changed). Same "stable boolean, resolved by the parent" shape as
    *  `isStaleSource` above. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void | Promise<void>
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void | Promise<void>
+  getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
@@ -1556,10 +1851,14 @@ interface MemoizedRowProps {
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
+  /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
+  contentNumber: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
@@ -1593,10 +1892,6 @@ interface MemoizedRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
-  assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
-  assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
@@ -1611,13 +1906,15 @@ interface MemoizedRowProps {
   onFootnoteCreated?: () => void
   sourceFootnoteNumberOffset: number
   targetFootnoteNumberOffset: number
+  /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
+  scriptureNumbering: boolean
 }
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, previews, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    activeCueIndex, rowIndex, gridCols,
+    activeCueIndex, rowIndex, contentNumber, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -1632,20 +1929,18 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isEditorActive,
     onActivateEditor,
     onDeactivateEditor,
-    project, username, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable,
+    project, username, activeLane, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
-    onSeekToCue, lineNumbersEnabled, cellLabelsEnabled,
-    sourceTextDirection, targetTextDirection, isAnonymous,
+    onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
+    sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
-    onClaimCell, onReleaseCell, onAckRemoteChange,
+    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
-    assigneeLabel,
-    assigneeNote,
     checkLockHolder,
     showFootnotesInline,
     footnotePanelActive,
@@ -1727,6 +2022,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onActivateEditor={onActivateEditor}
         onDeactivateEditor={onDeactivateEditor}
         username={username}
+        activeLane={activeLane}
         editable={editable}
         canValidate={canValidate}
         canEditSource={canEditSource}
@@ -1756,8 +2052,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
+        contentNumber={contentNumber}
         lineNumbersEnabled={lineNumbersEnabled}
+        scriptureNumbering={scriptureNumbering}
         cellLabelsEnabled={cellLabelsEnabled}
+        sourceDirectionMode={sourceDirectionMode}
+        targetDirectionMode={targetDirectionMode}
         sourceTextDirection={sourceTextDirection}
         targetTextDirection={targetTextDirection}
         gridCols={gridCols}
@@ -1781,16 +2081,17 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getAlignmentModel={getAlignmentModel}
         onAlignmentSeedChange={onAlignmentSeedChange}
         onCellCommitted={onCellCommitted}
+        getPendingTargetEventId={getPendingTargetEventId}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
+        presenceStore={presenceStore}
         remoteChangedWhileFocused={remoteChangedWhileFocused}
         onClaimCell={onClaimCell}
         onReleaseCell={onReleaseCell}
+        onTargetPresenceSelection={onTargetPresenceSelection}
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
-        assigneeLabel={assigneeLabel}
-        assigneeNote={assigneeNote}
         checkLockHolder={checkLockHolder}
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
@@ -1811,6 +2112,9 @@ interface EditorRowProps {
   onActivateEditor: (cellId: string) => void
   onDeactivateEditor: (cellId: string) => void
   username: string
+  /** AQU-538: active target lane. Passed into `target.cell.commit` and
+   *  validate/unvalidate emits as `targetLang` (`''` omitted on the wire). */
+  activeLane: string
   editable: boolean
   /** FRO-273: reviewer (300) can validate but not edit. True whenever role ≥ REVIEWER. */
   canValidate: boolean
@@ -1826,12 +2130,15 @@ interface EditorRowProps {
    *  upstream chain hop changed). Renders the violet/dotted second tone.
    *  Same once-per-file computation shape as `isStaleSource`. */
   isUpstreamStaleSource: boolean
-  onCellCommitted?: (cellId: string, committedEventId?: string) => void
+  onCellCommitted?: (cellId: string, committedEventId?: string, parentId?: string | null) => void
+  getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
@@ -1875,10 +2182,16 @@ interface EditorRowProps {
   onGridRowKeyNav: (direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
+  /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
+  contentNumber: number
   lineNumbersEnabled: boolean
+  /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
+  scriptureNumbering: boolean
   cellLabelsEnabled: boolean
-  sourceTextDirection: "ltr" | "rtl"
-  targetTextDirection: "ltr" | "rtl"
+  sourceDirectionMode: DirectionMode
+  targetDirectionMode: DirectionMode
+  sourceTextDirection: TextDirection
+  targetTextDirection: TextDirection
   gridCols: "grid-cols-[44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
@@ -1895,10 +2208,6 @@ interface EditorRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** FRO-192: username of the assignee for this cell. Null = no assignment. */
-  assigneeLabel?: string | null
-  /** FRO-192: scope label for the assignment tooltip. */
-  assigneeNote?: string | null
   /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
   checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
@@ -2121,11 +2430,11 @@ function humanFootnoteCellRef(cell: CellData): string {
 }
 
 function footnoteMarkerOptions(
-  cell: CellData,
+  targetText: string,
   anchor: FootnoteInsertionAnchor | null,
   numberOffset: number,
 ): Record<FootnoteMarkerStyle, AddFootnoteMarkerOption> {
-  const targetFootnotes = extractUsfmFootnotes(cell.translated ?? "")
+  const targetFootnotes = extractUsfmFootnotes(targetText)
   const insertionIndex = anchor?.plainPosition ?? Number.POSITIVE_INFINITY
   const targetFootnotesBeforeInsertion = targetFootnotes.filter((footnote) => footnote.index < insertionIndex)
   const numberedPreview = numberOffset + targetFootnotesBeforeInsertion.length + 1
@@ -2264,6 +2573,194 @@ function SanitizedRichHtml({ html }: { html: string }) {
       dangerouslySetInnerHTML={innerHtml}
     />
   )
+}
+
+interface RemotePresenceOverlayItem {
+  key: string
+  kind: "selection" | "caret" | "label"
+  username: string
+  color: string
+  style: React.CSSProperties
+}
+
+function RemoteTargetPresenceOverlay({
+  contentRef,
+  peers,
+}: {
+  contentRef: React.RefObject<HTMLElement | null>
+  peers: CellPresencePeer[]
+}) {
+  const [items, setItems] = useState<RemotePresenceOverlayItem[]>([])
+
+  useLayoutEffect(() => {
+    const root = contentRef.current
+    const container = root?.parentElement
+    if (!root || !container || peers.length === 0) {
+      setItems((current) => current.length === 0 ? current : [])
+      return
+    }
+
+    const next: RemotePresenceOverlayItem[] = []
+    const containerRect = container.getBoundingClientRect()
+    for (const peer of peers) {
+      const selection = peer.selection
+      if (!selection || selection.side !== "target") continue
+      const anchor = Math.max(0, selection.anchor)
+      const head = Math.max(0, selection.head)
+      const start = Math.min(anchor, head)
+      const end = Math.max(anchor, head)
+      const caretRect = rectForCaretOffset(root, end)
+      if (start !== end) {
+        const range = rangeForPlainOffsets(root, start, end)
+        if (range) {
+          Array.from(range.getClientRects()).forEach((rect, index) => {
+            if (rect.width <= 0 || rect.height <= 0) return
+            next.push({
+              key: `${peer.peerId}-selection-${index}`,
+              kind: "selection",
+              username: peer.username,
+              color: peer.color,
+              style: {
+                left: rect.left - containerRect.left,
+                top: rect.top - containerRect.top,
+                width: rect.width,
+                height: rect.height,
+                backgroundColor: peer.color,
+              },
+            })
+          })
+        }
+      }
+      if (caretRect) {
+        const left = caretRect.left - containerRect.left
+        const top = caretRect.top - containerRect.top
+        const height = Math.max(16, caretRect.height)
+        next.push({
+          key: `${peer.peerId}-caret`,
+          kind: "caret",
+          username: peer.username,
+          color: peer.color,
+          style: {
+            left,
+            top,
+            height,
+            backgroundColor: peer.color,
+          },
+        })
+        next.push({
+          key: `${peer.peerId}-label`,
+          kind: "label",
+          username: peer.username,
+          color: peer.color,
+          style: {
+            left: left + 3,
+            top: Math.max(0, top - 18),
+            backgroundColor: peer.color,
+          },
+        })
+      }
+    }
+    setItems(next)
+  }, [contentRef, peers])
+
+  if (items.length === 0) return null
+
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+      {items.map((item) => {
+        if (item.kind === "selection") {
+          return (
+            <span
+              key={item.key}
+              className="absolute rounded-[2px] opacity-20"
+              style={item.style}
+            />
+          )
+        }
+        if (item.kind === "caret") {
+          return (
+            <span
+              key={item.key}
+              className="absolute w-0.5 rounded-full"
+              style={item.style}
+            />
+          )
+        }
+        return (
+          <span
+            key={item.key}
+            className="absolute max-w-28 truncate rounded px-1 py-px text-[10px] font-medium leading-4 text-white shadow-sm"
+            style={item.style}
+          >
+            {item.username}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+function rangeForPlainOffsets(root: HTMLElement, start: number, end: number): Range | null {
+  const startPos = textNodePositionForOffset(root, start)
+  const endPos = textNodePositionForOffset(root, end)
+  if (!startPos || !endPos) return null
+  const range = document.createRange()
+  range.setStart(startPos.node, startPos.offset)
+  range.setEnd(endPos.node, endPos.offset)
+  return range
+}
+
+function rectForCaretOffset(root: HTMLElement, offset: number): DOMRect | null {
+  const collapsed = rangeForPlainOffsets(root, offset, offset)
+  const collapsedRect = firstUsableRect(collapsed)
+  if (collapsedRect) return collapsedRect
+
+  const before = offset > 0 ? rangeForPlainOffsets(root, offset - 1, offset) : null
+  const beforeRect = firstUsableRect(before)
+  if (beforeRect) {
+    return new DOMRect(beforeRect.right, beforeRect.top, 0, beforeRect.height)
+  }
+
+  const after = rangeForPlainOffsets(root, offset, offset + 1)
+  const afterRect = firstUsableRect(after)
+  if (afterRect) {
+    return new DOMRect(afterRect.left, afterRect.top, 0, afterRect.height)
+  }
+
+  return null
+}
+
+function firstUsableRect(range: Range | null): DOMRect | null {
+  if (!range) return null
+  for (const rect of Array.from(range.getClientRects())) {
+    if (rect.height > 0) return rect
+  }
+  const rect = range.getBoundingClientRect()
+  return rect.height > 0 ? rect : null
+}
+
+function textNodePositionForOffset(
+  root: HTMLElement,
+  targetOffset: number,
+): { node: Text; offset: number } | null {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement
+      if (parent?.closest("[data-presence-ignore]")) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  let remaining = Math.max(0, targetOffset)
+  let lastText: Text | null = null
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text
+    lastText = node
+    const length = node.data.length
+    if (remaining <= length) return { node, offset: remaining }
+    remaining -= length
+  }
+  if (lastText) return { node: lastText, offset: lastText.data.length }
+  return null
 }
 
 function TargetRichHtml({
@@ -2539,7 +3036,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 
 function EditorRow({
   project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
-  username, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable, isLoading,
+  username, activeLane = "", editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
@@ -2551,20 +3048,17 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, lineNumbersEnabled, cellLabelsEnabled, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
-  onCellCommitted, onOptimisticEdit, lockHolderLabel, remoteChangedWhileFocused,
-  onClaimCell, onReleaseCell, onAckRemoteChange,
+  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
-  getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
-  assigneeLabel,
-  assigneeNote,
   checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
@@ -2578,8 +3072,17 @@ function EditorRow({
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
   const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
-  const hasTranslatedText = Boolean(cell.translated?.trim())
-  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const remoteCellPresence = useCellPresence(presenceStore, cell.id)
+  // A focus lock admits one active writer. Prefer its newest ephemeral draft
+  // so the read surface and remote caret advance together between commits.
+  const remoteDraftText = useMemo(() => {
+    let latest: CellPresencePeer | null = null
+    for (const peer of remoteCellPresence) {
+      if (peer.selection?.draftText === undefined) continue
+      if (!latest || peer.lastSeenAt > latest.lastSeenAt) latest = peer
+    }
+    return latest?.selection?.draftText
+  }, [remoteCellPresence])
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
@@ -2612,7 +3115,17 @@ function EditorRow({
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
-  const pendingSourceEventIdRef = useRef<string | null>(cell.sourceEventId ?? null)
+  // Tracks the newest source.cell.commit this row enqueued whose projection
+  // head hasn't caught up yet, as { eventId, parentId }. Successive source edits
+  // chain onto `eventId`; the reconciling effect below clears it once the
+  // projection reaches it (or a different/remote head lands) — crucially WITHOUT
+  // regressing it back to the lagging projection head. Mirrors the target-side
+  // pendingTargetCommitHeadsRef reconciliation in ProjectWorkspace. AQU-603: the
+  // old naive "adopt cell.sourceEventId" effect clobbered the pending head when a
+  // lane switch triggered a mid-flight cells revalidate, forking the next edit
+  // onto the same parent — which the server's AD-2 first-child guard dropped as a
+  // "stale sibling" (server accepted but did not apply).
+  const pendingSourceCommitRef = useRef<{ eventId: string; parentId: string | null } | null>(null)
   const sourceColRef = useRef<HTMLDivElement | null>(null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
@@ -2631,6 +3144,7 @@ function EditorRow({
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
+  const targetReadContentRef = useRef<HTMLDivElement | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -2639,11 +3153,28 @@ function EditorRow({
     ref: "",
     text: "",
   })
+  const [localTargetDraft, setLocalTargetDraft] = useState<{ value: string; valueHtml?: string } | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
   const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
-  const hasTargetFootnoteMarker = (cell.translated ?? "").includes("\\f")
+  const visibleTranslated = localTargetDraft?.value ?? cell.translated
+  const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
+  const hasTranslatedText = Boolean(visibleTranslated?.trim())
+  const showCompletionOverlay = isLoading && !hasTranslatedText
+  const sourceCellDirection = useMemo(
+    () => resolveTextDirection(sourceDirectionMode, cell.originalHtml ?? cell.original, sourceTextDirection),
+    [sourceDirectionMode, sourceTextDirection, cell.originalHtml, cell.original],
+  )
+  const targetCellDirection = useMemo(
+    () => resolveTextDirection(
+      targetDirectionMode,
+      showCompletionOverlay ? (completionPreview ?? "") : (visibleTranslatedHtml ?? visibleTranslated),
+      targetTextDirection,
+    ),
+    [targetDirectionMode, targetTextDirection, showCompletionOverlay, completionPreview, visibleTranslatedHtml, visibleTranslated],
+  )
+  const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
   const shouldHydrateFootnotes =
@@ -2651,7 +3182,7 @@ function EditorRow({
     (expanded && expansionTab === "footnotes" && showFootnotesInExpansion)
   const allFootnotes = useMemo(
     () => shouldHydrateFootnotes ? getFootnoteDetails(cell.id) : EMPTY_CELL_FOOTNOTE_DETAILS,
-    [cell.id, cell.original, cell.translated, getFootnoteDetails, shouldHydrateFootnotes],
+    [cell.id, cell.original, visibleTranslated, getFootnoteDetails, shouldHydrateFootnotes],
   )
   const sourceDisplayFootnotes = useMemo(() => {
     if (!shouldHydrateFootnotes || !hasSourceFootnoteMarker) return EMPTY_EXTRACTED_FOOTNOTES
@@ -2674,6 +3205,13 @@ function EditorRow({
   const targetFootnotes = showFootnotesInline ? allFootnotes.targetFootnotes : EMPTY_EXTRACTED_FOOTNOTES
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
+  const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+
+  useEffect(() => {
+    if (!localTargetDraft) return
+    if ((cell.translated ?? "") !== localTargetDraft.value) return
+    setLocalTargetDraft(null)
+  }, [cell.translated, localTargetDraft])
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -2773,7 +3311,7 @@ function EditorRow({
     }
     return out
   }, [cellInfractions, waivedInfractions, waivedRuleIds, ruleSeverity])
-  const targetHasRichFormatting = hasMeaningfulRichText(cell.translatedHtml)
+  const targetHasRichFormatting = hasMeaningfulRichText(visibleTranslatedHtml)
 
   // Editor commit path. The plain TipTap editor (TranslatedEditor) calls
   // this on idle/blur/release with the current `{value, valueHtml}` snapshot.
@@ -2809,16 +3347,23 @@ function EditorRow({
     // `checkRulesForCell` for this one cell on the next render — no other
     // cell's cached infractions are invalidated. The server projection
     // arrives via `onCellCommitted` -> revalidate and overwrites this.
+    setLocalTargetDraft({ value, valueHtml })
     onOptimisticEdit?.(cell.id, { value, valueHtml })
     setWriteError(null)
-    // RACE-3/QW-2: use the pending event id (the last event WE enqueued for this
-    // cell) as parentId rather than the projection value. The projection row may
-    // lag by a round-trip when a second idle-commit fires before the read-back
-    // confirms; chaining from the projection value would make it a sibling of
-    // our own earlier event and dead-letter it. pendingTargetEventIdRef is
-    // updated from cell.targetEventId whenever the projection confirms (effect
-    // at line ~1621), so it stays correct once the server catches up.
-    const parentId = pendingTargetEventIdRef.current ?? cell.sourceEventId ?? null
+    // RACE-3/QW-2: use the last event id we enqueued for this cell as parentId
+    // rather than the lagging projection value. The workspace-level getter
+    // survives Legend List row remounts; the row-local ref covers repeated
+    // commits while this exact row instance remains mounted.
+    const parentId =
+      getPendingTargetEventId?.(cell.id) ??
+      pendingTargetEventIdRef.current ??
+      cell.targetEventId ??
+      cell.sourceEventId ??
+      null
+    // AQU-538: tag the commit with the active lane. The store now renders this
+    // row's ACTIVE-lane target value, so the edited text belongs to `activeLane`.
+    // emitTargetCellCommit omits `''` (default lane) on the wire, so N=1 is
+    // byte-identical.
     emitTargetCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -2828,11 +3373,33 @@ function EditorRow({
       value,
       valueHtml,
       author: username,
+      targetLang: activeLane,
     }).then((eventId) => {
       pendingTargetEventIdRef.current = eventId
+      // Restore codex behaviour: a direct human edit auto-validates the cell
+      // ("a human has touched it"). The target.cell.commit above cleared any
+      // prior validators (audit-stats-overlay resets activeValidators on every
+      // edit), so we re-add the current user against the JUST-committed event
+      // id — a cell.validate only sticks when its editEventId matches the
+      // cell's latest edit. cell.validate needs only REVIEWER (≤ the CONTRIBUTOR
+      // floor already required to reach this commit path), so anyone who can
+      // edit can validate; guard defensively anyway. Skip empty commits so
+      // clearing a cell doesn't mark an empty row "validated".
+      if (value.trim() && canValidate && canPerform("cell.validate", project.syncRole?.level ?? null)) {
+        void emitCellValidate({
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          editEventId: eventId,
+          author: username,
+        }).catch((err) => {
+          // Telemetry-adjacent, non-blocking: the commit already landed.
+          console.warn("[auto-validate] emit failed:", err)
+        })
+      }
       // Pass the just-assigned event id: the auto-BT in the parent pins to it
       // so the BT describes THIS commit, not the lagging projection head.
-      void onCellCommitted?.(cell.id, eventId)
+      void onCellCommitted?.(cell.id, eventId, parentId)
     }).catch((err) => {
       // RES-4/M1-3: enqueue failure (IDB quota, private-mode, InsufficientRoleError)
       // must be loud. Revert the optimistic patch so the cell doesn't show
@@ -2840,13 +3407,14 @@ function EditorRow({
       console.error("[editor-commit] enqueue failed:", err)
       const msg = err instanceof Error ? err.message : "Could not save — please try again"
       setWriteError(msg)
+      setLocalTargetDraft(null)
       // Revert the optimistic patch to the last confirmed projection value.
       onOptimisticEdit?.(cell.id, {
         value: cell.translated ?? "",
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.translated, cell.translatedHtml, cell.sourceEventId, username, onCellCommitted, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, canValidate, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -2866,7 +3434,7 @@ function EditorRow({
     // (cleared by the effect below once cell.original round-trips).
     setSourceDraft({ value, valueHtml })
     setWriteError(null)
-    const parentId = pendingSourceEventIdRef.current ?? cell.sourceEventId ?? null
+    const parentId = resolveSourceCommitParent(pendingSourceCommitRef.current, cell.sourceEventId ?? null)
     emitSourceCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -2876,7 +3444,7 @@ function EditorRow({
       valueHtml,
       author: username,
     }).then((eventId) => {
-      pendingSourceEventIdRef.current = eventId
+      pendingSourceCommitRef.current = { eventId, parentId }
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.error("[source-edit] enqueue failed:", err)
@@ -2886,10 +3454,21 @@ function EditorRow({
     })
   }, [canEditSource, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
 
-  // Adopt the projection's source head as the next chain parent — for both our
-  // own confirmed commits and remote source commits (mirror-sync / peer leads).
+  // Reconcile the pending source head against the projection — the mirror of
+  // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
+  // Clear the pending head ONLY when the projection has caught up to it, or when
+  // a DIFFERENT head (a remote/peer source commit, mirror-sync) landed that isn't
+  // the parent we chained from — in which case the next edit should chain onto
+  // that new projection head. While the projection still lags at our commit's
+  // parent, KEEP the pending head so the next edit chains onto it rather than
+  // forking a stale sibling onto the same parent (AQU-603). When there is no
+  // pending commit, handleSourceCommit falls back to cell.sourceEventId, so a
+  // remote head is still adopted correctly.
   useEffect(() => {
-    if (cell.sourceEventId) pendingSourceEventIdRef.current = cell.sourceEventId
+    pendingSourceCommitRef.current = reconcilePendingSourceCommit(
+      pendingSourceCommitRef.current,
+      cell.sourceEventId ?? null,
+    )
   }, [cell.sourceEventId])
 
   // Clear the optimistic source draft once the server projection carries it.
@@ -2925,7 +3504,7 @@ function EditorRow({
   // there is no selection (defensive fallback), we append so the translator
   // can still chain multiple terms. Uses the same commit path as keyboard edits.
   const handleTermApply = useCallback((rendering: string) => {
-    const existing = cell.translated ?? ""
+    const existing = visibleTranslated ?? ""
     const selected = targetSelectionTextRef.current
     let next: string
     if (selected && existing.includes(selected)) {
@@ -2935,7 +3514,7 @@ function EditorRow({
       next = trimmed ? `${trimmed} ${rendering}` : rendering
     }
     handleEditorCommit({ value: next, valueHtml: next })
-  }, [cell.translated, handleEditorCommit])
+  }, [visibleTranslated, handleEditorCommit])
 
   const captureFootnoteAnchor = useCallback(() => {
     pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
@@ -2944,7 +3523,7 @@ function EditorRow({
   const openAddFootnoteDialog = useCallback((defaults?: AddFootnoteDialogDefaults) => {
     if (!pendingFootnoteAnchorRef.current) captureFootnoteAnchor()
     const anchor = pendingFootnoteAnchorRef.current
-    const markerOptions = footnoteMarkerOptions(cell, anchor, targetFootnoteNumberOffset)
+    const markerOptions = footnoteMarkerOptions(visibleTranslated ?? "", anchor, targetFootnoteNumberOffset)
     const markerStyle = defaults?.markerStyle ?? footnoteMarkerStyleFromCaller(defaults?.caller)
     setAddFootnoteDefaults({
       caller: defaults?.caller ?? "+",
@@ -2961,7 +3540,7 @@ function EditorRow({
       markerOptions,
     })
     setAddFootnoteOpen(true)
-  }, [captureFootnoteAnchor, cell, targetFootnoteNumberOffset])
+  }, [captureFootnoteAnchor, cell, visibleTranslated, targetFootnoteNumberOffset])
 
   const handleAddFootnote = useCallback((value: AddFootnoteDialogValue) => {
     const marker = createUsfmFootnoteMarker(value)
@@ -2971,14 +3550,14 @@ function EditorRow({
     ) ?? false
 
     if (!inserted) {
-      const next = `${cell.translated ?? ""}${marker}`
+      const next = `${visibleTranslated ?? ""}${marker}`
       handleEditorCommit({ value: next, valueHtml: next })
     }
 
     pendingFootnoteAnchorRef.current = null
     onFootnoteCreated?.()
     setAddFootnoteOpen(false)
-  }, [cell.translated, handleEditorCommit, onFootnoteCreated])
+  }, [visibleTranslated, handleEditorCommit, onFootnoteCreated])
 
   const handleCreateTargetFootnote = useCallback((sourceFootnote: ExtractedFootnote) => {
     pendingFootnoteAnchorRef.current = null
@@ -3091,14 +3670,14 @@ function EditorRow({
   // Recomputes naturally as the preview streams in and as the committed text /
   // BT verdict changes on later renders.
   const preAcceptanceWarnings = useMemo(() => {
-    const completionText = isLoading ? (completionPreview ?? "") : (cell.translated ?? "")
+    const completionText = isLoading ? (completionPreview ?? "") : (visibleTranslated ?? "")
     if (!completionText.trim()) return []
     return detectPreAcceptanceWarnings(
       completionText,
       cell.original ?? "",
-      project.terminology ?? [],
+      terminologyConcepts,
     )
-  }, [isLoading, completionPreview, cell.translated, cell.original, project.terminology])
+  }, [isLoading, completionPreview, visibleTranslated, cell.original, terminologyConcepts])
 
   // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
@@ -3121,6 +3700,10 @@ function EditorRow({
     }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
+    setOptimisticSelfValidation(validated)
+    // AQU-538: scope the validation to the active lane. emitCellValidate/
+    // emitCellUnvalidate omit `''` (default lane) on the wire, so N=1 is
+    // byte-identical.
     const emit = validated ? emitCellValidate : emitCellUnvalidate
     void emit({
       projectId: project.id,
@@ -3128,20 +3711,26 @@ function EditorRow({
       cellId: cell.id,
       editEventId,
       author: username,
+      targetLang: activeLane,
     }).then(() => {
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
+      setOptimisticSelfValidation(null)
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback(() => {
-    if (!editable || isLoading) return
+    if (!editable || isLoading || lockHolderLabel) return
     onActivateEditor(cell.id)
-  }, [editable, isLoading, onActivateEditor, cell.id])
+  }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
+
+  const handleTargetPresenceSelection = useCallback((selection: TargetPresenceSelection | null) => {
+    onTargetPresenceSelection?.(cell.id, selection)
+  }, [cell.id, onTargetPresenceSelection])
 
   const handleEditorFocus = useCallback(() => {
     editorFocusedRef.current = true
@@ -3200,10 +3789,10 @@ function EditorRow({
 
   // Detect formatting loss: source has inline style marks that the target doesn't.
   const sourceHasFormatting = Boolean(cell.originalHtml && /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(cell.originalHtml))
-  const targetHtml = cell.translatedHtml ?? ""
+  const targetHtml = visibleTranslatedHtml ?? ""
   const targetHasFormatting = /<(b|strong|i|em|u|s|strike|del|code)\b/i.test(targetHtml)
   const showFormattingLossWarning =
-    sourceHasFormatting && !targetHasFormatting && cell.translated.trim().length > 0
+    sourceHasFormatting && !targetHasFormatting && visibleTranslated.trim().length > 0
 
   const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
 
@@ -3243,6 +3832,32 @@ function EditorRow({
   ])
   const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId)
 
+  // AQU-521: karaoke-while-listening for the read-only target view. When a cell
+  // is not being actively edited its target renders as plain text (not a
+  // ProseMirror editor), so the editor's karaoke plugin can't paint the active
+  // word. Compute the active word's plain-text offset span from whichever audio
+  // is playing (recorded take or generated voice) so KaraokeReadText can paint
+  // it as playback advances. Scoped to plain (non-USFM, non-rich) target text —
+  // WordTiming offsets are computed against that plain text.
+  const targetIsPlainText = useMemo(
+    () => !targetHasRichFormatting && segmentUsfmForDisplay(visibleTranslated ?? "") === null,
+    [targetHasRichFormatting, visibleTranslated],
+  )
+  const karaokeReadRange = useMemo(() => {
+    if (!targetIsPlainText) return null
+    if (audioController.isPlaying) {
+      return activeWordRange(cellAudioTimings, audioController.currentTime)
+    }
+    if (generatedVoiceController.isPlaying) {
+      return activeWordRange(generatedVoiceTimings, generatedVoiceController.currentTime)
+    }
+    return null
+  }, [
+    targetIsPlainText, cellAudioTimings, generatedVoiceTimings,
+    audioController.isPlaying, audioController.currentTime,
+    generatedVoiceController.isPlaying, generatedVoiceController.currentTime,
+  ])
+
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
   // (focus inside an editable element).
@@ -3273,10 +3888,31 @@ function EditorRow({
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
   }, [cell, rowSession, project.id, project.targetLanguage])
 
-  const vs = cell.validationStatus
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
-  const isSelfValidated = cell.activeValidators.includes(username)
-  const hasValidatorInfo = cell.activeValidators.length > 0 || cell.validationHistory.length > 1
+  const authoritativeSelfValidated = cell.activeValidators.includes(username)
+  const [optimisticSelfValidation, setOptimisticSelfValidation] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (optimisticSelfValidation !== null && authoritativeSelfValidated === optimisticSelfValidation) {
+      setOptimisticSelfValidation(null)
+    }
+  }, [authoritativeSelfValidated, optimisticSelfValidation])
+  const isSelfValidated = optimisticSelfValidation ?? authoritativeSelfValidated
+  const displayedValidators = useMemo(() => {
+    if (optimisticSelfValidation === null) return cell.activeValidators
+    if (optimisticSelfValidation) {
+      return cell.activeValidators.includes(username)
+        ? cell.activeValidators
+        : [...cell.activeValidators, username]
+    }
+    return cell.activeValidators.filter((validator) => validator !== username)
+  }, [cell.activeValidators, optimisticSelfValidation, username])
+  const validationRequirement = readValidationCount(project)
+  const vs = optimisticSelfValidation === true
+    ? displayedValidators.length >= validationRequirement ? "full-self" : "self"
+    : optimisticSelfValidation === false
+      ? displayedValidators.length >= validationRequirement ? "full-others" : displayedValidators.length > 0 ? "others" : "none"
+      : cell.validationStatus
+  const hasValidatorInfo = displayedValidators.length > 0 || cell.validationHistory.length > 1
 
   // Gate Base UI's auto-toggle: clicks on an unvalidated cell should validate
   // (not open the popover), and hovers should only open when there's actually
@@ -3324,7 +3960,7 @@ function EditorRow({
     vs === "others" ? "text-muted-foreground/60" :
     "text-muted-foreground/30"
 
-  const hasContent = Boolean(cell.translated && cell.translated.trim())
+  const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
   // AD-14 amendment 2026-06-04: use server-derived confidence score from
   // healthMap when available (set by the confidence overlay in ProjectWorkspace
@@ -3350,7 +3986,6 @@ function EditorRow({
   // SECURITY: originalHtml below is sanitized through DOMPurify.sanitize() at
   // the render boundary. Parsers only produce safe inline tags (<b>, <i>, <u>,
   // <s>, <code>). DOMPurify provides defense-in-depth against XSS.
-  const showLineNumber = lineNumbersEnabled && cell.type !== "paratext"
   // Prefer the explicitly-assigned cast member's name; fall back to the cell's
   // own label (e.g. a chapter/verse marker from USFM), then nothing.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
@@ -3364,8 +3999,16 @@ function EditorRow({
   // the cast label moved to the target column header lane so it isn't squished
   // into this 44px gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
-  const numberLabel = showLineNumber ? String(rowIndex + 1) : null
-  const numberPill = !showLineNumber ? null : (
+  const numberLabel = cellNumberLabel({
+    lineNumbersEnabled,
+    cellType: cell.type,
+    canonicalRef: cell.group,
+    sourceCanonicalRef: cell.globalReferences?.[0],
+    scriptureNumbering,
+    rowIndex,
+    contentNumber,
+  })
+  const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
       <CellNumberPill
         number={numberLabel}
@@ -3375,14 +4018,14 @@ function EditorRow({
     </span>
   )
 
-  // ── Hover / focus / tap state for the floating action rail ───────────────
-  // Three input sources OR'd together: row hover, focus-within, tap-selected
-  // (touch). Hover-leave has a 120ms grace period to prevent flicker as the
-  // cursor grazes adjacent rows.
+  // ── Hover / focus state for the floating action rail ─────────────────────
+  // Browser focus is exclusive, as is the pointer's hovered row. Deriving
+  // visibility only from those two sources guarantees one rail normally and
+  // at most two while a focused editor remains active and another row is
+  // hovered. Do not add a per-row sticky selection latch here: visited rows
+  // would accumulate visible rails.
   const [isHovering, setIsHovering] = useState(false)
   const [hasFocusWithin, setHasFocusWithin] = useState(false)
-  const [isTapSelected, setIsTapSelected] = useState(false)
-  const hoverLeaveTimerRef = useRef<number | null>(null)
   // AQU-354: does a rail control specifically hold focus? Used to pin the rail
   // open (an in-progress interaction must never be idle-collapsed).
   const [railHasFocus, setRailHasFocus] = useState(false)
@@ -3390,31 +4033,18 @@ function EditorRow({
   // ── Expansion state ───────────────────────────────────────────────────────
   const alignmentModelForExpansion = useMemo(() => {
     if (!btAlignmentOpen || !expanded || expansionTab !== "backtranslation") return null
-    if (!cell.original.trim() || !cell.translated.trim()) return null
+    if (!cell.original.trim() || !visibleTranslated.trim()) return null
     return getAlignmentModel?.() ?? null
-  }, [btAlignmentOpen, cell.original, cell.translated, expanded, expansionTab, getAlignmentModel])
+  }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
 
-  // History tab: fetch the D1 event log on demand only when the History tab is
-  // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
-  // — the audit trail lives in the sync-worker, not the cell projection.
-  const historyTokenFetcher = useMemo(() => {
-    return getTokenForFile ?? (async (_fileId: string) => null as string | null)
-  }, [getTokenForFile])
-  const {
-    history: fetchedHistory,
-    isLoading: isHistoryLoading,
-    isError: isHistoryError,
-  } = useCellEditHistory({
-    enabled: expanded && expansionTab === "history" && Boolean(getTokenForFile),
-    projectId: project?.id ?? null,
-    fileId: cell.fileId ?? null,
-    cellId: cell.id,
-    getTokenForFile: historyTokenFetcher,
-  })
+  // Edit history is reached via the single History control on the cell action
+  // rail (opens the full HistoryDrawer). The audit trail lives in the
+  // sync-worker, not the cell projection, so the drawer fetches the D1 event
+  // log on demand — the row itself no longer renders a duplicate inline list.
 
   // ── Compute attention signals for chevron + tab dots ──────────────────────
   const isBtStale = Boolean(
-    cell.backtranslation && cell.backtranslationForText !== cell.translated,
+    cell.backtranslation && cell.backtranslationForText !== visibleTranslated,
   )
   const transcriptText = useMemo(() => {
     if (!cellAudioTimings || cellAudioTimings.length === 0) return ""
@@ -3424,8 +4054,8 @@ function EditorRow({
     if (!hasAudio || !transcriptText) return true
     const norm = (s: string) =>
       s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").trim().replace(/\s+/g, " ")
-    return norm(transcriptText) === norm(cell.translated)
-  }, [hasAudio, transcriptText, cell.translated])
+    return norm(transcriptText) === norm(visibleTranslated)
+  }, [hasAudio, transcriptText, visibleTranslated])
   const transcriptNeedsAttention =
     hasAudio &&
     Boolean(cellAudioTimings && cellAudioTimings.length > 0) &&
@@ -3473,7 +4103,7 @@ function EditorRow({
   // were editing" conflict banner (whose Discard button sits under the rail).
   // Pins (expansion open, a rail control focused, a rail popover open) keep the
   // rail visible so an in-progress interaction is never yanked away.
-  const railRevealTriggered = isHovering || hasFocusWithin || isTapSelected
+  const railRevealTriggered = isHovering || hasFocusWithin
   const railPinned = expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm
   const { revealed: railRevealed, registerActivity: registerRailActivity } = useRailIdleHide({
     revealTriggered: railRevealTriggered,
@@ -3489,9 +4119,9 @@ function EditorRow({
   // persisted as the cell's back-translation.
   const [btStatsOpen, setBtStatsOpen] = useState(false)
   const statisticalGloss = useMemo(() => {
-    if (!btStatsOpen || !cell.translated.trim()) return ""
-    return getStatisticalBt?.(cell.translated) ?? ""
-  }, [btStatsOpen, cell.translated, getStatisticalBt])
+    if (!btStatsOpen || !visibleTranslated.trim()) return ""
+    return getStatisticalBt?.(visibleTranslated) ?? ""
+  }, [btStatsOpen, visibleTranslated, getStatisticalBt])
 
   // When editing starts, seed the input with the current BT text.
   const handleBtEditStart = useCallback(() => {
@@ -3522,20 +4152,14 @@ function EditorRow({
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
-    if (hoverLeaveTimerRef.current !== null) {
-      window.clearTimeout(hoverLeaveTimerRef.current)
-      hoverLeaveTimerRef.current = null
-    }
     setIsHovering(true)
     // AQU-354: a fresh hover re-summons the rail if it had idle-collapsed.
     registerRailActivity()
   }
   const handleRowMouseLeave = () => {
-    if (hoverLeaveTimerRef.current !== null) window.clearTimeout(hoverLeaveTimerRef.current)
-    hoverLeaveTimerRef.current = window.setTimeout(() => {
-      setIsHovering(false)
-      hoverLeaveTimerRef.current = null
-    }, 120)
+    // Clear immediately. A grace timer lets the previous hovered row overlap
+    // the next one, producing three rails when an editor is also focused.
+    setIsHovering(false)
   }
   const handleRowFocusCapture = () => {
     setHasFocusWithin(true)
@@ -3564,8 +4188,8 @@ function EditorRow({
     // Plain click clears any active multi-selection so the next interaction
     // doesn't surprise the user with a stale bulk action target.
     clearSelection()
-    setIsTapSelected((p) => !p)
-    // AQU-354: a tap re-summons the rail if it had idle-collapsed.
+    // The row is focusable (`tabIndex={0}`), so mouse/touch activation is
+    // represented by the same exclusive focus state as keyboard activation.
     registerRailActivity()
   }
 
@@ -3654,7 +4278,7 @@ function EditorRow({
         size={22}
         strokeWidth={2}
         className="pointer-events-none"
-        style={{ position: "absolute", inset: 0 }}
+        style={{ position: "absolute", inset: 0, margin: "auto" }}
       />
       <ValidationIcon
         className="relative h-3.5 w-3.5"
@@ -3709,7 +4333,12 @@ function EditorRow({
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
-          "group relative grid gap-2 overflow-hidden px-4 py-2 transition-colors duration-150 ease-out",
+          "group relative grid gap-2 px-4 py-2 transition-colors duration-150 ease-out",
+          // The mic-permission help is anchored in the action rail. While it
+          // is open, this row must become its own higher stacking layer and
+          // allow the popover to escape the row; otherwise neighbouring rows
+          // and the sticky table header paint above it.
+          showMicDeniedHelp ? "z-30 overflow-visible" : "overflow-hidden",
           hasInlineFootnotes && "gap-y-1 py-1.5",
           // Keyboard-focus ring for the grid row (only when focused directly,
           // not via a child element — :focus-visible + :not(:focus-within:not(:focus))).
@@ -3770,10 +4399,10 @@ function EditorRow({
                     <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                       Validated by
                     </li>
-                    {cell.activeValidators.length === 0 ? (
+                    {displayedValidators.length === 0 ? (
                       <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
                     ) : (
-                      cell.activeValidators.map((v) => (
+                      displayedValidators.map((v) => (
                         <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                           <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
                           {v === username && canValidate && (
@@ -3825,17 +4454,6 @@ function EditorRow({
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
           )}
-          {/* FRO-192: assignee avatar chip — shows initials of the member
-              this cell is assigned to. Tooltip = username + scope label. */}
-          {assigneeLabel && (
-            <AppTooltip content={assigneeNote ? `Assigned to ${assigneeLabel} (${assigneeNote})` : `Assigned to ${assigneeLabel}`}>
-              <InitialsAvatar
-                name={assigneeLabel}
-                size="xs"
-                fallbackClassName="bg-indigo-100 text-[8px] uppercase text-indigo-700 ring-1 ring-indigo-300 dark:bg-indigo-900 dark:text-indigo-300 dark:ring-indigo-700"
-              />
-            </AppTooltip>
-          )}
         </div>
 
         {/* Source column. In Audio mode there's no need for source text to
@@ -3875,10 +4493,13 @@ function EditorRow({
             data-showcase="editor.source"
             ref={sourceColRef}
             className={cn(
-              "relative flex flex-col transition-opacity",
+              // The selection control is centered on the physical divider and
+              // protrudes into this column. Reserve enough room for RTL text,
+              // whose first glyph sits against this right edge.
+              "relative flex flex-col pr-4 transition-opacity",
               isSynthBusy && "opacity-70",
             )}
-            dir={sourceTextDirection}
+            dir={sourceCellDirection}
             aria-label="Source text"
             data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
@@ -3891,7 +4512,7 @@ function EditorRow({
             {sourceSelection && (
               <SourceSelectionToolbar
                 sourceSelection={sourceSelection}
-                concepts={project.terminology ?? []}
+                concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
                 onTermApply={handleTermApply}
@@ -3953,7 +4574,7 @@ function EditorRow({
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
-                concepts={project.terminology ?? []}
+                concepts={terminologyConcepts}
                 onTermApply={handleTermApply}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -3979,7 +4600,7 @@ function EditorRow({
             "relative flex flex-col pl-3 pr-9 transition-opacity",
             isSynthBusy && "opacity-70",
           )}
-          dir={targetTextDirection}
+          dir="ltr"
           style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
         >
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
@@ -4025,13 +4646,23 @@ function EditorRow({
               the floating action rail a lane of its own instead of letting it
               cover the first line of target text. The cast/character label
               lives here (left side), not squished into the line-number pill. */}
-          <div className="mb-1 flex h-4 items-center text-xs text-muted-foreground" dir="ltr">
+          <div className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
             {showCellLabel && (
               <AppTooltip content={labelText} disabled={!labelText}>
                 <span className="max-w-[60%] truncate">
                   {labelText}
                 </span>
               </AppTooltip>
+            )}
+            {cell.aiDrafted && (
+              <Badge
+                variant="outline"
+                className="ml-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
+                aria-label="AI draft — individual human review required"
+              >
+                <Sparkles className="size-2.5" />
+                AI draft · review required
+              </Badge>
             )}
           </div>
           <div className="flex flex-1 flex-col">
@@ -4044,18 +4675,22 @@ function EditorRow({
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
                 hasInlineFootnotes && "min-h-0 py-0.5",
                 "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
-                !cell.translated?.trim() && "bg-muted/40",
+                !visibleTranslated?.trim() && "bg-muted/40",
               )}
             >
                 {isEditorActive ? (
                   <TranslatedEditor
                     ref={translatedEditorRef}
                     cellId={cell.id}
-                    initialPlain={cell.translated}
-                    initialHtml={cell.translatedHtml}
+                    initialPlain={visibleTranslated}
+                    initialHtml={visibleTranslatedHtml}
                     onCommit={handleEditorCommit}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
+                    onSelectionChange={handleTargetPresenceSelection}
+                    textDirection={targetCellDirection}
+                    directionMode={targetDirectionMode}
+                    lang={project.targetLanguage || undefined}
                     className={cn(
                       "w-full",
                       showCompletionOverlay && "opacity-30 transition-opacity",
@@ -4073,7 +4708,7 @@ function EditorRow({
                     remoteChangedDuringEdit={remoteChangedWhileFocused}
                     onDiscardLocal={handleDiscardLocalAndReload}
                     onNavigateCell={onNavigateCell}
-                    terminologyConcepts={project.terminology ?? []}
+                    terminologyConcepts={terminologyConcepts}
                     onTermChipClick={handleTermChipClick}
                     footnoteNumberOffset={targetFootnoteNumberOffset}
                     showFootnoteTooltips={!footnotePanelActive}
@@ -4091,12 +4726,14 @@ function EditorRow({
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
                     aria-label={editorAriaLabel}
                     data-target-read-view
-                    tabIndex={editable && !isLoading ? 0 : undefined}
+                    dir={targetCellDirection}
+                    lang={project.targetLanguage || undefined}
+                    tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
                     className={cn(
-                      "min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+                      "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
                       "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
                       showCompletionOverlay && "opacity-30 transition-opacity",
-                      !cell.translated?.trim() && "text-muted-foreground/60",
+                      !visibleTranslated?.trim() && "text-muted-foreground/60",
                     )}
                     onClick={(event) => {
                       event.stopPropagation()
@@ -4109,33 +4746,39 @@ function EditorRow({
                       requestTargetEdit()
                     }}
                   >
-                    {lockHolderLabel && (
-                      <div
-                        aria-live="polite"
-                        className="pointer-events-none absolute right-1 top-1 z-10 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
-                      >
-                        {lockHolderLabel} is editing
-                      </div>
-                    )}
-                    {targetHasRichFormatting && cell.translatedHtml ? (
-                      <TargetRichHtml
-                        html={cell.translatedHtml}
-                        footnotePanelActive={footnotePanelActive}
-                        footnoteNumberOffset={targetFootnoteNumberOffset}
-                      />
-                    ) : cell.translated?.trim() ? (
-                      <TargetReadText
-                        text={cell.translated}
-                        ranges={targetRanges}
-                        concepts={project.terminology ?? []}
-                        onRangeClick={openInlineRule}
-                        onTermChipClick={handleTermChipClick}
-                        footnotePanelActive={footnotePanelActive}
-                        footnoteNumberOffset={targetFootnoteNumberOffset}
-                      />
-                    ) : (
-                      <span aria-hidden="true" className="block min-h-[1.6em]" />
-                    )}
+                    <div ref={targetReadContentRef}>
+                      {remoteDraftText !== undefined ? (
+                        <span data-remote-presence-draft>
+                          {remoteDraftText || "\u200b"}
+                        </span>
+                      ) : targetHasRichFormatting && visibleTranslatedHtml ? (
+                        <TargetRichHtml
+                          html={visibleTranslatedHtml}
+                          footnotePanelActive={footnotePanelActive}
+                          footnoteNumberOffset={targetFootnoteNumberOffset}
+                        />
+                      ) : visibleTranslated?.trim() ? (
+                        karaokeReadRange ? (
+                          <KaraokeReadText text={visibleTranslated} range={karaokeReadRange} />
+                        ) : (
+                          <TargetReadText
+                            text={visibleTranslated}
+                            ranges={targetRanges}
+                            concepts={terminologyConcepts}
+                            onRangeClick={openInlineRule}
+                            onTermChipClick={handleTermChipClick}
+                            footnotePanelActive={footnotePanelActive}
+                            footnoteNumberOffset={targetFootnoteNumberOffset}
+                          />
+                        )
+                      ) : (
+                        <span aria-hidden="true" className="block min-h-[1.6em]" />
+                      )}
+                    </div>
+                    <RemoteTargetPresenceOverlay
+                      contentRef={targetReadContentRef}
+                      peers={remoteCellPresence}
+                    />
                   </div>
                 )}
               {/* FRO-204: Terminology chip popover — controlled via termChipState.
@@ -4146,7 +4789,7 @@ function EditorRow({
                   the popover body; the BaseUI Popover controlled-open + external
                   anchor positions it on the clicked chip. */}
               {termChipState && (() => {
-                const concepts = project.terminology ?? []
+                const concepts = terminologyConcepts
                 const onApply = targetHasSelectionRef.current
                   ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
                   : undefined
@@ -4177,7 +4820,7 @@ function EditorRow({
                     /* Streaming preview flows top-down like normal cell
                        text — same metrics as TipTap underneath so the
                        handoff at isLoading=false has no visible jump. */
-                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90">
+                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90" dir={targetCellDirection}>
                       {completionPreview}
                       <span
                         aria-hidden
@@ -4207,11 +4850,12 @@ function EditorRow({
                 editable={editable}
                 isDocx={isDocxFile}
                 onSave={(footnoteIndex, newText) => {
-                  const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                  const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
+                  if (updated === null) return false // stale index — keep the editor open (FRO-472)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onDelete={(footnoteIndex) => {
-                  const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                  const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onCreateTarget={handleCreateTargetFootnote}
@@ -4326,7 +4970,7 @@ function EditorRow({
                     // FRO-278: if the cell already has human text, confirm
                     // before letting the AI overwrite it. Empty cells proceed
                     // immediately (byte-identical to previous behavior).
-                    if (cell.translated.trim()) {
+                    if (visibleTranslated.trim()) {
                       setShowGenerateConfirm(true)
                     } else {
                       onCompleteSingle(cell)
@@ -4445,10 +5089,10 @@ function EditorRow({
                 />
               )}
 
-              {cell.translated.trim().length > 0 && (
+              {visibleTranslated.trim().length > 0 && (
                 <CellTtsButton
                   cellId={cell.id}
-                  text={cell.translated}
+                  text={visibleTranslated}
                   original={cell.original}
                   context={cell.context}
                   cellLabel={cell.cellLabel}
@@ -4496,6 +5140,14 @@ function EditorRow({
                 />
               )}
 
+              {onOpenHistory && (
+                <RailButton
+                  icon={<HistoryIcon className="h-3.5 w-3.5" />}
+                  tooltip="Edit history"
+                  onClick={() => onOpenHistory(cell.id)}
+                />
+              )}
+
               {onSeekToCue && (
                 <RailButton
                   icon={<Play className="h-3.5 w-3.5" />}
@@ -4524,18 +5176,18 @@ function EditorRow({
             {
               value: "health",
               icon: <Activity className="h-3 w-3" />,
-              label: "Staleness",
+              label: "Retrieval support",
               renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
                   <p>
                     <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
-                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · health{" "}
+                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · support{" "}
                     <span className="font-medium text-foreground">{healthValue}%</span>
                   </p>
                   <p>
                     {cellNeedsAttention
-                      ? "Needs attention — nearby context cells haven't been validated yet."
-                      : "No attention needed — enough nearby context is validated."}
+                      ? "Lower retrieval support — review terminology and context closely."
+                      : "Better retrieval support — human review is still required."}
                   </p>
                 </div>
               ),
@@ -4606,7 +5258,7 @@ function EditorRow({
                   </div>
 
                   {/* ── Body ────────────────────────────────────────────────── */}
-                  {cell.translated.trim().length === 0 ? (
+                  {visibleTranslated.trim().length === 0 ? (
                     <div className="flex flex-col items-center gap-1.5 rounded-xl bg-muted/40 px-3 py-6 text-center">
                       <FileText className="h-4 w-4 text-muted-foreground/40" />
                       <p className="text-xs text-muted-foreground">Translate this cell to read it back.</p>
@@ -4625,7 +5277,7 @@ function EditorRow({
                             <button
                               type="button"
                               onClick={() => onBacktranslate?.(cell, "refresh")}
-                              disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                              disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                               className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
@@ -4691,7 +5343,7 @@ function EditorRow({
                           <button
                             type="button"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
-                            disabled={!isBacktranslationConfigured || isBacktranslating || cell.translated.trim().length === 0}
+                            disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                             className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {isBacktranslating ? (
@@ -4716,7 +5368,7 @@ function EditorRow({
                   {/* ── Statistical reference — collapsed by default. A rough
                       corpus-derived gloss kept as a cross-check on the AI
                       reading; local-only, never saved as the cell's BT. ──── */}
-                  {cell.translated.trim().length > 0 && getStatisticalBt && !btEditing && (
+                  {visibleTranslated.trim().length > 0 && getStatisticalBt && !btEditing && (
                     <div className="rounded-lg border border-border/60">
                       <button
                         type="button"
@@ -4747,7 +5399,7 @@ function EditorRow({
                     </div>
                   )}
                   {/* ── FRO-207: Interlinear alignment panel ──────────────── */}
-                  {cell.original.trim() && cell.translated.trim() && getAlignmentModel && !btEditing && (
+                  {cell.original.trim() && visibleTranslated.trim() && getAlignmentModel && !btEditing && (
                     <div className="rounded-lg border border-border/60">
                       <button
                         type="button"
@@ -4763,7 +5415,7 @@ function EditorRow({
                         <div data-aquilla-alignment-panel className="px-2.5 pb-2.5">
                           <InterlinearAlignmentPanel
                             sourceText={cell.original}
-                            targetText={cell.translated}
+                            targetText={visibleTranslated}
                             alignmentModel={alignmentModelForExpansion}
                             confirmedSeeds={project.alignmentSeeds ?? []}
                             onSeedChange={onAlignmentSeedChange ?? (() => undefined)}
@@ -4789,11 +5441,12 @@ function EditorRow({
                   editable={editable}
                   isDocx={isDocxFile}
                   onSave={(footnoteIndex, newText) => {
-                    const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+                    const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
+                    if (updated === null) return false // stale index — keep the editor open (FRO-472)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onDelete={(footnoteIndex) => {
-                    const updated = deleteFootnote(cell.translated ?? "", footnoteIndex)
+                    const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onCreateTarget={handleCreateTargetFootnote}
@@ -4860,10 +5513,10 @@ function EditorRow({
                         <CellTranscriptPreview
                           ref={transcriptPreviewRef}
                           timings={cellAudioTimings}
-                          cellText={cell.translated}
+                          cellText={visibleTranslated}
                           cellId={cell.id}
                           alignedToCellText={
-                            tokenizeWords(cell.translated).length === cellAudioTimings.length
+                            tokenizeWords(visibleTranslated).length === cellAudioTimings.length
                           }
                           editable={editable}
                           onRetranscribe={handleTranscribe}
@@ -4896,6 +5549,16 @@ function EditorRow({
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
                         </Button>
+                        {/* Surfaces model-download %, failures (click-to-expand
+                            with Retry), and a success flash. Errors previously
+                            existed in transcribe-status but were rendered
+                            nowhere — the button just reverted to "Transcribe". */}
+                        <CellTranscribeBadge
+                          audioId={cell.selectedAudioId}
+                          hasTimings={(cellAudioTimings?.length ?? 0) > 0}
+                          onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}
+                          onRetry={handleTranscribe}
+                        />
                         {cell.selectedAudioId && selectedAudio && (
                           <DenoiseButton
                             projectId={project.id}
@@ -4936,10 +5599,10 @@ function EditorRow({
                       {generatedVoiceTimings && generatedVoiceTimings.length > 0 && (
                         <CellTranscriptPreview
                           timings={generatedVoiceTimings}
-                          cellText={cell.translated}
+                          cellText={visibleTranslated}
                           cellId={cell.id}
                           alignedToCellText={
-                            tokenizeWords(cell.translated).length === generatedVoiceTimings.length
+                            tokenizeWords(visibleTranslated).length === generatedVoiceTimings.length
                           }
                           editable={editable}
                           onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
@@ -5060,63 +5723,19 @@ function EditorRow({
                 </div>
               ),
             },
-            {
-              value: "history",
-              icon: <HistoryIcon className="h-3 w-3" />,
-              label: "History",
-              renderContent: () => (
-                <div className="flex flex-col gap-2">
-                  {isHistoryLoading ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      Loading edit history…
-                    </p>
-                  ) : isHistoryError ? (
-                    <p className="py-3 text-center text-xs text-destructive">
-                      Failed to load edit history.
-                    </p>
-                  ) : fetchedHistory.length === 0 ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      No edit history yet.
-                    </p>
-                  ) : (
-                    <>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        onClick={() => onOpenHistory?.(cell.id)}
-                        disabled={!onOpenHistory}
-                        className="self-start"
-                      >
-                        <HistoryIcon className="h-3 w-3" />
-                        Open full history
-                      </Button>
-                      <ul className="bg-muted divide-y divide-border/40 rounded-lg">
-                        {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
-                          const date = new Date(entry.timestamp).toLocaleString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
-                          return (
-                            <li key={`${entry.timestamp}-${i}`} className="px-2.5 py-1.5 text-xs">
-                              <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                                <span>{entry.author}</span>
-                                <span>{date}</span>
-                              </div>
-                              <div className="mt-0.5 text-muted-foreground">
-                                <FootnotedTextValue value={entry.value} showFootnotes />
-                              </div>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    </>
-                  )}
-                </div>
-              ),
-            },
+            // Metadata — untranslated import columns (DCS TSV supportReference/
+            // quote/occurrence/tags, OBS image attachments). Only offered when
+            // the cell actually carries a non-empty metadata bucket.
+            ...(hasCellMetadata(cell.metadata)
+              ? [
+                  {
+                    value: "metadata",
+                    icon: <Braces className="h-3 w-3" />,
+                    label: "Metadata",
+                    renderContent: () => <CellMetadataTab metadata={cell.metadata as Record<string, unknown>} />,
+                  },
+                ]
+              : []),
           ]}
         />
       </div>

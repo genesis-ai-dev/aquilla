@@ -7,7 +7,7 @@
  *
  * Key schema: `aq.file-view-prefs.v1`
  *
- * FRO-251: per-file font size control.
+ * AQU-251: per-file font size control.
  */
 
 import { useSyncExternalStore } from "react"

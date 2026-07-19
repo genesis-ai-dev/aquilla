@@ -38,7 +38,7 @@ export interface ProjectWideSettings {
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
   /**
-   * FRO-186: minimum role level required to trigger a harmonization sweep on
+   * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
    * maintainer (600); lowering below project_lead is not allowed (hard floor).
    */
@@ -64,13 +64,13 @@ export interface ProjectWideSettings {
    */
   draftContext?: DraftContextSettings
   /**
-   * Persisted interlinear alignment seeds (FRO-207). Each entry is a
+   * Persisted interlinear alignment seeds (AQU-207). Each entry is a
    * (srcToken, tgtToken, weight) triple; positive weight = confirmed,
    * negative = invalidated. Synced additively the same way as `terminology`.
    */
   alignmentSeeds?: import("@/lib/completion/interlinear").AlignmentSeed[]
   /**
-   * Bible Aquifer reference data (bibletranslation.org). FRO-460 derive-on-read:
+   * Bible Aquifer reference data (bibletranslation.org). AQU-460 derive-on-read:
    * this is the EXPLICIT user override only. When absent, the effective value
    * is derived — on for scripture projects, off otherwise — and is NEVER
    * persisted just by viewing/loading a project. An explicit `true`/`false`
@@ -87,6 +87,11 @@ export interface ProjectWideSettings {
    * See docs/superpowers/specs/2026-07-06-dcs-importer-design.md §8.
    */
   dcsUpstream?: import("@/lib/dcs/types").DcsCursor
+  /**
+   * AQU-538: non-default target-language lanes ('' is always implicit, never stored).
+   * Opaque BCP-47-ish tags; order = display order.
+   */
+  targetLanes?: string[]
 }
 
 export interface ProjectSettingsResponse {

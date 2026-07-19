@@ -7,7 +7,7 @@
 | Auth        | API-level login (covered implicitly by every multi-user spec via `ensureAuthState`) | `e2e/helpers/auth.ts` |  n/a   |
 | Auth        | UI sign-up / login flow                              | _gap — Plan 2 (no `/login` route; login lives in onboarding)_ |        |
 | Auth        | Password reset request                               | _gap — Plan 2_                                                |        |
-| Auth        | Switch between two signed-in accounts                | _gap — Plan 2_                                                |        |
+| Auth        | Switch between two signed-in accounts (cross-tab reconcile, FRO-367) | `e2e/specs/orgs/account-switch-cross-tab.spec.ts`  |        |
 | Onboarding  | First-run flow to dashboard                          | _gap — Plan 2_                                                |        |
 | Projects    | Create project, appears on dashboard                 | `e2e/specs/projects/create.smoke.spec.ts`                     |   ✅   |
 | Projects    | Open / delete / restore from trash                   | `e2e/specs/projects/project-trash.smoke.spec.ts` + `dashboard-trash-expand-restore.smoke.spec.ts` | ✅ |
@@ -21,33 +21,38 @@
 | Orgs        | Remove member, change role                           | `e2e/specs/orgs/remove-member-dialog.smoke.spec.ts` + `projects/share-panel-role-change.smoke.spec.ts` | ✅ |
 | Orgs        | Send & accept invite                                 | `e2e/specs/orgs/invite-to-projects.smoke.spec.ts` + `pending-invite-revoke.smoke.spec.ts` | ✅ |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
-| Editor      | Commit survives a stale in-flight refetch (no vanish-until-refresh, FRO-247) | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` | ✅ |
+| Editor      | Scripture verse labels match canonical refs; chapter picker and previous/next navigation | `e2e/specs/editor/chapter-navigation.smoke.spec.ts` | ✅ |
+| Editor      | Commit survives a stale in-flight refetch (no vanish-until-refresh, AQU-247) | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+K search                                         | `e2e/specs/editor/search.smoke.spec.ts` (toolbar) + `search-keyboard-shortcut.smoke.spec.ts` (Ctrl+K) | ✅ |
 | Editor      | Virtualization scroll integrity                      | _gap — Plan 2_                                                |        |
 | Rules       | Enable built-in rule, see violation in editor        | `e2e/specs/rules/violation.smoke.spec.ts`                     |   ✅   |
 | Rules       | Define custom rule                                   | `e2e/specs/rules/create-rule.smoke.spec.ts`                   |   ✅   |
 | Rules       | Auto-correct a violation                             | _gap — Plan 2_                                                |        |
-| Validation  | Validate a cell, indicator turns emerald             | `e2e/specs/validation/validate.smoke.spec.ts`                 |   ✅   |
+| Validation  | Editing a cell auto-validates it (indicator turns emerald) | `e2e/specs/validation/validate.smoke.spec.ts`           |   ✅   |
 | Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
-| AI          | Sparkle button fills cell from mock LLM              | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings)            | ✅ |
+| AI          | Sparkle button fills cell and marks it for individual human review | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings) | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
 | Collab      | Conflict resolution on same cell                     | _gap — Plan 2_                                                |        |
-| Collab      | Member presence indicators                           | _gap — Plan 2_                                                |        |
+| Collab      | Member presence indicators                           | `e2e/specs/collab/member-presence-popover.smoke.spec.ts`       | ✅ |
 | Comments    | Add / edit / resolve comment                         | `e2e/specs/editor/comments.smoke.spec.ts` + `comment-resolve.smoke.spec.ts` + `comment-reply.smoke.spec.ts` | ✅ |
 | Comments    | Go to cell from comments page                        | `e2e/specs/editor/comments-go-to-cell.smoke.spec.ts`          |   ✅   |
 | Sharing     | Generate invite link / join project via link         | `e2e/specs/projects/share-invite-link.smoke.spec.ts` + `join-page.smoke.spec.ts` | ✅ |
-| Sharing     | Invite accept confirmation + dashboard visibility (FRO-335) | `e2e/specs/projects/invite-accept-dashboard-visibility.smoke.spec.ts` | ✅ |
-| Sharing     | Pending-invite inbox + org external-collaborator revoke (FRO-326) | `e2e/specs/orgs/pending-invite-inbox-external-revoke.smoke.spec.ts` | ✅ |
+| Sharing     | Invite accept confirmation + `/shared` visibility (AQU-335 / AQU-417) | `e2e/specs/projects/invite-accept-dashboard-visibility.smoke.spec.ts` | ✅ |
+| Sharing     | Pending-invite inbox + org external-collaborator revoke (AQU-326) | `e2e/specs/orgs/pending-invite-inbox-external-revoke.smoke.spec.ts` | ✅ |
 | Sharing     | Copy invite URL from share panel                     | `e2e/specs/projects/share-invite-copy-url.smoke.spec.ts`      |   ✅   |
 | Sharing     | Toggle invite mode between @user and email           | `e2e/specs/projects/share-invite-mode-toggle.smoke.spec.ts`   |   ✅   |
+| Sharing     | Invite landing pages name inviter + workspace (AQU-471) | `e2e/specs/projects/join-page.smoke.spec.ts` (test 2) + `e2e/specs/orgs/join-org-context.smoke.spec.ts` | ✅ |
+| Sharing     | Email invites to multiple projects from the org view (AQU-471) | `e2e/specs/orgs/multi-project-invite-submit.smoke.spec.ts` (test 2) | ✅ |
 | Audio/Video | Import audio file                                    | _gap — Plan 2_                                                |        |
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
-| Export      | Export to each supported format                      | `e2e/specs/editor/export.smoke.spec.ts` + `export-format-switch.smoke.spec.ts` (partial — all format radio buttons covered) | ✅ |
+| Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
+| Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
+| Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
 | Editor      | Formatting loss warning when source has bold/italic   | `e2e/specs/editor/formatting-loss-warning.smoke.spec.ts`      |   ✅   |
 | Editor      | File actions hover menu (rename/delete)               | `e2e/specs/editor/file-actions-button.smoke.spec.ts`          |   ✅   |
@@ -74,17 +79,17 @@
 | Projects    | Project settings discard-changes dialog (Keep editing / Discard) | `e2e/specs/projects/project-settings-discard-unsaved.smoke.spec.ts` | ✅ |
 | Rules       | Amend rule button navigates to rules?focus=autofix    | `e2e/specs/rules/rule-drawer.smoke.spec.ts` (extended)             |   ✅   |
 | Editor      | Import dialog back-to-types button returns to landing | `e2e/specs/editor/import-back-to-types.smoke.spec.ts`              |   ✅   |
-| Projects    | Terminology candidate term "Promote to managed" opens Edit concept dialog | `e2e/specs/projects/terminology-promote-candidate.smoke.spec.ts` | ✅ |
+| Projects    | Accepting an inline suggested term promotes it to active | `e2e/specs/projects/terminology-promote-candidate.smoke.spec.ts` | ✅ |
 | Editor      | File rename suggestion banner (numbered family) appears and can be dismissed | `e2e/specs/editor/suggestion-banner-dismiss.smoke.spec.ts` | ✅ |
 | Editor      | Suggestion banner Apply all renames files and shows undo toast; Undo reverts | `e2e/specs/editor/suggestion-banner-apply-undo.smoke.spec.ts` | ✅ |
 | Editor      | Suggestion banner Review dialog shows per-file checkboxes; Cancel closes     | `e2e/specs/editor/suggestion-banner-review-dialog.smoke.spec.ts` | ✅ |
-| Editor      | Expand file row in sidebar reveals FileSectionGrid section rows; click navigates | `e2e/specs/editor/sidebar-file-expand-sections.smoke.spec.ts` | ✅ |
+| Editor      | Expand file row from compact progress (no cell-page fetch); edit/validation updates bars; section click navigates | `e2e/specs/editor/sidebar-file-expand-sections.smoke.spec.ts` | ✅ |
 | Editor      | Sidebar section progress dot click opens editor at section | `e2e/specs/editor/sidebar-progress-dot-navigate.smoke.spec.ts` | ✅ |
 | Editor      | Per-file "Apply rename suggestion" sparkle applies one rename and shows undo toast | `e2e/specs/editor/suggestion-banner-per-file-apply.smoke.spec.ts` | ✅ |
 | Rules       | Delete a custom rule removes it from the list          | `e2e/specs/rules/rule-delete.smoke.spec.ts`             |   ✅   |
-| Terminology | Delete managed concept removes it from the list        | `e2e/specs/projects/terminology-delete-concept.smoke.spec.ts` | ✅ |
+| Terminology | Archive hides an active term while preserving it for restore | `e2e/specs/projects/terminology-delete-concept.smoke.spec.ts` | ✅ |
 | Editor      | Pre-acceptance warning band for forbidden terminology rendering | `e2e/specs/editor/preacceptance-warning-band.smoke.spec.ts` | ✅ |
-| Editor      | RTL hint "Adjust" button opens view settings menu and dismisses hint | `e2e/specs/editor/rtl-hint-adjust-opens-settings.smoke.spec.ts` | ✅ |
+| Editor      | Manual direction mismatch offers Auto repair and restores content-driven direction | `e2e/specs/editor/rtl-hint-adjust-opens-settings.smoke.spec.ts` | ✅ |
 | Editor      | Workspace "Settings" dropdown item navigates to project settings     | `e2e/specs/editor/workspace-settings-navigate.smoke.spec.ts`   |   ✅   |
 | Projects    | Settings sub-menu link navigates to its pane and back (AQU-501) | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
 | Editor      | Next unfinished navigation basic flow                 | `e2e/specs/editor/next-unfinished.smoke.spec.ts`              |   ✅   |
@@ -111,8 +116,8 @@
 | Projects    | Project overview assign work form                     | `e2e/specs/projects/project-overview-assign-work.smoke.spec.ts` + `project-overview-assign-work-submit.smoke.spec.ts` | ✅ |
 | Projects    | Project overview overflow menu (archive/share/etc.)   | `e2e/specs/projects/project-overview-overflow-menu.smoke.spec.ts` |   ✅   |
 | Projects    | Projects list page renders project cards              | `e2e/specs/projects/projects-list-page.smoke.spec.ts`         |   ✅   |
-| Projects    | Project overview route renders name + Open project    | `e2e/specs/projects/project-overview.smoke.spec.ts`           |   ✅   |
-| Projects    | Project settings save flow persists name change       | `e2e/specs/projects/project-settings.smoke.spec.ts`           |   ✅   |
+| Projects    | Project overview opens editor; breadcrumbs preserve clickable organization ancestry | `e2e/specs/projects/project-overview.smoke.spec.ts` | ✅ |
+| Projects    | Project settings keeps synced name read-only and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
 | Projects    | Project card role badge shows user's role             | `e2e/specs/projects/project-card-role-badge.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home status filter (All/Stalled/Overdue/Needs attention)   | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |
@@ -137,7 +142,7 @@
 | Orgs        | Team delete dialog                                    | `e2e/specs/orgs/team-delete.smoke.spec.ts`                    |   ✅   |
 | Orgs        | Teams sort and filter                                 | `e2e/specs/orgs/teams-sort-and-filter.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell action popover shows Record audio + Add comment  | `e2e/specs/editor/cell-action-popover.smoke.spec.ts`          |   ✅   |
-| Editor      | Cell details expansion panel tabs (Decay/BT/Issues/History) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
+| Editor      | Cell details expansion panel tabs (Decay/BT/Footnotes/Issues) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
 | Editor      | Cell expansion panel closes on Escape key             | `e2e/specs/editor/cell-expansion-escape-close.smoke.spec.ts`  |   ✅   |
 | Editor      | CellExpansion tabs ArrowRight/Home/End keyboard nav   | `e2e/specs/editor/cell-expansion-tab-arrow-nav.smoke.spec.ts` |   ✅   |
 | Editor      | Tab / Shift+Tab moves focus between target cells      | `e2e/specs/editor/cell-tab-navigation.smoke.spec.ts`          |   ✅   |
@@ -160,7 +165,6 @@
 | Editor      | File rename Escape key cancels without saving         | `e2e/specs/editor/file-rename-escape-cancel.smoke.spec.ts`    |   ✅   |
 | Editor      | "r" key on focused file row opens inline rename       | `e2e/specs/editor/file-rename-r-hotkey.smoke.spec.ts`         |   ✅   |
 | Editor      | No-file placeholder renders when no file open         | `e2e/specs/editor/editor-no-file-placeholder.smoke.spec.ts`   |   ✅   |
-| Editor      | Confirm action dialog requires checkbox               | `e2e/specs/editor/confirm-action-dialog-checkbox.smoke.spec.ts` |   ✅   |
 | Editor      | Sidebar corpus collapse toggle                        | `e2e/specs/editor/sidebar-corpus-collapse.smoke.spec.ts`      |   ✅   |
 | Editor      | Import dialog opens and shows upload/eBible options   | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
 | Editor      | eBible import search and select corpus                | `e2e/specs/editor/import-dialog-ebible.smoke.spec.ts` + `import-dialog-ebible-search.smoke.spec.ts` | ✅ |
@@ -175,7 +179,7 @@
 | Editor      | Selection bar bulk validate + unvalidate              | `e2e/specs/editor/selection-bar.smoke.spec.ts` + `selection-bar-bulk-validate.smoke.spec.ts` + `selection-bar-unvalidate.smoke.spec.ts` + `selection-bar-clear.smoke.spec.ts` | ✅ |
 | Editor      | Formatting italic toggle via toolbar                  | `e2e/specs/editor/formatting-italic-toggle.smoke.spec.ts`     |   ✅   |
 | Editor      | View settings menu toggles line numbers + cell labels | `e2e/specs/editor/view-settings-menu.smoke.spec.ts` + `view-settings-cell-labels-toggle.smoke.spec.ts` + `view-settings-text-direction.smoke.spec.ts` | ✅ |
-| Editor      | RTL hint dismiss button removes hint                  | `e2e/specs/editor/rtl-hint-dismiss.smoke.spec.ts`             |   ✅   |
+| Editor      | Manual direction mismatch warning can be dismissed without changing the override | `e2e/specs/editor/rtl-hint-dismiss.smoke.spec.ts` | ✅ |
 | Editor      | Video attachment remove clears saved URL              | `e2e/specs/editor/video-attachment-dialog.smoke.spec.ts`      |   ✅   |
 | Editor      | Setup checklist drawer expands items + skip           | `e2e/specs/editor/setup-checklist.smoke.spec.ts` + `setup-checklist-item-expand.smoke.spec.ts` + `setup-checklist-skip.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist AI models section expand              | `e2e/specs/editor/setup-checklist-ai-models-expand.smoke.spec.ts` |   ✅   |
@@ -201,19 +205,19 @@
 | Rules       | Rules page add rule dialog opens                      | `e2e/specs/rules/rules-page-add-rule-dialog.smoke.spec.ts`    |   ✅   |
 | Rules       | Rules page back to editor navigation                  | `e2e/specs/rules/rules-page-back-to-editor.smoke.spec.ts`     |   ✅   |
 | Rules       | Rule create dialog test button                        | `e2e/specs/rules/rule-create-dialog-test-button.smoke.spec.ts` |   ✅   |
-| Terminology | Terminology page renders + add concept dialog         | `e2e/specs/projects/terminology.smoke.spec.ts` + `terminology-add-concept.smoke.spec.ts` | ✅ |
-| Terminology | Edit concept dialog                                   | `e2e/specs/projects/terminology-edit-concept.smoke.spec.ts`   |   ✅   |
-| Terminology | Concept status select (draft/approved/old)            | `e2e/specs/projects/terminology-concept-status-select.smoke.spec.ts` |   ✅   |
-| Terminology | Concept notes field                                   | `e2e/specs/projects/terminology-concept-notes.smoke.spec.ts`  |   ✅   |
-| Terminology | Add rendering to concept                              | `e2e/specs/projects/terminology-add-rendering.smoke.spec.ts`  |   ✅   |
-| Terminology | Rendering status select (preferred/alternate/forbidden)| `e2e/specs/projects/terminology-rendering-status-select.smoke.spec.ts` |   ✅   |
-| Terminology | Term detail popover from concept row                  | `e2e/specs/projects/terminology-term-detail.smoke.spec.ts`    |   ✅   |
+| Terminology | Glossary renders and inline append row creates an active term | `e2e/specs/projects/terminology.smoke.spec.ts` + `terminology-add-concept.smoke.spec.ts` | ✅ |
+| Terminology | Edit a glossary source term inline                    | `e2e/specs/projects/terminology-edit-concept.smoke.spec.ts`   | ✅ |
+| Terminology | Glossary lifecycle archives and restores an active term | `e2e/specs/projects/terminology-concept-status-select.smoke.spec.ts` | ✅ |
+| Terminology | Edit concept notes in the row expander                | `e2e/specs/projects/terminology-concept-notes.smoke.spec.ts`  | ✅ |
+| Terminology | Add a rendering in the row expander                   | `e2e/specs/projects/terminology-add-rendering.smoke.spec.ts`  | ✅ |
+| Terminology | Change rendering status (required/alternate/forbidden) | `e2e/specs/projects/terminology-rendering-status-select.smoke.spec.ts` | ✅ |
+| Terminology | Open the term details secondary view from a glossary row | `e2e/specs/projects/terminology-term-detail.smoke.spec.ts` | ✅ |
 | Terminology | Term detail occurrence row inline cell editor         | `e2e/specs/projects/terminology-term-detail-inline-edit.smoke.spec.ts` | ✅ |
 | Terminology | Remove rendering button deletes rendering from concept | `e2e/specs/terminology/terminology-remove-rendering.smoke.spec.ts` | ✅ |
-| Terminology | TerminologyTermDetail Close detail button dismisses panel | `e2e/specs/terminology/terminology-term-detail-close.smoke.spec.ts` | ✅ |
-| Terminology | Candidate terms tab renders mined terms               | `e2e/specs/projects/terminology-candidates-tab.smoke.spec.ts` |   ✅   |
+| Terminology | Back to glossary closes the term details view         | `e2e/specs/terminology/terminology-term-detail-close.smoke.spec.ts` | ✅ |
+| Terminology | Suggest terms adds mined candidates as inline pending rows | `e2e/specs/projects/terminology-candidates-tab.smoke.spec.ts` | ✅ |
 | Terminology | Export CSV and TBX buttons                           | `e2e/specs/projects/terminology-export.smoke.spec.ts`         |   ✅   |
-| Terminology | Import termbase dialog opens                          | `e2e/specs/projects/terminology-import-dialog.smoke.spec.ts`  |   ✅   |
+| Terminology | Import toolbar accepts CSV and TBX termbases          | `e2e/specs/projects/terminology-import-dialog.smoke.spec.ts`  | ✅ |
 | Terminology | Term lookup popover + apply rendering                 | `e2e/specs/projects/term-lookup-popover.smoke.spec.ts` + `term-lookup-apply-rendering.smoke.spec.ts` | ✅ |
 | Memory      | Living memory page renders entries                    | `e2e/specs/projects/living-memory.smoke.spec.ts`              |   ✅   |
 | Memory      | Add / edit / delete living memory entry               | `e2e/specs/projects/living-memory-add-entry.smoke.spec.ts` + `living-memory-edit-entry.smoke.spec.ts` + `living-memory-delete-entry.smoke.spec.ts` | ✅ |
@@ -239,7 +243,7 @@
 | Projects    | Project settings termbase publish toggle              | `e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Project settings validation section                   | `e2e/specs/projects/project-settings-validation.smoke.spec.ts` + `project-settings-validation-count.smoke.spec.ts` | ✅ |
 | Projects    | Assign work panel in project overview                 | `e2e/specs/projects/assign-work-panel.smoke.spec.ts`          |   ✅   |
-| Projects    | Assign work form — full submit, success message       | `e2e/specs/orgs/assign-work-submit.smoke.spec.ts`             |   ✅   |
+| Projects    | Assign work form submits and collapses after success  | `e2e/specs/orgs/assign-work-submit.smoke.spec.ts`             | ✅ |
 | Projects    | All routes return 200 / don't crash                   | `e2e/specs/projects/route-health.smoke.spec.ts`               |   ✅   |
 | Sharing     | Share dialog opens with correct default state         | `e2e/specs/projects/share-dialog.smoke.spec.ts`               |   ✅   |
 | Sharing     | Invite email validation (invalid email stays disabled) | `e2e/specs/projects/share-invite-email-validation.smoke.spec.ts` |   ✅   |
@@ -256,6 +260,7 @@
 | Terminology | Violations tab shows inbox content                    | `e2e/specs/projects/terminology-violations-tab.smoke.spec.ts` |   ✅   |
 | Terminology | Wildcard source term 'samp*' creates chip for 'sample' | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts`     |   ✅   |
 | Terminology | Violations inbox concept group expand/collapse        | `e2e/specs/terminology/violations-inbox-expand-group.smoke.spec.ts` | ✅ |
+| Projects    | Add target language → switch lane → translate per lane (AQU-538) | `e2e/specs/projects/add-target-language.spec.ts` |   |
 | Editor      | Setup checklist AI instructions edit + reset          | `e2e/specs/editor/setup-checklist-ai-instructions-edit.smoke.spec.ts` |   ✅   |
 | Editor      | Workspace actions dropdown lists available actions    | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts`   |   ✅   |
 | Editor      | Workspace actions cell scroll to target cell          | `e2e/specs/editor/workspace-actions-cell-scroll.smoke.spec.ts` |   ✅   |
@@ -284,4 +289,4 @@ Human-clickable walkthroughs for journeys where automation misses visual or UX e
 
 | Area | Checklist |
 |------|-----------|
-| Orgs — access lifecycle (FRO-144) | `e2e/manual-checklists/org-access-walkthrough.md` |
+| Orgs — access lifecycle (AQU-144) | `e2e/manual-checklists/org-access-walkthrough.md` |

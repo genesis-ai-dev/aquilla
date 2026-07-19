@@ -56,7 +56,7 @@ jobs:
           echo "$changed" | grep -q '^auth-worker/' && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
 
   # Worker deploys are blocked until the target Neon schema is current — the
-  # recurring 500 class (FRO-135/150/158, projects.is_active/source_link_*) was
+  # recurring 500 class (AQU-135/150/158, projects.is_active/source_link_*) was
   # worker code referencing columns whose migration was never applied to Neon.
   # `neon-migrate status` is read-only: it checks the schema_migrations ledger
   # and diffs db/postgres/schema.sql against live information_schema. On a

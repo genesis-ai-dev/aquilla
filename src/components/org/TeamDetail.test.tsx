@@ -51,7 +51,7 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
 
 function renderDetail() {
   // QueryClientProvider: the org shell's AccountSwitcher reaches useAccounts,
-  // which clears the React Query cache on account switch (FRO-212).
+  // which clears the React Query cache on account switch (AQU-212).
   return render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={["/teams/10"]}>
@@ -161,7 +161,7 @@ describe("TeamDetail non-admin gating", () => {
   })
 })
 
-describe("TeamDetail member role editing (FRO-139)", () => {
+describe("TeamDetail member role editing (AQU-139)", () => {
   beforeEach(() => {
     addOrgMember.mockResolvedValue({ userId: 2, username: "anna", role: { level: 400, name: "contributor" } })
   })

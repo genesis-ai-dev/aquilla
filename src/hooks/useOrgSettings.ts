@@ -15,11 +15,11 @@ import type { OrgProviderKeys } from "@/lib/sync/org-settings"
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600)
 // in auth-worker/src/routes/org-settings.ts. Lowering this to PROJECT_LEAD (500)
-// would re-open the FRO-255 silent-divergence window (editable controls + a 403
+// would re-open the AQU-255 silent-divergence window (editable controls + a 403
 // the user never sees) — do not change without a matching auth-worker update.
 const ORG_SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 
-// FRO-253: The WRITE gate for the exportMinRole setting itself is OWNER (700).
+// AQU-253: The WRITE gate for the exportMinRole setting itself is OWNER (700).
 // This is enforced server-side (auth-worker org-settings PATCH handler).
 // The client-side Settings UI enforces it via canEditExportFloor=(role>=OWNER)
 // so the select is disabled for non-owners. The server remains the source of truth.
@@ -67,20 +67,20 @@ export interface UseOrgSettings {
   /** True when the caller's org role is >= MAINTAINER. */
   canEdit: boolean
   /**
-   * FRO-433: True when the caller's org role is >= MAINTAINER.
+   * AQU-433: True when the caller's org role is >= MAINTAINER.
    * Org-level provider keys are set/edited by maintainer+, same gate as general settings.
    */
   canEditOrgKeys: boolean
   /**
-   * FRO-433: The current org-level provider key map, or empty object when unset.
+   * AQU-433: The current org-level provider key map, or empty object when unset.
    * Key is a provider identifier (e.g. "gemini-tts"); value is the raw key string.
    */
   orgProviderKeys: OrgProviderKeys
   /**
-   * FRO-253: True when the caller's project-resolved role meets the org's exportMinRole floor.
+   * AQU-253: True when the caller's project-resolved role meets the org's exportMinRole floor.
    *
    * NON-BREAKING DEFAULT: when the org has NOT explicitly set exportMinRole, canExport is
-   * always true client-side (gate nothing — pre-FRO-253 behavior; server routes keep their
+   * always true client-side (gate nothing — pre-AQU-253 behavior; server routes keep their
    * own pre-existing MAINTAINER default). Only when exportMinRole is explicitly set in org
    * settings does this gate apply. Callers should hide/disable export affordances when false.
    *
@@ -91,7 +91,7 @@ export interface UseOrgSettings {
    *
    * NOTE: client-side formats (txt/md/tsv/csv/xlf/tmx/vtt) operate on already-fetched cells
    * and cannot be truly enforced client-side. The floor here gates the UI affordance and the
-   * server-side USFM/bundle routes; read-API gating is explicitly out of scope (FRO-253).
+   * server-side USFM/bundle routes; read-API gating is explicitly out of scope (AQU-253).
    */
   canExport: boolean
   /**
@@ -205,7 +205,7 @@ export function useOrgSettings(
   const canEdit =
     orgRoleLevel != null && orgRoleLevel >= ORG_SETTINGS_WRITE_MIN_ROLE
 
-  // FRO-253: derive the explicit export floor from org settings.
+  // AQU-253: derive the explicit export floor from org settings.
   // null = org has NOT set it (non-breaking default: no client-side gate).
   // The server routes independently default to MAINTAINER (600) for USFM/bundle.
   const exportMinRole = (() => {
@@ -282,7 +282,7 @@ export function useOrgSettings(
           // Forbidden (role check failed at the API layer) or error: roll back
           // the optimistic write to the pre-write snapshot, then re-fetch truth.
           // Without this the rejected value lingered until an unrelated refresh
-          // (FRO-255: no silent local divergence).
+          // (AQU-255: no silent local divergence).
           writeServer(fresh)
           void refresh()
         }
@@ -310,16 +310,16 @@ export function useOrgSettings(
   const settings = server?.settings ?? {}
   const orgRules: TranslationRule[] = settings.rules ?? []
   const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
-  // FRO-433: org-level provider keys; default to empty object when unset.
+  // AQU-433: org-level provider keys; default to empty object when unset.
   const orgProviderKeys: OrgProviderKeys = settings.orgProviderKeys ?? {}
   // canEditOrgKeys: same gate as general settings write (maintainer+).
   const canEditOrgKeys = canEdit
 
-  // FRO-253 (corrected): canExport logic:
+  // AQU-253 (corrected): canExport logic:
   //   • Before settings are fetched (hasFetched=false): optimistically allow so the
   //     button renders; the ACTION (openExportFlow) must wait for hasFetched.
   //   • After fetch, if exportMinRole is null (not set): ALLOW — non-breaking default.
-  //     Pre-FRO-253 the button had no role gate; we preserve that for orgs that
+  //     Pre-AQU-253 the button had no role gate; we preserve that for orgs that
   //     haven't configured anything. Server routes gate USFM/bundle independently.
   //   • After fetch, if exportMinRole is set: compare against the project-resolved
   //     role (effectiveRoleLevel), not the raw org role.

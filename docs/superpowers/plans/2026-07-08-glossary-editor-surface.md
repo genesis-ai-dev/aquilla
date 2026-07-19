@@ -1152,7 +1152,7 @@ const GlossaryEditorContent = lazy(() =>
 Locate (near line 3882):
 ```tsx
         ) : centerSurface === "terminology" ? (
-          // FRO-254: Terminology page inside the shell.
+          // AQU-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
               <TerminologyPageContent />

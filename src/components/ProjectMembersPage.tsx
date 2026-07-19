@@ -1,6 +1,6 @@
-// FRO-180: Per-project members page (/project/:id/members).
+// AQU-180: Per-project members page (/project/:id/members).
 //
-// Renders inside the ProjectWorkspace shell (FRO-254 surface-swap pattern).
+// Renders inside the ProjectWorkspace shell (AQU-254 surface-swap pattern).
 // Shell stays mounted; only the center content area swaps.
 //
 // Features:
@@ -28,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import {
   revokeAllProjectAccess, partitionMembers, type RevokeAllResult,
 } from "@/lib/frontier/members"
@@ -36,8 +37,10 @@ import {
   ROLE,
   LINK_ROLE_OPTIONS,
   PROJECT_ROLE_OPTIONS,
+  humanRoleName,
   roleDisplayText,
 } from "@/lib/frontier/roles"
+import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { toUserFacingError } from "@/lib/errors/user-error"
@@ -130,7 +133,7 @@ export function ProjectMembersPage() {
 // ──────────────────────────────────────────────────────────────────────────
 // Members tab
 //
-// Exported (FRO-335) so the org-side ProjectOverview (/projects/:id) can
+// Exported (AQU-335) so the org-side ProjectOverview (/projects/:id) can
 // embed the same members add/change-role/revoke surface the in-project
 // members page offers — one implementation, two surfaces.
 // ──────────────────────────────────────────────────────────────────────────
@@ -153,15 +156,22 @@ export function MembersTab({
   const [newRole, setNewRole] = useState<number>(ROLE.CONTRIBUTOR)
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  // AQU-560: when the add is refused for lack of permission, surface the
+  // enriched account-identity + switch-user alert instead of the bare message
+  // (the denial is usually "you're on the wrong account").
+  const [addForbidden, setAddForbidden] = useState(false)
 
   // Revoke-all state
   const [revokeTarget, setRevokeTarget] = useState<ProjectMember | null>(null)
+  // Remove-direct-grant confirmation (FRO-368: used to remove instantly).
+  const [removeTarget, setRemoveTarget] = useState<ProjectMember | null>(null)
 
   const handleAdd = useCallback(async () => {
     const trimmed = newUsername.trim()
     if (!trimmed) return
     setAdding(true)
     setAddError(null)
+    setAddForbidden(false)
     try {
       const result = await add(trimmed, newRole)
       if (!result) {
@@ -170,7 +180,9 @@ export function MembersTab({
       }
       setNewUsername("")
     } catch (e) {
-      setAddError(toUserFacingError(e, "project").message)
+      const uf = toUserFacingError(e, "project")
+      setAddForbidden(uf.category === "forbidden")
+      setAddError(uf.message)
     } finally {
       setAdding(false)
     }
@@ -251,14 +263,16 @@ export function MembersTab({
 
           {/* Remove button for direct grants */}
           {!isLocked && !isSelf && m.role.source === "override" ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-muted-foreground"
-              onClick={() => void remove(m.userId)}
-            >
-              Remove
-            </Button>
+            <AppTooltip content={`Removes ${m.username}'s direct project access. Access via org, team, or creator status is unaffected.`}>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => setRemoveTarget(m)}
+              >
+                Remove
+              </Button>
+            </AppTooltip>
           ) : isLocked ? (
             <AppTooltip content={lockedHint}>
               <span className="text-[10px] text-muted-foreground">
@@ -269,16 +283,17 @@ export function MembersTab({
 
           {/* Revoke all — available when session exists + maintainer+ */}
           {session?.jwt && !isSelf && (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="gap-1 text-destructive/70 hover:text-destructive"
-              title="Revoke all access to this project"
-              onClick={() => setRevokeTarget(m)}
-            >
-              <ShieldOff className="h-3.5 w-3.5" />
-              Revoke all
-            </Button>
+            <AppTooltip content="Review every access path this member holds (direct, org, team), then revoke with typed confirmation.">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1 text-destructive/70 hover:text-destructive"
+                onClick={() => setRevokeTarget(m)}
+              >
+                <ShieldOff className="h-3.5 w-3.5" />
+                Revoke all
+              </Button>
+            </AppTooltip>
           )}
         </div>
       </li>
@@ -401,6 +416,7 @@ export function MembersTab({
             onChange={(e) => {
               setNewUsername(e.target.value)
               setAddError(null)
+              setAddForbidden(false)
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") void handleAdd()
@@ -438,10 +454,33 @@ export function MembersTab({
             {adding ? "Adding…" : "Add"}
           </Button>
         </div>
-        {addError && (
+        {addForbidden ? (
+          <PermissionDeniedAlert
+            action="add members to this project"
+            requiredRole="Maintainer or higher"
+          />
+        ) : addError ? (
           <p className="text-xs text-destructive">{addError}</p>
-        )}
+        ) : null}
       </div>
+
+      {/* Remove-direct-grant confirmation (FRO-368) */}
+      <ConfirmActionDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}
+        title="Remove member"
+        description={
+          removeTarget
+            ? `Remove ${removeTarget.username}'s direct ${humanRoleName(removeTarget.role.level)} access to this project? Any access via org, team, or creator status is unaffected — use "Revoke all" to review every path.`
+            : ""
+        }
+        confirmLabel="Remove"
+        variant="destructive"
+        onConfirm={() => {
+          if (removeTarget) void remove(removeTarget.userId)
+          setRemoveTarget(null)
+        }}
+      />
 
       {/* Revoke-all dialog */}
       {revokeTarget && (
@@ -566,7 +605,6 @@ function RevokeAllDialog({
             <GrantPathRow
               source={member.role.source}
               level={member.role.level}
-              name={member.role.name}
               removable={member.role.source === "override"}
             />
             {member.secondarySources?.map((s, i) => (
@@ -574,7 +612,6 @@ function RevokeAllDialog({
                 key={i}
                 source={s.source}
                 level={s.level}
-                name={s.name}
                 removable={false}
               />
             ))}
@@ -857,11 +894,10 @@ function SourceBadge({ source }: { source: string }) {
 }
 
 function GrantPathRow({
-  source, level, name, removable,
+  source, level, removable,
 }: {
   source: string
   level: number
-  name: string
   removable: boolean
 }) {
   return (
@@ -869,7 +905,8 @@ function GrantPathRow({
       <span className={cn("font-medium capitalize", removable ? "text-foreground" : "text-muted-foreground")}>
         {source}
       </span>
-      <span className="text-muted-foreground">→ <RoleLabel name={name} /> (level {level})</span>
+      {/* Role LABEL only — numeric levels are internal (FRO-368). */}
+      <span className="text-muted-foreground">→ {humanRoleName(level)}</span>
       {removable ? (
         <span className="text-xs text-destructive/70">will be removed</span>
       ) : (

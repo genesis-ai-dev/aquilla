@@ -31,7 +31,7 @@ test("export format switch to CSV triggers a CSV download", async ({ alice }) =>
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
-  // Open Export dialog from header overflow (FRO-331).
+  // Open Export dialog from header overflow (AQU-331).
   await ws.openExportDialog()
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })

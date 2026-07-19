@@ -1,5 +1,5 @@
 // Types for the sync-worker stale-source read API (Phase 5 / AD-9; extended
-// FRO-476 §6 — live source links mirror engine + deterministic staleness).
+// AQU-476 §6 — live source links mirror engine + deterministic staleness).
 //
 // Mirror of `sync-worker/src/events/stale-source-route.ts`.
 
@@ -10,7 +10,7 @@
  */
 export type StaleCellId = string
 
-/** Link-level "you have unmirrored upstream changes" probe (FRO-476 §6).
+/** Link-level "you have unmirrored upstream changes" probe (AQU-476 §6).
  *  Non-null iff the project is a `live` link AND the upstream has
  *  lane-relevant changes past the mirrored cursor — comments/audio/
  *  validation-only upstream activity never counts. */
@@ -30,13 +30,13 @@ export interface StaleSourceResponse {
   /** The cell ids whose source has advanced since the translator committed. */
   staleCellIds: StaleCellId[]
   /**
-   * FRO-476: cell ids whose upstream source was deleted. The downstream's
+   * AQU-476: cell ids whose upstream source was deleted. The downstream's
    * local source row is kept (never deleted) so the orphaned target stays
    * visible — the review UI surfaces these separately from "changed."
    */
   tombstonedCellIds: StaleCellId[]
   /**
-   * FRO-477: cell ids whose ANCESTRY is stale (design spec §6's per-hop
+   * AQU-477: cell ids whose ANCESTRY is stale (design spec §6's per-hop
    * chain walk) — an ancestor hop above the immediate upstream changed, or
    * the immediate upstream's own translation is itself stale against its
    * source (the "dormant middle hop" case: English fixed, French never
@@ -56,13 +56,13 @@ export interface StaleSourceResponse {
    */
   upstreamProjectId: string | null
   /**
-   * FRO-476: link-level "you have unmirrored changes" probe. Null for
+   * AQU-476: link-level "you have unmirrored changes" probe. Null for
    * clone-mode links (which never show upstream drift), self-contained
    * projects, or when the live link has nothing unmirrored.
    */
   behindSeq: BehindSeq | null
   /**
-   * FRO-477: true iff some ancestor further up the chain (beyond the
+   * AQU-477: true iff some ancestor further up the chain (beyond the
    * immediate upstream) is itself behind ITS upstream. Link-granularity
    * only (§6 step 3 / §15 — v1 does not attempt per-cell precision for
    * this case); surfaced as a banner-level signal, not a per-cell flag.

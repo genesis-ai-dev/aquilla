@@ -1,4 +1,4 @@
-// FRO-334: Project Setup sidebar must render write-level rows (instructions,
+// AQU-334: Project Setup sidebar must render write-level rows (instructions,
 // invite, voice & transcription) read-only-with-tooltip for callers below
 // the action's role floor, rather than editable — per
 // aquilla-specs/05-user-stories/customize-ai-settings.md Persona section.
@@ -7,7 +7,7 @@
 // RoleGatedStep in isolation (see RoleGatedStep.test.tsx for the unit
 // coverage of the gating logic itself).
 //
-// FRO-334 (live-UI QA regression): the drawer used to derive its gate from
+// AQU-334 (live-UI QA regression): the drawer used to derive its gate from
 // `project.syncRole?.level` — a stale-tolerant cache stamped by unrelated
 // /sync-token round-trips (see useProject.ts). A real contributor's checklist
 // rendered with that cache unset (roleLevel == null -> fail-open) showed
@@ -91,7 +91,7 @@ function expandStep(title: string) {
   fireEvent.click(screen.getByRole("button", { name: new RegExp(title, "i") }))
 }
 
-describe("SetupChecklistDrawer — FRO-334 role-aware read-only rows", () => {
+describe("SetupChecklistDrawer — AQU-334 role-aware read-only rows", () => {
   it("contributor (400): instructions, invite, and voice rows are all gated read-only", () => {
     renderDrawer(ROLE.CONTRIBUTOR)
 
@@ -154,7 +154,7 @@ describe("SetupChecklistDrawer — FRO-334 role-aware read-only rows", () => {
     expect(document.querySelectorAll("[data-testid='role-gated-step']").length).toBe(0)
   })
 
-  it("FRO-334 regression: a synced contributor whose project.syncRole cache is unset still gates — mirrors live QA (bob, role.level=400, zero gated steps)", () => {
+  it("AQU-334 regression: a synced contributor whose project.syncRole cache is unset still gates — mirrors live QA (bob, role.level=400, zero gated steps)", () => {
     // The project record deliberately carries NO syncRole (the exact shape
     // QA observed for a real contributor whose /sync-token round-trip hadn't
     // fired this session) — only the `roleLevel` prop carries the server's

@@ -440,7 +440,7 @@ export function ProjectTable({
                           <span
                             tabIndex={0}
                             data-testid="project-table-deadline-trigger"
-                            className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                            className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                           >
                             <ProjectDeadlineStatuses
                               deadline={dstatus}

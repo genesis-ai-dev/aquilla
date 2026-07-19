@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
@@ -303,12 +304,13 @@ function VoiceRow({
         </span>
       </span>
       {isDefault && (
-        <span
+        <Badge
+          variant="secondary"
           title="Narrator — lines without an explicit speaker use this voice."
-          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
+          className="shrink-0 gap-1 text-[9px]"
         >
-          <Star className="h-2.5 w-2.5" /> Narrator
-        </span>
+          <Star data-icon="inline-start" /> Narrator
+        </Badge>
       )}
       {/* AQU-365: the ⋯ menu is character CRUD (edit/set-narrator/delete) —
           hidden below the maintainer floor. Selecting/dragging a voice to

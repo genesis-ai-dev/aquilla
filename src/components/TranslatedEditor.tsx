@@ -1261,7 +1261,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           <button
             type="button"
             onClick={onDiscardLocal}
-            className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
+            className="rounded-md bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
           >
             Discard and reload
           </button>
@@ -1307,7 +1307,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleBold().run()}
               aria-label="Bold"
-              className={cn("rounded-full", editor.isActive("bold") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("bold") && "bg-accent")}
             >
               <Bold className="h-3 w-3" />
             </Button>
@@ -1319,7 +1319,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleItalic().run()}
               aria-label="Italic"
-              className={cn("rounded-full", editor.isActive("italic") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("italic") && "bg-accent")}
             >
               <Italic className="h-3 w-3" />
             </Button>
@@ -1331,7 +1331,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleUnderline().run()}
               aria-label="Underline"
-              className={cn("rounded-full", editor.isActive("underline") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("underline") && "bg-accent")}
             >
               <UnderlineIcon className="h-3 w-3" />
             </Button>
@@ -1343,7 +1343,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleStrike().run()}
               aria-label="Strikethrough"
-              className={cn("rounded-full", editor.isActive("strike") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("strike") && "bg-accent")}
             >
               <Strikethrough className="h-3 w-3" />
             </Button>
@@ -1355,7 +1355,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleCode().run()}
               aria-label="Inline code"
-              className={cn("rounded-full", editor.isActive("code") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("code") && "bg-accent")}
             >
               <Code className="h-3 w-3" />
             </Button>

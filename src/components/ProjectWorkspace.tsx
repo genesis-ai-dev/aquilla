@@ -4955,7 +4955,7 @@ export function ProjectWorkspace() {
                 onClick={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
                 disabled={checkRunning}
                 aria-expanded={checkOpen}
-                className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
+                className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
                 title={
                   checkOpen
                     ? "Close file check"
@@ -4972,8 +4972,8 @@ export function ProjectWorkspace() {
                 Check file
                 {checkResult && !checkRunning && (
                   <span className={checkResult.totalFindingCount > 0
-                    ? "rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
-                    : "rounded-full bg-green-100 px-1.5 text-[10px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-300"}>
+                    ? "rounded-md bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
+                    : "rounded-md bg-green-100 px-1.5 text-[10px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-300"}>
                     {checkResult.totalFindingCount}
                   </span>
                 )}

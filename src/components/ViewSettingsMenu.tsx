@@ -2,6 +2,7 @@ import { useState, forwardRef, useImperativeHandle } from "react"
 import { Menu } from "@base-ui/react/menu"
 import { AlertTriangle, Eye, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
@@ -122,7 +123,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           <button
             type="button"
             onClick={() => applyDirectionMismatchFix("auto")}
-            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+            className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
           >
             Auto
           </button>
@@ -130,7 +131,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             <button
               type="button"
               onClick={() => applyDirectionMismatchFix(detectedManualDirection)}
-              className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+              className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
             >
               {detectedManualDirection.toUpperCase()}
             </button>
@@ -269,7 +270,7 @@ function Pill({ on }: { on: boolean }) {
   return (
     <span
       className={
-        "rounded-full px-2 py-0.5 text-[10px] font-medium " +
+        "rounded-md px-2 py-0.5 text-[10px] font-medium " +
         (on ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")
       }
     >
@@ -424,9 +425,9 @@ function DirPill({
 }) {
   const label = mode === "auto" ? `AUTO ${(autoSummary ?? dir).toUpperCase()}` : dir.toUpperCase()
   return (
-    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+    <Badge variant="secondary" className="text-[10px] tabular-nums">
       {label}
-    </span>
+    </Badge>
   )
 }
 

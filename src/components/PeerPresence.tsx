@@ -27,7 +27,7 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
         <PopoverTrigger
           render={
             <button
-              className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-1.5 pr-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-1.5 pr-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             >
               <AvatarGroup className="-space-x-1 *:data-[slot=avatar]:ring-background">
                 {visible.map((peer) => (

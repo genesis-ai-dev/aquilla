@@ -140,7 +140,7 @@ function RoleToggle({
       aria-label={`${label}${active ? " (selected)" : ""}`}
       title={title}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
+        "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors",
         active
           ? "border-transparent bg-primary text-primary-foreground"
           : "border-input text-muted-foreground hover:text-foreground",

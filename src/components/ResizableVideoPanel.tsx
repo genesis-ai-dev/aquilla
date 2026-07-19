@@ -71,7 +71,7 @@ export function ResizableVideoPanel({ children, className }: ResizableVideoPanel
             dragStateRef.current ? "bg-primary/50" : ""
           )}
         >
-          <div className="h-0.5 w-8 rounded-full bg-muted-foreground/40" />
+          <div className="h-0.5 w-8 rounded-md bg-muted-foreground/40" />
         </div>
       </AppTooltip>
     </div>

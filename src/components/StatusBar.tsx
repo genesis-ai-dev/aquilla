@@ -1,4 +1,5 @@
 import type { CellSummary } from "@/hooks/useActiveCellStore"
+import { Badge } from "@/components/ui/badge"
 import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
 
@@ -43,10 +44,14 @@ export function StatusBar({
       <span className="flex items-center gap-2">
         <span>{total.toLocaleString()} cells · {translated} translated ({pct}%)</span>
         {unvalidated > 0 && (
-          <span className="bg-muted rounded-full px-2 py-0.5 text-xs text-amber-500">{unvalidated} unvalidated</span>
+          <Badge variant="secondary" className="text-amber-500">
+            {unvalidated} unvalidated
+          </Badge>
         )}
         {validated > 0 && (
-          <span className="bg-muted rounded-full px-2 py-0.5 text-xs text-green-500">{validated} validated</span>
+          <Badge variant="secondary" className="text-green-500">
+            {validated} validated
+          </Badge>
         )}
       </span>
     </footer>

@@ -193,7 +193,7 @@ export function ExpandableFileList({
                     {canEditCorpus && !isEditingCorpus && (
                       <AppTooltip content={`Rename ${group.label}`} side="right">
                         <button
-                          className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
+                          className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
                           aria-label={`Rename ${group.label}`}
                         >

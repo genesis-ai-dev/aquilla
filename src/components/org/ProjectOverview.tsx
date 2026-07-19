@@ -110,7 +110,7 @@ function ProjectOverviewSkeleton() {
       <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
         <div className="flex items-center gap-2">
           <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-md" />
         </div>
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-20" />
@@ -220,7 +220,7 @@ function LanePill({ active, onClick, testId, children }: {
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+        "rounded-md border px-2.5 py-0.5 text-xs font-medium transition-colors",
         active
           ? "border-transparent bg-primary text-primary-foreground"
           : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Section } from "@/components/ui/page"
+import { SettingsGroup } from "@/components/ui/page"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
 import {
@@ -75,19 +75,19 @@ export function PersonalProviderSection() {
   }
 
   return (
-    <Section contentClassName="p-0">
+    <SettingsGroup label="Personal override">
       <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger className="flex w-full items-start gap-3 px-5 py-5 text-left hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
+        <CollapsibleTrigger className="flex w-full items-start gap-3 px-5 py-4 text-left hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
           {open ? (
             <ChevronDown className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           ) : (
             <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           )}
           <div className="min-w-0 flex flex-col gap-1">
-            <h2 className="font-heading text-base leading-snug font-medium text-foreground">
+            <p className="text-sm font-medium text-foreground">
               AI provider (advanced)
-            </h2>
-            <p className="text-sm text-muted-foreground">
+            </p>
+            <p className="text-xs text-muted-foreground">
               {hasOverride
                 ? "Active — your projects use this endpoint on this device."
                 : "Optional. Most users should leave this off and use Frontier."}
@@ -98,7 +98,7 @@ export function PersonalProviderSection() {
         <CollapsibleContent>
           <form
             id="personal-provider-form"
-            className="flex flex-col gap-4 border-t px-5 pb-5 pt-4"
+            className="flex flex-col gap-4 border-t px-5 pb-4 pt-4"
             onSubmit={(e) => {
               e.preventDefault()
               void form.handleSubmit()
@@ -204,6 +204,6 @@ export function PersonalProviderSection() {
           </form>
         </CollapsibleContent>
       </Collapsible>
-    </Section>
+    </SettingsGroup>
   )
 }

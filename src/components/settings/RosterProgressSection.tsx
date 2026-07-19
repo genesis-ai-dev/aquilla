@@ -22,8 +22,8 @@
 
 import { useEffect, useState } from "react"
 import { Check } from "lucide-react"
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
-import { Section } from "@/components/ui/page"
+import { FieldDescription, FieldError } from "@/components/ui/field"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import {
   Select,
   SelectContent,
@@ -103,19 +103,19 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
 
   return (
     <div className="space-y-6">
-      <Section
-        title="Who can view the member roster"
-        description="Minimum role required to see the member list and member count, on both the org Members page and each project's Members tab. Defaults to Maintainer — safe for teams that don't want to reveal who or how many people are on a project, even to their own members."
-      >
-        <Field>
-          <FieldLabel htmlFor="roster-min-role" className="text-sm font-medium">Who can view the roster</FieldLabel>
+      <SettingsGroup label="Member roster">
+        <SettingsRow
+          label="Who can view the roster"
+          description="Minimum role required to see the member list and member count, on both the org Members page and each project's Members tab. Defaults to Maintainer. Below this role, the roster and count are hidden entirely — not shown empty, just absent."
+          block
+        >
           <Select
             items={ROSTER_PROGRESS_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: opt.label }))}
             value={String(rosterViewMinRole)}
             onValueChange={(v) => { if (v) void handleRosterChange(Number(v)) }}
             disabled={!canEdit || rosterBusy}
           >
-            <SelectTrigger id="roster-min-role" className="w-full max-w-sm">
+            <SelectTrigger id="roster-min-role" aria-label="Who can view the roster" className="w-full max-w-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -128,9 +128,6 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
               </SelectGroup>
             </SelectContent>
           </Select>
-          <FieldDescription>
-            Below this role, the roster and count are hidden entirely — not shown empty, just absent.
-          </FieldDescription>
           {!canEdit && (
             <FieldDescription>Only org owners can change the roster visibility policy.</FieldDescription>
           )}
@@ -142,22 +139,22 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
               <Check className="size-3.5" /> Saved
             </p>
           )}
-        </Field>
-      </Section>
+        </SettingsRow>
+      </SettingsGroup>
 
-      <Section
-        title="Who can view member progress"
-        description="Minimum role required to see per-member progress/productivity — separate from roster visibility, since being allowed to see who's on the team doesn't mean being allowed to see what each person did. Defaults to Maintainer."
-      >
-        <Field>
-          <FieldLabel htmlFor="progress-min-role" className="text-sm font-medium">Who can view member progress</FieldLabel>
+      <SettingsGroup label="Member progress">
+        <SettingsRow
+          label="Who can view member progress"
+          description="Minimum role required to see per-member progress/productivity — separate from roster visibility. Defaults to Maintainer. Independent of roster visibility — a role can see who's on the team without seeing their progress, or vice versa."
+          block
+        >
           <Select
             items={ROSTER_PROGRESS_ROLE_OPTIONS.map((opt) => ({ value: String(opt.level), label: opt.label }))}
             value={String(memberProgressViewMinRole)}
             onValueChange={(v) => { if (v) void handleProgressChange(Number(v)) }}
             disabled={!canEdit || progressBusy}
           >
-            <SelectTrigger id="progress-min-role" className="w-full max-w-sm">
+            <SelectTrigger id="progress-min-role" aria-label="Who can view member progress" className="w-full max-w-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -170,11 +167,6 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
               </SelectGroup>
             </SelectContent>
           </Select>
-          <FieldDescription>
-            Independent of roster visibility — a role can see who's on the team without seeing their
-            progress, or vice versa. No dedicated per-member progress view exists yet; this policy is
-            ready for it.
-          </FieldDescription>
           {!canEdit && (
             <FieldDescription>Only org owners can change the member-progress visibility policy.</FieldDescription>
           )}
@@ -186,8 +178,8 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
               <Check className="size-3.5" /> Saved
             </p>
           )}
-        </Field>
-      </Section>
+        </SettingsRow>
+      </SettingsGroup>
     </div>
   )
 }

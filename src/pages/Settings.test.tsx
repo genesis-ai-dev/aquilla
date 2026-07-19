@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { Settings, OrgSettingsIdentity, OrgSettingsExport, OrgSettingsRoster } from "./Settings"
+import { Settings, OrgSettingsIdentity, OrgSettingsExport, OrgSettingsRoster, OrgSettingsAssignment } from "./Settings"
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,6 +78,7 @@ function renderSettings(path = "/settings") {
           <Route path="/settings/identity" element={<OrgSettingsIdentity />} />
           <Route path="/settings/export" element={<OrgSettingsExport />} />
           <Route path="/settings/roster" element={<OrgSettingsRoster />} />
+          <Route path="/settings/assignment" element={<OrgSettingsAssignment />} />
         </Routes>
       </OrgProvider>
     </MemoryRouter>,

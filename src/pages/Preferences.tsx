@@ -5,10 +5,10 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Switch } from "@/components/ui/switch"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Page, PageHeader, Section } from "@/components/ui/page"
+import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
@@ -34,6 +34,9 @@ import {
  * index of navigation rows (grouped, with a hint showing the current value);
  * each row opens a focused detail sub-page at `/preferences/:section`. Both
  * routes render this same component — it branches on the `section` param.
+ *
+ * Detail pages match the org-settings layout: page-sized title via PageHeader,
+ * then floating SettingsGroup headers with content cards for the controls.
  */
 const RAIL_OPTIONS: { id: DockRailPosition; label: string }[] = [
   { id: "left", label: "Left rail" },
@@ -74,13 +77,12 @@ const PROFILE_KEYS: (keyof TranslatorProfile)[] = [
 function WorkspaceSection() {
   const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
   return (
-    <Section title="Workspace" description="Layout choices for the project sidebar.">
-      <Field>
-        <FieldLabel className="text-sm font-medium">Sidebar tab layout</FieldLabel>
-        <FieldDescription>
-          Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar
-          across the top of the sidebar.
-        </FieldDescription>
+    <SettingsGroup label="Sidebar">
+      <SettingsRow
+        label="Sidebar tab layout"
+        description="Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar across the top of the sidebar."
+        block
+      >
         <Tabs
           value={railPosition}
           onValueChange={(value) => setRailPosition(value as DockRailPosition)}
@@ -94,8 +96,8 @@ function WorkspaceSection() {
             ))}
           </TabsList>
         </Tabs>
-      </Field>
-    </Section>
+      </SettingsRow>
+    </SettingsGroup>
   )
 }
 
@@ -107,12 +109,12 @@ function AppearanceSection() {
   const { mode, setMode } = useThemeMode()
 
   return (
-    <Section title="Appearance" description="How the workspace looks on this device.">
-      <Field>
-        <FieldLabel className="text-sm font-medium">Theme</FieldLabel>
-        <FieldDescription>
-          Follow your system appearance or choose a theme for this device.
-        </FieldDescription>
+    <SettingsGroup label="Theme">
+      <SettingsRow
+        label="Theme"
+        description="Follow your system appearance or choose a theme for this device."
+        block
+      >
         <Tabs
           value={mode}
           onValueChange={(value) => setMode(value as ThemeMode)}
@@ -126,8 +128,8 @@ function AppearanceSection() {
             ))}
           </TabsList>
         </Tabs>
-      </Field>
-    </Section>
+      </SettingsRow>
+    </SettingsGroup>
   )
 }
 
@@ -135,25 +137,30 @@ function AppearanceSection() {
 function PrivacySection() {
   const { enabled, setEnabled } = useAnalyticsConsent()
   return (
-    <Section title="Privacy" description="Control what's shared with us about how you use the app.">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <FieldLabel htmlFor="analytics-consent" className="text-sm font-medium">
-            Share usage data
-          </FieldLabel>
-          <p className="text-xs text-muted-foreground">
+    <SettingsGroup label="Analytics">
+      <SettingsRow
+        label="Share usage data"
+        description={
+          <>
             Events like project creation, exports, and AI translations. Never the contents of your
             translations or files.
-          </p>
-        </div>
-        <Switch id="analytics-consent" checked={enabled} onCheckedChange={setEnabled} />
-      </div>
-      {!enabled && (
-        <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-          With analytics disabled, we may not be able to help diagnose problems you encounter.
-        </p>
-      )}
-    </Section>
+            {!enabled ? (
+              <span className="mt-1 block text-amber-600 dark:text-amber-400">
+                With analytics disabled, we may not be able to help diagnose problems you encounter.
+              </span>
+            ) : null}
+          </>
+        }
+        control={
+          <Switch
+            id="analytics-consent"
+            checked={enabled}
+            onCheckedChange={setEnabled}
+            aria-label="Share usage data"
+          />
+        }
+      />
+    </SettingsGroup>
   )
 }
 
@@ -172,41 +179,41 @@ function TranslatorProfileSection() {
   }
 
   return (
-    <Section
-      title="Translator profile"
-      description="Tell the AI about yourself so its summaries and answers fit your context — and so it replies in your language. All fields are optional."
-    >
-      <FieldGroup className="grid gap-4 sm:grid-cols-2">
-        {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
-          <Field key={key}>
-            <FieldLabel htmlFor={`profile-${key}`} className="text-sm font-medium">
-              {label}
-            </FieldLabel>
-            <Input
-              id={`profile-${key}`}
-              value={form[key] ?? ""}
-              onChange={(e) => update(key, e.target.value)}
-              placeholder={placeholder}
-            />
-          </Field>
-        ))}
-      </FieldGroup>
-      <Field className="mt-4">
-        <FieldLabel htmlFor="profile-otherInfo" className="text-sm font-medium">
-          Other relevant information
-        </FieldLabel>
-        <Textarea
-          id="profile-otherInfo"
-          value={form.otherInfo ?? ""}
-          onChange={(e) => update("otherInfo", e.target.value)}
-          placeholder="Anything else that should shape the summaries you get"
-          rows={3}
-        />
-      </Field>
-      <p className="mt-3 text-xs text-muted-foreground">
-        This profile is stored on this device and sent to the AI to tailor your summaries.
-      </p>
-    </Section>
+    <SettingsGroup label="About you">
+      <SettingsRow
+        label="Profile fields"
+        description="All fields are optional. Stored on this device and sent to the AI to tailor your summaries."
+        block
+      >
+        <FieldGroup className="grid gap-4 sm:grid-cols-2">
+          {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
+            <Field key={key}>
+              <FieldLabel htmlFor={`profile-${key}`} className="text-sm font-medium">
+                {label}
+              </FieldLabel>
+              <Input
+                id={`profile-${key}`}
+                value={form[key] ?? ""}
+                onChange={(e) => update(key, e.target.value)}
+                placeholder={placeholder}
+              />
+            </Field>
+          ))}
+        </FieldGroup>
+        <Field className="mt-4">
+          <FieldLabel htmlFor="profile-otherInfo" className="text-sm font-medium">
+            Other relevant information
+          </FieldLabel>
+          <Textarea
+            id="profile-otherInfo"
+            value={form.otherInfo ?? ""}
+            onChange={(e) => update("otherInfo", e.target.value)}
+            placeholder="Anything else that should shape the summaries you get"
+            rows={3}
+          />
+        </Field>
+      </SettingsRow>
+    </SettingsGroup>
   )
 }
 
@@ -214,20 +221,80 @@ function TranslatorProfileSection() {
 interface PreferenceSection {
   slug: string
   title: string
+  description: string
   group: string
   icon: React.ComponentType<{ className?: string }>
   render: () => React.ReactNode
 }
 
 const PREFERENCE_SECTIONS: PreferenceSection[] = [
-  { slug: "workspace", title: "Workspace", group: "General", icon: PanelLeft, render: () => <WorkspaceSection /> },
-  { slug: "appearance", title: "Appearance", group: "General", icon: Palette, render: () => <AppearanceSection /> },
-  { slug: "privacy", title: "Privacy", group: "General", icon: ShieldCheck, render: () => <PrivacySection /> },
-  { slug: "profile", title: "Translator profile", group: "AI & personalization", icon: UserRound, render: () => <TranslatorProfileSection /> },
-  { slug: "provider-keys", title: "AI provider keys", group: "AI & personalization", icon: KeyRound, render: () => <PersonalProviderSection /> },
-  { slug: "local-models", title: "Local models", group: "AI & personalization", icon: Cpu, render: () => <LocalModelsSection /> },
-  { slug: "usage", title: "Usage", group: "Account", icon: Gauge, render: () => <UsageSection /> },
-  { slug: "api-tokens", title: "API tokens", group: "Account", icon: KeyRound, render: () => <ApiTokensSection /> },
+  {
+    slug: "workspace",
+    title: "Workspace",
+    description: "Layout choices for the project sidebar.",
+    group: "General",
+    icon: PanelLeft,
+    render: () => <WorkspaceSection />,
+  },
+  {
+    slug: "appearance",
+    title: "Appearance",
+    description: "How the workspace looks on this device.",
+    group: "General",
+    icon: Palette,
+    render: () => <AppearanceSection />,
+  },
+  {
+    slug: "privacy",
+    title: "Privacy",
+    description: "Control what's shared with us about how you use the app.",
+    group: "General",
+    icon: ShieldCheck,
+    render: () => <PrivacySection />,
+  },
+  {
+    slug: "profile",
+    title: "Translator profile",
+    description:
+      "Tell the AI about yourself so its summaries and answers fit your context — and so it replies in your language.",
+    group: "AI & personalization",
+    icon: UserRound,
+    render: () => <TranslatorProfileSection />,
+  },
+  {
+    slug: "provider-keys",
+    title: "AI provider keys",
+    description: "Optional personal AI provider override for this device only.",
+    group: "AI & personalization",
+    icon: KeyRound,
+    render: () => <PersonalProviderSection />,
+  },
+  {
+    slug: "local-models",
+    title: "Local models",
+    description:
+      "Whisper transcription and Kokoro / MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
+    group: "AI & personalization",
+    icon: Cpu,
+    render: () => <LocalModelsSection />,
+  },
+  {
+    slug: "usage",
+    title: "Usage",
+    description: "Your audio and AI activity. No pricing is shown here.",
+    group: "Account",
+    icon: Gauge,
+    render: () => <UsageSection />,
+  },
+  {
+    slug: "api-tokens",
+    title: "API tokens",
+    description:
+      "Personal access tokens for the Agent API. Anyone holding a token can act with your access, up to its scope — treat it like a password.",
+    group: "Account",
+    icon: KeyRound,
+    render: () => <ApiTokensSection />,
+  },
 ]
 
 const PREFERENCE_GROUPS = ["General", "AI & personalization", "Account"] as const
@@ -294,8 +361,9 @@ function PreferencesDetail({ slug }: { slug: string }) {
       statusBar={null}
       main={
         <Page>
-          <div className="space-y-4">
+          <div className="space-y-6">
             <BackLink to="/preferences" label="Preferences" />
+            <PageHeader title={section.title} description={section.description} />
             {section.render()}
           </div>
         </Page>

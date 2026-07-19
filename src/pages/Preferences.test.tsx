@@ -65,6 +65,7 @@ describe("Preferences", () => {
 
   it("renders the Privacy form on its detail route, with a back link to the index", () => {
     renderAt("/preferences/privacy")
+    expect(screen.getByRole("heading", { name: "Privacy" })).toBeInTheDocument()
     expect(screen.getByText("Share usage data")).toBeInTheDocument()
     // Both the breadcrumb's parent crumb and the dedicated BackLink render a
     // "Preferences" link back to the index, so more than one match is expected —

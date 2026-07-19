@@ -15,8 +15,8 @@
 
 import { useEffect, useState } from "react"
 import { Check } from "lucide-react"
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
-import { Section } from "@/components/ui/page"
+import { FieldDescription, FieldError } from "@/components/ui/field"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { Switch } from "@/components/ui/switch"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -55,37 +55,38 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
   }
 
   return (
-    <Section
-      title="Who can assign work"
-      description="By default, only project leads and maintainers can assign a book, chapter, or take to a member. Turn this on for teams that work collaboratively — it lets any contributor claim open work for themselves, though leads and maintainers can still assign to anyone, always."
-    >
-      <Field orientation="horizontal">
-        <div className="flex-1">
-          <FieldLabel htmlFor="allow-self-assignment" className="text-sm font-medium">
-            Allow self-assignment
-          </FieldLabel>
-          <FieldDescription>
-            When on, a member (contributor and above) can claim a book/chapter/take for THEMSELVES
-            from the assign-work picker — they still can't assign work to anyone else. Leads and
-            maintainers can always assign, to anyone, regardless of this setting.
-          </FieldDescription>
+    <SettingsGroup label="Assignments">
+      <SettingsRow
+        label="Allow self-assignment"
+        description="When on, a member (contributor and above) can claim a book/chapter/take for THEMSELVES from the assign-work picker — they still can't assign work to anyone else. Leads and maintainers can always assign, to anyone, regardless of this setting."
+        block
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-1">
+            {!canEdit && (
+              <FieldDescription>Only org owners can change the assignment authority policy.</FieldDescription>
+            )}
+            {error && <FieldError className="text-xs">{error}</FieldError>}
+            {saved && (
+              <p
+                className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400"
+                role="status"
+                data-testid="assignment-authority-saved"
+              >
+                <Check className="size-3.5" /> Saved
+              </p>
+            )}
+          </div>
+          <Switch
+            id="allow-self-assignment"
+            checked={allowSelfAssignment}
+            onCheckedChange={(checked) => void handleChange(checked)}
+            disabled={!canEdit || busy}
+            aria-label="Allow self-assignment"
+            className="shrink-0"
+          />
         </div>
-        <Switch
-          id="allow-self-assignment"
-          checked={allowSelfAssignment}
-          onCheckedChange={(checked) => void handleChange(checked)}
-          disabled={!canEdit || busy}
-        />
-      </Field>
-      {!canEdit && (
-        <FieldDescription>Only org owners can change the assignment authority policy.</FieldDescription>
-      )}
-      {error && <FieldError className="text-xs">{error}</FieldError>}
-      {saved && (
-        <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="assignment-authority-saved">
-          <Check className="size-3.5" /> Saved
-        </p>
-      )}
-    </Section>
+      </SettingsRow>
+    </SettingsGroup>
   )
 }

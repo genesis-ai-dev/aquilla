@@ -8,42 +8,53 @@
  * `useNavHistoryTitle` once that data has loaded.
  */
 import { ORG_SETTINGS_SECTION_TITLES, type OrgSettingsSection } from "@/pages/settings/constants"
+import { parseOrgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
+
 export function deriveNavTitle(pathname: string): string {
   const p = pathname.replace(/\/+$/, "") || "/"
   if (p === "/") return "Home"
 
-  // Org-level pages — exact matches.
+  // Global (non-org-prefixed) pages.
   switch (p) {
     case "/projects":
       return "Projects"
-    case "/projects/archived":
-      return "Archived projects"
-    case "/assigned":
-      return "Assigned to me"
     case "/preferences":
       return "Preferences"
-    case "/settings":
-      return "Organization settings"
-    case "/members":
-      return "Members"
-    case "/teams":
-      return "Teams"
     case "/admin":
       return "Admin console"
+    case "/shared":
+      return "Shared with you"
+  }
+
+  const org = parseOrgPath(p)
+  if (org) {
+    if (org.orgKey === ALL_ORGS_PARAM || org.rest === "") return "Projects"
+    const rest = org.rest.replace(/^\//, "")
+    const parts = rest.split("/").filter(Boolean)
+    switch (parts[0]) {
+      case "archived":
+        return "Archived projects"
+      case "assigned":
+        return "Assigned to me"
+      case "settings":
+        if (parts.length === 1) return "Organization settings"
+        return ORG_SETTINGS_SECTION_TITLES[parts[1] as OrgSettingsSection] ?? "Settings"
+      case "members":
+        return parts[1] === "matrix" ? "Members matrix" : "Members"
+      case "teams":
+        return parts.length >= 2 ? "Team" : "Teams"
+      default:
+        break
+    }
   }
 
   const seg = p.split("/").filter(Boolean)
 
-  // /settings/:section — org settings detail sub-pages.
-  if (seg[0] === "settings" && seg.length === 2) {
-    const section = seg[1] as OrgSettingsSection
-    return ORG_SETTINGS_SECTION_TITLES[section] ?? "Settings"
-  }
+  // /preferences/:section
+  if (seg[0] === "preferences" && seg.length === 2) return "Preferences"
 
   // /projects/:id — single project card view.
   if (seg[0] === "projects" && seg.length === 2) return "Project overview"
-  // /teams/:groupId
-  if (seg[0] === "teams" && seg.length === 2) return "Team"
 
   // /project/:id[/<surface>] — workspace shell and its content surfaces.
   if (seg[0] === "project" && seg.length >= 2) {

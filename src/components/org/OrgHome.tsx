@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
+import { membersPath, orgHomePath } from "@/lib/navigation/org-paths"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
@@ -771,7 +772,7 @@ export function OrgHome() {
 
   function openOrg(orgId: number) {
     setActiveOrg(orgId)
-    navigate({ pathname: "/", search: `?org=${orgId}` })
+    navigate(orgHomePath(orgId))
   }
 
   function selectProjectLens(lens: ProjectLens) {
@@ -1131,7 +1132,10 @@ export function OrgHome() {
                               linkableProjects={accessibleProjects}
                             />
                           )}
-                          <Button variant="outline" onClick={() => navigate("/members")}>
+                          <Button
+                            variant="outline"
+                            onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
+                          >
                             Invite your team
                           </Button>
                         </div>

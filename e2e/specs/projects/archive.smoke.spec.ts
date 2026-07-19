@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -37,7 +37,7 @@ test("archive a project and restore it", async ({ alice }) => {
   await expect(alice.getByText(name).first()).not.toBeVisible({ timeout: 5_000 })
 
   // 3. Navigate to /projects/archived and confirm it's listed there.
-  await alice.goto("/projects/archived")
+  await alice.goto(orgRoute(alice, "/archived"))
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
 
   // 4. Click Restore — ArchivedProjects calls load() after success, which removes

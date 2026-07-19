@@ -3,6 +3,8 @@ import { useNavigate, Navigate } from "react-router-dom"
 import {
   ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users, FolderOpen, Filter,
 } from "lucide-react"
+import { useActiveOrg } from "@/context/OrgContext"
+import { membersPath, orgSettingsPath } from "@/lib/navigation/org-paths"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   listProjects,
@@ -46,6 +48,7 @@ export function Dashboard() {
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("active")
   const [_pendingLifecycleId, setPendingLifecycleId] = useState<string | null>(null)
   const { session } = useFrontierSession()
+  const { activeOrgId } = useActiveOrg()
   const navigate = useNavigate()
   const brand = useBrand()
 
@@ -257,8 +260,18 @@ export function Dashboard() {
           <div className="flex shrink-0 items-center gap-2">
             <OverflowMenu
               items={[
-                { id: "members", label: "Members", icon: Users, onClick: () => navigate("/members") },
-                { id: "settings", label: "Settings", icon: SettingsIcon, onClick: () => navigate("/settings") },
+                {
+                  id: "members",
+                  label: "Members",
+                  icon: Users,
+                  onClick: () => activeOrgId != null && navigate(membersPath(activeOrgId)),
+                },
+                {
+                  id: "settings",
+                  label: "Settings",
+                  icon: SettingsIcon,
+                  onClick: () => activeOrgId != null && navigate(orgSettingsPath(activeOrgId)),
+                },
               ]}
             />
             <ProjectCreateDialog onCreated={upsert} />

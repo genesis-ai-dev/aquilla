@@ -7,7 +7,8 @@ import {
   UsersRound,
   X,
 } from "lucide-react"
-import { useSearchParams } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
+import { membersPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -146,21 +147,14 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const [multiInviteOpen, setMultiInviteOpen] = useState(false)
 
   // AQU-538 §3.4: "Roster" (the org-wide member list, default) vs "Matrix"
-  // (MembersMatrixView — members × projects role grid, previously mounted
-  // nowhere). Read/write via the URL so the tab is linkable
-  // (`/members?tab=matrix`) and survives a refresh.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const tab: MembersTab = searchParams.get("tab") === "matrix" ? "matrix" : "roster"
+  // (MembersMatrixView — members × projects role grid). Path-based so the
+  // tab is linkable (`/orgs/:id/members/matrix`) and survives a refresh.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const tab: MembersTab = location.pathname.endsWith("/members/matrix") ? "matrix" : "roster"
   function setTab(next: MembersTab) {
-    setSearchParams(
-      (prev) => {
-        const params = new URLSearchParams(prev)
-        if (next === "matrix") params.set("tab", "matrix")
-        else params.delete("tab")
-        return params
-      },
-      { replace: true },
-    )
+    if (orgId == null) return
+    navigate(membersPath(orgId, next), { replace: true })
   }
 
   const panelMembers: MembersPanelMember[] = members.map((m) => ({

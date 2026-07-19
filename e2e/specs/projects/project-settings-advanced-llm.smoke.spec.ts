@@ -23,7 +23,7 @@ test("project settings Advanced LLM section expands and Custom endpoint radio to
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
+  await alice.goto(`/project/${projectId}/settings/ai`)
   // The <details> summary is "Advanced LLM settings".
   const summary = alice.getByText(/Advanced LLM settings/i)
   await expect(summary).toBeVisible({ timeout: 10_000 })

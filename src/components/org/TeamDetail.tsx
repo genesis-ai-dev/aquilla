@@ -22,6 +22,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { humanRoleName } from "@/lib/frontier/roles"
+import { orgPath } from "@/lib/navigation/org-paths"
 import {
   getTeam,
   addTeamMember,
@@ -197,7 +198,7 @@ export function TeamDetail() {
     setDeleting(true)
     try {
       await deleteTeam(jwt, activeOrgId, groupIdNum)
-      navigate("/teams")
+      navigate(orgPath(activeOrgId, "/teams"))
     } finally {
       setDeleting(false)
     }
@@ -262,7 +263,7 @@ export function TeamDetail() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb parent={{ label: "Teams", to: "/teams" }} section={team?.name ?? "Team"} />}
+      header={<OrgBreadcrumb parent={{ label: "Teams", to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? "Team"} />}
       statusBar={null}
       main={
         <Page size="wide">

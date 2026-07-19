@@ -172,6 +172,7 @@ describe("OrgSwitcher", () => {
     await act(async () => { screen.getByRole("button", { name: /guest org/i }).click() })
     await act(async () => { screen.getByRole("menuitem", { name: /acme/i }).click() })
 
-    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/?org=1"))
+    // Org scope is path-based now, so the overview is `/orgs/1` rather than `/?org=1`.
+    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/1"))
   })
 })

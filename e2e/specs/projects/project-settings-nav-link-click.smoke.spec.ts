@@ -25,7 +25,7 @@ test("settings sub-menu link navigates to its pane and back", async ({ alice }) 
 
   // The URL now carries the section param and the Validation section's own
   // card is visible.
-  await expect(alice).toHaveURL(/\?section=validation/, { timeout: 5_000 })
+  await expect(alice).toHaveURL(/\/settings\/validation(?:\?|$)/, { timeout: 5_000 })
   const validationSection = alice.locator("#section-validation")
   await expect(validationSection).toBeVisible({ timeout: 5_000 })
 

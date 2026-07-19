@@ -7,6 +7,11 @@ import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { RoleLabel } from "@/components/RoleLabel"
 import {
+  ALL_ORGS_PARAM,
+  orgHomePath,
+  swapOrgInPath,
+} from "@/lib/navigation/org-paths"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -98,7 +103,7 @@ export function OrgSwitcher() {
   function handleAllOrgs() {
     setAllOrgs()
     setOpen(false)
-    navigate({ pathname: "/", search: "?org=all" })
+    navigate(swapOrgInPath(location.pathname, ALL_ORGS_PARAM))
   }
 
   function handleActiveOrg(orgId: number) {
@@ -106,9 +111,10 @@ export function OrgSwitcher() {
     setOpen(false)
     // `|| guestSelected`: returning to a member org from a guest's scoped
     // shared view (`/shared?org=<id>`) must navigate to that org's overview,
-    // symmetric with picking a guest org (AQU-624).
+    // symmetric with picking a guest org (AQU-624). swapOrgInPath falls back
+    // to the org home when the current path isn't org-scoped (e.g. /shared).
     if (isOrgScopedRoute(location.pathname) || location.pathname === "/" || guestSelected) {
-      navigate({ pathname: "/", search: `?org=${orgId}` })
+      navigate(swapOrgInPath(location.pathname, orgId))
     }
   }
 
@@ -125,7 +131,9 @@ export function OrgSwitcher() {
     await refresh()
     setActiveOrg(orgId)
     if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
-      navigate({ pathname: "/", search: `?org=${orgId}` })
+      navigate(swapOrgInPath(location.pathname, orgId))
+    } else {
+      navigate(orgHomePath(orgId))
     }
   }
 

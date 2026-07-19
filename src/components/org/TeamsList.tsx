@@ -25,6 +25,7 @@ import { Page, PageHeader, EmptyState } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
+import { orgPath } from "@/lib/navigation/org-paths"
 import {
   Select,
   SelectContent,
@@ -101,7 +102,7 @@ export function TeamsList() {
         )
         setCreating(false)
         createTeamForm.reset()
-        navigate(`/teams/${t.id}`)
+        navigate(orgPath(activeOrgId, `/teams/${t.id}`))
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : "Couldn't create team.")
       }
@@ -328,7 +329,7 @@ export function TeamsList() {
               {filtered.map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => navigate(`/teams/${t.id}`)}
+                  onClick={() => activeOrgId != null && navigate(orgPath(activeOrgId, `/teams/${t.id}`))}
                   className="rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/40"
                 >
                   <span className="block truncate font-medium text-foreground">{t.name}</span>

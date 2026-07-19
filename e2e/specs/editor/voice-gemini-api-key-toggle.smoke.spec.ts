@@ -27,7 +27,7 @@ test("project settings Gemini API key field reveals and conceals the key", async
   expect(projectId).toBeTruthy()
 
   // AQU-501: Voice lives under the AI & completion settings pane.
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
+  await alice.goto(`/project/${projectId}/settings/ai`)
   // Scope to the Voice settings card — other sections render their own
   // ApiKeyFields with the same Show/Hide buttons.
   const voiceSection = alice.locator("#section-voice")

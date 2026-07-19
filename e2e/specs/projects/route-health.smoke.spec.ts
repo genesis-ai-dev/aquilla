@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Route-health sweep: every named route renders without a crash boundary
@@ -20,18 +20,17 @@ const PROJECT_ROUTES = [
   `/project/${SEEDED_PROJECT_ID}/voice`,
 ]
 
-const ORG_ROUTES = [
-  "/",
-  "/projects",
-  "/projects/archived",
-  "/assigned",
-  "/teams",
-  "/members",
-  "/settings",
-  "/preferences",
-]
-
 test("all org-level routes render without errors", async ({ alice }) => {
+  const ORG_ROUTES = [
+    "/",
+    "/projects",
+    orgRoute(alice, "/archived"),
+    orgRoute(alice, "/assigned"),
+    orgRoute(alice, "/teams"),
+    orgRoute(alice, "/members"),
+    orgRoute(alice, "/settings"),
+    "/preferences",
+  ]
   for (const route of ORG_ROUTES) {
     await alice.goto(route)
     // No crash boundary.

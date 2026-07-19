@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
+import { orgHomePath } from "@/lib/navigation/org-paths"
 import {
   getAdminOverview,
   getAdminOrgs,
@@ -84,7 +85,7 @@ export function AdminConsole() {
   const openOrg = useCallback(
     (orgId: number) => {
       setActiveOrg(orgId)
-      navigate({ pathname: "/", search: `?org=${orgId}` })
+      navigate(orgHomePath(orgId))
     },
     [setActiveOrg, navigate],
   )

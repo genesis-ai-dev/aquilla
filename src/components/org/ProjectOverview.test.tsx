@@ -1554,7 +1554,7 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
 
     await screen.findByTestId("overview-lane-table")
     expect(screen.getByTestId("overview-lane-add-language").getAttribute("href"))
-      .toBe("/project/p1/settings?section=general")
+      .toBe("/project/p1/settings/general")
   })
 
   it("re-reads the per-file drill-down with the selected lane param", async () => {

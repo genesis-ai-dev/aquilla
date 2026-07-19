@@ -573,7 +573,7 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData) => void | Promise<void>
   onCompleteBatch: (cells: CellData[]) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
@@ -1839,7 +1839,7 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData) => void | Promise<void>
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2157,7 +2157,7 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData) => void | Promise<void>
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -3142,6 +3142,11 @@ function EditorRow({
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
+  // AQU-618: transient "Saved" confirmation shown after a Replace / AI-generate
+  // commit resolves, so the translator can see the change landed instead of
+  // being left on the (now-closed) dialog wondering whether it persisted.
+  const [showSaved, setShowSaved] = useState(false)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
@@ -3415,6 +3420,29 @@ function EditorRow({
       })
     })
   }, [editable, canValidate, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+
+  // AQU-618: run a single-cell AI generate/Replace, then return the translator
+  // to the edited cell and confirm the save. Both entry points — the Replace
+  // confirm dialog and the direct sparkle on an empty cell — used to fire
+  // `onCompleteSingle` and leave focus on the dialog / rail button with no
+  // saved signal, so testers re-applied the change unsure it had persisted.
+  // We await the commit (completeSingle auto-commits and flushes the outbox),
+  // then re-focus the cell editor (the new text is now visible there) and show
+  // a brief "Saved" confirmation.
+  const completeSingleAndReturn = useCallback(async () => {
+    await onCompleteSingle(cell)
+    onActivateEditor(cell.id)
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setShowSaved(true)
+    savedTimerRef.current = setTimeout(() => {
+      setShowSaved(false)
+      savedTimerRef.current = null
+    }, 2400)
+  }, [onCompleteSingle, cell, onActivateEditor])
+
+  useEffect(() => () => {
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+  }, [])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -4910,6 +4938,18 @@ function EditorRow({
                 </Button>
               </div>
             )}
+            {/* AQU-618: transient saved confirmation after a Replace / AI-generate
+                commit. `role="status"` announces it politely; the check + label
+                give the sighted translator the "it landed" signal they lacked. */}
+            {showSaved && !writeError && (
+              <div
+                role="status"
+                className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
+              >
+                <Check className="h-3 w-3" strokeWidth={3} />
+                <span>Saved</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -4973,7 +5013,7 @@ function EditorRow({
                     if (visibleTranslated.trim()) {
                       setShowGenerateConfirm(true)
                     } else {
-                      onCompleteSingle(cell)
+                      void completeSingleAndReturn()
                     }
                   }
                 }}
@@ -5788,7 +5828,7 @@ function EditorRow({
         isValidated={cell.status === "validated"}
         onConfirm={() => {
           setShowGenerateConfirm(false)
-          onCompleteSingle(cell)
+          void completeSingleAndReturn()
         }}
         onCancel={() => setShowGenerateConfirm(false)}
       />

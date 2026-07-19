@@ -21,6 +21,7 @@
 
 import { useMemo, useState } from "react"
 import type { ReactNode } from "react"
+import { Link } from "react-router-dom"
 import { Search, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -198,7 +199,8 @@ export function StaffLanePopover({
         <div>
           <p className="text-xs font-medium">Staff {laneLabel}</p>
           <p className="text-[11px] text-muted-foreground">
-            Add someone to this project, scoped to this lane.
+            Add an <strong className="font-medium text-foreground">org member</strong> to
+            this project, scoped to this lane.
           </p>
         </div>
 
@@ -212,7 +214,7 @@ export function StaffLanePopover({
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by username"
+                placeholder="Search your organization"
                 aria-label="Search org members"
                 className="h-8 pl-7 text-xs"
               />
@@ -220,7 +222,9 @@ export function StaffLanePopover({
             <ul className="max-h-40 divide-y overflow-y-auto rounded border">
               {results.length === 0 ? (
                 <li className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-                  {orgMembers.length === 0 ? "No org members yet." : "No matches."}
+                  {orgMembers.length === 0
+                    ? "No one in your organization yet."
+                    : "No org members match."}
                 </li>
               ) : (
                 results.map((m) => (
@@ -236,6 +240,23 @@ export function StaffLanePopover({
                 ))
               )}
             </ul>
+            {/* AQU-607: this control only reaches people already in your org —
+                that's why an outside-org name never appears here (the demo's
+                "you're not in my organization" dead-end). Surface the second
+                path explicitly rather than failing silently: external
+                contributors (e.g. translators) join via a project invite
+                link, not the org roster. */}
+            <p className="text-[11px] text-muted-foreground">
+              Searches your organization only. Adding someone from outside it?{" "}
+              <Link
+                to={`/project/${projectId}/members`}
+                className="font-medium text-foreground underline underline-offset-2"
+                onClick={() => setOpen(false)}
+              >
+                Invite them to the project
+              </Link>
+              .
+            </p>
           </div>
         ) : (
           <div className="space-y-2">

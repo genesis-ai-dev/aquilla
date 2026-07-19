@@ -67,6 +67,20 @@ describe("VoicePlaybackBar", () => {
     expect(screen.getByText("Press play to listen")).toBeTruthy()
   })
 
+  it("renders nested below content under now-playing", () => {
+    render(
+      <VoicePlaybackBar
+        cells={[cell()]}
+        projectId="dev-project"
+        session={null}
+        settings={undefined}
+        below={<span>Synced</span>}
+      />,
+    )
+    expect(screen.getByText("Synced")).toBeTruthy()
+    expect(screen.getByText("Nothing playing")).toBeTruthy()
+  })
+
   describe("start section (AQU-666)", () => {
     const session = { jwt: "t" } as unknown as FrontierSession
     const voiced = (id: string): CellData =>

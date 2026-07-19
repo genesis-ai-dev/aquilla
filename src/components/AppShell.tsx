@@ -70,12 +70,32 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
       <brand.logo.Mark className="h-6 w-6 shrink-0" aria-hidden />
     </a>
   ) : null)
+  // Status / playback sit at the bottom of the MAIN column (not under `aside`)
+  // so the transport/volume share the editor's right edge when drawers/sidebars
+  // are open — instead of stretching under them and looking "escaped."
+  const cardBody = (
+    <>
+      {beforeMain}
+      <main className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            <ErrorBoundary key={pathname} compact>
+              {main}
+            </ErrorBoundary>
+          </div>
+          {statusBar ? <div className="shrink-0">{statusBar}</div> : null}
+        </div>
+        {aside}
+      </main>
+    </>
+  )
+
   return (
-    // Linear "frame + floating card" model: the sidebar, header, and status
-    // bar all share the chrome base (bg-sidebar) as one continuous, lower/darker
-    // layer; the main workspace is a distinct, lighter card that sits ON TOP of
-    // it — inset on every side (top, sides, bottom) and fully rounded so the
-    // chrome reads as a frame wrapping the whole editor.
+    // Linear "frame + floating card" model: the sidebar and header share the
+    // chrome base (bg-sidebar); the main workspace is a distinct, lighter card
+    // inset on every side and fully rounded. Status / playback sit inside the
+    // card's main column (alongside any right aside) so they stay aligned with
+    // the editor shell on both edges.
     <div className="flex h-screen min-w-0 bg-sidebar">
       {/* AQU-308: Left dock — width is controlled by LeftDock itself (resizable + collapsible).
           The aside wrapper is kept so the logo can live above the dock rail. */}
@@ -134,31 +154,14 @@ export function AppShell({ leftDock, sidebar, logoSlot, logoAccessory, header, s
           <div className="mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="shrink-0 pb-1">{aboveCard}</div>
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
-              {beforeMain}
-              <main className="flex min-h-0 flex-1 overflow-hidden">
-                <div className="min-w-0 flex-1 overflow-hidden">
-                  <ErrorBoundary key={pathname} compact>
-                    {main}
-                  </ErrorBoundary>
-                </div>
-                {aside}
-              </main>
+              {cardBody}
             </div>
           </div>
         ) : (
           <div className="m-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
-            {beforeMain}
-            <main className="flex min-h-0 flex-1 overflow-hidden">
-              <div className="min-w-0 flex-1 overflow-hidden">
-                <ErrorBoundary key={pathname} compact>
-                  {main}
-                </ErrorBoundary>
-              </div>
-              {aside}
-            </main>
+            {cardBody}
           </div>
         )}
-        {statusBar}
       </div>
     </div>
   )

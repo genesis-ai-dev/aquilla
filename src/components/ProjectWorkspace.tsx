@@ -5559,49 +5559,70 @@ export function ProjectWorkspace() {
           </>
         }
         statusBar={
-          <>
-            {lens === "audio" && project && centerSurface !== "agent" && (
-              <VoicePlaybackBar
-                cells={legacyCells}
-                projectId={project.id}
-                session={frontierSession ?? null}
-                settings={tts.settings}
-                onActiveCell={jumpToCellId}
-                startCellId={timelineSelectedCellId}
+          (() => {
+            const syncStatus = (
+              <WorkspaceStatusBar
+                className={lens === "audio" && project && centerSurface !== "agent" ? "px-0 py-0.5" : undefined}
+                left={
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
+                    <SyncStatusIndicator status={fileSyncStatus} />
+                    <OutboxSyncIndicator
+                      pendingCount={Math.max(0, outboxPending - outboxFailed)}
+                      failureStreak={outboxFailures}
+                      failedCount={outboxFailed}
+                      // SUB-9: all-status feed so quarantined refusals render in
+                      // the inspector (with reason + Retry/Discard) instead of
+                      // the popover claiming "all caught up" beside a failed pill.
+                      records={outboxInspectorRecords}
+                      onRetryNow={outboxFlushNow}
+                    />
+                  </div>
+                }
               />
-            )}
-            <WorkspaceStatusBar
-              left={
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
-                  <SyncStatusIndicator status={fileSyncStatus} />
-                  <OutboxSyncIndicator
-                    pendingCount={Math.max(0, outboxPending - outboxFailed)}
-                    failureStreak={outboxFailures}
-                    failedCount={outboxFailed}
-                    // SUB-9: all-status feed so quarantined refusals render in
-                    // the inspector (with reason + Retry/Discard) instead of
-                    // the popover claiming "all caught up" beside a failed pill.
-                    records={outboxInspectorRecords}
-                    onRetryNow={outboxFlushNow}
-                  />
-                </div>
-              }
-            />
-            {/* File translation stats belong to the editor; the workbench has
-                its own working-set summary. Sync/outbox status above stays —
-                agent Apply flushes through the same outbox. */}
-            {centerSurface !== "agent" &&
-              (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") && (
+            )
+            // File translation stats belong to the editor; the workbench has
+            // its own working-set summary. Sync/outbox status above stays —
+            // agent Apply flushes through the same outbox.
+            const fileStats =
+              centerSurface !== "agent" &&
+              (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") ? (
               <StatusBar
+                className={lens === "audio" && project ? "px-0 py-0.5" : undefined}
                 cells={cellSummaries}
                 projectHealth={projectHealth}
                 healthMap={healthMap}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}
               />
-            )}
-          </>
+            ) : null
+
+            if (lens === "audio" && project && centerSurface !== "agent") {
+              return (
+                <VoicePlaybackBar
+                  cells={legacyCells}
+                  projectId={project.id}
+                  session={frontierSession ?? null}
+                  settings={tts.settings}
+                  onActiveCell={jumpToCellId}
+                  startCellId={timelineSelectedCellId}
+                  below={
+                    <>
+                      {syncStatus}
+                      {fileStats}
+                    </>
+                  }
+                />
+              )
+            }
+
+            return (
+              <>
+                {syncStatus}
+                {fileStats}
+              </>
+            )
+          })()
         }
       />
       {project && (

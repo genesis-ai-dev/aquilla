@@ -274,6 +274,17 @@ describe("OrgHome", () => {
     expect(screen.queryByText("New Testament")).not.toBeInTheDocument()
   })
 
+  it("filters to projects that need attention via the status chip", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "Needs attention" }))
+
+    // Legacy Translation is overdue + stalled; New Testament is healthy.
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
+    expect(screen.queryByText("New Testament")).not.toBeInTheDocument()
+  })
+
   it("shows a no-match message when the filter excludes every project", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())

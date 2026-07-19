@@ -113,7 +113,7 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2, X, Mic } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2, X, Mic, Plus } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
@@ -4926,7 +4926,8 @@ export function ProjectWorkspace() {
                   onClick={() => setEditingRuleId("new")}
                   disabled={editingRuleId !== null}
                 >
-                  + Add Rule
+                  <Plus className="size-4" aria-hidden />
+                  Add Rule
                 </Button>
               </>
             )}

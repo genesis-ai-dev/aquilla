@@ -16,7 +16,7 @@ test("edit rule button opens inline RuleEditor pre-filled with rule name", async
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
   // Create a new rule first.
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

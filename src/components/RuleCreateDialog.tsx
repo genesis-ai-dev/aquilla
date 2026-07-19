@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
+import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Field,
@@ -217,7 +218,8 @@ export function RuleCreateDialog({
           />
         }
       >
-        + Add Rule
+        <Plus className="size-4" aria-hidden />
+        Add Rule
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Create Translation Rule</DialogTitle></DialogHeader>

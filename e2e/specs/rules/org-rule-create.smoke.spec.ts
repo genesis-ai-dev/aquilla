@@ -20,7 +20,7 @@ test("+ Add Org Rule creates an org-scoped rule", async ({ alice }) => {
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
   // The "Org Rules" card and "+ Add Org Rule" button (maintainer only).
-  const addOrgRuleBtn = alice.getByRole("button", { name: /\+ Add Org Rule/i })
+  const addOrgRuleBtn = alice.getByRole("button", { name: /Add Org Rule/i })
   await expect(addOrgRuleBtn).toBeVisible({ timeout: 10_000 })
   await addOrgRuleBtn.click()
 

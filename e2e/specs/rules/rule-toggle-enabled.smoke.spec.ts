@@ -22,7 +22,7 @@ test("custom rule enable/disable toggle updates aria-label", async ({ alice }) =
 
   await alice.goto(`/project/${projectId}/rules`)
   // Create a custom rule.
-  const addBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addBtn).toBeVisible({ timeout: 10_000 })
   await addBtn.click()
 

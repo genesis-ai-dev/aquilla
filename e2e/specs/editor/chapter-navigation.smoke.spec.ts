@@ -21,8 +21,8 @@ test("scripture editor shows canonical verse numbers and supports chapter naviga
   // based chapter tracking cannot immediately snap back to chapter 1.
   await alice.setViewportSize({ width: 1280, height: 500 })
 
-  const chapterMenuTrigger = alice.getByRole("button", { name: /Current chapter:/ })
-  const chapterTrigger = alice.getByRole("button", { name: /Current chapter: Genesis 1/ })
+  const chapterMenuTrigger = alice.getByRole("combobox", { name: /Current chapter:/ })
+  const chapterTrigger = alice.getByRole("combobox", { name: /Current chapter: Genesis 1/ })
   await expect(chapterTrigger).toContainText("Verses 1–2")
 
   const chapterOneVerse = alice.locator("[data-cell-id]").filter({
@@ -34,7 +34,7 @@ test("scripture editor shows canonical verse numbers and supports chapter naviga
   await expect(chapterHeading.getByLabel("Line 1")).toHaveCount(0)
 
   await alice.getByRole("button", { name: "Next chapter" }).click()
-  await expect(alice.getByRole("button", { name: /Current chapter: Genesis 2/ })).toContainText("Verses 1–2")
+  await expect(alice.getByRole("combobox", { name: /Current chapter: Genesis 2/ })).toContainText("Verses 1–2")
 
   const chapterTwoVerse = alice.locator("[data-cell-id]").filter({
     hasText: "Thus the heavens and the earth were finished.",
@@ -44,13 +44,18 @@ test("scripture editor shows canonical verse numbers and supports chapter naviga
 
   await chapterMenuTrigger.click()
   await alice.getByRole("option", { name: /Genesis 1/ }).click()
-  await expect(alice.getByRole("button", { name: /Current chapter: Genesis 1/ })).toBeVisible()
+  await expect(alice.getByRole("combobox", { name: /Current chapter: Genesis 1/ })).toBeVisible()
 
   await chapterMenuTrigger.click()
   const chapterSearch = alice.getByRole("combobox", { name: "Find a chapter" })
+  await expect(chapterSearch).toBeFocused()
   await chapterSearch.fill("21")
   await expect(alice.getByText("No chapters found.")).toBeVisible()
   await chapterSearch.fill("2")
-  await expect(alice.getByRole("option", { name: /Genesis 2/ })).toBeVisible()
+  const genesisTwo = alice.getByRole("option", { name: /Genesis 2/ })
+  await expect(genesisTwo).toBeVisible()
+  await expect(genesisTwo).toHaveAttribute("data-highlighted", "")
   await expect(alice.getByRole("option", { name: /Genesis 1/ })).toHaveCount(0)
+  await genesisTwo.click()
+  await expect(alice.getByRole("combobox", { name: /Current chapter: Genesis 2/ })).toBeVisible()
 })

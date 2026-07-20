@@ -168,6 +168,13 @@ interface ImportDialogProps {
    * status notice — the dialog itself is gone by then.
    */
   onLabelsImported?: (result: LabelImportResult) => void
+  /**
+   * AQU-634: per-project USFM front-matter opt-out. When true, USFM imports
+   * (upload, Paratext project, DCS/Door43) exclude book-name/title/TOC +
+   * intro-block cells. Wired from the project's `importExcludeFrontMatter`
+   * setting. Absent/false imports front matter (the default).
+   */
+  excludeFrontMatter?: boolean
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -194,6 +201,7 @@ export function ImportDialog({
   projectFiles,
   activeFileId,
   onLabelsImported,
+  excludeFrontMatter,
 }: ImportDialogProps) {
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
@@ -535,6 +543,7 @@ export function ImportDialog({
             onCommitProgress={setPreviewUploadProgress}
             onCommitError={setPreviewCommitError}
             onImported={handleChildImported}
+            excludeFrontMatter={excludeFrontMatter}
           />
         )}
 
@@ -591,6 +600,7 @@ export function ImportDialog({
             onImported={async (refs, inferredLanguages, skipped) => {
               await handleChildImported(refs, inferredLanguages, skipped)
             }}
+            excludeFrontMatter={excludeFrontMatter}
           />
         )}
 
@@ -1011,6 +1021,9 @@ interface UploadPanelProps {
    * Keep this handoff inside the unified Upload files entry point so users do
    * not have to know which specialized importer to choose. */
   onSpreadsheetFile: (file: File) => void
+  /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
+   *  the Paratext preview). */
+  excludeFrontMatter?: boolean
 }
 
 /** Sorted, deduped extension list ("mp3,usfm") for import telemetry breakdowns. */
@@ -1033,7 +1046,7 @@ function idmlParsePhase(
   return `${action} ${fileName}${count}…`
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1142,6 +1155,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               onIdmlProgress: (progress) => {
                 setPhase(idmlParsePhase(file.name, progress))
               },
+              excludeFrontMatter,
             })
             preparedByFile.set(file, prepared)
             allParsedResults.push(...prepared.results)
@@ -1378,6 +1392,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         onCancel={() => setParatextChoice(null)}
         existingFiles={existingFiles}
         onCollision={onCollision}
+        excludeFrontMatter={excludeFrontMatter}
       />
     )
   }
@@ -1483,6 +1498,9 @@ interface ParatextChoiceProps {
   existingFiles?: { id?: string; name: string; bookCode?: string }[]
   /** AQU-287: called when collisions are detected before running the import. */
   onCollision?: (collisions: CollisionResult[], proceed: (resolution: CollisionResolution) => void | Promise<void>) => void
+  /** AQU-634: per-project USFM front-matter opt-out (forwarded to
+   *  prepareParatextProject). */
+  excludeFrontMatter?: boolean
 }
 
 /** Preview + source-vs-target choice for a detected Paratext project (AQU-310:
@@ -1492,7 +1510,7 @@ interface ParatextChoiceProps {
  *  (aligned by verse ref). */
 function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
-  existingFiles, onCollision,
+  existingFiles, onCollision, excludeFrontMatter,
 }: ParatextChoiceProps) {
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
   const [plan, setPlan] = useState<ParatextPlan | null>(null)
@@ -1511,7 +1529,7 @@ function ParatextChoice({
   // so the preview appears immediately and the user confirms before any upload.
   useEffect(() => {
     let cancelled = false
-    prepareParatextProject(entries)
+    prepareParatextProject(entries, { excludeFrontMatter })
       .then((p) => { if (!cancelled) setPlan(p) })
       .catch((err) => {
         if (cancelled) return
@@ -1524,7 +1542,7 @@ function ParatextChoice({
         setError(err instanceof Error ? err.message : "Couldn't read the project")
       })
     return () => { cancelled = true }
-  }, [entries, projectId])
+  }, [entries, projectId, excludeFrontMatter])
 
   function onProgress(p: ParatextImportProgress) {
     const bookLabel = p.book
@@ -2952,11 +2970,14 @@ interface DcsPanelProps {
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
     skipped?: { book: string; reason: string }[],
   ) => void | Promise<void>
+  /** AQU-634: per-project USFM front-matter opt-out (forwarded to
+   *  importDcsResource). */
+  excludeFrontMatter?: boolean
 }
 
 type DcsPanelStage = "browse" | "importing" | "done"
 
-function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported }: DcsPanelProps) {
+function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported, excludeFrontMatter }: DcsPanelProps) {
   const [stage, setStage] = useState<DcsPanelStage>("browse")
   const [selected, setSelected] = useState<DcsCatalogEntry | null>(null)
   const [progress, setProgress] = useState<{ uploaded: number; total: number } | null>(null)
@@ -2980,6 +3001,7 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
         client: new DcsClient(),
         getToken,
         trackMode: "release",
+        excludeFrontMatter,
         onProgress: (uploaded, total) => setProgress({ uploaded, total }),
         signal: abortRef.current.signal,
       })
@@ -3005,7 +3027,7 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
     } finally {
       abortRef.current = null
     }
-  }, [projectId, getToken, patchDcsCursor, onImported])
+  }, [projectId, getToken, patchDcsCursor, onImported, excludeFrontMatter])
 
   if (stage === "browse") {
     return (

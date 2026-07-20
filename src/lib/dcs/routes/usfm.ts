@@ -20,7 +20,7 @@ export const usfmRoute: ResourceRoute = {
   id: "usfm",
   matches: (entry, manifest) =>
     entry.contentFormat.toLowerCase() === "usfm" || isUsfmManifest(manifest),
-  parse: ({ entry, files }) => {
+  parse: ({ entry, files, options }) => {
     const repo = entry.fullName
     const out: DcsFile[] = []
 
@@ -29,7 +29,9 @@ export const usfmRoute: ResourceRoute = {
 
       // The existing parser can emit several books per file (\id sections); the
       // adapter keeps one DcsFile per USFM file, book code from the first section.
-      const books = extractUsfmStrings(text)
+      const books = extractUsfmStrings(text, {
+        excludeFrontMatter: options?.excludeFrontMatter,
+      })
       const cells: DcsCell[] = []
       let bookCode: string | undefined
 

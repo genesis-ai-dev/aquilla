@@ -177,6 +177,8 @@ export interface UserRow {
   preferences: string
   created_at: string
   updated_at: string
+  /** Stamped on a successful password-reset; null if never reset. See authMiddleware. */
+  password_changed_at: string | null
 }
 
 /** Hydrated user injected into request context by `authMiddleware`. */
@@ -188,6 +190,7 @@ export interface AuthUser {
   preferences: Record<string, unknown>
   created_at: string
   updated_at: string
+  password_changed_at: string | null
 }
 
 export interface UserResponse {

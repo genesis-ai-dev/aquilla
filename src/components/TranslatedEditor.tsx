@@ -79,6 +79,17 @@ export const PRESENCE_WORD_BATCH_SIZE = 2
 /** Keep presence frames lightweight even if a malformed/imported cell is huge. */
 export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
+/**
+ * TipTap's default getText() joins blocks with `\n\n`, so a cell the user
+ * typed as single Enter line-breaks reads as double-spaced under
+ * `whitespace-pre-wrap`. Karaoke / textBetween already use a single `\n`
+ * between blocks — match that here so committed plain text matches the
+ * on-screen editor.
+ */
+export function getEditorPlainText(editor: { getText: (options?: { blockSeparator?: string }) => string }): string {
+  return editor.getText({ blockSeparator: "\n" })
+}
+
 function presenceWords(text: string): string[] {
   // Unicode letters/numbers/marks keep this useful outside English. Treat
   // apostrophes and hyphens inside a token as part of the same word so one
@@ -430,7 +441,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [])
 
   const snapshotEditor = useCallback((editorInstance: TiptapEditor): TranslatedEditorCommit | null => {
-    const value = editorInstance.getText()
+    const value = getEditorPlainText(editorInstance)
     if (!idmlContext) return { value, valueHtml: editorInstance.getHTML() }
     const valueHtml = serializeIdmlEditorDocument(editorInstance.state.doc)
     if (valueHtml === null) {
@@ -462,7 +473,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
     if (!editorInstance || editorInstance.isDestroyed) return
     const next = directionModeRef.current === "auto"
-      ? detectStrongTextDirection(editorInstance.getText()) ?? textDirectionRef.current
+      ? detectStrongTextDirection(getEditorPlainText(editorInstance)) ?? textDirectionRef.current
       : textDirectionRef.current
     editorInstance.view.dom.setAttribute("dir", next)
     if (lang) editorInstance.view.dom.setAttribute("lang", lang)
@@ -473,7 +484,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     const { selection, doc } = editorInstance.state
     const anchor = pmPositionToPlainPosition(doc, selection.anchor)
     const head = pmPositionToPlainPosition(doc, selection.head)
-    const text = editorInstance.getText()
+    const text = getEditorPlainText(editorInstance)
     const next: TargetPresenceSelection = {
       side: "target",
       anchor,
@@ -496,7 +507,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       // The caret offsets belong to the current draft. Until that draft has
       // passed the paused word-boundary gate, sending them would either leak
       // a partial word or position a caret against different remote text.
-      if (editorInstance.getText() !== lastPublishedDraftRef.current) return
+      if (getEditorPlainText(editorInstance) !== lastPublishedDraftRef.current) return
       publishSelection(editorInstance)
     }, PRESENCE_SELECTION_THROTTLE_MS)
   }, [publishSelection])
@@ -507,7 +518,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     }
     presenceDraftIdleTimerRef.current = setTimeout(() => {
       presenceDraftIdleTimerRef.current = null
-      const text = editorInstance.getText()
+      const text = getEditorPlainText(editorInstance)
       if (!lastTypingEndedAtBoundaryRef.current) return
       if (!shouldPublishPresenceDraft(lastPublishedDraftRef.current, text)) return
       publishSelection(editorInstance)
@@ -568,8 +579,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
           compactHeight
-            ? "prose prose-sm max-w-none px-1 py-0 leading-snug focus:outline-none"
-            : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
+            ? "prose prose-sm max-w-none px-1 py-0 text-[length:inherit] leading-[inherit] focus:outline-none prose-p:my-0 prose-p:leading-[inherit] prose-headings:my-0"
+            : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 text-[length:inherit] leading-[inherit] focus:outline-none prose-p:my-0 prose-p:leading-[inherit] prose-headings:my-0",
           "rounded-lg transition-colors",
           className
         ),
@@ -874,7 +885,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       applyEditorDirection(editor)
       const { selection, doc } = editor.state
       const caretOffset = pmPositionToPlainPosition(doc, selection.head)
-      lastTypingEndedAtBoundaryRef.current = isPresenceWordBoundary(editor.getText(), caretOffset)
+      lastTypingEndedAtBoundaryRef.current = isPresenceWordBoundary(getEditorPlainText(editor), caretOffset)
       scheduleTypingPresencePublish(editor)
       // Reset idle timer on every keystroke; commit when the user pauses.
       if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)
@@ -937,7 +948,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         clearTimeout(liveTextTimerRef.current)
         liveTextTimerRef.current = null
       }
-      onLiveTextChangeRef.current?.(editor.getText())
+      onLiveTextChangeRef.current?.(getEditorPlainText(editor))
       onRuleHoverRef.current?.(null, null)
       const snapshot = snapshotEditor(editor)
       pendingCommitRef.current = null
@@ -1094,14 +1105,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // The committed baseline is the editor's OWN canonical text, never the raw
   // stored value. Stored values can be HTML-escaped or otherwise differ from
   // what TipTap parses + serializes — legacy-import wrote `--&gt;`, which
-  // hydrates as `-->`. Comparing editor.getText() against the raw `initialPlain`
+  // hydrates as `-->`. Comparing the editor's plain text against the raw `initialPlain`
   // would misread that load-time normalization as a user edit and emit a
   // phantom revision on the next blur, corrupting files just by opening them.
   // Seed once per editor instance (one editor per cellId). (AQU-216)
   // (`lastHydratedPlainRef` is declared above so the blur handler can read it.)
   useEffect(() => {
     if (!editor) return
-    lastCommittedRef.current = editor.getText()
+    lastCommittedRef.current = getEditorPlainText(editor)
     lastHydratedPlainRef.current = initialPlain
     lastHydratedContentRef.current = initialContent
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1143,7 +1154,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     }
     pendingCommitRef.current = null
     if (wasFocused) editor.commands.focus("end")
-    lastCommittedRef.current = editor.getText()
+    lastCommittedRef.current = getEditorPlainText(editor)
   }, [editor, initialContent, initialPlain, aiDrafted, idmlContext])
 
   useEffect(() => {

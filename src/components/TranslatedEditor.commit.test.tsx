@@ -7,6 +7,7 @@ import { render, fireEvent, cleanup, act } from "@testing-library/react"
 import {
   TranslatedEditor,
   COMMIT_IDLE_MS,
+  getEditorPlainText,
   isPresenceWordBoundary,
   shouldPublishPresenceDraft,
 } from "./TranslatedEditor"
@@ -14,6 +15,47 @@ import {
 afterEach(cleanup)
 
 describe("TranslatedEditor — plain TipTap commit path", () => {
+  it("serializes paragraphs with a single newline (not TipTap's default blank line)", () => {
+    const editor = {
+      getText: (opts?: { blockSeparator?: string }) => {
+        const sep = opts?.blockSeparator ?? "\n\n"
+        return ["line1", "line2", "line3"].join(sep)
+      },
+    }
+    expect(getEditorPlainText(editor)).toBe("line1\nline2\nline3")
+  })
+
+  // Composition guard for the above. The helper alone is not enough: the commit
+  // path snapshots through snapshotEditor(), and if THAT reads TipTap's default
+  // getText() while the hydration baseline reads the single-newline helper, the
+  // two disagree on every multi-paragraph cell — so merely opening a file and
+  // clicking away commits a phantom revision (the AQU-216 failure mode). Drive a
+  // real editor through a real blur and assert nothing is written.
+  it("does not commit a phantom revision when a multi-paragraph cell is opened and blurred", async () => {
+    const commits: { value: string; valueHtml: string }[] = []
+    const { container } = render(
+      <TranslatedEditor
+        cellId="cell-multi"
+        initialPlain={"line1\nline2\nline3"}
+        initialHtml="<p>line1</p><p>line2</p><p>line3</p>"
+        onCommit={(snap) => { commits.push(snap) }}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+
+    const pm = container.querySelector(".ProseMirror") as HTMLElement
+    expect(pm.textContent).toContain("line1")
+
+    // Focus and leave without typing anything.
+    act(() => { pm.focus() })
+    await act(async () => {
+      pm.blur()
+      await Promise.resolve()
+    })
+
+    expect(commits).toHaveLength(0)
+  })
+
   it("batches live draft presence at two-word checkpoints", () => {
     expect(shouldPublishPresenceDraft("", "one")).toBe(false)
     expect(shouldPublishPresenceDraft("", "one two")).toBe(true)

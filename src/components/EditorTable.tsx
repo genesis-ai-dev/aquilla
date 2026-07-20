@@ -1385,7 +1385,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // expand) is absolutely positioned at the row's right edge so it doesn't
   // claim layout space when collapsed. The target column reserves pr-9 so the
   // ever-present expand chevron never overlaps text.
-  const gridCols = "grid-cols-[44px_1fr_1fr]"
+  const gridCols = "grid-cols-[24px_44px_1fr_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1699,6 +1699,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         )}
         {showParagraphBoundary && (
           <div className={`grid ${gridCols} border-t border-border/60`}>
+            {/* Skip the multi-select track so the pilcrow stays in the number
+                gutter, aligned with the line numbers below it. */}
+            <div aria-hidden="true" />
             <div className="flex items-center justify-center py-1" title="New paragraph">
               <Pilcrow className="h-3 w-3 text-muted-foreground" />
             </div>
@@ -1910,6 +1913,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+          {/* Unlabeled tracks: the multi-select column, then the number gutter. */}
+          <div aria-hidden="true" />
           <div aria-hidden="true" />
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
@@ -2246,7 +2251,7 @@ interface MemoizedRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[44px_1fr_1fr]"
+  gridCols: "grid-cols-[24px_44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2631,7 +2636,7 @@ interface EditorRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[44px_1fr_1fr]"
+  gridCols: "grid-cols-[24px_44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -5045,54 +5050,58 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
-        {/* Multi-select control — anchored to the FAR LEFT edge of the row
-            (inside the row's horizontal padding, before the number gutter) so
-            the only affordance between the source and target columns is the
-            validation button. */}
-        {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
-            no visual feedback and the action bar never appears. Root cause:
-            the drag-selection affordance (onPointerDown) uses setSelection()
-            via handleSelectionPointerDown in ProjectWorkspace but the
-            SelectionBar's useSelectedIds() doesn't react — likely because
-            the pointerdown handler only fires on drag (not click) and a
-            single tap does not call toggleSelected. Investigate:
-              1. Does a pointer-drag across two cells actually call setSelection?
-              2. Does SelectionBar mount when activeFileId is set but the bar
-                 doesn't appear because selected.size stays 0?
-              3. Consider adding a click handler that calls toggleSelected so
-                 single-cell selection gives immediate visual feedback, then
-                 the SelectionBar ("X selected" pill) appears for discoverability.
-            See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
-        <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={isMultiSelected}
-            aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
-            onPointerDown={onSelectionPointerDown}
-            onClick={(e) => e.stopPropagation()}
-            className={cn(
-              "absolute left-1 top-10 z-20 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full border",
-              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
-              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
-              isMultiSelected
-                ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
-            )}
-          >
-            {isMultiSelected ? (
-              <Check className="h-3 w-3" strokeWidth={3} />
-            ) : (
-              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-            )}
-          </button>
-        </AppTooltip>
+        {/* Multi-select column — the row's FIRST grid cell, to the left of the
+            number/validation gutter, so the only affordance between the source
+            and target columns is the validation button. In-flow rather than
+            absolutely positioned: it claims its own 24px track, so it can
+            never overlap the line number at narrow widths. */}
+        <div className="flex items-start justify-center pt-4">
+          {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
+              no visual feedback and the action bar never appears. Root cause:
+              the drag-selection affordance (onPointerDown) uses setSelection()
+              via handleSelectionPointerDown in ProjectWorkspace but the
+              SelectionBar's useSelectedIds() doesn't react — likely because
+              the pointerdown handler only fires on drag (not click) and a
+              single tap does not call toggleSelected. Investigate:
+                1. Does a pointer-drag across two cells actually call setSelection?
+                2. Does SelectionBar mount when activeFileId is set but the bar
+                   doesn't appear because selected.size stays 0?
+                3. Consider adding a click handler that calls toggleSelected so
+                   single-cell selection gives immediate visual feedback, then
+                   the SelectionBar ("X selected" pill) appears for discoverability.
+              See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
+          <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={isMultiSelected}
+              aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
+              onPointerDown={onSelectionPointerDown}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "grid h-5 w-5 place-items-center rounded-md border",
+                "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+                "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+                isMultiSelected
+                  ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                  : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
+              )}
+            >
+              {isMultiSelected ? (
+                <Check className="h-3 w-3" strokeWidth={3} />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+              )}
+            </button>
+          </AppTooltip>
+        </div>
         {/* Left gutter — a subtle line number sits to the LEFT of the
             validation circle, both anchored to the top of the card. The number
             is the single issue surface (severity tint + title); no
-            stripe/dot/warning. Multi-select lives at the far-left row edge so
-            only the validation button sits between source and target. */}
-        <div className="flex h-full w-full flex-wrap items-start justify-center gap-1 pt-5">
+            stripe/dot/warning. Multi-select has its own column to the left of
+            this gutter, so only the validation button sits between source and
+            target. */}
+        <div className="flex h-full w-full items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* The validation circle moved next to the TARGET editing cell
               (AQU-592); the gutter now carries only the line number and the
@@ -5167,10 +5176,13 @@ function EditorRow({
             data-showcase="editor.source"
             ref={sourceColRef}
             className={cn(
-              // The selection control is centered on the physical divider and
-              // protrudes into this column. Reserve enough room for RTL text,
-              // whose first glyph sits against this right edge.
-              "relative flex flex-col pr-4 transition-opacity",
+              // The showcase node IS the text surface so it fills the whole
+              // source column. pr-7 clears the floating pencil.
+              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
+              // Match the target well — same muted fill + ring (not a darker
+              // primary-tinted edit chrome).
+              "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
+              sourceEditing && "bg-muted ring-1 ring-ring/40 ring-inset",
               isSynthBusy && "opacity-70",
             )}
             dir={sourceCellDirection}
@@ -5194,50 +5206,55 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
-              <span>{cell.context}</span>
-              {showFormattingLossWarning && (
-                <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
-                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    formatting
-                  </span>
-                </AppTooltip>
-              )}
-              {/* Source-edit affordance (project_lead+, non-live projects). Emits
-                  source.cell.commit — the template-owner correction that propagates
-                  downstream. Read-only source stays the default; editing is explicit. */}
-              {canEditSourceForCell ? (
-                <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
-                  <button
-                    type="button"
-                    aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
-                    aria-pressed={sourceEditing}
-                    onClick={() => setSourceEditing((v) => !v)}
-                    className={cn(
-                      "ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors",
-                      sourceEditing
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                    )}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                </AppTooltip>
-              ) : sourceReadOnlyReasonForCell ? (
-                // Force-locked source lane (DCS pin): keep an explained
-                // affordance where the pencil would be instead of letting it
-                // silently vanish (AQU-615 review nit).
-                <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
-                  <span
-                    aria-label="Source is locked"
-                    className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                  >
-                    <Lock className="h-3 w-3" />
-                  </span>
-                </AppTooltip>
-              ) : null}
-            </div>
+            {/* Source-edit affordance (project_lead+, non-live projects). Emits
+                source.cell.commit — the template-owner correction that propagates
+                downstream. Read-only source stays the default; editing is explicit.
+                Floated to the column's top-right so it costs no layout: the
+                context line below is conditional, and the pencil must still have
+                somewhere to sit when a cell carries no context. */}
+            {canEditSourceForCell ? (
+              <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
+                <button
+                  type="button"
+                  aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
+                  aria-pressed={sourceEditing}
+                  onClick={() => setSourceEditing((v) => !v)}
+                  className={cn(
+                    "absolute right-1 top-1 z-10 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors",
+                    sourceEditing
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                  )}
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              </AppTooltip>
+            ) : sourceReadOnlyReasonForCell ? (
+              // Force-locked source lane (DCS pin): keep an explained
+              // affordance where the pencil would be instead of letting it
+              // silently vanish (AQU-615 review nit).
+              <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
+                <span
+                  aria-label="Source is locked"
+                  className="absolute right-1 top-1 z-10 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Lock className="h-3 w-3" />
+                </span>
+              </AppTooltip>
+            ) : null}
+            {(cell.context || showFormattingLossWarning) && (
+              <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
+                <span>{cell.context}</span>
+                {showFormattingLossWarning && (
+                  <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
+                    <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                      <AlertTriangle className="h-2.5 w-2.5" />
+                      formatting
+                    </span>
+                  </AppTooltip>
+                )}
+              </div>
+            )}
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
               <TranslatedEditor
@@ -5247,9 +5264,12 @@ function EditorRow({
                 onCommit={handleSourceCommit}
                 onBlur={() => setSourceEditing(false)}
                 editable
+                // Size to content like the read surface — compactHeight skips
+                // the h-full / min-h-[40px] stretch that was jumping the row.
+                compactHeight
                 ariaLabel="Edit source text"
                 placeholder="Source text…"
-                className="w-full rounded-lg ring-1 ring-primary/30 focus-within:ring-primary/50"
+                className="w-full !px-0"
               />
             ) : (sourceDraft?.valueHtml || cell.originalHtml) ? (
               <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />

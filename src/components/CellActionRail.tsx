@@ -8,6 +8,7 @@
 
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 // Bouncy spring matches the reference popout, slightly tamed for desktop.
 // Original: cubic-bezier(.68,-0.75,.27,1.75)
@@ -44,29 +45,30 @@ export function RailButton({
 
   const button = (
     <div className="relative">
-      <button
-        type="button"
-        title={tooltip}
-        data-tooltip={import.meta.env.MODE === "test" ? tooltip : undefined}
-        onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.() }}
-        onMouseDown={onMouseDown}
-        onMouseEnter={onMouseEnter}
-        disabled={disabled}
-        aria-label={tooltip}
-        className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-full",
-          "transition-[transform,color,background-color] duration-150 ease-out",
-          "active:scale-[0.88]",
-          "hover:bg-muted/80",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          disabled
-            ? "cursor-not-allowed text-muted-foreground/30"
-            : toneClass ?? "text-muted-foreground/70 hover:text-foreground",
-          pulsing && "animate-pulse",
-        )}
-      >
-        {icon}
-      </button>
+      <AppTooltip content={tooltip}>
+        <button
+          type="button"
+          data-tooltip={tooltip}
+          onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.() }}
+          onMouseDown={onMouseDown}
+          onMouseEnter={onMouseEnter}
+          disabled={disabled}
+          aria-label={tooltip}
+          className={cn(
+            "flex h-6 w-6 items-center justify-center rounded-md",
+            "transition-[transform,color,background-color] duration-150 ease-out",
+            "active:scale-[0.88]",
+            "hover:bg-muted/80",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+            disabled
+              ? "cursor-not-allowed text-muted-foreground/30"
+              : toneClass ?? "text-muted-foreground/70 hover:text-foreground",
+            pulsing && "animate-pulse",
+          )}
+        >
+          {icon}
+        </button>
+      </AppTooltip>
       {dotColor && (
         <span
           aria-hidden
@@ -112,8 +114,8 @@ export function CellActionRail({
       data-slot="cell-action-rail"
       data-revealed={revealed ? "true" : "false"}
       className={cn(
-        "flex items-center justify-end gap-0.5 rounded-md px-1 py-0.5",
-        // Filled pill only when revealed, so the rail reads as a distinct
+        "flex items-center justify-end gap-0.5 rounded-md p-0.5",
+        // Filled surface only when revealed, so the rail reads as a distinct
         // cluster off the cell surface instead of competing with text.
         revealed && "bg-card",
       )}
@@ -151,7 +153,6 @@ export function CellActionRail({
             <ChevronDown
               className="h-3.5 w-3.5"
               style={{
-                transition: `transform 220ms ${SPRING}`,
                 transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
               }}
             />

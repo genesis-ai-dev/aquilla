@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { EditorState } from "@tiptap/pm/state"
-import { schema as basicSchema } from "@tiptap/pm/schema-basic"
+import { basicSchema } from "./test-schema"
 import { buildViolationDecorationSet } from "./violation-decoration-plugin"
 import type { RuleInfraction } from "@/lib/parsers/types"
 

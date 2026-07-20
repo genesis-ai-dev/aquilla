@@ -64,6 +64,7 @@ import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
+import { usfmDisplayText } from "@/lib/parsers/usfm-display"
 import type { SourceVerse } from "@/lib/parsers/paratext-pairing"
 import {
   fetchTranslationsList,
@@ -1525,7 +1526,12 @@ function ParatextChoice({
                     <ul className="space-y-1 px-3 pb-2 pl-9">
                       {b.strings.slice(0, 4).map((s) => (
                         <li key={s.id} className="truncate text-xs text-muted-foreground">
-                          <span className="font-medium">{s.context}</span> {s.original}
+                          {/* AQU-580: Paratext books are raw USFM — strip the
+                              intra-cell markers (\add, \nd, \f…\f*, \w…\w*, …)
+                              for the preview so translators never see backslash
+                              codes. Stored cell text (s.original) is untouched;
+                              only this display is cleaned. */}
+                          <span className="font-medium">{s.context}</span> {usfmDisplayText(s.original)}
                         </li>
                       ))}
                       {b.strings.length > 4 && (

@@ -326,7 +326,7 @@ export function OrgProjectsDataTable({
             <div className="truncate text-left text-xs text-muted-foreground">
               <DateTooltip
                 value={row.original.lastEditAt}
-                label="Edited"
+                label="Updated"
                 className="text-muted-foreground"
               />
             </div>

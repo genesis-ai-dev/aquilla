@@ -5,7 +5,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * OrgHome — project status filter pills.
  *
  * OrgHome.tsx renders pill-style filter buttons (aria-pressed) for:
- *   All, Stalled, Overdue
+ *   All, Stalled, Overdue, Needs attention
  * The "All" filter is selected by default (aria-pressed="true").
  * Clicking a filter pill sets aria-pressed="true" on it.
  *
@@ -14,7 +14,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * at least one project, so this spec creates one first.
  *
  * This spec: creates a project → navigates to the org home ("/") →
- * verifies "All" is pressed → clicks "Stalled" → verifies "Stalled" becomes
+ * verifies "All" is pressed → clicks "Needs attention" → verifies it becomes
  * pressed and "All" un-pressed → clicks "All" to restore.
  */
 test("org home status filter pills toggle active state", async ({ alice }) => {
@@ -30,13 +30,16 @@ test("org home status filter pills toggle active state", async ({ alice }) => {
   await expect(allBtn).toBeVisible({ timeout: 10_000 })
   await expect(allBtn).toHaveAttribute("aria-pressed", "true")
 
-  // Click "Stalled".
-  const stalledBtn = alice.getByRole("button", { name: /^Stalled$/i })
-  await expect(stalledBtn).toBeVisible({ timeout: 3_000 })
-  await stalledBtn.click()
+  // Needs attention is last in the pill order.
+  const overdueBtn = alice.getByRole("button", { name: /^Overdue$/i })
+  const attentionBtn = alice.getByRole("button", { name: /^Needs attention$/i })
+  await expect(overdueBtn).toBeVisible({ timeout: 3_000 })
+  await expect(attentionBtn).toBeVisible({ timeout: 3_000 })
 
-  // "Stalled" is now pressed; "All" is not.
-  await expect(stalledBtn).toHaveAttribute("aria-pressed", "true", { timeout: 3_000 })
+  await attentionBtn.click()
+
+  // "Needs attention" is now pressed; "All" is not.
+  await expect(attentionBtn).toHaveAttribute("aria-pressed", "true", { timeout: 3_000 })
   await expect(allBtn).toHaveAttribute("aria-pressed", "false")
 
   // Restore by clicking "All".

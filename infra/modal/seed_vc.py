@@ -38,12 +38,17 @@ Or exercise the model path directly, no web layer / no auth:
     modal run infra/modal/seed_vc.py --source tts_output.wav --reference target.wav
 """
 
+import hmac
 import os
 
 import modal
 
 # --- Config knobs ------------------------------------------------------------
 REPO = "https://github.com/Plachtaa/seed-vc.git"
+# Pinned commit — cloning the floating default branch would let an upstream
+# compromise or bad push land in the next image rebuild with GPU-container
+# privileges. Bump deliberately when picking up upstream changes.
+REPO_COMMIT = "51383efd921027683c89e5348211d93ff12ac2a8"
 GPU = "L40S"          # fine alternatives: "A10G", "A100-40GB". T4 may OOM in fp16.
 SCALEDOWN = 300       # seconds to keep a warm container after the last request
 CACHE_DIR = "/cache"  # HF + torch download cache, persisted across runs via the Volume
@@ -54,7 +59,7 @@ image = (
     modal.Image.debian_slim(python_version="3.10")
     .apt_install("git", "ffmpeg")
     .run_commands(
-        f"git clone {REPO} {SEED_VC_DIR}",
+        f"git clone {REPO} {SEED_VC_DIR} && cd {SEED_VC_DIR} && git checkout {REPO_COMMIT}",
         f"cd {SEED_VC_DIR} && pip install -r requirements.txt",
     )
     .pip_install("fastapi[standard]", "python-multipart")  # for the asgi endpoint
@@ -295,7 +300,7 @@ def web():
         x_auth_token: str = Header(default=""),
     ):
         expected = os.environ.get("SEED_VC_TOKEN", "")
-        if not expected or x_auth_token != expected:
+        if not expected or not hmac.compare_digest(x_auth_token, expected):
             raise HTTPException(status_code=401, detail="unauthorized")
         wav = SeedVC().convert.remote(
             await source.read(),

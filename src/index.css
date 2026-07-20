@@ -174,20 +174,43 @@
 
   * {
     @apply border-border outline-ring/50;
-    /* Mirror ScrollArea: w-2.5 (10px) track, rounded-full bg-border thumb,
-       transparent track. scrollbar-thin is narrower than ScrollArea on most UAs. */
+    /* Mirror ScrollArea: rounded-full bg-border thumb, transparent track. */
     scrollbar-width: auto;
     scrollbar-color: var(--border) transparent;
   }
 
-  *::-webkit-scrollbar {
-    width: 0.625rem;
-    height: 0.625rem;
+  /*
+   * Fixed scrollbar geometry. Safari fattens ::-webkit-scrollbar on hover even
+   * when width is set — lock width with !important and keep the visible thumb
+   * thin via a transparent border + background-clip (track size never changes).
+   */
+  *::-webkit-scrollbar,
+  *:hover::-webkit-scrollbar,
+  *::-webkit-scrollbar:hover,
+  *::-webkit-scrollbar:vertical,
+  *:hover::-webkit-scrollbar:vertical {
+    -webkit-appearance: none !important;
+    width: 0.75rem !important;
+    height: 0.75rem !important;
+    max-width: 0.75rem !important;
+    max-height: 0.75rem !important;
+    min-width: 0.75rem !important;
+    min-height: 0.75rem !important;
+    background: transparent;
   }
 
   *::-webkit-scrollbar-thumb {
     background-color: var(--border);
     border-radius: 9999px;
+    border: 0.1875rem solid transparent;
+    background-clip: content-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover,
+  *::-webkit-scrollbar-thumb:active {
+    background-color: var(--border);
+    border: 0.1875rem solid transparent;
+    background-clip: content-box;
   }
 
   *::-webkit-scrollbar-track {
@@ -196,7 +219,42 @@
 
   /* Tailwind scrollbar-none only sets scrollbar-width; hide WebKit too. */
   .scrollbar-none::-webkit-scrollbar {
-    display: none;
+    display: none !important;
+  }
+
+  /* Compact overlays/lists — same fixed-track trick, smaller gutter. */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar,
+  .scrollbar-thin:hover::-webkit-scrollbar,
+  .scrollbar-thin::-webkit-scrollbar:hover,
+  .scrollbar-thin::-webkit-scrollbar:vertical,
+  .scrollbar-thin:hover::-webkit-scrollbar:vertical {
+    -webkit-appearance: none !important;
+    width: 0.5rem !important;
+    height: 0.5rem !important;
+    max-width: 0.5rem !important;
+    max-height: 0.5rem !important;
+    min-width: 0.5rem !important;
+    min-height: 0.5rem !important;
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+    border: 0.125rem solid transparent;
+    background-clip: content-box;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover,
+  .scrollbar-thin::-webkit-scrollbar-thumb:active {
+    background-color: var(--border);
+    border: 0.125rem solid transparent;
+    background-clip: content-box;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
   }
   body {
     @apply bg-background text-foreground;

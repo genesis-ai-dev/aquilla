@@ -71,7 +71,7 @@ jobs:
         run: |
           echo "::notice::Skipping preview deploy (${{ steps.decide.outputs.reason }}). Add [preview] to a commit message to force one."
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.decide.outputs.deploy == 'true'
 
       - uses: actions/setup-node@v4

@@ -64,6 +64,7 @@ import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
+import { usfmDisplayText } from "@/lib/parsers/usfm-display"
 import type { SourceVerse } from "@/lib/parsers/paratext-pairing"
 import {
   fetchTranslationsList,
@@ -86,12 +87,13 @@ import {
   IMPORT_STARTED,
   IMPORT_SUCCEEDED,
   IMPORT_PARTIAL,
+  IMPORT_FAILED,
   IMPORT_COLLISION_DETECTED,
   IMPORT_COLLISION_SKIPPED,
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/event-names"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
-import { LabelImportPanel } from "@/components/import/LabelImportPanel"
+import { LabelImportPanel, type LabelImportResult } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
@@ -140,6 +142,20 @@ interface ImportDialogProps {
    * without a way to write settings). Returns true on a successful save.
    */
   patchDcsCursor?: (cursor: DcsCursor) => Promise<boolean>
+  /**
+   * AQU-314: project files for the Cell-labels panel's step-1 file picker.
+   * The panel fetches the selected file's source cells itself, so labels no
+   * longer depend on which file happens to be active in the editor.
+   */
+  projectFiles?: { id: string; name: string }[]
+  /** AQU-314: the workspace's active file — pre-selected in the picker. */
+  activeFileId?: string | null
+  /**
+   * AQU-314: called after a label apply run completes and the dialog closes.
+   * The host surfaces the result (applied/unmatched counts) as its transient
+   * status notice — the dialog itself is gone by then.
+   */
+  onLabelsImported?: (result: LabelImportResult) => void
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -161,6 +177,9 @@ export function ImportDialog({
   sourceCells,
   existingFiles,
   patchDcsCursor,
+  projectFiles,
+  activeFileId,
+  onLabelsImported,
 }: ImportDialogProps) {
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
@@ -580,19 +599,21 @@ export function ImportDialog({
         )}
 
         {/* AQU-314: Cell labels / cast import via downloadable template */}
-        {screen === "labels" && sourceCells && sourceCells.length > 0 && (
+        {screen === "labels" && projectFiles && projectFiles.length > 0 && (
           <LabelImportPanel
             projectId={projectId}
             username={username}
-            sourceCells={sourceCells}
+            files={projectFiles}
+            defaultFileId={activeFileId}
             getToken={getToken}
-            onImported={() => {
+            onImported={(result) => {
               onOpenChange(false)
+              onLabelsImported?.(result)
             }}
             onCancel={() => setScreen("landing")}
           />
         )}
-        {screen === "labels" && (!sourceCells || sourceCells.length === 0) && (
+        {screen === "labels" && (!projectFiles || projectFiles.length === 0) && (
           <div className="py-4 text-center text-sm text-muted-foreground">
             Cell labels require an existing source file in this project. Import source files first, then return here.
           </div>
@@ -918,6 +939,11 @@ interface UploadPanelProps {
   onCommitError?: (message: string | null) => void
 }
 
+/** Sorted, deduped extension list ("mp3,usfm") for import telemetry breakdowns. */
+function fileExts(list: File[]): string {
+  return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
+}
+
 function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -1002,6 +1028,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
             allParsedResults.push(...results)
           }
         } catch (err) {
+          posthog.captureException(err, { import_stage: "parse", project_id: projectId, file_exts: fileExts(list) })
+          posthog.capture(IMPORT_FAILED, {
+            import_stage: "parse",
+            project_id: projectId,
+            file_exts: fileExts(list),
+            error_message: err instanceof Error ? err.message : String(err),
+          })
           setError(err instanceof Error ? err.message : "Parse failed")
           setImporting(false)
           setPhase("")
@@ -1090,6 +1123,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         await onImported(allRefs)
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed"
+        posthog.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
+        posthog.capture(IMPORT_FAILED, {
+          import_stage: "upload",
+          project_id: projectId,
+          file_exts: fileExts(list),
+          error_message: message,
+        })
         setError(message)
         // AQU-430 (fix): also surface to the parent — during the preview screen
         // this UploadPanel is unmounted, so its local error would never show.
@@ -1266,9 +1306,18 @@ function ParatextChoice({
     let cancelled = false
     prepareParatextProject(entries)
       .then((p) => { if (!cancelled) setPlan(p) })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "Couldn't read the project") })
+      .catch((err) => {
+        if (cancelled) return
+        posthog.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
+        posthog.capture(IMPORT_FAILED, {
+          import_stage: "paratext-parse",
+          project_id: projectId,
+          error_message: err instanceof Error ? err.message : String(err),
+        })
+        setError(err instanceof Error ? err.message : "Couldn't read the project")
+      })
     return () => { cancelled = true }
-  }, [entries])
+  }, [entries, projectId])
 
   function onProgress(p: ParatextImportProgress) {
     const bookLabel = p.book
@@ -1305,6 +1354,12 @@ function ParatextChoice({
       const inferredLang = settings.languageIsoCode || settings.language
       await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
+      posthog.captureException(err, { import_stage: "paratext-upload", project_id: projectId })
+      posthog.capture(IMPORT_FAILED, {
+        import_stage: "paratext-upload",
+        project_id: projectId,
+        error_message: err instanceof Error ? err.message : String(err),
+      })
       setError(err instanceof Error ? err.message : "Import failed"); setMode("choose")
     }
   }
@@ -1506,7 +1561,12 @@ function ParatextChoice({
                     <ul className="space-y-1 px-3 pb-2 pl-9">
                       {b.strings.slice(0, 4).map((s) => (
                         <li key={s.id} className="truncate text-xs text-muted-foreground">
-                          <span className="font-medium">{s.context}</span> {s.original}
+                          {/* AQU-580: Paratext books are raw USFM — strip the
+                              intra-cell markers (\add, \nd, \f…\f*, \w…\w*, …)
+                              for the preview so translators never see backslash
+                              codes. Stored cell text (s.original) is untouched;
+                              only this display is cleaned. */}
+                          <span className="font-medium">{s.context}</span> {usfmDisplayText(s.original)}
                         </li>
                       ))}
                       {b.strings.length > 4 && (

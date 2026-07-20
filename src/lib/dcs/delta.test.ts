@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from "vitest"
-import { computeDelta, applyDelta, type DeltaEmitters, type CurrentCell } from "./delta"
+import {
+  computeDelta,
+  computeRepairDelta,
+  applyDelta,
+  repairRevisionToken,
+  type DeltaEmitters,
+  type CurrentCell,
+} from "./delta"
 import { dcsCellId, dcsFileId, dcsEventId } from "./cell-id"
 import { contentHash } from "./content-hash"
 import type { DcsCatalogEntry } from "./types"
@@ -221,6 +228,155 @@ describe("computeDelta — classification (spec §6, THE money logic)", () => {
     expect(delta).toEqual({ creates: [], commits: [], deletes: [] })
     // fetchRaw is never called when nothing changed.
     expect(client.fetchRaw).not.toHaveBeenCalled()
+  })
+})
+
+// ── computeRepairDelta — re-parse the PINNED ref (parser-fix recovery) ───────
+
+// The repo state AT THE PINNED REF (v88): v1, v2, v4 — nothing changed upstream.
+const PINNED_TIT_USFM = `\\id TIT
+\\c 1
+\\p
+\\v 1 Paul, a servant of God.
+\\v 2 In the hope of eternal life.
+\\v 4 Old verse 4 that got removed.`
+
+function repairClient(paths: Record<string, string>) {
+  return {
+    getCatalogEntry: vi.fn(),
+    searchCatalog: vi.fn(),
+    compareRefs: vi.fn(),
+    getTree: vi.fn(async () => Object.keys(paths)),
+    fetchRaw: vi.fn(async (_o: string, _r: string, _ref: string, path: string) => paths[path] ?? ""),
+  }
+}
+
+describe("computeRepairDelta — re-parses ALL held files at the pinned ref", () => {
+  it("produces no ops when every cell's hash already matches the pinned parse", async () => {
+    const client = repairClient({
+      "manifest.yaml": MANIFEST_YAML,
+      [TIT_PATH]: PINNED_TIT_USFM,
+      "LICENSE.md": "license text",
+    })
+    const delta = await computeRepairDelta({
+      client: client as never,
+      entry: OLD_ENTRY,
+      currentCells: currentCells(), // hashes match the pinned text exactly
+    })
+    expect(delta).toEqual({ creates: [], commits: [], deletes: [] })
+    // No ref-compare involved — repair reads the pinned ref directly.
+    expect(client.compareRefs).not.toHaveBeenCalled()
+  })
+
+  it("repairs a cell whose stored content differs from today's parse (parser-fix case)", async () => {
+    const client = repairClient({
+      "manifest.yaml": MANIFEST_YAML,
+      [TIT_PATH]: PINNED_TIT_USFM,
+    })
+    // The old parser mangled v1 down to one word (the aligned-USFM bug); v2 and
+    // v4 were imported correctly. Upstream is UNCHANGED — computeDelta would see
+    // nothing to do, but repair must fix v1.
+    const current = currentCells()
+    current.set(V1, { ...current.get(V1)!, contentHash: contentHash("Paul,") })
+
+    const delta = await computeRepairDelta({
+      client: client as never,
+      entry: OLD_ENTRY,
+      currentCells: current,
+    })
+    expect(delta.commits).toHaveLength(1)
+    expect(delta.commits[0].cell.cellId).toBe(V1)
+    expect(delta.commits[0].cell.value).toContain("servant of God")
+    // Chained on the cell's CURRENT head event.
+    expect(delta.commits[0].parentEventId).toBe(
+      dcsEventId(PROJECT_ID, REPO, OLD_ENTRY.commitSha, V1),
+    )
+    // Correctly-imported cells are untouched.
+    expect(delta.creates).toEqual([])
+    expect(delta.deletes).toEqual([])
+  })
+
+  it("classifies missing→create and vanished→delete like computeDelta", async () => {
+    // Pinned text has v1+v2 only; the adapter holds v1 (matching) and v4 (a cell
+    // the broken parser invented, absent from a correct parse → delete). v2 was
+    // dropped by the broken parser entirely → create.
+    const TIT_V1_V2 = `\\id TIT
+\\c 1
+\\p
+\\v 1 Paul, a servant of God.
+\\v 2 In the hope of eternal life.`
+    const client = repairClient({ "manifest.yaml": MANIFEST_YAML, [TIT_PATH]: TIT_V1_V2 })
+    const current = currentCells()
+    current.delete(V2)
+    const delta = await computeRepairDelta({
+      client: client as never,
+      entry: OLD_ENTRY,
+      currentCells: current,
+    })
+    expect(delta.creates.map((c) => c.cell.cellId)).toEqual([V2])
+    expect(delta.creates[0].fileId).toBe(TIT_FILE_ID)
+    expect(delta.commits).toEqual([])
+    expect(delta.deletes).toEqual([V4_GONE])
+  })
+
+  it("never fetches files the adapter does not hold (fileId pre-filter)", async () => {
+    const PHM_PATH = "58-PHM.usfm"
+    const client = repairClient({
+      "manifest.yaml": MANIFEST_YAML,
+      [TIT_PATH]: PINNED_TIT_USFM,
+      [PHM_PATH]: `\\id PHM
+\\c 1
+\\p
+\\v 1 Paul, a prisoner of Christ Jesus.`,
+    })
+    const delta = await computeRepairDelta({
+      client: client as never,
+      entry: OLD_ENTRY,
+      currentCells: currentCells(), // TIT-only adapter
+    })
+    // PHM is skipped BEFORE the raw fetch — a one-book adapter of a 66-book
+    // repo must not download the whole Bible to repair one book.
+    const fetchedPaths = client.fetchRaw.mock.calls.map((c) => c[3])
+    expect(fetchedPaths).not.toContain(PHM_PATH)
+    // And no PHM cells classify as creates.
+    const phmV1 = dcsCellId(`${REPO}|PHM 1:1`)
+    expect(delta.creates.some((c) => c.cell.cellId === phmV1)).toBe(false)
+  })
+
+  it("fetches nothing when the adapter holds no cells", async () => {
+    const client = repairClient({ "manifest.yaml": MANIFEST_YAML, [TIT_PATH]: PINNED_TIT_USFM })
+    const delta = await computeRepairDelta({
+      client: client as never,
+      entry: OLD_ENTRY,
+      currentCells: new Map(),
+    })
+    expect(delta).toEqual({ creates: [], commits: [], deletes: [] })
+    expect(client.fetchRaw).not.toHaveBeenCalled()
+  })
+})
+
+describe("repairRevisionToken — repair event ids must not collide with the import's", () => {
+  it("differs from the bare pinned sha and is deterministic on delta content", async () => {
+    const client = repairClient({ "manifest.yaml": MANIFEST_YAML, [TIT_PATH]: PINNED_TIT_USFM })
+    const current = currentCells()
+    current.set(V1, { ...current.get(V1)!, contentHash: contentHash("Paul,") })
+    const delta = await computeRepairDelta({
+      client: client as never,
+      entry: OLD_ENTRY,
+      currentCells: current,
+    })
+    const token = repairRevisionToken(OLD_ENTRY.commitSha, delta)
+    // The original import minted event ids at the bare sha; reusing it would
+    // make the server's INSERT OR IGNORE drop every repair commit.
+    expect(token).not.toBe(OLD_ENTRY.commitSha)
+    // Same repair re-run → same token (idempotent dedupe)…
+    expect(repairRevisionToken(OLD_ENTRY.commitSha, delta)).toBe(token)
+    // …but a LATER parser fix (different repaired content) mints a fresh token.
+    const delta2 = {
+      ...delta,
+      commits: [{ ...delta.commits[0], cell: { ...delta.commits[0].cell, contentHash: "zzzz9999" } }],
+    }
+    expect(repairRevisionToken(OLD_ENTRY.commitSha, delta2)).not.toBe(token)
   })
 })
 

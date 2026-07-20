@@ -188,6 +188,24 @@ export async function audioCachePut(
 }
 
 /**
+ * Convenience wrapper: cache a recording straight from its Blob (record-time
+ * producers hold a Blob, not a Uint8Array). Warming the cache here lets a take
+ * be transcribed/played locally before — or without — a successful R2 upload
+ * (FRO-355). Non-fatal on any failure.
+ */
+export async function audioCachePutBlob(
+  audioId: string,
+  ext: string,
+  blob: Blob,
+): Promise<void> {
+  try {
+    await audioCachePut(audioId, ext, new Uint8Array(await blob.arrayBuffer()))
+  } catch {
+    // Non-fatal — the audio stack still works without the persistent cache.
+  }
+}
+
+/**
  * Remove a specific audioId from the cache (called when the recording is
  * deleted so subsequent opens don't serve stale bytes from a re-used key —
  * unlikely with UUIDv7 ids but included for correctness).

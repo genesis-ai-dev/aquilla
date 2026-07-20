@@ -1,17 +1,19 @@
 openapi: 3.1.0
 info:
   title: Aquilla Agent API (external REST surface)
-  version: "1.0.0"
+  version: "1.1.0"
   description: >
     Minimal, verified-against-code OpenAPI description of Aquilla's external Agent API
-    (AQU-533). Covers credential management and changeset approval (identity host,
-    auth-worker) and reads/artifacts/changesets (sync host, sync-worker). Deliberately
-    excludes anything not implemented in code as of this wave — see
-    docs/api/agent-api.md §8 "What's not yet available" for the omitted surface
-    (jobs, export, run_checks, CreateProject/UpdateProjectSettings/LinkMedia, MCP).
+    (AQU-533, v1.1). Covers credential management and changeset approval (identity host,
+    auth-worker) and reads/artifacts/changesets (sync host, sync-worker), including the
+    v1.1 CreateProject/UpdateProjectSettings/LinkMedia commands, audio artifact upload,
+    and the changeset "committing" status. Deliberately excludes anything not implemented
+    in code as of this wave — see docs/api/agent-api.md §8 "What's not yet available" for
+    the omitted surface (jobs, export, run_checks, OAuth, rate limiting; MCP is described
+    in docs/api/agent-api.md, not schema'd here beyond its single JSON-RPC endpoint).
     Accuracy over completeness: every path/schema field here exists in
     sync-worker/src/external/*.ts, auth-worker/src/routes/{credentials,
-    changeset-approvals}.ts, or db/postgres/schema.sql.
+    changeset-approvals}.ts, db/shared/projects.ts, or db/postgres/schema.sql.
 servers:
   - url: https://api.aquilla.app/identity
     description: identity host (auth-worker) — credentials, changeset approval
@@ -50,6 +52,7 @@ components:
                 - plan_stale
                 - confirmation_required
                 - validation_failed
+                - conflict
                 - job_failed
                 - rate_limited
                 - not_found
@@ -86,13 +89,18 @@ components:
       description: >
         Server-computed effect summary. SetTranslation changesets populate
         translationsAdded/translationsModified; PlanImport changesets populate
-        filesCreated/sourceCellsAdded/artifactLinked. Nothing here is agent-narrated.
+        filesCreated/sourceCellsAdded/artifactLinked; LinkMedia changesets populate
+        mediaLinked. CreateProject/UpdateProjectSettings changesets are receipt-only
+        and have an empty summary (just warnings: []). Nothing here is agent-narrated.
       properties:
         translationsAdded: { type: integer }
         translationsModified: { type: integer }
         filesCreated: { type: integer }
         sourceCellsAdded: { type: integer }
         artifactLinked: { type: string }
+        mediaLinked:
+          type: integer
+          description: "LinkMedia: number of cells an audio artifact is attached to."
         warnings:
           type: array
           items:
@@ -128,6 +136,27 @@ components:
           description: Present only on a committed PlanImport — the created file's id.
       required: [eventIds, appliedCount, staleCount, warnings, committedAt]
 
+    ReceiptOnlyReceipt:
+      type: object
+      description: >
+        Receipt for the receipt-only commands (CreateProject, UpdateProjectSettings — v1.1),
+        which apply a plain row write, not events, so the event-shaped ChangesetReceipt does
+        not fit. This IS the provenance record for these commands; there is no
+        events.provenance row to cross-reference.
+      properties:
+        credentialId: { type: string }
+        channel: { type: string, enum: [mcp, rest] }
+        changesetId: { type: string }
+        command: { type: string, enum: [CreateProject, UpdateProjectSettings] }
+        appliedAt: { type: string, format: date-time }
+        projectId:
+          type: string
+          description: CreateProject — the created project id. UpdateProjectSettings — the updated project's id.
+        version:
+          type: integer
+          description: UpdateProjectSettings only — the new settings version after the write.
+      required: [credentialId, channel, changesetId, command, appliedAt, projectId]
+
     Changeset:
       type: object
       properties:
@@ -138,11 +167,22 @@ components:
         autonomyMode: { type: string, enum: [ask, act] }
         status:
           type: string
-          enum: [staged, committed, discarded, stale, expired]
+          enum: [staged, committing, committed, discarded, stale, expired]
+          description: >
+            "committing" is the mid-commit state (v1.1): set the instant a commit starts
+            applying, flipped to "committed" once every write has landed. A changeset found
+            in "committing" is a crash-retry — POST .../commit accepts it and resumes,
+            replaying the exact ids stored at prepare rather than minting fresh ones.
         commands:
           type: array
-          items: {}
-          description: Normalized SetTranslation/PlanImport command objects (union, not separately schema'd here).
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/SetTranslationCommand"
+              - $ref: "#/components/schemas/PlanImportCommand"
+              - $ref: "#/components/schemas/CreateProjectCommand"
+              - $ref: "#/components/schemas/UpdateProjectSettingsCommand"
+              - $ref: "#/components/schemas/LinkMediaCommand"
+          description: Normalized command objects, as staged.
         preconditions:
           type: array
           items: {}
@@ -154,6 +194,7 @@ components:
         receipt:
           oneOf:
             - $ref: "#/components/schemas/ChangesetReceipt"
+            - $ref: "#/components/schemas/ReceiptOnlyReceipt"
             - type: "null"
         confirmationId: { type: [string, "null"] }
         createdAt: { type: string, format: date-time }
@@ -198,6 +239,58 @@ components:
             $ref: "#/components/schemas/PlanImportCell"
       required: [kind, fileName, fileType, cells]
 
+    CreateProjectCommand:
+      type: object
+      description: >
+        Receipt-only (v1.1) — applies a plain row write via db/shared/projects.ts, not an
+        event. Must be the sole command in its changeset. Requires an unscoped or
+        org-scoped credential with org role >= MAINTAINER in the target org (a
+        project-scoped credential is 403 scope_denied); a project id claimed by another
+        caller between prepare and commit is 409 conflict.
+      properties:
+        kind: { type: string, enum: [CreateProject] }
+        name: { type: string }
+        projectId:
+          type: string
+          description: >
+            Optional. When omitted, the DEFINITIVE new project id is the changeset's URL
+            project id (the :projectId path segment) — pin the SAME value in both places
+            to avoid ambiguity.
+        orgId:
+          type: [string, integer]
+          description: Target org id. Omit for a personal (org-less) project.
+      required: [kind, name]
+
+    UpdateProjectSettingsCommand:
+      type: object
+      description: >
+        Receipt-only (v1.1) — a version-guarded settings write via the same shared module
+        auth-worker's internal route uses. Must be the sole command in its changeset.
+        Requires project role >= MAINTAINER.
+      properties:
+        kind: { type: string, enum: [UpdateProjectSettings] }
+        projectId: { type: string, description: Must equal the changeset's URL project id. }
+        settings: { type: object, description: Settings blob to write (replaces the stored blob). }
+        ifMatchVersion:
+          type: integer
+          description: Must equal the live settings version at both prepare and commit, else plan_stale.
+      required: [kind, projectId, settings, ifMatchVersion]
+
+    LinkMediaCommand:
+      type: object
+      description: >
+        Event-native (v1.1) — compiles to cell.audio.attach + cell.audio.select, requires
+        CONTRIBUTOR at commit. artifactId must reference an audio-kind artifact already
+        uploaded to the same project (see POST .../artifacts with x-artifact-kind: audio).
+        Multiple LinkMedia commands may share one changeset; cannot mix with any other
+        command kind.
+      properties:
+        kind: { type: string, enum: [LinkMedia] }
+        fileId: { type: string }
+        cellId: { type: string }
+        artifactId: { type: string, description: An audio-kind artifact id from the artifact upload endpoint. }
+      required: [kind, fileId, cellId, artifactId]
+
     PrepareChangesetRequest:
       type: object
       properties:
@@ -217,6 +310,12 @@ components:
             oneOf:
               - $ref: "#/components/schemas/SetTranslationCommand"
               - $ref: "#/components/schemas/PlanImportCommand"
+              - $ref: "#/components/schemas/CreateProjectCommand"
+              - $ref: "#/components/schemas/UpdateProjectSettingsCommand"
+              - $ref: "#/components/schemas/LinkMediaCommand"
+          description: >
+            PlanImport, CreateProject, UpdateProjectSettings must each be the sole command
+            in the array; LinkMedia commands may repeat but cannot mix with any other kind.
       required: [commands]
 
     PrepareChangesetResponse:
@@ -235,7 +334,9 @@ components:
       type: object
       properties:
         receipt:
-          $ref: "#/components/schemas/ChangesetReceipt"
+          oneOf:
+            - $ref: "#/components/schemas/ChangesetReceipt"
+            - $ref: "#/components/schemas/ReceiptOnlyReceipt"
       required: [receipt]
 
     Artifact:
@@ -250,6 +351,13 @@ components:
         sizeBytes: { type: integer }
         sha256: { type: string }
         fileId: { type: [string, "null"] }
+        kind:
+          type: string
+          enum: [source, audio]
+          description: "'source' (default) preserves a verbatim import original; 'audio' is a clip a LinkMedia changeset attaches to a cell."
+        audioId:
+          type: [string, "null"]
+          description: "audio-kind artifacts only: the R2 object name (<artifactId>.<ext>) LinkMedia's compiled cell.audio.attach payload references."
         createdAt: { type: string, format: date-time }
 
     UploadArtifactResponse:
@@ -580,7 +688,7 @@ paths:
 
   /api/v1/external/projects/{projectId}/artifacts:
     post:
-      summary: Upload a source artifact (raw bytes, max 25MB)
+      summary: Upload an artifact (raw bytes, max 25MB) — source (default) or audio
       security: [{ apiCredentialBearer: [] }]
       parameters:
         - name: projectId
@@ -591,6 +699,20 @@ paths:
           in: header
           required: true
           schema: { type: string }
+        - name: x-artifact-kind
+          in: header
+          required: false
+          schema: { type: string, enum: [source, audio], default: source }
+          description: >
+            'source' (default, omit the header) preserves a verbatim import original
+            unchanged from v1. 'audio' validates content-type against
+            audio/wav, audio/mpeg, audio/mp4, audio/x-m4a, audio/ogg and lands the bytes
+            in the per-file audio R2 layout for a later LinkMedia command to attach.
+        - name: content-type
+          in: header
+          required: false
+          schema: { type: string }
+          description: Required (and checked against the allowlist above) when x-artifact-kind is 'audio'.
       requestBody:
         required: true
         content:
@@ -673,7 +795,9 @@ paths:
 
   /api/v1/external/projects/{projectId}/changesets:
     post:
-      summary: Prepare (stage) a changeset — SetTranslation batch or a sole PlanImport
+      summary: >
+        Prepare (stage) a changeset — a SetTranslation batch, one or more LinkMedia,
+        or a sole PlanImport/CreateProject/UpdateProjectSettings
       security: [{ apiCredentialBearer: [] }]
       parameters:
         - name: projectId
@@ -741,7 +865,9 @@ paths:
           schema: { type: string }
       responses:
         "200":
-          description: Committed (or idempotently re-returned if already committed).
+          description: >
+            Committed (or idempotently re-returned if already committed; a changeset found
+            in "committing" — a crash-retry — resumes and completes rather than erroring).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CommitChangesetResponse" }
@@ -751,14 +877,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
         "409":
-          description: plan_stale — project state drifted since prepare.
+          description: >
+            plan_stale — project state (or, for UpdateProjectSettings, the settings version)
+            drifted since prepare; OR conflict — CreateProject only, the chosen project id
+            was claimed by a different caller since prepare.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
   /api/v1/external/projects/{projectId}/changesets/{id}/discard:
     post:
-      summary: Discard a staged/stale/expired changeset (cannot discard a committed one)
+      summary: Discard a staged/stale/expired changeset (cannot discard a committed or committing one)
       security: [{ apiCredentialBearer: [] }]
       parameters:
         - name: projectId
@@ -782,7 +911,7 @@ paths:
                       - $ref: "#/components/schemas/Changeset"
                       - type: "null"
         "400":
-          description: validation_failed — cannot discard a committed changeset.
+          description: validation_failed — cannot discard a committed or committing changeset.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }

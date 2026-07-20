@@ -20,6 +20,10 @@ interface HistoryDrawerProps {
   fileId?: string | null
   /** Fetches a file-scoped sync token (same as Phase 2 outbox flusher). */
   getTokenForFile?: (fileId: string) => Promise<string | null>
+  /** Whether this project has cloud (D1) history at all. Gates the
+   *  fetch-error state: tokenless local projects legitimately fall back to
+   *  cell.history and must not see a scary "couldn't load" message. */
+  isSynced?: boolean
   /** Called when the user confirms promoting a stale-branch entry to current.
    *  AD-2: the caller should emit a new target-cell commit whose parentId is
    *  the current chain head, making the promoted text the new current value. */
@@ -113,7 +117,7 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
   return i
 }
 
-export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, onPromote }: HistoryDrawerProps) {
+export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, isSynced = false, onPromote }: HistoryDrawerProps) {
   const enabled = !!projectId && !!fileId && !!getTokenForFile
   // Target side is the typical edit surface in this translation app, so we
   // use `targetEventId` as the AD-2 chain head when computing stale-branch
@@ -123,6 +127,9 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   const currentEventId = cell.targetEventId || null
   const {
     history: d1History,
+    isLoading: d1Loading,
+    isError: d1Error,
+    revalidate,
   } = useCellEditHistory({
     enabled,
     projectId: projectId ?? null,
@@ -173,7 +180,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
         <h3 className="text-sm font-semibold">
           Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="sm" onClick={onClose}>
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close history">
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -184,10 +191,37 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-2">
-        {history.length === 0 ? (
+        {isSynced && d1Loading && history.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Loading history…</p>
+        ) : isSynced && d1Error && history.length === 0 ? (
+          // A failed D1 fetch on a synced project used to fall through to
+          // "No edits yet." — confidently wrong for cells with real history.
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground">Couldn't load edit history.</p>
+            <button
+              type="button"
+              onClick={revalidate}
+              className="text-[11px] font-medium text-primary hover:text-primary/80 underline underline-offset-2"
+            >
+              Retry
+            </button>
+          </div>
+        ) : history.length === 0 ? (
           <p className="text-xs text-muted-foreground">No edits yet.</p>
         ) : (
           <>
+            {isSynced && d1Error && (
+              <p className="text-[10px] text-muted-foreground">
+                Couldn't refresh from the server — showing local edits.{" "}
+                <button
+                  type="button"
+                  onClick={revalidate}
+                  className="font-medium text-primary hover:text-primary/80 underline underline-offset-2"
+                >
+                  Retry
+                </button>
+              </p>
+            )}
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               {groups.length} significant {groups.length === 1 ? "revision" : "revisions"}
               {hiddenCount > 0 && (

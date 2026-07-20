@@ -140,3 +140,157 @@ export function canonicalRefFromTsv(book: string, reference: string): string {
   // A reference that already includes a space is treated as a full ref.
   return reference.includes(" ") ? reference : `${book} ${reference}`
 }
+
+// ---------------------------------------------------------------------------
+// Prose fidelity — TSV escape unfolding + markdown → cell HTML.
+//
+// unfoldingWord TSV cells cannot contain a real newline/tab, so prose columns
+// embed them as the LITERAL two-character sequences `\n` / `\t` (and `\\` for a
+// literal backslash). Without unescaping, imported cells display raw "\n"
+// pairs. Prose is also markdown; we render it to `cell.valueHtml` so the editor
+// shows headings/bold/lists instead of `#`/`**` syntax. The repo's existing
+// markdown→HTML helpers (src/lib/parsers/markdown.ts markdownInlineToHtml) are
+// module-private, so the same inline conventions (<b>/<i>/<s>/<code>) are
+// mirrored here with HTML-escaping added (TSV prose is untrusted text).
+// ---------------------------------------------------------------------------
+
+/**
+ * Unfold the TSV escapes in a prose cell: literal `\n` → newline, `\t` → tab,
+ * `\\` → backslash. One left-to-right pass, so `\\n` correctly yields a
+ * backslash followed by the letter n (the `\\` is consumed first).
+ */
+export function unescapeTsvProse(raw: string): string {
+  return raw.replace(/\\\\|\\n|\\t/g, (m) => (m === "\\\\" ? "\\" : m === "\\n" ? "\n" : "\t"))
+}
+
+// `[[rc://STAR/ta/man/translate/figs-metaphor]]`-style unfoldingWord resource
+// links (the wildcard segment is a literal asterisk in the source files).
+const RC_WIKI_LINK_RE = /\[\[(rc:\/\/[^\]]+)\]\]/g
+/** Any markdown link `[text](target)` (target has no spaces/parens). */
+const MD_LINK_RE = /\[([^\]]*)\]\(([^()\s]+)\)/g
+
+/** Human-readable tail of an rc:// URI or relative path: "…/figs-metaphor" → "figs-metaphor". */
+function readableLinkText(target: string): string {
+  const trimmed = target.replace(/\.md$/i, "").replace(/\/+$/, "")
+  const seg = trimmed.split("/").filter(Boolean).pop()
+  return seg ?? target
+}
+
+/**
+ * Replace unfoldingWord link forms that resolve nowhere in Aquilla with their
+ * readable text, BEFORE markdown rendering — so no broken `<a href>` is
+ * emitted. `[[rc://…]]` → last path segment ("figs-metaphor"); relative /
+ * rc:// markdown links → the link text (or the target's tail when the text is
+ * empty). Absolute http(s) links pass through untouched.
+ */
+export function stripUnresolvableLinks(md: string): string {
+  let out = md.replace(RC_WIKI_LINK_RE, (_m, uri: string) => readableLinkText(uri))
+  out = out.replace(MD_LINK_RE, (m: string, text: string, target: string) => {
+    if (/^https?:\/\//i.test(target)) return m
+    return text || readableLinkText(target)
+  })
+  return out
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+/** Inline markdown → HTML on ONE escaped text run. http(s) links become real
+ *  anchors (tokenized first so emphasis rules cannot mangle underscores in
+ *  the href); bold/italic/strike/code mirror parsers/markdown.ts. */
+function inlineHtml(text: string): string {
+  let html = escapeHtml(text)
+  const anchors: string[] = []
+  html = html.replace(
+    /\[([^\]]+)\]\((https?:[^()\s]+)\)/gi,
+    (_m, label: string, href: string) => {
+      anchors.push(`<a href="${href}">${label}</a>`)
+      return `\uE000${anchors.length - 1}\uE000`
+    },
+  )
+  html = html
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/__(.+?)__/g, "<b>$1</b>")
+    .replace(/\*(.+?)\*/g, "<i>$1</i>")
+    .replace(/_(.+?)_/g, "<i>$1</i>")
+    .replace(/~~(.+?)~~/g, "<s>$1</s>")
+    .replace(/`(.+?)`/g, "<code>$1</code>")
+  return html.replace(/\uE000(\d+)\uE000/g, (_m, i: string) => anchors[Number(i)])
+}
+
+/**
+ * Render TSV prose markdown (already unescaped) to cell HTML. Block model
+ * mirrors parsers/markdown.ts: `#`-headings, `-`/`*`/`+` and `1.` lists,
+ * `>` blockquotes, blank-line-separated paragraphs. Unresolvable
+ * unfoldingWord links are stripped to readable text first.
+ */
+export function tsvMarkdownToHtml(markdown: string): string {
+  const md = stripUnresolvableLinks(markdown)
+  const out: string[] = []
+  let para: string[] = []
+  let list: { kind: "ul" | "ol"; items: string[] } | null = null
+
+  const flushPara = (): void => {
+    if (para.length === 0) return
+    out.push(`<p>${inlineHtml(para.join(" "))}</p>`)
+    para = []
+  }
+  const flushList = (): void => {
+    if (list === null) return
+    out.push(`<${list.kind}>${list.items.map((i) => `<li>${i}</li>`).join("")}</${list.kind}>`)
+    list = null
+  }
+
+  for (const rawLine of md.split("\n")) {
+    const line = rawLine.trim()
+    if (line === "") {
+      flushPara()
+      flushList()
+      continue
+    }
+    const h = line.match(/^(#{1,6})\s+(.+)/)
+    if (h) {
+      flushPara()
+      flushList()
+      out.push(`<h${h[1].length}>${inlineHtml(h[2])}</h${h[1].length}>`)
+      continue
+    }
+    const ul = line.match(/^[-*+]\s+(.+)/)
+    if (ul) {
+      flushPara()
+      if (list?.kind !== "ul") {
+        flushList()
+        list = { kind: "ul", items: [] }
+      }
+      list.items.push(inlineHtml(ul[1]))
+      continue
+    }
+    const ol = line.match(/^\d+\.\s+(.+)/)
+    if (ol) {
+      flushPara()
+      if (list?.kind !== "ol") {
+        flushList()
+        list = { kind: "ol", items: [] }
+      }
+      list.items.push(inlineHtml(ol[1]))
+      continue
+    }
+    const quote = line.match(/^>\s*(.*)/)
+    if (quote) {
+      flushPara()
+      flushList()
+      out.push(`<blockquote><p>${inlineHtml(quote[1])}</p></blockquote>`)
+      continue
+    }
+    flushList()
+    para.push(line)
+  }
+  flushPara()
+  flushList()
+  return out.join("")
+}

@@ -7,7 +7,7 @@
 // reshaping the batch envelope. Hand validation (no zod) keeps the worker
 // dependency-free.
 
-import { REQUIRED_ROLE } from '../events/role-policy'
+import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
 export interface SetTranslationCommand {
@@ -47,7 +47,53 @@ export interface PlanImportCommand {
   cells: PlanImportCell[]
 }
 
-export type Command = SetTranslationCommand | PlanImportCommand
+/** Create a project (spec §2, receipt-only — D8). Applies a plain row write via
+ *  db/shared/projects.ts, NOT events. `projectId` is optional: when omitted the
+ *  changeset's URL project id is the definitive id; either way the definitive id
+ *  is pinned in the plan at prepare (prepare-time-ids doctrine — a crash-retry
+ *  re-applies the SAME id). `orgId` names the target org (null/omitted = a
+ *  personal, org-less project). Scope: unscoped or org-scoped credentials only —
+ *  a project-scoped credential can never CreateProject, so (act tokens being
+ *  required project-scoped at mint) CreateProject is ask-mode-only by design. */
+export interface CreateProjectCommand {
+  kind: 'CreateProject'
+  /** Client-chosen project id; when omitted the changeset URL project id is used. */
+  projectId?: string
+  name: string
+  /** Target org id (numeric, or its string form). Omit for a personal project. */
+  orgId?: string | number
+}
+
+/** Update a project's settings blob with optimistic-concurrency control (spec
+ *  §2, receipt-only — D8). Applies via db/shared/projects.ts's version-guarded
+ *  write; when the validation threshold changes the shared module runs the
+ *  re-projection locally (sync-worker owns the projection). `ifMatchVersion`
+ *  must equal the live settings version at prepare (else plan_stale) and is
+ *  re-checked at commit. */
+export interface UpdateProjectSettingsCommand {
+  kind: 'UpdateProjectSettings'
+  projectId: string
+  settings: Record<string, unknown>
+  ifMatchVersion: number
+}
+
+/** Attach an uploaded audio artifact to a cell (Agent API v1.1 §3). Compiles to
+ *  cell.audio.attach + cell.audio.select events. The artifact must be an
+ *  `audio`-kind artifact in the same project (uploaded via the REST artifact
+ *  endpoint with `x-artifact-kind: audio`). */
+export interface LinkMediaCommand {
+  kind: 'LinkMedia'
+  fileId: string
+  cellId: string
+  artifactId: string
+}
+
+export type Command =
+  | SetTranslationCommand
+  | PlanImportCommand
+  | CreateProjectCommand
+  | UpdateProjectSettingsCommand
+  | LinkMediaCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -65,6 +111,11 @@ export type ValidateCommandsResult =
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0
+}
+
+/** A plain (non-array, non-null) object — the shape a settings blob must take. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /** Validate a raw request `commands` value into a typed batch. */
@@ -182,6 +233,77 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       })
       return
     }
+    if (c.kind === 'CreateProject') {
+      if (!isNonEmptyString(c.name)) {
+        issues.push({ index, message: 'CreateProject.name must be a non-empty string' })
+        return
+      }
+      if (c.projectId !== undefined && !isNonEmptyString(c.projectId)) {
+        issues.push({ index, message: 'CreateProject.projectId must be a non-empty string when present' })
+        return
+      }
+      if (
+        c.orgId !== undefined &&
+        !isNonEmptyString(c.orgId) &&
+        typeof c.orgId !== 'number'
+      ) {
+        issues.push({ index, message: 'CreateProject.orgId must be a string or number when present' })
+        return
+      }
+      commands.push({
+        kind: 'CreateProject',
+        ...(c.projectId !== undefined ? { projectId: c.projectId as string } : {}),
+        name: c.name,
+        ...(c.orgId !== undefined ? { orgId: c.orgId as string | number } : {}),
+      })
+      return
+    }
+    if (c.kind === 'UpdateProjectSettings') {
+      if (!isNonEmptyString(c.projectId)) {
+        issues.push({ index, message: 'UpdateProjectSettings.projectId must be a non-empty string' })
+        return
+      }
+      if (!isPlainObject(c.settings)) {
+        issues.push({ index, message: 'UpdateProjectSettings.settings must be a plain object' })
+        return
+      }
+      if (
+        typeof c.ifMatchVersion !== 'number' ||
+        !Number.isInteger(c.ifMatchVersion) ||
+        c.ifMatchVersion < 0
+      ) {
+        issues.push({ index, message: 'UpdateProjectSettings.ifMatchVersion must be an integer >= 0' })
+        return
+      }
+      commands.push({
+        kind: 'UpdateProjectSettings',
+        projectId: c.projectId,
+        settings: c.settings,
+        ifMatchVersion: c.ifMatchVersion,
+      })
+      return
+    }
+    if (c.kind === 'LinkMedia') {
+      if (!isNonEmptyString(c.fileId)) {
+        issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
+        return
+      }
+      if (!isNonEmptyString(c.cellId)) {
+        issues.push({ index, message: 'LinkMedia.cellId must be a non-empty string' })
+        return
+      }
+      if (!isNonEmptyString(c.artifactId)) {
+        issues.push({ index, message: 'LinkMedia.artifactId must be a non-empty string' })
+        return
+      }
+      commands.push({
+        kind: 'LinkMedia',
+        fileId: c.fileId,
+        cellId: c.cellId,
+        artifactId: c.artifactId,
+      })
+      return
+    }
     issues.push({ index, message: `unsupported command kind: ${String(c.kind)}` })
   })
 
@@ -201,6 +323,17 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
 export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'PlanImport') {
     return Math.max(REQUIRED_ROLE['file.create'], REQUIRED_ROLE['source.cell.create'])
+  }
+  // Receipt-only project-lifecycle commands take their OWN prepare/commit path
+  // (their role gate is org-level for CreateProject, project-MAINTAINER for
+  // UpdateProjectSettings), so this generic per-command floor is never consulted
+  // for them — but the union must be covered. MAINTAINER is the honest floor.
+  if (c.kind === 'CreateProject' || c.kind === 'UpdateProjectSettings') {
+    return ROLE.MAINTAINER
+  }
+  if (c.kind === 'LinkMedia') {
+    // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
+    return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

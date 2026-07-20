@@ -114,11 +114,14 @@ describe("self-assign carve-out (AQU-496)", () => {
     expect(screen.getByText(/self-assignment is on/i)).toBeTruthy()
   })
 
-  it("fails closed (no eligible assignee, submit blocked) when callerUserId can't be resolved", () => {
+  it("fails closed (no eligible assignee, submit blocked) when callerUserId can't be resolved", async () => {
     render(<AssignModal {...SELF_ASSIGN_PROPS} callerUserId={null} />)
     // Trigger renders no committed label — placeholder only, nothing to pick.
-    const assignBtn = screen.getByRole("button", { name: /^assign$/i })
-    expect((assignBtn as HTMLButtonElement).disabled).toBe(true)
+    // The submit button stays enabled (click-to-validate), but clicking it
+    // must surface an inline error and never emit assignment.create.
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    expect(await screen.findByText(/select a member/i)).toBeTruthy()
+    expect(mockCreate).not.toHaveBeenCalled()
   })
 })
 
@@ -339,10 +342,13 @@ describe("lane select (AQU-538)", () => {
 
 // ── Error: no member selected ────────────────────────────────────────────────
 describe("validation", () => {
-  it("assign button is disabled when no member is selected", () => {
+  it("submitting with no member selected surfaces an inline error and emits nothing", async () => {
+    // Click-to-validate: the button stays enabled so the user sees the
+    // validation error instead of a dead disabled control.
     render(<AssignModal {...BASE_PROPS} />)
-    const assignBtn = screen.getByRole("button", { name: /^assign$/i })
-    expect((assignBtn as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    expect(await screen.findByText(/select a member/i)).toBeTruthy()
+    expect(mockCreate).not.toHaveBeenCalled()
   })
 
   // AQU-495 regression: onAssigned is the sole hook the open-assignments /

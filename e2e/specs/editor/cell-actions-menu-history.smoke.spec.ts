@@ -16,7 +16,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * — dead code.
  *
  * The history-drawer journey this spec covered now lives at:
- *   cell row → "Open cell details" chevron → History tab → "Open full history"
+ *   cell row → hover → "Edit history" rail button → HistoryDrawer
  * which is exactly what cell-history-drawer.smoke.spec.ts already exercises.
  * Keeping this spec would duplicate that coverage against a UI that no
  * longer exists, so it is skipped pending deletion (and CellActionsMenu.tsx

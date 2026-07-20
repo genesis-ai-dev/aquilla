@@ -18,10 +18,15 @@ export function OrgSidebar() {
 
   // FRO-474: project-only invitees (direct project_members grant, no org
   // membership for that project) have no org-scoped nav surface to reach
-  // their project. List those projects here — same "Shared with you" partition
-  // used on the dashboard (FRO-335/FRO-428) — so they always have a way in.
+  // their project. AQU-417: rather than scatter those projects under every
+  // org's nav, expose ONE dedicated entry — a single "Shared with you" link to
+  // the /shared page that collects them all in one place — shown whenever the
+  // caller has at least one cross-org grant. Reachability is preserved for
+  // zero-org invitees (the link and the /shared route work regardless of org
+  // membership, unlike the all-orgs overview which requires 2+ member orgs).
   const { projects: accessibleProjects } = useProjectsForNavigation()
-  const sharedProjects = partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
+  const hasSharedProjects =
+    partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe.length > 0
 
   return (
     <div className="flex h-full min-w-0 flex-col gap-1 overflow-hidden p-2">
@@ -52,22 +57,10 @@ export function OrgSidebar() {
           <div className="my-1 border-t" />
           <NavLink to="/admin" className={link}>Admin</NavLink>
         </>}
-        {sharedProjects.length > 0 && (
+        {hasSharedProjects && (
           <>
             <div className="my-1 border-t" />
-            <p className="px-2 pb-1 pt-1 text-xs font-medium text-muted-foreground">
-              Shared with you
-            </p>
-            {sharedProjects.map((p) => (
-              <NavLink
-                key={p.id}
-                to={`/projects/${p.id}`}
-                className={link}
-                title={p.name}
-              >
-                <span className="block truncate">{p.name}</span>
-              </NavLink>
-            ))}
+            <NavLink to="/shared" className={link}>Shared with you</NavLink>
           </>
         )}
       </nav>

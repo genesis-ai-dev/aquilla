@@ -25,6 +25,7 @@ interface CapturedFileCreate {
     name: string
   }
   cells: unknown[]
+  complete?: boolean
 }
 
 let captured: CapturedFileCreate[]
@@ -70,7 +71,9 @@ describe("AQU-249 — source/target language threading", () => {
       },
     )
 
-    expect(captured).toHaveLength(1)
+    // One cell-carrying chunk + the trailing finalize request (empty cells).
+    expect(captured).toHaveLength(2)
+    expect(captured[1].complete).toBe(true)
     const payload = captured[0]
     // file.create metadata must carry the language pair.
     expect(payload.file?.sourceLanguage).toBe("hbo")
@@ -90,7 +93,7 @@ describe("AQU-249 — source/target language threading", () => {
       },
     )
 
-    expect(captured).toHaveLength(1)
+    expect(captured).toHaveLength(2)
     const file = captured[0].file
     // When omitted, neither key should be set to an empty string — that
     // would overwrite a language the user already configured.
@@ -112,7 +115,7 @@ describe("AQU-249 — source/target language threading", () => {
       },
     )
 
-    expect(captured).toHaveLength(1)
+    expect(captured).toHaveLength(2)
     const f = captured[0].file
     // Must not equal each other — that's the broken state we're preventing.
     expect(f?.sourceLanguage).toBe("arb")

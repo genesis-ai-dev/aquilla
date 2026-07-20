@@ -7,7 +7,7 @@
 | Auth        | API-level login (covered implicitly by every multi-user spec via `ensureAuthState`) | `e2e/helpers/auth.ts` |  n/a   |
 | Auth        | UI sign-up / login flow                              | _gap — Plan 2 (no `/login` route; login lives in onboarding)_ |        |
 | Auth        | Password reset request                               | _gap — Plan 2_                                                |        |
-| Auth        | Switch between two signed-in accounts                | _gap — Plan 2_                                                |        |
+| Auth        | Switch between two signed-in accounts (cross-tab reconcile, FRO-367) | `e2e/specs/orgs/account-switch-cross-tab.spec.ts`  |        |
 | Onboarding  | First-run flow to dashboard                          | _gap — Plan 2_                                                |        |
 | Projects    | Create project, appears on dashboard                 | `e2e/specs/projects/create.smoke.spec.ts`                     |   ✅   |
 | Projects    | Open / delete / restore from trash                   | `e2e/specs/projects/project-trash.smoke.spec.ts` + `dashboard-trash-expand-restore.smoke.spec.ts` | ✅ |
@@ -39,7 +39,7 @@
 | Comments    | Add / edit / resolve comment                         | `e2e/specs/editor/comments.smoke.spec.ts` + `comment-resolve.smoke.spec.ts` + `comment-reply.smoke.spec.ts` | ✅ |
 | Comments    | Go to cell from comments page                        | `e2e/specs/editor/comments-go-to-cell.smoke.spec.ts`          |   ✅   |
 | Sharing     | Generate invite link / join project via link         | `e2e/specs/projects/share-invite-link.smoke.spec.ts` + `join-page.smoke.spec.ts` | ✅ |
-| Sharing     | Invite accept confirmation + dashboard visibility (AQU-335) | `e2e/specs/projects/invite-accept-dashboard-visibility.smoke.spec.ts` | ✅ |
+| Sharing     | Invite accept confirmation + `/shared` visibility (AQU-335 / AQU-417) | `e2e/specs/projects/invite-accept-dashboard-visibility.smoke.spec.ts` | ✅ |
 | Sharing     | Pending-invite inbox + org external-collaborator revoke (AQU-326) | `e2e/specs/orgs/pending-invite-inbox-external-revoke.smoke.spec.ts` | ✅ |
 | Sharing     | Copy invite URL from share panel                     | `e2e/specs/projects/share-invite-copy-url.smoke.spec.ts`      |   ✅   |
 | Sharing     | Toggle invite mode between @user and email           | `e2e/specs/projects/share-invite-mode-toggle.smoke.spec.ts`   |   ✅   |
@@ -51,7 +51,8 @@
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
 | Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
-| Export      | Export to each supported format                      | `e2e/specs/editor/export.smoke.spec.ts` + `export-format-switch.smoke.spec.ts` (partial — all format radio buttons covered) | ✅ |
+| Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
+| Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
 | Editor      | Formatting loss warning when source has bold/italic   | `e2e/specs/editor/formatting-loss-warning.smoke.spec.ts`      |   ✅   |
 | Editor      | File actions hover menu (rename/delete)               | `e2e/specs/editor/file-actions-button.smoke.spec.ts`          |   ✅   |
@@ -119,7 +120,7 @@
 | Projects    | Project settings keeps synced name read-only and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
 | Projects    | Project card role badge shows user's role             | `e2e/specs/projects/project-card-role-badge.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |
-| Projects    | Org home status filter (All/Active/Stalled/Overdue)   | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |
+| Projects    | Org home status filter (All/Stalled/Overdue/Needs attention)   | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |
 | Projects    | Project settings user section (username/author)       | `e2e/specs/projects/project-settings-user-section.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings AI instructions textarea             | `e2e/specs/projects/project-settings-ai-instructions.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings context controls section             | `e2e/specs/projects/project-settings-context-controls.smoke.spec.ts` |   ✅   |
@@ -141,7 +142,7 @@
 | Orgs        | Team delete dialog                                    | `e2e/specs/orgs/team-delete.smoke.spec.ts`                    |   ✅   |
 | Orgs        | Teams sort and filter                                 | `e2e/specs/orgs/teams-sort-and-filter.smoke.spec.ts`          |   ✅   |
 | Editor      | Cell action popover shows Record audio + Add comment  | `e2e/specs/editor/cell-action-popover.smoke.spec.ts`          |   ✅   |
-| Editor      | Cell details expansion panel tabs (Decay/BT/Issues/History) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
+| Editor      | Cell details expansion panel tabs (Decay/BT/Footnotes/Issues) | `e2e/specs/editor/cell-details.smoke.spec.ts` + `cell-expansion-bt-tab.smoke.spec.ts` + `cell-expansion-decay-tab.smoke.spec.ts` + `cell-expansion-issues-tab.smoke.spec.ts` | ✅ |
 | Editor      | Cell expansion panel closes on Escape key             | `e2e/specs/editor/cell-expansion-escape-close.smoke.spec.ts`  |   ✅   |
 | Editor      | CellExpansion tabs ArrowRight/Home/End keyboard nav   | `e2e/specs/editor/cell-expansion-tab-arrow-nav.smoke.spec.ts` |   ✅   |
 | Editor      | Tab / Shift+Tab moves focus between target cells      | `e2e/specs/editor/cell-tab-navigation.smoke.spec.ts`          |   ✅   |

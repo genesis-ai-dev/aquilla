@@ -24,8 +24,11 @@ vi.mock('partyserver', () => ({
 
 import { handleExternalArtifactsRequest, MAX_ARTIFACT_BYTES } from '../external/artifacts-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
+import { handleEventsWriteRequest } from '../events/route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
+import { makeTestToken } from './helpers/auth'
+import type { RawEvent } from '../events/types'
 
 const PROJECT = 'proj-a'
 const CRED_LEAD = '00000000-0000-0000-0000-0000000000a1'
@@ -467,5 +470,132 @@ describe('PlanImport — commit', () => {
     ))!
     expect(res.status).toBe(400)
     expect((await res.json() as { error: { code: string } }).error.code).toBe('validation_failed')
+  })
+})
+
+// ── PlanImport commit replay: crash-retry idempotency (W1-B §4/§9) ───────────
+// The flagship idempotency test: a multi-chunk PlanImport crashes mid-commit
+// after a PARTIAL apply, then retries. Pre-W1-B, commit minted the file id +
+// event ids at commit time, so a retry produced a DUPLICATE file and duplicate
+// source cells. Now those ids are minted at prepare and stored; the retry
+// re-posts identical ids that the /events idempotency layer (INSERT OR IGNORE
+// on event id) dedupes.
+
+describe('PlanImport — commit replay (crash-retry idempotency)', () => {
+  it('a mid-commit crash retry of a multi-chunk PlanImport produces zero duplicate events/files', async () => {
+    tdb = await seedProject()
+    bucket = makeStubBucket()
+    env = makeEnv(tdb.db, bucket)
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+
+    // 150 cells → file.create + 150 source.cell.create = 151 events, spanning
+    // multiple PLAN_IMPORT_CHUNK (100) posts on commit.
+    const cells = Array.from({ length: 150 }, (_, i) => ({ content: `c${i}` }))
+    const prepRes = (await handleExternalChangesetsRequest(
+      prepareReq(token, { kind: 'PlanImport', fileName: 'Big.usfm', fileType: 'usfm', cells }),
+      env,
+    ))!
+    const prep = (await prepRes.json()) as { changeset: { id: string } }
+    const csId = prep.changeset.id
+
+    // Read the prepare-time id ledger — the crash simulation replays a slice of
+    // it, and the retry must converge on exactly these ids.
+    const storedRow = (await tdb.rows<{ id: string; summary: unknown }>('changesets')).find(
+      (c) => c.id === csId,
+    )!
+    const summary =
+      typeof storedRow.summary === 'string' ? JSON.parse(storedRow.summary) : storedRow.summary
+    const planned = summary.plannedIds.planImport as {
+      fileId: string
+      fileEventId: string
+      cells: { cellId: string; eventId: string }[]
+    }
+
+    // Simulate a partial apply (worker evicted mid-commit): apply file.create +
+    // the first 80 source cells using the EXACT stored ids, through the same
+    // /events perimeter commit uses, chained by anchorCellId. Then leave the
+    // changeset in the transient 'committing' state.
+    const leadTok = await makeTestToken(SECRET, {
+      projectId: PROJECT,
+      fileId: planned.fileId,
+      userId: 1,
+      username: 'lead',
+      role: 500,
+    })
+    const fileEvent: RawEvent<'file.create'> = {
+      id: planned.fileEventId,
+      schemaVersion: 1,
+      kind: 'file.create',
+      projectId: PROJECT,
+      fileId: planned.fileId,
+      parentId: null,
+      author: 'lead',
+      payload: { name: 'Big.usfm', fileType: 'usfm' },
+      clientTs: 1,
+    }
+    const partialCells: RawEvent<'source.cell.create'>[] = []
+    let prev: string | null = null
+    for (let i = 0; i < 80; i++) {
+      const pc = planned.cells[i]
+      partialCells.push({
+        id: pc.eventId,
+        schemaVersion: 1,
+        kind: 'source.cell.create',
+        projectId: PROJECT,
+        fileId: planned.fileId,
+        cellId: pc.cellId,
+        parentId: null,
+        author: 'lead',
+        payload: { cellId: pc.cellId, anchorCellId: prev, value: `c${i}` },
+        clientTs: 1,
+      })
+      prev = pc.cellId
+    }
+    const partial: RawEvent[] = [fileEvent, ...partialCells]
+    const partialRes = await handleEventsWriteRequest(
+      new Request('https://w/events', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${leadTok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: partial }),
+      }),
+      env,
+    )
+    const partialBody = (await partialRes!.json()) as { accepted: unknown[] }
+    expect(partialBody.accepted).toHaveLength(81) // file + 80 cells landed
+
+    await tdb.db
+      .prepare(`UPDATE changesets SET status = 'committing' WHERE id = ?`)
+      .bind(csId)
+      .run()
+
+    // Retry the commit: re-posts file.create + ALL 150 cells; the 81 already
+    // applied dedupe by id, the remaining 70 apply.
+    const res = (await handleExternalChangesetsRequest(commitReq(token, csId), env))!
+    expect(res.status).toBe(200)
+    const commit = (await res.json()) as { receipt: { appliedCount: number; fileId: string } }
+    expect(commit.receipt.fileId).toBe(planned.fileId) // stored id, not a fresh mint
+    expect(commit.receipt.appliedCount).toBe(151)
+
+    // Exactly one file — NOT a duplicate from a re-minted file id (the old bug).
+    const files = await tdb.rows<{ id: string }>('files')
+    expect(files).toHaveLength(1)
+    expect(files[0].id).toBe(planned.fileId)
+
+    // All 150 source cells, no duplicates.
+    const sourceCells = (await tdb.rows<{ side: string; file_id: string }>('cells')).filter(
+      (c) => c.side === 'source' && c.file_id === planned.fileId,
+    )
+    expect(sourceCells).toHaveLength(150)
+
+    // 1 file.create + 150 source.cell.create = 151 events, no duplicates.
+    const createEvents = (await tdb.rows<{ kind: string }>('events')).filter(
+      (e) => e.kind === 'file.create' || e.kind === 'source.cell.create',
+    )
+    expect(createEvents).toHaveLength(151)
+
+    // Single changeset row, converged to committed.
+    const cs = await tdb.rows<{ status: string }>('changesets')
+    expect(cs).toHaveLength(1)
+    expect(cs[0].status).toBe('committed')
   })
 })

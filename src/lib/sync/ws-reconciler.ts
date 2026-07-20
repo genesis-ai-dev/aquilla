@@ -101,6 +101,18 @@ export function isOwnWriteEcho(msg: { by?: string }, currentUserId: string): boo
   return !!msg.by && msg.by === currentUserId
 }
 
+/**
+ * True when an `event.applied` frame is a validation-state change
+ * (`cell.validate` / `cell.unvalidate`). These events project into the
+ * audit-stats read (`activeValidators` → the validation pill), NOT the
+ * `/files/:fileId/cells` row that the targeted cell refetch pulls — so a
+ * remote validation must also poke the per-cell audit-stats read, or the
+ * pill shows a stale validated-by state until the next full stats poll.
+ */
+export function isValidationEvent(kind: string): boolean {
+  return kind === "cell.validate" || kind === "cell.unvalidate"
+}
+
 export type ProjectWsClientMessage =
   | { t: "outbox.event"; event: OutboxRawEvent }
   | { t: "focus.claim"; cellId: string; leaseMs?: number }
@@ -396,12 +408,15 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       if (!u || typeof u !== "object") return null
       const r = u as Record<string, unknown>
       if (typeof r.userId !== "string" || typeof r.ts !== "number") return null
+      // A present-but-invalid selection (wrong shape, oversized draft) marks
+      // the whole frame malformed — same strictness as the other fields.
+      if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
       users.push({
         userId: r.userId,
         ts: r.ts,
         ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
         ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
-        ...(isTargetPresenceSelection(r.selection) ? { selection: r.selection } : {}),
+        ...(r.selection !== undefined ? { selection: r.selection } : {}),
       })
     }
     return { t: "presence", users }

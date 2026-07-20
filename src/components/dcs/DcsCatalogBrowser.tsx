@@ -19,6 +19,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { DcsClient, type CatalogSearchParams } from "@/lib/dcs/catalog"
 import { toDcsLangSeed } from "@/lib/dcs/lang-seed"
+import { isSupportedCatalogEntry } from "@/lib/dcs/resource-map"
 import type { DcsCatalogEntry } from "@/lib/dcs/types"
 
 // Sentinel for "any" in the Select — Base UI/Radix selects can't carry an empty
@@ -224,29 +225,54 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
           </div>
         ) : results && results.length > 0 ? (
           <ul className="divide-y">
-            {results.map((entry) => (
-              <li key={`${entry.fullName}@${entry.ref}`}>
-                <button
-                  type="button"
-                  onClick={() => onPick(entry)}
-                  className="flex w-full flex-col items-start gap-1 px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+            {results.map((entry) => {
+              // Pre-import support check (entry-side signals only) — unsupported
+              // resources are shown but not pickable, so the user never hits
+              // importDcsResource's "no route" throw AFTER committing.
+              const supported = isSupportedCatalogEntry(entry)
+              return (
+                <li
+                  key={`${entry.fullName}@${entry.ref}`}
+                  // Title lives on the <li> — disabled buttons swallow pointer
+                  // events in some browsers, so a button-level tooltip may never show.
+                  title={
+                    supported
+                      ? undefined
+                      : "Aquilla can't import this resource type yet (tracked in AQU-615)"
+                  }
                 >
-                  <div className="flex w-full items-baseline gap-2">
-                    <span className="truncate text-sm font-medium">{entry.fullName}</span>
-                    {entry.ref && (
-                      <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
-                        {entry.ref}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                    {entry.subject && <span>{entry.subject}</span>}
-                    {entry.language && <span>· {entry.languageTitle || entry.language}</span>}
-                    {entry.released && <span>· {formatReleased(entry.released)}</span>}
-                  </div>
-                </button>
-              </li>
-            ))}
+                  <button
+                    type="button"
+                    disabled={!supported}
+                    onClick={() => onPick(entry)}
+                    className={
+                      supported
+                        ? "flex w-full flex-col items-start gap-1 px-3 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                        : "flex w-full cursor-not-allowed flex-col items-start gap-1 px-3 py-2 text-left opacity-50"
+                    }
+                  >
+                    <div className="flex w-full items-baseline gap-2">
+                      <span className="truncate text-sm font-medium">{entry.fullName}</span>
+                      {entry.ref && (
+                        <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+                          {entry.ref}
+                        </Badge>
+                      )}
+                      {!supported && (
+                        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+                          Not yet supported
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                      {entry.subject && <span>{entry.subject}</span>}
+                      {entry.language && <span>· {entry.languageTitle || entry.language}</span>}
+                      {entry.released && <span>· {formatReleased(entry.released)}</span>}
+                    </div>
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         ) : (
           <div className="flex flex-col items-center gap-1 py-8 text-center text-sm text-muted-foreground">

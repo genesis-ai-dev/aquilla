@@ -1,10 +1,11 @@
 # Aquilla Agent API — practitioner guide
 
-Status: **implemented surface, v1** · 2026-07-13 · matches code in `sync-worker/src/external/*`
-and `auth-worker/src/routes/{credentials,changeset-approvals}.ts`. Design rationale and vocabulary
-live in [`docs/AGENT-API.md`](../AGENT-API.md) (AQU-533) — this document describes what is
-actually implemented and callable today. Where the two disagree, this document is right; call
-those spots out explicitly rather than paper over them.
+Status: **implemented surface, v1.1** · 2026-07-17 · matches code in `sync-worker/src/external/*`,
+`auth-worker/src/routes/{credentials,changeset-approvals}.ts`, and `db/shared/projects.ts`. Design
+rationale and vocabulary live in [`docs/AGENT-API.md`](../AGENT-API.md) (AQU-533) and
+[`docs/superpowers/specs/2026-07-17-agent-api-v1.1-design.md`](../superpowers/specs/2026-07-17-agent-api-v1.1-design.md)
+— this document describes what is actually implemented and callable today. Where the two disagree,
+this document is right; call those spots out explicitly rather than paper over them.
 
 A worked, copy-pasteable example lives in
 [`docs/api/examples/blackfoot-import.md`](examples/blackfoot-import.md). A minimal OpenAPI 3.1
@@ -65,6 +66,11 @@ Response (`201`):
   }
 }
 ```
+
+`name` is **required** (`z.string().min(1).max(200)` in `auth-worker/src/routes/credentials.ts`) —
+a mint request with an empty/missing name is `400 validation_failed` (surfaced by the framework's
+schema validator, not a hand-written check). Use it to tell credentials apart in the list view;
+it is never shown back to anyone but the minting user.
 
 **The token is shown exactly once, in this response.** It is never stored in retrievable
 form — only its SHA-256 hash (`api_credentials.token_hash`) is persisted, and `GET
@@ -161,17 +167,22 @@ hand-rolled client), not just Claude products.
 | `search_project` | Full-text search over source/target cells. |
 | `read_content` | List a project's files, or read one file's cells (with `since`/`limit`/`cursor`). |
 | `read_history` | Append-only event history for one cell. |
-| `prepare_translations` | Stage a `SetTranslation` batch as a changeset (see §3). |
+| `prepare_translations` | Stage a changeset (see §3): a `SetTranslation` batch via `translations`, and/or `CreateProject` / `UpdateProjectSettings` / `LinkMedia` commands via `commands` (Agent API v1.1 — §4.1 below). |
 | `get_changeset` | Fetch a changeset's status/summary/digest/receipt/approvalUrl. |
 | `confirm_changeset` | Commit a prepared changeset (ask or act). |
 | `discard_changeset` | Discard a staged/stale/expired changeset. |
 
-There is **no MCP tool for artifacts or `PlanImport`** yet — uploading an artifact and staging
-an import changeset are REST-only in v1 (§4 below); an MCP-based agent must shell out to REST
-for those two steps, or a REST-capable host must do them on its behalf. `create_project` /
-`update_project`, `run_checks`, jobs, and export tools from the design doc's §4 table are **not
-yet available** at all (no command layer support). See `docs/swarm/AGENT-API-TRACES.md` for the
-open list.
+`prepare_translations` is the generic propose step and `confirm_changeset` the generic commit
+step for every MCP-stageable command kind — they are not SetTranslation-specific despite the
+tool's name (kept for backward compatibility). `get_capabilities` publishes the full, current
+list of `commandKinds` and per-kind staging notes (`projectLifecycle`, `linkMedia`) — call it
+first rather than trusting a stale copy of this table.
+
+There is **no MCP tool for artifact upload or `PlanImport`** — uploading an artifact (source or
+audio) and staging an import changeset are REST-only (§4 below); an MCP-based agent must shell
+out to REST for those two steps, or a REST-capable host must do them on its behalf.
+`run_checks`, jobs, and export tools from the design doc's §4 table are **not yet available** at
+all (no command layer support). See `docs/swarm/AGENT-API-TRACES.md` for the open list.
 
 ## 3. The ask-mode loop, narrated agent-side
 
@@ -212,7 +223,19 @@ immediately.
 
 Polling: an agent may call `get_changeset` between steps 2 and 4 to observe `status` transition
 from `staged` to `committed` once a human has approved *and* the agent has re-called confirm —
-approval alone does not commit; the agent's own confirm call is still required.
+approval alone does not commit; the agent's own confirm call is still required. A changeset may
+also transiently read `committing` — the mid-apply state a commit sets before flipping to
+`committed` (§4.1 "commit idempotency" below); treat it the same as `staged` and poll again.
+
+**`CreateProject` is ask-mode only, by construction.** `prepare` **forces every `CreateProject`
+changeset to ask-mode**, whatever the credential's or request's mode — an org-scoped `act`
+credential (which the mint endpoint still permits, for its *other* commands) does not commit a
+project unattended; its `CreateProject` changeset is staged ask-mode all the same and still
+requires human approval. (A project-scoped credential can never `CreateProject` at all —
+`403 scope_denied` at prepare.) Every agent-initiated project creation therefore passes through
+human approval at `/approve/:id`. This is intentional, not a gap: project creation is the one
+operation this API deliberately keeps a human in the loop for, enforced in code rather than left
+to the mint dialog's UX.
 
 ## 4. REST endpoint reference
 
@@ -235,16 +258,21 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 | `GET /api/v1/external/projects/:projectId/files?limit=&cursor=` | `aqk_` | VIEWER | List files. |
 | `GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=` | `aqk_` | VIEWER | Read a file's cells; supports delta reads via `since`. |
 | `GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=` | `aqk_` | VIEWER | Append-only event history for one cell (not fileId-scoped, unlike the internal route). |
-| `POST /api/v1/external/projects/:projectId/artifacts` | `aqk_` | CONTRIBUTOR | Body = raw bytes; headers `x-artifact-name` (required), `content-type`. Returns `{ artifactId, sha256, sizeBytes }`. Max 25MB. |
+| `POST /api/v1/external/projects/:projectId/artifacts` | `aqk_` | CONTRIBUTOR | Body = raw bytes; headers `x-artifact-name` (required), `content-type`, `x-artifact-kind` (`source` default, or `audio` — §4.1). Returns `{ artifactId, sha256, sizeBytes }`. Max 25MB. |
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId` | `aqk_` | VIEWER | Metadata. |
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/content` | `aqk_` | VIEWER | Raw bytes. |
-| `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/inspect` | `aqk_` | VIEWER | Lightweight format sniff (first 64KB): `usfm`, `xliff`, `tmx`, `json`, `csv`, `tsv`, `plaintext`. |
-| `POST /api/v1/external/projects/:projectId/changesets` | `aqk_` | CONTRIBUTOR (SetTranslation) / PROJECT_LEAD (PlanImport, enforced at commit) | Prepare (stage) a changeset. Body `{ commands: [...], id?, autonomyMode? }`. |
+| `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/inspect` | `aqk_` | VIEWER | Lightweight format sniff (first 64KB): `usfm`, `xliff`, `tmx`, `json`, `csv`, `tsv`, `plaintext`. Audio artifacts return size + content type only — no duration/waveform sniffing. |
+| `POST /api/v1/external/projects/:projectId/changesets` | `aqk_` | Per command kind — see §4.1 | Prepare (stage) a changeset. Body `{ commands: [...], id?, autonomyMode? }`. |
 | `GET /api/v1/external/projects/:projectId/changesets/:id` | `aqk_` | — (must be the staging credential) | Fetch status/summary/digest/receipt + `approvalUrl`. |
-| `POST /api/v1/external/projects/:projectId/changesets/:id/commit` | `aqk_` | — (must be the staging credential) | Commit (ask requires a consumed confirmation; act auto-confirms). Idempotent on `committed`. |
-| `POST /api/v1/external/projects/:projectId/changesets/:id/discard` | `aqk_` | — (must be the staging credential) | Discard a staged/stale/expired changeset. Cannot discard `committed`. |
+| `POST /api/v1/external/projects/:projectId/changesets/:id/commit` | `aqk_` | — (must be the staging credential) | Commit (ask requires a consumed confirmation; act auto-confirms). Idempotent on `committed` **and safe to retry from `committing`** (§4.1). |
+| `POST /api/v1/external/projects/:projectId/changesets/:id/discard` | `aqk_` | — (must be the staging credential) | Discard a staged/stale/expired changeset. Cannot discard `committed` **or `committing`** (a mid-apply plan must not be stranded). |
 
-Notes on commands:
+### 4.1 Commands, audio artifacts, and commit idempotency
+
+Every command below shares the one `POST .../changesets` → `.../commit` pipeline. `SetTranslation`
+and `PlanImport` are unchanged from v1; `CreateProject`, `UpdateProjectSettings`, and `LinkMedia`
+are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
+
 - **`SetTranslation`** (`{ kind: "SetTranslation", fileId, cellId, value, valueHtml? }`) compiles
   to `target.cell.commit`, requires **CONTRIBUTOR** at commit time (routed through the same
   `/events` perimeter as in-app writes).
@@ -255,8 +283,67 @@ Notes on commands:
   succeeds (permission is enforced by the same `/events` perimeter Wave-1 uses, not re-derived).
   A `PlanImport` must be the **sole command** in its changeset. Capped at **5,000 cells**
   (`PLAN_IMPORT_MAX_CELLS`); above that, `validation_failed`.
-- Currently **not implemented**: `CreateProject`, `UpdateProjectSettings`, `LinkMedia` from the
-  design doc's command set. No REST endpoint creates projects, updates settings, or links media.
+- **`CreateProject`** (`{ kind: "CreateProject", name, projectId?, orgId? }`) — **receipt-only**:
+  applies a plain row write via `db/shared/projects.ts` (creates the `projects` row plus an owner
+  (700) `project_members` row for the caller), not an event. Must be the **sole command** in its
+  changeset. `projectId` is optional; when omitted, the **definitive** new project id is the
+  changeset's URL project id (the `:projectId` segment of `POST .../projects/:projectId/
+  changesets` — yes, even though that project doesn't exist yet). Either way the definitive id is
+  pinned into the plan at prepare time, so a crash-and-retry commit re-applies the same id rather
+  than minting a new one. **Scope/role gate:** the credential must be unscoped or org-scoped to
+  the target org (a project-scoped credential is `403 scope_denied` — it can never create a
+  project); the caller needs **org role ≥ MAINTAINER** in the target org (checked at the org level
+  — there is no project yet to resolve a project role against). A personal (org-less) project
+  needs no org-role check at all. If the chosen project id is claimed by another caller between
+  prepare and commit, commit returns **`409 conflict`** (not `plan_stale` — this is a genuine
+  race, distinguished from the credential's own crash-retry, which is idempotent success).
+- **`UpdateProjectSettings`** (`{ kind: "UpdateProjectSettings", projectId, settings,
+  ifMatchVersion }`) — **receipt-only**: applies a version-guarded write via the same shared
+  module auth-worker's internal settings route uses (first-write insert vs `version + 1` update;
+  a validation-threshold change re-runs the `cells.validated` / `files.approved_count` projection
+  fan-out locally). Must be the **sole command** in its changeset. Requires **project role ≥
+  MAINTAINER**. `ifMatchVersion` must equal the live settings version both at prepare and at
+  commit — a mismatch at either point is `409 plan_stale` (re-fetch the current version and
+  re-prepare, don't blindly retry commit).
+- **`LinkMedia`** (`{ kind: "LinkMedia", fileId, cellId, artifactId }`) — **event-native**:
+  compiles to `cell.audio.attach` + `cell.audio.select`, requires **CONTRIBUTOR** at commit time
+  (same perimeter as SetTranslation). `artifactId` must reference an `audio`-kind artifact already
+  uploaded to the same project (see the audio-upload paragraph below) — a missing, wrong-kind, or
+  cross-project artifact is `validation_failed` at prepare, or `plan_stale` if it disappears
+  between prepare and commit. Multiple `LinkMedia` commands may share one changeset; a `LinkMedia`
+  changeset cannot mix with any other command kind. Commit copies the artifact's bytes into the
+  target cell's file's audio key (the same R2 layout `sync-worker/src/audio.ts` reads), so the
+  app's native playback route serves externally-attached audio with no special-casing.
+
+**Uploading audio for `LinkMedia`.** MCP is JSON-RPC and cannot carry a 25MB binary body, so audio
+always goes through the REST artifact endpoint first, regardless of which transport stages the
+`LinkMedia` command itself:
+
+```
+POST /api/v1/external/projects/:projectId/artifacts
+x-artifact-name: recording.wav
+x-artifact-kind: audio
+content-type: audio/wav
+
+<raw bytes>
+```
+
+Accepted `content-type`s: `audio/wav`, `audio/mpeg` (mp3), `audio/mp4` / `audio/x-m4a`, `audio/ogg`
+— anything else is `400 validation_failed` with the accepted list in `details`. The size cap is
+unchanged (25MB, `MAX_ARTIFACT_BYTES`). Omit `x-artifact-kind` (or send `source`) for the existing
+verbatim-import-preservation upload path — that behavior is byte-for-byte unchanged.
+
+**Commit idempotency (crash-and-retry).** `commit.ts` mints every id an apply step needs (event
+ids for `SetTranslation`/`LinkMedia`; the file id, `file.create` event id, and per-cell ids for
+`PlanImport`) at **prepare** time and stores them in the plan, then sets the changeset's status to
+`committing` the instant it starts applying, flipping to `committed` only once every write has
+landed. A worker eviction mid-commit (a 5,000-cell `PlanImport` chunks into ~50 event-batch POSTs
+in one request) leaves the changeset in `committing`, never `staged` again. `POST .../commit`
+accepts a changeset in **either** `staged` or `committing`: a `committing` changeset is read as
+"my own prior attempt crashed, resume it" — the retry replays the exact same stored ids, and the
+`/events` idempotency layer (or, for the receipt-only commands, an id-ownership check) absorbs the
+duplicate rather than creating a second file/event/project. Callers never need to distinguish a
+fresh commit from a crash-retry; the same request works for both.
 
 ## 5. Error contract
 
@@ -274,9 +361,10 @@ routes mirror the same shape and codes by convention.)
 | --- | --- | --- | --- |
 | `permission_denied` | 403 | Credential invalid/revoked/expired, or the live-resolved role is below the operation's minimum. | Don't retry with the same credential. Surface to the human — they may need a higher role or a new credential. |
 | `scope_denied` | 403 | The credential's org/project scope doesn't cover the target resource. | Don't retry. Mint or use a credential scoped correctly. |
-| `plan_stale` | 409 | Project state changed since `prepare` (a precondition drifted), or a `confirm_changeset` digest doesn't match the stored plan. | Re-`prepare` a fresh changeset against current state; do not blindly retry `commit`. |
+| `plan_stale` | 409 | Project state changed since `prepare` (a precondition drifted), a `confirm_changeset` digest doesn't match the stored plan, an `UpdateProjectSettings.ifMatchVersion` no longer matches the live settings version, or a `LinkMedia` artifact/cell disappeared before commit. | Re-`prepare` a fresh changeset against current state; do not blindly retry `commit`. |
 | `confirmation_required` | 428 | Ask-mode changeset has no valid, unconsumed human approval. | Surface the `approvalUrl` (present in the error's `details` from MCP; re-fetch `get_changeset` for REST) to a human; only call commit again after they approve. |
-| `validation_failed` | 400 | Malformed request, bad command shape, oversize artifact, expired changeset, wrong changeset status for the action, etc. | Fix the request per `details`/`message`; do not retry unchanged. |
+| `validation_failed` | 400 | Malformed request, bad command shape, oversize/wrong-content-type artifact, expired changeset, wrong changeset status for the action, a `CreateProject`/`UpdateProjectSettings`/`LinkMedia` not staged as the sole (or only-LinkMedia) command in its changeset, etc. | Fix the request per `details`/`message`; do not retry unchanged. |
+| `conflict` | 409 | `CreateProject` only: the chosen project id was claimed by a different caller between `prepare` and `commit` — a genuine race, distinct from your own crash-retry (which is idempotent success, not a conflict). | Don't retry with the same id. Choose a different `projectId` (or omit it and let the next changeset's URL id pick a fresh one) and re-`prepare`. |
 | `job_failed` | 500 | Unexpected server-side failure (misconfiguration, unhandled exception, partial apply on `PlanImport`). | Safe to retry once; if it persists, treat as a bug — check `details.receipt` for a `PlanImport` partial-apply accounting. |
 | `rate_limited` | 429 | Reserved in the error contract; **not currently enforced anywhere in code** — no rate limiter exists in v1. | N/A today; documented for forward compatibility. |
 | `not_found` | 404 | Resource (changeset, artifact, project, credential) doesn't exist or isn't visible to this credential. | Don't retry with the same id. |
@@ -287,9 +375,10 @@ across both adapters (`sync-worker/src/external/mcp-handlers.ts`).
 
 ## 6. Provenance
 
-Every event **applied through a changeset commit** (both `SetTranslation` and `PlanImport`
-paths, `sync-worker/src/external/commit.ts`) is stamped with a provenance envelope written to
-`events.provenance` (JSONB) *after* the event is accepted by the `/events` perimeter:
+Every event **applied through a changeset commit** (`SetTranslation`, `PlanImport`, and
+`LinkMedia` — the three event-native command kinds, `sync-worker/src/external/commit.ts`) is
+stamped with a provenance envelope written to `events.provenance` (JSONB) *after* the event is
+accepted by the `/events` perimeter:
 
 ```json
 {
@@ -307,11 +396,30 @@ paths, `sync-worker/src/external/commit.ts`) is stamped with a provenance envelo
 | --- | --- | --- |
 | `origin` | Always `"agent"` for changeset-committed events. | Verified (server-set constant). |
 | `human_authority.user_id`, `.credential_id` | The changeset's `created_by_user_id` / `credential_id`, resolved from the credential that staged it. | Verified. |
-| `channel` | Always `"rest"` today — both the REST commit route and the MCP `confirm_changeset` tool delegate to the same commit handler, which hardcodes `channel: 'rest'`. **Note:** the design doc's envelope sketch implies `channel` should distinguish `"mcp"` vs `"rest"`; the implementation does not yet make that distinction — call this out as a spec/implementation gap. | Verified but not currently MCP-aware. |
+| `channel` | `"mcp"` when the commit request is the MCP `confirm_changeset` tool's synthetic in-process request (marked with an internal `x-aquilla-channel: mcp` header), `"rest"` for a direct `POST .../commit` call. Distinguished as of v1.1 — the v1 practitioner guide's earlier "hardcoded to rest" note no longer applies. | Verified. |
 | `autonomy_mode` | The changeset's stored `autonomy_mode` (`ask`\|`act`). | Verified. |
 | `changeset_id` | The committing changeset's id. | Verified. |
 | `confirmation_id` | Present only when an ask-mode confirmation was consumed to commit. | Verified. |
 | `agent` | Parsed from the caller-supplied `x-agent-meta` request header (JSON), or `null` if absent/invalid. Never validated against a real provider/model. | **Caller-declared, not verified** — recorded as testimony only. |
+
+`CreateProject` and `UpdateProjectSettings` are **receipt-only** — they write a plain `projects` /
+`project_settings` row, not an event, so there is no `events.provenance` row to stamp. Their
+provenance lives entirely in the changeset's `receipt` instead:
+
+```json
+{
+  "credentialId": "...",
+  "channel": "mcp",
+  "changesetId": "...",
+  "command": "UpdateProjectSettings",
+  "appliedAt": "2026-07-17T00:00:00.000Z",
+  "projectId": "proj_abc123",
+  "version": 3
+}
+```
+
+`version` is present only on `UpdateProjectSettings` (the new settings version after the write);
+`CreateProject`'s `projectId` is the created project's id. Same `channel` distinction as above.
 
 Non-event operations (artifact upload, credential mint/revoke) are **not** covered by the
 provenance envelope at all — there is no separate audit-ledger table in the current schema
@@ -332,6 +440,8 @@ discarded plans" is **not yet implemented** — treat it as aspirational, not sh
 | `PlanImport` commit chunk size to the `/events` perimeter | 100 events/POST | `PLAN_IMPORT_CHUNK`, `sync-worker/src/external/commit.ts` (implementation detail — large imports are chunked internally, not something a caller sets) |
 | Artifact inspect sniff window | 64 KB | `INSPECT_SNIFF_BYTES`, `sync-worker/src/external/artifacts-route.ts` |
 | Cell history page cap | 200 rows | `HISTORY_MAX_LIMIT`, `sync-worker/src/external/read-routes.ts` |
+| Accepted `audio`-kind artifact content types | `audio/wav`, `audio/mpeg`, `audio/mp4`, `audio/x-m4a`, `audio/ogg` | `AUDIO_CONTENT_TYPES`, `sync-worker/src/external/artifacts-route.ts`. Same 25 MB cap as any artifact — audio gets no separate limit. |
+| Credential `name` length | 1–200 chars | `createSchema`, `auth-worker/src/routes/credentials.ts` |
 | Rate limiting | **not implemented** | `rate_limited` is a reserved error code with no enforcement in code today |
 
 ## 8. What's not yet available
@@ -340,10 +450,10 @@ Documented explicitly so you don't go looking for it:
 
 - **`run_checks`** (rules/health verification tool) — no MCP tool, no REST endpoint, no command.
 - **Jobs** (`get_job`) — imports/commits are synchronous within a single HTTP request; there is
-  no async job queue, polling endpoint, or job id in any response.
+  no async job queue, polling endpoint, or job id in any response. (The `committing` status and
+  prepare-time id ledger added in v1.1 exist partly to make room for an eventual async commit
+  mode — see the v1.1 design doc §6 — but nothing in this wave adopts it.)
 - **Export** (`prepare_export`, `get_export`) — not implemented.
-- **`CreateProject` / `UpdateProjectSettings` / `LinkMedia`** commands — not implemented; no way
-  to create a project or attach media via this API yet.
 - **OAuth 2.1 / MCP connector-directory listing** — auth is PAT-only (`aqk_` bearer).
 - **Presigned upload/download URLs** — artifact bytes are worker-proxied (streamed through the
   Worker), not signed-URL, despite the design doc's D10 decision to use signed URLs.

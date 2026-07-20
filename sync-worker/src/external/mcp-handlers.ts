@@ -38,6 +38,7 @@ const ERROR_CODES: ExternalErrorCode[] = [
   'plan_stale',
   'confirmation_required',
   'validation_failed',
+  'conflict',
   'job_failed',
   'rate_limited',
   'not_found',
@@ -92,16 +93,46 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
   return ok({
     apiVersion: 'v1',
     credentialMode: cred.mode,
-    // Both domain command kinds now ship. PlanImport, however, has no MCP
-    // staging tool yet (prepare_translations only stages SetTranslation) — it
-    // is staged over REST (POST .../changesets). Advertised so an MCP-only host
-    // knows to reach for the REST surface for imports.
-    commandKinds: ['SetTranslation', 'PlanImport'],
+    // All five domain command kinds now ship (Agent API v1.1). PlanImport is
+    // the one holdout with no MCP staging tool (prepare_translations's
+    // `commands` argument does not accept it) — it stays REST-only (POST
+    // .../changesets). CreateProject / UpdateProjectSettings / LinkMedia stage
+    // through the SAME prepare_translations / confirm_changeset tools as
+    // SetTranslation, via that `commands` argument — see projectLifecycle and
+    // linkMedia below for their per-kind rules.
+    commandKinds: ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     planImport: {
       stagingChannels: ['rest'],
       mcpStagingTool: null,
       maxCellsPerChangeset: PLAN_IMPORT_MAX_CELLS,
       note: 'PlanImport is staged via REST only; no MCP staging tool exists yet.',
+    },
+    projectLifecycle: {
+      mcpStagingTool: 'prepare_translations',
+      commitTool: 'confirm_changeset',
+      note:
+        'CreateProject and UpdateProjectSettings are receipt-only (a plain row write, not an ' +
+        'event) — stage via prepare_translations\'s `commands` argument and commit with ' +
+        'confirm_changeset exactly like SetTranslation. Each must be the sole command in its ' +
+        'changeset. CreateProject requires an unscoped or org-scoped credential with org ' +
+        'role >= MAINTAINER (a project-scoped credential gets scope_denied) — and prepare ' +
+        'ALWAYS stages CreateProject in ask-mode regardless of credential mode, so it always ' +
+        'requires human approval at the approvalUrl before it can commit; a project id ' +
+        'claimed by another caller between prepare and commit returns ' +
+        'conflict. UpdateProjectSettings requires project role >= MAINTAINER and a matching ' +
+        'ifMatchVersion (else plan_stale). Receipt shape: { credentialId, channel, ' +
+        'changesetId, command, appliedAt, projectId, version? }.',
+    },
+    linkMedia: {
+      mcpStagingTool: 'prepare_translations',
+      commitTool: 'confirm_changeset',
+      note:
+        'LinkMedia attaches an already-uploaded audio artifact to a cell. Upload the audio ' +
+        'bytes first via REST POST .../projects/:projectId/artifacts with header ' +
+        '"x-artifact-kind: audio" (MCP is JSON-RPC text and cannot carry that binary body) — ' +
+        'see limits.maxArtifactBytes for the size cap. Then stage LinkMedia via ' +
+        'prepare_translations\'s `commands` argument. Multiple LinkMedia commands may share ' +
+        'one changeset; LinkMedia cannot mix with any other command kind.',
     },
     limits: {
       changesetExpirySeconds: CHANGESET_TTL_MS / 1000,
@@ -290,16 +321,40 @@ async function prepareTranslations(
 ): Promise<McpToolResult> {
   const projectId = str(args, 'projectId')
   if (!projectId) return fail('validation_failed', 'projectId is required')
-  if (!Array.isArray(args.translations)) {
-    return fail('validation_failed', 'translations must be an array')
+
+  const commands: Record<string, unknown>[] = []
+
+  if (args.translations !== undefined) {
+    if (!Array.isArray(args.translations)) {
+      return fail('validation_failed', 'translations must be an array')
+    }
+    commands.push(
+      ...(args.translations as Record<string, unknown>[]).map((t) => ({
+        kind: 'SetTranslation',
+        fileId: t?.fileId,
+        cellId: t?.cellId,
+        value: t?.value,
+        ...(t?.valueHtml !== undefined ? { valueHtml: t.valueHtml } : {}),
+      })),
+    )
   }
-  const commands = (args.translations as Record<string, unknown>[]).map((t) => ({
-    kind: 'SetTranslation',
-    fileId: t?.fileId,
-    cellId: t?.cellId,
-    value: t?.value,
-    ...(t?.valueHtml !== undefined ? { valueHtml: t.valueHtml } : {}),
-  }))
+
+  // Agent API v1.1: CreateProject / UpdateProjectSettings / LinkMedia stage
+  // through this SAME tool via a generic `commands` array, passed through
+  // as-is — validateCommands (server-side, in the delegated changesets route)
+  // is the single source of truth for per-kind shape, sole-command, and
+  // scope/role checks, so this adapter does not re-derive any of it.
+  if (args.commands !== undefined) {
+    if (!Array.isArray(args.commands)) {
+      return fail('validation_failed', 'commands must be an array')
+    }
+    commands.push(...(args.commands as Record<string, unknown>[]))
+  }
+
+  if (commands.length === 0) {
+    return fail('validation_failed', 'translations or commands must be a non-empty array')
+  }
+
   const body: Record<string, unknown> = { commands }
   const changesetId = str(args, 'changesetId')
   if (changesetId) body.id = changesetId

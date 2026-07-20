@@ -393,6 +393,17 @@ describe("OrgHome", () => {
     expect(screen.queryByText("New Testament")).not.toBeInTheDocument()
   })
 
+  it("filters to projects that need attention via the status chip", async () => {
+    render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "Needs attention" }))
+
+    // Legacy Translation is overdue + stalled; New Testament is healthy.
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
+    expect(screen.queryByText("New Testament")).not.toBeInTheDocument()
+  })
+
   it("shows a no-match message when the filter excludes every project", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
@@ -404,29 +415,27 @@ describe("OrgHome", () => {
     expect(screen.getByText("No results.")).toBeInTheDocument()
   })
 
-  // AQU-416: the dashboard's "Shared with you" section (bottom of the org
-  // project list) was the QA repro surface — clicking a shared project
-  // "reloaded the page and went nowhere". Root cause was ProjectOverview's
-  // pre-AQU-474 org-mismatch redirect; the section itself must render each
-  // shared project as a real client-side <Link> to /projects/:id so the
-  // click enters the SPA route (no full-page navigation) and the overview
-  // can resolve access server-side. Pins both the section rendering and the
-  // exact href for a project whose org the caller is NOT a member of.
-  it("renders Shared with you rows as client-side links to /projects/:id for foreign-org grants", async () => {
+  // AQU-417: cross-org grants are no longer listed on the org dashboard — they
+  // were scattered under every org's project list. They now live on the
+  // dedicated /shared page (SharedProjectsPage), reached via the sidebar. The
+  // dashboard must NOT render the "Shared with you" section anymore, even when
+  // the caller holds a foreign-org grant. (The /shared page's own test pins the
+  // client-side <Link> to /projects/:id that AQU-416 originally guarded.)
+  it("does not render a Shared with you section on the org dashboard (moved to /shared, AQU-417)", async () => {
     fetchAccessibleProjectsMock.mockResolvedValue([
-      // In the caller's own org (id 1) — must stay OUT of the shared section.
+      // In the caller's own org (id 1) — surfaces via the normal portfolio.
       { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
-      // Foreign-org grant (viewer via invite) — the AQU-416 repro row.
+      // Foreign-org grant (viewer via invite) — previously in the dashboard's
+      // shared section; now collected on /shared instead.
       { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
     ])
 
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
 
-    const shared = await screen.findByTestId("shared-with-you")
-    const link = within(shared).getByRole("link", { name: /guest gospel/i })
-    expect(link.getAttribute("href")).toBe("/projects/p503")
-    // Own-org project must not leak into the shared section.
-    expect(within(shared).queryByText("Legacy Translation")).not.toBeInTheDocument()
+    // Wait for the org portfolio to render before asserting absence.
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    expect(screen.queryByTestId("shared-with-you")).not.toBeInTheDocument()
+    expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
   })
 })
 

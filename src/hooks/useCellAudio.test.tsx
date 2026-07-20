@@ -1,10 +1,12 @@
-// Tests for the R2-backed audio hook. Verifies the happy-path fetch flow
-// against the sync-worker /audio endpoint, plus the error states the UI
-// renders (legacy LFS attachment, no session, server failure).
+// Tests for the R2-backed audio hook. Verifies the happy-path progressive
+// playback flow (element streams from the authenticated /audio URL — play()
+// must NOT download the whole object first), the blob fallback when the
+// stream errors, plus the error states the UI renders (legacy LFS
+// attachment, no session, server failure).
 
 import "fake-indexeddb/auto"
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
-import { renderHook, act } from "@testing-library/react"
+import { renderHook, act, waitFor } from "@testing-library/react"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -36,11 +38,13 @@ import { buildFrontierAudioUrl } from "@/lib/audio/upload"
 let nextUrlId = 0
 const createdUrls: string[] = []
 const revokedUrls: string[] = []
+const audioInstances: Array<InstanceType<typeof Audio>> = []
 
 beforeEach(() => {
   nextUrlId = 0
   createdUrls.length = 0
   revokedUrls.length = 0
+  audioInstances.length = 0
   Object.defineProperty(globalThis.URL, "createObjectURL", {
     writable: true, configurable: true,
     value: vi.fn((_blob: Blob) => {
@@ -60,7 +64,11 @@ beforeEach(() => {
       public onplay: (() => void) | null = null
       public onpause: (() => void) | null = null
       public onended: (() => void) | null = null
-      constructor(src?: string) { if (src) this.src = src }
+      public onerror: (() => void) | null = null
+      constructor(src?: string) {
+        if (src) this.src = src
+        audioInstances.push(this as unknown as InstanceType<typeof Audio>)
+      }
       async play() { this.onplay?.() }
       pause() { this.onpause?.() }
     },
@@ -90,10 +98,7 @@ describe("useCellAudio", () => {
   const fetchMock = vi.fn()
   beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
 
-  it("happy path: GETs from sync-worker /audio and plays", async () => {
-    const bytes = new TextEncoder().encode("audio-bytes")
-    fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
-
+  it("happy path: streams from the authenticated /audio URL without downloading bytes first", async () => {
     const project = makeProject()
     const cell = makeCell("a1", buildFrontierAudioUrl("a1", "webm"))
     const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
@@ -105,13 +110,16 @@ describe("useCellAudio", () => {
 
     expect(result.current.state).toBe("ready")
     expect(result.current.error).toBeNull()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [url, opts] = fetchMock.mock.calls[0]
-    expect(String(url)).toContain("/audio/p1/file-1/a1.webm")
-    expect((opts as RequestInit)?.headers).toMatchObject({
-      Authorization: "Bearer sync-token-stub",
-    })
-    expect(createdUrls.length).toBe(1)
+    // Progressive playback: the element streams straight from the worker —
+    // play() must NOT pull the whole object through fetch (that was the
+    // 27MB-in-memory / long-silent-wait bug) and needs no object URL.
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(createdUrls.length).toBe(0)
+    expect(audioInstances).toHaveLength(1)
+    const src = audioInstances[0].src
+    expect(src).toContain("/audio/p1/file-1/a1.webm")
+    // The sync-token rides in the URL because <audio src> can't send headers.
+    expect(src).toContain("t=sync-token-stub")
   })
 
   it("surfaces pointer-invalid for legacy LFS attachment URLs", async () => {
@@ -138,47 +146,52 @@ describe("useCellAudio", () => {
     expect(result.current.error).toMatchObject({ kind: "pointer-missing" })
   })
 
-  it("surfaces download-failed when sync-worker returns 5xx", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("boom", { status: 500 }))
+  // The stream src failing is the only signal the element gives us (media
+  // errors carry no HTTP status), so the hook must fall back to the byte
+  // fetch once — both to recover from transient failures AND to translate a
+  // permanent 404 into the precise "audio-deleted" UI state.
+  it("surfaces download-failed when the stream errors and the byte fallback hits a 5xx", async () => {
+    fetchMock.mockResolvedValue(new Response("boom", { status: 500 }))
 
     const project = makeProject()
     const cell = makeCell("a3", buildFrontierAudioUrl("a3", "webm"))
     const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
 
     await act(async () => { await result.current.play() })
-    expect(result.current.state).toBe("error")
+    expect(result.current.state).toBe("ready") // streaming src wired up
+    act(() => { audioInstances[0].onerror?.(new Event("error")) })
+    await waitFor(() => expect(result.current.state).toBe("error"))
     expect(result.current.error?.kind).toBe("download-failed")
   })
 
-  it("F10: surfaces audio-deleted (not download-failed) when sync-worker returns 404", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("not found", { status: 404 }))
+  it("F10: surfaces audio-deleted (not download-failed) when the audio is gone (404)", async () => {
+    fetchMock.mockResolvedValue(new Response("not found", { status: 404 }))
 
     const project = makeProject()
     const cell = makeCell("a-deleted", buildFrontierAudioUrl("a-deleted", "webm"))
     const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
 
     await act(async () => { await result.current.play() })
-    expect(result.current.state).toBe("error")
+    act(() => { audioInstances[0].onerror?.(new Event("error")) })
+    await waitFor(() => expect(result.current.state).toBe("error"))
     // Must be "audio-deleted", not the generic "download-failed" —
     // so the UI knows not to show a retry affordance.
     expect(result.current.error?.kind).toBe("audio-deleted")
     expect(result.current.error?.message).toMatch(/deleted/)
   })
 
-  it("does not re-fetch bytes on a second play after the audio element exists", async () => {
-    const bytes = new TextEncoder().encode("cached-audio")
-    fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
-
+  it("reuses the existing element on a second play (no new element, no fetch)", async () => {
     const project = makeProject()
     const cell = makeCell("a4", buildFrontierAudioUrl("a4", "webm"))
     const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
 
     await act(async () => { await result.current.play() })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(audioInstances).toHaveLength(1)
 
     await act(async () => { await result.current.play() })
-    // Second play reuses the existing HTMLAudioElement; no further fetch.
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Second play reuses the existing HTMLAudioElement; still zero byte fetches.
+    expect(audioInstances).toHaveLength(1)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("dedups concurrent loads: two parallel fetches collapse to a single GET", async () => {
@@ -200,16 +213,21 @@ describe("useCellAudio", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it("revokes the object URL on unmount", async () => {
+  it("plays from a blob and revokes the object URL on unmount when bytes are already loaded", async () => {
     const bytes = new TextEncoder().encode("revoke-test")
     fetchMock.mockResolvedValueOnce(new Response(bytes.buffer as ArrayBuffer, { status: 200 }))
 
     const project = makeProject()
     const cell = makeCell("a5", buildFrontierAudioUrl("a5", "webm"))
     const { result, unmount } = renderHook(() => useCellAudio(project, cell, "file-1"))
+    // Bytes fetched up front (e.g. waveform peaks) → play() must reuse them
+    // via a blob object URL instead of opening a second network stream…
+    await act(async () => { await result.current.ensureBytes() })
     await act(async () => { await result.current.play() })
     expect(createdUrls.length).toBe(1)
+    expect(audioInstances[0].src).toBe(createdUrls[0])
 
+    // …and the object URL must not leak past unmount.
     unmount()
     expect(revokedUrls).toContain(createdUrls[0])
   })

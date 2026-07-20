@@ -779,7 +779,7 @@ CREATE TABLE IF NOT EXISTS changesets (
     credential_id      TEXT NOT NULL,
     autonomy_mode      TEXT NOT NULL CHECK (autonomy_mode IN ('ask', 'act')),
     status             TEXT NOT NULL DEFAULT 'staged'
-                         CHECK (status IN ('staged', 'committed', 'discarded', 'stale', 'expired')),
+                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'expired')),
     commands           JSONB NOT NULL,            -- normalized domain commands
     preconditions      JSONB NOT NULL,            -- per-cell head/source pins resolved at prepare
     summary            JSONB NOT NULL,            -- server-computed effect summary
@@ -836,6 +836,14 @@ CREATE INDEX IF NOT EXISTS idx_api_credentials_token_hash ON api_credentials(tok
 -- `{prefix}artifacts/{projectId}/{artifactId}`; this row is metadata +
 -- provenance + integrity digest. `file_id` is linked when a PlanImport
 -- changeset referencing the artifact commits.
+--
+-- 0064_artifacts_audio.sql (Agent API v1.1 §3, W2-B): `kind` distinguishes a
+-- verbatim source artifact ('source') from an uploaded audio clip ('audio').
+-- Audio bytes are stored in the EXISTING per-file audio R2 layout used by
+-- audio.ts (`{prefix}projects/{projectId}/files/{artifactId}/audio/{audio_id}`)
+-- so a LinkMedia commit can serve them through the app's native /audio route;
+-- `audio_id` is the full object name (`<artifactId>.<ext>`) the audio layout +
+-- the cell.audio.attach payload expect.
 CREATE TABLE IF NOT EXISTS artifacts (
     id                  UUID PRIMARY KEY,
     project_id          TEXT NOT NULL,
@@ -847,6 +855,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
     sha256              TEXT NOT NULL,
     r2_key              TEXT NOT NULL,
     file_id             TEXT,
+    kind                TEXT NOT NULL DEFAULT 'source',
+    audio_id            TEXT,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);

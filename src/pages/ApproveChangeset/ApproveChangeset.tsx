@@ -18,6 +18,10 @@ import { AUTH_BASE } from "@/lib/frontier/auth"
 
 interface ApprovalSummary {
   warnings?: { message: string }[]
+  /** UpdateProjectSettings: per-key truncated previews of the settings being
+   *  written (an object, so it needs explicit rendering below — the flat
+   *  number/string fact loop skips it). */
+  settingsChanges?: Record<string, string>
   [key: string]: unknown
 }
 
@@ -213,8 +217,12 @@ function ApprovalSummaryView({
   onApprove: () => void
   onReject: () => void
 }) {
-  const { warnings, ...facts } = data.summary
+  const { warnings, settingsChanges, ...facts } = data.summary
   const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
+  const settingsEntries =
+    settingsChanges && typeof settingsChanges === "object"
+      ? Object.entries(settingsChanges).filter(([, v]) => typeof v === "string")
+      : []
   const notStaged = data.status !== "staged"
   const working = actionPhase === "working"
 
@@ -233,7 +241,7 @@ function ApprovalSummaryView({
 
       <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
         <p className="text-sm font-medium">What will be applied</p>
-        {factEntries.length === 0 ? (
+        {factEntries.length === 0 && settingsEntries.length === 0 ? (
           <p className="text-xs text-muted-foreground">No changes summarized.</p>
         ) : (
           <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -243,6 +251,19 @@ function ApprovalSummaryView({
               </li>
             ))}
           </ul>
+        )}
+        {settingsEntries.length > 0 && (
+          <div className="space-y-0.5 pt-1">
+            <p className="text-xs font-medium">Settings changes</p>
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {settingsEntries.map(([key, value]) => (
+                <li key={key}>
+                  <span className="font-mono">{key}</span>:{" "}
+                  <span className="font-medium text-foreground">{value}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 

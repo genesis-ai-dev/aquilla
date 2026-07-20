@@ -9,7 +9,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, Music,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, Lock, ChevronRight, ChevronDown, Music, Braces,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -31,8 +31,10 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
+import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
+import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
@@ -46,13 +48,15 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import { CellExpansion } from "./CellExpansion"
+import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
+import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -67,6 +71,12 @@ import {
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -113,7 +123,7 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
-import { FootnoteInline, FootnotedTextValue } from "./footnotes/FootnoteInline"
+import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
   AddFootnoteDialog,
   type AddFootnoteMarkerOption,
@@ -499,6 +509,21 @@ interface EditorTableProps {
    * the emit helpers, so N=1 is byte-identical.
    */
   activeLane?: string
+  /**
+   * AQU-602: all selectable target lanes, default lane FIRST as `''` (callers
+   * build `['', ...targetLanes]`). When more than one is offered AND
+   * `onLaneChange` is provided, the TARGET language tag in the column header
+   * becomes a dropdown that switches the active lane. With one lane (or no
+   * handler) the tag stays a static pill — byte-identical to the N=1 header.
+   */
+  lanes?: string[]
+  /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
+   *  is used. Omit to keep the tag non-interactive. */
+  onLaneChange?: (lane: string) => void
+  /** Human label for the default (`''`) lane in the TARGET tag dropdown — the
+   *  project/file's default target-language name. Non-default lanes label
+   *  themselves with their own tag string. */
+  defaultLaneLabel?: string
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
@@ -642,7 +667,8 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, activeLane = "", isCompletionConfigured, isCompletionAvailable,
+  project, cellStore, username, activeLane = "", lanes, onLaneChange, defaultLaneLabel,
+  isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
   infractions = new Map(), rules = [],
@@ -677,7 +703,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
 }, ref) {
-  const { canEdit, canValidate, canEditSource, readOnlyLabel } = useEditorCapabilities(project)
+  // DCS lockdown: while this project is pinned to a Door43 upstream, the
+  // repair path treats any hand-edited source cell as damage and overwrites
+  // it, so the "Edit source" affordance must stay off. Loading counts as
+  // linked (default-locked) — see useDcsUpstreamCursor.
+  const { cursor: dcsCursor, loading: dcsCursorLoading } = useDcsUpstreamCursor(
+    project.id,
+    project.syncRole?.level ?? null,
+  )
+  const { canEdit, canValidate, canEditSource, sourceReadOnlyReason, readOnlyLabel } = useEditorCapabilities(project, {
+    hasDcsUpstream: dcsCursorLoading || dcsCursor !== null,
+  })
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
   const { micDenied } = useMicPermission(audioLens !== null)
@@ -688,6 +724,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
   const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
+  // Mirror ref so the imperative handle (getCurrentIndex) reads current
+  // values without widening its dependency array — same pattern as
+  // displayCellsRef below.
+  const viewableIndexesRef = useRef(viewableIndexes)
+  viewableIndexesRef.current = viewableIndexes
+  // Last cell whose editor was activated (jump target or clicked-into cell).
+  // Deliberately NOT cleared on blur/deactivate: clicking the "Next
+  // unfinished" menu item blurs the editor before the click lands, and the
+  // user's position shouldn't evaporate at that instant. getCurrentIndex
+  // ignores it once the cell is off screen or no longer rendered.
+  const lastActiveEditorCellIdRef = useRef<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
@@ -736,6 +783,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleActivateEditor = useCallback((cellId: string) => {
     setActiveEditorCellId(cellId)
+    lastActiveEditorCellIdRef.current = cellId
   }, [])
 
   const handleDeactivateEditor = useCallback((cellId: string) => {
@@ -835,6 +883,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
     setActiveEditorCellId(targetId)
+    lastActiveEditorCellIdRef.current = targetId
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -879,7 +928,30 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     },
     focusCellEditorIndex: focusCellEditorByIndex,
-    getCurrentIndex: () => 0,
+    getCurrentIndex: () => {
+      // The last-active editor cell when it's on screen (so "Next unfinished"
+      // advances past a just-jumped-to cell instead of re-finding it),
+      // otherwise the first visible row — mapped from display space back to
+      // the `cells` prop space the search indexes into. Pure logic lives in
+      // lib/editor/current-index.ts where it's testable.
+      const state = listRef.current?.getState()
+      const scrollEl = parentRef.current ?? listRootRef.current
+      return resolveCurrentCellIndex({
+        displayCells: displayCellIdsRef.current.map((id) => ({ id })),
+        cells: cellStore.getAllSummaries(),
+        activeCellId: lastActiveEditorCellIdRef.current,
+        viewableIndexes: viewableIndexesRef.current,
+        measurements: state
+          ? {
+              scroll: state.scroll,
+              positionAtIndex: (index) => state.positionAtIndex(index),
+              sizeAtIndex: (index) => state.sizeAtIndex(index),
+            }
+          : null,
+        fallbackScrollTop: scrollEl?.scrollTop ?? 0,
+        estimatedRowHeight: ESTIMATED_ROW_HEIGHT_PX,
+      })
+    },
     flashCell(cellId, _searchTerm) {
       // Defer to next frame: the list may still be scrolling, so the
       // DOM node we want might not exist yet.
@@ -892,7 +964,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
       })
     },
-  }), [displayCellIds.length, focusCellEditorByIndex, getListQueryRoot])
+  }), [displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1268,6 +1340,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion])
 
+  // AQU-610: sequential (non-scripture) numbering counts only *numbered*
+  // (non-paratext) cells, so the count starts at 1 at the first real content
+  // cell and stays gap-free even when front matter, introductions, or other
+  // paratextual cells sit before/among the content. Scripture files number by
+  // canonical verse ref and don't consult this map.
+  const sequentialNumberByCellId = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => {
+      const map = new Map<string, number>()
+      let ordinal = 0
+      for (const id of displayCellIds) {
+        if (cellStore.getCellView(id)?.type === "paratext") continue
+        map.set(id, ++ordinal)
+      }
+      return map
+    }),
+  [cellStore, cellStoreVersion, displayCellIds])
+
   const activeChapterLabel = chapterNavigationItems.some((chapter) => chapter.label === currentSectionLabel)
     ? currentSectionLabel
     : chapterNavigationItems[0]?.label ?? ""
@@ -1392,6 +1481,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           editable={canEdit}
           canValidate={canValidate}
           canEditSource={canEditSource}
+          sourceReadOnlyReason={sourceReadOnlyReason}
           onCellCommitted={onCellCommitted}
           getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
@@ -1423,6 +1513,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
           rowIndex={index}
+          contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
           scriptureNumbering={chapterNavigationItems.length > 0}
           cellLabelsEnabled={cellLabelsEnabled}
@@ -1509,6 +1600,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionConfigured,
     isTimeOrdered,
     chapterNavigationItems.length,
+    sequentialNumberByCellId,
     lineNumbersEnabled,
     micDenied,
     onAckRemoteChange,
@@ -1581,11 +1673,50 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
           <div className="flex items-center gap-2 pl-3">
             Target
-            {project.targetLanguage && (
+            {/* AQU-602: the target-language tag doubles as the lane switcher.
+                With >1 lane (and a change handler) it's a dropdown that switches
+                the active target lane; otherwise it's a static pill. `''` = the
+                default lane, labelled with the project/file default language. */}
+            {project.targetLanguage && lanes && lanes.length > 1 && onLaneChange ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      data-testid="lane-switcher"
+                      data-active-lane={activeLane}
+                      aria-label="Active translation lane"
+                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                  }
+                >
+                  {project.targetLanguage}
+                  <ChevronDown className="h-2.5 w-2.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[8rem]">
+                  {lanes.map((lane) => {
+                    const active = lane === activeLane
+                    const label = lane === "" ? (defaultLaneLabel || "Target") : lane
+                    return (
+                      <DropdownMenuItem
+                        key={lane || "__default__"}
+                        data-testid={`lane-option-${lane}`}
+                        data-active={active ? "true" : undefined}
+                        onClick={() => onLaneChange(lane)}
+                        className="justify-between gap-2 text-xs"
+                      >
+                        {label}
+                        {active && <Check className="h-3.5 w-3.5" />}
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : project.targetLanguage ? (
               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
                 {project.targetLanguage}
               </span>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -1693,6 +1824,10 @@ interface MemoizedRowProps {
   /** True when the user may edit SOURCE text (source.cell.commit): cloud
    *  project_lead+ (500) on a non-live-linked project. See canEditSource. */
   canEditSource: boolean
+  /** Why the source lane is force-locked (DCS pin), or null. Shown where the
+   *  pencil would be, and surfaced when a mid-edit capability flip force-closes
+   *  an open source editor. See useProjectPermissions.sourceReadOnlyReason. */
+  sourceReadOnlyReason: string | null
   /** Phase 5 / AD-9: source has advanced since this target was last committed.
    *  Resolved once per file by the parent (membership look-up) so this prop
    *  is just a stable boolean — preserves the row's React.memo invariant. */
@@ -1732,6 +1867,8 @@ interface MemoizedRowProps {
   activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
+  /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
+  contentNumber: number
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode: DirectionMode
@@ -1793,7 +1930,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
     cell, examples, completing, errors, previews, healthMap, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    activeCueIndex, rowIndex, gridCols,
+    activeCueIndex, rowIndex, contentNumber, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -1808,7 +1945,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isEditorActive,
     onActivateEditor,
     onDeactivateEditor,
-    project, username, activeLane, editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable,
+    project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
@@ -1905,6 +2042,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         editable={editable}
         canValidate={canValidate}
         canEditSource={canEditSource}
+        sourceReadOnlyReason={sourceReadOnlyReason}
         isStaleSource={isStaleSource}
         isUpstreamStaleSource={isUpstreamStaleSource}
         isCompletionConfigured={isCompletionConfigured}
@@ -1931,6 +2069,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
+        contentNumber={contentNumber}
         lineNumbersEnabled={lineNumbersEnabled}
         scriptureNumbering={scriptureNumbering}
         cellLabelsEnabled={cellLabelsEnabled}
@@ -2000,6 +2139,10 @@ interface EditorRowProps {
    *  project_lead+ (500) on a non-live-linked project. Surfaces the per-cell
    *  "Edit source" affordance. See useProjectPermissions.canEditSource. */
   canEditSource: boolean
+  /** Why the source lane is force-locked (DCS pin), or null. Renders a lock
+   *  hint where the pencil would be and is the message shown when a mid-edit
+   *  capability flip force-closes the source editor. */
+  sourceReadOnlyReason: string | null
   /** Phase 5 / AD-9 — true when the source has advanced since the last
    *  target commit. Renders a small warning badge next to the validation
    *  status. Computed once-per-file by the parent. */
@@ -2060,6 +2203,8 @@ interface EditorRowProps {
   onGridRowKeyNav: (direction: "prev" | "next") => void
   getVoiceTakeCells: (startIndex: number, count: number) => CellData[]
   rowIndex: number
+  /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
+  contentNumber: number
   lineNumbersEnabled: boolean
   /** Scripture files number verse rows by canonical ref and leave headings unnumbered. */
   scriptureNumbering: boolean
@@ -2912,7 +3057,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 
 function EditorRow({
   project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
-  username, activeLane = "", editable, canValidate, canEditSource, isCompletionConfigured, isCompletionAvailable, isLoading,
+  username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
@@ -2924,14 +3069,13 @@ function EditorRow({
   isActiveCue: _isActiveCue, onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
-  rowIndex, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
+  rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
-  getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
   sourceFontSize = 14,
@@ -2992,7 +3136,17 @@ function EditorRow({
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
-  const pendingSourceEventIdRef = useRef<string | null>(cell.sourceEventId ?? null)
+  // Tracks the newest source.cell.commit this row enqueued whose projection
+  // head hasn't caught up yet, as { eventId, parentId }. Successive source edits
+  // chain onto `eventId`; the reconciling effect below clears it once the
+  // projection reaches it (or a different/remote head lands) — crucially WITHOUT
+  // regressing it back to the lagging projection head. Mirrors the target-side
+  // pendingTargetCommitHeadsRef reconciliation in ProjectWorkspace. AQU-603: the
+  // old naive "adopt cell.sourceEventId" effect clobbered the pending head when a
+  // lane switch triggered a mid-flight cells revalidate, forking the next edit
+  // onto the same parent — which the server's AD-2 first-child guard dropped as a
+  // "stale sibling" (server accepted but did not apply).
+  const pendingSourceCommitRef = useRef<{ eventId: string; parentId: string | null } | null>(null)
   const sourceColRef = useRef<HTMLDivElement | null>(null)
   // RES-4: local error state for enqueue failures (IDB quota, role errors).
   // Surfaces a compact inline message below the editor instead of swallowing.
@@ -3301,7 +3455,7 @@ function EditorRow({
     // (cleared by the effect below once cell.original round-trips).
     setSourceDraft({ value, valueHtml })
     setWriteError(null)
-    const parentId = pendingSourceEventIdRef.current ?? cell.sourceEventId ?? null
+    const parentId = resolveSourceCommitParent(pendingSourceCommitRef.current, cell.sourceEventId ?? null)
     emitSourceCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
@@ -3311,7 +3465,7 @@ function EditorRow({
       valueHtml,
       author: username,
     }).then((eventId) => {
-      pendingSourceEventIdRef.current = eventId
+      pendingSourceCommitRef.current = { eventId, parentId }
       void onCellCommitted?.(cell.id)
     }).catch((err) => {
       console.error("[source-edit] enqueue failed:", err)
@@ -3321,16 +3475,41 @@ function EditorRow({
     })
   }, [canEditSource, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
 
-  // Adopt the projection's source head as the next chain parent — for both our
-  // own confirmed commits and remote source commits (mirror-sync / peer leads).
+  // Reconcile the pending source head against the projection — the mirror of
+  // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
+  // Clear the pending head ONLY when the projection has caught up to it, or when
+  // a DIFFERENT head (a remote/peer source commit, mirror-sync) landed that isn't
+  // the parent we chained from — in which case the next edit should chain onto
+  // that new projection head. While the projection still lags at our commit's
+  // parent, KEEP the pending head so the next edit chains onto it rather than
+  // forking a stale sibling onto the same parent (AQU-603). When there is no
+  // pending commit, handleSourceCommit falls back to cell.sourceEventId, so a
+  // remote head is still adopted correctly.
   useEffect(() => {
-    if (cell.sourceEventId) pendingSourceEventIdRef.current = cell.sourceEventId
+    pendingSourceCommitRef.current = reconcilePendingSourceCommit(
+      pendingSourceCommitRef.current,
+      cell.sourceEventId ?? null,
+    )
   }, [cell.sourceEventId])
 
   // Clear the optimistic source draft once the server projection carries it.
   useEffect(() => {
     if (sourceDraft && (cell.original ?? "") === sourceDraft.value) setSourceDraft(null)
   }, [cell.original, sourceDraft])
+
+  // Force-close an OPEN source editor when canEditSource flips false mid-edit
+  // (e.g. a settings revalidate delivers a DCS cursor). Without this the editor
+  // stayed mounted but handleSourceCommit's guard silently dropped every commit
+  // — the user kept typing into a void. Closing is bounded loss (only the text
+  // since the flip moment); the writeError banner says WHY so it isn't silent.
+  useEffect(() => {
+    if (!sourceEditing || canEditSource) return
+    setSourceEditing(false)
+    setWriteError(
+      sourceReadOnlyReason ??
+        "Source editing is no longer available on this project — the source editor was closed.",
+    )
+  }, [sourceEditing, canEditSource, sourceReadOnlyReason])
 
   // Focus the inline source editor when entering edit mode (mirrors the target
   // editor's focus effect, but scoped to the source column so it can't grab the
@@ -3862,6 +4041,7 @@ function EditorRow({
     sourceCanonicalRef: cell.globalReferences?.[0],
     scriptureNumbering,
     rowIndex,
+    contentNumber,
   })
   const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
@@ -3892,23 +4072,10 @@ function EditorRow({
     return getAlignmentModel?.() ?? null
   }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
 
-  // History tab: fetch the D1 event log on demand only when the History tab is
-  // visible. `cell.history` from useCells is intentionally empty (EMPTY_HISTORY)
-  // — the audit trail lives in the sync-worker, not the cell projection.
-  const historyTokenFetcher = useMemo(() => {
-    return getTokenForFile ?? (async (_fileId: string) => null as string | null)
-  }, [getTokenForFile])
-  const {
-    history: fetchedHistory,
-    isLoading: isHistoryLoading,
-    isError: isHistoryError,
-  } = useCellEditHistory({
-    enabled: expanded && expansionTab === "history" && Boolean(getTokenForFile),
-    projectId: project?.id ?? null,
-    fileId: cell.fileId ?? null,
-    cellId: cell.id,
-    getTokenForFile: historyTokenFetcher,
-  })
+  // Edit history is reached via the single History control on the cell action
+  // rail (opens the full HistoryDrawer). The audit trail lives in the
+  // sync-worker, not the cell projection, so the drawer fetches the D1 event
+  // log on demand — the row itself no longer renders a duplicate inline list.
 
   // ── Compute attention signals for chevron + tab dots ──────────────────────
   const isBtStale = Boolean(
@@ -4401,7 +4568,7 @@ function EditorRow({
               {/* Source-edit affordance (project_lead+, non-live projects). Emits
                   source.cell.commit — the template-owner correction that propagates
                   downstream. Read-only source stays the default; editing is explicit. */}
-              {canEditSource && (
+              {canEditSource ? (
                 <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
                   <button
                     type="button"
@@ -4418,7 +4585,19 @@ function EditorRow({
                     <Pencil className="h-3 w-3" />
                   </button>
                 </AppTooltip>
-              )}
+              ) : sourceReadOnlyReason ? (
+                // Force-locked source lane (DCS pin): keep an explained
+                // affordance where the pencil would be instead of letting it
+                // silently vanish (AQU-615 review nit).
+                <AppTooltip content={sourceReadOnlyReason} className="max-w-xs">
+                  <span
+                    aria-label="Source is locked"
+                    className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <Lock className="h-3 w-3" />
+                  </span>
+                </AppTooltip>
+              ) : null}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -4719,6 +4898,7 @@ function EditorRow({
                 isDocx={isDocxFile}
                 onSave={(footnoteIndex, newText) => {
                   const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
+                  if (updated === null) return false // stale index — keep the editor open (FRO-472)
                   handleEditorCommit({ value: updated, valueHtml: updated })
                 }}
                 onDelete={(footnoteIndex) => {
@@ -5004,6 +5184,14 @@ function EditorRow({
                       : undefined
                   }
                   dot={openCommentCount > 0 ? "primary" : undefined}
+                />
+              )}
+
+              {onOpenHistory && (
+                <RailButton
+                  icon={<HistoryIcon className="h-3.5 w-3.5" />}
+                  tooltip="Edit history"
+                  onClick={() => onOpenHistory(cell.id)}
                 />
               )}
 
@@ -5301,6 +5489,7 @@ function EditorRow({
                   isDocx={isDocxFile}
                   onSave={(footnoteIndex, newText) => {
                     const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
+                    if (updated === null) return false // stale index — keep the editor open (FRO-472)
                     handleEditorCommit({ value: updated, valueHtml: updated })
                   }}
                   onDelete={(footnoteIndex) => {
@@ -5407,6 +5596,16 @@ function EditorRow({
                           />
                           {isTranscribing ? "Transcribing…" : "Transcribe"}
                         </Button>
+                        {/* Surfaces model-download %, failures (click-to-expand
+                            with Retry), and a success flash. Errors previously
+                            existed in transcribe-status but were rendered
+                            nowhere — the button just reverted to "Transcribe". */}
+                        <CellTranscribeBadge
+                          audioId={cell.selectedAudioId}
+                          hasTimings={(cellAudioTimings?.length ?? 0) > 0}
+                          onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}
+                          onRetry={handleTranscribe}
+                        />
                         {cell.selectedAudioId && selectedAudio && (
                           <DenoiseButton
                             projectId={project.id}
@@ -5571,63 +5770,19 @@ function EditorRow({
                 </div>
               ),
             },
-            {
-              value: "history",
-              icon: <HistoryIcon className="h-3 w-3" />,
-              label: "History",
-              renderContent: () => (
-                <div className="flex flex-col gap-2">
-                  {isHistoryLoading ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      Loading edit history…
-                    </p>
-                  ) : isHistoryError ? (
-                    <p className="py-3 text-center text-xs text-destructive">
-                      Failed to load edit history.
-                    </p>
-                  ) : fetchedHistory.length === 0 ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      No edit history yet.
-                    </p>
-                  ) : (
-                    <>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        onClick={() => onOpenHistory?.(cell.id)}
-                        disabled={!onOpenHistory}
-                        className="self-start"
-                      >
-                        <HistoryIcon className="h-3 w-3" />
-                        Open full history
-                      </Button>
-                      <ul className="bg-muted divide-y divide-border/40 rounded-lg">
-                        {[...fetchedHistory].slice(-5).reverse().map((entry, i) => {
-                          const date = new Date(entry.timestamp).toLocaleString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                            hour: "numeric",
-                            minute: "2-digit",
-                          })
-                          return (
-                            <li key={`${entry.timestamp}-${i}`} className="px-2.5 py-1.5 text-xs">
-                              <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wide text-muted-foreground/80">
-                                <span>{entry.author}</span>
-                                <span>{date}</span>
-                              </div>
-                              <div className="mt-0.5 text-muted-foreground">
-                                <FootnotedTextValue value={entry.value} showFootnotes />
-                              </div>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    </>
-                  )}
-                </div>
-              ),
-            },
+            // Metadata — untranslated import columns (DCS TSV supportReference/
+            // quote/occurrence/tags, OBS image attachments). Only offered when
+            // the cell actually carries a non-empty metadata bucket.
+            ...(hasCellMetadata(cell.metadata)
+              ? [
+                  {
+                    value: "metadata",
+                    icon: <Braces className="h-3 w-3" />,
+                    label: "Metadata",
+                    renderContent: () => <CellMetadataTab metadata={cell.metadata as Record<string, unknown>} />,
+                  },
+                ]
+              : []),
           ]}
         />
       </div>

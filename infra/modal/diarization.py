@@ -19,7 +19,11 @@
 # API note: written against Modal 1.0 (fastapi_endpoint, @app.cls). If the
 # installed modal version differs, the decorator names may need a tweak.
 
+import hmac
+import ipaddress
 import os
+import socket
+from urllib.parse import urlparse
 
 import modal
 
@@ -138,6 +142,34 @@ def _post(url: str, payload: dict, secret: str) -> None:
         c.post(url, json=payload, headers={"X-Diarization-Secret": secret})
 
 
+def _assert_public_https_url(url: str, label: str) -> None:
+    """Reject anything but a public https:// URL. `start` is only guarded by
+    the shared secret (no network isolation — see admin.py's constant-time
+    note), so if that secret ever leaks, `audioUrl`/`callbackUrl` would
+    otherwise let a caller make this GPU container fetch/POST to arbitrary
+    internal addresses (cloud metadata service, Modal-internal hosts, etc.).
+    This is a pre-fetch check only — it doesn't re-validate after redirects."""
+    from fastapi import HTTPException
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise HTTPException(status_code=400, detail=f"{label} must be an https URL")
+
+    hostname = parsed.hostname.lower()
+    if hostname == "localhost" or hostname.endswith(".local") or hostname.endswith(".internal"):
+        raise HTTPException(status_code=400, detail=f"{label} host not allowed")
+
+    try:
+        resolved = {info[4][0] for info in socket.getaddrinfo(hostname, None)}
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail=f"{label} host does not resolve") from None
+
+    for addr in resolved:
+        ip = ipaddress.ip_address(addr)
+        if not ip.is_global:
+            raise HTTPException(status_code=400, detail=f"{label} resolves to a non-public address")
+
+
 @app.function(image=image, secrets=[APP_SECRET])
 @modal.fastapi_endpoint(method="POST")
 def start(payload: dict):
@@ -147,12 +179,15 @@ def start(payload: dict):
     inside the body so this file stays importable wherever `modal deploy` runs."""
     from fastapi import HTTPException
 
-    if payload.get("secret") != os.environ["DIARIZATION_SHARED_SECRET"]:
+    if not hmac.compare_digest(str(payload.get("secret") or ""), os.environ["DIARIZATION_SHARED_SECRET"]):
         raise HTTPException(status_code=401, detail="bad shared secret")
 
     for k in ("jobId", "audioUrl", "callbackUrl"):
         if not payload.get(k):
             raise HTTPException(status_code=400, detail=f"missing {k}")
+
+    _assert_public_https_url(payload["audioUrl"], "audioUrl")
+    _assert_public_https_url(payload["callbackUrl"], "callbackUrl")
 
     Diarizer().diarize_and_callback.spawn(
         payload["jobId"],

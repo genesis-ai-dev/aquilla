@@ -3,6 +3,8 @@
 // the partyserver import graph (which references cloudflare:* URLs Node
 // doesn't resolve).
 
+import { timingSafeEqual } from "node:crypto"
+
 export interface AdminEnv {
   SNAPSHOTS: R2Bucket
   SYNC_SECRET_KEY?: string
@@ -12,6 +14,16 @@ export interface AdminEnv {
 function r2KeyPrefix(env: Pick<AdminEnv, "R2_KEY_PREFIX">): string {
   const p = env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "") ?? ""
   return p ? `${p}/` : ""
+}
+
+// Constant-time compare — a plain `!==` leaks timing information proportional
+// to the shared secret's matching prefix length to anyone who can hit this
+// public admin route.
+function constantTimeEqual(a: string, b: string): boolean {
+  const aBytes = Buffer.from(a)
+  const bBytes = Buffer.from(b)
+  if (aBytes.length !== bBytes.length) return false
+  return timingSafeEqual(aBytes, bBytes)
 }
 
 /**
@@ -38,7 +50,7 @@ export async function handleAdminRequest(
   // Auth gate applies to every recognized admin route.
   const auth = request.headers.get("Authorization") ?? ""
   const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || auth !== expected) {
+  if (!expected || !constantTimeEqual(auth, expected)) {
     return new Response("unauthorized", { status: 401 })
   }
 

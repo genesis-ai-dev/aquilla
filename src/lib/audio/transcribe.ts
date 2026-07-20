@@ -10,6 +10,7 @@ import { alignChunks } from "./timings"
 import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import { setTranscribeStatus } from "./transcribe-status"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
+import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import type {
@@ -158,6 +159,16 @@ export interface TranscribeCellArgs {
   language?: string
 }
 
+// Test seam: transcribeCell calls transcribeAudio through this binding so
+// unit tests can stub out the Whisper worker (which is dynamically imported).
+// Mirrors the __setRootForTests precedent in bytes-cache.ts.
+let transcribeAudioImpl: typeof transcribeAudio = transcribeAudio
+
+/** @internal — test-only. Pass null to restore the real implementation. */
+export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null): void {
+  transcribeAudioImpl = fn ?? transcribeAudio
+}
+
 /**
  * Transcribe a single cell's selected audio. Drives the per-cell
  * transcribe-status store (so CellTranscribeBadge shows progress), then
@@ -172,31 +183,54 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   const audioId = cell.selectedAudioId
   if (!audioId) return 0
 
+  // Early guards write an error status instead of returning silently — the
+  // Recording tab renders these via CellTranscribeBadge, and a bare `return 0`
+  // left the user with a button that did nothing and no explanation.
   const attachment = cell.attachments?.[audioId]
   const attachmentUrl = attachment?.url
-  if (!attachmentUrl) return 0
+  if (!attachmentUrl) {
+    setTranscribeStatus(audioId, { kind: "error", message: "This recording has no downloadable audio yet. Try again after it finishes syncing." })
+    return 0
+  }
 
   const frontier = parseFrontierAudioUrl(attachmentUrl)
-  if (!frontier) return 0
-  if (!session?.jwt) return 0
+  if (!frontier) {
+    setTranscribeStatus(audioId, { kind: "error", message: "This audio isn't stored in a transcribable location." })
+    return 0
+  }
 
-  const getSyncToken = makeAudioSyncTokenFetcher(() => session)
+  // Local-first (FRO-355): a just-recorded take's bytes live in the OPFS cache
+  // even before — or without — a successful R2 upload, so transcription can run
+  // offline and while signed out. Only the network fallback needs a JWT, so the
+  // sign-in guard moves below the cache probe.
+  const cached = await audioCacheGet(frontier.audioId, frontier.ext)
+  if (!cached && !session?.jwt) {
+    setTranscribeStatus(audioId, { kind: "error", message: "Sign in to transcribe audio." })
+    return 0
+  }
 
   setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
 
   const t0 = Date.now()
   try {
-    const bytes = await fetchCellAudio({
-      projectId,
-      fileId: cell.fileId,
-      audioId: frontier.audioId,
-      ext: frontier.ext,
-      getSyncToken,
-    })
+    let bytes = cached
+    if (!bytes) {
+      const getSyncToken = makeAudioSyncTokenFetcher(() => session)
+      bytes = await fetchCellAudio({
+        projectId,
+        fileId: cell.fileId,
+        audioId: frontier.audioId,
+        ext: frontier.ext,
+        getSyncToken,
+      })
+      // Write through so a later transcribe/play hits the cache (mirrors
+      // useCellAudio.ensureBytes). Non-fatal if OPFS is unavailable.
+      void audioCachePut(frontier.audioId, frontier.ext, bytes)
+    }
 
     setTranscribeStatus(audioId, { kind: "transcribing" })
 
-    const result = await transcribeAudio(bytes, {
+    const result = await transcribeAudioImpl(bytes, {
       language,
       onProgress: (p) => {
         setTranscribeStatus(audioId, {
@@ -220,6 +254,10 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // cell.translated (transcript offsets as fallback when counts mismatch).
     if (result.chunks.length > 0) {
       const timings = alignChunks(result.chunks, cell.translated)
+      // Signed-out transcribes (cache hit) have no session — the emit queues
+      // to the local outbox and can throw a role-gate error, so swallow it:
+      // transcription itself succeeded, and the timings re-emit on a manual
+      // re-transcribe. author falls back to "local".
       void emitCellAudioAttach({
         projectId,
         fileId: cell.fileId,
@@ -228,7 +266,9 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         url: attachmentUrl,
         slot: "recording",
         timings,
-        author: session.username ?? "local",
+        author: session?.username ?? "local",
+      }).catch((err) => {
+        console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)
       })
     }
 

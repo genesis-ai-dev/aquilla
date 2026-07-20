@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
-import { handleAudioRequest, audioObjectKey } from "../audio"
+import { handleAudioRequest, audioObjectKey, MAX_AUDIO_BYTES } from "../audio"
 import { handleAdminRequest } from "../admin"
 import type { SyncTokenClaims } from "../auth"
 
@@ -34,13 +34,39 @@ function makeStubBucket() {
         cursor: truncated ? String(nextStart) : undefined,
       }
     },
-    async get(key: string) {
+    async get(
+      key: string,
+      opts?: { range?: { offset?: number; length?: number; suffix?: number } },
+    ) {
       const obj = store.get(key)
       if (!obj) return null
+      const size = obj.body.byteLength
+      let slice = obj.body
+      if (opts?.range) {
+        const r = opts.range
+        if (r.suffix !== undefined) {
+          slice = obj.body.slice(Math.max(0, size - r.suffix))
+        } else {
+          const offset = r.offset ?? 0
+          // Mirror R2: an offset at/past the end of the object throws.
+          if (offset >= size) throw new Error("range not satisfiable")
+          slice = obj.body.slice(
+            offset,
+            r.length !== undefined ? Math.min(offset + r.length, size) : size,
+          )
+        }
+      }
       return {
-        arrayBuffer: async () => obj.body,
+        size,
+        body: new Response(slice).body,
+        arrayBuffer: async () => slice,
         httpMetadata: obj.httpMetadata,
       }
+    },
+    async head(key: string) {
+      const obj = store.get(key)
+      if (!obj) return null
+      return { size: obj.body.byteLength }
     },
     async put(
       key: string,
@@ -173,6 +199,175 @@ describe("audio R2 endpoints", () => {
     expect(get.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable")
     const out = new Uint8Array(await get.arrayBuffer())
     expect(Array.from(out)).toEqual([7, 7, 7, 7, 7])
+  })
+
+  // Progressive playback (AQU: time-to-first-audio): media elements can't send
+  // Authorization headers, so GET accepts the same sync-token via `?t=`, streams
+  // the body, and honours Range so playback starts before the download ends.
+  it("GET accepts the sync-token as a ?t= query param", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    env.SNAPSHOTS._seed(audioObjectKey(env, "p1", "f1", "clip.webm"), new Uint8Array([1, 2, 3]))
+    const res = (await handleAudioRequest(
+      new Request(`https://w/audio/p1/f1/clip.webm?t=${encodeURIComponent(token)}`),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Accept-Ranges")).toBe("bytes")
+    expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([1, 2, 3])
+  })
+
+  it("PUT does NOT accept a ?t= query token (writes stay header-only)", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const res = (await handleAudioRequest(
+      new Request(`https://w/audio/p1/f1/clip.webm?t=${encodeURIComponent(token)}`, {
+        method: "PUT",
+        body: new Uint8Array([1]),
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(401)
+  })
+
+  // Oversized uploads must fail with a clean 413 (not an opaque 500) — a
+  // tester's large mp3 was "basically unusable" because the raw arrayBuffer
+  // read blew up with no explanation. Mirrors source-upload-route.ts.
+  it("PUT rejects a body over MAX_AUDIO_BYTES with 413", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/huge.mp3", {
+        method: "PUT",
+        body: new Uint8Array(MAX_AUDIO_BYTES + 1),
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(413)
+    const body = (await res.json()) as { error: string; maxBytes: number }
+    expect(body.error).toContain("too large")
+    expect(body.maxBytes).toBe(MAX_AUDIO_BYTES)
+    expect(env.SNAPSHOTS._size()).toBe(0)
+  })
+
+  it("PUT rejects early on an oversized Content-Length header", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    // Bodyless PUT: the declared length alone must trip the cheap pre-buffer
+    // check (the handler must not need to read the body to reject).
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/huge.mp3", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Length": String(MAX_AUDIO_BYTES + 1),
+        },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(413)
+  })
+
+  it("GET serves a byte range as 206 with Content-Range", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    env.SNAPSHOTS._seed(
+      audioObjectKey(env, "p1", "f1", "clip.webm"),
+      new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    )
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        headers: { Authorization: `Bearer ${token}`, Range: "bytes=2-5" },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(206)
+    expect(res.headers.get("Content-Range")).toBe("bytes 2-5/10")
+    expect(res.headers.get("Content-Length")).toBe("4")
+    expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([2, 3, 4, 5])
+  })
+
+  it("GET serves open-ended and suffix ranges", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    env.SNAPSHOTS._seed(
+      audioObjectKey(env, "p1", "f1", "clip.webm"),
+      new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+    )
+    const openEnded = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        headers: { Authorization: `Bearer ${token}`, Range: "bytes=7-" },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(openEnded.status).toBe(206)
+    expect(openEnded.headers.get("Content-Range")).toBe("bytes 7-9/10")
+    expect(Array.from(new Uint8Array(await openEnded.arrayBuffer()))).toEqual([7, 8, 9])
+
+    const suffix = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        headers: { Authorization: `Bearer ${token}`, Range: "bytes=-3" },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(suffix.status).toBe(206)
+    expect(suffix.headers.get("Content-Range")).toBe("bytes 7-9/10")
+    expect(Array.from(new Uint8Array(await suffix.arrayBuffer()))).toEqual([7, 8, 9])
+  })
+
+  it("GET clamps a range that overshoots the object end", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    env.SNAPSHOTS._seed(
+      audioObjectKey(env, "p1", "f1", "clip.webm"),
+      new Uint8Array([0, 1, 2, 3, 4]),
+    )
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        headers: { Authorization: `Bearer ${token}`, Range: "bytes=3-99" },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(206)
+    expect(res.headers.get("Content-Range")).toBe("bytes 3-4/5")
+    expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([3, 4])
+  })
+
+  it("GET returns 416 for a range past the end of the object", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    env.SNAPSHOTS._seed(
+      audioObjectKey(env, "p1", "f1", "clip.webm"),
+      new Uint8Array([0, 1, 2]),
+    )
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        headers: { Authorization: `Bearer ${token}`, Range: "bytes=50-" },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(416)
+    expect(res.headers.get("Content-Range")).toBe("bytes */3")
+  })
+
+  it("GET ignores malformed and multi-range headers (serves 200 full)", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    env.SNAPSHOTS._seed(
+      audioObjectKey(env, "p1", "f1", "clip.webm"),
+      new Uint8Array([0, 1, 2]),
+    )
+    for (const bad of ["bytes=1-0", "bytes=0-1,2-3", "items=0-1", "bytes=-"]) {
+      const res = (await handleAudioRequest(
+        new Request("https://w/audio/p1/f1/clip.webm", {
+          headers: { Authorization: `Bearer ${token}`, Range: bad },
+        }),
+        env as unknown as Parameters<typeof handleAudioRequest>[1],
+      )) as Response
+      expect(res.status).toBe(200)
+      expect(res.headers.get("Content-Length")).toBe("3")
+    }
   })
 
   it("GET returns 404 for missing audio", async () => {

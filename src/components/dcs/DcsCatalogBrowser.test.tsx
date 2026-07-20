@@ -151,6 +151,47 @@ describe("DcsCatalogBrowser", () => {
     expect(toDcsLangSeed(undefined)).toBe("")
   })
 
+  it("renders unsupported resources visibly but non-selectable (AQU-615 dead-end fix)", async () => {
+    // WHY: picking e.g. en_twl used to throw 'No import route…' AFTER the user
+    // committed. The row must stay VISIBLE (so the catalog doesn't look broken/
+    // incomplete) but carry a badge and refuse the pick.
+    const client = makeClient(async () => [
+      entry(), // supported: Aligned Bible / usfm
+      entry({
+        name: "en_twl",
+        fullName: "unfoldingWord/en_twl",
+        subject: "TSV Translation Words Links",
+        contentFormat: "tsv7",
+      }),
+    ])
+    const onPick = vi.fn()
+
+    await act(async () => {
+      render(<DcsCatalogBrowser onPick={onPick} client={client} />)
+    })
+
+    // The unsupported row is still listed, with the badge.
+    const twlLabel = await screen.findByText("unfoldingWord/en_twl")
+    expect(screen.getByText("Not yet supported")).toBeTruthy()
+
+    // Its action is disabled — clicking never reaches onPick.
+    const twlButton = twlLabel.closest("button") as HTMLButtonElement
+    expect(twlButton.disabled).toBe(true)
+    await act(async () => {
+      fireEvent.click(twlButton)
+    })
+    expect(onPick).not.toHaveBeenCalled()
+
+    // The supported row is unaffected: no badge, still pickable.
+    const ultButton = screen.getByText("unfoldingWord/en_ult").closest("button") as HTMLButtonElement
+    expect(ultButton.disabled).toBe(false)
+    await act(async () => {
+      fireEvent.click(ultButton)
+    })
+    expect(onPick).toHaveBeenCalledTimes(1)
+    expect(onPick.mock.calls[0][0]).toMatchObject({ name: "en_ult" })
+  })
+
   it("surfaces a search error instead of silently showing an empty list", async () => {
     const client = makeClient(async () => {
       throw new Error("DCS request failed (HTTP 500)")

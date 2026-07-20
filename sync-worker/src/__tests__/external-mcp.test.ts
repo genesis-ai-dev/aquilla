@@ -244,8 +244,10 @@ describe('MCP tools/call — reads', () => {
     const { payload } = toolPayload(((await res.json()) as any).result)
     const p = payload as any
     expect(p.credentialMode).toBe('act')
-    // Both command kinds are now reported (PlanImport merged post-Wave-1).
-    expect(p.commandKinds).toEqual(['SetTranslation', 'PlanImport'])
+    // All five command kinds are now reported (Agent API v1.1).
+    expect(p.commandKinds).toEqual(
+      ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+    )
     expect(p.limits.changesetExpirySeconds).toBe(3600) // CHANGESET_TTL_MS / 1000
     // Every number is imported from its owning module — no invented values.
     expect(p.limits.planImportMaxCells).toBe(PLAN_IMPORT_MAX_CELLS)
@@ -254,7 +256,14 @@ describe('MCP tools/call — reads', () => {
     expect(p.planImport.stagingChannels).toEqual(['rest'])
     expect(p.planImport.mcpStagingTool).toBeNull()
     expect(p.planImport.maxCellsPerChangeset).toBe(PLAN_IMPORT_MAX_CELLS)
+    // CreateProject/UpdateProjectSettings/LinkMedia stage via the SAME MCP
+    // tools as SetTranslation — advertised, not a separate tool.
+    expect(p.projectLifecycle.mcpStagingTool).toBe('prepare_translations')
+    expect(p.projectLifecycle.commitTool).toBe('confirm_changeset')
+    expect(p.linkMedia.mcpStagingTool).toBe('prepare_translations')
+    expect(p.linkMedia.commitTool).toBe('confirm_changeset')
     expect(p.errorCodes).toContain('confirmation_required')
+    expect(p.errorCodes).toContain('conflict')
   })
 
   it('list_projects returns accessible projects', async () => {
@@ -443,5 +452,97 @@ describe('MCP tools/call — changesets', () => {
     })
     const discarded = toolPayload(((await discardRes.json()) as any).result).payload as any
     expect(discarded.status).toBe('discarded')
+  })
+})
+
+// Agent API v1.1: CreateProject / UpdateProjectSettings / LinkMedia stage via
+// the SAME prepare_translations / confirm_changeset tools as SetTranslation,
+// through a generic `commands` argument (mcp-handlers.ts passes it through
+// as-is; REST-level coverage of the commands themselves lives in
+// external-project-commands.test.ts / external-link-media.test.ts — these
+// tests are about the MCP dispatch plumbing, not re-deriving that coverage).
+describe('MCP tools/call — v1.1 commands via the generic `commands` argument', () => {
+  it('prepare_translations requires translations or commands to be non-empty', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 30, method: 'tools/call',
+      params: { name: 'prepare_translations', arguments: { projectId: PROJECT } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('validation_failed')
+  })
+
+  it('UpdateProjectSettings via `commands` stages and commits with a receipt-only receipt, channel "mcp"', async () => {
+    const env = makeEnv(tdb.db)
+    const CRED_2 = '00000000-0000-0000-0000-000000000002'
+    await tdb.pg.query(
+      `INSERT INTO users (id, username, email, password_hash) VALUES (2, 'maintainer', 'maintainer@x.com', 'h')
+       ON CONFLICT (id) DO NOTHING`,
+    )
+    await tdb.pg.query(
+      `INSERT INTO project_members (project_id, user_id, role_level) VALUES ($1, 2, 600)`,
+      [PROJECT],
+    )
+    const { token: rawToken, tokenHash, tokenPrefix } = await mintApiToken()
+    await tdb.pg.query(
+      `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
+       VALUES ($1, '2', 'test', $2, $3, 'act', NULL, $4)`,
+      [CRED_2, tokenPrefix, tokenHash, PROJECT],
+    )
+
+    const prepRes = await rpc(env, rawToken, {
+      jsonrpc: '2.0', id: 31, method: 'tools/call',
+      params: {
+        name: 'prepare_translations',
+        arguments: {
+          projectId: PROJECT,
+          commands: [
+            { kind: 'UpdateProjectSettings', projectId: PROJECT, settings: { validationThreshold: 2 }, ifMatchVersion: 0 },
+          ],
+        },
+      },
+    })
+    const prep = toolPayload(((await prepRes.json()) as any).result)
+    expect(prep.isError).toBe(false)
+    const prepPayload = prep.payload as any
+    expect(prepPayload.mode).toBe('act')
+
+    const confirmRes = await rpc(env, rawToken, {
+      jsonrpc: '2.0', id: 32, method: 'tools/call',
+      params: {
+        name: 'confirm_changeset',
+        arguments: { projectId: PROJECT, changesetId: prepPayload.changesetId, digest: prepPayload.digest },
+      },
+    })
+    const confirm = toolPayload(((await confirmRes.json()) as any).result)
+    expect(confirm.isError).toBe(false)
+    const receipt = (confirm.payload as any).receipt
+    expect(receipt.command).toBe('UpdateProjectSettings')
+    // channel is stamped 'mcp' because the tool dispatch marks its synthetic
+    // request with x-aquilla-channel, not the REST default.
+    expect(receipt.channel).toBe('mcp')
+    expect(receipt.version).toBe(1)
+    expect(receipt.projectId).toBe(PROJECT)
+  })
+
+  it('CreateProject mixed with SetTranslation -> validation_failed (server-enforced sole-command rule)', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 33, method: 'tools/call',
+      params: {
+        name: 'prepare_translations',
+        arguments: {
+          projectId: PROJECT,
+          translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }],
+          commands: [{ kind: 'CreateProject', name: 'Nested project' }],
+        },
+      },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('validation_failed')
   })
 })

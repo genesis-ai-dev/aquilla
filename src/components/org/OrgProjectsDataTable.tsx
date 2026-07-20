@@ -77,6 +77,7 @@ export function OrgProjectsDataTable({
   allowSelfAssignment = false,
   callerUserId = null,
   onLanesChanged,
+  onLaneAdded,
 }: {
   projects: OrgProjectRow[]
   now: number
@@ -98,8 +99,12 @@ export function OrgProjectsDataTable({
   author?: string
   allowSelfAssignment?: boolean
   callerUserId?: number | null
-  /** Called after a lane is added, so the parent can refetch the portfolio. */
+  /** Called after an assign/staff lane action, so the parent can refetch the
+   * portfolio (per-lane rollups changed). */
   onLanesChanged?: () => void
+  /** AQU-605: called with (projectId, lane) after a "+ Language" add so the
+   * parent can insert the lane in place — no full-table refetch/reload. */
+  onLaneAdded?: (projectId: string, lane: string) => void
 }) {
   const navigate = useNavigate()
   const [tableNow] = useState(() => now)
@@ -192,7 +197,11 @@ export function OrgProjectsDataTable({
                 onOverflowClick={() => toggleExpand(p.id)}
               />
               {jwt && canAddLanguage(p.id) && (
-                <AddLanguagePopover projectId={p.id} jwt={jwt} onAdded={onLanesChanged} />
+                <AddLanguagePopover
+                  projectId={p.id}
+                  jwt={jwt}
+                  onAdded={(lane) => onLaneAdded?.(p.id, lane)}
+                />
               )}
             </div>
           )
@@ -317,7 +326,7 @@ export function OrgProjectsDataTable({
             <div className="truncate text-left text-xs text-muted-foreground">
               <DateTooltip
                 value={row.original.lastEditAt}
-                label="Edited"
+                label="Updated"
                 className="text-muted-foreground"
               />
             </div>
@@ -334,7 +343,7 @@ export function OrgProjectsDataTable({
       canAddLanguage,
       defaultLaneLabelByProjectId,
       jwt,
-      onLanesChanged,
+      onLaneAdded,
     ],
   )
 

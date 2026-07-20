@@ -102,6 +102,16 @@ name = "aquilla-sync-worker"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.aquilla.app/sync/*"]
 
+# Observability is NOT inherited from the top-level block by named envs —
+# without this, production has Workers Logs disabled and 4xx/5xx are invisible.
+[env.production.observability]
+enabled = true
+
+[env.production.vars]
+# PostHog *project* token (public — same one shipped in the SPA bundle).
+# Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
+POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+
 [[env.production.durable_objects.bindings]]
 name = "ProjectSync"
 class_name = "ProjectSync"

@@ -3,7 +3,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getProject, patchProject } from "@/lib/store/project-index"
 import { ROLE } from "@/lib/frontier/roles"
 import {
-  fetchProjectSettings,
+  fetchProjectSettingsResult,
   patchProjectSettings,
   type PatchResult,
   type ProjectWideSettings,
@@ -196,11 +196,20 @@ export function useProjectSettings(
   const refresh = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
     if (!projectId || !jwt) return null
     if (!isOnlineRef.current) return null
-    const got = await fetchProjectSettings(jwt, projectId)
+    const out = await fetchProjectSettingsResult(jwt, projectId)
     // Guard against post-unmount state updates. aliveRef is only set false on
     // final unmount; explicit refresh() calls from still-mounted consumers
     // should always land (aliveRef.current will be true for them).
     if (!aliveRef.current) return null
+    if (!out.ok) {
+      // FAIL CLOSED: the GET failed (network / 401 / 5xx) — the settings state
+      // is UNKNOWN, not "empty". Do NOT mark hasFetched (consumers like the DCS
+      // source lockdown treat un-fetched as locked), and do NOT clobber a
+      // previously fetched server snapshot with null. The existing focus /
+      // online / settings-updated revalidation paths retry the GET.
+      return null
+    }
+    const got = out.value
     writeServer(got)
     setHasFetched(true)
     if (got) {
@@ -460,7 +469,8 @@ export function useProjectSettings(
       // real DB row (initial fetch hadn't landed, a previous tab wrote, an
       // earlier session's migration succeeded but its response was dropped,
       // etc.). One extra GET per save eliminates the whole class of bug.
-      const fresh = (await fetchProjectSettings(jwt, projectId)) ?? serverRef.current
+      const probe = await fetchProjectSettingsResult(jwt, projectId)
+      const fresh = (probe.ok ? probe.value : null) ?? serverRef.current
       const baseVersion = fresh?.version ?? 0
       const optimistic: ProjectSettingsResponse = {
         version: baseVersion,

@@ -31,8 +31,8 @@ import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { LaneSwitcher } from "./LaneSwitcher"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
+import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -96,7 +96,7 @@ import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-dia
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2 } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2, X } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
@@ -114,6 +114,7 @@ import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
+import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { EditorModeToggle } from "./EditorModeToggle"
 import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -384,15 +385,20 @@ export function ProjectWorkspace() {
   // across reloads would need server backing; the in-session state is what the
   // X button and "apply" flows actually need.)
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
-  // FRO-249/FRO-255 fix (Fix 4): transient notice shown when the user explicitly
-  // confirmed a direction but their role is below MAINTAINER (600) so the change
-  // could not be saved project-wide. Auto-dismissed after 6 s.
-  const [directionRoleNotice, setDirectionRoleNotice] = useState<string | null>(null)
+  // Transient bottom-right status notice. Originally the FRO-249/FRO-255
+  // direction-role notice; now shared by any flow that needs a post-action
+  // result confirmation (e.g. the AQU-314 label import). Severity tints follow
+  // the workspace banner idiom (amber warnings, etc.). Only success notices
+  // auto-dismiss (6 s) — error/warning/info stay until the user closes them.
+  const [transientNotice, setTransientNotice] = useState<{
+    message: string
+    severity: "error" | "warning" | "success" | "info"
+  } | null>(null)
   useEffect(() => {
-    if (!directionRoleNotice) return
-    const t = setTimeout(() => setDirectionRoleNotice(null), 6000)
+    if (transientNotice?.severity !== "success") return
+    const t = setTimeout(() => setTransientNotice(null), 6000)
     return () => clearTimeout(t)
-  }, [directionRoleNotice])
+  }, [transientNotice])
   useEffect(() => {
     optimisticFileIdsRef.current = new Set()
     setOptimisticFiles([])
@@ -426,6 +432,12 @@ export function ProjectWorkspace() {
     )
     return pending.length > 0 ? [...base, ...pending] : base
   }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticDeletes])
+
+  // AQU-314: id+name pairs for the Cell-labels import panel's file picker.
+  const labelPickerFiles = useMemo(
+    () => projectFiles.map((f) => ({ id: f.id, name: f.name })),
+    [projectFiles],
+  )
 
   const project = useMemo<ProjectRecord | null>(() => {
     if (!hydratedProject) return null
@@ -1176,7 +1188,20 @@ export function ProjectWorkspace() {
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
+  // The DEFAULT (`''`) lane's target language — file's, then project's. Used to
+  // label the default-lane switch option, which must always name the project
+  // default regardless of which lane is active.
   const activeTargetLanguage = activeFile?.targetLanguage || project?.targetLanguage
+  // AQU-602: the target language of the ACTIVE lane. A non-default lane's tag IS
+  // its target language, so switching lanes switches what the editor
+  // reads/writes/translates into (source stays shared). The completion path was
+  // already lane-aware; this routes the editor project + file metadata through
+  // the same rule so the target language actually changes on lane switch.
+  const activeLaneTargetLanguage = resolveActiveTargetLanguage(
+    activeLane,
+    activeFile?.targetLanguage,
+    project?.targetLanguage,
+  )
 
   // AQU-538 (slice 2): active target lane. `''` = default lane. The registry
   // arrives on the settings-overlaid project record (useProject overlaySettings).
@@ -1220,13 +1245,13 @@ export function ProjectWorkspace() {
   const editorProject = useMemo<ProjectRecord | null>(() => {
     if (!project) return null
     const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage
-    const targetLanguage = activeTargetLanguage ?? project.targetLanguage
+    const targetLanguage = activeLaneTargetLanguage ?? project.targetLanguage
     if (sourceLanguage === project.sourceLanguage && targetLanguage === project.targetLanguage) {
       return project
     }
     return { ...project, sourceLanguage, targetLanguage }
-  }, [activeSourceLanguage, activeTargetLanguage, project])
-  const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeTargetLanguage, {
+  }, [activeSourceLanguage, activeLaneTargetLanguage, project])
+  const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeLaneTargetLanguage, {
     sourceTextDirection: activeFile?.sourceTextDirection,
     targetTextDirection: activeFile?.targetTextDirection,
   })
@@ -1784,10 +1809,11 @@ export function ProjectWorkspace() {
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
-    // AQU-538: when a non-default lane is active, its tag IS the target
+    // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
-    // (then project's) targetLanguage exactly as before.
-    project?.completionSettings, project?.sourceLanguage || "", activeLane || activeTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
+    // (then project's) targetLanguage exactly as before. Shares the same
+    // lane-aware derivation as the editor project + file metadata.
+    project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
   )
 
@@ -2151,6 +2177,15 @@ export function ProjectWorkspace() {
   // in that case (no eligible assignee shown), not open.
   const currentUserId = projectMembers.find((m) => m.username === currentUsername)?.userId ?? null
   const jwt = frontierSession?.jwt ?? null
+
+  // AQU-559: presence frames stamped by the sync DO carry `auth.claims.username`,
+  // but legacy tokens without a username claim fall back to a `user:<numericId>`
+  // form. Register that fallback identity as "self" once the roster resolves the
+  // numeric id, so the user never sees their own presence circle on cells.
+  useEffect(() => {
+    if (currentUserId == null) return
+    presenceStore.addSelfId(`user:${currentUserId}`)
+  }, [presenceStore, currentUserId])
 
   useEffect(() => {
     if (!jwt || !project?.id) return
@@ -2552,7 +2587,7 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, createLinkUpstreamChangedHandler } =
+      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
@@ -2664,6 +2699,13 @@ export function ProjectWorkspace() {
               // firing a redundant targeted GET (~5 of 8 per edit cycle).
               if (!ownWrite) {
                 revalidateCell(msg.cell)
+                // activeValidators (the validation pill) comes from the
+                // audit-stats projection, not /files/:fileId/cells — a remote
+                // validate/unvalidate must poke that read too, or the pill
+                // stays stale until the next full stats poll.
+                if (isValidationEvent(msg.kind)) {
+                  revalidateCellStats(msg.cell)
+                }
               }
               // Audio attachment events project into cell_audio (not cells);
               // poke the per-file audio read so the new clip surfaces. This
@@ -3046,8 +3088,9 @@ export function ProjectWorkspace() {
 
   const handleTrayFootnoteSave = useCallback((cellId: string, footnoteIndex: number, newText: string) => {
     const cell = getActiveCell(cellId)
-    if (!cell) return
+    if (!cell) return false
     const updated = spliceFootnoteText(cell.translated ?? "", footnoteIndex, newText)
+    if (updated === null) return false // stale index — keep the editor open (FRO-472)
     void commitTrayFootnoteText(cellId, updated)
   }, [commitTrayFootnoteText, getActiveCell])
 
@@ -3899,9 +3942,10 @@ export function ProjectWorkspace() {
               `[FRO-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
               "Mismatch note: EDIT_ROLE_FLOOR in useProjectSettings is PROJECT_LEAD(500) but server requires MAINTAINER(600); tracked for follow-up.",
             )
-            setDirectionRoleNotice(
-              "Your direction choice couldn't be saved project-wide — it needs a maintainer. It will apply locally.",
-            )
+            setTransientNotice({
+              message: "Direction applied locally only — saving project-wide needs a maintainer.",
+              severity: "warning",
+            })
           }
         }
       }
@@ -4142,6 +4186,17 @@ export function ProjectWorkspace() {
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
+            {/* AQU-615: Door43 upstream-sync badge — visible hint that source
+                cells are managed by a DCS link. Self-gated: renders nothing
+                when project_settings has no dcsUpstream cursor. */}
+            {project && projectId && (
+              <DcsSyncBadgeMount
+                projectId={projectId}
+                roleLevel={serverRoleLevel}
+                onClick={() => navigate(`/project/${projectId}/settings`)}
+              />
+            )}
+
             {project && centerSurface === "rules" && (
               <>
                 <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
@@ -4171,13 +4226,9 @@ export function ProjectWorkspace() {
 
             {project && centerSurface === "editor" && activeFileId ? (
               <>
-                {/* AQU-538: active-lane switcher — renders only when >1 lane. */}
-                <LaneSwitcher
-                  lanes={availableLanes}
-                  value={activeLane}
-                  onChange={setActiveLane}
-                  defaultLaneLabel={activeTargetLanguage || "Target"}
-                />
+                {/* AQU-602: the active-lane switcher moved into the editor's
+                    TARGET language tag (see EditorTable header) — no separate
+                    header control. */}
                 <EditorModeToggle
                   lens={lens}
                   onChange={(l) => {
@@ -4574,6 +4625,9 @@ export function ProjectWorkspace() {
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}
+            lanes={availableLanes}
+            onLaneChange={setActiveLane}
+            defaultLaneLabel={activeTargetLanguage || "Target"}
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
@@ -4723,6 +4777,7 @@ export function ProjectWorkspace() {
                 projectId={project?.id ?? null}
                 fileId={activeFileId}
                 getTokenForFile={getTokenForFile}
+                isSynced={!!project?.syncRole}
                 onPromote={handlePromoteToCurrentCell}
               />
             )}
@@ -4858,6 +4913,26 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
+          projectFiles={labelPickerFiles}
+          activeFileId={activeFileId}
+          onLabelsImported={(r) => {
+            setTransientNotice(
+              r.applied === 0
+                ? {
+                    message: `No labels applied — the CSV doesn't match ${r.fileName}. Re-download the template and try again.`,
+                    severity: "warning",
+                  }
+                : r.unmatched > 0
+                  ? {
+                      message: `Applied ${r.applied} of ${r.applied + r.unmatched} labels to ${r.fileName}.`,
+                      severity: "warning",
+                    }
+                  : {
+                      message: `Applied ${r.applied} label${r.applied !== 1 ? "s" : ""} to ${r.fileName}.`,
+                      severity: "success",
+                    },
+            )
+          }}
           patchDcsCursor={async (cursor) => {
             // Pin the project to the imported Door43 release (spec §8). Server
             // floor is MAINTAINER(600); a below-floor caller gets a blocked
@@ -4881,14 +4956,33 @@ export function ProjectWorkspace() {
           />
         </Suspense>
       )}
-      {/* FRO-249/FRO-255 fix (Fix 4): transient notice when direction couldn't be saved project-wide */}
-      {directionRoleNotice && (
+      {/* Shared transient result notice (direction-role fallback, label import results, …).
+          Severity tints match the workspace banner idiom (unintrusive 50-tint bg + 200 border).
+          Success auto-dismisses; other severities carry an explicit close button. */}
+      {transientNotice && (
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-4 right-4 z-60 max-w-sm rounded border bg-background px-3 py-2 text-sm text-foreground shadow-md"
+          className={`fixed bottom-4 right-4 z-60 flex max-w-sm items-start gap-2 rounded border px-3 py-2 text-sm shadow-md ${
+            {
+              error: "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200",
+              warning: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200",
+              success: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
+              info: "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200",
+            }[transientNotice.severity]
+          }`}
         >
-          {directionRoleNotice}
+          <span className="min-w-0">{transientNotice.message}</span>
+          {transientNotice.severity !== "success" && (
+            <button
+              type="button"
+              aria-label="Dismiss notice"
+              onClick={() => setTransientNotice(null)}
+              className="-mr-1 mt-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
         </div>
       )}
       <Suspense fallback={null}>

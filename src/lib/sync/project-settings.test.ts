@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   fetchProjectSettings,
+  fetchProjectSettingsResult,
   patchProjectSettings,
   PROJECT_SETTINGS_VERSION_INITIAL,
 } from "./project-settings"
@@ -144,5 +145,55 @@ describe("ProjectWideSettings.translationBrief", () => {
     const json = JSON.parse(JSON.stringify(settings))
     expect(json.translationBrief.parameters.purpose).toBe("Evangelistic")
     expect(json.translationBrief.l1Summary).toBe("Be evangelistic.")
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fail-closed GET contract (AQU-615 adversarial-review blocker).
+//
+// WHY: the DCS source lockdown derives "is this project Door43-linked?" from
+// this GET. Collapsing transport failures into null made one flaky request
+// read as "no settings → no cursor → unlock source editing", after which the
+// repair pass destroys the hand edit. fetchProjectSettingsResult must keep
+// "server answered: nothing here" and "request failed" distinguishable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("fetchProjectSettingsResult (fail-closed contract)", () => {
+  it("returns {ok:true, value} on 200", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ version: 2, updatedAt: "t", updatedBy: null, settings: {} }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ))
+    const got = await fetchProjectSettingsResult("jwt", "p1", API)
+    expect(got).toEqual({ ok: true, value: { version: 2, updatedAt: "t", updatedBy: null, settings: {} } })
+  })
+
+  it("returns {ok:true, value:null} on 404 (definitive: no settings)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }))
+    expect(await fetchProjectSettingsResult("jwt", "p1", API)).toEqual({ ok: true, value: null })
+  })
+
+  it("returns {ok:true, value:null} on 403 (definitive: no access)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 403 }))
+    expect(await fetchProjectSettingsResult("jwt", "p1", API)).toEqual({ ok: true, value: null })
+  })
+
+  it("returns {ok:false} on 5xx — unknown, NOT 'no settings'", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("oops", { status: 503 }))
+    const got = await fetchProjectSettingsResult("jwt", "p1", API)
+    expect(got.ok).toBe(false)
+    if (!got.ok) expect(got.status).toBe(503)
+  })
+
+  it("returns {ok:false} on 401 — an expired token must not unlock the lockdown", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 401 }))
+    expect((await fetchProjectSettingsResult("jwt", "p1", API)).ok).toBe(false)
+  })
+
+  it("returns {ok:false} on network failure", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
+    const got = await fetchProjectSettingsResult("jwt", "p1", API)
+    expect(got.ok).toBe(false)
+    if (!got.ok) expect(got.status).toBe(0)
   })
 })

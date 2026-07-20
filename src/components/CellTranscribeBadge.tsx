@@ -97,7 +97,7 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
     return (
       <Badge variant="secondary" className={cn(PILL, "text-primary")} title="Transcribing audio…">
         <Sparkles className="h-2.5 w-2.5 animate-pulse" />
-        <span>asr</span>
+        <span>transcribing</span>
       </Badge>
     )
   }
@@ -119,7 +119,7 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
             type="button"
             className={cn(badgeVariants({ variant: "destructive" }), PILL, "cursor-pointer")}
           >
-            asr · failed
+            Transcription failed
           </button>
         }
       />

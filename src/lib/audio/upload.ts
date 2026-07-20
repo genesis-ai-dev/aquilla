@@ -152,6 +152,21 @@ export async function deleteCellAudio(args: DeleteCellAudioArgs): Promise<void> 
   })
 }
 
+/**
+ * Build an authenticated URL an `<audio src>` can stream directly. Media
+ * elements can't send Authorization headers, so the sync-token rides in a
+ * `?t=` query param (GET-only on the worker side). The endpoint supports
+ * Range/206, so playback starts as soon as the browser has buffered enough —
+ * no full-download-into-memory wait. Returns null when no sync token is
+ * available (anonymous session / no project access).
+ */
+export async function getCellAudioStreamUrl(args: FetchCellAudioArgs): Promise<string | null> {
+  const { projectId, fileId, audioId, ext, getSyncToken } = args
+  const token = await getSyncToken(projectId, fileId)
+  if (!token) return null
+  return `${audioEndpoint(projectId, fileId, audioId, ext)}?t=${encodeURIComponent(token)}`
+}
+
 /** Fetch an uploaded audio blob back from sync-worker. Returns the raw
  *  bytes; the caller wraps them in a Blob for the <audio> element. */
 export async function fetchCellAudio(args: FetchCellAudioArgs): Promise<Uint8Array> {

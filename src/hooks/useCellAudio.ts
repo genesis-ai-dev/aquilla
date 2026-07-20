@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { decodePeaks } from "@/lib/audio/peaks"
 import { peaksCacheGet, peaksCachePut } from "@/lib/audio/peaks-cache"
@@ -310,22 +310,37 @@ export function useCellAudio(
     }
     setState("loading")
     setError(null)
-    try {
-      let src: string
-      if (attachmentUrl && isRemoteMediaUrl(attachmentUrl)) {
-        // Stream straight from the source URL — no byte copy, no object URL.
-        src = attachmentUrl
-      } else {
-        const bytes = await ensureBytes()
-        const blob = new Blob([bytes as BlobPart])
-        src = URL.createObjectURL(blob)
-        urlRef.current = src
-      }
+    // One-shot guard: if the streamed src errors (expired token, transient
+    // network blip, misbehaving proxy), retry exactly once via the full-bytes
+    // blob path before surfacing an error.
+    let triedBlobFallback = false
+    const makeElement = (src: string, streaming: boolean): HTMLAudioElement => {
       const audio = new Audio(src)
       audio.volume = volumeRef.current
       audio.onerror = () => {
         setIsPlaying(false)
         stopTicking()
+        if (streaming && !triedBlobFallback) {
+          triedBlobFallback = true
+          void (async () => {
+            try {
+              const bytes = await ensureBytes()
+              if (audioRef.current !== audio) return // superseded / unmounted
+              const blobSrc = URL.createObjectURL(new Blob([bytes as BlobPart]))
+              urlRef.current = blobSrc
+              const next = makeElement(blobSrc, false)
+              setState("ready")
+              await next.play()
+            } catch (e) {
+              const err = (e && typeof e === "object" && "kind" in e)
+                ? (e as AudioError)
+                : { kind: "download-failed" as const, message: String(e) }
+              setError(err)
+              setState("error")
+            }
+          })()
+          return
+        }
         setError({ kind: "download-failed", message: "Playback failed — the media source could not be streamed." })
         setState("error")
       }
@@ -348,6 +363,58 @@ export function useCellAudio(
         setCurrentTime(audio.currentTime)
       }
       audioRef.current = audio
+      return audio
+    }
+    try {
+      let src: string
+      let streamingSrc = false
+      const frontier = attachmentUrl ? parseFrontierAudioUrl(attachmentUrl) : null
+      if (attachmentUrl && isRemoteMediaUrl(attachmentUrl)) {
+        // Stream straight from the source URL — no byte copy, no object URL.
+        src = attachmentUrl
+      } else if (frontier) {
+        // Progressive playback: bytes already at hand (L1 ref / OPFS L2 —
+        // also the offline path) play from a blob; otherwise point the
+        // element at the authenticated streaming URL so first sound doesn't
+        // wait for the full download. Peaks/transcription still fetch full
+        // bytes via ensureBytes.
+        let bytes = bytesRef.current
+        if (!bytes) {
+          bytes = await audioCacheGet(frontier.audioId, frontier.ext)
+          if (bytes) bytesRef.current = bytes
+        }
+        if (bytes) {
+          src = URL.createObjectURL(new Blob([bytes as BlobPart]))
+          urlRef.current = src
+        } else {
+          const streamUrl = sessionRef.current?.jwt
+            ? await getCellAudioStreamUrl({
+                projectId: project.id,
+                fileId,
+                audioId: frontier.audioId,
+                ext: frontier.ext,
+                getSyncToken,
+              })
+            : null
+          if (streamUrl) {
+            src = streamUrl
+            streamingSrc = true
+          } else {
+            // No token (anonymous / no access) — ensureBytes surfaces the
+            // precise AudioError (no-session, download-failed, …).
+            const fetched = await ensureBytes()
+            src = URL.createObjectURL(new Blob([fetched as BlobPart]))
+            urlRef.current = src
+          }
+        }
+      } else {
+        // Non-frontier pointer — ensureBytes throws the right AudioError
+        // (pointer-missing / pointer-invalid).
+        const fetched = await ensureBytes()
+        src = URL.createObjectURL(new Blob([fetched as BlobPart]))
+        urlRef.current = src
+      }
+      const audio = makeElement(src, streamingSrc)
       setState("ready")
       try {
         await audio.play()
@@ -362,7 +429,7 @@ export function useCellAudio(
       setError(err)
       setState("error")
     }
-  }, [attachmentUrl, ensureBytes, startTicking, stopTicking])
+  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking])
 
   const pause = useCallback(() => {
     audioRef.current?.pause()

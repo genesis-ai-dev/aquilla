@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
@@ -32,11 +32,11 @@ test("archived project can be restored back to active projects", async ({ alice 
   const archiveItem = alice.getByRole("button", { name: /^Archive$/ })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
-  await alice.waitForURL(/\/projects$/, { timeout: 10_000 })
+  await alice.waitForURL(new RegExp(`/orgs/${alice.orgId}$`), { timeout: 10_000 })
 
   // The Archived page (sidebar "Archived" link) lists the project.
   await alice.getByRole("link", { name: /^Archived$/ }).click()
-  await alice.waitForURL(/\/projects\/archived$/, { timeout: 5_000 })
+  await alice.waitForURL(new RegExp(`/orgs/${alice.orgId}/archived$`), { timeout: 5_000 })
   const archivedRow = alice.getByText(name)
   await expect(archivedRow).toBeVisible({ timeout: 10_000 })
 
@@ -47,7 +47,7 @@ test("archived project can be restored back to active projects", async ({ alice 
   await expect(archivedRow).not.toBeVisible({ timeout: 10_000 })
 
   // …and it is back in the active projects list.
-  await alice.goto("/projects")
+  await alice.goto(orgRoute(alice))
   await alice.waitForLoadState("networkidle")
   await expect(alice.getByText(name)).toBeVisible({ timeout: 10_000 })
 })

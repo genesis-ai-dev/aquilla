@@ -62,12 +62,12 @@ vi.mock("@legendapp/list/react", async () => {
   }
 })
 
-function makeProject(level: number): ProjectRecord {
+function makeProject(level: number, targetLanguage = "fr"): ProjectRecord {
   return {
     id: "proj-1",
     name: "Test Project",
     sourceLanguage: "en",
-    targetLanguage: "fr",
+    targetLanguage,
     createdAt: "2026-01-01T00:00:00Z",
     files: [],
     members: [],
@@ -103,13 +103,13 @@ function makeStore(): CellStore {
   return store
 }
 
-function renderTable(level: number) {
+function renderTable(level: number, targetLanguage = "fr") {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
       <EditorActionsProvider value={{}}>
         <EditorTable
-          project={makeProject(level)}
+          project={makeProject(level, targetLanguage)}
           cellStore={makeStore()}
           username="tester"
           activeLane=""
@@ -148,5 +148,15 @@ describe("EditorTable — lane switcher is maintainer-gated (AQU-608)", () => {
     expect(screen.queryByTestId("lane-switcher")).not.toBeInTheDocument()
     // …and the target language is still shown as a plain pill.
     expect(screen.getByText("fr")).toBeInTheDocument()
+  })
+
+  // AQU-583: with extra lanes registered but no default target language set, the
+  // switcher must still be reachable so the named lanes aren't stranded — the
+  // trigger prompts to set the default rather than showing a blank pill.
+  it("shows the switcher for a maintainer even with no default target language", async () => {
+    renderTable(ROLE.MAINTAINER, "")
+    const switcher = await screen.findByTestId("lane-switcher")
+    expect(switcher).toBeInTheDocument()
+    expect(switcher).toHaveTextContent("Set target language")
   })
 })

@@ -1696,7 +1696,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 • >1 lane (+ change handler) → a dropdown that switches the active
                   lane; with `onEditTargetLanguage` it also gets a "Change target
                   language…" item so the language is reachable here, not buried in
-                  Settings.
+                  Settings. The switcher does NOT require a default target to be
+                  set — with extra lanes registered but no default language yet the
+                  dropdown still opens (trigger reads "Set target language"), so the
+                  named lanes stay reachable and the default can be set from here.
                 • otherwise, with `onEditTargetLanguage` → a clickable pill (or a
                   "Set target language" prompt when none is set yet) opening the
                   language settings.
@@ -1705,8 +1708,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 AQU-608: lane switching is a maintainer-and-above affordance —
                 below maintainer the tag stays a static pill so translators keep
                 to their assigned lane. */}
-            {project.targetLanguage &&
-            lanes &&
+            {lanes &&
             lanes.length > 1 &&
             onLaneChange &&
             canSwitchLanes(project.syncRole?.level) ? (
@@ -1722,7 +1724,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                     />
                   }
                 >
-                  {project.targetLanguage}
+                  {/* AQU-583: on the default lane with no project target set,
+                      `project.targetLanguage` is empty — prompt to set one rather
+                      than showing a blank pill. A named lane always has a tag. */}
+                  {project.targetLanguage || "Set target language"}
                   <ChevronDown className="h-2.5 w-2.5" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="min-w-[8rem]">

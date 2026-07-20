@@ -155,19 +155,20 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         </div>
       )}
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen}>
-        <Menu.Trigger
-          render={
-            <Button
-              variant="ghost"
-              size="icon"
-              title="View settings"
-              aria-label="View settings"
-              className={cn(hideTrigger ? "sr-only" : "relative")}
-            >
-              <Eye className="h-4 w-4" />
-            </Button>
-          }
-        />
+        <AppTooltip content="View settings">
+          <Menu.Trigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="View settings"
+                className={cn(hideTrigger ? "sr-only" : "relative")}
+              >
+                <Eye className="h-4 w-4" />
+              </Button>
+            }
+          />
+        </AppTooltip>
         <Menu.Portal>
           {/* z-40 on Positioner, not Popup — see ui/tooltip.tsx for rationale. */}
           <Menu.Positioner sideOffset={4} className="z-40">

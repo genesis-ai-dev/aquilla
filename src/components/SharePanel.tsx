@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Copy, AlertCircle, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { FieldLabel } from "@/components/ui/field"
@@ -328,9 +329,11 @@ function InviteLinkTab({ projectId, onSharesChanged }: InviteLinkTabProps) {
           <p className="text-sm">Invite link ready. Send it to the recipient.</p>
           <div className="flex items-center gap-1">
             <Input value={issuedUrl} readOnly className="text-xs font-mono" />
-            <Button size="sm" variant="ghost" onClick={() => copyUrl(issuedUrl)} title="Copy URL">
-              <Copy className="h-3.5 w-3.5" />
-            </Button>
+            <AppTooltip content="Copy URL">
+              <Button size="sm" variant="ghost" onClick={() => copyUrl(issuedUrl)} aria-label="Copy URL">
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </AppTooltip>
           </div>
           {copied && <p className="text-xs text-green-600">Copied!</p>}
           <p className="text-[10px] text-muted-foreground">
@@ -562,15 +565,17 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
                 </Button>
               </div>
             ) : (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-6 shrink-0 px-1 text-muted-foreground hover:text-destructive"
-                title="Revoke this invite link"
-                onClick={() => { setRevokeTarget(inv.token); setRevokeConfirm(false) }}
-              >
-                <Trash2 className="h-3 w-3" />
-              </Button>
+              <AppTooltip content="Revoke this invite link">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 shrink-0 px-1 text-muted-foreground hover:text-destructive"
+                  onClick={() => { setRevokeTarget(inv.token); setRevokeConfirm(false) }}
+                  aria-label="Revoke this invite link"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </AppTooltip>
             )}
           </li>
         ))}

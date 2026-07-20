@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Mic, Pause, Play, Sparkles, Square, Trash2, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
@@ -268,14 +269,14 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
   }, [state, projectId, fileId, referenceAudioId, session, cleanup])
 
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      onClick={toggle}
-      className={cn(state === "error" && "text-destructive")}
-      title="Preview reference clip"
-    >
+    <AppTooltip content="Preview reference clip">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={toggle}
+        className={cn(state === "error" && "text-destructive")}
+      >
       {state === "loading" ? (
         <Spinner className="mr-1 size-3.5" />
       ) : state === "playing" ? (
@@ -285,5 +286,6 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
       )}
       {state === "error" ? "Preview failed" : "Preview"}
     </Button>
+    </AppTooltip>
   )
 }

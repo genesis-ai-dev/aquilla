@@ -20,6 +20,7 @@ import {
 } from "@/lib/parsers/helloao"
 import { cn } from "@/lib/utils"
 import { BookMarked, Plus, Search, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   InputGroup,
@@ -261,14 +262,16 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
             </span>
           )}
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label="Hide parallel bibles"
           onClick={onToggle}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+          className="text-muted-foreground"
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </Button>
       </div>
 
       {/* Body */}

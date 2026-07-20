@@ -13,6 +13,7 @@ import { DataTable } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 /**
  * Platform-admin "Compute / Credits" section for the AdminConsole.
@@ -95,7 +96,9 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
       {
         id: "today",
         header: () => (
-          <span title="Total spend today across all rails (agent + chat + TTS).">Today</span>
+          <AppTooltip content="Total spend today across all rails (agent + chat + TTS).">
+            <span>Today</span>
+          </AppTooltip>
         ),
         cell: ({ row }) => (
           <SpendWindow
@@ -110,7 +113,9 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
       {
         id: "week",
         header: () => (
-          <span title="Total spend this week across all rails.">This week</span>
+          <AppTooltip content="Total spend this week across all rails.">
+            <span>This week</span>
+          </AppTooltip>
         ),
         cell: ({ row }) => (
           <SpendWindow

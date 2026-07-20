@@ -13,6 +13,7 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { Bot, Minimize2, RotateCcw, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
@@ -230,29 +231,31 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
               Stop
             </Button>
           )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 text-[11px] text-muted-foreground"
-            onClick={reset}
-            title="Drop this conversation and start a fresh session"
-          >
-            <RotateCcw data-icon="inline-start" />
-            New session
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 text-[11px] text-muted-foreground"
-            onClick={onClose}
-            title="Back to the editor"
-            aria-label="Close workbench"
-          >
-            <Minimize2 data-icon="inline-start" />
-            Editor
-          </Button>
+          <AppTooltip content="Drop this conversation and start a fresh session">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[11px] text-muted-foreground"
+              onClick={reset}
+            >
+              <RotateCcw data-icon="inline-start" />
+              New session
+            </Button>
+          </AppTooltip>
+          <AppTooltip content="Back to the editor">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[11px] text-muted-foreground"
+              onClick={onClose}
+              aria-label="Close workbench"
+            >
+              <Minimize2 data-icon="inline-start" />
+              Editor
+            </Button>
+          </AppTooltip>
         </span>
       </div>
 

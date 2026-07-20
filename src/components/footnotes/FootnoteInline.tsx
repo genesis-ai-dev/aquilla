@@ -169,7 +169,7 @@ export function FootnotesTray({
               aria-label="Close footnotes tray"
               onClick={onClose}
             >
-              <X className="h-4 w-4" />
+              <X />
             </Button>
           )}
         </div>

@@ -8,6 +8,7 @@
 import { useState } from "react"
 import { Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog,
@@ -193,19 +194,22 @@ export function RuleSuggestFromEditsDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!isConfigured}
-            title={
+          <AppTooltip
+            content={
               isConfigured
                 ? "Mine your edits for rule patterns"
                 : "Configure LLM in project settings first"
             }
           >
-            <Sparkles className="mr-1 h-3.5 w-3.5" />
-            Suggest from edits
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!isConfigured}
+            >
+              <Sparkles className="mr-1 h-3.5 w-3.5" />
+              Suggest from edits
+            </Button>
+          </AppTooltip>
         }
       />
 

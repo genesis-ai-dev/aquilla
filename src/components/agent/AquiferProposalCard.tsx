@@ -142,13 +142,13 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
           >
             Discard
           </Button>
-          <Button
-            size="sm"
-            className="h-6 text-[11px]"
-            onClick={() => void handleApply()}
-            disabled={!jwt || state === "applying"}
-            title={!jwt ? "Sign in to publish" : undefined}
-          >
+          <AppTooltip content={!jwt ? "Sign in to publish" : undefined} disabled={Boolean(jwt)}>
+            <Button
+              size="sm"
+              className="h-6 text-[11px]"
+              onClick={() => void handleApply()}
+              disabled={!jwt || state === "applying"}
+            >
             {state === "applying" ? (
               <>
                 <Loader2 className={cn("h-3 w-3 animate-spin")} /> Publishing…
@@ -157,6 +157,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
               "Apply"
             )}
           </Button>
+          </AppTooltip>
         </div>
       )}
     </div>

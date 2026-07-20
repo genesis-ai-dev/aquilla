@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react"
 import { Film, Upload, Link as LinkIcon, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import {
@@ -140,9 +141,11 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                 <p className="text-xs text-muted-foreground">Currently attached</p>
                 <p className="text-sm truncate">{currentLabel}</p>
               </div>
-              <Button variant="ghost" size="sm" onClick={handleRemove} title="Remove attachment">
-                <Trash2 className="h-3.5 w-3.5 text-destructive" />
-              </Button>
+              <AppTooltip content="Remove attachment">
+                <Button variant="ghost" size="sm" onClick={handleRemove} aria-label="Remove attachment">
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </AppTooltip>
             </div>
             <Field orientation="horizontal" className="items-center gap-2">
               <FieldLabel htmlFor="vstart" className="text-xs whitespace-nowrap">

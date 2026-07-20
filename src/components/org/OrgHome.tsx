@@ -49,7 +49,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
-import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
@@ -343,9 +343,8 @@ export function ProjectTable({
   defaultLaneLabelByProjectId?: Map<string, string>
 }) {
   return (
-    <TooltipDelegationBoundary>
-      <div data-testid="project-table" className="@container/project-table overflow-hidden">
-        <div className="w-full">
+    <div data-testid="project-table" className="@container/project-table overflow-hidden">
+      <div className="w-full">
         <div
           className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm`}
         >
@@ -496,9 +495,8 @@ export function ProjectTable({
             )
           })}
         </div>
-        </div>
       </div>
-    </TooltipDelegationBoundary>
+    </div>
   )
 }
 

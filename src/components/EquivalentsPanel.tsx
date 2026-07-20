@@ -29,6 +29,7 @@
 import { useState } from "react"
 import { ChevronRight, ChevronDown, ShieldCheck, Sparkles, ArrowUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { TermRendering, RenderingStatus } from "@/lib/terminology/types"
 import type {
@@ -137,16 +138,17 @@ function PredictedRow({
         </span>
 
         {canPromote && onPromote && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 gap-1 px-1.5 text-[10px]"
-            onClick={() => onPromote(prediction.target)}
-            title="Promote to a managed rendering (crosses the deterministic line)"
-          >
-            <ArrowUp className="h-3 w-3" />
-            Promote
-          </Button>
+          <AppTooltip content="Promote to a managed rendering (crosses the deterministic line)">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-1.5 text-[10px]"
+              onClick={() => onPromote(prediction.target)}
+            >
+              <ArrowUp className="h-3 w-3" />
+              Promote
+            </Button>
+          </AppTooltip>
         )}
       </div>
 

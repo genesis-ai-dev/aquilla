@@ -729,14 +729,16 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         </p>
         <div className="flex items-center gap-1">
           <Input value={issuedUrl} readOnly className="text-xs font-mono" />
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => copyUrl(issuedUrl)}
-            title="Copy URL"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
+          <AppTooltip content="Copy URL">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => copyUrl(issuedUrl)}
+              aria-label="Copy URL"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          </AppTooltip>
         </div>
         {copied && <p className="text-xs text-green-600">Copied!</p>}
         <p className="text-[10px] text-muted-foreground">

@@ -10,6 +10,7 @@
 
 import { AlertTriangle, ArrowRight, PenLine, Undo2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { AgentProposal } from "@/lib/agent/protocol"
 
 export interface ReceiptCounts {
@@ -111,15 +112,16 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
             </button>
           )}
           {undoable && onUndo && (
-            <button
-              type="button"
-              onClick={onUndo}
-              title="Restore each applied cell to its pre-draft text (a new, audited edit — nothing is deleted)"
-              className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
-            >
-              <Undo2 className="h-3 w-3" />
-              Undo applied
-            </button>
+            <AppTooltip content="Restore each applied cell to its pre-draft text (a new, audited edit — nothing is deleted)">
+              <button
+                type="button"
+                onClick={onUndo}
+                className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+              >
+                <Undo2 className="h-3 w-3" />
+                Undo applied
+              </button>
+            </AppTooltip>
           )}
         </div>
       )}

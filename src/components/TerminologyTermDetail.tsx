@@ -286,7 +286,7 @@ export function TerminologyTermDetail({
       {/* Header */}
       <header className="flex items-center gap-3 border-b px-4 py-3">
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close detail">
-          <X className="h-4 w-4" />
+          <X />
         </Button>
         <div className="flex flex-1 items-center gap-2 min-w-0">
           <span className="text-base font-semibold truncate">{concept.sourceTerm}</span>

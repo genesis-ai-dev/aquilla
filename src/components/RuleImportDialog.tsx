@@ -9,6 +9,7 @@
 import { useState, useRef, useCallback } from "react"
 import { Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -249,19 +250,22 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!isConfigured}
-            title={
+          <AppTooltip
+            content={
               isConfigured
                 ? "Import rules from a document"
                 : "Configure LLM in settings first"
             }
           >
-            <Upload className="mr-1 h-3.5 w-3.5" />
-            Import from doc
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!isConfigured}
+            >
+              <Upload className="mr-1 h-3.5 w-3.5" />
+              Import from doc
+            </Button>
+          </AppTooltip>
         }
       />
 

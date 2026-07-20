@@ -86,13 +86,13 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   }
 
   return (
-    <div className="bg-card relative z-10 flex h-full w-96 flex-col" data-testid="comments-drawer">
-      <div className="flex items-center justify-between border-b px-3 py-2">
+    <div className="bg-card relative z-10 flex h-full w-96 flex-col border-l" data-testid="comments-drawer">
+      <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           Comments {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <X className="h-4 w-4" />
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close comments">
+          <X />
         </Button>
       </div>
 

@@ -38,16 +38,16 @@ describe("actionGateProps", () => {
     expect(props.disabled).toBeUndefined()
   })
 
-  it("returns disabled=true and a title when action is denied", () => {
+  it("returns disabled=true and a tooltip when action is denied", () => {
     const props = actionGateProps(false, "project_lead")
     expect(props.disabled).toBe(true)
-    expect(props.title).toBeTruthy()
-    expect(props.title).toContain("project_lead")
+    expect(props.tooltip).toBeTruthy()
+    expect(props.tooltip).toContain("project_lead")
   })
 
-  it("title is human-readable (no role codes)", () => {
+  it("tooltip is human-readable (no role codes)", () => {
     const props = actionGateProps(false, "maintainer")
-    expect(props.title).not.toMatch(/\d{3}/)
-    expect(props.title).toContain("maintainer")
+    expect(props.tooltip).not.toMatch(/\d{3}/)
+    expect(props.tooltip).toContain("maintainer")
   })
 })

@@ -12,6 +12,7 @@
 import { useState } from "react"
 import { BadgeCheck, Check, Loader2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { applyStagedEvent, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 
@@ -80,16 +81,19 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                   <Check className="h-3 w-3" /> validated
                 </span>
               ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-5 shrink-0 px-1.5 text-[10px]"
-                  disabled={!canValidate || state === "applying"}
-                  title={canValidate ? undefined : "Your role can't validate in this project"}
-                  onClick={() => void confirm(ev, idx)}
-                  aria-label={`Validate ${ev.display.canonicalRef ?? ev.cellId ?? "cell"}`}
+                <AppTooltip
+                  content={canValidate ? undefined : "Your role can't validate in this project"}
+                  disabled={canValidate}
                 >
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-5 shrink-0 px-1.5 text-[10px]"
+                    disabled={!canValidate || state === "applying"}
+                    onClick={() => void confirm(ev, idx)}
+                    aria-label={`Validate ${ev.display.canonicalRef ?? ev.cellId ?? "cell"}`}
+                  >
                   {state === "applying" ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
                   ) : (
@@ -97,6 +101,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                   )}
                   Validate
                 </Button>
+                </AppTooltip>
               )}
               {state === "error" && <X className="h-3 w-3 shrink-0 text-destructive" aria-label="Failed" />}
             </div>

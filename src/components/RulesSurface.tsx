@@ -286,15 +286,17 @@ export function RulesSurface({
                         </div>
                         {canEditOrgRules && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setEditingOrgRuleId(editingOrgRuleId === rule.id ? null : rule.id)}
-                              title="Edit org rule"
-                              disabled={editingOrgRuleId !== null && editingOrgRuleId !== rule.id}
-                            >
-                              <Pencil />
-                            </Button>
+                            <AppTooltip content="Edit org rule">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setEditingOrgRuleId(editingOrgRuleId === rule.id ? null : rule.id)}
+                                disabled={editingOrgRuleId !== null && editingOrgRuleId !== rule.id}
+                                aria-label="Edit org rule"
+                              >
+                                <Pencil />
+                              </Button>
+                            </AppTooltip>
                             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                               <Switch
                                 size="sm"
@@ -350,12 +352,16 @@ export function RulesSurface({
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <Button size="sm" onClick={() => handleApproveRequest(req)} title="Promote this rule to org scope">
-                              Approve
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)} title="Dismiss this request">
-                              Dismiss
-                            </Button>
+                            <AppTooltip content="Promote this rule to org scope">
+                              <Button size="sm" onClick={() => handleApproveRequest(req)}>
+                                Approve
+                              </Button>
+                            </AppTooltip>
+                            <AppTooltip content="Dismiss this request">
+                              <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)}>
+                                Dismiss
+                              </Button>
+                            </AppTooltip>
                           </div>
                         </div>
                       </li>
@@ -420,25 +426,27 @@ export function RulesSurface({
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
-                          title="Opens the editor with this rule's drawer"
-                        >
-                          <Wand2 data-icon="inline-start" />
-                          Try to fix all
-                        </Button>
+                        <AppTooltip content="Opens the editor with this rule's drawer">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
+                          >
+                            <Wand2 data-icon="inline-start" />
+                            Try to fix all
+                          </Button>
+                        </AppTooltip>
                         {canEditOrgRules && patchOrgSettings && (
+                          <AppTooltip content="Copy this rule to the org's rule library">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => setPromoteRule(rule)}
-                            title="Copy this rule to the org's rule library"
                           >
                             <ArrowUpCircle data-icon="inline-start" />
                             Promote to org
                           </Button>
+                          </AppTooltip>
                         )}
                         {!canEditOrgRules && canRequestPromotion && requestPromotion && (
                           (() => {
@@ -452,28 +460,31 @@ export function RulesSurface({
                                 {notice ?? "Requested"}
                               </Badge>
                             ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleRequestPromotion(rule)}
-                                disabled={isRequesting}
-                                title="Ask an org maintainer to promote this rule to org scope"
-                              >
-                                <ArrowUpCircle data-icon="inline-start" />
-                                {isRequesting ? "Requesting…" : "Request promotion"}
-                              </Button>
+                              <AppTooltip content="Ask an org maintainer to promote this rule to org scope">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleRequestPromotion(rule)}
+                                  disabled={isRequesting}
+                                >
+                                  <ArrowUpCircle data-icon="inline-start" />
+                                  {isRequesting ? "Requesting…" : "Request promotion"}
+                                </Button>
+                              </AppTooltip>
                             )
                           })()
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
-                          title="Edit rule"
-                          disabled={editingRuleId !== null && editingRuleId !== rule.id}
-                        >
-                          <Pencil />
-                        </Button>
+                        <AppTooltip content="Edit rule">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
+                            disabled={editingRuleId !== null && editingRuleId !== rule.id}
+                            aria-label="Edit rule"
+                          >
+                            <Pencil />
+                          </Button>
+                        </AppTooltip>
                         <Button variant="ghost" size="sm" onClick={() => toggleExpanded(rule.id)}>
                           {expanded ? <ChevronUp /> : <ChevronDown />}
                         </Button>

@@ -11,6 +11,7 @@
 
 import { X, AlertTriangle, AlertCircle, BookA, Loader2, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import type { CellData } from "@/hooks/useCells"
 import type {
@@ -72,12 +73,12 @@ interface CellRefButtonProps {
 function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail }: CellRefButtonProps) {
   return (
     <li className="flex items-start gap-1">
-      <button
-        type="button"
-        className="flex-1 rounded border-l-2 border-amber-400 bg-amber-50 p-1.5 text-left text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
-        onClick={() => onNavigateToCell(cellId)}
-        title="Go to cell"
-      >
+      <AppTooltip content="Go to cell">
+        <button
+          type="button"
+          className="flex-1 rounded border-l-2 border-amber-400 bg-amber-50 p-1.5 text-left text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
+          onClick={() => onNavigateToCell(cellId)}
+        >
         <div className="font-medium">{label}</div>
         {detail && <div className="truncate text-muted-foreground">{detail}</div>}
         {cell && (
@@ -86,17 +87,19 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
           </div>
         )}
       </button>
+      </AppTooltip>
       {onOpenComments && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-1"
-          onClick={() => onOpenComments(cellId)}
-          title="Comment on this cell"
-          aria-label={`Comment on ${label}`}
-        >
-          <MessageSquare className="h-3 w-3" />
-        </Button>
+        <AppTooltip content="Comment on this cell">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-1"
+            onClick={() => onOpenComments(cellId)}
+            aria-label={`Comment on ${label}`}
+          >
+            <MessageSquare className="h-3 w-3" />
+          </Button>
+        </AppTooltip>
       )}
     </li>
   )
@@ -197,11 +200,11 @@ export function CheckFindingsDrawer({
   const termIssueCount = flaggedTermFindings.reduce((n, f) => n + f.flaggedCells.length, 0)
 
   return (
-    <div className="flex h-full w-80 flex-col border-l bg-background">
-      <div className="flex items-center justify-between border-b px-3 py-2">
+    <div className="flex h-full w-80 flex-col border-l bg-card">
+      <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">Check results</h3>
-        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close check results">
-          <X className="h-4 w-4" />
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close check results">
+          <X />
         </Button>
       </div>
 

@@ -255,10 +255,12 @@ export function RulesPage() {
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
-                        <Button size="sm" variant="outline" onClick={() => navigate(`/project/${id}/editor?openRule=${rule.id}`)} title="Opens the editor with this rule's drawer">
-                          <Wand2 className="mr-1 h-3.5 w-3.5" />
-                          Try to fix all
-                        </Button>
+                        <AppTooltip content="Opens the editor with this rule's drawer">
+                          <Button size="sm" variant="outline" onClick={() => navigate(`/project/${id}/editor?openRule=${rule.id}`)}>
+                            <Wand2 className="mr-1 h-3.5 w-3.5" />
+                            Try to fix all
+                          </Button>
+                        </AppTooltip>
                         <Button variant="ghost" size="sm" onClick={() => toggleExpanded(rule.id)}>
                           {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </Button>
@@ -268,12 +270,13 @@ export function RulesPage() {
                             onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })} />
                           <span className="text-muted-foreground">Enabled</span>
                         </label>
-                        <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`}
-                          disabled={!canManageRules}
-                          title={manageRulesDeniedReason ?? undefined}
-                          onClick={() => setPendingDeleteRuleId(rule.id)}>
-                          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        </Button>
+                        <AppTooltip content={manageRulesDeniedReason ?? undefined} disabled={canManageRules || !manageRulesDeniedReason}>
+                          <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`}
+                            disabled={!canManageRules}
+                            onClick={() => setPendingDeleteRuleId(rule.id)}>
+                            <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          </Button>
+                        </AppTooltip>
                       </div>
 
                       {expanded && (

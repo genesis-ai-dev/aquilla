@@ -1,6 +1,5 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState, injectSessions } from "../../helpers/auth"
-import { getMyOrg } from "../../helpers/frontier-api"
 
 /**
  * AccountSwitcher dropdown — sidebar username button.
@@ -11,7 +10,7 @@ import { getMyOrg } from "../../helpers/frontier-api"
  *   - "Preferences" link
  *   - "Add another account…" button
  *
- * This spec navigates to /projects and verifies the account switcher
+ * This spec navigates to the org home and verifies the account switcher
  * renders and the dropdown opens.
  */
 test("account switcher dropdown opens with session info", async ({ alice }) => {
@@ -46,7 +45,6 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
     ensureAuthState("alice"),
     ensureAuthState("bob"),
   ])
-  const bobOrg = await getMyOrg(bobSession.jwt)
 
   await alice.goto(orgRoute(alice))
   await injectSessions(alice, [aliceSession, bobSession], "alice")
@@ -56,9 +54,10 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
   await accountBtn.click()
   await alice.getByRole("menuitem", { name: /^Log out$/i }).click()
 
-  // Org-scoped shell: after alice logs out, bob is promoted in IDB but the
-  // URL may still be alice's org — land on bob's org home so the switcher renders.
-  await alice.goto(`/orgs/${bobOrg.id}`)
+  // After alice logs out, bob is promoted in IDB but the URL may still be
+  // alice's org (OrgRouteGate shows "not found" with no account switcher).
+  // /orgs/all always mounts the shell so the promoted account menu is visible.
+  await alice.goto("/orgs/all")
   await alice.waitForLoadState("networkidle")
 
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({

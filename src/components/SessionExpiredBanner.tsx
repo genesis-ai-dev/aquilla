@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { X } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { onSessionExpired } from "@/lib/errors/session-expired-signal"
 
 export function SessionExpiredBanner() {
@@ -48,14 +49,16 @@ export function SessionExpiredBanner() {
         </Link>{" "}
         to continue.
       </span>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-xs"
         onClick={() => setVisible(false)}
         aria-label="Dismiss"
-        className="shrink-0 rounded p-0.5 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-100"
+        className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-100"
       >
-        <X className="h-4 w-4" />
-      </button>
+        <X />
+      </Button>
     </div>
   )
 }

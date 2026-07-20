@@ -57,9 +57,9 @@ export function PrimaryActionButton({ ctx, run }: Props) {
           <DropdownMenuTrigger
             render={
               <Button
-                size="sm"
+                size="icon-sm"
                 variant="outline"
-                className="px-1.5 [&[aria-expanded=true]_svg]:rotate-180"
+                className="[&[aria-expanded=true]_svg]:rotate-180"
                 aria-label="More actions"
               >
                 <ChevronDown className="transition-transform duration-200" />

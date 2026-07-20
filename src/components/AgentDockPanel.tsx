@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react"
 import { Bot, Maximize2 } from "lucide-react"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { Button } from "@/components/ui/button"
 import type { CellContext } from "@/lib/cell-context"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
@@ -83,16 +83,17 @@ export function AgentDockPanel({
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">AI Agent</span>
         {onExpand && !expanded && (
-          <AppTooltip content="Open full-screen workbench">
-            <button
-              type="button"
-              onClick={onExpand}
-              className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="Open full-screen workbench"
-            >
-              <Maximize2 className="h-3.5 w-3.5" />
-            </button>
-          </AppTooltip>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={onExpand}
+            className="ml-auto text-muted-foreground"
+            title="Open full-screen workbench"
+            aria-label="Open full-screen workbench"
+          >
+            <Maximize2 />
+          </Button>
         )}
       </div>
 

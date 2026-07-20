@@ -60,7 +60,7 @@ export function OrgSetupChecklist({
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
+          size="icon-xs"
           onClick={dismiss}
           aria-label="Dismiss checklist"
           className="text-muted-foreground"

@@ -18,7 +18,10 @@ export function BetaBadge() {
 
   return (
     <Dialog>
-      <DialogTrigger render={<Badge className="cursor-pointer">Beta</Badge>} />
+      <DialogTrigger
+        nativeButton={false}
+        render={<Badge className="cursor-pointer">Beta</Badge>}
+      />
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Heads up — we're in beta</DialogTitle>

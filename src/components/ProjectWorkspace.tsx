@@ -1187,10 +1187,13 @@ export function ProjectWorkspace() {
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
-  // The DEFAULT (`''`) lane's target language — file's, then project's. Used to
-  // label the default-lane switch option, which must always name the project
-  // default regardless of which lane is active.
-  const activeTargetLanguage = activeFile?.targetLanguage || project?.targetLanguage
+  // The DEFAULT (`''`) lane's target language — project's, then the file's. Used
+  // to label the default-lane switch option, which must always name the project
+  // default regardless of which lane is active. AQU-583: project-first so a
+  // Settings change to the target language is reflected here even when the active
+  // file carries a stale import-time per-file target (the file value is only a
+  // fallback for a project that has no target set yet — AQU-249).
+  const activeTargetLanguage = project?.targetLanguage || activeFile?.targetLanguage
   // AQU-602: the target language of the ACTIVE lane. A non-default lane's tag IS
   // its target language, so switching lanes switches what the editor
   // reads/writes/translates into (source stays shared). The completion path was

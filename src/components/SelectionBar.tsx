@@ -20,7 +20,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
+import { clearSelection, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { canPerform } from "@/lib/sync/role-policy"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
@@ -109,7 +109,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
   }, [])
 
   const selectedCells = useMemo(() => {
-    return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED))
+    return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected))
   }, [cellStore, cellStoreVersion, selected])
 
   const missingCount = useMemo(

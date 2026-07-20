@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState, injectSessions } from "../../helpers/auth"
 
 /**
@@ -14,7 +14,7 @@ import { ensureAuthState, injectSessions } from "../../helpers/auth"
  * renders and the dropdown opens.
  */
 test("account switcher dropdown opens with session info", async ({ alice }) => {
-  await alice.goto("/projects")
+  await alice.goto(orgRoute(alice))
   // The AccountSwitcher renders as a button showing the username.
   // Alice is seeded as "alice".
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
@@ -44,7 +44,7 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
     ensureAuthState("bob"),
   ])
 
-  await alice.goto("/projects")
+  await alice.goto(orgRoute(alice))
   await injectSessions(alice, [aliceSession, bobSession], "alice")
 
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })

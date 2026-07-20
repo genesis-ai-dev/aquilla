@@ -1277,13 +1277,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useEffect(() => stopSelectionDrag, [stopSelectionDrag])
 
-  // Grid layout: [left-gutter] [source] [target]. The left 44px gutter holds
-  // only the line number / cell label and the validation pill. There is no
-  // right gutter — the floating action rail (sparkle / mic / tts / comment /
-  // expand) is absolutely positioned at the row's right edge so it doesn't
-  // claim layout space when collapsed. The target column reserves pr-9 so the
-  // ever-present expand chevron never overlaps text.
-  const gridCols = "grid-cols-[44px_1fr_1fr]"
+  // Grid layout: [left-gutter] [source] [select] [target]. The left 44px
+  // gutter holds the line number / cell label and the validation pill. The
+  // narrow select column centers the multi-select control between source and
+  // target. There is no right gutter — the floating action rail is absolutely
+  // positioned at the row's right edge so it doesn't claim layout space when
+  // collapsed. The target column reserves mr-9 so the ever-present expand
+  // chevron never overlaps text.
+  const gridCols = "grid-cols-[44px_1fr_24px_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1713,7 +1714,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2 pl-3">
+          <div aria-hidden="true" />
+          <div className="flex items-center gap-2">
             Target
             {/* AQU-602: the target-language tag doubles as the lane switcher.
                 With >1 lane (and a change handler) it's a dropdown that switches
@@ -1920,7 +1922,7 @@ interface MemoizedRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[44px_1fr_1fr]"
+  gridCols: "grid-cols-[44px_1fr_24px_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2258,7 +2260,7 @@ interface EditorRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[44px_1fr_1fr]"
+  gridCols: "grid-cols-[44px_1fr_24px_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2635,6 +2637,7 @@ function SanitizedRichHtml({ html }: { html: string }) {
 
   return (
     <div
+      className="[&_p]:my-0"
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={innerHtml}
     />
@@ -2849,6 +2852,7 @@ function TargetRichHtml({
 
   return (
     <div
+      className="[&_p]:my-0"
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={innerHtml}
     />
@@ -4451,8 +4455,8 @@ function EditorRow({
         {/* Left gutter — a subtle line number sits to the LEFT of the
             validation circle, both anchored to the top of the card. The number
             is the single issue surface (severity tint + title); no
-            stripe/dot/warning. Selection lives on the source/target divider so
-            range selection follows the text. */}
+            stripe/dot/warning. Multi-select lives in its own center column
+            between source and target. */}
         <div className="flex h-full w-full items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* Validation circle — single bare icon until validated, with a
@@ -4573,10 +4577,13 @@ function EditorRow({
             data-showcase="editor.source"
             ref={sourceColRef}
             className={cn(
-              // The selection control is centered on the physical divider and
-              // protrudes into this column. Reserve enough room for RTL text,
-              // whose first glyph sits against this right edge.
-              "relative flex flex-col pr-4 transition-opacity",
+              // The showcase node IS the text surface so it fills the whole
+              // source column. pr-7 clears the floating pencil.
+              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
+              // Match the target well — same muted fill + ring (not a darker
+              // primary-tinted edit chrome).
+              "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
+              sourceEditing && "bg-muted ring-1 ring-ring/40 ring-inset",
               isSynthBusy && "opacity-70",
             )}
             dir={sourceCellDirection}
@@ -4600,50 +4607,52 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
-              <span>{cell.context}</span>
-              {showFormattingLossWarning && (
-                <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
-                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    formatting
-                  </span>
-                </AppTooltip>
-              )}
-              {/* Source-edit affordance (project_lead+, non-live projects). Emits
-                  source.cell.commit — the template-owner correction that propagates
-                  downstream. Read-only source stays the default; editing is explicit. */}
-              {canEditSource ? (
-                <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
-                  <button
-                    type="button"
-                    aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
-                    aria-pressed={sourceEditing}
-                    onClick={() => setSourceEditing((v) => !v)}
-                    className={cn(
-                      "ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors",
-                      sourceEditing
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                    )}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                </AppTooltip>
-              ) : sourceReadOnlyReason ? (
-                // Force-locked source lane (DCS pin): keep an explained
-                // affordance where the pencil would be instead of letting it
-                // silently vanish (AQU-615 review nit).
-                <AppTooltip content={sourceReadOnlyReason} className="max-w-xs">
-                  <span
-                    aria-label="Source is locked"
-                    className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                  >
-                    <Lock className="h-3 w-3" />
-                  </span>
-                </AppTooltip>
-              ) : null}
-            </div>
+            {/* Source-edit affordance (project_lead+, non-live projects). Emits
+                source.cell.commit — the template-owner correction that propagates
+                downstream. Read-only source stays the default; editing is explicit. */}
+            {canEditSource ? (
+              <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
+                <button
+                  type="button"
+                  aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
+                  aria-pressed={sourceEditing}
+                  onClick={() => setSourceEditing((v) => !v)}
+                  className={cn(
+                    "absolute right-1 top-1 z-10 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors",
+                    sourceEditing
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                  )}
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              </AppTooltip>
+            ) : sourceReadOnlyReason ? (
+              // Force-locked source lane (DCS pin): keep an explained
+              // affordance where the pencil would be instead of letting it
+              // silently vanish (AQU-615 review nit).
+              <AppTooltip content={sourceReadOnlyReason} className="max-w-xs">
+                <span
+                  aria-label="Source is locked"
+                  className="absolute right-1 top-1 z-10 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Lock className="h-3 w-3" />
+                </span>
+              </AppTooltip>
+            ) : null}
+            {(cell.context || showFormattingLossWarning) && (
+              <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
+                <span>{cell.context}</span>
+                {showFormattingLossWarning && (
+                  <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
+                    <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                      <AlertTriangle className="h-2.5 w-2.5" />
+                      formatting
+                    </span>
+                  </AppTooltip>
+                )}
+              </div>
+            )}
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
               <TranslatedEditor
@@ -4653,9 +4662,12 @@ function EditorRow({
                 onCommit={handleSourceCommit}
                 onBlur={() => setSourceEditing(false)}
                 editable
+                // Size to content like the read surface — compactHeight skips
+                // the h-full / min-h-[40px] stretch that was jumping the row.
+                compactHeight
                 ariaLabel="Edit source text"
                 placeholder="Source text…"
-                className="w-full rounded-lg ring-1 ring-primary/30 focus-within:ring-primary/50"
+                className="w-full !px-0"
               />
             ) : (sourceDraft?.valueHtml || cell.originalHtml) ? (
               <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
@@ -4682,19 +4694,9 @@ function EditorRow({
           </div>
         )}
 
-        {/* Target column — TipTap is inline so typing is unchanged. Everything
-            else (waveform, transcript preview, backtranslation, infractions
-            detail) lives in the expansion panel. pr-9 reserves space for the
-            ever-present chevron at the right edge. */}
-        <div
-          data-showcase="editor.target"
-          className={cn(
-            "relative flex flex-col pl-3 pr-9 transition-opacity",
-            isSynthBusy && "opacity-70",
-          )}
-          dir="ltr"
-          style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
-        >
+        {/* Multi-select column — sits in the gutter between source and target
+            with no surface/border of its own so the circle reads as centered. */}
+        <div className="flex items-start justify-center pt-4">
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
               the drag-selection affordance (onPointerDown) uses setSelection()
@@ -4718,8 +4720,8 @@ function EditorRow({
               onPointerDown={onSelectionPointerDown}
               onClick={(e) => e.stopPropagation()}
               className={cn(
-                "absolute left-0 top-8 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border",
-                "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+                "grid h-5 w-5 place-items-center rounded-md border",
+                "touch-none transition-[opacity,transform,color,background-color] duration-150 ease-out",
                 "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
                 isMultiSelected
                   ? "border-transparent bg-primary text-primary-foreground opacity-100"
@@ -4733,126 +4735,139 @@ function EditorRow({
               )}
             </button>
           </AppTooltip>
-          {/* Header lane — mirrors the source column's context line so the
-              target's first text line aligns with the source text, and gives
-              the floating action rail a lane of its own instead of letting it
-              cover the first line of target text. The cast/character label
-              lives here (left side), not squished into the line-number pill. */}
-          <div className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
-            {showCellLabel && (
-              <AppTooltip content={labelText} disabled={!labelText}>
-                <span className="max-w-[60%] truncate">
-                  {labelText}
-                </span>
-              </AppTooltip>
-            )}
-            {cell.aiDrafted && (
-              <Badge
-                variant="outline"
-                className="ml-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
-                aria-label="AI draft — individual human review required"
-              >
-                <Sparkles className="size-2.5" />
-                AI draft · review required
-              </Badge>
-            )}
-          </div>
-          <div className="flex flex-1 flex-col">
-            {/* Target is a cheap read surface at rest. It upgrades to TipTap
-                only for the active cell, which keeps scrolling from mounting
-                dozens of ProseMirror instances. */}
-            <div
-              data-cell-type="target"
-              className={cn(
-                "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
-                hasInlineFootnotes && "min-h-0 py-0.5",
-                "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
-                !visibleTranslated?.trim() && "bg-muted/40",
+        </div>
+
+        {/* Target column — TipTap is inline so typing is unchanged. Everything
+            else (waveform, transcript preview, backtranslation, infractions
+            detail) lives in the expansion panel. The showcase node IS the text
+            surface (mirrors source). mr-9 reserves space for the ever-present
+            chevron at the right edge. */}
+        <div
+          data-showcase="editor.target"
+          data-cell-type="target"
+          className={cn(
+            "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 transition-[colors,opacity]",
+            "mr-9 hover:bg-muted/60",
+            hasInlineFootnotes && "min-h-0 py-0.5",
+            "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
+            !visibleTranslated?.trim() && "bg-muted/40",
+            isSynthBusy && "opacity-70",
+          )}
+          dir="ltr"
+          style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
+        >
+          {(showCellLabel || cell.aiDrafted) && (
+            <div className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
+              {showCellLabel && (
+                <AppTooltip content={labelText} disabled={!labelText}>
+                  <span className="max-w-[60%] truncate">
+                    {labelText}
+                  </span>
+                </AppTooltip>
               )}
+              {cell.aiDrafted && (
+                <Badge
+                  variant="outline"
+                  className="ml-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
+                  aria-label="AI draft — individual human review required"
+                >
+                  <Sparkles className="size-2.5" />
+                  AI draft · review required
+                </Badge>
+              )}
+            </div>
+          )}
+          {/* Target is a cheap read surface at rest. It upgrades to TipTap
+              only for the active cell, which keeps scrolling from mounting
+              dozens of ProseMirror instances. */}
+          {isEditorActive ? (
+            <TranslatedEditor
+              ref={translatedEditorRef}
+              cellId={cell.id}
+              initialPlain={visibleTranslated}
+              initialHtml={visibleTranslatedHtml}
+              onCommit={handleEditorCommit}
+              onFocus={handleEditorFocus}
+              onBlur={handleEditorBlurOuter}
+              onSelectionChange={handleTargetPresenceSelection}
+              textDirection={targetCellDirection}
+              directionMode={targetDirectionMode}
+              lang={project.targetLanguage || undefined}
+              className={cn(
+                "w-full flex-1",
+                showCompletionOverlay && "opacity-30 transition-opacity",
+              )}
+              // Match the read surface metrics — TipTap inherits the column's
+              // font-size / line-height; compactHeight only for footnote rows.
+              compactHeight={hasInlineFootnotes}
+              editable={editable && !isLoading}
+              heldByLabel={lockHolderLabel}
+              infractions={mergedInfractions}
+              ruleSeverity={ruleSeverity}
+              waivedRuleIds={waivedRuleIds}
+              onRuleClick={openInlineRule}
+              audioTimings={cellAudioTimings}
+              audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
+              onSeekToTime={hasAudio ? audioController.seek : undefined}
+              remoteChangedDuringEdit={remoteChangedWhileFocused}
+              onDiscardLocal={handleDiscardLocalAndReload}
+              onNavigateCell={onNavigateCell}
+              terminologyConcepts={terminologyConcepts}
+              onTermChipClick={handleTermChipClick}
+              footnoteNumberOffset={targetFootnoteNumberOffset}
+              showFootnoteTooltips={!footnotePanelActive}
+              onFootnoteHover={(index) => {
+                setActiveFootnoteIndex(index)
+                onFootnoteHoverChange?.(index === null ? null : { cellId: cell.id, index })
+              }}
+              ariaLabel={editorAriaLabel}
+              onEscapeToGrid={onEscapeToGrid}
+            />
+          ) : (
+            <div
+              role="textbox"
+              aria-multiline="true"
+              aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
+              aria-label={editorAriaLabel}
+              data-target-read-view
+              dir={targetCellDirection}
+              lang={project.targetLanguage || undefined}
+              tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
+              className={cn(
+                "relative min-h-[40px] w-full flex-1 whitespace-pre-wrap px-1 py-0.5 text-foreground/90 outline-none",
+                "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
+                showCompletionOverlay && "opacity-30 transition-opacity",
+                !visibleTranslated?.trim() && "text-muted-foreground/60",
+              )}
+              onClick={(event) => {
+                event.stopPropagation()
+                requestTargetEdit()
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return
+                event.preventDefault()
+                event.stopPropagation()
+                requestTargetEdit()
+              }}
             >
-                {isEditorActive ? (
-                  <TranslatedEditor
-                    ref={translatedEditorRef}
-                    cellId={cell.id}
-                    initialPlain={visibleTranslated}
-                    initialHtml={visibleTranslatedHtml}
-                    onCommit={handleEditorCommit}
-                    onFocus={handleEditorFocus}
-                    onBlur={handleEditorBlurOuter}
-                    onSelectionChange={handleTargetPresenceSelection}
-                    textDirection={targetCellDirection}
-                    directionMode={targetDirectionMode}
-                    lang={project.targetLanguage || undefined}
-                    className={cn(
-                      "w-full",
-                      showCompletionOverlay && "opacity-30 transition-opacity",
-                    )}
-                    compactHeight={hasInlineFootnotes}
-                    editable={editable && !isLoading}
-                    heldByLabel={lockHolderLabel}
-                    infractions={mergedInfractions}
-                    ruleSeverity={ruleSeverity}
-                    waivedRuleIds={waivedRuleIds}
-                    onRuleClick={openInlineRule}
-                    audioTimings={cellAudioTimings}
-                    audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
-                    onSeekToTime={hasAudio ? audioController.seek : undefined}
-                    remoteChangedDuringEdit={remoteChangedWhileFocused}
-                    onDiscardLocal={handleDiscardLocalAndReload}
-                    onNavigateCell={onNavigateCell}
-                    terminologyConcepts={terminologyConcepts}
-                    onTermChipClick={handleTermChipClick}
-                    footnoteNumberOffset={targetFootnoteNumberOffset}
-                    showFootnoteTooltips={!footnotePanelActive}
-                    onFootnoteHover={(index) => {
-                      setActiveFootnoteIndex(index)
-                      onFootnoteHoverChange?.(index === null ? null : { cellId: cell.id, index })
-                    }}
-                    ariaLabel={editorAriaLabel}
-                    onEscapeToGrid={onEscapeToGrid}
-                  />
-                ) : (
-                  <div
-                    role="textbox"
-                    aria-multiline="true"
-                    aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
-                    aria-label={editorAriaLabel}
-                    data-target-read-view
-                    dir={targetCellDirection}
-                    lang={project.targetLanguage || undefined}
-                    tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
-                    className={cn(
-                      "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
-                      "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
-                      showCompletionOverlay && "opacity-30 transition-opacity",
-                      !visibleTranslated?.trim() && "text-muted-foreground/60",
-                    )}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      requestTargetEdit()
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return
-                      event.preventDefault()
-                      event.stopPropagation()
-                      requestTargetEdit()
-                    }}
-                  >
-                    <div ref={targetReadContentRef}>
-                      {remoteDraftText !== undefined ? (
-                        <span data-remote-presence-draft>
-                          {remoteDraftText || "\u200b"}
-                        </span>
-                      ) : targetHasRichFormatting && visibleTranslatedHtml ? (
-                        <TargetRichHtml
-                          html={visibleTranslatedHtml}
-                          footnotePanelActive={footnotePanelActive}
-                          footnoteNumberOffset={targetFootnoteNumberOffset}
-                        />
-                      ) : visibleTranslated?.trim() ? (
-                        karaokeReadRange ? (
+              <div ref={targetReadContentRef}>
+                {remoteDraftText !== undefined ? (
+                  <span data-remote-presence-draft>
+                    {remoteDraftText || "\u200b"}
+                  </span>
+                ) : karaokeReadRange ? (
                           <KaraokeReadText text={visibleTranslated} range={karaokeReadRange} />
-                        ) : (
+                        ) : visibleTranslatedHtml?.trim() ? (
+                          // Prefer stored HTML for read — TipTap historically
+                          // committed plain text with `\n\n` between paragraphs,
+                          // which whitespace-pre-wrap renders as double-spaced
+                          // while the editor (real <p>s) looks single-spaced.
+                          <TargetRichHtml
+                            html={visibleTranslatedHtml}
+                            footnotePanelActive={footnotePanelActive}
+                            footnoteNumberOffset={targetFootnoteNumberOffset}
+                          />
+                        ) : visibleTranslated?.trim() ? (
                           <TargetReadText
                             text={visibleTranslated}
                             ranges={targetRanges}
@@ -4862,152 +4877,149 @@ function EditorRow({
                             footnotePanelActive={footnotePanelActive}
                             footnoteNumberOffset={targetFootnoteNumberOffset}
                           />
-                        )
-                      ) : (
-                        <span aria-hidden="true" className="block min-h-[1.6em]" />
-                      )}
-                    </div>
-                    <RemoteTargetPresenceOverlay
-                      contentRef={targetReadContentRef}
-                      peers={remoteCellPresence}
-                    />
-                  </div>
-                )}
-              {/* FRO-204: Terminology chip popover — controlled via termChipState.
-                  Anchored to the chip DOM element that was clicked. Apply is
-                  offered only when the target had a non-empty text selection
-                  at click time (per spec).
-                  We pass a dummy <span/> trigger so TermLookupPopover renders
-                  the popover body; the BaseUI Popover controlled-open + external
-                  anchor positions it on the clicked chip. */}
-              {termChipState && (() => {
-                const concepts = terminologyConcepts
-                const onApply = targetHasSelectionRef.current
-                  ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
-                  : undefined
-                return (
-                  <TermLookupPopover
-                    sourceTerm={termChipState.term}
-                    concepts={concepts}
-                    onApply={onApply}
-                    open
-                    onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
-                    anchor={termChipState.anchor}
-                  >
-                    <span />
-                  </TermLookupPopover>
-                )
-              })()}
-              {/* Streaming preview overlay — visible while the LLM is
-                  running and the target is still empty. Once committed text
-                  is present, the editor becomes the single visible layer even
-                  if completion cleanup is still in flight. */}
-              {showCompletionOverlay && (
-                <div
-                  aria-live="polite"
-                  aria-busy="true"
-                  className="pointer-events-none absolute inset-0 flex"
-                >
-                  {completionPreview ? (
-                    /* Streaming preview flows top-down like normal cell
-                       text — same metrics as TipTap underneath so the
-                       handoff at isLoading=false has no visible jump. */
-                    <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90" dir={targetCellDirection}>
-                      {completionPreview}
-                      <span
-                        aria-hidden
-                        className="ml-0.5 inline-block h-3.5 w-[2px] -mb-0.5 animate-pulse bg-primary/70 align-middle"
-                      />
-                    </p>
-                  ) : (
-                    /* Pre-stream spinner — centered so it doesn't overlap
-                       any existing target text peeking through the dimmed
-                       editor underneath. */
-                    <div className="m-auto flex items-center gap-1.5 rounded-md bg-card px-2.5 py-1 text-muted-foreground">
-                      <Spinner className="size-3.5" aria-hidden />
-                      <span>
-                        {loadingPhase === "searching"
-                          ? "Looking up similar examples…"
-                          : "Generating translation…"}
-                      </span>
-                    </div>
-                  )}
+                        ) : (
+                          <span aria-hidden="true" className="block min-h-[1.6em]" />
+                        )}
+              </div>
+              <RemoteTargetPresenceOverlay
+                contentRef={targetReadContentRef}
+                peers={remoteCellPresence}
+              />
+            </div>
+          )}
+          {/* FRO-204: Terminology chip popover — controlled via termChipState.
+              Anchored to the chip DOM element that was clicked. Apply is
+              offered only when the target had a non-empty text selection
+              at click time (per spec).
+              We pass a dummy <span/> trigger so TermLookupPopover renders
+              the popover body; the BaseUI Popover controlled-open + external
+              anchor positions it on the clicked chip. */}
+          {termChipState && (() => {
+            const concepts = terminologyConcepts
+            const onApply = targetHasSelectionRef.current
+              ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
+              : undefined
+            return (
+              <TermLookupPopover
+                sourceTerm={termChipState.term}
+                concepts={concepts}
+                onApply={onApply}
+                open
+                onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
+                anchor={termChipState.anchor}
+              >
+                <span />
+              </TermLookupPopover>
+            )
+          })()}
+          {/* Streaming preview overlay — visible while the LLM is
+              running and the target is still empty. Once committed text
+              is present, the editor becomes the single visible layer even
+              if completion cleanup is still in flight. */}
+          {showCompletionOverlay && (
+            <div
+              aria-live="polite"
+              aria-busy="true"
+              className="pointer-events-none absolute inset-0 flex"
+            >
+              {completionPreview ? (
+                /* Streaming preview flows top-down like normal cell
+                   text — same metrics as TipTap underneath so the
+                   handoff at isLoading=false has no visible jump. */
+                <p className="whitespace-pre-wrap px-2 py-1 leading-relaxed text-foreground/90" dir={targetCellDirection}>
+                  {completionPreview}
+                  <span
+                    aria-hidden
+                    className="ml-0.5 inline-block h-3.5 w-[2px] -mb-0.5 animate-pulse bg-primary/70 align-middle"
+                  />
+                </p>
+              ) : (
+                /* Pre-stream spinner — centered so it doesn't overlap
+                   any existing target text peeking through the dimmed
+                   editor underneath. */
+                <div className="m-auto flex items-center gap-1.5 rounded-md bg-card px-2.5 py-1 text-muted-foreground">
+                  <Spinner className="size-3.5" aria-hidden />
+                  <span>
+                    {loadingPhase === "searching"
+                      ? "Looking up similar examples…"
+                      : "Generating translation…"}
+                  </span>
                 </div>
               )}
             </div>
-            {hasInlineFootnotes && (
-              <FootnoteInline
-                sourceFootnotes={sourceFootnotes}
-                targetFootnotes={targetFootnotes}
-                editable={editable}
-                isDocx={isDocxFile}
-                onSave={(footnoteIndex, newText) => {
-                  const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
-                  if (updated === null) return false // stale index — keep the editor open (FRO-472)
-                  handleEditorCommit({ value: updated, valueHtml: updated })
-                }}
-                onDelete={(footnoteIndex) => {
-                  const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
-                  handleEditorCommit({ value: updated, valueHtml: updated })
-                }}
-                onCreateTarget={handleCreateTargetFootnote}
-                numberOffset={targetFootnoteNumberOffset}
-                activeFootnoteIndex={activeFootnoteIndex}
-                compact
-              />
-            )}
-            {/* Slice 4: advisory terminology warning band for the copilot
-                completion. Renders nothing when there are no warnings; never
-                blocks accept/commit. */}
-            <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
-            {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
-            {/* FRO-297: polite live region for transient inline feedback that
-                is NOT already assertive (FRO-274 write-failure banners use
-                role="alert" aria-live="assertive" — don't double-announce those).
-                This region announces completion-phase transitions ("Generating…")
-                and other non-critical status changes to screen readers. */}
-            <div
-              aria-live="polite"
-              aria-atomic="true"
-              className="sr-only"
-            >
-              {isLoading && !completionPreview
-                ? (loadingPhase === "searching"
-                    ? `${cellRef}: Looking up similar examples…`
-                    : `${cellRef}: Generating translation…`)
-                : isLoading && completionPreview
-                  ? `${cellRef}: Translation preview available`
-                  : null}
-            </div>
-            {/* FRO-274: write-failure banner — shown when an outbox enqueue
-                fails (IndexedDB unavailable, quota exceeded, etc.). The user
-                must be told immediately so they can copy their text before
-                reloading rather than silently losing it. */}
-            {writeError && (
-              <div
-                role="alert"
-                aria-live="assertive"
-                className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive dark:bg-destructive/20"
-              >
-                <span>{writeError}</span>
-                <Button
-                  type="button"
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label="Dismiss"
-                  onClick={() => setWriteError(null)}
-                  className="shrink-0 text-destructive hover:bg-destructive/20"
-                >
-                  ✕
-                </Button>
-              </div>
-            )}
+          )}
+          {hasInlineFootnotes && (
+            <FootnoteInline
+              sourceFootnotes={sourceFootnotes}
+              targetFootnotes={targetFootnotes}
+              editable={editable}
+              isDocx={isDocxFile}
+              onSave={(footnoteIndex, newText) => {
+                const updated = spliceFootnoteText(visibleTranslated ?? "", footnoteIndex, newText)
+                if (updated === null) return false // stale index — keep the editor open (FRO-472)
+                handleEditorCommit({ value: updated, valueHtml: updated })
+              }}
+              onDelete={(footnoteIndex) => {
+                const updated = deleteFootnote(visibleTranslated ?? "", footnoteIndex)
+                handleEditorCommit({ value: updated, valueHtml: updated })
+              }}
+              onCreateTarget={handleCreateTargetFootnote}
+              numberOffset={targetFootnoteNumberOffset}
+              activeFootnoteIndex={activeFootnoteIndex}
+              compact
+            />
+          )}
+          {/* Slice 4: advisory terminology warning band for the copilot
+              completion. Renders nothing when there are no warnings; never
+              blocks accept/commit. */}
+          <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
+          {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
+          {/* FRO-297: polite live region for transient inline feedback that
+              is NOT already assertive (FRO-274 write-failure banners use
+              role="alert" aria-live="assertive" — don't double-announce those).
+              This region announces completion-phase transitions ("Generating…")
+              and other non-critical status changes to screen readers. */}
+          <div
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only"
+          >
+            {isLoading && !completionPreview
+              ? (loadingPhase === "searching"
+                  ? `${cellRef}: Looking up similar examples…`
+                  : `${cellRef}: Generating translation…`)
+              : isLoading && completionPreview
+                ? `${cellRef}: Translation preview available`
+                : null}
           </div>
+          {/* FRO-274: write-failure banner — shown when an outbox enqueue
+              fails (IndexedDB unavailable, quota exceeded, etc.). The user
+              must be told immediately so they can copy their text before
+              reloading rather than silently losing it. */}
+          {writeError && (
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="mt-1 flex items-start justify-between gap-2 rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive dark:bg-destructive/20"
+            >
+              <span>{writeError}</span>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Dismiss"
+                onClick={() => setWriteError(null)}
+                className="shrink-0 text-destructive hover:bg-destructive/20"
+              >
+                ✕
+              </Button>
+            </div>
+          )}
         </div>
 
-        {/* Floating action rail — anchored to the row's right edge, aligned
-            with the target column's header lane so it never covers the target
-            text. z-20 so it sits above the sticky column header (z-10).
+        {/* Floating action rail — anchored to the row's right edge above the
+            target text surface so it never covers the first line. z-20 so it
+            sits above the sticky column header (z-10).
             Without this, when a row is positioned at the very top of the
             scroll container, the sticky header's stacking context wins (rows
             are position:relative with auto z-index, so the row's local z-10

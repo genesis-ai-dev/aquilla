@@ -7,6 +7,7 @@ import { render, fireEvent, cleanup, act } from "@testing-library/react"
 import {
   TranslatedEditor,
   COMMIT_IDLE_MS,
+  getEditorPlainText,
   isPresenceWordBoundary,
   shouldPublishPresenceDraft,
 } from "./TranslatedEditor"
@@ -14,6 +15,16 @@ import {
 afterEach(cleanup)
 
 describe("TranslatedEditor — plain TipTap commit path", () => {
+  it("serializes paragraphs with a single newline (not TipTap's default blank line)", () => {
+    const editor = {
+      getText: (opts?: { blockSeparator?: string }) => {
+        const sep = opts?.blockSeparator ?? "\n\n"
+        return ["line1", "line2", "line3"].join(sep)
+      },
+    }
+    expect(getEditorPlainText(editor)).toBe("line1\nline2\nline3")
+  })
+
   it("batches live draft presence at two-word checkpoints", () => {
     expect(shouldPublishPresenceDraft("", "one")).toBe(false)
     expect(shouldPublishPresenceDraft("", "one two")).toBe(true)

@@ -36,7 +36,7 @@ test("rules surface returns to editor via sidebar file selection", async ({ alic
     .click()
 
   // URL changes to the editor file route and cells render.
-  await alice.waitForURL(/\/project\/[^/]+\/file\/[^/]+/, { timeout: 10_000 })
+  await alice.waitForURL(/\/project\/[^/]+\/editor\/file\/[^/]+/, { timeout: 10_000 })
   await ws.waitForEditor()
   await expect(alice.getByText("Built-in checks")).not.toBeVisible()
 })

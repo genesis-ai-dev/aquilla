@@ -121,11 +121,11 @@ function SortButton({
     <button
       type="button"
       onClick={() => onSort(colKey)}
-      className={`inline-flex justify-self-start select-none text-left text-xs font-medium uppercase tracking-wide ${
-        active
-          ? "text-foreground"
-          : "text-muted-foreground hover:text-foreground"
-      }`}
+      className={`inline-flex justify-self-start select-none text-left text-xs font-medium ${
+ active
+ ? "text-foreground"
+ : "text-muted-foreground hover:text-foreground"
+ }`}
     >
       {label}
       {indicator}
@@ -430,8 +430,8 @@ export function ProjectsList() {
                 <div className="grid grid-cols-[minmax(0,1fr)_7rem] gap-x-6 border-b bg-muted/30 px-4 py-2">
                   {isAllOrgs ? (
                     <>
-                      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Name</span>
-                      <span className="justify-self-start text-xs font-medium uppercase tracking-wide text-muted-foreground">Role</span>
+                      <span className="text-xs font-medium text-muted-foreground">Name</span>
+                      <span className="justify-self-start text-xs font-medium text-muted-foreground">Role</span>
                     </>
                   ) : (
                     <>

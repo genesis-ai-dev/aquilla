@@ -35,8 +35,8 @@ vi.mock("./LanguageBlitz", () => ({
   LanguageMarquee: () => null,
 }))
 
-vi.mock("@/components/HealthRing", () => ({
-  HealthRing: () => null,
+vi.mock("@/components/Gauge", () => ({
+  Gauge: () => null,
 }))
 
 // CSS import — no-op in tests.

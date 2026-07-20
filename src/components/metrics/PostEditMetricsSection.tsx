@@ -321,7 +321,7 @@ export function PostEditMetricsSection({
 
               {/* Weekly trend chart */}
               <div className="mt-4">
-                <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <h4 className="text-xs font-medium text-muted-foreground">
                   Weekly trend
                   {activeUser && (
                     <span className="ml-1 normal-case font-normal">
@@ -347,7 +347,7 @@ export function PostEditMetricsSection({
               {/* By-user table */}
               {metrics.byUser.length > 0 && (
                 <div className="mt-5">
-                  <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <h4 className="text-xs font-medium text-muted-foreground">
                     By reviewer
                     <span className="ml-1 normal-case font-normal text-muted-foreground">
                       (click a row to filter the trend above)

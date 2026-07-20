@@ -231,7 +231,7 @@ function FootnoteSurfaceHeader({
 }) {
   return (
     <div className={cn("flex items-center gap-1.5", className)}>
-      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      <span className="text-xs text-muted-foreground">
         {title}
       </span>
       {typeof count === "number" && count > 0 && (

@@ -7,7 +7,7 @@ import {
 } from "@legendapp/list/react"
 import DOMPurify from "dompurify"
 import {
-  Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
+  Check, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, NotebookPen, Info, Pencil, Lock, ChevronRight, ChevronDown, Music, Braces,
 } from "lucide-react"
@@ -40,7 +40,7 @@ import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
-import { HealthRing } from "./HealthRing"
+import { StatusPie, isFullValidationStatus, validationPieTone, validationProgress, validationProgressAfterClick, validationProgressAfterUnvalidate } from "./StatusPie"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
@@ -69,14 +69,13 @@ import {
   useIsSelected,
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -390,7 +389,7 @@ function ValidationHistoryTimeline({
   return (
     <>
       <div className="my-1 h-px bg-border" />
-      <div className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">History</div>
+      <div className="mb-1 px-1 text-xs text-muted-foreground">History</div>
       <ul className="space-y-0.5">
         {historical.map((entry, i) => {
           const snippet = typeof entry.value === "string"
@@ -1501,7 +1500,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         className={cn("relative", untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70")}
       >
         {untimedInTimeLens && (
-          <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+          <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             no timing
           </span>
         )}
@@ -1697,7 +1696,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             />
           </div>
         )}
-        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
           <div aria-hidden="true" />
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
@@ -2437,7 +2436,7 @@ function UsfmNoteChip({
   const tooltipContent = (
     <div className="max-w-72 text-xs">
       <div className="mb-0.5 flex items-center gap-1.5">
-        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{kindLabel}</span>
+        <span className="text-[9px] font-medium text-muted-foreground">{kindLabel}</span>
         {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
       </div>
       <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
@@ -3874,7 +3873,9 @@ function EditorRow({
   const showFormattingLossWarning =
     sourceHasFormatting && !targetHasFormatting && visibleTranslated.trim().length > 0
 
-  const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
+  // Ring + expansion use server confidence only — validated status is the icon,
+  // not a synthetic 100% ring (AD-14: absence of the marker is silence).
+  const healthValue = health ?? 0
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
@@ -3968,7 +3969,6 @@ function EditorRow({
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
   }, [cell, rowSession, project.id, project.targetLanguage])
 
-  const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const authoritativeSelfValidated = cell.activeValidators.includes(username)
   const [optimisticSelfValidation, setOptimisticSelfValidation] = useState<boolean | null>(null)
   useEffect(() => {
@@ -3994,51 +3994,21 @@ function EditorRow({
       : cell.validationStatus
   const hasValidatorInfo = displayedValidators.length > 0 || cell.validationHistory.length > 1
 
-  // Gate Base UI's auto-toggle: clicks on an unvalidated cell should validate
-  // (not open the popover), and hovers should only open when there's actually
-  // something to show. Everything else passes through to the default behavior,
-  // including outside-press / escape-key closes.
-  function handleOpenChange(
-    nextOpen: boolean,
-    details: { reason: string; cancel(): void },
-  ) {
-    if (!nextOpen) {
-      setValidationPopoverOpen(false)
-      return
-    }
-    // "keyboard" fires when activated via Space/Enter; "trigger-press" fires
-    // on pointer press. The trigger button's own click handler performs the
-    // validation, so the popover only needs to stay closed on first touch.
-    if (details.reason === "trigger-press" || details.reason === "keyboard") {
-      if (canValidate && !isSelfValidated) {
-        details.cancel()
-        return
-      }
-      setValidationPopoverOpen(true)
-      return
-    }
-    if (details.reason === "trigger-hover" && !hasValidatorInfo) {
-      details.cancel()
-      return
-    }
-    setValidationPopoverOpen(true)
-  }
+  const validationPieProgress = validationProgress(
+    displayedValidators.length,
+    validationRequirement,
+  )
+  const pieTone = validationPieTone(vs)
+  const validationComplete = isFullValidationStatus(vs)
+  const validationHoverPreview = canValidate
+    ? isSelfValidated
+      ? validationProgressAfterUnvalidate(displayedValidators.length, validationRequirement)
+      : validationProgressAfterClick(displayedValidators.length, validationRequirement)
+    : null
 
-  // "others" now uses a filled Circle (lucide has no dedicated filled-circle
-  // icon; we render Circle with fill="currentColor"). Matches codex-editor
-  // desktop AudioValidationStatusIcon's circle-filled codicon.
-  // full-self = fully validated and current user is one of the validators (double-check, green)
-  // full-others = fully validated but current user has NOT validated (double-check, green)
-  const ValidationIcon =
-    vs === "full-self" || vs === "full-others" ? CheckCheck :
-    vs === "self" ? Check :
-    Circle
-  const validationColorClass =
-    vs === "full-self" ? "text-green-500" :
-    vs === "full-others" ? "text-green-500" :
-    vs === "self" ? "text-green-500" :
-    vs === "others" ? "text-muted-foreground/60" :
-    "text-muted-foreground/30"
+  const toggleMyValidation = useCallback(() => {
+    emitValidationChange(!isSelfValidated)
+  }, [emitValidationChange, isSelfValidated])
 
   const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
@@ -4312,10 +4282,36 @@ function EditorRow({
   const cellRef = cell.context?.trim()
     || cell.globalReferences?.[0]?.trim()
     || `row ${rowIndex + 1}`
-  const validationTooltip = canValidate ? "Not validated — click to validate" : "Validation unavailable"
-  type PreventableReactEvent<T> = React.SyntheticEvent<T> & {
-    preventBaseUIHandler?: () => void
-  }
+  const validationHoverContent = useMemo(() => {
+    if (!hasValidatorInfo) return null
+    return (
+      <div className="space-y-2 text-left">
+        <div>
+          <p className="mb-1 text-xs text-muted-foreground">
+            Validated by
+          </p>
+          <ul className="space-y-0.5">
+            {displayedValidators.length === 0 ? (
+              <li className="text-xs text-muted-foreground">No active validators</li>
+            ) : (
+              displayedValidators.map((v) => (
+                <li key={v} className="truncate text-xs">
+                  {v}
+                  {v === username ? " (you)" : ""}
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+        {cell.validationHistory.length > 0 && (
+          <ValidationHistoryTimeline
+            entries={cell.validationHistory}
+            currentUsername={username}
+          />
+        )}
+      </div>
+    )
+  }, [hasValidatorInfo, displayedValidators, username, cell.validationHistory])
   const renderValidationButton = (onClick?: () => void) => (
     <Button
       type="button"
@@ -4332,38 +4328,28 @@ function EditorRow({
             ? `Validated by others — ${cellRef}. Click to add your validation.`
             : `Not validated — ${cellRef}. Click to validate.`
       }
-      onClick={(e) => {
-        if (!onClick) return
-        onClick()
-        ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
+      onClick={() => {
+        onClick?.()
       }}
       onKeyDown={(e) => {
         if (!onClick || (e.key !== " " && e.key !== "Enter")) return
         e.preventDefault()
         e.stopPropagation()
         onClick()
-        ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
       }}
       className={cn(
-        "relative rounded-full",
-        validationColorClass,
-        vs === "none" && "hover:text-green-500",
-        vs === "others" && "hover:text-green-500",
-        vs === "full-others" && "hover:text-green-500",
+        "group/validate size-6 shrink-0 rounded-md p-0",
+        "hover:bg-transparent active:bg-transparent aria-expanded:bg-transparent",
+        "hover:!bg-transparent active:!bg-transparent",
       )}
       disabled={!canValidate}
     >
-      <HealthRing
-        health={healthValue}
-        size={22}
-        strokeWidth={2}
+      <StatusPie
+        progress={validationPieProgress}
+        tone={pieTone}
+        complete={validationComplete}
+        hoverPreviewProgress={validationHoverPreview}
         className="pointer-events-none"
-        style={{ position: "absolute", inset: 0, margin: "auto" }}
-      />
-      <ValidationIcon
-        className="relative size-3.5"
-        strokeWidth={2.5}
-        {...(vs === "others" ? { fill: "currentColor" } : {})}
       />
     </Button>
   )
@@ -4453,68 +4439,17 @@ function EditorRow({
             in its own center column between source and target. */}
         <div className="flex h-full w-full items-start justify-center gap-1 pt-1.5">
           {numberPill}
-          {/* Validation circle — single bare icon until validated, with a
-              health ring appearing around it once there's a substantive score. */}
-          {hasContent && hasValidatorInfo && (
-            <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
-              <PopoverTrigger
-                openOnHover
-                delay={400}
-                closeDelay={100}
-                render={renderValidationButton(
-                  canValidate && !isSelfValidated
-                    ? () => emitValidationChange(true)
-                    : undefined,
-                )}
-              />
-              {vs !== "empty" && (
-                <PopoverContent
-                  side="right"
-                  align="start"
-                  className="w-72 rounded-xl p-2"
-                >
-                  <ul className="space-y-0.5">
-                    <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Validated by
-                    </li>
-                    {displayedValidators.length === 0 ? (
-                      <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
-                    ) : (
-                      displayedValidators.map((v) => (
-                        <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
-                          <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
-                          {v === username && canValidate && (
-                            <AppTooltip content="Remove your validation">
-                              <button
-                                type="button"
-                                aria-label="Remove your validation"
-                                className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                                onClick={() => {
-                                  emitValidationChange(false)
-                                  setValidationPopoverOpen(false)
-                                }}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </button>
-                            </AppTooltip>
-                          )}
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                  {cell.validationHistory.length > 0 && (
-                    <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
-                  )}
-                </PopoverContent>
-              )}
-            </Popover>
-          )}
-          {hasContent && !hasValidatorInfo && (
-            <AppTooltip content={validationTooltip}>
+          {/* Validation — Linear-style pie tile + center icon (quorum progress). */}
+          {hasContent && (
+            <AppTooltip
+              content={validationHoverContent}
+              disabled={!validationHoverContent}
+              side="right"
+              delay={400}
+              className="block max-w-72 w-72 p-2 text-left shadow-md"
+            >
               {renderValidationButton(
-                canValidate && !isSelfValidated
-                  ? () => emitValidationChange(true)
-                  : undefined,
+                canValidate ? toggleMyValidation : undefined,
               )}
             </AppTooltip>
           )}
@@ -5282,7 +5217,9 @@ function EditorRow({
                   <p>
                     <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
                     {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · support{" "}
-                    <span className="font-medium text-foreground">{healthValue}%</span>
+                    <span className="font-medium text-foreground">
+                      {health !== undefined ? `${healthValue}%` : "—"}
+                    </span>
                   </p>
                   <p>
                     {cellNeedsAttention
@@ -5487,7 +5424,7 @@ function EditorRow({
                         type="button"
                         onClick={() => setBtStatsOpen((v) => !v)}
                         aria-expanded={btStatsOpen}
-                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                       >
                         <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btStatsOpen && "rotate-90")} />
                         Statistical gloss
@@ -5518,7 +5455,7 @@ function EditorRow({
                         type="button"
                         onClick={() => setBtAlignmentOpen((v) => !v)}
                         aria-expanded={btAlignmentOpen}
-                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                        className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
                       >
                         <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", btAlignmentOpen && "rotate-90")} />
                         Alignment
@@ -5810,7 +5747,7 @@ function EditorRow({
                       })}
                       {waivedInfractions.length > 0 && (
                         <>
-                          <div className="mt-2 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="mt-2 px-1 text-xs text-muted-foreground">
                             Waived
                           </div>
                           {waivedInfractions.map((inf) => {

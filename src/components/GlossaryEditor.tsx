@@ -424,7 +424,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
       ) : (
         <>
       {/* Column headers */}
-      <div className="flex items-center gap-3 border-b bg-muted/40 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="flex items-center gap-3 border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
         <span className="w-4" />
         <span className="flex-1">Source</span>
         <span className="flex-1">Rendering</span>

@@ -600,7 +600,7 @@ export function ExportDialog({
         <DialogBody className="flex flex-col gap-4">
         {/* Format selector */}
         <fieldset className="flex flex-col gap-1.5 min-w-0">
-          <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+          <legend className="text-xs font-medium text-muted-foreground mb-1.5">
             Format
           </legend>
           <RadioGroup
@@ -635,7 +635,7 @@ export function ExportDialog({
                     {f.label}
                     <span className="text-xs text-muted-foreground font-normal font-mono">{f.ext}</span>
                     {f.lossy && (
-                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider">
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold ">
                         lossy
                       </span>
                     )}
@@ -649,7 +649,7 @@ export function ExportDialog({
 
         {/* Scope selector */}
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+          <legend className="text-xs font-medium text-muted-foreground mb-1.5">
             Scope
           </legend>
           <SegmentTabs<ExportScope>
@@ -712,7 +712,7 @@ export function ExportDialog({
         {/* AQU-439: Voice filter — only shown when cells have cast assignments */}
         {distinctVoices.length > 0 && (
           <fieldset className="flex flex-col gap-1.5">
-            <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+            <legend className="text-xs font-medium text-muted-foreground mb-1.5">
               Voice
             </legend>
             <select
@@ -736,7 +736,7 @@ export function ExportDialog({
 
         {/* AQU-437: Filename control — editable base name + optional suffixes */}
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+          <legend className="text-xs font-medium text-muted-foreground mb-1.5">
             Filename
           </legend>
           <div className="flex flex-col gap-2">
@@ -778,7 +778,7 @@ export function ExportDialog({
           const preview = previewAudioByCharacter(cells, ttsSettings)
           return (
           <div className="flex flex-col gap-1 text-xs">
-            <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Preview</p>
+            <p className="font-medium text-muted-foreground text-[10px]">Preview</p>
             {preview.length === 0 ? (
               <p className="text-muted-foreground">No cells with audio found in this file.</p>
             ) : (
@@ -826,7 +826,7 @@ export function ExportDialog({
           onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
           className="group"
         >
-          <summary className="cursor-pointer text-xs font-medium text-muted-foreground uppercase tracking-wide select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
             <span
               className={
                 "inline-block transition-transform " +
@@ -864,7 +864,7 @@ export function ExportDialog({
                 <span className="text-sm font-medium leading-tight flex items-baseline gap-1.5 flex-wrap">
                   Plain-text dump
                   <span className="text-xs text-muted-foreground font-normal font-mono">.txt</span>
-                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider">
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold ">
                     lossy
                   </span>
                 </span>

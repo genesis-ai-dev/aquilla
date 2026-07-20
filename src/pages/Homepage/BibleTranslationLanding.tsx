@@ -1,7 +1,7 @@
 import { Component, type ReactNode, useEffect, useRef, useState } from "react"
 import { useBrand } from "@/branding/use-brand"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
-import { HealthRing } from "@/components/HealthRing"
+import { Gauge } from "@/components/Gauge"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { MultimodalWorkspace } from "./MultimodalWorkspaceBT"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitzBT"
@@ -260,7 +260,7 @@ export function BibleTranslationLanding() {
                   { l: "Luke 15", s: "drafting", h: 34 },
                 ].map((c) => (
                   <div className="aq-health-item" key={c.l}>
-                    <HealthRing health={c.h} size={34} strokeWidth={3.5} />
+                    <Gauge value={c.h} sizePx={34} strokeWidth={3.5} />
                     <div>
                       <div className="aq-hi-label">{c.l}</div>
                       <div className="aq-hi-sub">{c.s}</div>
@@ -275,7 +275,7 @@ export function BibleTranslationLanding() {
                   { ref: "Psalm 96:5", h: 52 },
                 ].map((d) => (
                   <div key={d.ref} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", fontSize: 13.5, color: "var(--aq-dim)" }}>
-                    <HealthRing health={d.h} size={15} strokeWidth={2.2} />
+                    <Gauge value={d.h} sizePx={15} strokeWidth={2.2} />
                     <span className="aq-mono">{d.ref}</span>
                     <span style={{ marginLeft: "auto", color: "var(--aq-faint)" }}>jump →</span>
                   </div>

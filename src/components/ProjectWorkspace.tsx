@@ -4103,7 +4103,7 @@ export function ProjectWorkspace() {
                         render={
                           <button
                             onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
                           />
                         }
                       >
@@ -4260,7 +4260,7 @@ export function ProjectWorkspace() {
                   type="button"
                   onClick={() => void runCheck()}
                   disabled={checkRunning}
-                  className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
+                  className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
                   aria-label="Check file"
                   data-testid="check-file-button"
                 >

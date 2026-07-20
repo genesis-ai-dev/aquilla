@@ -346,7 +346,7 @@ export function ProjectTable({
     <div data-testid="project-table" className="@container/project-table overflow-hidden">
       <div className="w-full">
         <div
-          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm`}
+          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium text-muted-foreground backdrop-blur-sm`}
         >
           <span
             className={cn(

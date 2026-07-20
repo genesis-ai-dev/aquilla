@@ -151,7 +151,7 @@ function HistoryList({
   }
   return (
     <div className="max-h-80 overflow-y-auto">
-      <div className="px-2 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="px-2 py-1.5 text-xs text-muted-foreground">
         {direction === "back" ? "Back" : "Forward"}
       </div>
       <ul className="flex flex-col">

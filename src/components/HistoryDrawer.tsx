@@ -222,7 +222,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                 </button>
               </p>
             )}
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            <p className="text-[10px] text-muted-foreground">
               {groups.length} significant {groups.length === 1 ? "revision" : "revisions"}
               {hiddenCount > 0 && (
                 <span className="ml-1 normal-case text-muted-foreground/70">
@@ -335,7 +335,7 @@ function GroupItem({
           </AppTooltip>
         )}
         {hasSubEntries && (
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
             +{group.entries.length - 1} minor edit{group.entries.length - 1 !== 1 ? "s" : ""}
           </span>
         )}

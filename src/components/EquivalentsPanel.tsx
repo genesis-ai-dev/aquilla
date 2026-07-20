@@ -69,7 +69,7 @@ function ConfidenceChip({ confidence }: { confidence: EquivalentConfidence }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ",
         confidence === "HIGH" &&
           "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
         confidence === "AMBER" &&
@@ -200,7 +200,7 @@ export function EquivalentsPanel({
       <section className="rounded-lg border bg-card p-3">
         <header className="mb-2 flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+          <h3 className="text-xs font-semibold text-foreground">
             Managed
           </h3>
           <span className="text-[10px] text-muted-foreground">(your decisions)</span>
@@ -222,7 +222,7 @@ export function EquivalentsPanel({
       <section className="rounded-lg border border-dashed border-amber-300/60 bg-amber-50/30 p-3 dark:border-amber-800/40 dark:bg-amber-950/10">
         <header className="mb-2 flex items-center gap-1.5">
           <Sparkles className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+          <h3 className="text-xs font-semibold text-foreground">
             AI-assumed
           </h3>
           <span className="text-[10px] text-muted-foreground">(predicted)</span>

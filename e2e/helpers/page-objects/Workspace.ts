@@ -211,12 +211,6 @@ export class Workspace {
     await row.hover()
     await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
     await validationButton.click()
-
-    const removeButton = this.page.locator(
-      '[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]',
-    )
-    await expect(removeButton).toBeVisible({ timeout: 8_000 })
-    await removeButton.click()
     await expect(validationButton).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
   }
 

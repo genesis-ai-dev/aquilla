@@ -399,7 +399,7 @@ function ImmutableBody({
         </p>
       </div>
       <div className="border-t pt-1">
-        <p className="px-1 pb-1 text-[10px] font-medium text-muted-foreground">
+        <p className="px-1 pb-1 text-xs text-muted-foreground">
           Set a project-level exception (direct grant)…
         </p>
         <div className="space-y-0.5">

@@ -45,7 +45,7 @@ export function PreAcceptanceWarningBand({ warnings, className }: PreAcceptanceW
         className,
       )}
     >
-      <span className="text-[11px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300">
+      <span className="text-[11px] font-medium text-amber-700 dark:text-amber-300">
         Terminology advisory
       </span>
       <ul className="flex flex-col gap-1">

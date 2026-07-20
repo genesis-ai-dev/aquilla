@@ -135,7 +135,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
               isUsfm ? usfmDisplayText(original) : original
             return (
             <div key={ri} className="p-3">
-              <p className="mb-2 text-xs font-semibold text-foreground/80 uppercase tracking-wide">
+              <p className="mb-2 text-xs font-semibold text-foreground/80 ">
                 {r.name}
                 <span className="ml-2 font-normal normal-case text-muted-foreground">
                   {r.strings.length.toLocaleString()} cells

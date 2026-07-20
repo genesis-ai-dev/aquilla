@@ -156,7 +156,7 @@ export function ExpandableFileList({
             return (
               <div key={group.label}>
                 {showHeader && (
-                  <div className="group/corpus flex items-center gap-1 px-1 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <div className="group/corpus flex items-center gap-1 px-1 pb-1 text-[10px] text-muted-foreground">
                     <button
                       type="button"
                       className="flex flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-left transition-colors hover:text-foreground"

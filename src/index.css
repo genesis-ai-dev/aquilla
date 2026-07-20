@@ -71,6 +71,9 @@
     --shadow-lg: var(--shadow-soft-lg);
     --shadow-xl: var(--shadow-soft-lg);
     --shadow-2xl: var(--shadow-soft-lg);
+
+    --animate-gauge_fadeIn: gauge_fadeIn 1s ease forwards;
+    --animate-gauge_fill: gauge_fill 1s ease forwards;
 }
 
 @layer base {
@@ -467,4 +470,14 @@
         background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 14%, transparent); }
   80% { box-shadow: inset 0 0 0 2px var(--color-primary, oklch(0.65 0.2 250));
         background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 8%, transparent); }
+}
+
+/* Vercel gauge (papermark/gauge-demo) — retrieval support rings */
+@keyframes gauge_fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes gauge_fill {
+  from { stroke-dashoffset: 332; opacity: 0; }
+  to { opacity: 1; }
 }

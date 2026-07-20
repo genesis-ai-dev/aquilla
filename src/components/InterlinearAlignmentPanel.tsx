@@ -246,7 +246,7 @@ export function InterlinearAlignmentPanel({
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-1">
           {/* AQU-241: legend/help tooltip for the Alignment section */}
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="text-xs font-medium text-muted-foreground">
             Alignment
           </span>
           <AppTooltip
@@ -272,7 +272,7 @@ export function InterlinearAlignmentPanel({
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1">
         {/* AQU-241: legend/help tooltip for the Alignment section (AQU-240: explains ✓/✕ controls) */}
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="text-xs font-medium text-muted-foreground">
           Alignment
         </span>
         <AppTooltip

@@ -325,7 +325,7 @@ function MemberScopesEditor({
       </p>
       {config.lanes.length > 0 && (
         <fieldset className="mb-2">
-          <legend className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <legend className="mb-1 text-[10px] text-muted-foreground">
             Lanes
           </legend>
           <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -344,7 +344,7 @@ function MemberScopesEditor({
       )}
       {config.files.length > 0 && (
         <fieldset className="mb-2">
-          <legend className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <legend className="mb-1 text-[10px] text-muted-foreground">
             Files
           </legend>
           <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
@@ -392,10 +392,10 @@ function LastActiveChip({ lastActiveAt }: { lastActiveAt: string | null | undefi
     >
       <span
         className={`rounded px-1.5 py-0.5 text-[10px] ${
-          stale
-            ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-            : "bg-muted text-muted-foreground"
-        }`}
+ stale
+ ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+ : "bg-muted text-muted-foreground"
+ }`}
       >
         {stale ? "stale · " : ""}
         {label}

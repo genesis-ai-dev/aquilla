@@ -317,7 +317,7 @@ function AutofixEditor({ rule, onUpdate, disabled = false }: { rule: Translation
 
   return (
     <div className="mt-3 space-y-2 border-t pt-3">
-      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Saved autofix (regex)</p>
+      <p className="text-xs text-muted-foreground">Saved autofix (regex)</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Input data-autofix-field="pattern" placeholder="Pattern" value={pattern} onChange={(e) => setPattern(e.target.value)} disabled={disabled} />
         <Input placeholder="Replacement" value={replacement} onChange={(e) => setReplacement(e.target.value)} disabled={disabled} />

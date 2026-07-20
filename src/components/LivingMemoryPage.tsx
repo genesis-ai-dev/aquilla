@@ -129,7 +129,7 @@ function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
         {/* Reference label */}
         {cell.group && (
           <span
-            className="text-[10px] font-mono text-muted-foreground/80 leading-none tracking-wide"
+            className="text-[10px] font-mono text-muted-foreground/80 leading-none"
             aria-label={`Reference: ${cell.group}`}
           >
             {cell.group}
@@ -176,7 +176,7 @@ function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
 
 function FileGroupHeading({ fileName }: { fileName: string }) {
   return (
-    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-6 mb-2 px-0.5 first:mt-0 flex items-center gap-2">
+    <h3 className="text-xs font-semibold text-muted-foreground mt-6 mb-2 px-0.5 first:mt-0 flex items-center gap-2">
       <span className="flex-1 truncate">{fileName}</span>
     </h3>
   )
@@ -316,7 +316,7 @@ function AuthoredEntriesSection({
   return (
     <section aria-label={title} className="mb-8">
       <div className="flex items-center gap-2 mb-1">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex-1">
+        <h2 className="text-xs font-semibold text-muted-foreground flex-1">
           {title}
         </h2>
         {canEdit && !adding && (
@@ -671,7 +671,7 @@ export function LivingMemoryPage() {
         {/* Recent Examples */}
         <section aria-label="Recent Examples" className="mb-8">
           <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            <h2 className="text-xs font-semibold text-muted-foreground">
               Recent Examples
             </h2>
           </div>

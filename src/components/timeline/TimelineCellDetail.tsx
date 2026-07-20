@@ -72,7 +72,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget }: TimelineC
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-border bg-card p-2.5">
-          <div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="mb-1 text-[9px] font-semibold text-muted-foreground">
             Source{isDialogue ? " · dialogue" : ""}
           </div>
           <div data-testid="tl-detail-source" className="text-sm leading-snug text-foreground">
@@ -80,7 +80,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget }: TimelineC
           </div>
         </div>
         <div className="rounded-lg border border-border bg-card p-2.5">
-          <div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="mb-1 text-[9px] font-semibold text-muted-foreground">
             Target
           </div>
           <textarea

@@ -148,7 +148,7 @@ export function CellWaveform({
         <button
           type="button"
           onClick={handleLoadClick}
-          className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
+          className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl text-xs text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
         >
           <Download className="h-3 w-3" />
           <span>Load waveform</span>

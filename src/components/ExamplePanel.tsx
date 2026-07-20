@@ -36,7 +36,7 @@ export function ExamplePanel({
           sideOffset={6}
           className="w-80 space-y-2 p-3 text-xs"
         >
-          <div className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
+          <div className="font-medium text-muted-foreground text-[10px]">
             Translation Examples
           </div>
           {examples.map((ex, i) => {
@@ -49,7 +49,7 @@ export function ExamplePanel({
                 className="rounded border-l-2 bg-muted/30 p-2 space-y-1"
                 style={{ borderLeftColor: EXAMPLE_COLORS[colorIndex] }}
               >
-                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                <div className="text-xs text-muted-foreground/70">
                   Source
                 </div>
                 <div className="text-muted-foreground">
@@ -58,7 +58,7 @@ export function ExamplePanel({
                     highlights={matched.map((t) => ({ token: t, colorIndex }))}
                   />
                 </div>
-                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70 mt-1">
+                <div className="text-xs text-muted-foreground/70 mt-1">
                   Target
                 </div>
                 <div className="font-medium">{ex.target}</div>

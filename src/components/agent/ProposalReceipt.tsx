@@ -116,7 +116,7 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
               <button
                 type="button"
                 onClick={onUndo}
-                className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+                className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
               >
                 <Undo2 className="h-3 w-3" />
                 Undo applied

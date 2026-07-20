@@ -184,7 +184,7 @@ function SearchResultContent({ result }: { result: WorkspaceSearchResult }) {
           {result.fileName || result.fileId}
         </span>
         <span
-          className="shrink-0 text-[9px] font-semibold text-muted-foreground/50 uppercase tracking-widest"
+          className="shrink-0 text-[9px] font-semibold text-muted-foreground/50 "
           aria-hidden="true"
         >
           {columnLabel}
@@ -590,7 +590,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
 
           {mode === "replace" && (
             <div className="flex flex-col gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3">
-              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="text-xs font-medium text-muted-foreground">
                 Replace (target cells only)
               </div>
               <ReplaceSection

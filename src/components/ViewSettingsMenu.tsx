@@ -198,7 +198,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               {onFootnoteViewModeChange && (
                 <>
                   <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
-                  <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <div className="px-2 py-1 text-xs text-muted-foreground">
                     Footnotes
                   </div>
                   <FootnoteModeItem
@@ -222,7 +222,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 </>
               )}
               <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
-              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="px-2 py-1 text-xs text-muted-foreground">
                 Text Direction
               </div>
               <DirectionModeRow
@@ -242,7 +242,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 onChange={onTargetDirectionModeChange}
               />
               <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
-              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="px-2 py-1 text-xs text-muted-foreground">
                 Font Size
               </div>
               {/* Plain rows (not Menu.Item) so stepping the size doesn't close

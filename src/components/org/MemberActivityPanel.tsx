@@ -90,7 +90,7 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <h4 className="mb-2 text-xs font-semibold text-muted-foreground">
               Files worked on
             </h4>
             {fileRollup.length === 0 ? (
@@ -110,7 +110,7 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
           </div>
 
           <div>
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <h4 className="mb-2 text-xs font-semibold text-muted-foreground">
               Recent actions
             </h4>
             {events.length === 0 ? (

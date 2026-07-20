@@ -837,7 +837,7 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
 function ImportSection({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-2">
-      <h3 className="px-0.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">{label}</h3>
+      <h3 className="px-0.5 text-xs font-medium text-muted-foreground/70">{label}</h3>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{children}</div>
     </div>
   )
@@ -875,7 +875,7 @@ function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
       </ImportSection>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="px-0.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">Specialized</h3>
+          <h3 className="px-0.5 text-xs font-medium text-muted-foreground/70">Specialized</h3>
           <InputGroup className="h-7 w-44">
             <InputGroupAddon>
               <Search className="text-muted-foreground/60" />

@@ -103,7 +103,7 @@ function ConceptPanel({ concept, onApply }: ConceptPanelProps) {
   return (
     <div className="space-y-2">
       {/* Headword */}
-      <p className="text-xs font-semibold tracking-wide text-foreground">
+      <p className="text-xs font-semibold text-foreground">
         {concept.sourceTerm}
       </p>
 

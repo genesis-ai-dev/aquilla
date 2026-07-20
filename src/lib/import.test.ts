@@ -11,6 +11,7 @@ interface CapturedBody {
   fileId: string
   file?: { name: string; role?: string; kind?: string }
   cells: Array<{ id: string; cellId: string; anchorCellId: string | null; value: string }>
+  complete?: boolean
 }
 
 let captured: CapturedBody[]
@@ -56,8 +57,11 @@ describe("import — bulk upload", () => {
     )
 
     expect(ref.cellCount).toBe(3)
-    // 3 cells < one chunk → a single request.
-    expect(captured).toHaveLength(1)
+    // 3 cells < one chunk → a single cell-carrying request, followed by the
+    // required empty finalize request (counter/progress rebuild).
+    expect(captured).toHaveLength(2)
+    expect(captured[1].complete).toBe(true)
+    expect(captured[1].cells).toHaveLength(0)
     const body = captured[0]
     expect(body.projectId).toBe("p-1")
     expect(body.fileId).toBe(ref.id)
@@ -79,7 +83,9 @@ describe("import — bulk upload", () => {
 
     expect(refs).toHaveLength(1)
     expect(refs[0].cellCount).toBeGreaterThan(0)
-    expect(captured).toHaveLength(1)
+    // One cell-carrying chunk + the trailing finalize request.
+    expect(captured).toHaveLength(2)
+    expect(captured[1].complete).toBe(true)
     expect(captured[0].file?.name).toBe("notes.txt")
     expect(captured[0].cells.length).toBe(refs[0].cellCount)
   })

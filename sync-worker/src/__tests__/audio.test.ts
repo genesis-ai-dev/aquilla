@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
-import { handleAudioRequest, audioObjectKey } from "../audio"
+import { handleAudioRequest, audioObjectKey, MAX_AUDIO_BYTES } from "../audio"
 import { handleAdminRequest } from "../admin"
 import type { SyncTokenClaims } from "../auth"
 
@@ -228,6 +228,45 @@ describe("audio R2 endpoints", () => {
       env as unknown as Parameters<typeof handleAudioRequest>[1],
     )) as Response
     expect(res.status).toBe(401)
+  })
+
+  // Oversized uploads must fail with a clean 413 (not an opaque 500) — a
+  // tester's large mp3 was "basically unusable" because the raw arrayBuffer
+  // read blew up with no explanation. Mirrors source-upload-route.ts.
+  it("PUT rejects a body over MAX_AUDIO_BYTES with 413", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/huge.mp3", {
+        method: "PUT",
+        body: new Uint8Array(MAX_AUDIO_BYTES + 1),
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(413)
+    const body = (await res.json()) as { error: string; maxBytes: number }
+    expect(body.error).toContain("too large")
+    expect(body.maxBytes).toBe(MAX_AUDIO_BYTES)
+    expect(env.SNAPSHOTS._size()).toBe(0)
+  })
+
+  it("PUT rejects early on an oversized Content-Length header", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    // Bodyless PUT: the declared length alone must trip the cheap pre-buffer
+    // check (the handler must not need to read the body to reject).
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/huge.mp3", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Length": String(MAX_AUDIO_BYTES + 1),
+        },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(413)
   })
 
   it("GET serves a byte range as 206 with Content-Range", async () => {

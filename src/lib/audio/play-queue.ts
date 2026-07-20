@@ -9,6 +9,7 @@ import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
+import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { setActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "./audio-coordinator"
 
@@ -163,7 +164,9 @@ async function fetchFullBlobUrl(
     getSyncToken: audioSyncTokenFetcherForSession(session),
   })
   void audioCachePut(frontier.audioId, frontier.ext, bytes)
-  return URL.createObjectURL(new Blob([bytes as BlobPart]))
+  // MIME must match the real container — Safari/Firefox reject mistyped or
+  // typeless blobs with a bare onerror ("Audio failed to load").
+  return URL.createObjectURL(new Blob([bytes as BlobPart], { type: audioMimeForExt(frontier.ext) }))
 }
 
 /**
@@ -186,7 +189,9 @@ async function resolveAudioSrc(
   if (!session.jwt) throw new Error("Sign in to play audio")
   const cached = await audioCacheGet(frontier.audioId, frontier.ext)
   if (cached) {
-    const url = URL.createObjectURL(new Blob([cached as BlobPart]))
+    const url = URL.createObjectURL(
+      new Blob([cached as BlobPart], { type: audioMimeForExt(frontier.ext) }),
+    )
     return { src: url, objectUrl: url, streaming: false, frontier }
   }
   const streamUrl = await getCellAudioStreamUrl({
@@ -226,6 +231,24 @@ function findPrevPlayable(cells: CellData[], startIndex: number): number {
     if (pickPlayableAudio(cells[i])) return i
   }
   return -1
+}
+
+/**
+ * The [start, end) window (seconds, on the CLIP's clock) the queue must play
+ * for a cell, or null to play the whole attachment.
+ *
+ * Media segments (`medium: "media"`) share one imported clip across N cells,
+ * each windowed by startTime/endTime — ignoring the window plays the full file
+ * once per cell. Text cells' startTime/endTime are subtitle timings on the
+ * video timeline, NOT offsets into their own recording, so they get no window.
+ */
+export function trimWindowForCell(cell: CellData): { start: number; end: number } | null {
+  if (cell.medium !== "media") return null
+  const { startTime, endTime } = cell
+  if (typeof startTime !== "number" || typeof endTime !== "number") return null
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null
+  if (endTime <= startTime) return null
+  return { start: startTime, end: endTime }
 }
 
 async function playAt(index: number): Promise<void> {
@@ -272,10 +295,35 @@ async function playAt(index: number): Promise<void> {
   currentUrl = resolved.objectUrl
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  setProgress({ currentTime: 0, duration: 0 })
+  const trim = trimWindowForCell(cell)
+  setProgress({ currentTime: trim?.start ?? 0, duration: 0 })
 
+  const advance = () => {
+    const next = findNextPlayable(ctx.cells, index + 1)
+    if (next < 0) {
+      setState(IDLE)
+      disposeCurrent()
+      return
+    }
+    void playAt(next)
+  }
+
+  if (trim) {
+    audio.onloadedmetadata = () => {
+      if (seq !== currentSeq) return
+      audio.currentTime = trim.start
+    }
+  }
   audio.ontimeupdate = () => {
     if (seq !== currentSeq) return
+    // A media segment's window ends before the shared clip does — treat
+    // reaching trim.end as this cell's "ended" and move to the next cell.
+    if (trim && audio.currentTime >= trim.end) {
+      audio.onpause = null // don't let the pause handler flash a "paused" state
+      audio.pause()
+      advance()
+      return
+    }
     setProgress({ currentTime: audio.currentTime })
   }
   audio.ondurationchange = () => {
@@ -295,13 +343,7 @@ async function playAt(index: number): Promise<void> {
   }
   audio.onended = () => {
     if (seq !== currentSeq) return
-    const next = findNextPlayable(ctx.cells, index + 1)
-    if (next < 0) {
-      setState(IDLE)
-      disposeCurrent()
-      return
-    }
-    void playAt(next)
+    advance()
   }
   let triedBlobFallback = false
   audio.onerror = () => {

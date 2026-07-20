@@ -69,6 +69,12 @@ export function parseRangeHeader(raw: string | null): ParsedRange | null {
   return { offset, length: end - offset + 1 }
 }
 
+// Reject uploads that would blow past Workers' 100 MB request cap with an
+// opaque error. 95 MB leaves headroom for headers while comfortably covering
+// real recordings. Mirrored client-side as MAX_AUDIO_UPLOAD_BYTES in
+// src/lib/audio/upload.ts — keep the two in sync.
+export const MAX_AUDIO_BYTES = 95 * 1024 * 1024
+
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
@@ -168,7 +174,24 @@ export async function handleAudioRequest(
   }
 
   if (request.method === "PUT") {
+    // Reject oversize uploads before buffering the whole body when the client
+    // advertises the size; the post-buffer check below is the backstop.
+    // (Mirrors source-upload-route.ts.)
+    const tooLarge = () =>
+      withAudioCors(
+        Response.json(
+          { error: "audio too large", maxBytes: MAX_AUDIO_BYTES },
+          { status: 413 },
+        ),
+      )
+    const declaredLength = Number(request.headers.get("Content-Length"))
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_AUDIO_BYTES) {
+      return tooLarge()
+    }
     const body = await request.arrayBuffer()
+    if (body.byteLength > MAX_AUDIO_BYTES) {
+      return tooLarge()
+    }
     const contentType = request.headers.get("Content-Type") || "application/octet-stream"
     await env.SNAPSHOTS.put(key, body, {
       httpMetadata: { contentType },

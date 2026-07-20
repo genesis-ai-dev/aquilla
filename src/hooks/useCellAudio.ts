@@ -10,6 +10,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { decodePeaks } from "@/lib/audio/peaks"
+import { audioMimeForExt } from "@/lib/audio/mime"
 import { peaksCacheGet, peaksCachePut } from "@/lib/audio/peaks-cache"
 import { audioCacheGet, audioCachePut, audioCacheEvict } from "@/lib/audio/bytes-cache"
 import {
@@ -320,6 +321,12 @@ export function useCellAudio(
     // network blip, misbehaving proxy), retry exactly once via the full-bytes
     // blob path before surfacing an error.
     let triedBlobFallback = false
+    // Stamp the real container type on playback blobs — Safari/Firefox trust
+    // the declared type and fail a typeless Blob with a bare onerror.
+    const blobOpts = (): BlobPropertyBag | undefined => {
+      const ext = attachmentUrl ? parseFrontierAudioUrl(attachmentUrl)?.ext : undefined
+      return ext ? { type: audioMimeForExt(ext) } : undefined
+    }
     const makeElement = (src: string, streaming: boolean): HTMLAudioElement => {
       const audio = new Audio(src)
       audio.volume = volumeRef.current
@@ -332,7 +339,7 @@ export function useCellAudio(
             try {
               const bytes = await ensureBytes()
               if (audioRef.current !== audio) return // superseded / unmounted
-              const blobSrc = URL.createObjectURL(new Blob([bytes as BlobPart]))
+              const blobSrc = URL.createObjectURL(new Blob([bytes as BlobPart], blobOpts()))
               urlRef.current = blobSrc
               const next = makeElement(blobSrc, false)
               setState("ready")
@@ -396,7 +403,7 @@ export function useCellAudio(
           if (bytes) bytesRef.current = bytes
         }
         if (bytes) {
-          src = URL.createObjectURL(new Blob([bytes as BlobPart]))
+          src = URL.createObjectURL(new Blob([bytes as BlobPart], blobOpts()))
           urlRef.current = src
         } else {
           const streamUrl = sessionRef.current?.jwt
@@ -415,7 +422,7 @@ export function useCellAudio(
             // No token (anonymous / no access) — ensureBytes surfaces the
             // precise AudioError (no-session, download-failed, …).
             const fetched = await ensureBytes()
-            src = URL.createObjectURL(new Blob([fetched as BlobPart]))
+            src = URL.createObjectURL(new Blob([fetched as BlobPart], blobOpts()))
             urlRef.current = src
           }
         }
@@ -423,7 +430,7 @@ export function useCellAudio(
         // Non-frontier pointer — ensureBytes throws the right AudioError
         // (pointer-missing / pointer-invalid).
         const fetched = await ensureBytes()
-        src = URL.createObjectURL(new Blob([fetched as BlobPart]))
+        src = URL.createObjectURL(new Blob([fetched as BlobPart], blobOpts()))
         urlRef.current = src
       }
       const audio = makeElement(src, streamingSrc)

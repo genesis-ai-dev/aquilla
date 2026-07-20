@@ -42,6 +42,7 @@ describe("ChapterNavigator", () => {
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={onSelect} />)
     openChapterPicker()
     expect(chapterSearch()).toBeInTheDocument()
+    expect(chapterSearch().closest("[data-slot=input-group]")?.querySelector("svg.lucide-search")).toBeTruthy()
     fireEvent.click(screen.getByRole("option", { name: /Matthew 2/ }))
     expect(onSelect).toHaveBeenCalledWith("MAT 2")
   })

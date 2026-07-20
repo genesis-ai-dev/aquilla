@@ -9,8 +9,7 @@ import {
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { ChevronLeft, ChevronRight } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { ChevronLeft, ChevronRight, CheckIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -18,11 +17,10 @@ import {
   ComboboxContent,
   ComboboxEmpty,
   ComboboxInput,
-  ComboboxItem,
   ComboboxList,
+  ComboboxSeparator,
   ComboboxTrigger,
 } from "@/components/ui/combobox"
-import { Separator } from "@/components/ui/separator"
 
 export interface ChapterNavigationItem {
   label: string
@@ -33,6 +31,7 @@ export interface ChapterNavigationItem {
   total: number
 }
 
+// Estimate only — real height comes from measureElement (no locked style.height).
 const CHAPTER_ROW_HEIGHT_PX = 44
 
 type ChapterListVirtualizer = ReturnType<typeof useVirtualizer<HTMLDivElement, Element>>
@@ -68,8 +67,6 @@ function VirtualizedChapterList({
     getScrollElement: () => scrollElementRef.current,
     estimateSize: () => CHAPTER_ROW_HEIGHT_PX,
     overscan: 12,
-    paddingStart: 4,
-    paddingEnd: 4,
     initialRect: { width: 320, height: 360 },
     // happy-dom reports 0×0 for CSS-sized scrollports; coerce so rows mount.
     observeElementRect: (instance, cb) =>
@@ -107,56 +104,58 @@ function VirtualizedChapterList({
   return (
     <div
       role="presentation"
-      ref={handleScrollElementRef}
-      className="h-72 max-h-[var(--available-height)] overflow-auto overscroll-contain"
+      className="h-72 max-h-[var(--available-height)] overflow-hidden p-1"
     >
-      <div role="presentation" className="relative w-full" style={{ height: totalSize }}>
-        {virtualizer.getVirtualItems().map((virtualItem) => {
-          const chapter = filteredItems[virtualItem.index]
-          if (!chapter) return null
+      <div
+        role="presentation"
+        ref={handleScrollElementRef}
+        className="h-full overflow-auto overscroll-contain scrollbar-thin"
+      >
+        <div role="presentation" className="relative w-full" style={{ height: totalSize }}>
+          {virtualizer.getVirtualItems().map((virtualItem) => {
+            const chapter = filteredItems[virtualItem.index]
+            if (!chapter) return null
 
-          const translatedPercent = chapter.total > 0
-            ? Math.round((chapter.translated / chapter.total) * 100)
-            : 0
+            const translatedPercent = chapter.total > 0
+              ? Math.round((chapter.translated / chapter.total) * 100)
+              : 0
+            const isActive = chapter.label === activeLabel
 
-          return (
-            <ComboboxItem
-              key={chapter.label}
-              index={virtualItem.index}
-              data-index={virtualItem.index}
-              ref={virtualizer.measureElement}
-              value={chapter}
-              className="min-h-11"
-              aria-setsize={filteredItems.length}
-              aria-posinset={virtualItem.index + 1}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: virtualItem.size,
-                transform: `translateY(${virtualItem.start}px)`,
-              }}
-            >
-              <Badge
-                variant={chapter.label === activeLabel ? "default" : "outline"}
-                className="size-6 rounded-full p-0 tabular-nums"
-                aria-hidden="true"
+            return (
+              <ComboboxPrimitive.Item
+                key={chapter.label}
+                index={virtualItem.index}
+                data-index={virtualItem.index}
+                ref={virtualizer.measureElement}
+                value={chapter}
+                className="relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50"
+                aria-setsize={filteredItems.length}
+                aria-posinset={virtualItem.index + 1}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  width: "auto",
+                  transform: `translateY(${virtualItem.start}px)`,
+                }}
               >
-                {chapter.displayLabel.match(/\d+$/)?.[0]}
-              </Badge>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium tabular-nums">{chapter.displayLabel}</span>
-                <span className="block text-xs tabular-nums text-muted-foreground">
-                  {chapter.verseRange ? `Verses ${chapter.verseRange}` : `${chapter.total} cells`}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium tabular-nums">{chapter.displayLabel}</span>
+                  <span className="block text-xs tabular-nums text-muted-foreground">
+                    {chapter.verseRange ? `Verses ${chapter.verseRange}` : `${chapter.total} cells`}
+                  </span>
                 </span>
-              </span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                {translatedPercent}% translated
-              </span>
-            </ComboboxItem>
-          )
-        })}
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {translatedPercent}% translated
+                </span>
+                {isActive ? (
+                  <CheckIcon className="size-4 shrink-0 text-foreground" aria-hidden="true" />
+                ) : null}
+              </ComboboxPrimitive.Item>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -249,22 +248,21 @@ export function ChapterNavigator({
               </span>
             </span>
           </ComboboxTrigger>
-          <ComboboxContent align="center" className="w-80 min-w-80">
-            <div className="flex flex-col gap-1 px-3 py-2.5">
-              <div className="text-sm font-medium">Go to chapter</div>
-              <p className="text-sm text-muted-foreground">
-                Choose a chapter to jump to its first verse.
-              </p>
-            </div>
-            <Separator />
+          <ComboboxContent
+            align="center"
+            // min-w-56 trigger + two size-8 prev/next buttons
+            className="w-[calc(14rem+2rem+2rem)] min-w-[calc(14rem+2rem+2rem)] *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
+          >
             <ComboboxInput
               showTrigger={false}
+              showSearchIcon
               placeholder="Find a chapter…"
               aria-label="Find a chapter"
-              className="border-transparent shadow-none has-[[data-slot=input-group-control]:focus-visible]:border-transparent has-[[data-slot=input-group-control]:focus-visible]:ring-0"
+              className="w-auto rounded-none border-0 shadow-none outline-none ring-0 tabular-nums *:data-[slot=input-group-addon]:pl-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
             />
+            <ComboboxSeparator className="mx-0 my-0" />
             <ComboboxEmpty>No chapters found.</ComboboxEmpty>
-            <ComboboxList className="max-h-none overflow-visible p-1">
+            <ComboboxList className="max-h-none overflow-visible p-0">
               <VirtualizedChapterList
                 activeLabel={active.label}
                 open={open}

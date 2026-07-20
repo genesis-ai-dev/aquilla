@@ -9,7 +9,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import { ChevronDownIcon, XIcon, CheckIcon } from "lucide-react"
+import { ChevronDownIcon, XIcon, CheckIcon, SearchIcon } from "lucide-react"
 
 const Combobox = ComboboxPrimitive.Root
 
@@ -53,13 +53,20 @@ function ComboboxInput({
   disabled = false,
   showTrigger = true,
   showClear = false,
+  showSearchIcon = false,
   ...props
 }: ComboboxPrimitive.Input.Props & {
   showTrigger?: boolean
   showClear?: boolean
+  showSearchIcon?: boolean
 }) {
   return (
     <InputGroup className={cn("w-auto", className)}>
+      {showSearchIcon && (
+        <InputGroupAddon align="inline-start">
+          <SearchIcon className="size-4 text-muted-foreground" />
+        </InputGroupAddon>
+      )}
       <ComboboxPrimitive.Input
         render={<InputGroupInput disabled={disabled} />}
         {...props}
@@ -121,7 +128,9 @@ function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
     <ComboboxPrimitive.List
       data-slot="combobox-list"
       className={cn(
-        "no-scrollbar max-h-[min(calc(--spacing(72)---spacing(9)),calc(var(--available-height)---spacing(9)))] scroll-py-1 overflow-y-auto overscroll-contain p-1 data-empty:p-0",
+        // Native overflow scroll — matches EditorTable / global scrollbar chrome
+        // in index.css (border thumb, transparent track). Do not use no-scrollbar.
+        "max-h-[min(calc(--spacing(72)---spacing(9)),calc(var(--available-height)---spacing(9)))] scroll-py-1 overflow-y-auto overscroll-contain p-1 data-empty:p-0",
         className
       )}
       {...props}

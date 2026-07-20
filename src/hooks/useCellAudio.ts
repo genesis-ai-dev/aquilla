@@ -5,6 +5,7 @@
 // decoding so that waveform UI and the play button can share one controller.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import posthog from "@/lib/posthog"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
@@ -326,6 +327,9 @@ export function useCellAudio(
       audio.onerror = () => {
         setIsPlaying(false)
         stopTicking()
+        posthog.captureException(new Error("audio element failed to stream media source"), {
+          audio_error_kind: "download-failed",
+        })
         setError({ kind: "download-failed", message: "Playback failed — the media source could not be streamed." })
         setState("error")
       }
@@ -359,6 +363,9 @@ export function useCellAudio(
         ? (e as AudioError)
         : { kind: "download-failed" as const, message: String(e) }
       console.error("[useCellAudio]", err)
+      posthog.captureException(e instanceof Error ? e : new Error(err.message), {
+        audio_error_kind: err.kind,
+      })
       setError(err)
       setState("error")
     }

@@ -115,7 +115,6 @@ import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
-import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { EditorModeToggle } from "./EditorModeToggle"
 import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -4103,7 +4102,7 @@ export function ProjectWorkspace() {
                         render={
                           <button
                             onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
                           />
                         }
                       >
@@ -4190,17 +4189,6 @@ export function ProjectWorkspace() {
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
-            {/* AQU-615: Door43 upstream-sync badge — visible hint that source
-                cells are managed by a DCS link. Self-gated: renders nothing
-                when project_settings has no dcsUpstream cursor. */}
-            {project && projectId && (
-              <DcsSyncBadgeMount
-                projectId={projectId}
-                roleLevel={serverRoleLevel}
-                onClick={() => navigate(`/project/${projectId}/settings`)}
-              />
-            )}
-
             {project && centerSurface === "rules" && (
               <>
                 <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
@@ -4249,21 +4237,19 @@ export function ProjectWorkspace() {
             {/* Phase 0.5: deterministic "Check file" entry point. Title doubles
                 as the last-run summary so the result is visible at the button. */}
             {project && centerSurface === "editor" && activeFileId && (
-              <AppTooltip
-                content={
+              <button
+                type="button"
+                onClick={() => void runCheck()}
+                disabled={checkRunning}
+                className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
+                title={
                   checkResult
                     ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
                     : "Check the open file against the project's rules and term base"
                 }
+                aria-label="Check file"
+                data-testid="check-file-button"
               >
-                <button
-                  type="button"
-                  onClick={() => void runCheck()}
-                  disabled={checkRunning}
-                  className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-60"
-                  aria-label="Check file"
-                  data-testid="check-file-button"
-                >
                 {checkRunning
                   ? <Loader2 className="h-3 w-3 animate-spin" />
                   : <ListChecks className="h-3 w-3" />}
@@ -4276,7 +4262,6 @@ export function ProjectWorkspace() {
                   </span>
                 )}
               </button>
-              </AppTooltip>
             )}
 
             <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
@@ -4996,14 +4981,16 @@ export function ProjectWorkspace() {
         >
           <span className="min-w-0">{transientNotice.message}</span>
           {transientNotice.severity !== "success" && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               aria-label="Dismiss notice"
               onClick={() => setTransientNotice(null)}
-              className="-mr-1 mt-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100"
+              className="-mr-1 mt-0.5 shrink-0 opacity-70 transition-opacity hover:opacity-100"
             >
-              <X className="size-3.5" />
-            </button>
+              <X />
+            </Button>
           )}
         </div>
       )}

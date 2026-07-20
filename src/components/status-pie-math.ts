@@ -12,8 +12,17 @@ export const STATUS_PIE_COMPLETE_INNER_R = 3
 export const STATUS_PIE_COMPLETE_INNER_STROKE = 6
 export const STATUS_PIE_COMPLETE_INNER_C = 2 * Math.PI * STATUS_PIE_COMPLETE_INNER_R
 
-export const STATUS_PIE_COMPLETE_STROKE = "lch(48% 59.31 288.43)"
-export const STATUS_PIE_COMPLETE_BACKGROUND = "lch(47.918% 59.303 288.421 / 0.25)"
+/** Matches former CheckCheck validation icon: text-green-600 / dark:text-green-500. */
+export const STATUS_PIE_COMPLETE_STROKE = "var(--color-green-600)"
+export const STATUS_PIE_COMPLETE_BACKGROUND =
+  "color-mix(in oklch, var(--color-green-600) 25%, transparent)"
+
+/** Linear-style workflow palette. */
+export const STATUS_PIE_IDLE = "#BEC2C8"
+export const STATUS_PIE_OTHERS = "#95A2B3"
+export const STATUS_PIE_PARTIAL = "#F2C94C"
+/** Linear cyan — used at ~¾ (75%) quorum progress. */
+export const STATUS_PIE_CYAN = "#5DB1C9"
 
 const INNER_C = 2 * Math.PI * STATUS_PIE_INNER_R
 /** Matches Linear's inner dash length (~97% of circumference). */

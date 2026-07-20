@@ -34,3 +34,31 @@ describe("validationProgressAfterClick", () => {
     expect(validationProgressAfterClick(1, 2)).toBe(1)
   })
 })
+
+describe("isFullValidationStatus / validationPieTone", () => {
+  it("treats only full-self as the done glyph", async () => {
+    const { isFullValidationStatus } = await import("@/components/StatusPie")
+    expect(isFullValidationStatus("full-self")).toBe(true)
+    expect(isFullValidationStatus("full-others")).toBe(false)
+    expect(isFullValidationStatus("full")).toBe(false)
+    expect(isFullValidationStatus("others")).toBe(false)
+  })
+
+  it("colors only when you validated and quorum is still open", async () => {
+    const { validationPieTone } = await import("@/components/StatusPie")
+    expect(validationPieTone("self")).toBe("partial")
+    expect(validationPieTone("others")).toBe("others")
+    expect(validationPieTone("full-others")).toBe("others")
+    expect(validationPieTone("none")).toBe("idle")
+  })
+})
+
+describe("status pie palette", () => {
+  it("exposes cyan for three-quarter progress", async () => {
+    const { STATUS_PIE_CYAN, STATUS_PIE_PARTIAL, STATUS_PIE_COMPLETE_STROKE } =
+      await import("@/components/status-pie-math")
+    expect(STATUS_PIE_CYAN).toBe("#5DB1C9")
+    expect(STATUS_PIE_PARTIAL).toBe("#F2C94C")
+    expect(STATUS_PIE_COMPLETE_STROKE).toBe("var(--color-green-600)")
+  })
+})

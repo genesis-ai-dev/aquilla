@@ -41,6 +41,7 @@ import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { StatusPie, isFullValidationStatus, validationPieTone, validationProgress, validationProgressAfterClick, validationProgressAfterUnvalidate } from "./StatusPie"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
@@ -4295,9 +4296,12 @@ function EditorRow({
               <li className="text-xs text-muted-foreground">No active validators</li>
             ) : (
               displayedValidators.map((v) => (
-                <li key={v} className="truncate text-xs">
-                  {v}
-                  {v === username ? " (you)" : ""}
+                <li key={v} className="flex items-center gap-1.5 truncate text-xs">
+                  <InitialsAvatar name={v} size="xs" singleInitial className="shrink-0" />
+                  <span className="truncate">
+                    {v}
+                    {v === username ? " (you)" : ""}
+                  </span>
                 </li>
               ))
             )}

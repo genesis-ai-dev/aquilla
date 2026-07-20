@@ -109,10 +109,12 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
 
   return (
     <>
-      <Tooltip>
+      {/* Disable the tooltip while the history popover is open so it doesn't
+          sit on the menu as a second "header" tab. */}
+      <Tooltip disabled={open}>
         <TooltipTrigger render={button} />
         <TooltipContent side="bottom">
-          {enabled ? `${label} · hold for history` : `No ${label.toLowerCase()} history`}
+          {enabled ? label : `No ${label.toLowerCase()} history`}
         </TooltipContent>
       </Tooltip>
       <Popover open={open} onOpenChange={setOpen}>
@@ -125,7 +127,6 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
         >
           <HistoryList
             list={list}
-            direction={direction}
             onPick={(target) => {
               setOpen(false)
               nav.go(target)
@@ -139,11 +140,9 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
 
 function HistoryList({
   list,
-  direction,
   onPick,
 }: {
   list: HistoryTarget[]
-  direction: "back" | "forward"
   onPick: (target: number) => void
 }) {
   if (list.length === 0) {
@@ -151,9 +150,6 @@ function HistoryList({
   }
   return (
     <div className="max-h-80 overflow-y-auto">
-      <div className="px-2 py-1.5 text-xs text-muted-foreground">
-        {direction === "back" ? "Back" : "Forward"}
-      </div>
       <ul className="flex flex-col">
         {list.map(({ entry, target }) => (
           <li key={`${entry.key}-${target}`}>

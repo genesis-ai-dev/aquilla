@@ -35,10 +35,8 @@ export function ExamplePanel({
           side="bottom"
           sideOffset={6}
           className="w-80 space-y-2 p-3 text-xs"
+          aria-label="Translation examples"
         >
-          <div className="font-medium text-muted-foreground text-[10px]">
-            Translation Examples
-          </div>
           {examples.map((ex, i) => {
             const colorIndex = (i + globalColorOffset) % EXAMPLE_COLORS.length
             const sourceTokens = new Set(tokenizeText(ex.source))

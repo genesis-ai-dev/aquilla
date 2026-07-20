@@ -6,9 +6,12 @@ import {
   STATUS_PIE_COMPLETE_INNER_C,
   STATUS_PIE_COMPLETE_INNER_R,
   STATUS_PIE_COMPLETE_INNER_STROKE,
-  STATUS_PIE_COMPLETE_STROKE,
+  STATUS_PIE_CYAN,
+  STATUS_PIE_IDLE,
+  STATUS_PIE_OTHERS,
   STATUS_PIE_OUTER_R,
   STATUS_PIE_OUTER_STROKE,
+  STATUS_PIE_PARTIAL,
   STATUS_PIE_VIEWBOX,
   STATUS_PIE_WEDGE_RADIUS,
   statusPieWedgePath,
@@ -22,7 +25,7 @@ function isFullQuorum(progress: number): boolean {
 
 function CompleteStatusPieGlyph({
   sizePx,
-  strokeColor = STATUS_PIE_COMPLETE_STROKE,
+  strokeColor,
   className,
   interactiveHover = false,
 }: {
@@ -34,15 +37,15 @@ function CompleteStatusPieGlyph({
   return (
     <div
       className={cn(
-        "relative flex size-full items-center justify-center",
+        "relative flex size-full items-center justify-center text-green-600 dark:text-green-500",
         interactiveHover && [
           "opacity-90 transition-[opacity,filter] duration-150",
-          "group-hover/validate:opacity-100 group-hover/validate:brightness-[0.9]",
-          "dark:opacity-80 dark:group-hover/validate:opacity-100 dark:group-hover/validate:brightness-110",
+          "group-hover/validate:opacity-100 group-hover/validate:brightness-[0.92]",
+          "dark:opacity-90 dark:group-hover/validate:opacity-100 dark:group-hover/validate:brightness-110",
         ],
         className,
       )}
-      style={{ color: strokeColor }}
+      style={strokeColor ? { color: strokeColor } : undefined}
     >
       <svg
         width={sizePx}
@@ -86,31 +89,36 @@ function progressPieToneClass(tone: StatusPieTone, hoverAffordance: boolean): st
   const hover = hoverAffordance
     ? cn(
         "transition-[opacity,filter] duration-150",
-        "group-hover/validate:opacity-100 group-hover/validate:brightness-[0.82]",
-        "dark:group-hover/validate:opacity-95 dark:group-hover/validate:brightness-[1.18]",
+        "group-hover/validate:opacity-100 group-hover/validate:brightness-[0.88]",
+        "dark:group-hover/validate:opacity-95 dark:group-hover/validate:brightness-[1.12]",
       )
     : ""
 
   if (tone === "partial") {
-    return cn(
-      "text-[lch(68%_64_85)] opacity-[0.82]",
-      hover,
-      "dark:text-[lch(72%_52_85)] dark:opacity-65",
-    )
+    // Linear yellow — you validated, quorum still open
+    return cn("opacity-90", hover, "dark:opacity-80")
   }
   if (tone === "others") {
-    return cn(
-      "text-muted-foreground opacity-70",
-      hover,
-      "dark:opacity-55",
-    )
+    // Linear steel grey — others validated, you have not
+    return cn("opacity-85", hover, "dark:opacity-70")
   }
+  // Linear pale grey — empty / idle
   return cn(
-    "text-muted-foreground opacity-40",
-    hoverAffordance && "group-hover/validate:opacity-65",
+    "opacity-55",
+    hoverAffordance && "group-hover/validate:opacity-75",
     hover,
-    "dark:opacity-35 dark:group-hover/validate:opacity-60",
+    "dark:opacity-45 dark:group-hover/validate:opacity-65",
   )
+}
+
+function progressPieToneColor(tone: StatusPieTone, progress: number): string {
+  // ~¾ fill uses Linear cyan (palette teal).
+  if (progress >= 0.75 - 1e-6 && progress < 1 - 1e-6) {
+    return STATUS_PIE_CYAN
+  }
+  if (tone === "partial") return STATUS_PIE_PARTIAL
+  if (tone === "others") return STATUS_PIE_OTHERS
+  return STATUS_PIE_IDLE
 }
 
 export interface StatusPieProps {
@@ -142,7 +150,10 @@ export function StatusPie({
       : Math.min(1, Math.max(0, hoverPreviewProgress))
   const hoverAffordance =
     hoverP !== null && Math.abs(hoverP - p) > 1e-6
-  const hoverShowsComplete = hoverAffordance && hoverP !== null && isFullQuorum(hoverP)
+  // Done preview only when progress actually changes into a full quorum
+  // (e.g. last click). Already-full grey (full-others) stays grey on hover.
+  const hoverShowsComplete =
+    !complete && hoverAffordance && hoverP !== null && isFullQuorum(hoverP)
   const hoverShowsWedge =
     hoverAffordance && hoverP !== null && hoverP > 0 && !isFullQuorum(hoverP)
   const box = sizePx + 6
@@ -153,7 +164,7 @@ export function StatusPie({
       <div className={cn("relative shrink-0", className)} style={tileStyle}>
         <CompleteStatusPieGlyph
           sizePx={sizePx}
-          strokeColor={stroke ?? STATUS_PIE_COMPLETE_STROKE}
+          strokeColor={stroke}
           interactiveHover
         />
       </div>
@@ -168,6 +179,9 @@ export function StatusPie({
     hoverShowsWedge && hoverP !== null
       ? statusPieWedgePath(STATUS_PIE_CENTER, STATUS_PIE_CENTER, STATUS_PIE_WEDGE_RADIUS, hoverP)
       : ""
+  const colorProgress =
+    hoverShowsWedge && hoverP !== null ? hoverP : p
+  const toneColor = stroke ?? progressPieToneColor(tone, colorProgress)
 
   return (
     <div
@@ -189,6 +203,7 @@ export function StatusPie({
             "workflow-state-icon",
             progressPieToneClass(tone, hoverAffordance && !hoverShowsComplete),
           )}
+          style={{ color: toneColor }}
           aria-hidden
         >
           <circle
@@ -267,13 +282,16 @@ export function validationProgressAfterUnvalidate(
 export function isFullValidationStatus(
   vs: "none" | "self" | "others" | "full" | "full-self" | "full-others" | "empty",
 ): boolean {
-  return vs === "full-self" || vs === "full-others" || vs === "full"
+  // Purple "done" only when you personally validated and quorum is met.
+  return vs === "full-self"
 }
 
 export function validationPieTone(
   vs: "none" | "self" | "others" | "full" | "full-self" | "full-others" | "empty",
 ): StatusPieTone {
+  // Colored fill only when you personally validated but quorum isn't met yet.
+  // Others-only progress (including full-others) stays grey until full-self.
   if (vs === "self") return "partial"
-  if (vs === "others") return "others"
+  if (vs === "others" || vs === "full-others" || vs === "full") return "others"
   return "idle"
 }

@@ -6,8 +6,9 @@
 
 import { useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
-import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
+import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
+import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { setActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "./audio-coordinator"
 
@@ -136,28 +137,68 @@ function pickPlayableAudio(cell: CellData): { audioId: string; url: string } | u
   return undefined
 }
 
-async function fetchAudioBlob(
+interface ResolvedAudioSrc {
+  src: string
+  /** Object URL to revoke on dispose (blob playback only). */
+  objectUrl: string | null
+  /** True when src is an authenticated streaming URL — on media error the
+   *  queue retries once via the full-bytes blob path. */
+  streaming: boolean
+  frontier: { audioId: string; ext: string } | null
+}
+
+/** Full-download fallback: fetch all bytes, write through to the OPFS cache,
+ *  return a blob object URL. */
+async function fetchFullBlobUrl(
+  frontier: { audioId: string; ext: string },
+  projectId: string,
+  fileId: string,
+  session: FrontierSession,
+): Promise<string> {
+  const bytes = await fetchCellAudio({
+    projectId,
+    fileId,
+    audioId: frontier.audioId,
+    ext: frontier.ext,
+    getSyncToken: audioSyncTokenFetcherForSession(session),
+  })
+  void audioCachePut(frontier.audioId, frontier.ext, bytes)
+  return URL.createObjectURL(new Blob([bytes as BlobPart]))
+}
+
+/**
+ * Resolve a cell attachment to a playable `<audio src>`. Progressive-playback
+ * order: OPFS-cached bytes (offline-friendly, zero network) → authenticated
+ * streaming URL (first sound before the download finishes; Range/206 handles
+ * seeks) → full-download blob when no stream URL could be minted.
+ */
+async function resolveAudioSrc(
   attachmentUrl: string,
   projectId: string,
   fileId: string,
   session: FrontierSession,
-): Promise<Blob> {
+): Promise<ResolvedAudioSrc> {
   const frontier = parseFrontierAudioUrl(attachmentUrl)
-  if (frontier) {
-    if (!session.jwt) throw new Error("Sign in to play audio")
-    const bytes = await fetchCellAudio({
-      projectId,
-      fileId,
-      audioId: frontier.audioId,
-      ext: frontier.ext,
-      getSyncToken: audioSyncTokenFetcherForSession(session),
-    })
-    return new Blob([bytes as BlobPart], { type: "audio/wav" })
+  if (!frontier) {
+    // Direct (blob: / http) URL — the media element streams it natively.
+    return { src: attachmentUrl, objectUrl: null, streaming: false, frontier: null }
   }
-  // Direct (blob: / http) URL — let the browser fetch.
-  const res = await fetch(attachmentUrl)
-  if (!res.ok) throw new Error(`Failed to fetch audio (${res.status})`)
-  return res.blob()
+  if (!session.jwt) throw new Error("Sign in to play audio")
+  const cached = await audioCacheGet(frontier.audioId, frontier.ext)
+  if (cached) {
+    const url = URL.createObjectURL(new Blob([cached as BlobPart]))
+    return { src: url, objectUrl: url, streaming: false, frontier }
+  }
+  const streamUrl = await getCellAudioStreamUrl({
+    projectId,
+    fileId,
+    audioId: frontier.audioId,
+    ext: frontier.ext,
+    getSyncToken: audioSyncTokenFetcherForSession(session),
+  })
+  if (streamUrl) return { src: streamUrl, objectUrl: null, streaming: true, frontier }
+  const url = await fetchFullBlobUrl(frontier, projectId, fileId, session)
+  return { src: url, objectUrl: url, streaming: false, frontier }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -213,20 +254,22 @@ async function playAt(index: number): Promise<void> {
   setState({ kind: "loading", cellIndex: index, cellId: cell.id })
   ctx.onCellChange?.(index, cell.id)
 
-  let blob: Blob
+  let resolved: ResolvedAudioSrc
   try {
-    blob = await fetchAudioBlob(playable.url, ctx.projectId, cell.fileId, ctx.session)
+    resolved = await resolveAudioSrc(playable.url, ctx.projectId, cell.fileId, ctx.session)
   } catch (e) {
     if (seq !== currentSeq) return // superseded
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
     return
   }
-  if (seq !== currentSeq) return
+  if (seq !== currentSeq) {
+    if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+    return
+  }
 
-  const url = URL.createObjectURL(blob)
-  const audio = new Audio(url)
+  const audio = new Audio(resolved.src)
   currentAudio = audio
-  currentUrl = url
+  currentUrl = resolved.objectUrl
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
   setProgress({ currentTime: 0, duration: 0 })
@@ -260,8 +303,31 @@ async function playAt(index: number): Promise<void> {
     }
     void playAt(next)
   }
+  let triedBlobFallback = false
   audio.onerror = () => {
     if (seq !== currentSeq) return
+    // Streamed src failed (expired token, transient network) — retry once by
+    // downloading the full bytes and swapping the element's src in place so
+    // the wired handlers (onended advance, progress) carry over.
+    if (resolved.streaming && resolved.frontier && !triedBlobFallback) {
+      triedBlobFallback = true
+      void (async () => {
+        try {
+          const url = await fetchFullBlobUrl(resolved.frontier!, ctx.projectId, cell.fileId, ctx.session)
+          if (seq !== currentSeq) {
+            URL.revokeObjectURL(url)
+            return
+          }
+          currentUrl = url
+          audio.src = url
+          await audio.play()
+        } catch (e) {
+          if (seq !== currentSeq) return
+          setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
+        }
+      })()
+      return
+    }
     setState({ kind: "error", message: "Audio failed to load", cellId: cell.id })
   }
 

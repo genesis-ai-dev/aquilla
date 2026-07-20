@@ -1,12 +1,9 @@
 // Module-level cell selection. Lives outside React so the selection bar
 // (a sibling of the editor) and the editor's row click handler can both
 // read/write it without prop drilling. Keeps an anchor for range selection
-// while the editor supplies document order. Capped at MAX_SELECTED to keep
-// bulk operations from spawning runaway batches.
+// while the editor supplies document order.
 
 import { useSyncExternalStore } from "react"
-
-export const MAX_SELECTED = 20
 
 let selected: ReadonlySet<string> = new Set()
 let anchorId: string | null = null
@@ -23,10 +20,7 @@ export function getSelectionAnchorId(): string | null { return anchorId }
 /** Replace the entire selection (used on plain click → no modifier). */
 export function setSelection(ids: Iterable<string>, anchor?: string | null): void {
   const next = new Set<string>()
-  for (const id of ids) {
-    if (next.size >= MAX_SELECTED) break
-    next.add(id)
-  }
+  for (const id of ids) next.add(id)
   const nextAnchor = next.size === 0
     ? null
     : anchor !== undefined
@@ -40,7 +34,7 @@ export function setSelection(ids: Iterable<string>, anchor?: string | null): voi
   notify()
 }
 
-/** Add or remove a cell from the selection. Cap enforced. */
+/** Add or remove a cell from the selection. */
 export function toggleSelected(cellId: string): void {
   const next = new Set(selected)
   let nextAnchor = anchorId
@@ -48,7 +42,6 @@ export function toggleSelected(cellId: string): void {
     next.delete(cellId)
     if (nextAnchor === cellId) nextAnchor = next.values().next().value ?? null
   } else {
-    if (next.size >= MAX_SELECTED) return // silently ignore over-cap additions
     next.add(cellId)
     nextAnchor = cellId
   }

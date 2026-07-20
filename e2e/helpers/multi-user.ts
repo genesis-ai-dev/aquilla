@@ -42,9 +42,11 @@ async function makeAuthedPage(
   // one-time default that in-test org switches can still override.
   if (username === "alice") {
     await ctx.addInitScript((orgId) => {
-      if (localStorage.getItem("org:active") == null) {
-        localStorage.setItem("org:active", String(orgId))
-      }
+      // Always pin alice to her personal org — path-scoped `/orgs/:id` resume
+      // via localStorage must not retain a stale id from a prior document in
+      // this context (or "all"), or RootRedirect / Dashboard.goto land on
+      // OrgRouteGate's not-found shell (no "+ New Project", no account menu).
+      localStorage.setItem("org:active", String(orgId))
     }, ownOrg.id)
   }
   // RootRedirect (AQU-172) hard-replaces "/" with /homepage when the aq_hint

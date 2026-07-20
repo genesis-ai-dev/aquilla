@@ -18,11 +18,16 @@ export class Dashboard {
   }
 
   async goto(): Promise<void> {
-    // Org home (path-scoped). `/projects` only redirects to resumeOrgPath();
-    // landing on `/` does the same and keeps "+ New Project" available on a
-    // concrete org when org:active is seeded (see multi-user alice fixture).
-    await this.page.goto("/")
+    // Prefer the authed fixture's org id (AuthedPage.orgId) so we never resume
+    // a stale org:active into OrgRouteGate's not-found shell.
+    const orgId = (this.page as Page & { orgId?: number }).orgId
+    const target =
+      typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}` : "/"
+    await this.page.goto(target)
     await this.page.waitForLoadState("networkidle")
+    await expect(this.page.getByRole("button", { name: /new project/i }).first()).toBeVisible({
+      timeout: 15_000,
+    })
   }
 
   async createProject(opts: CreateProjectOpts = {}): Promise<string> {

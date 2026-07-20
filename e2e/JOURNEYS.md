@@ -45,7 +45,7 @@
 | Sharing     | Toggle invite mode between @user and email           | `e2e/specs/projects/share-invite-mode-toggle.smoke.spec.ts`   |   ✅   |
 | Sharing     | Invite landing pages name inviter + workspace (AQU-471) | `e2e/specs/projects/join-page.smoke.spec.ts` (test 2) + `e2e/specs/orgs/join-org-context.smoke.spec.ts` | ✅ |
 | Sharing     | Email invites to multiple projects from the org view (AQU-471) | `e2e/specs/orgs/multi-project-invite-submit.smoke.spec.ts` (test 2) | ✅ |
-| Audio/Video | Import audio file                                    | _gap — Plan 2_                                                |        |
+| Audio/Video | Import mp3 → silence-split clips → Play all          | `e2e/specs/editor/audio-import-playback.smoke.spec.ts`        |   ✅   |
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |

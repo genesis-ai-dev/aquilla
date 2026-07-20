@@ -9,6 +9,27 @@ export class Workspace {
   }
 
   async importFile(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
+    // counts) instead of starting the upload immediately. Confirm it to kick
+    // off the actual bulk upload.
+    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+    await confirmBtn.click()
+    await this.waitForImportSettled()
+  }
+
+  /** Import an audio/video file. Media files bypass the AQU-310 preview panel
+   * (they have no text cells to show) and upload immediately on selection, so
+   * there is no "Confirm import" step — see ImportDialog.doImportFiles. */
+  async importMediaFile(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    await this.waitForImportSettled()
+  }
+
+  /** Shared import prologue: dismiss the setup checklist, open the
+   * ImportDialog's Upload Files panel, and select `filePath`. */
+  private async chooseImportFiles(filePath: string): Promise<void> {
     // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.
@@ -38,12 +59,9 @@ export class Workspace {
     const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
     await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
-    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
-    // counts) instead of starting the upload immediately. Confirm it to kick
-    // off the actual bulk upload.
-    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
-    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
-    await confirmBtn.click()
+  }
+
+  private async waitForImportSettled(): Promise<void> {
     // A hidden confirm button is only the transient "Uploading…" state, not a
     // success signal. Wait for the authoritative sidebar row, while surfacing
     // any import error immediately instead of timing out on an unrelated row.

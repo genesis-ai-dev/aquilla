@@ -52,11 +52,16 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
+  await expect(alice.getByText("bob", { exact: true })).toBeVisible({ timeout: 3_000 })
   await alice.getByRole("menuitem", { name: /^Log out$/i }).click()
 
-  // After alice logs out, bob is promoted in IDB but the URL may still be
-  // alice's org (OrgRouteGate shows "not found" with no account switcher).
-  // /orgs/all always mounts the shell so the promoted account menu is visible.
+  // handleLogout is async: wait until alice is gone and bob is active. Still on
+  // alice's org URL, OrgRouteGate shows not-found (no account switcher) — that
+  // flip is the signal the IDB promote finished before we navigate away.
+  await expect(alice.getByRole("heading", { name: /Organization not found/i })).toBeVisible({
+    timeout: 10_000,
+  })
+
   await alice.goto("/orgs/all")
   await alice.waitForLoadState("networkidle")
 

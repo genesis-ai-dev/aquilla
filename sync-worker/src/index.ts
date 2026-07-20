@@ -64,6 +64,7 @@ export { ProjectSync } from "./project-do"
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
+import { shipLog, shipErrorResponse } from "./posthog-logs"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -130,6 +131,11 @@ declare global {
       EMAIL_FROM?: string
       /** Optional — Base URL for deep links in notification emails (e.g. https://aquilla.app). */
       BASE_URL?: string
+      /** PostHog project token (phc_…) — when set, 4xx/5xx responses are
+       *  shipped to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
+      POSTHOG_KEY?: string
+      /** PostHog ingest host. Defaults to https://us.i.posthog.com. */
+      POSTHOG_HOST?: string
       /**
        * Flat per-call TTS cost estimate in cents (amortised GPU cold-start etc.).
        * Default: 2 (2¢ per synthesis call). Spec § Config.
@@ -182,7 +188,7 @@ function stripApexPrefix(request: Request): Request {
   return new Request(url.toString(), request)
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     // Must run before CORS / route matching — those test bare paths.
     request = stripApexPrefix(request)
@@ -331,5 +337,31 @@ export default {
     } finally {
       ctx.waitUntil(pgShim.close())
     }
+  },
+}
+
+export default {
+  // Observability wrapper: 4xx/5xx responses and unhandled throws are shipped
+  // to PostHog Logs (fire-and-forget; no-op when POSTHOG_KEY is unset) so
+  // /audio and /events failures are queryable without a repro.
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    let response: Response
+    try {
+      response = await worker.fetch(request, env, ctx)
+    } catch (err) {
+      const url = new URL(request.url)
+      ctx.waitUntil(
+        shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${url.pathname}`, {
+          "http.method": request.method,
+          "http.path": url.pathname,
+          "error.message": err instanceof Error ? err.message : String(err),
+        }),
+      )
+      throw err
+    }
+    if (response.status >= 400) {
+      ctx.waitUntil(shipErrorResponse(env, "aquilla-sync-worker", request, response))
+    }
+    return response
   },
 }

@@ -85,6 +85,7 @@ import changesetApprovalsRoutes from "./routes/changeset-approvals"
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { shipLog, shipErrorResponse } from "./posthog-logs"
 
 const app = new Hono<HonoEnv>()
 
@@ -128,6 +129,38 @@ app.use("*", async (c, next) => {
   await next()
   for (const [k, v] of Object.entries(CORS_HEADERS)) {
     c.res.headers.set(k, v)
+  }
+})
+
+// Observability: ship 4xx/5xx responses and unhandled throws to PostHog Logs
+// (fire-and-forget; no-op when POSTHOG_KEY is unset — see posthog-logs.ts).
+// Hono throws on `c.executionCtx` when there is none (vitest calls
+// app.fetch without a ctx), so resolve it defensively and fall back to
+// un-awaited fire-and-forget.
+const runInBackground = (c: { executionCtx: ExecutionContext }, task: Promise<void>) => {
+  try {
+    c.executionCtx.waitUntil(task)
+  } catch {
+    void task
+  }
+}
+
+app.use("*", async (c, next) => {
+  try {
+    await next()
+  } catch (err) {
+    runInBackground(
+      c,
+      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${c.req.path}`, {
+        "http.method": c.req.method,
+        "http.path": c.req.path,
+        "error.message": err instanceof Error ? err.message : String(err),
+      }),
+    )
+    throw err
+  }
+  if (c.res.status >= 400) {
+    runInBackground(c, shipErrorResponse(c.env, "aquilla-identity", c.req.raw, c.res))
   }
 })
 

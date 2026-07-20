@@ -42,7 +42,7 @@ test("settings sub-menu link navigates to its pane and back", async ({ alice }) 
   await expect(alice.getByRole("link", { name: /Validation & health/i })).not.toBeVisible()
 
   // "‹ Settings" returns to the index.
-  await alice.getByRole("link", { name: /^Settings$/i }).click()
+  await alice.getByRole("main").getByRole("link", { name: /^Settings$/i }).click()
   await expect(validationSection).not.toBeVisible({ timeout: 5_000 })
   await expect(alice.getByRole("link", { name: /Validation & health/i })).toBeVisible({ timeout: 5_000 })
 })

@@ -48,7 +48,7 @@ test("living memory shell nav returns to the project editor", async ({ alice }) 
 
   // Click the imported file's sidebar row — shell nav back to the editor.
   await alice.locator("aside").getByText(/sample/i).first().click()
-  await alice.waitForURL(/\/project\/[^/]+\/file\/[^/]+/, { timeout: 5_000 })
+  await alice.waitForURL(/\/project\/[^/]+\/editor\/file\/[^/]+/, { timeout: 5_000 })
   await expect(alice.getByRole("heading", { name: /Living Memory/i })).not.toBeVisible({
     timeout: 5_000,
   })

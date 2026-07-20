@@ -143,7 +143,7 @@ jobs:
         working-directory: sync-worker
 
       - name: Deploy sync-worker
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
@@ -189,7 +189,7 @@ jobs:
       # ledger). The schema-guard job above fails this deploy if the target
       # schema is behind db/postgres/migrations/.
       - name: Deploy auth-worker
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7

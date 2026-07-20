@@ -139,7 +139,7 @@ jobs:
       - name: Deploy aquilla-web (main/staging/dev)
         id: deploy_prod
         if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
@@ -148,7 +148,7 @@ jobs:
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview
         if: steps.decide.outputs.deploy == 'true' && github.event_name == 'pull_request'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7

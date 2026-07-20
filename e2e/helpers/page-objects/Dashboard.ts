@@ -18,9 +18,10 @@ export class Dashboard {
   }
 
   async goto(): Promise<void> {
-    // "/" now renders the org Overview (OrgHome); the projects list + the
-    // "+ New Project" dialog live at /projects (ProjectsList).
-    await this.page.goto("/projects")
+    // Org home (path-scoped). `/projects` only redirects to resumeOrgPath();
+    // landing on `/` does the same and keeps "+ New Project" available on a
+    // concrete org when org:active is seeded (see multi-user alice fixture).
+    await this.page.goto("/")
   }
 
   organizationSwitcher(): Locator {

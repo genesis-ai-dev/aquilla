@@ -45,3 +45,27 @@ export function sectionLabelAtViewportStart(
   const cellId = cellIds[firstVisibleIndex]
   return cellId ? getSectionLabel(cellId) : ""
 }
+
+/**
+ * While a programmatic chapter jump is animating, viewport-derived indices
+ * briefly report intermediate chapters. Keep accepting only once the top
+ * visible row lands inside the destination chapter's index range.
+ */
+export function shouldAcceptChapterVisibleIndex(
+  pendingJump: { index: number; endIndex: number } | null,
+  nextIndex: number,
+): boolean {
+  if (!pendingJump) return true
+  return nextIndex >= pendingJump.index && nextIndex < pendingJump.endIndex
+}
+
+/** Prefer a pinned jump target over a transient viewport section label. */
+export function resolveActiveChapterLabel(
+  chapterLabels: readonly string[],
+  currentSectionLabel: string,
+  pinnedLabel: string | null,
+): string {
+  if (pinnedLabel && chapterLabels.includes(pinnedLabel)) return pinnedLabel
+  if (chapterLabels.includes(currentSectionLabel)) return currentSectionLabel
+  return chapterLabels[0] ?? ""
+}

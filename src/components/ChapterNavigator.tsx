@@ -146,8 +146,8 @@ function VirtualizedChapterList({
                 {chapter.displayLabel.match(/\d+$/)?.[0]}
               </Badge>
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{chapter.displayLabel}</span>
-                <span className="block text-xs text-muted-foreground">
+                <span className="block truncate font-medium tabular-nums">{chapter.displayLabel}</span>
+                <span className="block text-xs tabular-nums text-muted-foreground">
                   {chapter.verseRange ? `Verses ${chapter.verseRange}` : `${chapter.total} cells`}
                 </span>
               </span>
@@ -237,14 +237,16 @@ export function ChapterNavigator({
             render={
               <Button
                 variant="outline"
-                className="grid min-w-56 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 [&>svg:last-child]:justify-self-end"
+                className="flex min-w-56 items-center justify-center gap-2 px-3"
                 aria-label={`Current chapter: ${active.displayLabel}. Choose chapter`}
               />
             }
           >
-            <span className="truncate text-left font-semibold">{active.displayLabel}</span>
-            <span className="justify-self-center text-xs font-normal text-muted-foreground">
-              {activeSummary}
+            <span className="flex min-w-0 items-baseline gap-2 overflow-hidden">
+              <span className="truncate font-semibold tabular-nums">{active.displayLabel}</span>
+              <span className="shrink-0 text-xs font-normal tabular-nums text-muted-foreground">
+                {activeSummary}
+              </span>
             </span>
           </ComboboxTrigger>
           <ComboboxContent align="center" className="w-80 min-w-80">

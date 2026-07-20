@@ -24,7 +24,9 @@ describe("ChapterNavigator", () => {
   it("keeps the current chapter and verse range visible", () => {
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={() => {}} />)
     expect(screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })).toHaveTextContent("Verses 1–25")
-    expect(screen.getByText("Verses 1–25")).toHaveClass("justify-self-center")
+    expect(screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })).toHaveClass("justify-center", "px-3")
+    expect(screen.getByText("Verses 1–25")).toHaveClass("shrink-0", "tabular-nums")
+    expect(screen.getByText("Matthew 1")).toHaveClass("tabular-nums")
     expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
   })
 

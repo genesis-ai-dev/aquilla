@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
   firstActuallyVisibleIndex,
+  resolveActiveChapterLabel,
   rowMatchesChapterHeading,
   sectionLabelAtViewportStart,
+  shouldAcceptChapterVisibleIndex,
 } from "./chapter-navigation"
 
 describe("sectionLabelAtViewportStart", () => {
@@ -44,5 +46,34 @@ describe("sectionLabelAtViewportStart", () => {
       ["The word of the Lord remains forever"],
       "1 Peter 2",
     )).toBe(false)
+  })
+})
+
+describe("shouldAcceptChapterVisibleIndex", () => {
+  it("ignores intermediate rows while a chapter jump is in flight", () => {
+    const pending = { index: 40, endIndex: 60 }
+    expect(shouldAcceptChapterVisibleIndex(pending, 12)).toBe(false)
+    expect(shouldAcceptChapterVisibleIndex(pending, 39)).toBe(false)
+    expect(shouldAcceptChapterVisibleIndex(pending, 40)).toBe(true)
+    expect(shouldAcceptChapterVisibleIndex(pending, 59)).toBe(true)
+    expect(shouldAcceptChapterVisibleIndex(pending, 60)).toBe(false)
+  })
+
+  it("accepts every update when no jump is pending", () => {
+    expect(shouldAcceptChapterVisibleIndex(null, 0)).toBe(true)
+    expect(shouldAcceptChapterVisibleIndex(null, 99)).toBe(true)
+  })
+})
+
+describe("resolveActiveChapterLabel", () => {
+  const labels = ["MAT 1", "MAT 2", "MAT 3"]
+
+  it("keeps the pinned destination chapter while the viewport lags", () => {
+    expect(resolveActiveChapterLabel(labels, "MAT 1", "MAT 3")).toBe("MAT 3")
+  })
+
+  it("falls back to the viewport section, then the first chapter", () => {
+    expect(resolveActiveChapterLabel(labels, "MAT 2", null)).toBe("MAT 2")
+    expect(resolveActiveChapterLabel(labels, "UNKNOWN", null)).toBe("MAT 1")
   })
 })

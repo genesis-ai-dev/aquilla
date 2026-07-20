@@ -101,8 +101,10 @@ import {
 } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
+  resolveActiveChapterLabel,
   rowMatchesChapterHeading,
   sectionLabelAtViewportStart,
+  shouldAcceptChapterVisibleIndex,
 } from "@/lib/chapter-navigation"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import {
@@ -723,6 +725,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
   const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
+  // Pin the destination chapter while scroll animation catches up — otherwise
+  // viewport tracking briefly reports intermediate chapters and the navigator
+  // flashes the wrong number / verse range.
+  const [pinnedChapterLabel, setPinnedChapterLabel] = useState<string | null>(null)
+  const pendingChapterJumpRef = useRef<{ label: string; index: number; endIndex: number } | null>(null)
+  const chapterJumpUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
   // Mirror ref so the imperative handle (getCurrentIndex) reads current
   // values without widening its dependency array — same pattern as
@@ -819,6 +827,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [])
   const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
 
+  const clearChapterJumpLock = useCallback(() => {
+    pendingChapterJumpRef.current = null
+    if (chapterJumpUnlockTimerRef.current !== null) {
+      clearTimeout(chapterJumpUnlockTimerRef.current)
+      chapterJumpUnlockTimerRef.current = null
+    }
+    setPinnedChapterLabel(null)
+  }, [])
+
   const updateChapterVisibleIndex = useCallback(() => {
     const viewport = listRootRef.current
     const root = getListQueryRoot()
@@ -837,8 +854,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       viewport.getBoundingClientRect().top,
       firstVisibleIndex,
     )
+    const pending = pendingChapterJumpRef.current
+    if (!shouldAcceptChapterVisibleIndex(pending, nextIndex)) return
+    if (pending) clearChapterJumpLock()
     setChapterVisibleIndex((current) => current === nextIndex ? current : nextIndex)
-  }, [firstVisibleIndex, getListQueryRoot])
+  }, [clearChapterJumpLock, firstVisibleIndex, getListQueryRoot])
 
   const handleListScroll = useCallback(() => {
     if (chapterScrollFrameRef.current !== null) return
@@ -855,6 +875,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   useEffect(() => () => {
     if (chapterScrollFrameRef.current !== null) {
       cancelAnimationFrame(chapterScrollFrameRef.current)
+    }
+    if (chapterJumpUnlockTimerRef.current !== null) {
+      clearTimeout(chapterJumpUnlockTimerRef.current)
     }
   }, [])
 
@@ -1357,21 +1380,40 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion, displayCellIds])
 
-  const activeChapterLabel = chapterNavigationItems.some((chapter) => chapter.label === currentSectionLabel)
-    ? currentSectionLabel
-    : chapterNavigationItems[0]?.label ?? ""
+  const activeChapterLabel = resolveActiveChapterLabel(
+    chapterNavigationItems.map((chapter) => chapter.label),
+    currentSectionLabel,
+    pinnedChapterLabel,
+  )
 
   const handleChapterSelect = useCallback((label: string) => {
     const index = cellStore.findIndexBySection(label)
     if (index < 0) return
+    const navigation = cellStore.getNavigationIndex()
+    const sectionIndex = navigation.findIndex((entry) => entry.label === label)
+    const endIndex = sectionIndex >= 0
+      ? (navigation[sectionIndex + 1]?.firstIndex ?? displayCellIdsRef.current.length)
+      : index + 1
+    clearChapterJumpLock()
+    pendingChapterJumpRef.current = { label, index, endIndex }
+    setPinnedChapterLabel(label)
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
+    // Safety valve: if the user interrupts the animated scroll, unlock so
+    // viewport tracking can resume instead of staying pinned forever.
+    chapterJumpUnlockTimerRef.current = setTimeout(() => {
+      chapterJumpUnlockTimerRef.current = null
+      if (pendingChapterJumpRef.current?.label !== label) return
+      pendingChapterJumpRef.current = null
+      setPinnedChapterLabel(null)
+      updateChapterVisibleIndex()
+    }, 750)
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0,
       animated: true,
     })
-  }, [cellStore])
+  }, [cellStore, clearChapterJumpLock, updateChapterVisibleIndex])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string

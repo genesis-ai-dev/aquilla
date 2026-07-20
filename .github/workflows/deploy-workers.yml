@@ -24,6 +24,12 @@ on:
         required: false
         default: 'all'
 
+# Least-privilege default: deploys authenticate to Cloudflare via the
+# CLOUDFLARE_API_TOKEN secret, not GITHUB_TOKEN — this workflow never needs
+# to write back to the repo.
+permissions:
+  contents: read
+
 jobs:
   # Reliable change detection. The old per-job `contains(toJSON(
   # github.event.commits.*.modified), 'sync-worker/')` guard silently

@@ -15,6 +15,12 @@ dist-ssr
 .env.backup
 *.local
 
+# Wrangler local secrets (holds SECRET_KEY/SYNC_SECRET_KEY etc in dev) — only
+# the .example variants should ever be committed.
+**/.dev.vars
+**/.dev.vars.*
+!**/.dev.vars.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

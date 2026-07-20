@@ -152,6 +152,9 @@ interface Baseline {
   audioMediaStrategy: AudioMediaStrategy
   geminiApiKey: string
   precedingTargetCells: number
+  /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
+   *  front matter. Absent/false imports front matter (the default). */
+  importExcludeFrontMatter: boolean
 }
 
 function buildBaseline(project: ProjectRecord): Baseline {
@@ -188,6 +191,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     audioMediaStrategy: project.audioMediaStrategy ?? "lazy",
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
+    importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
   }
 }
 
@@ -315,6 +319,8 @@ export function ProjectSettings() {
   const [decaySettings, setDecaySettings] = useState<DecaySettings | undefined>(undefined)
   const [audioMediaStrategy, setAudioMediaStrategy] = useState<AudioMediaStrategy>("lazy")
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
+  // AQU-634: per-project USFM front-matter opt-out.
+  const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
 
   // Per-device user-scoped key — not part of the project record, not server-
   // synced, no race with the project save flow. Kept on its own immediate-save
@@ -365,6 +371,7 @@ export function ProjectSettings() {
     setAudioMediaStrategy(b.audioMediaStrategy)
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
+    setImportExcludeFrontMatter(b.importExcludeFrontMatter)
   }, [])
 
   // Seed once when the project first loads. We intentionally don't reseed on
@@ -460,7 +467,8 @@ export function ProjectSettings() {
       audioMediaStrategy !== baseline.audioMediaStrategy ||
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
-      precedingTargetCells !== baseline.precedingTargetCells
+      precedingTargetCells !== baseline.precedingTargetCells ||
+      importExcludeFrontMatter !== baseline.importExcludeFrontMatter
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
@@ -469,7 +477,7 @@ export function ProjectSettings() {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells,
+    precedingTargetCells, importExcludeFrontMatter,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -632,6 +640,7 @@ export function ProjectSettings() {
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
+      if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
@@ -697,6 +706,7 @@ export function ProjectSettings() {
         audioMediaStrategy,
         geminiApiKey,
         precedingTargetCells,
+        importExcludeFrontMatter,
       }
       setBaseline(newBaseline)
       // Refresh `useProject` in the background so other components see the
@@ -730,7 +740,7 @@ export function ProjectSettings() {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells,
+    precedingTargetCells, importExcludeFrontMatter,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -777,6 +787,7 @@ export function ProjectSettings() {
     { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language"] },
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
@@ -828,7 +839,7 @@ export function ProjectSettings() {
       label: "General",
       description: "Name, languages, username, Bible resources",
       icon: SlidersHorizontal,
-      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
     },
     {
       id: "source-sync",
@@ -1228,6 +1239,37 @@ export function ProjectSettings() {
                     id="bible-resources-enabled"
                     checked={resolveBibleResourcesEnabled(bibleResourcesEnabled, projectHasScriptureFiles(project?.files))}
                     onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
+                    disabled={!canEditShared}
+                  />
+                </div>
+              </DisabledFieldTooltip>
+            </CardContent>
+          </Card>
+        )}
+
+        {searchGroupLabel("section-import")}
+        {sectionsToRender.some((s) => s.id === "section-import") && (
+          <Card id="section-import">
+            <CardHeader>
+              <CardTitle>Import</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <FieldLabel htmlFor="import-exclude-front-matter" className="text-sm">
+                      Exclude USFM front matter
+                    </FieldLabel>
+                    <p className="text-xs text-muted-foreground">
+                      When on, USFM imports drop the book name, running header, TOC, main
+                      title, and introduction paragraphs. Section headings and Psalm titles
+                      still import. Off (the default) imports front matter as translatable cells.
+                    </p>
+                  </div>
+                  <Switch
+                    id="import-exclude-front-matter"
+                    checked={importExcludeFrontMatter}
+                    onCheckedChange={(checked) => setImportExcludeFrontMatter(checked)}
                     disabled={!canEditShared}
                   />
                 </div>

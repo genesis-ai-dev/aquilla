@@ -1,24 +1,35 @@
 import { v4 as uuid } from "uuid"
 import type { TranslatableString, CellType } from "./types"
 import { splitIntoSegments } from "./text-splitter"
+import { isBookTitleOrIntroMarker } from "./usfm-markers"
 
 export interface UsfmBookResult {
   bookId: string
   strings: TranslatableString[]
 }
 
-export function extractUsfmStrings(content: string): UsfmBookResult[] {
+export interface ExtractUsfmOptions {
+  /** When true, book-name/title/TOC + intro-block front matter is excluded from
+   *  the emitted cells (per-project opt-out, AQU-634). In-body section headings
+   *  (\s, \ms, \r) and Psalm titles (\d) are unaffected. Default: false. */
+  excludeFrontMatter?: boolean
+}
+
+export function extractUsfmStrings(
+  content: string,
+  opts?: ExtractUsfmOptions,
+): UsfmBookResult[] {
   const hasId = /\\id\s/.test(content)
 
   if (!hasId) {
-    return [parseBookSection(content, "unknown")]
+    return [parseBookSection(content, "unknown", opts)]
   }
 
   const sections = content.split(/(?=\\id\s)/).filter((s) => s.trim().length > 0)
   return sections.map((section) => {
     const idMatch = section.match(/\\id\s+(\S+)/)
     const bookId = idMatch ? idMatch[1] : "unknown"
-    return parseBookSection(section, bookId)
+    return parseBookSection(section, bookId, opts)
   })
 }
 
@@ -112,7 +123,12 @@ function normalizeAlignedUsfm(section: string): string {
     .join("\n")
 }
 
-function parseBookSection(section: string, bookId: string): UsfmBookResult {
+function parseBookSection(
+  section: string,
+  bookId: string,
+  opts?: ExtractUsfmOptions,
+): UsfmBookResult {
+  const excludeFrontMatter = opts?.excludeFrontMatter ?? false
   const lines = normalizeAlignedUsfm(unwrapSelah(stripNotes(section))).split("\n")
   const strings: TranslatableString[] = []
   let chapter = 0
@@ -202,6 +218,12 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
 
     const paratextMatch = trimmed.match(/^\\(mt|ms|r)\d?\s+(.*)/)
     if (paratextMatch) {
+      // Opt-out: drop book title (\mt) front matter; \ms and \r are in-body
+      // section headings and always import.
+      if (excludeFrontMatter && isBookTitleOrIntroMarker(paratextMatch[1])) {
+        verseOpen = false
+        continue
+      }
       addString(paratextMatch[2], bookId, "paratext", `${bookId} intro`)
       verseOpen = false
       continue

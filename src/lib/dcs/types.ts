@@ -82,6 +82,14 @@ export interface DcsFile {
   cells: DcsCell[]
 }
 
+/** Per-project import options carried into a route's parse (AQU-634). */
+export interface DcsImportOptions {
+  /** When true, exclude book-name/title/TOC + intro-block front matter from
+   *  imported cells (per-project opt-out). Only the USFM route honours it;
+   *  other routes ignore it. Default: false (import front matter). */
+  excludeFrontMatter?: boolean
+}
+
 /** Dispatch entry: a resource type's parser. resource-map.ts holds the ordered
  *  list; the first `matches` wins. */
 export interface ResourceRoute {
@@ -93,5 +101,6 @@ export interface ResourceRoute {
     entry: DcsCatalogEntry
     manifest: DcsManifest
     files: Map<string, string>
+    options?: DcsImportOptions
   }) => DcsFile[]
 }

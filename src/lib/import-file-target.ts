@@ -131,8 +131,11 @@ export function matchTargetRowsByOrder(
  *  paratext in document order, refs and text conventions identical to the
  *  source-import path (usfmSectionToStrings in lib/import.ts) so refs match
  *  cells that were originally imported from USFM. */
-export function usfmToTargetRows(raw: string): TargetRow[] {
-  const doc = parseUsfmLossless(raw)
+export function usfmToTargetRows(
+  raw: string,
+  opts?: { excludeFrontMatter?: boolean },
+): TargetRow[] {
+  const doc = parseUsfmLossless(raw, { excludeFrontMatter: opts?.excludeFrontMatter })
   return [
     ...doc.verses.map((v) => ({ order: v.textStart, ref: v.ref, text: v.text.trim() })),
     ...doc.headings.map((h) => ({ order: h.textStart, ref: h.ref, text: h.text.trim() })),

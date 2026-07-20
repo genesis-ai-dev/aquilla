@@ -1,5 +1,6 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState, injectSessions } from "../../helpers/auth"
+import { getMyOrg } from "../../helpers/frontier-api"
 
 /**
  * AccountSwitcher dropdown — sidebar username button.
@@ -43,6 +44,7 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
     ensureAuthState("alice"),
     ensureAuthState("bob"),
   ])
+  const bobOrg = await getMyOrg(bobSession.jwt)
 
   await alice.goto(orgRoute(alice))
   await injectSessions(alice, [aliceSession, bobSession], "alice")
@@ -51,6 +53,11 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
   await alice.getByRole("menuitem", { name: /^Log out$/i }).click()
+
+  // Org-scoped shell: after alice logs out, bob is promoted in IDB but the
+  // URL may still be alice's org — land on bob's org home so the switcher renders.
+  await alice.goto(`/orgs/${bobOrg.id}`)
+  await alice.waitForLoadState("networkidle")
 
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
     timeout: 10_000,

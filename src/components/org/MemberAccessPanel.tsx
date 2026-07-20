@@ -8,6 +8,7 @@ import { ROLE } from "@/lib/frontier/roles"
 import { RoleLevelLabel } from "@/components/RoleLabel"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { denialMessage } from "@/lib/permissions/denial"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 /**
  * AD-12 effective-access panel for one org member. Expands to show, per project,
@@ -201,20 +202,20 @@ function AccessProjectRow({
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {p.direct != null && (
-          <button
-            type="button"
-            onClick={canRevoke ? onRevokeDirect : undefined}
-            disabled={revoking || !canRevoke}
-            title={
-              !canRevoke
-                ? denialMessage(ROLE.MAINTAINER, callerOrgRoleLevel)
-                : undefined
-            }
-            data-testid="revoke-direct-grant"
-            className="rounded border px-2 py-0.5 text-[10px] hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+          <AppTooltip
+            content={!canRevoke ? denialMessage(ROLE.MAINTAINER, callerOrgRoleLevel) : undefined}
+            disabled={canRevoke}
           >
-            {revoking ? "Revoking…" : "Revoke direct grant"}
-          </button>
+            <button
+              type="button"
+              onClick={canRevoke ? onRevokeDirect : undefined}
+              disabled={revoking || !canRevoke}
+              data-testid="revoke-direct-grant"
+              className="rounded border px-2 py-0.5 text-[10px] hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {revoking ? "Revoking…" : "Revoke direct grant"}
+            </button>
+          </AppTooltip>
         )}
         {otherPaths.length > 0 && (
           <span className="text-[10px] text-muted-foreground">

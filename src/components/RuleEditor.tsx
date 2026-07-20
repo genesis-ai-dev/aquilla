@@ -237,8 +237,8 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
         <p className="text-sm font-semibold text-foreground">
           {initialRule ? "Edit rule" : "New rule"}
         </p>
-        <Button variant="ghost" size="sm" onClick={onCancel} aria-label="Cancel">
-          <X className="h-4 w-4" />
+        <Button variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Cancel">
+          <X />
         </Button>
       </div>
 

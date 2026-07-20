@@ -82,23 +82,26 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
   if (status.kind === "loading") {
     const pct = status.total > 0 ? Math.round((status.loaded / status.total) * 100) : null
     return (
-      <Badge
-        variant="secondary"
-        className={cn(PILL, "text-amber-700 dark:text-amber-300")}
-        title={pct != null ? `Downloading transcription model (${pct}%)…` : "Loading transcription model…"}
-      >
-        {pct != null ? <Download className="h-2.5 w-2.5" /> : <Spinner className="size-2.5" />}
-        {pct != null ? <span className="tabular-nums">{pct}%</span> : <span>load</span>}
-      </Badge>
+      <AppTooltip content={pct != null ? `Downloading transcription model (${pct}%)…` : "Loading transcription model…"}>
+        <Badge
+          variant="secondary"
+          className={cn(PILL, "text-amber-700 dark:text-amber-300")}
+        >
+          {pct != null ? <Download className="h-2.5 w-2.5" /> : <Spinner className="size-2.5" />}
+          {pct != null ? <span className="tabular-nums">{pct}%</span> : <span>load</span>}
+        </Badge>
+      </AppTooltip>
     )
   }
 
   if (status.kind === "transcribing") {
     return (
-      <Badge variant="secondary" className={cn(PILL, "text-primary")} title="Transcribing audio…">
-        <Sparkles className="h-2.5 w-2.5 animate-pulse" />
-        <span>transcribing</span>
-      </Badge>
+      <AppTooltip content="Transcribing audio…">
+        <Badge variant="secondary" className={cn(PILL, "text-primary")}>
+          <Sparkles className="h-2.5 w-2.5 animate-pulse" />
+          <span>transcribing</span>
+        </Badge>
+      </AppTooltip>
     )
   }
 

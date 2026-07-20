@@ -3356,11 +3356,11 @@ function TargetDecoratedText({
           showEvidence={false}
           onRangeClick={onRangeClick}
         />
+        <AppTooltip content={`Managed term: ${match.term}`}>
         <span
           role={onTermChipClick ? "button" : undefined}
           tabIndex={onTermChipClick ? 0 : undefined}
           aria-label={`Managed term: ${match.term}`}
-          title={`Managed term: ${match.term}`}
           data-source-term={match.term}
           className="term-chip term-chip-preferred"
           onClick={onTermChipClick ? (event) => {
@@ -3374,6 +3374,7 @@ function TargetDecoratedText({
             onTermChipClick(match.term, event.currentTarget)
           } : undefined}
         />
+        </AppTooltip>
       </span>,
     )
     cursor = match.end
@@ -3433,22 +3434,22 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
     <div className="mb-2 flex flex-col gap-2" dir="ltr">
       {renderable.map((att, i) =>
         att.type === "video" ? (
-          <video
-            key={i}
-            src={att.url}
-            controls
-            title={att.title}
-            className="max-h-32 rounded border object-contain"
-          />
+          <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
+            <video
+              src={att.url}
+              controls
+              className="max-h-32 rounded border object-contain"
+            />
+          </AppTooltip>
         ) : (
-          <img
-            key={i}
-            src={att.url}
-            alt={att.alt}
-            title={att.title}
-            loading="lazy"
-            className="block max-h-32 rounded border object-contain"
-          />
+          <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
+            <img
+              src={att.url}
+              alt={att.alt}
+              loading="lazy"
+              className="block max-h-32 rounded border object-contain"
+            />
+          </AppTooltip>
         ),
       )}
     </div>
@@ -4831,8 +4832,10 @@ function EditorRow({
     preventBaseUIHandler?: () => void
   }
   const renderValidationButton = (onClick?: () => void) => (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-xs"
       data-showcase="cell.health"
       // FRO-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
@@ -4857,9 +4860,7 @@ function EditorRow({
         ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
       }}
       className={cn(
-        "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
-        "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
-        "hover:bg-muted/80",
+        "relative rounded-full",
         validationColorClass,
         vs === "none" && "hover:text-green-500",
         vs === "others" && "hover:text-green-500",
@@ -4875,11 +4876,11 @@ function EditorRow({
         style={{ position: "absolute", inset: 0, margin: "auto" }}
       />
       <ValidationIcon
-        className="relative h-3.5 w-3.5"
+        className="relative size-3.5"
         strokeWidth={2.5}
         {...(vs === "others" ? { fill: "currentColor" } : {})}
       />
-    </button>
+    </Button>
   )
   // AQU-592: the validation control (health ring + validate toggle, with the
   // validators popover) renders to the LEFT of the TARGET editing cell — see the
@@ -5214,20 +5215,22 @@ function EditorRow({
                 somewhere to sit when a cell carries no context. */}
             {canEditSourceForCell ? (
               <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
                   aria-pressed={sourceEditing}
                   onClick={() => setSourceEditing((v) => !v)}
                   className={cn(
-                    "absolute right-1 top-1 z-10 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-colors",
+                    "absolute right-1 top-1 z-10 shrink-0",
                     sourceEditing
                       ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
                   )}
                 >
-                  <Pencil className="h-3 w-3" />
-                </button>
+                  <Pencil />
+                </Button>
               </AppTooltip>
             ) : sourceReadOnlyReasonForCell ? (
               // Force-locked source lane (DCS pin): keep an explained
@@ -5236,9 +5239,9 @@ function EditorRow({
               <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
                 <span
                   aria-label="Source is locked"
-                  className="absolute right-1 top-1 z-10 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
                 >
-                  <Lock className="h-3 w-3" />
+                  <Lock className="size-3" />
                 </span>
               </AppTooltip>
             ) : null}
@@ -6004,36 +6007,46 @@ function EditorRow({
                               ? "Sign in or add an AI model in project settings to generate back-translations"
                               : "Regenerate with AI"
                           }>
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon-xs"
                               disabled={!isBacktranslationConfigured || isBacktranslating}
                               onClick={() => onBacktranslate?.(cell, "regenerate")}
                               aria-label="Regenerate the back-translation"
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                              className="rounded-full text-muted-foreground hover:text-foreground"
                             >
-                              <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
-                            </button>
+                              <RefreshCw className={cn(isBacktranslating && "animate-spin")} />
+                            </Button>
                           </AppTooltip>
                         )}
                         {/* Edit — contributor+ only. A quiet icon, not a labelled pill. */}
                         {editable ? (
                           <AppTooltip content="Edit the back-translation">
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon-xs"
                               onClick={handleBtEditStart}
                               aria-label="Edit the back-translation"
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              className="rounded-full text-muted-foreground hover:text-foreground"
                             >
-                              <Pencil className="h-3 w-3" />
-                            </button>
+                              <Pencil />
+                            </Button>
                           </AppTooltip>
                         ) : (
                           <AppTooltip content="Contributor+ required to edit back-translations">
-                            <span
-                              aria-label="Contributor+ required to edit back-translations"
-                              className="inline-flex h-6 w-6 cursor-not-allowed items-center justify-center rounded-full text-muted-foreground opacity-40"
-                            >
-                              <Pencil className="h-3 w-3" />
+                            <span className="inline-flex">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                disabled
+                                aria-label="Contributor+ required to edit back-translations"
+                                className="rounded-full text-muted-foreground"
+                              >
+                                <Pencil />
+                              </Button>
                             </span>
                           </AppTooltip>
                         )}
@@ -6058,15 +6071,17 @@ function EditorRow({
                             Your translation changed since this was written
                           </span>
                           {editable && (
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="xs"
                               onClick={() => onBacktranslate?.(cell, "refresh")}
                               disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="h-auto shrink-0 gap-1 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-500/25 dark:text-amber-200"
                             >
-                              <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                              <RefreshCw className={cn(isBacktranslating && "animate-spin")} />
                               Refresh
-                            </button>
+                            </Button>
                           )}
                         </div>
                       )}
@@ -6085,21 +6100,22 @@ function EditorRow({
                             className="w-full resize-none rounded-lg border border-border bg-background px-3.5 py-3 text-[15px] leading-relaxed text-foreground outline-none focus:ring-1 focus:ring-ring"
                           />
                           <div className="flex items-center justify-end gap-1.5">
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="xs"
                               onClick={handleBtCancel}
-                              className="rounded-md px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
                             >
                               Cancel
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
+                              size="xs"
                               onClick={handleBtSave}
                               disabled={btSaving || !btEditValue.trim()}
-                              className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {btSaving ? "Saving…" : "Save"}
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       ) : (
@@ -6124,18 +6140,18 @@ function EditorRow({
                       </p>
                       {editable ? (
                         <>
-                          <button
+                          <Button
                             type="button"
+                            size="sm"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
                             disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {isBacktranslating ? (
-                              <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
+                              <><RefreshCw className="animate-spin" /> Reading it back…</>
                             ) : (
-                              <><Sparkles className="h-3 w-3" /> Read it back with AI</>
+                              <><Sparkles /> Read it back with AI</>
                             )}
-                          </button>
+                          </Button>
                           {!isBacktranslationConfigured && (
                             <p className="text-[11px] text-muted-foreground/70">
                               Sign in or add an AI model in project settings to generate one.

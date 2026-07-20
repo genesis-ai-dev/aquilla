@@ -8,6 +8,7 @@
 
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 
 // Bouncy spring matches the reference popout, slightly tamed for desktop.
@@ -43,11 +44,13 @@ export function RailButton({
           ? "bg-emerald-500"
           : null
 
-  const button = (
+  return (
     <div className="relative">
       <AppTooltip content={tooltip}>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           data-tooltip={tooltip}
           onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.() }}
           onMouseDown={onMouseDown}
@@ -55,33 +58,26 @@ export function RailButton({
           disabled={disabled}
           aria-label={tooltip}
           className={cn(
-            "flex h-6 w-6 items-center justify-center rounded-md",
-            "transition-[transform,color,background-color] duration-150 ease-out",
-            "active:scale-[0.88]",
-            "hover:bg-muted/80",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
             disabled
-              ? "cursor-not-allowed text-muted-foreground/30"
+              ? "text-muted-foreground/30"
               : toneClass ?? "text-muted-foreground/70 hover:text-foreground",
             pulsing && "animate-pulse",
           )}
         >
           {icon}
-        </button>
+        </Button>
       </AppTooltip>
       {dotColor && (
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full ring-2 ring-background",
+            "pointer-events-none absolute right-0.5 top-0.5 size-1.5 rounded-full ring-2 ring-background",
             dotColor,
           )}
         />
       )}
     </div>
   )
-
-  return button
 }
 
 interface CellActionRailProps {
@@ -114,7 +110,8 @@ export function CellActionRail({
       data-slot="cell-action-rail"
       data-revealed={revealed ? "true" : "false"}
       className={cn(
-        "flex items-center justify-end gap-0.5 rounded-md p-0.5",
+        // Match icon-xs Button radius so nested padding reads even.
+        "flex items-center justify-end rounded-[min(var(--radius-md),10px)] p-0.5",
         // Filled surface only when revealed, so the rail reads as a distinct
         // cluster off the cell surface instead of competing with text.
         revealed && "bg-card",
@@ -122,7 +119,7 @@ export function CellActionRail({
       style={{ transition: "background-color 200ms ease-out, box-shadow 200ms ease-out" }}
     >
       <div
-        className="flex items-center gap-0.5"
+        className="flex items-center"
         style={{
           opacity: revealed ? 1 : 0,
           // Scale only — no translate. A translate moves the button's hit-box

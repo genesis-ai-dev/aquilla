@@ -175,13 +175,13 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   }
 
   return (
-    <div className="flex h-full w-96 flex-col border-l bg-background">
-      <div className="flex items-center justify-between border-b px-3 py-2">
+    <div className="flex h-full w-96 flex-col border-l bg-card">
+      <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close history">
-          <X className="h-4 w-4" />
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close history">
+          <X />
         </Button>
       </div>
 

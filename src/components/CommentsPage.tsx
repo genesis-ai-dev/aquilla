@@ -13,6 +13,7 @@ import {
   MoreHorizontal, Pencil, Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -527,27 +528,29 @@ function CommentThreadCard({
               {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (() => {
                 const { exists } = resolveFileName(root.fileId, fileMap)
                 return exists ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-xs"
-                    title="Go to cell in editor"
-                    onClick={() => onNavigate(root)}
-                  >
-                    <ArrowUpRight className="mr-0.5 h-3 w-3" />
-                    Open file
-                  </Button>
+                  <AppTooltip content="Go to cell in editor">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => onNavigate(root)}
+                    >
+                      <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                      Open file
+                    </Button>
+                  </AppTooltip>
                 ) : (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
-                    title="File has been deleted"
-                    disabled
-                  >
-                    <ArrowUpRight className="mr-0.5 h-3 w-3" />
-                    Open file
-                  </Button>
+                  <AppTooltip content="File has been deleted">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
+                      disabled
+                    >
+                      <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                      Open file
+                    </Button>
+                  </AppTooltip>
                 )
               })()}
               <Button

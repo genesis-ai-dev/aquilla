@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export interface OverflowMenuItem {
   id: string
@@ -31,13 +32,15 @@ interface Props {
 export function OverflowMenu({ items }: Props) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="ghost" size="icon" aria-label="More" title="More">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        }
-      />
+      <AppTooltip content="More">
+        <DropdownMenuTrigger
+          render={
+            <Button variant="ghost" size="icon" aria-label="More">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          }
+        />
+      </AppTooltip>
       <DropdownMenuContent align="end" className="min-w-48">
         <DropdownMenuGroup>
           {items.map((item) =>

@@ -474,24 +474,25 @@ function PendingInviteRow({
           <span>{futureLabel ?? expiresLabel}</span>
         </div>
       </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-        disabled={busy}
-        title="Revoke invitation"
-        aria-label={`Revoke invitation to ${invite.projectName}`}
-        onClick={async () => {
-          setBusy(true)
-          try {
-            await onRevoke(invite.projectId, invite.token)
-          } finally {
-            setBusy(false)
-          }
-        }}
-      >
-        {busy ? <Spinner className="size-3.5" /> : <X className="h-3.5 w-3.5" />}
-      </Button>
+      <AppTooltip content="Revoke invitation">
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="text-muted-foreground hover:text-destructive"
+          disabled={busy}
+          aria-label={`Revoke invitation to ${invite.projectName}`}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              await onRevoke(invite.projectId, invite.token)
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          {busy ? <Spinner className="size-3.5" /> : <X />}
+        </Button>
+      </AppTooltip>
     </li>
   )
 }

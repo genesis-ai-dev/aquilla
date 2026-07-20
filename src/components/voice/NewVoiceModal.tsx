@@ -404,12 +404,13 @@ function NewVoiceModalBody({
           {/* Footer */}
           <div className="-mx-5 -mb-5 mt-2 flex flex-wrap items-center gap-2 rounded-b-3xl bg-muted/40 p-5">
             {onMakeDefault && !isDefault && (
-              <Button
-                type="button" size="sm" variant="outline" onClick={onMakeDefault}
-                title="Make this the narrator — used for lines without an explicit speaker."
-              >
-                <Star className="mr-1 h-3.5 w-3.5" /> Make narrator
-              </Button>
+              <AppTooltip content="Make this the narrator — used for lines without an explicit speaker.">
+                <Button
+                  type="button" size="sm" variant="outline" onClick={onMakeDefault}
+                >
+                  <Star className="mr-1 h-3.5 w-3.5" /> Make narrator
+                </Button>
+              </AppTooltip>
             )}
             {isDefault && (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">

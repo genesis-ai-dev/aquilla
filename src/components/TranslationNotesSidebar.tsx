@@ -22,6 +22,7 @@ import { useEffect, useState, useCallback } from "react"
 import { fetchProjectFiles, fetchFileCells } from "@/lib/sync/cells-read"
 import { cn } from "@/lib/utils"
 import { BookOpen, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 // Sentinel fileId for project-scoped token mints (no specific file).
 // Must match the "__project__" sentinel used by useComments,
@@ -194,14 +195,16 @@ export function TranslationNotesSidebar({
             </span>
           )}
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label="Hide translation notes"
           onClick={onToggle}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+          className="text-muted-foreground"
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </Button>
       </div>
 
       {/* Body */}

@@ -12,6 +12,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
@@ -154,18 +155,19 @@ export function VoicePlaybackBar({
           <IconButton title="Previous line" disabled={!canPlay} onClick={skipBack}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
-          <Button
-            type="button"
-            size="icon"
-            variant="default"
-            onClick={onPlayPause}
-            disabled={!canPlay}
-            title={isPlaying ? "Pause" : "Play all"}
-            aria-label={isPlaying ? "Pause" : "Play all"}
-            className="bg-foreground text-background hover:bg-foreground/90"
-          >
-            {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
-          </Button>
+          <AppTooltip content={isPlaying ? "Pause" : "Play all"}>
+            <Button
+              type="button"
+              size="icon"
+              variant="default"
+              onClick={onPlayPause}
+              disabled={!canPlay}
+              aria-label={isPlaying ? "Pause" : "Play all"}
+              className="bg-foreground text-background hover:bg-foreground/90"
+            >
+              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
+            </Button>
+          </AppTooltip>
           <IconButton title="Next line" disabled={!canPlay} onClick={skipForward}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
@@ -192,17 +194,18 @@ function IconButton({
   disabled?: boolean
 }) {
   return (
-    <Button
-      type="button"
-      size="icon-sm"
-      variant="ghost"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      {children}
-    </Button>
+    <AppTooltip content={title}>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label={title}
+        onClick={onClick}
+        disabled={disabled}
+      >
+        {children}
+      </Button>
+    </AppTooltip>
   )
 }
 
@@ -243,19 +246,20 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
   const [open, setOpen] = useState(false)
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            title="Playback speed"
-            className="min-w-9 px-1.5 tabular-nums"
-          >
-            {rate}x
-          </Button>
-        }
-      />
+      <AppTooltip content="Playback speed">
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="min-w-9 px-1.5 tabular-nums"
+            >
+              {rate}x
+            </Button>
+          }
+        />
+      </AppTooltip>
       <PopoverContent align="center" side="top" className="w-24 p-1">
         {SPEEDS.map((s) => (
           <button
@@ -279,16 +283,17 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
   const muted = volume === 0
   return (
     <div className="flex items-center gap-2">
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="ghost"
-        title={muted ? "Unmute" : "Mute"}
-        aria-label={muted ? "Unmute" : "Mute"}
-        onClick={() => onChange(muted ? 1 : 0)}
-      >
-        {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-      </Button>
+      <AppTooltip content={muted ? "Unmute" : "Mute"}>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={muted ? "Unmute" : "Mute"}
+          onClick={() => onChange(muted ? 1 : 0)}
+        >
+          {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+        </Button>
+      </AppTooltip>
       <Slider
         min={0}
         max={1}

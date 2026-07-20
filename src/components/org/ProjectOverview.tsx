@@ -385,10 +385,9 @@ function ChapterRow({
       {open && verses != null && (
         <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
           {verses.map((verse, index) => (
+            <AppTooltip key={`${verse.ref}:${index}`} content={verse.ref}>
             <li
-              key={`${verse.ref}:${index}`}
               data-testid="verse-cell"
-              title={verse.ref}
               className={cn(
                 "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
                 verse.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
@@ -398,6 +397,7 @@ function ChapterRow({
             >
               {verse.verseLabel}
             </li>
+            </AppTooltip>
           ))}
         </ul>
       )}

@@ -21,6 +21,7 @@ import { Check, ChevronDown, ChevronUp, Loader2, MessageSquare, Pencil, ShieldCh
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
@@ -330,13 +331,13 @@ function StagedProposalCard({
             >
               Discard
             </Button>
-            <Button
-              size="sm"
-              className="h-6 text-[11px]"
-              onClick={() => void handleApply()}
-              disabled={Boolean(blockedReason) || state === "applying"}
-              title={blockedReason ?? undefined}
-            >
+            <AppTooltip content={blockedReason ?? undefined} disabled={!blockedReason}>
+              <Button
+                size="sm"
+                className="h-6 text-[11px]"
+                onClick={() => void handleApply()}
+                disabled={Boolean(blockedReason) || state === "applying"}
+              >
               {state === "applying" ? (
                 <>
                   <Loader2 className={cn("h-3 w-3 animate-spin")} /> Applying…
@@ -345,6 +346,7 @@ function StagedProposalCard({
                 "Apply"
               )}
             </Button>
+            </AppTooltip>
           </div>
           {blockedReason && (
             <div className="text-right text-[10px] text-muted-foreground">{blockedReason}</div>

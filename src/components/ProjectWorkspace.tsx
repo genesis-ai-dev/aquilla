@@ -170,7 +170,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
-import { AppTooltip, Tooltip, TooltipContent, TooltipDelegationBoundary, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
 import {
@@ -4952,37 +4952,40 @@ export function ProjectWorkspace() {
             {/* Phase 0.5: deterministic "Check file" entry point. Title doubles
                 as the last-run summary so the result is visible at the button. */}
             {project && centerSurface === "editor" && activeFileId && (
-              <button
-                type="button"
-                // SUB-6: toggle semantics — while the drawer is open, clicking
-                // the button closes it (like the other dock toggles) instead of
-                // silently re-running the check. Re-check = close, click again.
-                onClick={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
-                disabled={checkRunning}
-                aria-expanded={checkOpen}
-                className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
-                title={
+              <AppTooltip
+                content={
                   checkOpen
                     ? "Close file check"
                     : checkResult
                       ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
                       : "Check the open file against the project's rules and term base"
                 }
-                aria-label="Check file"
-                data-testid="check-file-button"
               >
-                {checkRunning
-                  ? <Loader2 className="h-3 w-3 animate-spin" />
-                  : <ListChecks className="h-3 w-3" />}
-                Check file
-                {checkResult && !checkRunning && (
-                  <span className={checkResult.totalFindingCount > 0
-                    ? "rounded-md bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
-                    : "rounded-md bg-green-100 px-1.5 text-[10px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-300"}>
-                    {checkResult.totalFindingCount}
-                  </span>
-                )}
-              </button>
+                <button
+                  type="button"
+                  // SUB-6: toggle semantics — while the drawer is open, clicking
+                  // the button closes it (like the other dock toggles) instead of
+                  // silently re-running the check. Re-check = close, click again.
+                  onClick={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
+                  disabled={checkRunning}
+                  aria-expanded={checkOpen}
+                  className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
+                  aria-label="Check file"
+                  data-testid="check-file-button"
+                >
+                  {checkRunning
+                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                    : <ListChecks className="h-3 w-3" />}
+                  Check file
+                  {checkResult && !checkRunning && (
+                    <span className={checkResult.totalFindingCount > 0
+                      ? "rounded-md bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
+                      : "rounded-md bg-green-100 px-1.5 text-[10px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-300"}>
+                      {checkResult.totalFindingCount}
+                    </span>
+                  )}
+                </button>
+              </AppTooltip>
             )}
 
             {/* AQU-661: the dynamic primary-action button was removed — its
@@ -5378,11 +5381,6 @@ export function ProjectWorkspace() {
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>
-              {/* Dense grid: one tooltip-bearing control per cell across
-                  hundreds of cells — opt into the delegated tooltip layer here
-                  (see TooltipDelegationBoundary) instead of mounting a Base UI
-                  tooltip per control. */}
-              <TooltipDelegationBoundary>
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -5453,7 +5451,6 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
           />
-              </TooltipDelegationBoundary>
               </EditorActionsProvider>
               )}
             </div>

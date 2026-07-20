@@ -60,14 +60,16 @@ export function OrgSetupChecklist({
     <section data-testid="org-setup-checklist" className="rounded-lg border bg-card p-4">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-sm font-medium">Get your organization started</h2>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={dismiss}
           aria-label="Dismiss checklist"
-          className="text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground"
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </Button>
       </div>
       <p className="mb-3 text-xs text-muted-foreground">{doneCount} of 2 complete</p>
       <ul className="space-y-3">

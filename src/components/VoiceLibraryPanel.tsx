@@ -274,22 +274,22 @@ function VoiceRow({
     : providerInfo(voice.provider ?? projectProvider).shortTitle
   const [menuOpen, setMenuOpen] = useState(false)
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
-        e.dataTransfer.effectAllowed = "copy"
-      }}
-      onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
-      title="Click to select · drag onto a line to assign"
-      className={cn(
-        "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
-        active ? "bg-primary/10" : "hover:bg-accent/50",
-      )}
-    >
+    <AppTooltip content="Click to select · drag onto a line to assign">
+      <div
+        role="button"
+        tabIndex={0}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
+          e.dataTransfer.effectAllowed = "copy"
+        }}
+        onClick={onSelect}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
+        className={cn(
+          "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
+          active ? "bg-primary/10" : "hover:bg-accent/50",
+        )}
+      >
       <VoiceAvatar voice={voice} size={28} />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium leading-tight">{voice.name}</span>
@@ -304,13 +304,14 @@ function VoiceRow({
         </span>
       </span>
       {isDefault && (
-        <Badge
-          variant="secondary"
-          title="Narrator — lines without an explicit speaker use this voice."
-          className="shrink-0 gap-1 text-[9px]"
-        >
-          <Star data-icon="inline-start" /> Narrator
-        </Badge>
+        <AppTooltip content="Narrator — lines without an explicit speaker use this voice.">
+          <Badge
+            variant="secondary"
+            className="shrink-0 gap-1 text-[9px]"
+          >
+            <Star data-icon="inline-start" /> Narrator
+          </Badge>
+        </AppTooltip>
       )}
       {/* AQU-365: the ⋯ menu is character CRUD (edit/set-narrator/delete) —
           hidden below the maintainer floor. Selecting/dragging a voice to
@@ -318,21 +319,22 @@ function VoiceRow({
           concern this ticket doesn't touch). */}
       {canEdit && (
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-          <PopoverTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={(e) => e.stopPropagation()}
-                title="More"
-                aria-label="More voice actions"
-                className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            }
-          />
+          <AppTooltip content="More">
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="More voice actions"
+                  className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              }
+            />
+          </AppTooltip>
           <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
             <MenuItem icon={Pencil} label="Edit" onClick={() => { setMenuOpen(false); onEdit() }} />
             {!isDefault && (
@@ -350,7 +352,8 @@ function VoiceRow({
         </Popover>
       )}
       {active && <Check className="h-4 w-4 shrink-0 text-primary" />}
-    </div>
+      </div>
+    </AppTooltip>
   )
 }
 

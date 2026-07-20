@@ -74,7 +74,7 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
         <h3 className="text-sm font-medium">Activity — {username}</h3>
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="icon-xs"
           className="text-muted-foreground"
           onClick={onClose}
           aria-label="Close member activity"
@@ -90,7 +90,7 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <h4 className="mb-2 text-xs font-semibold text-muted-foreground">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Files worked on
             </h4>
             {fileRollup.length === 0 ? (
@@ -110,7 +110,7 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
           </div>
 
           <div>
-            <h4 className="mb-2 text-xs font-semibold text-muted-foreground">
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Recent actions
             </h4>
             {events.length === 0 ? (

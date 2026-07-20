@@ -282,10 +282,10 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
                 type="button"
                 onClick={() => setMode(m)}
                 className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
- mode === m
- ? "bg-primary text-primary-foreground"
- : "bg-muted text-muted-foreground hover:bg-muted/80"
- }`}
+                  mode === m
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
               >
                 {m === "forbidden" ? "Forbidden" : m === "required" ? "Required" : "Must match"}
               </button>
@@ -304,10 +304,10 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
                   type="button"
                   onClick={() => setSide(s)}
                   className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
- side === s
- ? "bg-primary text-primary-foreground"
- : "bg-muted text-muted-foreground hover:bg-muted/80"
- }`}
+                    side === s
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
                 >
                   {s === "source" ? "Source" : "Target"}
                 </button>
@@ -325,12 +325,12 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
                 type="button"
                 onClick={() => setSeverity(sv)}
                 className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
- severity === sv
- ? sv === "major"
- ? "bg-red-500 text-white"
- : "bg-amber-500 text-white"
- : "bg-muted text-muted-foreground hover:bg-muted/80"
- }`}
+                  severity === sv
+                    ? sv === "major"
+                      ? "bg-red-500 text-white"
+                      : "bg-amber-500 text-white"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
               >
                 {sv === "major" ? "Major" : "Minor"}
               </button>
@@ -405,7 +405,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
       {/* Live preview */}
       {pattern && !patternError && !sourcePatternError && (
         <div className="rounded border bg-muted/30 p-3 space-y-2">
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
             Live preview — current file
           </p>
           {preview.count === 0 ? (
@@ -441,7 +441,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
               Autofix — regex replace
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">

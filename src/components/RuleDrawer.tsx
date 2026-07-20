@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router-dom"
 import { X, AlertTriangle, AlertCircle, Sparkles, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 
@@ -41,24 +40,22 @@ export function RuleDrawer({
   }
 
   return (
-    <div className="flex h-full w-80 flex-col border-l bg-card">
+    <div className="flex h-full w-80 flex-col border-l bg-background">
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-2">
           <SeverityIcon className={`h-4 w-4 ${severityColor}`} />
           <h3 className="text-sm font-semibold">{rule.name}</h3>
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close rule details">
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close rule">
           <X />
         </Button>
       </div>
 
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <AppTooltip content="Autofix is unavailable in this build">
-          <Button size="sm" disabled>
-            <Wand2 className="mr-1 h-3.5 w-3.5" />
-            Try to fix all
-          </Button>
-        </AppTooltip>
+        <Button size="sm" disabled title="Autofix is unavailable in this build">
+          <Wand2 className="mr-1 h-3.5 w-3.5" />
+          Try to fix all
+        </Button>
         <Button variant="ghost" size="sm" onClick={onAmendRule}>Amend rule</Button>
       </div>
 
@@ -72,7 +69,7 @@ export function RuleDrawer({
         {rule.description && <p className="text-xs text-muted-foreground">{rule.description}</p>}
 
         <div>
-          <p className="text-xs text-muted-foreground mb-1">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
             Breaking this rule ({infractionCells.length})
           </p>
           {infractionCells.length === 0 ? (
@@ -88,11 +85,9 @@ export function RuleDrawer({
                     <div className="truncate text-muted-foreground">{cell!.original.slice(0, 60)}...</div>
                     <div className="truncate font-medium">{cell!.translated.slice(0, 60)}...</div>
                   </button>
-                  <AppTooltip content="Autofix is unavailable in this build">
-                    <Button variant="ghost" size="sm" className="h-6 px-1" disabled aria-label="Autofix unavailable">
-                      <Sparkles className="h-3 w-3" />
-                    </Button>
-                  </AppTooltip>
+                  <Button variant="ghost" size="sm" className="h-6 px-1" disabled title="Autofix is unavailable in this build">
+                    <Sparkles className="h-3 w-3" />
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -100,7 +95,7 @@ export function RuleDrawer({
         </div>
 
         <div>
-          <p className="text-xs text-muted-foreground mb-1">
+          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
             Following this rule ({passingCells.length}{passingCells.length >= 10 ? "+" : ""})
           </p>
           {passingCells.length === 0 ? (

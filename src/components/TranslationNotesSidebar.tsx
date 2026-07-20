@@ -185,7 +185,7 @@ export function TranslationNotesSidebar({
       )}
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-2">
+      <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">
           <BookOpen className="h-4 w-4 text-muted-foreground" />
           <span>Translation Notes</span>
@@ -226,7 +226,7 @@ export function TranslationNotesSidebar({
             {[...byFile.values()].map(({ fileName, notes: fileNotes }) => (
               <div key={fileName}>
                 {byFile.size > 1 && (
-                  <div className="sticky top-0 bg-muted/60 px-3 py-1 text-xs text-muted-foreground">
+                  <div className="sticky top-0 bg-muted/60 px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                     {fileName}
                   </div>
                 )}

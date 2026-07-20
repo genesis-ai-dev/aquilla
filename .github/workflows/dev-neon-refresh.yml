@@ -39,7 +39,7 @@ jobs:
             echo "Skipping: schedule '$schedule' does not match today's Eastern offset ($eastern_offset)."
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.eastern_gate.outputs.should_run == 'true'
 
       - uses: pnpm/action-setup@v4

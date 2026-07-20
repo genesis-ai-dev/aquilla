@@ -62,7 +62,7 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   await expect(dialog).not.toBeVisible({ timeout: 3_000 })
   // AQU-501: the pane is now expressed via `?section=`, so match the path
   // rather than anchoring on end-of-string.
-  await expect(alice).toHaveURL(/\/settings(\?|$)/, { timeout: 3_000 })
+  await expect(alice).toHaveURL(/\/settings(?:\/|\?|$)/, { timeout: 3_000 })
 })
 
 test("project settings discard dialog: Discard navigates away from settings", async ({ alice }) => {

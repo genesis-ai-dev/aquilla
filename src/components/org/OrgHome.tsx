@@ -7,7 +7,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
-import { portfolioActivityStatus } from "@/lib/project-status"
+import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
@@ -122,7 +122,7 @@ export function activityStatus(p: PortfolioProject, now: number): ActivityStatus
   return portfolioActivityStatus(p, now)
 }
 
-type StatusFilter = "all" | "stalled" | "overdue"
+type StatusFilter = "all" | "stalled" | "attention" | "overdue"
 
 type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name"
 
@@ -196,6 +196,7 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "stalled", label: "Stalled" },
   { value: "overdue", label: "Overdue" },
+  { value: "attention", label: "Needs attention" },
 ]
 
 const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; empty: string }[] = [
@@ -759,18 +760,26 @@ export function OrgHome() {
     switch (statusFilter) {
       case "stalled":
         return activityStatus(p, now) === "stalled"
+      case "attention":
+        return portfolioAttentionReasons(p, now).length > 0
       case "overdue":
         return deadlineStatus(p, now) === "overdue"
       default:
         return true
     }
   })
-  const visible = sortProjectsByLens(filteredProjects, projectLens, now)
+  const visible = sortProjectsByLens(
+    filteredProjects,
+    statusFilter === "attention" ? "attention" : projectLens,
+    now,
+  )
 
   const statusFilteredProjects = projects.filter((p) => {
     switch (statusFilter) {
       case "stalled":
         return activityStatus(p, now) === "stalled"
+      case "attention":
+        return portfolioAttentionReasons(p, now).length > 0
       case "overdue":
         return deadlineStatus(p, now) === "overdue"
       default:
@@ -1111,13 +1120,15 @@ export function OrgHome() {
                         allowSelfAssignment={orgSettings.allowSelfAssignment}
                         onLanesChanged={() => setRefreshTick((t) => t + 1)}
                         onLaneAdded={handleLaneAdded}
-                        initialLens={projectLens}
+                        initialLens={statusFilter === "attention" ? "attention" : projectLens}
                         emptyTitle={
                           statusFilter === "stalled"
                             ? "No stalled projects."
-                            : statusFilter === "overdue"
-                              ? "No overdue projects."
-                              : "No projects yet."
+                            : statusFilter === "attention"
+                              ? "No projects need attention."
+                              : statusFilter === "overdue"
+                                ? "No overdue projects."
+                                : "No projects yet."
                         }
                       />
                     </div>

@@ -4060,7 +4060,15 @@ function EditorRow({
     contentNumber,
   })
   const numberPill = numberLabel === null ? null : (
-    <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
+    // Size the digit to the source's first line box (font-size × line-height
+    // 1.6) and center it — same top inset as the text well (py-1.5 below),
+    // so the number sits on the first line rather than floating above/below
+    // from ad-hoc padding guesses.
+    <span
+      className="flex items-center justify-center leading-none"
+      style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+      aria-label={`Line ${numberLabel}`}
+    >
       <CellNumberPill
         number={numberLabel}
         plain
@@ -4438,25 +4446,27 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
-        {/* Left gutter — line number + validation sit at the top of the row,
-            level with the first line of source/target text. Multi-select lives
-            in its own center column between source and target. */}
-        <div className="flex h-full w-full items-start justify-center gap-1 pt-1.5">
-          {numberPill}
-          {/* Validation — Linear-style pie tile + center icon (quorum progress). */}
-          {hasContent && (
-            <AppTooltip
-              content={validationHoverContent}
-              disabled={!validationHoverContent}
-              side="right"
-              delay={400}
-              className="block max-w-72 w-72 p-2 text-left shadow-md"
-            >
-              {renderValidationButton(
-                canValidate ? toggleMyValidation : undefined,
-              )}
-            </AppTooltip>
-          )}
+        {/* Left gutter — line number stacked above validation. py-1.5 matches
+            the source/target wells; the digit itself is centered in a
+            source-line-height box so it rides the first line of text. */}
+        <div className="flex h-full w-full items-start justify-center gap-1 py-1.5">
+          <div className="flex flex-col items-center gap-0.5">
+            {numberPill}
+            {/* Validation — Linear-style pie tile + center icon (quorum progress). */}
+            {hasContent && (
+              <AppTooltip
+                content={validationHoverContent}
+                disabled={!validationHoverContent}
+                side="right"
+                delay={400}
+                className="block max-w-72 w-72 p-2 text-left shadow-md"
+              >
+                {renderValidationButton(
+                  canValidate ? toggleMyValidation : undefined,
+                )}
+              </AppTooltip>
+            )}
+          </div>
           {/* Stale-source indicator alongside validate button. Both flags
               are already resolved per-row booleans (see isStaleSource's doc
               comment) — the singleton Set(s) just adapt them to the

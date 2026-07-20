@@ -49,6 +49,6 @@ test("'Try to fix all' button navigates to editor with ?openRule= param", async 
   await tryFixBtn.click()
 
   // URL should contain openRule= param and be on the project editor.
-  await alice.waitForURL(/\/project\/[^/]+\?.*openRule=/, { timeout: 5_000 })
+  await alice.waitForURL(/\/project\/[^/]+\/editor\?.*openRule=/, { timeout: 5_000 })
   expect(alice.url()).toContain("openRule=")
 })

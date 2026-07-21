@@ -55,18 +55,19 @@ scheduled runs, voice, per-org tool registry, agent-worker deploy/zone routes (R
 
 ## Waves & ownership
 
-Wave 0: recon (Explore, running — extended to Agent API surface). Then orchestrator writes
-`agent-worker/src/contracts.ts` + SPA mirror `src/lib/agent/contracts.ts` (READ-ONLY to all
-builders) and scaffolds agent-worker/{package.json,tsconfig,wrangler.toml} skeleton.
+Wave 0 DONE: recon revealed existing agent stack (auth-worker SSE runner + `src/lib/agent/` +
+AgentWorkbench + `/project/:id/agent` route) and Agent API changeset layer. REVISED PLAN:
+extend the existing harness; new worker is sandbox-execution-only. Contracts:
+`docs/swarm/AQU-AGENT-CONTRACTS.md` (READ-ONLY for builders).
 
 | Agent | Model | Branch | Owns (exclusive) | Forbidden |
 |---|---|---|---|---|
-| W1A worker-core | opus | swarm/agent-w1a | agent-worker/src/{index,do,auth}.ts, wrangler.toml final, worker-level tests | src/harness/**, src/sandbox/**, src/memory/**, SPA, sync-worker/** |
-| W1B harness | opus | swarm/agent-w1b | agent-worker/src/harness/** (OpenRouter client, loop, router, budget, tools registry glue) | all else |
-| W1C sandbox | sonnet | swarm/agent-w1c | agent-worker/src/sandbox/**, agent-worker/Dockerfile | wrangler.toml (spec via contracts; W1A applies) |
-| W1D memory | opus | swarm/agent-w1d | agent-worker/src/memory/**, agent-worker/src/routes/memory.ts, db/postgres/migrations/00NN_agent_memory.sql (number per recon) | DO internals, sync-worker/** |
-| W1E spa-chat | sonnet | swarm/agent-w1e | src/pages/project/agent/**, src/lib/agent/** (except contracts.ts, memory-api.ts), App.tsx + nav edits (adds BOTH routes) | memory UI |
-| W1F spa-memory | sonnet | swarm/agent-w1f | src/components/agent/memory/**, src/pages/project/agent/MemoryPage.tsx, src/lib/agent/memory-api.ts | App.tsx |
+| W1A sandbox-worker | opus | swarm/agent-w1a | agent-worker/** (new: Sandbox container service per contracts §1,§6), scripts/dev-stack.ts (:8790 wiring) | auth-worker/**, sync-worker/**, src/**, db/** |
+| W1B harness-tools | opus | swarm/agent-w1b | auth-worker/src/routes/agent.ts, auth-worker/src/lib/agent/** NEW tool files (run_code, load_artifact, read_sandbox_file, plan_import, memory tools), changeset-bridge.ts, frames.ts, budget guard, prompt assembly; auth-worker wrangler env vars | auth-worker/src/index.ts, db/**, sync-worker/**, src/**, agent-worker/** |
+| W1C memory-backend | opus | swarm/agent-w1c | db/postgres/migrations/0066_agent_memory.sql, db/postgres/schema.sql (additive), db/shared/agent-memory.ts, auth-worker/src/routes/agent-memory.ts (+ registration in auth-worker/src/index.ts), tests | agent.ts, sync-worker/**, src/**, agent-worker/** |
+| W1D spa-chat | sonnet | swarm/agent-w1d | src/lib/agent/{protocol,agent-client,run-state}.ts extensions, src/components/agent/** EXCEPT memory/, tab slot importing memory/AgentMemoryTab | src/components/agent/memory/**, memory-api.ts, App.tsx, workers |
+| W1E spa-memory | sonnet | swarm/agent-w1e | src/components/agent/memory/**, src/lib/agent/memory-api.ts, tests | AgentWorkbench.tsx, protocol.ts, App.tsx, workers |
+| W1F fixtures+e2e+docs | sonnet | swarm/agent-w1f | e2e/specs/agent-*.spec.ts (skeleton, tagged skip-if-no-sandbox), e2e fixtures (messy CSV/XLSX/mixed files), docs/AGENT-SANDBOX.md, docs/AGENT-API.md status addendum, e2e/JOURNEYS.md entry | all product code |
 
 Wave 2: integrator (opus; wires seams, runs local stack) + UI verifier (drives preview
 browser through golden path) + fixers. Wave 3: adversarial panel → fixes → final gate →

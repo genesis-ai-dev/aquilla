@@ -154,3 +154,31 @@ export async function finalizeSourceBlobSchema(
   )
   return ["made file_source_blobs.raw_source nullable"]
 }
+
+/** Mirror migration 0065 for long-lived local databases. The local schema
+ * reconciler adds columns but intentionally cannot infer replacements for
+ * named CHECK constraints, so an older container otherwise rejects the
+ * agentic import commit's transient `committing` state. */
+export async function finalizeChangesetSchema(
+  client: PgSchemaClient,
+  run: RunSchemaSql,
+): Promise<string[]> {
+  if (!(await tableExists(client, "changesets"))) return []
+  const { rows } = await client.query(
+    `SELECT pg_get_constraintdef(oid) AS definition
+       FROM pg_constraint
+      WHERE conrelid = 'changesets'::regclass
+        AND conname = 'changesets_status_check'`,
+  )
+  const definition = typeof rows[0]?.definition === "string" ? rows[0].definition : ""
+  if (definition.includes("committing")) return []
+
+  await run(
+    `ALTER TABLE changesets DROP CONSTRAINT IF EXISTS changesets_status_check;
+     ALTER TABLE changesets
+       ADD CONSTRAINT changesets_status_check
+       CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'expired'))`,
+    "updating changesets.status constraint (migration 0065)",
+  )
+  return ["updated changesets.status constraint for committing"]
+}

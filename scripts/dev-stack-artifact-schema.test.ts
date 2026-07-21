@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   finalizeArtifactBindingSchema,
+  finalizeChangesetSchema,
   finalizeSourceBlobSchema,
   prepareArtifactBindingSchema,
   type PgSchemaClient,
@@ -29,6 +30,12 @@ beforeEach(async () => {
       created_at BIGINT NOT NULL,
       r2_key TEXT,
       size_bytes BIGINT
+    );
+    CREATE TABLE changesets (
+      id UUID PRIMARY KEY,
+      status TEXT NOT NULL
+        CONSTRAINT changesets_status_check
+        CHECK (status IN ('staged', 'committed', 'discarded', 'stale', 'expired'))
     );
   `)
 }, 30_000)
@@ -111,5 +118,15 @@ describe("local dev artifact schema reconciliation", () => {
        VALUES ('f1', 'p1', 'docx', NULL, 'artifacts/p1/a/original.docx', 4, 1)`,
     )).resolves.toBeDefined()
     expect(await finalizeSourceBlobSchema(client(), run)).toEqual([])
+  })
+
+  it("admits the crash-retry committing state in a pre-0065 database", async () => {
+    expect(await finalizeChangesetSchema(client(), run)).toEqual([
+      "updated changesets.status constraint for committing",
+    ])
+    await expect(pg.query(
+      "INSERT INTO changesets (id, status) VALUES ('00000000-0000-4000-8000-000000000001', 'committing')",
+    )).resolves.toBeDefined()
+    expect(await finalizeChangesetSchema(client(), run)).toEqual([])
   })
 })

@@ -4,7 +4,6 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileTypeHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
-import { FileActionMenu } from "./FileActionMenu"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { useEditorScroll } from "@/context/EditorScrollContext"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
@@ -64,7 +63,6 @@ export function ExpandableFileList({
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
     `codex:sidebar:corpus-collapsed:${projectId}`,
   )
-  const [menu, setMenu] = useState<{ fileId: string; x: number; y: number } | null>(null)
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
@@ -226,8 +224,14 @@ export function ExpandableFileList({
                             onEditCancel={() => setEditingFileId(null)}
                             onToggleExpand={() => toggle(file.id)}
                             onSelect={() => onSelectFile(file.id)}
-                            onOpenMenu={(x, y) => setMenu({ fileId: file.id, x, y })}
                             onStartRename={() => setEditingFileId(file.id)}
+                            onMove={() => onMove(file.id)}
+                            onDelete={onDelete ? () => onDelete(file.id) : undefined}
+                            onExportSource={
+                              EXPORTABLE_FILE_TYPES.has(file.type) && canExportByOrgPolicy
+                                ? () => { void exportFile(file) }
+                                : undefined
+                            }
                             onApplySuggestion={
                               onApplySuggestion ? () => onApplySuggestion(file.id) : undefined
                             }
@@ -261,21 +265,6 @@ export function ExpandableFileList({
           })}
         </div>
       </div>
-      {menu && (() => {
-        const menuFile = files.find((f) => f.id === menu.fileId)
-        // AQU-253 (a fix): also gate on org policy, not just file type.
-        const canExportFile = !!menuFile && EXPORTABLE_FILE_TYPES.has(menuFile.type) && canExportByOrgPolicy
-        return (
-          <FileActionMenu
-            x={menu.x} y={menu.y}
-            onClose={() => setMenu(null)}
-            onRename={() => setEditingFileId(menu.fileId)}
-            onMove={() => onMove(menu.fileId)}
-            onDelete={onDelete ? () => onDelete(menu.fileId) : undefined}
-            onExportSource={canExportFile ? () => exportFile(menuFile!) : undefined}
-          />
-        )
-      })()}
       {exportToast && (
         <div
           className={cn(

@@ -33,7 +33,7 @@ test("move to corpus dialog opens and shows corpus selector", async ({ alice }) 
   await expect(fileRow).toBeVisible({ timeout: 10_000 })
   await fileRow.click({ button: "right" })
 
-  // Click "Move to corpus…" in the context menu (shadcn DropdownMenu — role="menuitem").
+  // Click "Move to corpus…" in the context menu (shadcn ContextMenu — role="menuitem").
   const moveBtn = alice.getByRole("menuitem", { name: /Move to corpus/i })
   await expect(moveBtn).toBeVisible({ timeout: 3_000 })
   await moveBtn.click()

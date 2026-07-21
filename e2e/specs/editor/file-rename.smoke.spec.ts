@@ -33,7 +33,7 @@ test("file rename via context menu updates sidebar name", async ({ alice }) => {
   await expect(fileRow).toBeVisible({ timeout: 10_000 })
   await fileRow.click({ button: "right" })
 
-  // FileActionMenu appears (shadcn DropdownMenu) — click "Rename".
+  // FileActionMenu appears (shadcn ContextMenu) — click "Rename".
   const renameItem = alice.getByRole("menuitem", { name: /^Rename$/i })
   await expect(renameItem).toBeVisible({ timeout: 3_000 })
   await renameItem.click()

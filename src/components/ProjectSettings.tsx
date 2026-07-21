@@ -267,6 +267,13 @@ export function ProjectSettings() {
     : reasonCannotEdit === "role" ? "Maintainer or higher can edit shared settings."
     : null
 
+  // AQU-623: a below-floor member's shared inputs are disabled up-front, so a
+  // role-blocked save can never actually fire — show the denial alert
+  // persistently for them instead of only after a rejected PATCH. Gated on
+  // isCloudProject because unsynced projects also report reason "role"
+  // (roleLevel is null) but have no shared-settings permission model.
+  const roleBlocked = isCloudProject && reasonCannotEdit === "role"
+
   // Baseline is the last-saved snapshot of every field on the page. The diff
   // between baseline and the form state determines `isDirty` and which writes
   // we actually have to fire on Save.
@@ -993,7 +1000,7 @@ export function ProjectSettings() {
           <BackLink to="?" label="Settings" />
         )}
 
-        {permissionBlocked && (
+        {(permissionBlocked || roleBlocked) && (
           <PermissionDeniedAlert
             action="change shared settings"
             requiredRole="Maintainer or higher"

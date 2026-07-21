@@ -56,6 +56,11 @@ import {
   openLogFile,
   type SpawnedWorker,
 } from "./lib/spawn-worker"
+import {
+  finalizeArtifactBindingSchema,
+  prepareArtifactBindingSchema,
+} from "./dev-stack-artifact-schema"
+import { parsePgSchema } from "./dev-stack-schema-parser"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
@@ -331,104 +336,6 @@ function backfillMissingLocalProgress(): void {
   if (output) console.log(`[dev-stack] ${output.replace(/\n/g, "\n[dev-stack] ")}`)
 }
 
-type SchemaTable = {
-  /** Full CREATE TABLE block, with IF NOT EXISTS forced in. */
-  createSql: string
-  columns: Array<{ name: string; def: string }>
-}
-
-function sqlParenthesisDelta(line: string): number {
-  let delta = 0
-  let inSingleQuote = false
-  let inDoubleQuote = false
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]
-    if (inSingleQuote) {
-      if (char === "'" && line[i + 1] === "'") i++
-      else if (char === "'") inSingleQuote = false
-      continue
-    }
-    if (inDoubleQuote) {
-      if (char === '"' && line[i + 1] === '"') i++
-      else if (char === '"') inDoubleQuote = false
-      continue
-    }
-    if (char === "'") inSingleQuote = true
-    else if (char === '"') inDoubleQuote = true
-    else if (char === "(") delta++
-    else if (char === ")") delta--
-  }
-  return delta
-}
-
-/**
- * Parse schema.sql into table blocks + column definitions + index statements.
- * Relies on the file's regular shape (also assumed by scripts/neon-migrate.ts,
- * which gates prod deploys on the same parse): blocks open with
- * `CREATE TABLE name (`, one column per line, close with `);`, and every
- * CREATE INDEX is a single line.
- */
-function parsePgSchema(sql: string): {
-  tables: Map<string, SchemaTable>
-  indexesByTable: Map<string, string[]>
-} {
-  const tables = new Map<string, SchemaTable>()
-  const indexesByTable = new Map<string, string[]>()
-  let current: SchemaTable | null = null
-  let block: string[] = []
-  let tableDepth = 0
-  for (const raw of sql.split("\n")) {
-    const line = raw.replace(/--.*$/, "").trimEnd()
-    const trimmed = line.trim()
-    if (current === null) {
-      const table = trimmed.match(
-        /^CREATE TABLE (?:IF NOT EXISTS )?([A-Za-z_][A-Za-z0-9_]*)\s*\($/i,
-      )
-      if (table) {
-        current = { createSql: "", columns: [] }
-        block = [`CREATE TABLE IF NOT EXISTS ${table[1]} (`]
-        tableDepth = 1
-        tables.set(table[1].toLowerCase(), current)
-        continue
-      }
-      const index = trimmed.match(
-        /^CREATE\s+(UNIQUE\s+)?INDEX\s+(?:IF NOT EXISTS\s+)?\S+\s+ON\s+([A-Za-z_][A-Za-z0-9_]*)/i,
-      )
-      if (index) {
-        const tableName = index[2].toLowerCase()
-        const stmt = /IF NOT EXISTS/i.test(trimmed)
-          ? trimmed
-          : trimmed.replace(
-              /^CREATE\s+(UNIQUE\s+)?INDEX\s+/i,
-              (_, uniq) => `CREATE ${uniq ? "UNIQUE " : ""}INDEX IF NOT EXISTS `,
-            )
-        if (!indexesByTable.has(tableName)) indexesByTable.set(tableName, [])
-        indexesByTable.get(tableName)!.push(stmt)
-      }
-      continue
-    }
-    block.push(line)
-    const depthBeforeLine = tableDepth
-    tableDepth += sqlParenthesisDelta(line)
-    if (tableDepth === 0) {
-      current.createSql = block.join("\n")
-      current = null
-      continue
-    }
-    // Only top-level entries are columns. Lines nested inside multiline
-    // CHECK/CONSTRAINT clauses must never become additive ALTER statements.
-    if (depthBeforeLine !== 1) continue
-    const first = trimmed.split(/[\s(,]/)[0]
-    if (!first) continue
-    if (/^(PRIMARY|UNIQUE|CHECK|CONSTRAINT|FOREIGN|EXCLUDE)$/i.test(first)) continue
-    current.columns.push({
-      name: first.toLowerCase(),
-      def: trimmed.replace(/,\s*$/, ""),
-    })
-  }
-  return { tables, indexesByTable }
-}
-
 /**
  * Additive-only drift repair: create tables (plus their indexes) and add
  * columns that schema.sql has but the live container lacks. Never drops or
@@ -462,13 +369,20 @@ async function reconcilePgSchema(
   }
 
   const patched: string[] = []
+
+  // AQU-635 (migrations 0066-0068): artifact_bindings has tenant-safe
+  // composite foreign keys. A long-lived local container can have the old
+  // artifacts/files tables without the matching composite unique keys. Those
+  // reference keys must exist BEFORE the generic loop creates the new table;
+  // otherwise Postgres rejects CREATE TABLE and the local stack cannot boot.
+  if (tables.has("artifact_bindings")) {
+    patched.push(...await prepareArtifactBindingSchema(client, run))
+  }
+
   for (const [name, table] of tables) {
     const liveCols = live.get(name)
     if (!liveCols) {
       await run(table.createSql, `creating table ${name}`)
-      for (const idx of indexesByTable.get(name) ?? []) {
-        await run(idx, `creating an index on ${name}`)
-      }
       patched.push(`created table ${name}`)
       continue
     }
@@ -481,6 +395,20 @@ async function reconcilePgSchema(
       patched.push(`added column ${name}.${col.name}`)
     }
   }
+
+  // Every parsed statement carries IF NOT EXISTS, so running these for both
+  // new and existing tables repairs indexes missed by older reconciler
+  // versions without rebuilding healthy indexes on later boots.
+  for (const [name, indexes] of indexesByTable) {
+    for (const index of indexes) {
+      await run(index, `ensuring an index on ${name}`)
+    }
+  }
+
+  if (tables.has("artifact_bindings")) {
+    patched.push(...await finalizeArtifactBindingSchema(client, run))
+  }
+
   // AQU-538 (migrations 0057 expand + 0061 contract): the cells PK gained the
   // target_lang lane. The generic loop above adds the column, but a drifted
   // container still carries the 4-column PK — and Postgres rejects

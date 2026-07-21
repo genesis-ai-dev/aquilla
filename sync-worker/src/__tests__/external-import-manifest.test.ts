@@ -180,4 +180,28 @@ describe('normalized PlanImport compiler', () => {
     invalid.cells[0].address = { scheme: 'scripture', book: 'GEN', chapter: 1, verse: '1' }
     expect(compilePlanImport(invalid).fileSummary.warningCounts).toEqual({ 'empty-source': 1 })
   })
+
+  it('rejects contradictory locators, verse labels, and duplicate explicit order', () => {
+    const issues = validatePlanImportManifest({
+      fileType: 'usfm',
+      cells: [
+        {
+          content: 'First',
+          type: 'verse',
+          canonicalRef: 'GEN 1:1',
+          displayLabel: '9',
+          physicalOrder: 4,
+          address: { scheme: 'sequence', index: 1 },
+          sourceLocator: { kind: 'sequence', index: 2 },
+        },
+        { content: 'Second', physicalOrder: 4 },
+      ],
+    })
+
+    expect(issues).toEqual(expect.arrayContaining([
+      'cells[0].displayLabel must match its canonical verse number',
+      'cells[0].sourceLocator does not match sequence address',
+      'cells[1].physicalOrder duplicates 4',
+    ]))
+  })
 })

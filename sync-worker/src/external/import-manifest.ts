@@ -166,6 +166,47 @@ function validateAddressShape(
   if ((kind === 'heading' || kind === 'paratext') && address?.scheme === 'scripture') {
     issues.push(`${path}.address cannot describe structural content as a scripture verse`)
   }
+  if (address && locator) {
+    const scheme = typeof address.scheme === 'string' ? address.scheme : ''
+    // Address is semantic identity; sourceLocator is physical provenance, so
+    // cross-scheme pairs are valid (for example a custom recipe record that
+    // maps to GEN 1:1). When both describe the same scheme, their duplicated
+    // fields must agree.
+    if (scheme === 'scripture' && locator.kind === 'usfm') {
+      const ref = `${String(address.book).toUpperCase()} ${address.chapter}:${address.verse}`
+      if (String(locator.ref).toUpperCase() !== ref.toUpperCase() || locator.marker !== 'v') {
+        issues.push(`${path}.sourceLocator does not match scripture address`)
+      }
+    } else if (scheme === 'scripture-structure' && locator.kind === 'usfm') {
+      if (locator.marker !== address.marker || locator.occurrence !== address.occurrence) {
+        issues.push(`${path}.sourceLocator does not match scripture-structure address`)
+      }
+    } else if (scheme === 'document' && locator.kind === 'package-block') {
+      if (
+        locator.memberPath !== address.memberPath
+        || locator.blockPath !== address.blockPath
+        || locator.segment !== address.segment
+      ) issues.push(`${path}.sourceLocator does not match document address`)
+    } else if (scheme === 'translation-unit' && locator.kind === 'translation-unit') {
+      if (
+        locator.format !== address.format
+        || locator.unitId !== address.unitId
+        || (locator.segmentId ?? null) !== (address.segmentId ?? null)
+      ) issues.push(`${path}.sourceLocator does not match translation-unit address`)
+    } else if (scheme === 'timeline' && locator.kind === 'cue') {
+      if (
+        locator.index !== address.cue
+        || (locator.startMs ?? null) !== (address.startMs ?? null)
+        || (locator.endMs ?? null) !== (address.endMs ?? null)
+      ) issues.push(`${path}.sourceLocator does not match timeline address`)
+    } else if (scheme === 'sequence' && locator.kind === 'sequence') {
+      if (locator.index !== address.index) issues.push(`${path}.sourceLocator does not match sequence address`)
+    } else if (scheme === 'custom' && locator.kind === 'recipe') {
+      if (locator.recipeId !== address.recipeId || locator.record !== address.record) {
+        issues.push(`${path}.sourceLocator does not match custom address`)
+      }
+    }
+  }
   return issues
 }
 
@@ -246,6 +287,7 @@ export function validatePlanImportManifest(input: PlanImportInput): string[] {
   }
 
   const explicitKeys = new Set<string>()
+  const physicalOrders = new Set<number>()
   input.cells.forEach((cell, index) => {
     const path = `cells[${index}]`
     if (cell.unitKey !== undefined) {
@@ -255,6 +297,10 @@ export function validatePlanImportManifest(input: PlanImportInput): string[] {
     }
     if (cell.physicalOrder !== undefined && (!Number.isInteger(cell.physicalOrder) || cell.physicalOrder < 0)) {
       issues.push(`${path}.physicalOrder must be a non-negative integer`)
+    } else if (cell.physicalOrder !== undefined && physicalOrders.has(cell.physicalOrder)) {
+      issues.push(`${path}.physicalOrder duplicates ${cell.physicalOrder}`)
+    } else if (cell.physicalOrder !== undefined) {
+      physicalOrders.add(cell.physicalOrder)
     }
     if ((cell.startMs === undefined) !== (cell.endMs === undefined)) {
       issues.push(`${path}.startMs and endMs must be supplied together`)
@@ -264,6 +310,10 @@ export function validatePlanImportManifest(input: PlanImportInput): string[] {
     const kind = normalizedKind(cell.type)
     if ((kind === 'heading' || kind === 'paratext') && cell.displayLabel != null) {
       issues.push(`${path}.displayLabel must be null for structural content`)
+    }
+    const verse = kind === 'verse' ? cell.canonicalRef?.match(SCRIPTURE_VERSE_RE) : null
+    if (verse && cell.displayLabel !== undefined && cell.displayLabel !== verse[3]) {
+      issues.push(`${path}.displayLabel must match its canonical verse number`)
     }
     issues.push(...validateAddressShape(cell, kind, path))
     const lanes = new Set<string>()

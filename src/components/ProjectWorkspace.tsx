@@ -148,7 +148,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectSeparator, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
@@ -5146,9 +5146,8 @@ export function ProjectWorkspace() {
   )
 }
 
-// Pick from existing corpus markers via a native <select>, with an inline
-// "Other…" option to create a brand-new marker. Replaces the prior free-text
-// input that hid the existing options behind the dialog's backdrop blur (#39).
+// Pick from existing corpus markers via a Select, with a footer
+// "Create a corpus" action that reveals an inline name field.
 // Caller wraps with `key` so internal state resets on each open.
 function MoveToCorpusDialog({
   initialValue, existingMarkers, onClose, onSave,
@@ -5166,10 +5165,13 @@ function MoveToCorpusDialog({
   const [selection, setSelection] = useState(initSelection)
   const [customValue, setCustomValue] = useState(initIsNew ? trimmed : "")
   const isNew = selection === NEW
-  const corpusItems = [
+  const existingItems = [
     { value: UNGROUPED, label: "Ungrouped" },
     ...existingMarkers.map((m) => ({ value: m, label: m })),
-    { value: NEW, label: "Other…" },
+  ]
+  const corpusItems = [
+    ...existingItems,
+    { value: NEW, label: "Create a corpus" },
   ]
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
@@ -5184,13 +5186,18 @@ function MoveToCorpusDialog({
             <SelectTrigger className="w-full" aria-label="Corpus">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent alignItemWithTrigger={false}>
               <SelectGroup>
-                {corpusItems.map((item) => (
+                {existingItems.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
                 ))}
+                <SelectSeparator />
+                <SelectItem value={NEW}>
+                  <Plus aria-hidden />
+                  Create a corpus
+                </SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -5199,8 +5206,8 @@ function MoveToCorpusDialog({
               autoFocus
               value={customValue}
               onChange={(e) => setCustomValue(e.target.value)}
-              placeholder="New corpus name"
-              aria-label="New corpus name"
+              placeholder="Corpus name"
+              aria-label="Corpus name"
             />
           )}
         </div>

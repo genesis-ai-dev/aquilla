@@ -146,7 +146,9 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     expect(res.headers.get("Content-Type")).toBe("text/event-stream")
 
     const frames = parseFrames(await res.text())
-    const types = frames.map((f) => f.type)
+    // AQU-AGENT §4 adds a per-turn "budget" cost meter frame (additive); filter
+    // it out here so the core wire-contract sequence stays asserted verbatim.
+    const types = frames.map((f) => f.type).filter((t) => t !== "budget")
 
     // Frame sequence per the wire contract.
     expect(types[0]).toBe("run_start")
@@ -412,7 +414,10 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     })
     parseFrames(await res2.text())
     const run2Messages = upstreamBodies[2].messages
+    // Two system messages per run: the schema-card prompt + the AQU-AGENT §2
+    // augmentation (brief/memory/language). Both are per-run and never persisted.
     expect(run2Messages.map((m) => m.role)).toEqual([
+      "system",
       "system",
       "user",
       "assistant",

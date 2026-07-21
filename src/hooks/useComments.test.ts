@@ -141,6 +141,83 @@ describe("useComments — optimistic comment survives refresh (AQU-228 WARN)", (
   })
 })
 
+describe("useComments — auto-load re-arms once the auth token is ready (AQU-640)", () => {
+  it("does not clobber the loading state or fetch while tokenReady is false, then loads when it flips true", async () => {
+    // Server has a comment, but getToken only yields a real token once the
+    // session has 'loaded' — mirroring CommentsPage's null-token-until-JWT race.
+    mockFetchComments.mockResolvedValue([makeServerComment()])
+    let jwtReady = false
+    const getTokenGatedOnJwt = async (_fileId: string) =>
+      jwtReady ? "test-token" : null
+
+    const { result, rerender } = renderHook(
+      ({ ready }: { ready: boolean }) =>
+        useComments({
+          projectId: "proj-1",
+          getToken: getTokenGatedOnJwt,
+          author: "alice",
+          tokenReady: ready,
+        }),
+      { initialProps: { ready: false } },
+    )
+
+    // Cold-load window: session not ready. The hook must show the loading state
+    // and must NOT have fetched (a fetch now would bail on the null token and
+    // never retry — the original bug).
+    await waitFor(() => expect(result.current.isLoading).toBe(true))
+    expect(mockFetchComments).not.toHaveBeenCalled()
+    expect(result.current.comments).toHaveLength(0)
+
+    // Session/JWT finishes loading → token becomes available.
+    jwtReady = true
+    rerender({ ready: true })
+
+    // The auto-load now fires on its own (no manual refresh) and populates.
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(mockFetchComments).toHaveBeenCalled()
+    expect(result.current.comments).toHaveLength(1)
+  })
+
+  it("negative case: a genuinely comment-free project resolves to the empty state once ready (no infinite spinner)", async () => {
+    mockFetchComments.mockResolvedValue([])
+    let jwtReady = false
+    const getTokenGatedOnJwt = async (_fileId: string) =>
+      jwtReady ? "test-token" : null
+
+    const { result, rerender } = renderHook(
+      ({ ready }: { ready: boolean }) =>
+        useComments({
+          projectId: "proj-1",
+          getToken: getTokenGatedOnJwt,
+          author: "alice",
+          tokenReady: ready,
+        }),
+      { initialProps: { ready: false } },
+    )
+
+    await waitFor(() => expect(result.current.isLoading).toBe(true))
+
+    jwtReady = true
+    rerender({ ready: true })
+
+    // Resolves to a clean empty state — no false error, no stuck spinner.
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.isError).toBe(false)
+    expect(result.current.comments).toHaveLength(0)
+  })
+
+  it("omitting tokenReady preserves the legacy auto-load-on-mount behavior", async () => {
+    mockFetchComments.mockResolvedValue([makeServerComment()])
+    const { result } = renderHook(() =>
+      useComments({ projectId: "proj-1", getToken: GET_TOKEN, author: "alice" }),
+    )
+    // No readiness signal → loads immediately on mount, as before.
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(mockFetchComments).toHaveBeenCalled()
+    expect(result.current.comments).toHaveLength(1)
+  })
+})
+
 describe("useComments — sentinel fileId for project-scoped mutations (AQU-228 BLOCKER 1 client side)", () => {
   it("addComment with project scope enqueues event with __project__ fileId sentinel", async () => {
     mockFetchComments.mockResolvedValue([])

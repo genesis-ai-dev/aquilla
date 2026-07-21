@@ -798,6 +798,11 @@ export function CommentsPage() {
     projectId: projectId ?? null,
     getToken,
     author: session?.username ?? 'unknown',
+    // AQU-640: on a cold load the page can mount before the session JWT is
+    // available; getToken can only mint a real token once session.jwt exists.
+    // Signal readiness so the auto-load fires when the token arrives instead of
+    // bailing on the null token and requiring a manual Refresh.
+    tokenReady: !!session?.jwt,
   })
 
   // Separate top-level threads from replies.

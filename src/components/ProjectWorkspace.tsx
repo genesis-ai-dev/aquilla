@@ -4908,6 +4908,7 @@ export function ProjectWorkspace() {
           username={currentUsername}
           getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
+          targetLang={activeLane}
           onImported={handleImported}
           sourceCells={importSourceCells}
           ttsSettings={tts.settings}
@@ -4948,6 +4949,7 @@ export function ProjectWorkspace() {
             onOpenChange={setFileImportOpen}
             projectId={project.id}
             username={currentUsername}
+            targetLang={activeLane}
             fileName={activeFile?.name ?? "this file"}
             cells={fileTargetCells}
             getToken={getTokenForFile}

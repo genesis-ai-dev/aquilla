@@ -109,6 +109,8 @@ interface ImportDialogProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  /** Active target-lane storage key. Empty means the project default lane. */
+  targetLang?: string
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean }) => void | Promise<void>
@@ -170,6 +172,7 @@ export function ImportDialog({
   username,
   sourceLanguage,
   targetLanguage,
+  targetLang,
   getToken,
   onImported,
   ttsSettings,
@@ -460,6 +463,7 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
+            targetLang={targetLang}
             getToken={getToken}
             ttsSettings={ttsSettings}
             onCastUpdated={onCastUpdated}
@@ -492,6 +496,7 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
+            targetLang={targetLang}
             getToken={getToken}
             sourceCells={sourceCells}
             onImported={async (ref, inferredLanguages) => {
@@ -624,6 +629,7 @@ export function ImportDialog({
           <PairedImportPanel
             projectId={projectId}
             username={username}
+            targetLang={targetLang}
             sourceCells={sourceCells}
             getToken={getToken}
             onImported={(committedCount) => {
@@ -910,6 +916,7 @@ interface UploadPanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
   /** AQU-277: third argument carries skipped books for partial Paratext imports. */
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
@@ -944,7 +951,7 @@ function fileExts(list: File[]): string {
   return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1090,6 +1097,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
             author: username,
             sourceLanguage,
             targetLanguage,
+            targetLang,
             getToken,
             onCellEnqueued: (count, total) => {
               const p = `Uploading ${file.name}`
@@ -1142,7 +1150,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -1168,6 +1176,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         username={username}
         sourceLanguage={sourceLanguage}
         targetLanguage={targetLanguage}
+        targetLang={targetLang}
         getToken={getToken}
         onImported={onImported}
         onCancel={() => setParatextChoice(null)}
@@ -1267,6 +1276,7 @@ interface ParatextChoiceProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
   /** AQU-277: third argument carries skipped books from a partial import so the
    *  parent can show the result screen before closing. */
@@ -1284,7 +1294,7 @@ interface ParatextChoiceProps {
  *  consultant's in-progress translation against an eBible source picked here
  *  (aligned by verse ref). */
 function ParatextChoice({
-  entries, bookCount, projectId, username, sourceLanguage, targetLanguage, getToken, onImported, onCancel,
+  entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
   existingFiles, onCollision,
 }: ParatextChoiceProps) {
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
@@ -1298,7 +1308,7 @@ function ParatextChoice({
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
   const [expandedBook, setExpandedBook] = useState<string | null>(null)
 
-  const ctx = { projectId, author: username, sourceLanguage, targetLanguage, getToken }
+  const ctx = { projectId, author: username, sourceLanguage, targetLanguage, targetLang, getToken }
 
   // AQU-310: parse the whole project client-side on mount — fast (no network),
   // so the preview appears immediately and the user confirms before any upload.
@@ -1604,6 +1614,7 @@ interface EBiblePanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
   onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
   /** When provided, enables the "into target" mode toggle (AQU-191). */
@@ -1615,7 +1626,7 @@ interface EBiblePanelProps {
 type EBiblePanelMode = "source" | "target"
 type EBibleTargetStep = "pick" | "review" | "applying" | "done"
 
-function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
+function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
   const [mode, setMode] = useState<EBiblePanelMode>("source")
   const [targetStep, setTargetStep] = useState<EBibleTargetStep>("pick")
   const [matchResult, setMatchResult] = useState<EBibleMatchResult | null>(null)
@@ -1732,7 +1743,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
       await applyEBibleTargetImport(
         matchResult,
         selectedCellIds,
-        { projectId, author: username, getToken },
+        { projectId, author: username, getToken, targetLang },
         setTargetProgress,
       )
       setTargetStep("done")

@@ -51,6 +51,12 @@ import { parseTmx } from "./parsers/tmx"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
 import { parseObsStories } from "./parsers/obs"
+import {
+  aquillaImportMetadata,
+  normalizeTranslatableStrings,
+  type NormalizedImportFile,
+} from "./import/normalized-manifest"
+import { ImportService } from "./import/import-service"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -230,7 +236,7 @@ export async function prepareEBibleTargetImport(
 export async function applyEBibleTargetImport(
   matchResult: EBibleMatchResult,
   selectedCellIds: Set<string>,
-  ctx: Pick<ImportContext, "projectId" | "author" | "getToken" | "signal">,
+  ctx: Pick<ImportContext, "projectId" | "author" | "getToken" | "signal" | "targetLang">,
   onProgress?: (p: EBibleTargetProgress) => void,
 ): Promise<{ committedCount: number; skippedCount: number }> {
   const toCommit = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
@@ -263,6 +269,7 @@ export async function applyEBibleTargetImport(
       projectId: ctx.projectId,
       fileId,
       author: ctx.author,
+      targetLang: ctx.targetLang,
       commits,
       getToken: ctx.getToken,
       signal: ctx.signal,
@@ -342,6 +349,8 @@ export interface ImportContext {
   /** Optional language pair to stamp on the `file.create` payload. */
   sourceLanguage?: string
   targetLanguage?: string
+  /** Target-lane storage key. Empty/absent means the project's default lane. */
+  targetLang?: string
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
@@ -386,44 +395,14 @@ export async function importFile(
   file: File,
   ctx: ImportContext,
 ): Promise<ImportFileResult> {
-  const fileType = detectFileType(file.name)
-  if (!fileType) {
-    throw new Error(`Unsupported file type: ${file.name}`)
-  }
-
-  // Timeline-segment-model (Scope A): audio/video files have no text parser —
-  // they import as a single media segment on a time-ordered file.
-  if (isMediaFileType(fileType)) {
-    const ref = await emitMediaFile(file, fileType, ctx)
-    return { refs: [ref], speakerPairs: [] }
-  }
-
-  // AQU-287: single-file skip — key is normalized file name (lowercase trimmed).
-  const fileNameKey = file.name.trim().toLowerCase()
-  if (ctx.skipKeys?.has(fileNameKey)) {
-    return { refs: [], speakerPairs: [] }
-  }
-
-  const results = await parseFile(file, fileType)
-  const refs: FileReference[] = []
-  const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
-
-  for (const result of results) {
-    // AQU-287: per-result skip — key is normalized display name (for USFM parsed
-    // results the name is the book display name; fall back to bookCode key too).
-    const resultNameKey = result.name.trim().toLowerCase()
-    const resultCodeKey = result.bookCode?.toUpperCase()
-    if (
-      ctx.skipKeys?.has(resultNameKey) ||
-      (resultCodeKey && ctx.skipKeys?.has(resultCodeKey))
-    ) {
-      continue
-    }
-    const { ref, speakerPairs: pairs } = await emitParsedFile(result, fileType, ctx)
-    refs.push(ref)
-    speakerPairs.push(...pairs)
-  }
-
+  const service = new ImportService<ImportContext, FileReference>({
+    detectFileType,
+    isMediaFileType,
+    parseFile,
+    emitMediaFile,
+    emitParsedFile,
+  })
+  const { refs, speakerPairs } = await service.importFile(file, ctx)
   return { refs, speakerPairs }
 }
 
@@ -835,36 +814,75 @@ export async function importTranslationNotes(
 export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
   cells: BulkImportCell[]
   speakerPairs: { cellId: string; speaker: string | undefined }[]
+}
+export function buildBulkCellsWithSpeakers(
+  strings: TranslatableString[],
+  options: {
+    fileName?: string
+    fileType?: FileType
+    profileId?: string
+    profileVersion?: string
+    normalizedFile?: NormalizedImportFile
+  },
+): {
+  cells: BulkImportCell[]
+  speakerPairs: { cellId: string; speaker: string | undefined }[]
+}
+export function buildBulkCellsWithSpeakers(
+  strings: TranslatableString[],
+  options: {
+    fileName?: string
+    fileType?: FileType
+    profileId?: string
+    profileVersion?: string
+    normalizedFile?: NormalizedImportFile
+  } = {},
+): {
+  cells: BulkImportCell[]
+  speakerPairs: { cellId: string; speaker: string | undefined }[]
 } {
+  const normalizedFile = options.normalizedFile ?? normalizeTranslatableStrings(strings, {
+    fileName: options.fileName ?? "import",
+    fileType: options.fileType ?? "txt",
+    profileId: options.profileId,
+    profileVersion: options.profileVersion,
+  })
+  if (normalizedFile.units.length !== strings.length) {
+    throw new Error("Normalized import unit count does not match parsed string count")
+  }
   const cells: BulkImportCell[] = []
   const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
   let prevCellId: string | null = null
-  let seq = 0
-  for (const str of strings) {
+  for (let seq = 0; seq < strings.length; seq++) {
+    const str = strings[seq]
+    const unit = normalizedFile.units[seq]
     const cellId = str.id || uuidv7()
+    const metadata = {
+      ...(str.metadata ?? {}),
+      aquillaImport: aquillaImportMetadata(normalizedFile, unit),
+    }
     cells.push({
       id: uuidv7(),
       cellId,
       anchorCellId: prevCellId,
-      value: str.original,
-      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
+      value: unit.sourceText,
+      ...(unit.sourceHtml ? { valueHtml: unit.sourceHtml } : {}),
       ...(str.type !== undefined ? { type: str.type } : {}),
-      ...(str.group ? { canonicalRef: str.group } : {}),
-      ...(str.start !== undefined && str.end !== undefined ? { startMs: Math.round(str.start * 1000), endMs: Math.round(str.end * 1000) } : {}),
+      ...(unit.canonicalRef ? { canonicalRef: unit.canonicalRef } : {}),
+      ...(unit.startMs !== undefined && unit.endMs !== undefined ? { startMs: unit.startMs, endMs: unit.endMs } : {}),
       // Timeline-segment-model: intrinsic order key (import order). For
       // time-ordered files it is the tiebreak / home for untimed rows; for
       // sequence-ordered files it IS the order. `medium` defaults to 'text'
       // (absent), so only an explicit media import needs to set it.
-      sequenceIndex: seq,
+      sequenceIndex: unit.physicalOrder,
       ...(str.medium ? { medium: str.medium } : {}),
       ...(str.paragraphStart ? { paragraphStart: true } : {}),
       // Extensible per-cell metadata (OBS frame attachments today). Threaded
       // into the bulk POST body verbatim → cells.metadata JSONB on the server.
-      ...(str.metadata ? { metadata: str.metadata } : {}),
+      metadata,
     })
     speakerPairs.push({ cellId, speaker: str.speaker })
     prevCellId = cellId
-    seq += 1
   }
   return { cells, speakerPairs }
 }
@@ -896,14 +914,24 @@ export async function emitParsedFile(
   result: ImportResult,
   fileType: FileType,
   ctx: ImportContext,
+  normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
   const fileId = uuidv7()
+
+  const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
+    fileName: result.name,
+    fileType,
+    profileId: fileType === "usfm" ? "builtin:usfm-lossless" : `builtin:${fileType}`,
+    profileVersion: "1",
+  })
 
   // Chain cells via anchorCellId: the first cell's anchor is null (genesis —
   // first in file); each subsequent cell anchors on the prior cell's id.
   // Use buildBulkCellsWithSpeakers so we capture speakerPairs from the SAME
   // call that mints the cellIds — avoids the double-parse cellId mismatch.
-  const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings)
+  const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
+    normalizedFile: normalized,
+  })
 
   // Timeline-segment-model: subtitle imports are time-true (their cues carry
   // timecodes and the timeline is the spine); every text/document format is
@@ -921,7 +949,7 @@ export async function emitParsedFile(
       role: "source",
       kind: fileType,
       importFormat: fileType,
-      parserVersion: "workspace-import-v1",
+      parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
       sourceTextDirection: ctx.sourceTextDirection,
@@ -1347,26 +1375,31 @@ export async function importParatextAsTarget(
     }
     try {
       const fileId = uuidv7()
-      // Source cells (reference text), chained; remember each source cell's
-      // event id so the paired target commit can use it as its AD-2 parent.
-      const cells: BulkImportCell[] = []
-      const targets: TargetCommit[] = []
-      let prevCellId: string | null = null
-      for (const c of bookPlan.cells) {
-        const sourceEventId = uuidv7()
-        cells.push({
-          id: sourceEventId,
-          cellId: c.cellId,
-          anchorCellId: prevCellId,
-          value: c.sourceText,
-          type: "verse",
-          canonicalRef: c.ref,
-        })
-        prevCellId = c.cellId
-        if (c.targetText) {
-          targets.push({ id: uuidv7(), cellId: c.cellId, parentId: sourceEventId, value: c.targetText })
-        }
-      }
+      const strings: TranslatableString[] = bookPlan.cells.map((cell) => ({
+        id: cell.cellId,
+        original: cell.sourceText,
+        translated: cell.targetText,
+        context: cell.ref,
+        group: cell.ref,
+        globalReferences: [cell.ref],
+        type: cell.type,
+        ...(cell.paragraphStart ? { paragraphStart: true } : {}),
+      }))
+      const normalized = normalizeTranslatableStrings(strings, {
+        fileName: bookPlan.displayName,
+        fileType: "usfm",
+        profileId: "builtin:paratext-bilingual",
+        profileVersion: "1",
+      })
+      // Compile source and target from one normalized unit list. Headings stay
+      // structural/unnumbered and both sides share the same semantic unit key.
+      const { cells } = buildBulkCellsWithSpeakers(strings, { normalizedFile: normalized })
+      const targets: TargetCommit[] = cells.flatMap((cell, index) => {
+        const value = bookPlan.cells[index].targetText
+        return value
+          ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
+          : []
+      })
 
       const cellsBefore = cellsUploaded
       const bookProgress = (uploaded: number) => {
@@ -1386,7 +1419,7 @@ export async function importParatextAsTarget(
           role: "target",
           kind: "usfm",
           importFormat: "usfm",
-          parserVersion: "paratext-target-v1",
+          parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
           targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
@@ -1404,6 +1437,7 @@ export async function importParatextAsTarget(
         projectId: ctx.projectId,
         fileId,
         author: ctx.author,
+        targetLang: ctx.targetLang,
         commits: targets,
         getToken: ctx.getToken,
         onProgress: (uploaded) => bookProgress(cells.length + uploaded),

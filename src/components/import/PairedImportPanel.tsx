@@ -37,6 +37,8 @@ import { ColumnMappingPanel } from "./ColumnMappingPanel"
 export interface PairedImportPanelProps {
   projectId: string
   username: string
+  /** Target-lane storage key. Empty/absent means the project's default lane. */
+  targetLang?: string
   sourceCells: SourceCellRef[]
   getToken: (fileId: string) => Promise<string | null>
   onImported: (committedCount: number) => void
@@ -48,6 +50,7 @@ type PanelStep = "file" | "sheet" | "mapping" | "review" | "importing"
 export function PairedImportPanel({
   projectId,
   username,
+  targetLang,
   sourceCells,
   getToken,
   onImported,
@@ -113,7 +116,7 @@ export function PairedImportPanel({
       const { committedCount } = await applyEBibleTargetImport(
         matchResult as Parameters<typeof applyEBibleTargetImport>[0],
         selectedCellIds,
-        { projectId, author: username, getToken },
+        { projectId, author: username, getToken, targetLang },
       )
       onImported(committedCount)
     } catch (err) {

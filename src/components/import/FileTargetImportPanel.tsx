@@ -35,6 +35,8 @@ import { ColumnMappingPanel } from "./ColumnMappingPanel"
 export interface FileTargetImportPanelProps {
   projectId: string
   username: string
+  /** Target-lane storage key. Empty/absent means the project's default lane. */
+  targetLang?: string
   /** Display name of the open file — shown so the user knows the import scope. */
   fileName: string
   /** The open file's cells, in display order. */
@@ -55,6 +57,7 @@ const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xls"])
 export function FileTargetImportPanel({
   projectId,
   username,
+  targetLang,
   fileName,
   cells,
   getToken,
@@ -148,7 +151,7 @@ export function FileTargetImportPanel({
       const { committedCount } = await applyEBibleTargetImport(
         matchResult,
         selectedCellIds,
-        { projectId, author: username, getToken },
+        { projectId, author: username, getToken, targetLang },
       )
       onImported(committedCount) // closes the dialog — content is already visible + queued
     } catch (err) {

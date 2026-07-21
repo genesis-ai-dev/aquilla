@@ -123,6 +123,7 @@ export async function importSdbh(
           projectId: ctx.projectId,
           fileId,
           author: ctx.author,
+          targetLang: ctx.targetLang,
           commits,
           getToken: ctx.getToken,
           signal: ctx.signal,

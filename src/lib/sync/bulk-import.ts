@@ -412,6 +412,8 @@ export interface BulkTargetCommitArgs {
   fileId: string
   /** Author stamped on the events (server overrides from the token). */
   author: string
+  /** Target-lane storage key. Empty/absent addresses the default lane. */
+  targetLang?: string
   commits: TargetCommit[]
   getToken: (fileId: string) => Promise<string | null>
   onProgress?: (uploaded: number, total: number) => void
@@ -445,7 +447,11 @@ export async function enqueueTargetCommits(args: BulkTargetCommitArgs): Promise<
     cellId: c.cellId,
     parentId: c.parentId,
     author: args.author,
-    payload: { value: c.value, sourceEventId: c.parentId },
+    payload: {
+      value: c.value,
+      sourceEventId: c.parentId,
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    },
     clientTs: Date.now(),
   }))
   await enqueueOutboxEvents(events as unknown as Parameters<typeof enqueueOutboxEvents>[0])

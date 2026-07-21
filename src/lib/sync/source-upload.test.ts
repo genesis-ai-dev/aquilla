@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { uploadSourceOriginal } from "./source-upload"
+import { bindSourceArtifact, uploadSourceOriginal } from "./source-upload"
 
 describe("uploadSourceOriginal", () => {
   it("PUTs bytes to the source endpoint with format + auth headers", async () => {
@@ -65,5 +65,82 @@ describe("uploadSourceOriginal", () => {
       retryDelaysMs: [0, 0],
     })).rejects.toThrow(/403/)
     expect(fetchFn).toHaveBeenCalledOnce()
+  })
+
+  it("sends package preservation metadata without replacing the source sidecar", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    await uploadSourceOriginal({
+      projectId: "p1",
+      fileId: "f1",
+      artifactId: "01900000-0000-7000-8000-000000000006",
+      artifactName: "My Project.zip",
+      bytes: new ArrayBuffer(3),
+      format: "paratext-project",
+      bindingRole: "support",
+      memberPath: "My Project/01GEN.SFM",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      updateSourceSidecar: false,
+      getToken: async () => "tok",
+      fetchFn,
+      baseUrl: "https://sync.test",
+    })
+
+    const [, init] = fetchFn.mock.calls[0]
+    expect(init.headers).toMatchObject({
+      "X-Source-Format": "paratext-project",
+      "X-Artifact-Name": "My%20Project.zip",
+      "X-Artifact-Binding-Role": "support",
+      "X-Artifact-Member-Path": "My%20Project%2F01GEN.SFM",
+      "X-Artifact-Profile-Id": "builtin:paratext-project",
+      "X-Artifact-Profile-Version": "1",
+      "X-Artifact-Fidelity": "preserved-only",
+      "X-Update-Source-Sidecar": "false",
+    })
+  })
+})
+
+describe("bindSourceArtifact", () => {
+  it("binds an existing package artifact to another file", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    await bindSourceArtifact({
+      projectId: "p1",
+      fileId: "f2",
+      artifactId: "01900000-0000-7000-8000-000000000006",
+      memberPath: "My Project/02EXO.SFM",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      getToken: async () => "tok",
+      fetchFn,
+      baseUrl: "https://sync.test",
+    })
+
+    const [url, init] = fetchFn.mock.calls[0]
+    expect(url).toBe("https://sync.test/api/v1/projects/p1/files/f2/source-bindings")
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body)).toEqual({
+      artifactId: "01900000-0000-7000-8000-000000000006",
+      bindingRole: "support",
+      memberPath: "My Project/02EXO.SFM",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+    })
+  })
+
+  it("reports binding failures", async () => {
+    await expect(bindSourceArtifact({
+      projectId: "p1",
+      fileId: "f2",
+      artifactId: "01900000-0000-7000-8000-000000000006",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      getToken: async () => "tok",
+      fetchFn: vi.fn().mockResolvedValue(new Response("missing", { status: 404 })),
+      baseUrl: "https://sync.test",
+    })).rejects.toThrow(/404.*missing/)
   })
 })

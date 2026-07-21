@@ -8,6 +8,14 @@ export interface UploadSourceArgs {
   bytes: ArrayBuffer
   /** Stable import format label persisted beside the immutable original. */
   format: string
+  artifactName?: string
+  bindingRole?: "source" | "support"
+  memberPath?: string
+  profileId?: string
+  profileVersion?: string
+  fidelity?: "native" | "verified-recipe" | "content-only" | "preserved-only"
+  /** Support/package artifacts must not replace the file's native export sidecar. */
+  updateSourceSidecar?: boolean
   getToken: (fileId: string) => Promise<string | null>
   fetchFn?: typeof fetch
   /** Override the base URL (for tests). Defaults to syncWorkerHttpOrigin(). */
@@ -50,6 +58,13 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
           Authorization: `Bearer ${token}`,
           "X-Source-Format": args.format,
           "X-Artifact-Id": args.artifactId,
+          ...(args.artifactName ? { "X-Artifact-Name": encodeURIComponent(args.artifactName) } : {}),
+          ...(args.bindingRole ? { "X-Artifact-Binding-Role": args.bindingRole } : {}),
+          ...(args.memberPath ? { "X-Artifact-Member-Path": encodeURIComponent(args.memberPath) } : {}),
+          ...(args.profileId ? { "X-Artifact-Profile-Id": args.profileId } : {}),
+          ...(args.profileVersion ? { "X-Artifact-Profile-Version": args.profileVersion } : {}),
+          ...(args.fidelity ? { "X-Artifact-Fidelity": args.fidelity } : {}),
+          ...(args.updateSourceSidecar === false ? { "X-Update-Source-Sidecar": "false" } : {}),
         },
         body: args.bytes,
       })
@@ -80,4 +95,44 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
   }
 
   throw lastError ?? new Error("Source upload failed")
+}
+
+export interface BindSourceArtifactArgs {
+  projectId: string
+  fileId: string
+  artifactId: string
+  memberPath?: string
+  profileId: string
+  profileVersion: string
+  fidelity: "native" | "verified-recipe" | "content-only" | "preserved-only"
+  getToken: (fileId: string) => Promise<string | null>
+  fetchFn?: typeof fetch
+  baseUrl?: string
+}
+
+/** Bind an already-uploaded package artifact to another file without
+ * re-uploading its bytes. Used by Paratext, where one ZIP owns many books. */
+export async function bindSourceArtifact(args: BindSourceArtifactArgs): Promise<void> {
+  const token = await args.getToken(args.fileId)
+  if (!token) throw new Error("Couldn't get an upload token — sign in and try again.")
+  const origin = args.baseUrl ?? syncWorkerHttpOrigin()
+  const response = await (args.fetchFn ?? fetch)(
+    `${origin}/api/v1/projects/${encodeURIComponent(args.projectId)}/files/${encodeURIComponent(args.fileId)}/source-bindings`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        artifactId: args.artifactId,
+        bindingRole: "support",
+        memberPath: args.memberPath ?? "",
+        profileId: args.profileId,
+        profileVersion: args.profileVersion,
+        fidelity: args.fidelity,
+      }),
+    },
+  )
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "")
+    throw new Error(`Artifact binding failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}`)
+  }
 }

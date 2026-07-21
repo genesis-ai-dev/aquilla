@@ -28,6 +28,8 @@ import {
   type ParatextBook,
   type ParatextProject,
   type ProjectEntry,
+  type ProjectEntryCollection,
+  type ProjectSourceArtifact,
 } from "./parsers/paratext-project"
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
@@ -37,6 +39,7 @@ import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractHtmlStrings } from "./parsers/html"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
+import { bindSourceArtifact, uploadSourceOriginal } from "./sync/source-upload"
 import {
   fetchTranslationText,
   parseEBibleCorpus,
@@ -1290,6 +1293,9 @@ export interface ParatextBookPlan {
 export interface ParatextPlan {
   project: ParatextProject
   books: ParatextBookPlan[]
+  /** Whole ZIP/folder package, including Settings, BookNames, support files,
+   * and any media members. One immutable artifact binds to every book file. */
+  sourceArtifact?: ProjectSourceArtifact
 }
 
 /**
@@ -1297,7 +1303,7 @@ export interface ParatextPlan {
  * parsing), so the dialog can show a preview of every book's cells before the
  * user confirms the import.
  */
-export async function prepareParatextProject(entries: ProjectEntry[]): Promise<ParatextPlan> {
+export async function prepareParatextProject(entries: ProjectEntryCollection): Promise<ParatextPlan> {
   const project = await assembleParatextProject(entries)
   if (!project) {
     throw new Error(
@@ -1308,7 +1314,44 @@ export async function prepareParatextProject(entries: ProjectEntry[]): Promise<P
     const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource)
     return { book, strings, duplicateRefs, cellCount: strings.length }
   })
-  return { project, books }
+  return { project, books, ...(entries.sourceArtifact ? { sourceArtifact: entries.sourceArtifact } : {}) }
+}
+
+async function preserveParatextPackage(
+  plan: ParatextPlan,
+  bindings: Array<{ fileId: string; memberPath: string }>,
+  ctx: Pick<ImportContext, "projectId" | "getToken">,
+): Promise<void> {
+  if (!plan.sourceArtifact || bindings.length === 0) return
+  const artifactId = uuidv7()
+  const bytes = await plan.sourceArtifact.bytes()
+  await uploadSourceOriginal({
+    projectId: ctx.projectId,
+    fileId: bindings[0].fileId,
+    artifactId,
+    artifactName: plan.sourceArtifact.name,
+    bytes,
+    format: plan.sourceArtifact.format,
+    bindingRole: "support",
+    memberPath: bindings[0].memberPath,
+    profileId: "builtin:paratext-project",
+    profileVersion: "1",
+    fidelity: "preserved-only",
+    updateSourceSidecar: false,
+    getToken: ctx.getToken,
+  })
+  for (const binding of bindings.slice(1)) {
+    await bindSourceArtifact({
+      projectId: ctx.projectId,
+      fileId: binding.fileId,
+      artifactId,
+      memberPath: binding.memberPath,
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      getToken: ctx.getToken,
+    })
+  }
 }
 
 export interface ParatextImportResult {
@@ -1368,6 +1411,7 @@ export async function commitParatextProject(
 
   let done = 0
   let cellsUploaded = 0
+  const packageBindings: Array<{ fileId: string; memberPath: string }> = []
   for (const bookPlan of plan.books) {
     const book = bookPlan.book
     onProgress?.({
@@ -1408,12 +1452,22 @@ export async function commitParatextProject(
         bookCtx,
       )
       refs.push(ref)
+      packageBindings.push({ fileId: ref.id, memberPath: book.fileName })
       cellsUploaded = cellsBefore + bookPlan.cellCount
     } catch (err) {
       skipped.push({ book: book.displayName, reason: err instanceof Error ? err.message : String(err) })
     }
     done++
     onProgress?.({ phase: "save", book: book.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
+  }
+
+  try {
+    await preserveParatextPackage(plan, packageBindings, baseCtx)
+  } catch (error) {
+    skipped.push({
+      book: plan.sourceArtifact?.name ?? "Paratext package",
+      reason: `package preservation failed: ${error instanceof Error ? error.message : String(error)}`,
+    })
   }
 
   return { refs, settings: plan.project.settings, skipped }
@@ -1450,6 +1504,7 @@ export async function importParatextAsTarget(
   )
   let cellsUploaded = 0
   let done = 0
+  const packageBindings: Array<{ fileId: string; memberPath: string }> = []
 
   for (const bookPlan of plans) {
     onProgress?.({
@@ -1537,12 +1592,25 @@ export async function importParatextAsTarget(
         ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
         ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
       })
+      packageBindings.push({
+        fileId,
+        memberPath: plan.project.books.find((book) => book.bookId === bookPlan.bookId)?.fileName ?? `${bookPlan.bookId}.SFM`,
+      })
       cellsUploaded = cellsBefore + cells.length + targets.length
     } catch (err) {
       skipped.push({ book: bookPlan.displayName, reason: err instanceof Error ? err.message : String(err) })
     }
     done++
     onProgress?.({ phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
+  }
+
+  try {
+    await preserveParatextPackage(plan, packageBindings, ctx)
+  } catch (error) {
+    skipped.push({
+      book: plan.sourceArtifact?.name ?? "Paratext package",
+      reason: `package preservation failed: ${error instanceof Error ? error.message : String(error)}`,
+    })
   }
 
   return { refs, settings: project.settings, skipped }

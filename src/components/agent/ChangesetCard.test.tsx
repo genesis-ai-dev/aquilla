@@ -32,6 +32,11 @@ describe("ChangesetCard", () => {
     expect(screen.getByText("1 cell")).toBeInTheDocument()
   })
 
+  it('tags the card with data-frame-type="changeset.staged" for e2e selectors', () => {
+    const { container } = render(<ChangesetCard item={item()} />)
+    expect(container.querySelector('[data-frame-type="changeset.staged"]')).not.toBeNull()
+  })
+
   it("links Review & approve to approvalUrl, opened in a new tab", () => {
     render(<ChangesetCard item={item()} />)
     const link = screen.getByRole("link", { name: /Review & approve/ })

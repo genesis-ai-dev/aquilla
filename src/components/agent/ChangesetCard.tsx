@@ -12,7 +12,10 @@ import type { ChangesetItem } from "@/lib/agent/run-state"
 
 export function ChangesetCard({ item }: { item: ChangesetItem }) {
   return (
-    <div className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2">
+    <div
+      data-frame-type="changeset.staged"
+      className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2"
+    >
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <FileDiff className="h-3.5 w-3.5 shrink-0 text-sky-500" />
         <span className="min-w-0 flex-1 truncate font-medium">{item.summary}</span>

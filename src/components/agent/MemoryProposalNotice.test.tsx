@@ -36,6 +36,13 @@ describe("MemoryProposalNotice", () => {
     expect(screen.queryByRole("button", { name: /Review in Memory tab/ })).toBeNull()
   })
 
+  it("tags the notice with data-frame-type and data-memory-path for e2e", () => {
+    const { container } = render(<MemoryProposalNotice item={memoryItem} />)
+    const row = container.querySelector('[data-frame-type="memory.proposed"]')
+    expect(row).not.toBeNull()
+    expect(row).toHaveAttribute("data-memory-path", "observations/mrk.md")
+  })
+
   it("jumps to the Memory tab when provided", () => {
     const onReviewMemory = vi.fn()
     render(<MemoryProposalNotice item={memoryItem} onReviewMemory={onReviewMemory} />)
@@ -51,5 +58,10 @@ describe("BriefProposalNotice", () => {
     expect(screen.getByText(/Tighten the tone guidance/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Review in Memory tab/ }))
     expect(onReviewMemory).toHaveBeenCalled()
+  })
+
+  it('tags the notice with data-frame-type="brief.proposed" for e2e', () => {
+    const { container } = render(<BriefProposalNotice item={briefItem} />)
+    expect(container.querySelector('[data-frame-type="brief.proposed"]')).not.toBeNull()
   })
 })

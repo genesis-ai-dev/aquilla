@@ -20,7 +20,10 @@ export function CodeActivityBlock({ item }: { item: CodeActivityItem }) {
   const hasOutput = Boolean(item.stdout) || Boolean(item.stderr)
 
   return (
-    <div className="rounded-md border bg-muted/30">
+    <div
+      data-frame-type={settled ? "tool.code.output" : "tool.code.start"}
+      className="rounded-md border bg-muted/30"
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

@@ -32,7 +32,11 @@ export function MemoryProposalNotice({
   onReviewMemory?: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-dashed px-2.5 py-1.5 text-[11px]">
+    <div
+      data-frame-type="memory.proposed"
+      data-memory-path={item.path}
+      className="flex flex-wrap items-center gap-1.5 rounded-md border border-dashed px-2.5 py-1.5 text-[11px]"
+    >
       <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1">
         Proposed memory <span className="font-mono">{item.path}</span> — {item.preview}
@@ -50,7 +54,10 @@ export function BriefProposalNotice({
   onReviewMemory?: () => void
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-dashed px-2.5 py-1.5 text-[11px]">
+    <div
+      data-frame-type="brief.proposed"
+      className="flex flex-wrap items-center gap-1.5 rounded-md border border-dashed px-2.5 py-1.5 text-[11px]"
+    >
       <BookMarked className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1">Proposed brief update — {item.preview}</span>
       <ReviewLink onClick={onReviewMemory} />

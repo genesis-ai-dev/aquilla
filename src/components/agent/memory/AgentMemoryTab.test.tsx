@@ -101,6 +101,17 @@ describe("loading and layout", () => {
     expect(screen.getByRole("tab", { name: /Proposed/ })).toHaveTextContent("1")
   })
 
+  it("tags proposed and approved rows with data-memory-path for e2e selectors", async () => {
+    const { container } = render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+    expect(container.querySelector('[data-memory-path="observations/foo.md"]')).not.toBeNull()
+    // Switch to the approved tab to render the approved list row.
+    fireEvent.click(screen.getByRole("tab", { name: /Approved/ }))
+    await waitFor(() =>
+      expect(container.querySelector('[data-memory-path="conventions/style.md"]')).not.toBeNull(),
+    )
+  })
+
   it("shows an error state with a retry affordance when the initial load fails", async () => {
     mockListAgentMemories.mockRejectedValueOnce(new Error("network down"))
     render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)

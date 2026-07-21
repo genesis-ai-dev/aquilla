@@ -25,6 +25,14 @@ describe("CodeActivityBlock", () => {
     expect(screen.getByText("python")).toBeInTheDocument()
   })
 
+  it("tags the row data-frame-type by settled state for e2e selectors", () => {
+    const { container: running } = render(<CodeActivityBlock item={item()} />)
+    expect(running.querySelector('[data-frame-type="tool.code.start"]')).not.toBeNull()
+
+    const { container: settled } = render(<CodeActivityBlock item={item({ durationMs: 5 })} />)
+    expect(settled.querySelector('[data-frame-type="tool.code.output"]')).not.toBeNull()
+  })
+
   it("shows the elapsed time once settled, and stdout/stderr when expanded", () => {
     render(
       <CodeActivityBlock

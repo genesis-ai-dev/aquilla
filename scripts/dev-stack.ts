@@ -549,6 +549,26 @@ async function reconcilePgSchema(
     patched.push("rebuilt file_section_progress PK with target_lang")
   }
 
+  // AQU-AGENT: the Agent API changeset lifecycle added the transitional
+  // 'committing' status (schema.sql line ~782, used by commit.ts). The generic
+  // loop above never touches CHECK constraints, so a container created before
+  // that status existed still carries the old 5-value check and 500s every
+  // external `commit` with `changesets_status_check` violations. Rebuild the
+  // check to match schema.sql if 'committing' is missing (idempotent).
+  const { rows: csCheck } = await client.query(
+    `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'changesets_status_check'`,
+  )
+  const csDef = (csCheck[0] as { def?: string } | undefined)?.def ?? ""
+  if (csDef && !csDef.includes("committing")) {
+    await run(
+      `ALTER TABLE changesets DROP CONSTRAINT changesets_status_check;
+       ALTER TABLE changesets ADD CONSTRAINT changesets_status_check
+         CHECK (status IN ('staged','committing','committed','discarded','stale','expired'))`,
+      "rebuilding changesets_status_check with the 'committing' status (AQU-AGENT)",
+    )
+    patched.push("rebuilt changesets_status_check with 'committing'")
+  }
+
   if (patched.length) {
     console.log(
       `[dev-stack] local Postgres schema patched from db/postgres/schema.sql: ${patched.join(", ")}`,

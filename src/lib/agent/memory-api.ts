@@ -212,7 +212,7 @@ export async function getProjectBrief(jwt: string, projectId: string): Promise<P
     { headers: authHeaders(jwt) },
   )
   if (!res.ok) return parseErrorAndThrow(res, "get brief failed")
-  return (await res.json()) as ProjectBrief
+  return ((await res.json()) as { brief: ProjectBrief }).brief
 }
 
 /** PUT /api/v2/projects/:projectId/brief (PROJECT_LEAD+, humans only). Throws
@@ -228,7 +228,7 @@ export async function putProjectBrief(
     { method: "PUT", headers: authHeaders(jwt), body: JSON.stringify({ content, ifMatchVersion }) },
   )
   if (!res.ok) return parseErrorAndThrow(res, "update brief failed")
-  return (await res.json()) as ProjectBrief
+  return ((await res.json()) as { brief: ProjectBrief }).brief
 }
 
 /** POST /api/v2/projects/:projectId/brief/proposals (agent or human). */
@@ -243,7 +243,7 @@ export async function proposeBriefUpdate(
     { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ content, rationale }) },
   )
   if (!res.ok) return parseErrorAndThrow(res, "propose brief update failed")
-  return (await res.json()) as ProjectBriefProposal
+  return ((await res.json()) as { proposal: ProjectBriefProposal }).proposal
 }
 
 /** GET /api/v2/projects/:projectId/brief/proposals — listed for the review
@@ -279,5 +279,5 @@ export async function reviewBriefProposal(
     { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ action }) },
   )
   if (!res.ok) return parseErrorAndThrow(res, "review brief proposal failed")
-  return (await res.json()) as ProjectBriefProposal
+  return ((await res.json()) as { proposal: ProjectBriefProposal; brief?: ProjectBrief }).proposal
 }

@@ -97,7 +97,7 @@ const app = new Hono<HonoEnv>()
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
   "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",

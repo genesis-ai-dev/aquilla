@@ -151,13 +151,15 @@ describe("editAgentMemory", () => {
 
 describe("getProjectBrief / putProjectBrief", () => {
   it("GETs the brief", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse(BRIEF))
+    // auth-worker GET /brief returns a `{brief}` envelope (agent-memory.ts).
+    fetchMock.mockResolvedValueOnce(jsonResponse({ brief: BRIEF }))
     const result = await getProjectBrief(JWT, PROJECT_ID)
     expect(result).toEqual(BRIEF)
   })
 
   it("PUTs with ifMatchVersion in the body", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ ...BRIEF, content: "new", version: 4 }))
+    // auth-worker PUT /brief returns `{brief: result.brief}`.
+    fetchMock.mockResolvedValueOnce(jsonResponse({ brief: { ...BRIEF, content: "new", version: 4 } }))
     const result = await putProjectBrief(JWT, PROJECT_ID, "new", 3)
     expect(result.version).toBe(4)
     const [, init] = fetchMock.mock.calls[0]
@@ -186,17 +188,21 @@ describe("getProjectBrief / putProjectBrief", () => {
 
 describe("brief proposals", () => {
   it("proposeBriefUpdate POSTs content + rationale", async () => {
+    // auth-worker POST /brief/proposals returns `{proposalId, proposal}`.
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
-        id: "prop-1",
-        projectId: PROJECT_ID,
-        content: "draft",
-        rationale: "why",
-        status: "proposed",
-        createdBy: "alice",
-        reviewedBy: null,
-        createdAt: "2026-01-01T00:00:00Z",
-        reviewedAt: null,
+        proposalId: "prop-1",
+        proposal: {
+          id: "prop-1",
+          projectId: PROJECT_ID,
+          content: "draft",
+          rationale: "why",
+          status: "proposed",
+          createdBy: "alice",
+          reviewedBy: null,
+          createdAt: "2026-01-01T00:00:00Z",
+          reviewedAt: null,
+        },
       }),
     )
     const result = await proposeBriefUpdate(JWT, PROJECT_ID, "draft", "why")
@@ -212,17 +218,21 @@ describe("brief proposals", () => {
   })
 
   it("reviewBriefProposal POSTs {action} to the review endpoint", async () => {
+    // auth-worker POST /brief/proposals/:id/review returns `{proposal, brief}`.
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
-        id: "prop-1",
-        projectId: PROJECT_ID,
-        content: "draft",
-        rationale: null,
-        status: "approved",
-        createdBy: "alice",
-        reviewedBy: "bob",
-        createdAt: "2026-01-01T00:00:00Z",
-        reviewedAt: "2026-01-02T00:00:00Z",
+        proposal: {
+          id: "prop-1",
+          projectId: PROJECT_ID,
+          content: "draft",
+          rationale: null,
+          status: "approved",
+          createdBy: "alice",
+          reviewedBy: "bob",
+          createdAt: "2026-01-01T00:00:00Z",
+          reviewedAt: "2026-01-02T00:00:00Z",
+        },
+        brief: BRIEF,
       }),
     )
     const result = await reviewBriefProposal(JWT, PROJECT_ID, "prop-1", "approve")

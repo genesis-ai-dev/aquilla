@@ -2,6 +2,44 @@
 
 Format: `- [STATUS] (id) description — how to pick up`
 
+## Wave-2 UI verifier (W2-QA) — 2026-07-21
+
+See `docs/swarm/AQU-AGENT-QA.md` for full verdicts + evidence (`docs/swarm/aqu-agent-qa/*.png`).
+Golden path (items 1–5, no-LLM) PASS after 3 small fixes; sandbox (item 6) BLOCKED (no image).
+
+- [FIXED] (qa-cors-artifact-name) Composer paperclip artifact upload failed in-browser on CORS
+  preflight — `x-artifact-name` missing from `Access-Control-Allow-Headers`. Added
+  `X-Artifact-Name` to `CORS_HEADERS` in auth-worker/src/index.ts. curl never caught it (no
+  preflight). Re-verified 201 + pill.
+- [FIXED] (qa-brief-envelope) Memory → Project brief tab crashed (React error boundary):
+  `getProjectBrief`/`putProjectBrief`/`proposeBriefUpdate`/`reviewBriefProposal` in
+  src/lib/agent/memory-api.ts cast the `{brief}`/`{proposal}`/`{proposal,brief}` route envelopes
+  as the bare type, so `brief.content` was undefined → `.trim()` TypeError. Unwrapped all 4.
+  The unit tests mocked the same wrong shape (false green) — corrected all 4 mocks to the real
+  enveloped responses (memory-api.test.ts, 25/25). W1E/W1C seam: confirm any OTHER consumer of
+  these routes unwraps correctly.
+- [FIXED] (qa-devstack-committing) Pre-existing local PG container 500'd every external `commit`
+  (`changesets_status_check` missing `'committing'`); reconciler only adds columns, not CHECK
+  constraints. Added an idempotent constraint rebuild in scripts/dev-stack.ts (mirrors the
+  AQU-538 PK special-cases). Prod unaffected (migrations carry `committing`).
+- [OPEN] (qa-memory-edit-revalidate) AgentMemoryTab approved-memory edit modal does not refetch
+  after Save — the row shows stale version/no Human-edited badge until a full reload (sub-tab
+  switch doesn't refetch either). Backend correct. Add a `revalidate()`/refetch on save in
+  src/components/agent/memory/AgentMemoryTab.tsx. Minor UX, not a blocker.
+- [OPEN] (qa-commit-approval-atomicity) In sync-worker external `commit`, the human
+  `changeset_confirmations` consume is not in the same transaction as the changeset status
+  write: when the status write failed (during qa-devstack-committing), the confirmation was
+  already consumed while status stayed `staged`, forcing a re-approval (428). Healthy DBs commit
+  fine, but consider wrapping consume+status in one tx — sync-worker/src/external/commit.ts.
+- [OPEN] (qa-toolcall-mock-gap) A live agent run streams the timeline + budget meter, but the
+  agent-specific frames (`tool.code.*`, `changeset.staged`, `memory.proposed`,
+  `budget.exhausted`) are never emitted in a scripted run: mock-openrouter.ts only scripts the
+  legacy read/draft/emit/sql/aquifer tools, and the sandbox is down for code frames. To close:
+  extend scriptMockResponse() to return a `namedToolCall("propose_memory"|"plan_import", …)` on a
+  keyword so the harness executes a new tool and emits its frame; verify run-state.ts pairs
+  `tool.code.start`/`tool.code.output` (the w1d-code-pairing scan-from-end path). Frame data
+  sources are already verified via API+UI (QA items 2/3/4).
+
 ## Wave-2 integrator (W2-INT) — 2026-07-21
 
 - [DONE] (w2int-selector-contract) Added `data-frame-type="<contract frame>"` on run-timeline

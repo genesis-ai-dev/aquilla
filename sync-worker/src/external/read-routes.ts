@@ -1,9 +1,16 @@
 // External read surface (AGENT-API §4 read tier — AQU-533 W1-C).
 //
+//   GET /api/v1/external/me                                — identity bootstrap
+//   GET /api/v1/external/projects                          — list accessible projects
 //   GET /api/v1/external/projects/:projectId/search?q=&side=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=
+//
+// /me and /projects are the REST cold-start pair (mirrors of the MCP
+// get_identity_and_scope / list_projects tools): they need only a valid
+// credential, no projectId — without them a REST caller had no way to
+// discover a project id at all.
 //
 // Auth: `Authorization: Bearer aqk_...` — a credential minted via the
 // api_credentials table (db/shared/api-credentials.ts), NOT a sync-token JWT.
@@ -45,6 +52,8 @@ import { makeVerifiedProjectId, queryScopedSearch } from "../events/scoped-searc
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { externalError } from "./errors"
+import { AUTH_HINT } from "./discovery-route"
+import { listProjectsForCredential } from "./projects-list"
 import { validateApiCredential, type ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { paginate, parsePageParams } from "./pagination"
@@ -54,6 +63,8 @@ export interface ExternalReadsEnv {
   SYNC_SECRET_KEY?: string
 }
 
+const ME_RE = /^\/api\/v1\/external\/me$/
+const PROJECTS_RE = /^\/api\/v1\/external\/projects$/
 const SEARCH_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/search$/
 const FILE_CELLS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files\/([^/]+)\/cells$/
 const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
@@ -62,6 +73,39 @@ const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)
 // ---------------------------------------------------------------------------
 // Shared auth + scope gate
 // ---------------------------------------------------------------------------
+
+/** Credential-only gate (no project in play yet) — used by /me and /projects,
+ *  and as the first step of the project-scoped gate below. 401 messages teach
+ *  the auth scheme: a cold-start agent's first failed call should tell it
+ *  exactly how to succeed, not just that it failed. */
+async function authenticateCredential(
+  request: Request,
+  env: ExternalReadsEnv,
+): Promise<{ ok: true; credential: ApiCredentialContext } | { ok: false; response: Response }> {
+  const authHeader = request.headers.get("Authorization") ?? ""
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null
+  if (!token) {
+    return {
+      ok: false,
+      response: externalError("permission_denied", `missing Authorization header — ${AUTH_HINT}`, 401),
+    }
+  }
+
+  const credential = await validateApiCredential(env.AQUILLA_PG as AquillaDb, token)
+  if (!credential) {
+    // Collapses invalid/revoked/expired into one generic message — the code
+    // (permission_denied) is what callers branch on, not the message text.
+    return {
+      ok: false,
+      response: externalError(
+        "permission_denied",
+        `invalid, revoked, or expired API credential — ${AUTH_HINT}`,
+        401,
+      ),
+    }
+  }
+  return { ok: true, credential }
+}
 
 interface AuthedContext {
   credential: ApiCredentialContext
@@ -82,21 +126,9 @@ async function authenticateAndScope(
     return { ok: false, response: new Response("AQUILLA_PG binding not configured", { status: 500 }) }
   }
 
-  const authHeader = request.headers.get("Authorization") ?? ""
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null
-  if (!token) {
-    return { ok: false, response: externalError("permission_denied", "missing Authorization header", 401) }
-  }
-
-  const credential = await validateApiCredential(env.AQUILLA_PG, token)
-  if (!credential) {
-    // Collapses invalid/revoked/expired into one generic message — the code
-    // (permission_denied) is what callers branch on, not the message text.
-    return {
-      ok: false,
-      response: externalError("permission_denied", "invalid, revoked, or expired API credential", 401),
-    }
-  }
+  const credentialed = await authenticateCredential(request, env)
+  if (!credentialed.ok) return credentialed
+  const credential = credentialed.credential
 
   const projectRow = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
     .bind(projectId)
@@ -149,6 +181,46 @@ async function mintInternalToken(
     exp: now + 30,
   }
   return sign(claims as unknown as Record<string, unknown>, env.SYNC_SECRET_KEY as string, "HS256")
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/me — cold-start step 1: prove the token works, learn
+// your identity, autonomy mode, scope, and what to call next.
+// ---------------------------------------------------------------------------
+
+async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promise<Response> {
+  if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
+  const authed = await authenticateCredential(request, env)
+  if (!authed.ok) return authed.response
+  const cred = authed.credential
+  return Response.json({
+    userId: cred.userId,
+    username: cred.username,
+    mode: cred.mode,
+    orgId: cred.orgId,
+    projectId: cred.projectId,
+    credentialId: cred.credentialId,
+    hints: {
+      mode:
+        cred.mode === "ask"
+          ? "ask mode: you can prepare changesets but a commit needs a human approval at the approvalUrl first (commit returns 428 confirmation_required until then)."
+          : "act mode: commit applies a prepared changeset immediately.",
+      next: "GET /api/v1/external/projects to find a projectId, then GET /api/v1/external/projects/:projectId/files. GET /api/v1/external for the full API map.",
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/projects — cold-start step 2: find a projectId.
+// (REST mirror of the MCP list_projects tool; same shared query.)
+// ---------------------------------------------------------------------------
+
+async function handleExternalProjects(request: Request, env: ExternalReadsEnv): Promise<Response> {
+  if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
+  const authed = await authenticateCredential(request, env)
+  if (!authed.ok) return authed.response
+  const projects = await listProjectsForCredential(env.AQUILLA_PG, authed.credential)
+  return Response.json({ data: projects, nextCursor: null })
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +456,9 @@ export async function handleExternalReadRequest(
 ): Promise<Response | null> {
   if (request.method !== "GET") return null
   const url = new URL(request.url)
+
+  if (ME_RE.test(url.pathname)) return handleExternalMe(request, env)
+  if (PROJECTS_RE.test(url.pathname)) return handleExternalProjects(request, env)
 
   let match = url.pathname.match(SEARCH_RE)
   if (match) return handleExternalSearch(request, env, decodeURIComponent(match[1]))

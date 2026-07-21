@@ -9,8 +9,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import AgentMemoryTab from "./AgentMemoryTab"
-import type { AgentMemory, ProjectBrief } from "@/lib/agent/memory-api"
+import type { AgentMemory, ProjectBrief, ProjectBriefProposal } from "@/lib/agent/memory-api"
 import { ROLE } from "@/lib/agent/role-floors"
+import type { AgentRunUi } from "@/lib/agent/run-state"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: vi.fn(() => ({
@@ -34,6 +35,30 @@ vi.mock("@/lib/agent/memory-api", async () => {
   }
 })
 
+// mem-M5/mem-m2: a controllable fake of the shared agent-session store, so
+// tests can assert AgentMemoryTab calls markMemoryReviewed/markBriefReviewed
+// on review, and can push in a `runs` array with more memory-proposed items
+// to prove the badge-refetch effect (real useSyncExternalStore wiring is
+// session-store.test.ts's job — this fakes just the read/write surface
+// AgentMemoryTab uses).
+let fakeRuns: AgentRunUi[] = []
+const mockMarkMemoryReviewed = vi.fn()
+const mockMarkBriefReviewed = vi.fn()
+vi.mock("@/lib/agent/session-store", () => ({
+  agentSessionStore: vi.fn(() => ({
+    markMemoryReviewed: mockMarkMemoryReviewed,
+    markBriefReviewed: mockMarkBriefReviewed,
+  })),
+  useAgentSession: vi.fn(() => ({
+    state: { runs: fakeRuns, isStreaming: false, queued: [], decided: new Map(), activity: [], sessionId: "s" },
+    send: vi.fn(),
+    stop: vi.fn(),
+    reset: vi.fn(),
+    decide: vi.fn(),
+    noteActivity: vi.fn(),
+  })),
+}))
+
 import {
   listAgentMemories,
   getProjectBrief,
@@ -41,7 +66,9 @@ import {
   reviewAgentMemory,
   editAgentMemory,
   putProjectBrief,
+  reviewBriefProposal,
   VersionConflictError,
+  SupersedesHumanEditedError,
 } from "@/lib/agent/memory-api"
 
 const mockListAgentMemories = vi.mocked(listAgentMemories)
@@ -50,6 +77,7 @@ const mockListBriefProposals = vi.mocked(listBriefProposals)
 const mockReviewAgentMemory = vi.mocked(reviewAgentMemory)
 const mockEditAgentMemory = vi.mocked(editAgentMemory)
 const mockPutProjectBrief = vi.mocked(putProjectBrief)
+const mockReviewBriefProposal = vi.mocked(reviewBriefProposal)
 
 const PROPOSED_MEMORY: AgentMemory = {
   id: "mem-1",
@@ -86,6 +114,7 @@ const BRIEF: ProjectBrief = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  fakeRuns = []
   mockListAgentMemories.mockResolvedValue([PROPOSED_MEMORY, APPROVED_MEMORY])
   mockGetProjectBrief.mockResolvedValue(BRIEF)
   mockListBriefProposals.mockResolvedValue([])
@@ -164,6 +193,123 @@ describe("proposed queue approve/reject", () => {
     expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
     expect(screen.getByText(/Requires project lead or higher/)).toBeInTheDocument()
   })
+
+  it("races-F5: a failed review only reverts its own row, not a concurrent successful one", async () => {
+    const SECOND_PROPOSED: AgentMemory = { ...PROPOSED_MEMORY, id: "mem-3", path: "observations/bar.md" }
+    mockListAgentMemories.mockResolvedValue([PROPOSED_MEMORY, SECOND_PROPOSED, APPROVED_MEMORY])
+
+    // mem-1 rejects, mem-3 resolves — both in flight at once (deferred so
+    // neither settles before the other's optimistic flip has applied).
+    let resolveMem3: (v: AgentMemory) => void = () => {}
+    mockReviewAgentMemory.mockImplementation((_jwt, _projectId, id) => {
+      if (id === "mem-1") return Promise.reject(new Error("403 forbidden"))
+      return new Promise((resolve) => {
+        resolveMem3 = resolve
+      })
+    })
+
+    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+    expect(screen.getByText("observations/bar.md")).toBeInTheDocument()
+
+    const approveButtons = screen.getAllByRole("button", { name: /Approve/ })
+    fireEvent.click(approveButtons[0]) // mem-1 — will fail
+    fireEvent.click(approveButtons[1]) // mem-3 — will succeed
+
+    resolveMem3({ ...SECOND_PROPOSED, status: "approved" })
+
+    // mem-1 reverts back into the proposed list; mem-3 stays approved (gone
+    // from Proposed) — an absolute-snapshot revert would have brought it back.
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("403 forbidden"))
+    expect(screen.getByText("observations/foo.md")).toBeInTheDocument()
+    expect(screen.queryByText("observations/bar.md")).not.toBeInTheDocument()
+  })
+})
+
+describe("supersede-human-edited confirm (B1)", () => {
+  it("shows a destructive confirm dialog on a 409 supersedes_human_edited, and reverts the row meanwhile", async () => {
+    mockReviewAgentMemory.mockRejectedValueOnce(
+      new SupersedesHumanEditedError("Approving will replace a human-edited memory.", {
+        path: "observations/foo.md",
+        existingId: "mem-old",
+      }),
+    )
+    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/Replace the human-edited memory/)).toBeInTheDocument(),
+    )
+    // Row is back in the Proposed list behind the dialog — no silent state change.
+    expect(screen.getAllByText("observations/foo.md").length).toBeGreaterThan(0)
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
+  it("confirm resends the review with supersedeHumanEdited: true", async () => {
+    mockReviewAgentMemory
+      .mockRejectedValueOnce(new SupersedesHumanEditedError("x", { path: "observations/foo.md" }))
+      .mockResolvedValueOnce({ ...PROPOSED_MEMORY, status: "approved" })
+
+    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+    await waitFor(() => expect(screen.getByText(/Replace the human-edited memory/)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "Replace it" }))
+
+    await waitFor(() =>
+      expect(mockReviewAgentMemory).toHaveBeenLastCalledWith("test-jwt", "proj-1", "mem-1", "approve", true),
+    )
+    await waitFor(() => expect(screen.queryByText("observations/foo.md")).not.toBeInTheDocument())
+  })
+
+  it("cancel leaves the memory proposed and never resends", async () => {
+    mockReviewAgentMemory.mockRejectedValueOnce(
+      new SupersedesHumanEditedError("x", { path: "observations/foo.md" }),
+    )
+    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+    await waitFor(() => expect(screen.getByText(/Replace the human-edited memory/)).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    expect(screen.queryByText(/Replace the human-edited memory/)).not.toBeInTheDocument()
+    expect(screen.getByText("observations/foo.md")).toBeInTheDocument()
+    expect(mockReviewAgentMemory).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("mem-M5 notice liveness + mem-m2 badge refetch", () => {
+  it("calls markMemoryReviewed on the shared session store after a successful review", async () => {
+    mockReviewAgentMemory.mockResolvedValueOnce({ ...PROPOSED_MEMORY, status: "approved" })
+    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
+
+    await waitFor(() => expect(mockMarkMemoryReviewed).toHaveBeenCalledWith("mem-1"))
+  })
+
+  it("refetches the memory list when a new memory-proposed run item lands (mem-m2)", async () => {
+    const { rerender } = render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(mockListAgentMemories).toHaveBeenCalledTimes(1))
+
+    fakeRuns = [
+      {
+        localId: "run-1",
+        prompt: "p",
+        runId: "r1",
+        items: [{ id: "i0", kind: "memory-proposed", memoryId: "mem-new", path: "x.md", preview: "x", status: "pending" }],
+        status: "ok",
+      },
+    ]
+    rerender(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+
+    await waitFor(() => expect(mockListAgentMemories).toHaveBeenCalledTimes(2))
+  })
 })
 
 describe("approved list edit", () => {
@@ -232,5 +378,47 @@ describe("project brief", () => {
     await waitFor(() => expect(screen.getByText(/this project translates Mark/)).toBeInTheDocument())
     expect(screen.queryByRole("button", { name: /Edit/ })).not.toBeInTheDocument()
     expect(screen.getByText("Project lead only")).toBeInTheDocument()
+  })
+})
+
+const BRIEF_PROPOSAL: ProjectBriefProposal = {
+  id: "prop-1",
+  projectId: "proj-1",
+  content: "this project translates Mark and Luke",
+  rationale: "Luke was added to scope",
+  status: "proposed",
+  createdBy: "agent",
+  reviewedBy: null,
+  createdAt: "2026-01-01T00:00:00Z",
+  reviewedAt: null,
+}
+
+describe("brief proposal diff + stale state (mem-M2/M3)", () => {
+  it("renders a line-level diff of the current brief vs the proposed content", async () => {
+    mockListBriefProposals.mockResolvedValue([BRIEF_PROPOSAL])
+    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("tab", { name: "Project brief" }))
+
+    // The unchanged prefix stays a context line; the changed line shows both
+    // the removed original and the added replacement.
+    await waitFor(() => expect(screen.getByText(/- this project translates Mark$/)).toBeInTheDocument())
+    expect(screen.getByText(/\+ this project translates Mark and Luke/)).toBeInTheDocument()
+  })
+
+  it("marks a proposal stale on a 409 conflict, disabling Approve and leaving only Reject", async () => {
+    mockListBriefProposals.mockResolvedValue([BRIEF_PROPOSAL])
+    mockReviewBriefProposal.mockRejectedValueOnce(new VersionConflictError("stale", 5, 3))
+    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("tab", { name: "Project brief" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }))
+
+    await waitFor(() => expect(screen.getByText(/Stale — brief changed since this was proposed/)).toBeInTheDocument())
+    expect(screen.getByText(/v3 → v5/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled()
   })
 })

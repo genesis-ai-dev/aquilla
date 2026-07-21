@@ -99,15 +99,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refreshGuestOrgs() }, [refreshGuestOrgs])
 
-  // FRO-367: persist the active-org selection whenever it settles, as an
-  // effect (state updaters must stay pure). This covers the clamp path: when
-  // another tab switches to an account that can't see the org this tab had
-  // active, refresh() drops it from state — but the stale id used to survive
-  // in localStorage, so a reload resurrected it (→ the "org I can't access"
-  // 403). The direct setters below also write the key; this write is
-  // idempotent alongside them.
+  // FRO-367: persist the CLAMP path as an effect (state updaters must stay
+  // pure): when another tab switches to an account that can't see the org this
+  // tab had active, refresh() drops it from state — but the stale id used to
+  // survive in localStorage, so a reload resurrected it (→ the "org I can't
+  // access" 403). Only the null (clamped) case is written here — explicit
+  // selections persist in the setters / URL handler below. A non-null id that
+  // reaches state without a setter is the single-org auto-select in refresh(),
+  // which is a default, not a choice: persisting it would keep a user scoped
+  // to their original org after they join a second one.
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, activeOrgId == null ? ALL_ORGS_VALUE : String(activeOrgId))
+    if (activeOrgId == null) localStorage.setItem(STORAGE_KEY, ALL_ORGS_VALUE)
   }, [activeOrgId])
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { test, expect } from "../helpers/multi-user"
 import { Dashboard } from "../helpers/page-objects/Dashboard"
 import { Workspace } from "../helpers/page-objects/Workspace"
-import { AgentPage } from "../pages/agent-page"
+import { AgentPage } from "../helpers/page-objects/AgentPage"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 

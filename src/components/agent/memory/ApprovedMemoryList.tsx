@@ -62,7 +62,11 @@ export function ApprovedMemoryList({ memories, roleLevel, username, onEdit }: Ap
       {[...byPath.entries()].map(([path, group]) => (
         <div key={path} className="space-y-1.5">
           {group.map((memory) => (
-            <div key={memory.id} className="space-y-2 rounded-lg border bg-card px-2.5 py-2">
+            <div
+              key={memory.id}
+              data-memory-path={memory.path}
+              className="space-y-2 rounded-lg border bg-card px-2.5 py-2"
+            >
               <div className="flex flex-wrap items-center gap-1.5">
                 <code className="min-w-0 truncate text-xs font-medium">{memory.path}</code>
                 {memory.humanEdited && (

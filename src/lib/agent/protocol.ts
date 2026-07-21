@@ -143,4 +143,20 @@ export interface AgentRunRequest {
     geographicalSetting?: string
     otherInfo?: string
   }
+  /**
+   * Files the user attached in the composer, already uploaded as project
+   * artifacts (POST /api/v2/projects/:id/agent-artifacts). The server tells the
+   * model they're available and how to pull them into the sandbox with the
+   * `load_artifact` tool. Server re-caps the count. Must match the server
+   * schema in auth-worker/src/routes/agent.ts (runRequestSchema.artifacts).
+   */
+  artifacts?: { artifactId: string; fileName: string }[]
+}
+
+/** Result of POST /api/v2/projects/:projectId/agent-artifacts. */
+export interface UploadedArtifact {
+  artifactId: string
+  fileName: string
+  sizeBytes: number
+  sha256: string
 }

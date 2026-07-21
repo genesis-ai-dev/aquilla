@@ -7,9 +7,8 @@
 // the turn, plan_import refuses to silently chunk oversized files, and every
 // tool emits the exact §4 frame shape.
 import { env } from "cloudflare:test"
-import { describe, it, expect, afterEach, beforeAll, vi } from "vitest"
+import { describe, it, expect, afterEach, vi } from "vitest"
 import { seedUser } from "./helpers/db"
-import { ensureAgentMemoryTables } from "./helpers/agent-memory-schema"
 import type { HarnessFrame } from "../lib/agent/frames"
 import type { MemoryContext } from "../../../db/shared/agent-memory"
 import {
@@ -70,10 +69,6 @@ function makeHarness(overrides?: {
   }
   return { ctx, frames, guard, registered }
 }
-
-beforeAll(async () => {
-  await ensureAgentMemoryTables()
-})
 
 afterEach(() => vi.restoreAllMocks())
 

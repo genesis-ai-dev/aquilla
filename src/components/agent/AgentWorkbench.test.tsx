@@ -41,6 +41,28 @@ vi.mock("@/lib/agent/agent-client", () => ({
   }),
 }))
 
+// The Memory tab lazy-loads W1E's real AgentMemoryTab, which reads the session
+// and fetches memory/brief on mount. Mock both so the tab renders its real
+// shell (Proposed/Approved/Project brief) instead of erroring on a live fetch.
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "alice" }, loading: false }),
+}))
+vi.mock("@/lib/agent/memory-api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/agent/memory-api")>("@/lib/agent/memory-api")
+  return {
+    ...actual,
+    listAgentMemories: vi.fn().mockResolvedValue([]),
+    getProjectBrief: vi.fn().mockResolvedValue({
+      projectId: "wb",
+      content: "",
+      updatedBy: null,
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00Z",
+    }),
+    listBriefProposals: vi.fn().mockResolvedValue([]),
+  }
+})
+
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench, type AgentWorkbenchProps } from "./AgentWorkbench"
 
@@ -225,10 +247,10 @@ describe("AgentWorkbench Sessions | Memory tab slot (AQU-AGENT §5)", () => {
 
     fireEvent.click(memoryTab)
     await waitFor(() => expect(memoryTab).toHaveAttribute("aria-selected", "true"))
-    // The Memory tab's real content is owned by W1E; this worktree renders
-    // the SWARM-TODO placeholder stub so the lazy import resolves.
+    // The Memory tab lazy-loads W1E's real AgentMemoryTab (Wave-2 seam): once
+    // resolved it renders its own Proposed/Approved/Project-brief sub-tabs.
     await waitFor(() =>
-      expect(screen.getByText(/Memory tab placeholder/)).toBeInTheDocument(),
+      expect(screen.getByRole("tab", { name: /Proposed/ })).toBeInTheDocument(),
     )
   })
 })

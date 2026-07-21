@@ -9,11 +9,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Bot } from "lucide-react"
+import { Bot, Loader2, Paperclip, X } from "lucide-react"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
+import { InputGroupButton } from "@/components/ui/input-group"
 import type { CellContext } from "@/lib/cell-context"
 import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
+import { uploadAgentArtifact, ArtifactUploadError } from "@/lib/agent/artifact-upload"
 import { expandSlashCommand } from "@/lib/agent/slash-commands"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
@@ -99,6 +101,40 @@ export function AgentDockView({
   const [includeContext, setIncludeContext] = useState(true)
   const composerRef = useRef<ChatComposerHandle>(null)
 
+  // Composer attach-file affordance (AQU-AGENT Wave-2). Chosen files are
+  // uploaded as project artifacts immediately; the returned {artifactId,
+  // fileName} pairs ride the next run request so the harness can load_artifact
+  // them into the sandbox. Attachments clear once a prompt is sent.
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [attachments, setAttachments] = useState<{ artifactId: string; fileName: string }[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [attachError, setAttachError] = useState<string | null>(null)
+
+  const handleFilesChosen = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0 || !jwt) return
+      setAttachError(null)
+      setUploading(true)
+      try {
+        for (const file of Array.from(files)) {
+          const uploaded = await uploadAgentArtifact(jwt, projectId, file)
+          setAttachments((prev) => [...prev, { artifactId: uploaded.artifactId, fileName: uploaded.fileName }])
+        }
+      } catch (err) {
+        setAttachError(
+          err instanceof ArtifactUploadError ? err.message : "Could not attach that file. Try again.",
+        )
+      } finally {
+        setUploading(false)
+      }
+    },
+    [jwt, projectId],
+  )
+
+  const removeAttachment = useCallback((artifactId: string) => {
+    setAttachments((prev) => prev.filter((a) => a.artifactId !== artifactId))
+  }, [])
+
   const sendPrompt = useCallback(
     (text: string, chips: ContextChip[] = []) => {
       if ((!text.trim() && chips.length === 0) || !jwt) return
@@ -124,10 +160,13 @@ export function AgentDockView({
             ? { context: { ...context } }
             : {}),
           ...(translatorProfile ? { translatorProfile } : {}),
+          ...(attachments.length > 0 ? { artifacts: attachments } : {}),
         },
       })
+      // Attachments belong to the message that carried them — clear after send.
+      if (attachments.length > 0) setAttachments([])
     },
-    [jwt, send, projectId, includeContext, context],
+    [jwt, send, projectId, includeContext, context, attachments],
   )
 
   // Run a prompt handed in from a suggested action (tapped in chat mode, which
@@ -248,6 +287,66 @@ export function AgentDockView({
         suggestedActions={suggestedActions}
         queueWhileStreaming
         placeholder="Ask the agent… (/draft, /check, /find, /status)"
+        attachmentBar={
+          attachments.length > 0 || attachError ? (
+            <div className="flex flex-col gap-1">
+              {attachments.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {attachments.map((a) => (
+                    <span
+                      key={a.artifactId}
+                      data-attachment-id={a.artifactId}
+                      className="inline-flex max-w-full items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-[11px]"
+                    >
+                      <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate font-mono">{a.fileName}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(a.artifactId)}
+                        aria-label={`Remove ${a.fileName}`}
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {attachError && (
+                <p role="alert" className="text-[11px] text-destructive">
+                  {attachError}
+                </p>
+              )}
+            </div>
+          ) : null
+        }
+        attachAction={
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              aria-hidden
+              tabIndex={-1}
+              onChange={(e) => {
+                void handleFilesChosen(e.target.files)
+                e.target.value = "" // allow re-selecting the same file
+              }}
+            />
+            <InputGroupButton
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled={!jwt || uploading}
+              aria-label="Attach file"
+              title="Attach a file for the agent"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {uploading ? <Loader2 className="animate-spin" /> : <Paperclip />}
+            </InputGroupButton>
+          </>
+        }
       />
     </div>
   )

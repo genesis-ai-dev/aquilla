@@ -63,7 +63,11 @@ export function ProposedMemoryList({
       {memories.map((memory) => {
         const busy = busyIds.has(memory.id)
         return (
-          <div key={memory.id} className="space-y-2 rounded-lg border bg-card px-2.5 py-2">
+          <div
+            key={memory.id}
+            data-memory-path={memory.path}
+            className="space-y-2 rounded-lg border bg-card px-2.5 py-2"
+          >
             <div className="flex flex-wrap items-center gap-1.5">
               <code className="min-w-0 truncate text-xs font-medium">{memory.path}</code>
               {memory.provenance?.runId && (

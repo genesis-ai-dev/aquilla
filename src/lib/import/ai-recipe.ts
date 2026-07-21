@@ -1,5 +1,5 @@
 import { v7 as uuidv7 } from "uuid"
-import { FRONTIER_CHAT_URL } from "@/lib/completion/completion-service"
+import { AUTH_BASE } from "@/lib/frontier/auth"
 import type { CellType, FileType, TranslatableString } from "@/lib/parsers/types"
 import type { DeclarativeImportRecipe } from "./normalized-manifest"
 
@@ -45,6 +45,7 @@ const SAMPLE_CHARS = 12_000
 const MAX_RECORDS = 20_000
 export const MAX_UNKNOWN_TEXT_BYTES = 10 * 1024 * 1024
 const BINARY_SCAN_BYTES = 8192
+export const IMPORT_CLASSIFY_URL = `${AUTH_BASE}/api/v1/import/classify`
 
 export interface PreparedUnknownText {
   text: string
@@ -126,12 +127,6 @@ async function deterministicRecipeId(
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material))
   const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
   return `ai-${hex.slice(0, 32)}`
-}
-
-function stripCodeFence(value: string): string {
-  const trimmed = value.trim()
-  const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
-  return match ? match[1] : trimmed
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -396,24 +391,19 @@ export async function classifyAndParseUnknownText(
   const { text } = prepared ?? await readUnknownTextFile(file, options.signal)
   if (text.includes("\0")) throw new Error(`${file.name} appears to be binary; use a supported package or document format`)
   const sample = text.slice(0, SAMPLE_CHARS)
-  const prompt = `You are the classification step inside a file importer. Classify the content and propose ONE constrained record recipe. Do not translate or rewrite text. Prefer line or paragraph records for prose; delimited for tables; json-array for JSON record arrays. Identify headings/verse references through fields when present. The recipe is interpreted locally and cannot run code.\n\nFile: ${file.name}\nMIME: ${file.type || "unknown"}\nSource language hint: ${options.sourceLanguage || "unknown"}\nTarget language hint: ${options.targetLanguage || "unknown"}\n\nReturn JSON only with: category (scripture|translation|document|subtitles|study-material|other), confidence (0..1), explanation, recipe {name,inputFormat,config}. config: recordMode (line|paragraph|delimited|json-array); optionally delimiter (comma, tab, semicolon, or pipe literal), hasHeader, recordsPath, sourceField, targetField, referenceField, typeField, speakerField, startField, endField, timeUnit (milliseconds|seconds|timestamp). Fields are header names for object/header data or zero-based indexes.\n\nSample:\n${sample}`
-  const response = await (options.fetchImpl ?? fetch)(FRONTIER_CHAT_URL, {
+  const response = await (options.fetchImpl ?? fetch)(IMPORT_CLASSIFY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${options.identityToken}`,
     },
     body: JSON.stringify({
-      model: "default",
-      messages: [
-        { role: "system", content: "Return only a safe declarative import recipe as JSON. Never return code or prose outside JSON." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0,
-      max_tokens: 1200,
-      stream: false,
       projectId: options.projectId,
-      response_format: { type: "json_object" },
+      fileName: file.name,
+      mime: file.type,
+      sourceLanguage: options.sourceLanguage,
+      targetLanguage: options.targetLanguage,
+      sample,
     }),
     signal: options.signal,
   })
@@ -421,16 +411,14 @@ export async function classifyAndParseUnknownText(
     const detail = await response.text().catch(() => "")
     throw new Error(`AI format analysis failed (${response.status})${detail ? `: ${detail}` : ""}`)
   }
-  const body = await response.json() as { choices?: { message?: { content?: string } }[] }
-  const content = body.choices?.[0]?.message?.content
-  if (!content) throw new Error("AI format analysis returned no recipe")
-  let decoded: unknown
+  let body: { classification?: unknown }
   try {
-    decoded = JSON.parse(stripCodeFence(content))
+    body = await response.json() as { classification?: unknown }
   } catch {
     throw new Error("AI format analysis returned malformed JSON; try analyzing the file again")
   }
-  const proposed = validatedClassification(decoded)
+  if (!body.classification) throw new Error("AI format analysis returned no recipe")
+  const proposed = validatedClassification(body.classification)
   const recipe: AiImportClassification["recipe"] = {
     version: 1,
     id: await deterministicRecipeId(proposed.category, proposed.recipe.config),

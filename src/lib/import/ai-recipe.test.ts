@@ -7,6 +7,7 @@ import {
   sniffKnownTextFile,
   type AiImportClassification,
   type AiRecipeConfig,
+  IMPORT_CLASSIFY_URL,
 } from "./ai-recipe"
 
 function classification(
@@ -92,7 +93,7 @@ describe("AI-assisted declarative import recipes", () => {
     const longFirstRecord = "x".repeat(12_100)
     const file = new File([`${longFirstRecord}\nsecond record`], "records.odd", { type: "text/plain" })
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({
+      classification: {
         category: "document",
         confidence: 0.84,
         explanation: "One record per line",
@@ -101,7 +102,7 @@ describe("AI-assisted declarative import recipes", () => {
           inputFormat: "unknown-lines",
           config: { recordMode: "line", delimiter: "tab" },
         },
-      }) } }],
+      },
     }), { status: 200, headers: { "Content-Type": "application/json" } }))
 
     const parsed = await classifyAndParseUnknownText(file, {
@@ -114,14 +115,22 @@ describe("AI-assisted declarative import recipes", () => {
     expect(parsed.strings[1].original).toBe("second record")
     expect(parsed.classification.recipe.config.delimiter).toBe("\t")
     expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0][0]).toBe(IMPORT_CLASSIFY_URL)
     const request = fetchImpl.mock.calls[0][1] as RequestInit
     expect(request.headers).toMatchObject({ Authorization: "Bearer identity-token" })
     expect(String(request.body)).not.toContain("second record")
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      projectId: "project-1",
+      fileName: "records.odd",
+      mime: "text/plain",
+    })
+    expect(String(request.body)).not.toContain("messages")
+    expect(String(request.body)).not.toContain("model")
   })
 
   it("derives a stable recipe id from executable semantics across content edits", async () => {
     const responseBody = JSON.stringify({
-      choices: [{ message: { content: JSON.stringify({
+      classification: {
         category: "document",
         confidence: 0.9,
         explanation: "Line records",
@@ -130,7 +139,7 @@ describe("AI-assisted declarative import recipes", () => {
           inputFormat: "unknown-lines",
           config: { recordMode: "line" },
         },
-      }) } }],
+      },
     })
     const fetchImpl = vi.fn(async () => new Response(responseBody, {
       status: 200,
@@ -193,9 +202,10 @@ describe("AI-assisted declarative import recipes", () => {
   })
 
   it("rejects malformed model output instead of guessing a structure", async () => {
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
-      choices: [{ message: { content: "not json" } }],
-    }), { status: 200, headers: { "Content-Type": "application/json" } }))
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response("not json", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))
 
     await expect(classifyAndParseUnknownText(
       new File(["one\ntwo"], "records.odd"),

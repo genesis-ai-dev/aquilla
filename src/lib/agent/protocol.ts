@@ -68,6 +68,16 @@ export type AgentFrame =
   | { type: 'usage'; promptTokens: number; completionTokens: number; costCents: number }
   | { type: 'done'; runId: string; status: 'ok' | 'capped' | 'error' }
   | { type: 'error'; message: string }
+  // ── AQU-AGENT wave-1 additions (docs/swarm/AQU-AGENT-CONTRACTS.md §4) ────
+  // Additive only — existing consumers (run-state reducer, older server
+  // builds) are unaffected by these new variants.
+  | { type: 'tool.code.start'; runId: string; language: 'js' | 'python'; codePreview: string } // first 400 chars
+  | { type: 'tool.code.output'; runId: string; stdout: string; stderr: string; truncated: boolean; durationMs: number }
+  | { type: 'changeset.staged'; runId: string; changesetId: string; approvalUrl: string; summary: string; cellCount: number }
+  | { type: 'memory.proposed'; runId: string; memoryId: string; path: string; preview: string }
+  | { type: 'brief.proposed'; runId: string; proposalId: string; preview: string }
+  | { type: 'budget'; runId: string; spentCents: number; capCents: number }
+  | { type: 'budget.exhausted'; runId: string; spentCents: number; capCents: number }
 
 // ── Staged proposal shape ──────────────────────────────────────────────────
 

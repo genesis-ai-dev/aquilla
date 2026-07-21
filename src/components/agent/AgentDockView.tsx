@@ -71,6 +71,9 @@ export interface AgentDockViewProps {
    *  full ProposalCard. Return null to fall back to the card (e.g. for
    *  proposals the working set can't review). */
   renderProposalOverride?: (proposal: AgentProposal) => ReactNode | null
+  /** Workbench seam: jump to the Memory tab from a memory/brief proposal
+   *  notice. Omitted in the dock panel, which has no Memory tab. */
+  onReviewMemory?: () => void
 }
 
 export function AgentDockView({
@@ -90,6 +93,7 @@ export function AgentDockView({
   pendingChip,
   onPendingChipConsumed,
   renderProposalOverride,
+  onReviewMemory,
 }: AgentDockViewProps) {
   const { state, send, stop, noteActivity } = useAgentSession(projectId)
   const [includeContext, setIncludeContext] = useState(true)
@@ -216,6 +220,7 @@ export function AgentDockView({
                           />
                         ) : null
                       }}
+                      onReviewMemory={onReviewMemory}
                     />
                   </MessageScrollerItem>
                 ))}

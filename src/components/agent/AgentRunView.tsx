@@ -32,6 +32,10 @@ import { Message, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import type { AgentProposal, AquiferPublishProposal } from "@/lib/agent/protocol"
 import type { AgentRunUi, ToolItem, ToolKind } from "@/lib/agent/run-state"
+import { BudgetMeter } from "./BudgetMeter"
+import { ChangesetCard } from "./ChangesetCard"
+import { CodeActivityBlock } from "./CodeActivityBlock"
+import { BriefProposalNotice, MemoryProposalNotice } from "./MemoryProposalNotice"
 
 const TOOL_ICON: Record<ToolKind, typeof Database> = {
   sql: Database,
@@ -103,9 +107,18 @@ export interface AgentRunViewProps {
   /** Card-registry seam (agent-complete §4): a rich live card rendered UNDER
    *  a tool chip (e.g. PassageCard for read/draft rows). Null → chip only. */
   renderToolCard?: (item: ToolItem) => ReactNode
+  /** Jump to the workbench's Memory tab from a memory/brief proposal notice.
+   *  Omitted where there's no Memory tab to jump to (e.g. the dock panel). */
+  onReviewMemory?: () => void
 }
 
-export function AgentRunView({ run, renderProposal, renderAquiferProposal, renderToolCard }: AgentRunViewProps) {
+export function AgentRunView({
+  run,
+  renderProposal,
+  renderAquiferProposal,
+  renderToolCard,
+  onReviewMemory,
+}: AgentRunViewProps) {
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -150,6 +163,14 @@ export function AgentRunView({ run, renderProposal, renderAquiferProposal, rende
             return renderAquiferProposal ? (
               <div key={item.id}>{renderAquiferProposal(item.proposal)}</div>
             ) : null
+          case "code":
+            return <CodeActivityBlock key={item.id} item={item} />
+          case "changeset":
+            return <ChangesetCard key={item.id} item={item} />
+          case "memory-proposed":
+            return <MemoryProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
+          case "brief-proposed":
+            return <BriefProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
         }
       })}
 
@@ -191,6 +212,8 @@ export function AgentRunView({ run, renderProposal, renderAquiferProposal, rende
           {formatCost(run.usage.costCents)}
         </div>
       )}
+
+      {run.budget && <BudgetMeter budget={run.budget} />}
     </div>
   )
 }

@@ -10,10 +10,11 @@
  * with Stop, plus session controls (new session, back to editor).
  */
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react"
 import { Bot, Minimize2, RotateCcw, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
@@ -31,6 +32,14 @@ import { lintCellFor } from "./ProposalCard"
 import { ProposalReceipt } from "./ProposalReceipt"
 import { WorkingSetPanel, type WorkingSetPanelHandle } from "./WorkingSetPanel"
 
+// Memory tab (AQU-AGENT §5): owned by W1E, may not exist in this worktree —
+// lazy import so a missing module only fails when the tab is opened, not at
+// build time. If W1E's file isn't present yet, fall back to the local
+// SWARM-TODO stub in ./memory/AgentMemoryTab.tsx.
+const AgentMemoryTab = lazy(() => import("./memory/AgentMemoryTab"))
+
+type WorkbenchTab = "sessions" | "memory"
+
 export interface AgentWorkbenchProps {
   /** Same wiring the dock panel gets — one source of truth in ProjectWorkspace. */
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed">
@@ -47,6 +56,7 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
   // was applied (that would re-offer applied drafts and drop Undo).
   const decided = state.decided
   const [applying, setApplying] = useState(false)
+  const [tab, setTab] = useState<WorkbenchTab>("sessions")
   const panelRef = useRef<WorkingSetPanelHandle>(null)
 
   const rows = useMemo(() => deriveWorkingSet(state.runs, decided), [state.runs, decided])
@@ -256,37 +266,72 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
         </span>
       </div>
 
-      {/* Chat is the SPINE (agent-complete §2): until the session stages
-          something to review, the conversation is the whole surface — a
-          centered column. The working set is a STAGE summoned by review work
-          (pending drafts / decisions), and the chat becomes its narrator. */}
-      <div className="flex min-h-0 flex-1">
-        {hasReviewWork ? (
-          <>
-            <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
-              <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <WorkingSetPanel
-                ref={panelRef}
-                rows={stageRows}
-                busy={applying}
-                lintRow={lintRow}
-                onAccept={(row, value) => acceptRows([{ row, value }])}
-                onAcceptAll={(valueFor) =>
-                  acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))
-                }
-                onReject={rejectRow}
-                onJumpToCell={onJumpToCell}
-              />
-            </div>
-          </>
-        ) : (
-          <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col">
-            <AgentDockView {...agent} renderProposalOverride={renderProposalOverride} />
+      <Tabs
+        value={tab}
+        onValueChange={(next) => setTab(next as WorkbenchTab)}
+        className="flex min-h-0 flex-1 flex-col gap-0"
+      >
+        <TabsList variant="line" className="mx-3 mt-1.5 w-fit" aria-label="Agent workbench sections">
+          <TabsTrigger value="sessions">Sessions</TabsTrigger>
+          <TabsTrigger value="memory">Memory</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="sessions" className="flex min-h-0 flex-1 flex-col">
+          {/* Chat is the SPINE (agent-complete §2): until the session stages
+              something to review, the conversation is the whole surface — a
+              centered column. The working set is a STAGE summoned by review
+              work (pending drafts / decisions), and the chat becomes its
+              narrator. */}
+          <div className="flex min-h-0 flex-1">
+            {hasReviewWork ? (
+              <>
+                <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
+                  <AgentDockView
+                    {...agent}
+                    renderProposalOverride={renderProposalOverride}
+                    onReviewMemory={() => setTab("memory")}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <WorkingSetPanel
+                    ref={panelRef}
+                    rows={stageRows}
+                    busy={applying}
+                    lintRow={lintRow}
+                    onAccept={(row, value) => acceptRows([{ row, value }])}
+                    onAcceptAll={(valueFor) =>
+                      acceptRows(pending.map((row) => ({ row, value: valueFor(row) })))
+                    }
+                    onReject={rejectRow}
+                    onJumpToCell={onJumpToCell}
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col">
+                <AgentDockView
+                  {...agent}
+                  renderProposalOverride={renderProposalOverride}
+                  onReviewMemory={() => setTab("memory")}
+                />
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </TabsContent>
+
+        <TabsContent value="memory" className="min-h-0 flex-1 overflow-auto">
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center gap-1.5 p-6 text-xs text-muted-foreground">
+                <Spinner className="h-3.5 w-3.5" />
+                Loading memory…
+              </div>
+            }
+          >
+            <AgentMemoryTab projectId={agent.projectId} />
+          </Suspense>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

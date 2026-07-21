@@ -112,3 +112,84 @@ describe("reduceRunFrame", () => {
     })
   })
 })
+
+// ── AQU-AGENT wave-1 frames (docs/swarm/AQU-AGENT-CONTRACTS.md §4) ─────────
+describe("reduceRunFrame — AQU-AGENT additions", () => {
+  it("opens a code-activity item on tool.code.start and pairs the matching tool.code.output", () => {
+    const run = fold([
+      { type: "tool.code.start", runId: "r1", language: "python", codePreview: "print(1)" },
+      { type: "tool.code.output", runId: "r1", stdout: "1\n", stderr: "", truncated: false, durationMs: 42 },
+    ])
+    expect(run.items).toHaveLength(1)
+    expect(run.items[0]).toMatchObject({
+      kind: "code",
+      language: "python",
+      codePreview: "print(1)",
+      stdout: "1\n",
+      stderr: "",
+      truncated: false,
+      durationMs: 42,
+    })
+  })
+
+  it("leaves a code item without output when tool.code.output never arrives (still running)", () => {
+    const run = fold([{ type: "tool.code.start", runId: "r1", language: "js", codePreview: "1+1" }])
+    expect(run.items[0]).toMatchObject({ kind: "code" })
+    expect((run.items[0] as { durationMs?: number }).durationMs).toBeUndefined()
+  })
+
+  it("pairs tool.code.output with the most recently opened unpaired code item (no step counter)", () => {
+    const run = fold([
+      { type: "tool.code.start", runId: "r1", language: "js", codePreview: "first()" },
+      { type: "tool.code.output", runId: "r1", stdout: "a", stderr: "", truncated: false, durationMs: 10 },
+      { type: "tool.code.start", runId: "r1", language: "js", codePreview: "second()" },
+      { type: "tool.code.output", runId: "r1", stdout: "b", stderr: "", truncated: false, durationMs: 20 },
+    ])
+    expect(run.items).toHaveLength(2)
+    expect(run.items[0]).toMatchObject({ codePreview: "first()", stdout: "a", durationMs: 10 })
+    expect(run.items[1]).toMatchObject({ codePreview: "second()", stdout: "b", durationMs: 20 })
+  })
+
+  it("stages a changeset.staged frame as a reviewable card in the timeline", () => {
+    const run = fold([
+      {
+        type: "changeset.staged",
+        runId: "r1",
+        changesetId: "cs-1",
+        approvalUrl: "https://app.example/approve/cs-1",
+        summary: "Import glossary.csv",
+        cellCount: 40,
+      },
+    ])
+    expect(run.items[0]).toMatchObject({
+      kind: "changeset",
+      changesetId: "cs-1",
+      approvalUrl: "https://app.example/approve/cs-1",
+      summary: "Import glossary.csv",
+      cellCount: 40,
+    })
+  })
+
+  it("records memory.proposed and brief.proposed as inline notices", () => {
+    const run = fold([
+      { type: "memory.proposed", runId: "r1", memoryId: "m1", path: "observations/mrk.md", preview: "MRK terms…" },
+      { type: "brief.proposed", runId: "r1", proposalId: "b1", preview: "Update tone guidance" },
+    ])
+    expect(run.items.map((i) => i.kind)).toEqual(["memory-proposed", "brief-proposed"])
+    expect(run.items[0]).toMatchObject({ memoryId: "m1", path: "observations/mrk.md" })
+    expect(run.items[1]).toMatchObject({ proposalId: "b1", preview: "Update tone guidance" })
+  })
+
+  it("tracks the budget meter across budget frames, and marks it exhausted on budget.exhausted", () => {
+    const running = fold([{ type: "budget", runId: "r1", spentCents: 120, capCents: 500 }])
+    expect(running.budget).toEqual({ spentCents: 120, capCents: 500, exhausted: false })
+
+    const halted = reduceRunFrame(running, {
+      type: "budget.exhausted",
+      runId: "r1",
+      spentCents: 500,
+      capCents: 500,
+    })
+    expect(halted.budget).toEqual({ spentCents: 500, capCents: 500, exhausted: true })
+  })
+})

@@ -127,6 +127,14 @@ export interface Env {
   /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
    *  run halts gracefully with a budget.exhausted frame at this ceiling. */
   AGENT_RUN_COST_CAP_CENTS?: string
+  /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
+   *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
+   *  writes attached files here so the sandbox's fetch-artifact can read them
+   *  back by r2_key. Absent → the upload route returns a clear 503. */
+  SNAPSHOTS?: R2Bucket
+  /** R2 key prefix, mirroring sync-worker/agent-worker. Unset in every current
+   *  env (→ empty prefix), so artifact keys are `artifacts/{projectId}/{id}`. */
+  R2_KEY_PREFIX?: string
 
   // AI budget + allowlist controls (AQU-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.

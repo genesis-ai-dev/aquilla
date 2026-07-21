@@ -448,7 +448,31 @@ const runRequestSchema = z.object({
     .max(10),
   context: z.object({ fileId: z.string().optional(), cellId: z.string().optional() }).optional(),
   translatorProfile: translatorProfileSchema,
+  /** AQU-AGENT Wave-2: files the user attached in the composer, already
+   *  uploaded as project artifacts (POST /projects/:id/agent-artifacts). The
+   *  agent is told they're available and can pull them into the sandbox with
+   *  the `load_artifact` tool. Capped so a client can't flood the prompt. */
+  artifacts: z
+    .array(z.object({ artifactId: z.string().min(1), fileName: z.string().min(1) }))
+    .max(10)
+    .optional(),
 })
+
+/** AQU-AGENT Wave-2 — system message announcing composer-attached artifacts.
+ *  English scaffolding (contracts §7). Lists each artifact's id + file name and
+ *  directs the model to `load_artifact` (which pulls bytes into the sandbox and
+ *  flips the untrusted-content guard) rather than assuming the content. */
+function buildAttachedArtifactsPrompt(
+  artifacts: { artifactId: string; fileName: string }[],
+): string {
+  const lines = artifacts.map((a) => `- ${a.fileName} (artifactId: ${a.artifactId})`)
+  return [
+    "The user attached the following file(s) to this run. They are stored as project artifacts, NOT inlined here.",
+    ...lines,
+    "",
+    "To inspect one, call load_artifact { artifactId, path } to copy it into the sandbox, then run_code / read_sandbox_file to read it. Loading artifact bytes puts the run in untrusted-content mode (memory writes are disabled that turn).",
+  ].join("\n")
+}
 
 // ── OpenRouter message plumbing ─────────────────────────────────────────────
 // ToolCall / UpstreamMessage and the streaming/JSON turn reader live in
@@ -713,6 +737,13 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
       role: "system" as const,
       content: buildAugmentSystemPrompt({ memory, workingLanguage: languages.targetLanguage }),
     },
+    // AQU-AGENT Wave-2 — attached artifacts. The user attached these files in
+    // the composer; they're already uploaded as project artifacts. Tell the
+    // model they exist and how to read them (load_artifact → sandbox), rather
+    // than pasting their bytes into the prompt.
+    ...(body.artifacts && body.artifacts.length > 0
+      ? [{ role: "system" as const, content: buildAttachedArtifactsPrompt(body.artifacts) }]
+      : []),
     ...storedConvo,
     ...body.messages,
   ]

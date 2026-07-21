@@ -63,6 +63,8 @@ export interface BriefProposal {
   status: "proposed" | "approved" | "rejected"
   createdBy: string | null
   reviewedBy: string | null
+  /** Brief version this proposal was drafted against. null for legacy rows. */
+  baseVersion: number | null
   createdAt: string
   reviewedAt: string | null
 }
@@ -303,18 +305,32 @@ export interface ReviewMemoryInput {
   id: string
   action: "approve" | "reject"
   reviewedBy?: string | null
+  /**
+   * Human callers only. When approving would supersede a currently-approved row
+   * that a human edited (`human_edited=true`), the caller must pass `true` to
+   * confirm they intend to overwrite human-owned memory. The agent channel must
+   * NEVER set this (the route forces it false and 403s if a supersede is needed)
+   * — adversarial-panel B1/B2.
+   */
+  supersedeHumanEdited?: boolean
 }
 
 export type ReviewMemoryResult =
   | { status: "ok"; memory: AgentMemory }
   | { status: "not_found" }
   | { status: "invalid_state"; message: string }
+  // Approving would archive a currently-approved, human-edited row and the
+  // caller did not confirm the supersede. The route maps this to 409 (human) or
+  // 403 (agent channel). `existing` identifies the human-edited holder.
+  | { status: "supersedes_human_edited"; existing: { id: string; path: string } }
 
 /**
  * Approve or reject a `proposed` memory. Approving supersedes any currently
  * approved row on the same (project, path) → 'archived' first (so the partial
  * UNIQUE index never conflicts), then flips this row to 'approved' — both in
- * one atomic batch.
+ * one atomic batch. If the row being superseded was human-edited, the caller
+ * must pass `supersedeHumanEdited: true` or the approve is refused
+ * (adversarial-panel B1/B2 — never silently overwrite human-owned memory).
  */
 export async function reviewMemory(
   db: AquillaDb,
@@ -326,6 +342,25 @@ export async function reviewMemory(
     return {
       status: "invalid_state",
       message: `memory is ${current.status}, only proposed memories can be reviewed`,
+    }
+  }
+
+  if (input.action === "approve") {
+    // Guard: if a human-edited row currently holds this path, refuse to archive
+    // it unless the caller explicitly confirmed the supersede.
+    const holder = await db
+      .prepare(
+        `SELECT id, human_edited FROM agent_memories
+          WHERE project_id = ? AND path = ? AND status = 'approved'
+          LIMIT 1`,
+      )
+      .bind(current.projectId, current.path)
+      .first<{ id: string; human_edited: boolean }>()
+    if (holder && holder.human_edited === true && input.supersedeHumanEdited !== true) {
+      return {
+        status: "supersedes_human_edited",
+        existing: { id: holder.id, path: current.path },
+      }
     }
   }
 
@@ -478,15 +513,35 @@ export async function putBrief(db: AquillaDb, input: PutBriefInput): Promise<Put
     }
   }
 
-  const row = await db
-    .prepare(
-      `UPDATE project_briefs
-          SET content = ?, updated_by = ?, version = version + 1, updated_at = now()
-        WHERE project_id = ? AND version = ?
-        RETURNING project_id, content, updated_by, version, updated_at`,
-    )
-    .bind(input.content, input.updatedBy ?? null, input.projectId, input.ifMatchVersion)
-    .first<BriefRow>()
+  // Snapshot the PRIOR content into history before overwriting it (keyed by the
+  // version being replaced), then version-guarded update. Both in one atomic
+  // batch so a history row never lands without its update, or vice-versa
+  // (adversarial-panel mem-M2/M3). ON CONFLICT DO NOTHING makes a crash-retry
+  // that re-snapshots the same version idempotent.
+  const results = await db.batch<BriefRow>([
+    db
+      .prepare(
+        `INSERT INTO project_brief_history (project_id, version, content, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (project_id, version) DO NOTHING`,
+      )
+      .bind(
+        input.projectId,
+        current.version,
+        current.content,
+        current.updatedBy ?? null,
+        current.updatedAt ?? new Date().toISOString(),
+      ),
+    db
+      .prepare(
+        `UPDATE project_briefs
+            SET content = ?, updated_by = ?, version = version + 1, updated_at = now()
+          WHERE project_id = ? AND version = ?
+          RETURNING project_id, content, updated_by, version, updated_at`,
+      )
+      .bind(input.content, input.updatedBy ?? null, input.projectId, input.ifMatchVersion),
+  ])
+  const row = results[1]?.results?.[0]
   if (!row) return { status: "conflict", current: await getBrief(db, input.projectId) }
   return { status: "ok", brief: rowToBrief(row) }
 }
@@ -499,6 +554,7 @@ interface BriefProposalRow {
   status: "proposed" | "approved" | "rejected"
   created_by: string | null
   reviewed_by: string | null
+  base_version: number | null
   created_at: unknown
   reviewed_at: unknown
 }
@@ -512,13 +568,14 @@ function rowToBriefProposal(r: BriefProposalRow): BriefProposal {
     status: r.status,
     createdBy: r.created_by,
     reviewedBy: r.reviewed_by,
+    baseVersion: r.base_version == null ? null : Number(r.base_version),
     createdAt: toIso(r.created_at),
     reviewedAt: r.reviewed_at == null ? null : toIso(r.reviewed_at),
   }
 }
 
 const BRIEF_PROPOSAL_COLS = `id, project_id, content, rationale, status,
-  created_by, reviewed_by, created_at, reviewed_at`
+  created_by, reviewed_by, base_version, created_at, reviewed_at`
 
 export interface CreateBriefProposalInput {
   projectId: string
@@ -532,14 +589,24 @@ export async function createBriefProposal(
   input: CreateBriefProposalInput,
 ): Promise<BriefProposal> {
   const id = crypto.randomUUID()
+  // Stamp the brief version this proposal is drafted against so approve can
+  // detect a human edit that landed in between (adversarial-panel mem-M2/M3).
+  const current = await getBrief(db, input.projectId)
   const row = await db
     .prepare(
       `INSERT INTO project_brief_proposals
-          (id, project_id, content, rationale, status, created_by)
-       VALUES (?, ?, ?, ?, 'proposed', ?)
+          (id, project_id, content, rationale, status, created_by, base_version)
+       VALUES (?, ?, ?, ?, 'proposed', ?, ?)
        RETURNING ${BRIEF_PROPOSAL_COLS}`,
     )
-    .bind(id, input.projectId, input.content, input.rationale ?? null, input.createdBy ?? null)
+    .bind(
+      id,
+      input.projectId,
+      input.content,
+      input.rationale ?? null,
+      input.createdBy ?? null,
+      current.version,
+    )
     .first<BriefProposalRow>()
   if (!row) throw new Error("failed to insert brief proposal")
   return rowToBriefProposal(row)
@@ -588,12 +655,21 @@ export type ReviewBriefProposalResult =
   | { status: "ok"; proposal: BriefProposal; brief?: ProjectBrief }
   | { status: "not_found" }
   | { status: "invalid_state"; message: string }
+  // Approving would clobber a human edit that landed after the proposal was
+  // drafted (the brief advanced past base_version). Route → 409 conflict.
+  | { status: "stale_base"; baseVersion: number | null; currentVersion: number }
 
 /**
  * Approve or reject a brief proposal. Approving ALSO adopts the proposed
  * content into `project_briefs` (bumping the brief version) — that is the point
  * of a proposal. See AQU-AGENT-TRACES.md: the contract underspecifies whether
  * approve applies the brief; W1C chose apply-on-approve.
+ *
+ * Approve refuses if the brief has moved on since the proposal was drafted:
+ * `currentBrief.version !== base_version` → stale_base (adversarial-panel
+ * mem-M2/M3). Legacy proposals (base_version NULL) are treated as stale whenever
+ * the brief has any content history (version > 0) — the safe default, since we
+ * cannot prove they were drafted against the current version.
  */
 export async function reviewBriefProposal(
   db: AquillaDb,
@@ -605,6 +681,23 @@ export async function reviewBriefProposal(
     return {
       status: "invalid_state",
       message: `brief proposal is ${current.status}, only proposed can be reviewed`,
+    }
+  }
+
+  // Staleness check (approve only): the brief must still be at the version this
+  // proposal was drafted against.
+  if (input.action === "approve") {
+    const currentBrief = await getBrief(db, current.projectId)
+    const stale =
+      current.baseVersion == null
+        ? currentBrief.version > 0
+        : currentBrief.version !== current.baseVersion
+    if (stale) {
+      return {
+        status: "stale_base",
+        baseVersion: current.baseVersion,
+        currentVersion: currentBrief.version,
+      }
     }
   }
 
@@ -645,6 +738,12 @@ export async function reviewBriefProposal(
 export interface MemoryIndexEntry {
   path: string
   firstLine: string
+  /**
+   * True when a human has edited this memory. Surfaced so the prompt can mark
+   * the entry human-owned and the model is told not to silently re-propose over
+   * it (adversarial-panel mem-M4). Content stays pure — this is metadata only.
+   */
+  humanEdited: boolean
 }
 
 export interface MemoryContext {
@@ -673,11 +772,14 @@ export async function buildMemoryContext(
   db: AquillaDb,
   projectId: string,
 ): Promise<MemoryContext> {
+  // listMemories orders by updated_at DESC, so the index is most-recently-updated
+  // first (adversarial-panel mem-m1 relies on this for the render cap).
   const brief = await getBrief(db, projectId)
   const approved = await listMemories(db, projectId, "approved")
   const memoryIndex: MemoryIndexEntry[] = approved.map((m) => ({
     path: m.path,
     firstLine: firstLine(m.content),
+    humanEdited: m.humanEdited,
   }))
 
   return {

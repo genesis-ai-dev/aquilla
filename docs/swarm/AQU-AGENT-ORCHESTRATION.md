@@ -121,8 +121,11 @@ Cleared: regressions lens fully; double-apply/gate-bypass; SSE pairing; tenancy 
    (npx tsx scripts/pg.ts db/postgres/migrations/0066_agent_memory.sql etc. with staging conn).
    I held the push because the new auth-worker memory routes 500 without these tables, and I
    couldn't safely confirm the staging Neon target from here at 2am. Two commands, then push.
-3. First agent-worker deploy (whenever ready): docker image (pull of cloudflare/sandbox:0.7.0
-   was hanging on this network — check `docker image ls`), `wrangler secret put AGENT_SANDBOX_KEY`,
+3. First agent-worker deploy (whenever ready): docker image — ROOT CAUSE FOUND: the pull
+   fails because `cloudflare/sandbox:0.7.0` ships NO linux/arm64 manifest (Apple Silicon).
+   Fix: `docker pull --platform linux/amd64 docker.io/cloudflare/sandbox:0.7.0` (Colima needs
+   x86 emulation: `colima start --vz-rosetta` or `--arch x86_64`), OR bump the pinned SDK/image
+   to a 0.12.x version if it ships arm64 (check `docker manifest inspect`). Then `wrangler secret put AGENT_SANDBOX_KEY`,
    `wrangler deploy` from agent-worker/ (claims nothing on the zone; no routes), then set
    AGENT_SANDBOX_URL var on auth-worker staging. Until then the harness degrades cleanly
    ("sandbox unavailable") — everything else works.

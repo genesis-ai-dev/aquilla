@@ -109,6 +109,26 @@ blocker by intent. Fix batch (Wave 3 fixers FIX-A backend / FIX-B SPA):
 - mem-M5 staged-card status polling; mem-m1 index cap; mem-m2 badge refetch; authz-m1 timing-safe compare
 - DECISION: agentMemoryAutonomy stays backend-enforced but UN-SURFACED in v1 (no settings UI; default 'human'); traced for v2.
 Cleared: regressions lens fully; double-apply/gate-bypass; SSE pairing; tenancy on artifacts/bridge/sandbox.
+| 02:0x | FIX-B + FIX-A | merged | panel batch: all 10 fixes proof-tested; envelopes matched |
+| 02:1x | FINAL GATE | GREEN | root tsc/e2e-tsc ✅ · root vitest 4674/4677 (3 pre-existing, base-reproduced) · build+brand ✅ · auth 763/763 · sync 1000/1000 · agent-worker 27/27 · e2e smoke 100/102 (2 fails reproduced on clean base — environmental, not batch) |
+| 02:1x | PROMOTED | dev ← integration (ff) | NOT pushed — deliberate hold, see MORNING CHECKLIST |
+
+## MORNING CHECKLIST (Ryder)
+
+1. Read docs/swarm/AQU-AGENT-QA.md (+ screenshots in docs/swarm/aqu-agent-qa/) and the
+   panel section above. Feature is fully built + verified locally; local dev == integration tip.
+2. BEFORE `git push origin dev`: apply migrations 0066/0067/0068 to the STAGING Postgres
+   (npx tsx scripts/pg.ts db/postgres/migrations/0066_agent_memory.sql etc. with staging conn).
+   I held the push because the new auth-worker memory routes 500 without these tables, and I
+   couldn't safely confirm the staging Neon target from here at 2am. Two commands, then push.
+3. First agent-worker deploy (whenever ready): docker image (pull of cloudflare/sandbox:0.7.0
+   was hanging on this network — check `docker image ls`), `wrangler secret put AGENT_SANDBOX_KEY`,
+   `wrangler deploy` from agent-worker/ (claims nothing on the zone; no routes), then set
+   AGENT_SANDBOX_URL var on auth-worker staging. Until then the harness degrades cleanly
+   ("sandbox unavailable") — everything else works.
+4. Deferred by decision (see TRACES): agent-low-risk autonomy UI (backend enforced, unsurfaced);
+   cross-run container reuse; tool-call-scripted mock for live LLM e2e (AGENT_SANDBOX_E2E spec
+   ready); Monday.com/MCP integrations; Tier-1 dynamic isolates.
 
 ## Lessons inherited from prior swarms (BINDING)
 

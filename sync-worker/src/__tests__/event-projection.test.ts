@@ -507,7 +507,7 @@ describe('buildEventProjectionStmts — file.create', () => {
     expect(recorded[0].sql).toContain('INSERT INTO files')
     expect(recorded[0].args[0]).toBe('file-a')
     expect(recorded[0].args[2]).toBe('Genesis')
-    expect(JSON.parse(recorded[0].args[6] as string)).toEqual({
+    expect(JSON.parse(recorded[0].args.at(-1) as string)).toEqual({
       sourceLanguage: 'en',
       aquillaImport: { version: 1, profileId: 'builtin:usfm-lossless' },
     })

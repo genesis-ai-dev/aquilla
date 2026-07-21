@@ -967,7 +967,7 @@ case 'cell.audio.attach': {
       // cell commit projections maintain those. Post-0012 schema: file_type
       // collapsed into role/kind; languages live in meta (JSON); event_id is
       // this file.create's id (NOT NULL AD-2 chain head).
-      const langMeta: Record<string, string> = {}
+      const langMeta: Record<string, unknown> = {}
       if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
       if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
       if (p.sourceTextDirection) langMeta.sourceTextDirection = p.sourceTextDirection
@@ -975,6 +975,7 @@ case 'cell.audio.attach': {
       // Timeline-segment-model: the file's order lens lives in meta (JSON),
       // alongside languages — no files-table column needed.
       if (p.orderedBy) langMeta.orderedBy = p.orderedBy
+      if (p.importManifest) langMeta.aquillaImport = p.importManifest
       stmts.push(
         db
           .prepare(

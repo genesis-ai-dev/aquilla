@@ -129,6 +129,21 @@ export interface NormalizedImportFile {
   warnings: ImportWarning[]
 }
 
+/**
+ * Compact file-level provenance stored with the file projection. Unit-level
+ * addresses and locators stay on cells, so this summary remains small even for
+ * large books or subtitle files.
+ */
+export interface NormalizedImportSummary {
+  version: typeof NORMALIZED_IMPORT_VERSION
+  profileId: string
+  profileVersion: string
+  deterministic: boolean
+  fidelity: RoundTripFidelity
+  unitCount: number
+  warningCounts: Partial<Record<ImportWarning["code"], number>>
+}
+
 export interface AquillaImportMetadata {
   version: typeof NORMALIZED_IMPORT_VERSION
   profileId: string
@@ -454,6 +469,24 @@ export function aquillaImportMetadata(
     sourceLocator: unit.sourceLocator,
     physicalOrder: unit.physicalOrder,
     fidelity: file.fidelity,
+  }
+}
+
+export function summarizeNormalizedImport(
+  file: NormalizedImportFile,
+): NormalizedImportSummary {
+  const warningCounts: NormalizedImportSummary["warningCounts"] = {}
+  for (const warning of file.warnings) {
+    warningCounts[warning.code] = (warningCounts[warning.code] ?? 0) + 1
+  }
+  return {
+    version: file.manifestVersion,
+    profileId: file.profileId,
+    profileVersion: file.profileVersion,
+    deterministic: file.deterministic,
+    fidelity: file.fidelity,
+    unitCount: file.units.length,
+    warningCounts,
   }
 }
 

@@ -87,6 +87,8 @@ export interface BulkImportFileMeta {
   /** Timeline-segment-model order lens ('time' | 'sequence'). Stored in
    *  files.meta on the server; absent ⇒ client treats as 'sequence'. */
   orderedBy?: string
+  /** Versioned normalized-import summary. Per-unit locators live on cells. */
+  importManifest?: object
 }
 
 export interface BulkUploadArgs {

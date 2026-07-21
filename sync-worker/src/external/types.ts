@@ -33,6 +33,8 @@ export interface ChangesetSummary {
   filesCreated?: number
   /** PlanImport: number of source cells the file.create seeds. */
   sourceCellsAdded?: number
+  /** PlanImport: target variants added across explicit lanes. */
+  targetVariantsAdded?: number
   /** PlanImport: the artifact id linked to the created file, when supplied. */
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
@@ -78,7 +80,9 @@ export interface PlannedEventIds {
   planImport?: {
     fileId: string
     fileEventId: string
-    cells: { cellId: string; eventId: string }[]
+    cells: { cellId: string; eventId: string; variantEventIds?: string[] }[]
+    /** Stable id for the artifact_bindings row when an artifact is supplied. */
+    artifactBindingId?: string
   }
   /** W2-A CreateProject (receipt-only): the definitive project id (minted /
    *  fixed at prepare so a crash-retry re-applies the SAME id, not a fresh one)

@@ -78,6 +78,8 @@ interface ImportFileMeta {
   targetTextDirection?: 'ltr' | 'rtl'
   /** Timeline-segment-model order lens ('time' | 'sequence') → files.meta. */
   orderedBy?: string
+  /** Compact normalized-import summary; per-unit locators are cell metadata. */
+  importManifest?: Record<string, unknown>
 }
 
 interface ImportCell {
@@ -256,6 +258,7 @@ export async function handleBulkImportRequest(
         sourceTextDirection: f.sourceTextDirection,
         targetTextDirection: f.targetTextDirection,
         ...(f.orderedBy !== undefined ? { orderedBy: f.orderedBy } : {}),
+        ...(f.importManifest !== undefined ? { importManifest: f.importManifest } : {}),
       },
       clientTs,
       serverTs: serverTs++,

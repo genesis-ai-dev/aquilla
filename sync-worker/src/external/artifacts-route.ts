@@ -103,6 +103,7 @@ interface ArtifactRow {
   file_id: string | null
   kind: string
   audio_id: string | null
+  metadata: unknown
   created_at: unknown
 }
 
@@ -119,6 +120,7 @@ function rowToMeta(row: ArtifactRow): Record<string, unknown> {
     fileId: row.file_id,
     kind: row.kind,
     audioId: row.audio_id,
+    metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : (row.metadata ?? {}),
     createdAt:
       row.created_at instanceof Date
         ? row.created_at.toISOString()
@@ -136,7 +138,7 @@ async function loadArtifact(
   return db
     .prepare(
       `SELECT id, project_id, uploaded_by_user_id, credential_id, name, content_type,
-              size_bytes, sha256, r2_key, file_id, kind, audio_id, created_at
+              size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata, created_at
          FROM artifacts WHERE id::text = ? AND project_id = ?`,
     )
     .bind(artifactId, projectId)
@@ -312,33 +314,107 @@ interface InspectDetails {
 
 /** Sniff format from the first ~64KB. Deterministic, order-of-checks matters:
  *  USFM (\id marker) → XLIFF/TMX (XML roots) → JSON → CSV/TSV → plaintext. */
-function detectFormat(text: string): { detectedFormat: string; extra: Record<string, unknown> } {
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
+
+function zipMemberNames(bytes: Uint8Array): string[] {
+  const names: string[] = []
+  const decoder = new TextDecoder()
+  // Scan local-file headers rather than inflating members. This is bounded and
+  // sufficient to classify OOXML and Paratext packages by their inventory.
+  for (let offset = 0; offset + 30 <= bytes.length && names.length < 500; offset++) {
+    if (bytes[offset] !== 0x50 || bytes[offset + 1] !== 0x4b || bytes[offset + 2] !== 0x03 || bytes[offset + 3] !== 0x04) continue
+    const nameLength = bytes[offset + 26] | (bytes[offset + 27] << 8)
+    const extraLength = bytes[offset + 28] | (bytes[offset + 29] << 8)
+    const nameStart = offset + 30
+    const nameEnd = nameStart + nameLength
+    if (nameEnd > bytes.length) break
+    names.push(decoder.decode(bytes.subarray(nameStart, nameEnd)))
+    // Skip the fixed header/name/extra. We deliberately resume scanning after
+    // it instead of trusting compressed-size when the data-descriptor flag is
+    // set; the next PK header is found safely by the outer scan.
+    offset = Math.max(offset, nameEnd + extraLength - 1)
+  }
+  return names
+}
+
+function detectFormat(
+  text: string,
+  bytes: Uint8Array,
+  name: string,
+): { detectedFormat: string; confidence: number; extra: Record<string, unknown> } {
   const head = text.slice(0, 4096)
   const trimmed = text.trimStart()
+  const extension = extensionOf(name)
+
+  const isZip = bytes.length >= 4
+    && bytes[0] === 0x50 && bytes[1] === 0x4b
+    && (bytes[2] === 0x03 || bytes[2] === 0x05 || bytes[2] === 0x07)
+  if (isZip) {
+    const members = zipMemberNames(bytes)
+    const lower = members.map((member) => member.toLowerCase())
+    const sfmMembers = members.filter((member) => /(?:^|\/)[^/]+\.(?:sfm|usfm)$/i.test(member))
+    if (lower.includes('word/document.xml')) {
+      return { detectedFormat: 'docx', confidence: 1, extra: { container: 'zip', memberCount: members.length, memberSample: members.slice(0, 50) } }
+    }
+    if (lower.some((member) => member.startsWith('ppt/slides/slide') && member.endsWith('.xml'))) {
+      return { detectedFormat: 'pptx', confidence: 1, extra: { container: 'zip', memberCount: members.length, memberSample: members.slice(0, 50) } }
+    }
+    if (sfmMembers.length > 0 || lower.some((member) => /(?:^|\/)settings\.xml$/i.test(member))) {
+      return {
+        detectedFormat: 'paratext-project',
+        confidence: sfmMembers.length > 0 ? 0.99 : 0.85,
+        extra: {
+          container: 'zip',
+          memberCount: members.length,
+          scriptureMemberCount: sfmMembers.length,
+          scriptureMembers: sfmMembers.slice(0, 100),
+          memberSample: members.slice(0, 50),
+        },
+      }
+    }
+    return { detectedFormat: extension === 'zip' ? 'zip' : extension || 'zip', confidence: 0.75, extra: { container: 'zip', memberCount: members.length, memberSample: members.slice(0, 50) } }
+  }
+
+  // Legacy Word binary (OLE compound file). It is preserved, but requires a
+  // recipe/converter before semantic cells can be produced.
+  const oleMagic = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]
+  if (bytes.length >= oleMagic.length && oleMagic.every((value, index) => bytes[index] === value)) {
+    return { detectedFormat: 'doc', confidence: 1, extra: { container: 'ole', needsRecipe: true } }
+  }
 
   // USFM: the \id marker is the canonical opening tag.
   if (/(^|\n)\s*\\id\b/.test(head)) {
-    return { detectedFormat: 'usfm', extra: {} }
+    return { detectedFormat: 'usfm', confidence: 1, extra: {} }
   }
   // XML dialects.
-  if (/<xliff[\s>]/i.test(head)) return { detectedFormat: 'xliff', extra: {} }
-  if (/<tmx[\s>]/i.test(head)) return { detectedFormat: 'tmx', extra: {} }
+  if (/<xliff[\s>]/i.test(head)) return { detectedFormat: 'xliff', confidence: 1, extra: {} }
+  if (/<tmx[\s>]/i.test(head)) return { detectedFormat: 'tmx', confidence: 1, extra: {} }
+  if (/<usx[\s>]/i.test(head)) return { detectedFormat: 'usx', confidence: 1, extra: {} }
+
+  if (/^WEBVTT(?:\s|$)/i.test(trimmed)) return { detectedFormat: 'vtt', confidence: 1, extra: {} }
+  if (/^\d+\s*\r?\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+/m.test(text)) {
+    return { detectedFormat: 'srt', confidence: 0.98, extra: {} }
+  }
 
   // JSON — parse the whole text; report top-level shape.
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
       const parsed = JSON.parse(text)
       if (Array.isArray(parsed)) {
-        return { detectedFormat: 'json', extra: { jsonShape: 'array', length: parsed.length } }
+        return { detectedFormat: 'json', confidence: 1, extra: { jsonShape: 'array', length: parsed.length } }
       }
       if (parsed !== null && typeof parsed === 'object') {
         const keys = Object.keys(parsed)
         return {
           detectedFormat: 'json',
+          confidence: 1,
           extra: { jsonShape: 'object', keyCount: keys.length, keySample: keys.slice(0, 10) },
         }
       }
-      return { detectedFormat: 'json', extra: { jsonShape: typeof parsed } }
+      return { detectedFormat: 'json', confidence: 1, extra: { jsonShape: typeof parsed } }
     } catch {
       // Not valid JSON despite the leading brace — fall through.
     }
@@ -349,13 +425,19 @@ function detectFormat(text: string): { detectedFormat: string; extra: Record<str
   const tabs = (firstLine.match(/\t/g) ?? []).length
   const commas = (firstLine.match(/,/g) ?? []).length
   if (tabs >= 1 && tabs >= commas) {
-    return { detectedFormat: 'tsv', extra: { delimiter: '\\t', columns: tabs + 1 } }
+    return { detectedFormat: 'tsv', confidence: 0.9, extra: { delimiter: '\\t', columns: tabs + 1 } }
   }
   if (commas >= 1) {
-    return { detectedFormat: 'csv', extra: { delimiter: ',', columns: commas + 1 } }
+    return { detectedFormat: 'csv', confidence: 0.85, extra: { delimiter: ',', columns: commas + 1 } }
   }
 
-  return { detectedFormat: 'plaintext', extra: {} }
+  if (extension === 'md' || extension === 'markdown') {
+    return { detectedFormat: 'markdown', confidence: 0.9, extra: {} }
+  }
+  if (['txt', 'text'].includes(extension)) {
+    return { detectedFormat: 'plaintext', confidence: 0.9, extra: {} }
+  }
+  return { detectedFormat: extension || 'unknown', confidence: extension ? 0.45 : 0.2, extra: { needsAssistance: true } }
 }
 
 async function handleInspect(
@@ -389,7 +471,7 @@ async function handleInspect(
   const sniff = full.subarray(0, INSPECT_SNIFF_BYTES)
   const text = new TextDecoder().decode(sniff)
 
-  const { detectedFormat, extra } = detectFormat(text)
+  const { detectedFormat, confidence, extra } = detectFormat(text, full, row.name)
   const lineCount = text === '' ? 0 : text.split(/\r?\n/).length
 
   const details: InspectDetails = {
@@ -397,8 +479,18 @@ async function handleInspect(
     sniffedBytes: sniff.byteLength,
     lineCount,
     truncated: full.byteLength > sniff.byteLength,
+    confidence,
     ...extra,
   }
+  const inspection = {
+    detectedFormat,
+    details,
+    inspectedAt: new Date().toISOString(),
+  }
+  await (env.AQUILLA_PG as AquillaDb)
+    .prepare(`UPDATE artifacts SET metadata = metadata || ?::jsonb WHERE id::text = ? AND project_id = ?`)
+    .bind(JSON.stringify({ inspection }), artifactId, projectId)
+    .run()
   return Response.json({ detectedFormat, details })
 }
 

@@ -353,7 +353,7 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     expect((cellRows[0] as any).content_hash).toHaveLength(8)
   })
 
-  it('carries per-cell metadata through the import route into cells.metadata (OBS frame images)', async () => {
+  it('carries file and per-cell import provenance through the bulk route', async () => {
     // Regression: the bulk import route builds its own source.cell.create
     // payloads from body.cells. It must forward `metadata` to the projection,
     // or per-row attachments (OBS frame images) silently vanish even though the
@@ -364,10 +364,36 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     const attachments = [
       { type: 'image', url: 'https://cdn.door43.org/obs/jpg/360px/obs-en-01-01.jpg', alt: 'OBS Image' },
     ]
+    const importManifest = {
+      version: 1,
+      profileId: 'builtin:obs',
+      profileVersion: '1',
+      deterministic: true,
+      fidelity: 'content-only',
+      unitCount: 1,
+      warningCounts: {},
+    }
+    const unitProvenance = {
+      version: 1,
+      profileId: 'builtin:obs',
+      profileVersion: '1',
+      unitKey: 'sequence:OBS 1:1',
+      kind: 'segment',
+      displayLabel: '1',
+      address: { scheme: 'sequence', index: 1 },
+      sourceLocator: { kind: 'sequence', index: 1 },
+      physicalOrder: 0,
+      fidelity: 'content-only',
+    }
     const body = {
       projectId: PROJECT_ID,
       fileId: FILE_ID,
-      file: { id: 'f-obs', name: 'Open Bible Stories', fileType: 'obs' },
+      file: {
+        id: 'f-obs',
+        name: 'Open Bible Stories',
+        fileType: 'obs',
+        importManifest,
+      },
       cells: [
         {
           id: 'obs-evt-1',
@@ -375,7 +401,7 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
           value: 'This is how God made everything in the beginning.',
           canonicalRef: 'OBS 1:1',
           type: 'text',
-          metadata: { attachments },
+          metadata: { attachments, aquillaImport: unitProvenance },
         },
       ],
     }
@@ -392,7 +418,13 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     const meta = cellRows[0].metadata
     // Postgres JSONB may surface as an object or a JSON string depending on driver.
     const parsed = typeof meta === 'string' ? JSON.parse(meta) : meta
-    expect(parsed).toEqual({ attachments })
+    expect(parsed).toEqual({ attachments, aquillaImport: unitProvenance })
+
+    const fileRows = await rows('files')
+    const fileMeta = typeof fileRows[0].meta === 'string'
+      ? JSON.parse(fileRows[0].meta)
+      : fileRows[0].meta
+    expect(fileMeta.aquillaImport).toEqual(importManifest)
   })
 
   it('duplicate cellIds within one chunk dedupe last-wins (multi-row ON CONFLICT safety)', async () => {

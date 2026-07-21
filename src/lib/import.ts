@@ -54,6 +54,7 @@ import { parseObsStories } from "./parsers/obs"
 import {
   aquillaImportMetadata,
   normalizeTranslatableStrings,
+  summarizeNormalizedImport,
   type NormalizedImportFile,
 } from "./import/normalized-manifest"
 import { ImportService } from "./import/import-service"
@@ -950,6 +951,7 @@ export async function emitParsedFile(
       kind: fileType,
       importFormat: fileType,
       parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
+      importManifest: summarizeNormalizedImport(normalized),
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
       sourceTextDirection: ctx.sourceTextDirection,
@@ -1420,6 +1422,7 @@ export async function importParatextAsTarget(
           kind: "usfm",
           importFormat: "usfm",
           parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
+          importManifest: summarizeNormalizedImport(normalized),
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
           targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,

@@ -144,6 +144,27 @@ function getReq(token: string, path: string): Request {
   })
 }
 
+function fakeZipMemberInventory(names: string[]): Uint8Array {
+  const encoder = new TextEncoder()
+  const chunks = names.map((name) => {
+    const encoded = encoder.encode(name)
+    const chunk = new Uint8Array(30 + encoded.length)
+    chunk.set([0x50, 0x4b, 0x03, 0x04], 0)
+    chunk[26] = encoded.length & 0xff
+    chunk[27] = encoded.length >> 8
+    chunk.set(encoded, 30)
+    return chunk
+  })
+  const size = chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+  const bytes = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.length
+  }
+  return bytes
+}
+
 function prepareReq(token: string, command: unknown): Request {
   return new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets`, {
     method: 'POST',
@@ -249,6 +270,30 @@ describe('artifacts — upload + retrieval', () => {
     expect(d2.detectedFormat).toBe('json')
     expect(d2.details.jsonShape).toBe('array')
     expect(d2.details.length).toBe(2)
+
+    const artifacts = await tdb.rows<{ id: string; metadata: unknown }>('artifacts')
+    const inspected = artifacts.find((artifact) => artifact.id === id2)
+    const metadata = typeof inspected?.metadata === 'string'
+      ? JSON.parse(inspected.metadata)
+      : inspected?.metadata
+    expect(metadata.inspection.detectedFormat).toBe('json')
+  })
+
+  it('classifies a Paratext ZIP from its member inventory without inflating it', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const zip = fakeZipMemberInventory(['Settings.xml', '01GENproject.SFM', '02EXOproject.SFM'])
+    const upload = (await handleExternalArtifactsRequest(uploadReq(token, 'project.zip', zip, 'application/zip'), env))!
+    const artifactId = ((await upload.json()) as { artifactId: string }).artifactId
+
+    const response = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}/inspect`), env))!
+    const inspection = (await response.json()) as {
+      detectedFormat: string
+      details: { confidence: number; scriptureMemberCount: number; scriptureMembers: string[] }
+    }
+    expect(inspection.detectedFormat).toBe('paratext-project')
+    expect(inspection.details.confidence).toBeGreaterThan(0.95)
+    expect(inspection.details.scriptureMemberCount).toBe(2)
+    expect(inspection.details.scriptureMembers).toEqual(['01GENproject.SFM', '02EXOproject.SFM'])
   })
 })
 
@@ -428,7 +473,7 @@ describe('PlanImport — commit', () => {
     expect(created).toHaveLength(0)
   })
 
-  it('links a referenced artifact to the created file after commit', async () => {
+  it('binds a normalized artifact manifest and writes explicit target lanes', async () => {
     const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
 
     // Upload an artifact first.
@@ -442,7 +487,35 @@ describe('PlanImport — commit', () => {
         fileName: 'Genesis.usfm',
         fileType: 'usfm',
         artifactId,
-        cells: [{ content: 'In the beginning' }],
+        manifest: {
+          version: 1,
+          profileId: 'agent:custom-scripture',
+          profileVersion: '2026-07-20',
+          deterministic: false,
+          fidelity: 'content-only',
+          memberPath: '01GENproject.SFM',
+          warningCounts: {},
+          recipe: {
+            version: 1,
+            name: 'Custom tagged Scripture',
+            inputFormat: 'custom-sfm',
+            strategy: 'model-assisted',
+            config: { versePrefix: '@v' },
+          },
+        },
+        cells: [{
+          content: 'In the beginning',
+          canonicalRef: 'GEN 1:1',
+          type: 'verse',
+          unitKey: 'scripture:GEN 1:1',
+          displayLabel: '1',
+          address: { scheme: 'scripture', book: 'GEN', chapter: 1, verse: '1' },
+          sourceLocator: { kind: 'recipe', line: 3 },
+          variants: [
+            { laneId: 'fr-formal', languageTag: 'fr', content: 'Au commencement' },
+            { laneId: 'ar-dz', languageTag: 'arq', content: 'فالبداية' },
+          ],
+        }],
       }),
       env,
     ))!
@@ -454,6 +527,50 @@ describe('PlanImport — commit', () => {
 
     const artifact = await tdb.rows<{ id: string; file_id: string | null }>('artifacts')
     expect(artifact[0].file_id).toBe(commit.receipt.fileId)
+
+    const bindings = await tdb.rows<{
+      artifact_id: string
+      file_id: string
+      member_path: string
+      profile_id: string
+      fidelity: string
+      recipe: unknown
+    }>('artifact_bindings')
+    expect(bindings).toHaveLength(1)
+    expect(bindings[0]).toMatchObject({
+      artifact_id: artifactId,
+      file_id: commit.receipt.fileId,
+      member_path: '01GENproject.SFM',
+      profile_id: 'agent:custom-scripture',
+      fidelity: 'content-only',
+    })
+    const recipe = typeof bindings[0].recipe === 'string' ? JSON.parse(bindings[0].recipe) : bindings[0].recipe
+    expect(recipe).toMatchObject({ strategy: 'model-assisted', config: { versePrefix: '@v' } })
+
+    const cells = await tdb.rows<{
+      side: string
+      target_lang: string
+      value: string
+      metadata: unknown
+    }>('cells')
+    const source = cells.find((cell) => cell.side === 'source')!
+    const sourceMeta = typeof source.metadata === 'string' ? JSON.parse(source.metadata) : source.metadata
+    expect(sourceMeta.aquillaImport).toMatchObject({
+      unitKey: 'scripture:GEN 1:1',
+      kind: 'verse',
+      displayLabel: '1',
+    })
+    expect(cells.filter((cell) => cell.side === 'target').map((cell) => cell.target_lang).sort())
+      .toEqual(['ar-dz', 'fr-formal'])
+
+    const files = await tdb.rows<{ id: string; meta: unknown }>('files')
+    const file = files.find((row) => row.id === commit.receipt.fileId)!
+    const fileMeta = typeof file.meta === 'string' ? JSON.parse(file.meta) : file.meta
+    expect(fileMeta.aquillaImport).toMatchObject({
+      profileId: 'agent:custom-scripture',
+      unitCount: 1,
+      recipe: { strategy: 'model-assisted' },
+    })
   })
 
   it('rejects a PlanImport whose artifactId does not exist in the project', async () => {

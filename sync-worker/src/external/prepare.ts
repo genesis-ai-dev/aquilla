@@ -315,6 +315,7 @@ async function preparePlanImport(
   const summary: ChangesetSummary = {
     filesCreated: 1,
     sourceCellsAdded: cmd.cells.length,
+    targetVariantsAdded: cmd.cells.reduce((count, cell) => count + (cell.variants?.length ?? 0), 0),
     ...(cmd.artifactId ? { artifactLinked: cmd.artifactId } : {}),
     warnings,
   }
@@ -336,7 +337,11 @@ async function preparePlanImport(
       cells: cmd.cells.map((cell) => ({
         cellId: cell.id ?? uuidv7(),
         eventId: uuidv7(),
+        ...(cell.variants?.length
+          ? { variantEventIds: cell.variants.map(() => uuidv7()) }
+          : {}),
       })),
+      ...(cmd.artifactId ? { artifactBindingId: uuidv7() } : {}),
     },
   }
 

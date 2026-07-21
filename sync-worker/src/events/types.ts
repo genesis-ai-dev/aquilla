@@ -347,6 +347,8 @@ export interface EventPayloads {
     /** Timeline-segment-model: order lens — 'time' | 'sequence'. Stored in
      *  files.meta (JSON). Absent ⇒ client treats as 'sequence'. */
     orderedBy?: string
+    /** Versioned normalized-import summary persisted under files.meta. */
+    importManifest?: Record<string, unknown>
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
   // (Corpus/grouping marker is not server-backed yet — name only.)

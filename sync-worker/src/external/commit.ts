@@ -20,6 +20,7 @@ import {
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { resolveCellStates } from './preconditions'
+import { compilePlanImport } from './import-manifest'
 import { loadChangeset } from './store'
 import { assertCredentialScope, mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
@@ -431,6 +432,7 @@ async function commitPlanImport(
   // changesets staged before the planned-id ledger existed (backward compat).
   const plannedImport = cs.plannedIds?.planImport
   const fileId = plannedImport?.fileId ?? uuidv7()
+  const compiled = compilePlanImport(cmd)
 
   const fileEvent: RawEvent<'file.create'> = {
     id: plannedImport?.fileEventId ?? uuidv7(),
@@ -445,6 +447,7 @@ async function commitPlanImport(
       fileType: cmd.fileType,
       ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
       ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+      importManifest: compiled.fileSummary,
     },
     clientTs,
   }
@@ -452,7 +455,8 @@ async function commitPlanImport(
   // Genesis source cells, chained via anchorCellId (null for the first cell).
   const cellEvents: RawEvent<'source.cell.create'>[] = []
   let prevCellId: string | null = null
-  cmd.cells.forEach((cell, i) => {
+  compiled.units.forEach((unit, i) => {
+    const cell = unit.cell
     const planned = plannedImport?.cells[i]
     const cellId = planned?.cellId ?? cell.id ?? uuidv7()
     cellEvents.push({
@@ -468,17 +472,49 @@ async function commitPlanImport(
         cellId,
         anchorCellId: prevCellId,
         value: cell.content,
-        ...(cell.canonicalRef !== undefined ? { canonicalRef: cell.canonicalRef } : {}),
-        ...(cell.type !== undefined ? { type: cell.type } : {}),
-        ...(cell.section !== undefined ? { metadata: { section: cell.section } } : {}),
+        ...(cell.contentHtml !== undefined ? { valueHtml: cell.contentHtml } : {}),
+        ...(unit.canonicalRef !== undefined ? { canonicalRef: unit.canonicalRef } : {}),
+        type: unit.type,
+        sequenceIndex: unit.sequenceIndex,
+        ...(unit.startMs !== undefined ? { startMs: unit.startMs } : {}),
+        ...(unit.endMs !== undefined ? { endMs: unit.endMs } : {}),
+        metadata: unit.metadata,
       },
       clientTs,
     })
     prevCellId = cellId
   })
 
+  // Explicit target variants reuse the same source unit and name their lane.
+  // The source event id is both the first target-chain parent and the staleness
+  // pin, matching browser bilingual imports.
+  const targetEvents: RawEvent<'target.cell.commit'>[] = []
+  compiled.units.forEach((unit, cellIndex) => {
+    const sourceEvent = cellEvents[cellIndex]
+    const planned = plannedImport?.cells[cellIndex]
+    for (const [variantIndex, variant] of (unit.cell.variants ?? []).entries()) {
+      targetEvents.push({
+        id: planned?.variantEventIds?.[variantIndex] ?? uuidv7(),
+        schemaVersion: 1,
+        kind: 'target.cell.commit',
+        projectId,
+        fileId,
+        cellId: sourceEvent.cellId,
+        parentId: sourceEvent.id,
+        author: cred.username,
+        payload: {
+          value: variant.content,
+          ...(variant.contentHtml !== undefined ? { valueHtml: variant.contentHtml } : {}),
+          sourceEventId: sourceEvent.id,
+          ...(variant.laneId ? { targetLang: variant.laneId } : {}),
+        },
+        clientTs,
+      })
+    }
+  })
+
   // file.create must land in the first chunk (it seeds the files row).
-  const allEvents: RawEvent[] = [fileEvent, ...cellEvents]
+  const allEvents: RawEvent[] = [fileEvent, ...cellEvents, ...targetEvents]
   const allEventIds = allEvents.map((e) => e.id)
 
   let token: string
@@ -533,6 +569,34 @@ async function commitPlanImport(
       .prepare(`UPDATE artifacts SET file_id = ? WHERE id::text = ? AND project_id = ?`)
       .bind(fileId, cmd.artifactId, projectId)
       .run()
+    await db
+      .prepare(
+        `INSERT INTO artifact_bindings (
+           id, project_id, artifact_id, file_id, binding_role, target_lang,
+           member_path, profile_id, profile_version, fidelity, manifest, recipe
+         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+         ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+         DO UPDATE SET
+           profile_id = excluded.profile_id,
+           profile_version = excluded.profile_version,
+           fidelity = excluded.fidelity,
+           manifest = excluded.manifest,
+           recipe = excluded.recipe,
+           updated_at = now()`,
+      )
+      .bind(
+        plannedImport?.artifactBindingId ?? uuidv7(),
+        projectId,
+        cmd.artifactId,
+        fileId,
+        cmd.manifest?.memberPath ?? '',
+        cmd.manifest?.profileId ?? `agent:${cmd.fileType.toLowerCase()}`,
+        cmd.manifest?.profileVersion ?? '1',
+        cmd.manifest?.fidelity ?? compiled.fileSummary.fidelity,
+        JSON.stringify(compiled.fileSummary),
+        cmd.manifest?.recipe ? JSON.stringify(cmd.manifest.recipe) : null,
+      )
+      .run()
   }
 
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
@@ -549,11 +613,19 @@ async function commitPlanImport(
     fileId,
   }
 
-  // Mark committed regardless of partial rejects. W1-B: event + file ids are now
-  // minted at prepare and stored, so a crash-retry (status='committing') re-posts
-  // IDENTICAL ids that the /events layer dedupes — no duplicate file. A partial
-  // apply is still reported as job_failed with the accurate receipt; re-committing
-  // a 'committing' changeset re-drives the same ids and converges.
+  // Only expose a terminal committed receipt after every event is accepted.
+  // On a partial result the row stays `committing`; a retry re-posts the same
+  // prepare-time ids and converges through event idempotency.
+  if (rejected.length > 0) {
+    await db
+      .prepare(`UPDATE changesets SET receipt = ?::jsonb WHERE id = ? AND status = 'committing'`)
+      .bind(JSON.stringify(receipt), cs.id)
+      .run()
+    return errorResponse('job_failed', 'import partially failed — retry will resume the same import', {
+      receipt,
+    })
+  }
+
   await db
     .prepare(
       `UPDATE changesets
@@ -562,14 +634,6 @@ async function commitPlanImport(
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
-
-  if (rejected.length > 0) {
-    // Partial apply: honest accounting — the changeset failed even though some
-    // events landed. The receipt carries the accurate applied count + rejects.
-    return errorResponse('job_failed', 'import partially failed — some events were rejected', {
-      receipt,
-    })
-  }
 
   return Response.json({ receipt })
 }

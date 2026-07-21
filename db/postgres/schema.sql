@@ -857,9 +857,39 @@ CREATE TABLE IF NOT EXISTS artifacts (
     file_id             TEXT,
     kind                TEXT NOT NULL DEFAULT 'source',
     audio_id            TEXT,
+    -- AQU-635: format inspection/classification facts that belong to the
+    -- immutable artifact rather than any one file interpretation.
+    metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
+
+-- AQU-635: one immutable artifact can contribute multiple package members or
+-- files. Per-cell reversible locators remain in cells.metadata; this relation
+-- stores only file-level interpretation/provenance and compact manifests.
+CREATE TABLE IF NOT EXISTS artifact_bindings (
+    id              UUID PRIMARY KEY,
+    project_id      TEXT NOT NULL,
+    artifact_id     UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    file_id         TEXT NOT NULL,
+    binding_role    TEXT NOT NULL
+                      CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
+    target_lang     TEXT NOT NULL DEFAULT '',
+    member_path     TEXT NOT NULL DEFAULT '',
+    profile_id      TEXT NOT NULL,
+    profile_version TEXT NOT NULL,
+    fidelity        TEXT NOT NULL
+                      CHECK (fidelity IN ('native', 'verified-recipe', 'content-only', 'preserved-only')),
+    manifest        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    recipe          JSONB,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path)
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_bindings_project_file
+  ON artifact_bindings(project_id, file_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_bindings_artifact
+  ON artifact_bindings(artifact_id);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

@@ -4,6 +4,7 @@ import type { TranslatableString } from "@/lib/parsers/types"
 import {
   aquillaImportMetadata,
   normalizeTranslatableStrings,
+  summarizeNormalizedImport,
 } from "./normalized-manifest"
 
 describe("normalized import manifest", () => {
@@ -188,6 +189,15 @@ describe("normalized import manifest", () => {
       sourceLocator: { kind: "usfm", ref: "GEN 1:1", marker: "v" },
       physicalOrder: 0,
       fidelity: "native",
+    })
+    expect(summarizeNormalizedImport(manifest)).toEqual({
+      version: 1,
+      profileId: "builtin:paratext-usfm",
+      profileVersion: "2026-07-20",
+      deterministic: true,
+      fidelity: "native",
+      unitCount: 1,
+      warningCounts: {},
     })
   })
 })

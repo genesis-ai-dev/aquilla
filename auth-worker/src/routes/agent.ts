@@ -39,7 +39,7 @@ import {
   type HarnessFrame,
   resolveRunCostCapCents,
 } from "../lib/agent/frames"
-import { buildMemoryContext, type MemoryContext } from "../lib/agent/memory-context-stub"
+import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { revokeRunCredential, type RunCredential } from "../lib/agent/changeset-bridge"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"

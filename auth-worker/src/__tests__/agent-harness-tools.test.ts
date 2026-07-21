@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach, beforeAll, vi } from "vitest"
 import { seedUser } from "./helpers/db"
 import { ensureAgentMemoryTables } from "./helpers/agent-memory-schema"
 import type { HarnessFrame } from "../lib/agent/frames"
-import type { MemoryContext } from "../lib/agent/memory-context-stub"
+import type { MemoryContext } from "../../../db/shared/agent-memory"
 import {
   runCode,
   loadArtifact,

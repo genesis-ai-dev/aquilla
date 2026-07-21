@@ -18,7 +18,7 @@ import {
 } from "./changeset-bridge"
 import { proposeMemory, proposeBriefUpdate, type MemoryProvenance } from "./memory-writes"
 import type { HarnessFrame } from "./frames"
-import type { MemoryContext } from "./memory-context-stub"
+import type { MemoryContext } from "../../../../db/shared/agent-memory"
 
 /** Cell cap for plan_import (contracts §2 PLAN_IMPORT_MAX_CELLS). */
 export const PLAN_IMPORT_MAX_CELLS = 5000

@@ -8,7 +8,7 @@
 //   3. new-tool guidance — sandbox / import / memory tools
 //   4. language rule — scaffolding is English; reply in the working language
 
-import type { MemoryContext } from "./memory-context-stub"
+import type { MemoryContext } from "../../../../db/shared/agent-memory"
 
 /** Fallback phrasing when no working language is resolvable from settings. */
 const WORKING_LANGUAGE_FALLBACK = "the project's working language"

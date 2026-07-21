@@ -108,7 +108,8 @@ describe("SetupChecklistDrawer — AQU-334 role-aware read-only rows", () => {
     const tooltips = Array.from(document.querySelectorAll("[data-testid='tooltip-content']")).map(
       (el) => el.textContent ?? "",
     )
-    expect(tooltips.some((t) => /project_lead/i.test(t))).toBe(true)
+    // Role labels render underscore-free and title-cased ("Project Lead").
+    expect(tooltips.some((t) => /project lead/i.test(t))).toBe(true)
     expect(tooltips.some((t) => /maintainer/i.test(t))).toBe(true)
   })
 

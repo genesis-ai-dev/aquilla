@@ -408,12 +408,15 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       if (!u || typeof u !== "object") return null
       const r = u as Record<string, unknown>
       if (typeof r.userId !== "string" || typeof r.ts !== "number") return null
+      // A present-but-invalid selection (wrong shape, oversized draft) marks
+      // the whole frame malformed — same strictness as the other fields.
+      if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
       users.push({
         userId: r.userId,
         ts: r.ts,
         ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
         ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
-        ...(isTargetPresenceSelection(r.selection) ? { selection: r.selection } : {}),
+        ...(r.selection !== undefined ? { selection: r.selection } : {}),
       })
     }
     return { t: "presence", users }

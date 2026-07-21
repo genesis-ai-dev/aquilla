@@ -47,6 +47,12 @@ export interface Env {
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
 
+  /** PostHog project token (phc_…) — when set, 4xx/5xx responses are shipped
+   *  to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
+  POSTHOG_KEY?: string
+  /** PostHog ingest host. Defaults to https://us.i.posthog.com. */
+  POSTHOG_HOST?: string
+
   /** Cloudflare Email Service `send_email` binding — password reset and
    *  project invites. Declared only in deployed env blocks (wrangler.toml);
    *  absent in local/e2e profiles, where invites no-op and password reset

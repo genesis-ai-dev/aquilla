@@ -123,29 +123,66 @@ function authHeaders(jwt: string): HeadersInit {
 }
 
 /**
- * GET /api/v2/projects/:id/settings.
+ * Discriminated GET outcome so callers can tell "the server answered and
+ * there are no settings for you" apart from "the request failed".
+ *
+ * - `{ok:true, value}`      — 200; the parsed settings row.
+ * - `{ok:true, value:null}` — 403/404; the server ANSWERED: no settings exist
+ *   for this caller (no access / project unknown). Definitive — treat as
+ *   fetched.
+ * - `{ok:false}`            — transport failure, 401 (expired token), or 5xx.
+ *   The settings state is UNKNOWN; callers gating a destructive-if-wrong
+ *   affordance (the DCS source lockdown) must stay fail-closed and retry
+ *   later rather than treating this as "no settings".
+ */
+export type FetchProjectSettingsResult =
+  | { ok: true; value: ProjectSettingsResponse | null }
+  | { ok: false; status: number; message: string }
+
+/** GET /api/v2/projects/:id/settings with a fail-closed-capable outcome. */
+export async function fetchProjectSettingsResult(
+  jwt: string,
+  projectId: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<FetchProjectSettingsResult> {
+  let res: Response
+  try {
+    res = await fetch(
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
+      { headers: authHeaders(jwt) },
+    )
+  } catch (e) {
+    return { ok: false, status: 0, message: e instanceof Error ? e.message : String(e) }
+  }
+  if (res.ok) {
+    try {
+      return { ok: true, value: (await res.json()) as ProjectSettingsResponse }
+    } catch (e) {
+      return { ok: false, status: res.status, message: e instanceof Error ? e.message : String(e) }
+    }
+  }
+  // 403/404: definitive "no settings for this caller" — the server answered.
+  if (res.status === 403 || res.status === 404) return { ok: true, value: null }
+  const text = await res.text().catch(() => "")
+  return { ok: false, status: res.status, message: text }
+}
+
+/**
+ * GET /api/v2/projects/:id/settings — legacy null-collapsing shape.
  *
  * Returns null on 403/404 (caller has no access or project doesn't exist
- * server-side) and on any network error — callers fall back to local IDB.
- * Real server failures (5xx that aren't network errors) also return null;
- * we do not surface them as exceptions because the consumer's UI is
- * already tolerant of "offline / unknown".
+ * server-side) and on any transport/server failure — callers fall back to
+ * local IDB. Consumers that must distinguish "no settings" from "request
+ * failed" (fail-closed gates like the DCS source lockdown) must use
+ * `fetchProjectSettingsResult` instead.
  */
 export async function fetchProjectSettings(
   jwt: string,
   projectId: string,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<ProjectSettingsResponse | null> {
-  try {
-    const res = await fetch(
-      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/settings`,
-      { headers: authHeaders(jwt) },
-    )
-    if (!res.ok) return null
-    return (await res.json()) as ProjectSettingsResponse
-  } catch {
-    return null
-  }
+  const out = await fetchProjectSettingsResult(jwt, projectId, apiUrl)
+  return out.ok ? out.value : null
 }
 
 /**

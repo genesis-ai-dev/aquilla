@@ -148,6 +148,11 @@ routes = [
 [env.production.placement]
 mode = "smart"
 
+# Like placement, observability is NOT inherited by env blocks — without this,
+# production has Workers Logs disabled and 4xx/5xx are invisible.
+[env.production.observability]
+enabled = true
+
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
@@ -173,6 +178,9 @@ DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
+# PostHog *project* token (public — same one shipped in the SPA bundle).
+# Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
+POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
 
 # ---------------------------------------------------------------------------
 # Development environment — for the dev branch, deployed to api.dev.aquilla.app

@@ -90,6 +90,35 @@ describe("tsvQuestionsRoute parse()", () => {
     expect(cells[0].metadata).toEqual({ occurrence: "0" })
   })
 
+  it("renders question + response as separate labelled paragraphs in valueHtml", () => {
+    const cells = parse()[0].cells
+    expect(cells[0].valueHtml).toBe(
+      "<p>Question: Whose servant does Paul call himself?</p>" +
+        "<p>Response: Paul calls himself a servant of God.</p>",
+    )
+    // Question-only rows render one unlabelled paragraph.
+    expect(cells[1].valueHtml).toBe("<p>What did God promise before time began?</p>")
+  })
+
+  it("unescapes literal \\n in Question/Response before combining", () => {
+    const tsv = [
+      "Reference\tID\tTags\tQuote\tOccurrence\tQuestion\tResponse",
+      "1:1\tqn1\t\t\t0\tWhy?\\nReally why?\tBecause **so**.",
+    ].join("\n")
+    const cells = tsvQuestionsRoute.parse({
+      entry: TQ_ENTRY,
+      manifest: TQ_MANIFEST,
+      files: new Map([["tq_TIT.tsv", tsv]]),
+    })[0].cells
+    expect(cells[0].value).toBe("Question: Why?\nReally why?\nResponse: Because **so**.")
+    expect(cells[0].value).not.toContain("\\n")
+    expect(cells[0].contentHash).toBe(contentHash(cells[0].value))
+    // Markdown in the response renders; the question's inner newline joins its paragraph.
+    expect(cells[0].valueHtml).toBe(
+      "<p>Question: Why? Really why?</p><p>Response: Because <b>so</b>.</p>",
+    )
+  })
+
   it("produces STABLE ids across two independent parses (cross-import lineage)", () => {
     const a = parse()
     const b = parse()

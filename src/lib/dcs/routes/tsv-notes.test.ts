@@ -102,6 +102,57 @@ describe("tsvNotesRoute parse()", () => {
     expect(cells[1].canonicalRef).toBe("TIT 1:2")
   })
 
+  it("unescapes literal \\n in the Note into real newlines (value + hash)", () => {
+    // Real en_tn intro-note shape: the TSV cell holds LITERAL backslash-n pairs.
+    const tsv = [
+      "Reference\tID\tTags\tSupportReference\tQuote\tOccurrence\tNote",
+      "front:intro\tint1\t\t\t\t0\t# Introduction to Titus\\n\\n## Part 1: General Introduction",
+    ].join("\n")
+    const cells = tsvNotesRoute.parse({
+      entry: TN_ENTRY,
+      manifest: TN_MANIFEST,
+      files: new Map([["tn_TIT.tsv", tsv]]),
+    })[0].cells
+    expect(cells[0].value).toBe("# Introduction to Titus\n\n## Part 1: General Introduction")
+    expect(cells[0].value).not.toContain("\\n")
+    expect(cells[0].contentHash).toBe(contentHash(cells[0].value))
+    // And the markdown renders to headings, not raw `#` syntax.
+    expect(cells[0].valueHtml).toBe(
+      "<h1>Introduction to Titus</h1><h2>Part 1: General Introduction</h2>",
+    )
+  })
+
+  it("renders Note markdown to valueHtml, with dead rc://+relative links as text", () => {
+    const tsv = [
+      "Reference\tID\tTags\tSupportReference\tQuote\tOccurrence\tNote",
+      "1:1\tlnk1\t\t\t\t0\tSee [[rc://*/ta/man/translate/figs-metaphor]] and [1:2](../01/02.md) plus **bold**.",
+    ].join("\n")
+    const cells = tsvNotesRoute.parse({
+      entry: TN_ENTRY,
+      manifest: TN_MANIFEST,
+      files: new Map([["tn_TIT.tsv", tsv]]),
+    })[0].cells
+    // The plain value keeps the raw markdown (unescaped only) …
+    expect(cells[0].value).toContain("[[rc://*/ta/man/translate/figs-metaphor]]")
+    // … while the HTML the user sees has readable text, no broken anchors.
+    expect(cells[0].valueHtml).toBe("<p>See figs-metaphor and 1:2 plus <b>bold</b>.</p>")
+    expect(cells[0].valueHtml).not.toContain("<a")
+  })
+
+  it("omits valueHtml when the Note is empty", () => {
+    const tsv = [
+      "Reference\tID\tTags\tSupportReference\tQuote\tOccurrence\tNote",
+      "1:1\temp1\t\t\t\t0\t",
+    ].join("\n")
+    const cells = tsvNotesRoute.parse({
+      entry: TN_ENTRY,
+      manifest: TN_MANIFEST,
+      files: new Map([["tn_TIT.tsv", tsv]]),
+    })[0].cells
+    expect(cells[0].value).toBe("")
+    expect(cells[0].valueHtml).toBeUndefined()
+  })
+
   it("produces STABLE ids across two independent parses (cross-import lineage)", () => {
     const a = parse()
     const b = parse()

@@ -50,13 +50,49 @@ export interface EditorCapabilities {
    * Null when the user has full edit access (no badge shown).
    */
   readOnlyLabel: string | null
+  /**
+   * SOURCE-side read-only explanation. Non-null when canEditSource is forced
+   * off for a reason unrelated to role (today: the project is pinned to a DCS
+   * upstream, so the repair path would overwrite any hand-edit). Null when the
+   * source lane is editable or merely role-gated.
+   */
+  sourceReadOnlyReason: string | null
 }
 
-export function resolveEditorCapabilities(project: ProjectRecord | null | undefined): EditorCapabilities {
+/** Shown wherever the source-edit affordance is suppressed by a DCS pin.
+ *  Detach is gated at MAINTAINER (600) — see DcsUpstreamPanel — so the copy
+ *  must not tell a project_lead (500) reader to do it themselves. */
+export const DCS_SOURCE_LOCK_REASON =
+  "Source is synced from Door43 — a maintainer can detach it in Project Settings."
+
+export interface EditorCapabilityOpts {
+  /**
+   * True while the project's settings carry a `dcsUpstream` cursor (Door43-
+   * linked adapter project). While linked, the DCS repair path treats ANY
+   * local source divergence as damage and overwrites it, so hand-editing
+   * source is forbidden regardless of role — the only sanctioned way out is
+   * an explicit detach in Project Settings. Callers should also pass `true`
+   * while the linked-state is still UNKNOWN (settings not yet fetched):
+   * default-locked can never let a doomed edit slip through, and it only
+   * delays the affordance for cloud project_lead+ users by one settings GET.
+   */
+  hasDcsUpstream?: boolean
+}
+
+export function resolveEditorCapabilities(
+  project: ProjectRecord | null | undefined,
+  opts?: EditorCapabilityOpts,
+): EditorCapabilities {
   const level = project?.syncRole?.level ?? null
-  // Source editing: cloud project_lead+ (500), never on a live-linked downstream.
+  const hasDcsUpstream = opts?.hasDcsUpstream === true
+  // Source editing: cloud project_lead+ (500), never on a live-linked
+  // downstream, never while pinned to a DCS upstream (see EditorCapabilityOpts).
   const canEditSource =
-    level !== null && level >= ROLE.PROJECT_LEAD && project?.sourceLinkMode !== "live"
+    level !== null &&
+    level >= ROLE.PROJECT_LEAD &&
+    project?.sourceLinkMode !== "live" &&
+    !hasDcsUpstream
+  const sourceReadOnlyReason = hasDcsUpstream ? DCS_SOURCE_LOCK_REASON : null
 
   // Local project (no syncRole): full edit, no badge.
   // Also covers git-imported projects that carry a ProjectPermissions object.
@@ -67,21 +103,23 @@ export function resolveEditorCapabilities(project: ProjectRecord | null | undefi
         canEdit: perms.canEditContent,
         canValidate: perms.canEditContent,  // legacy: validation was gated on edit
         canEditSource,  // false for local/git projects (level === null)
+        sourceReadOnlyReason,
         readOnlyLabel: perms.canEditContent ? null : "Read-only (imported from git)",
       }
     }
-    return { canEdit: true, canValidate: true, canEditSource, readOnlyLabel: null }
+    return { canEdit: true, canValidate: true, canEditSource, sourceReadOnlyReason, readOnlyLabel: null }
   }
 
   // Cloud project with a live syncRole level.
   if (level >= ROLE.CONTRIBUTOR) {
-    return { canEdit: true, canValidate: true, canEditSource, readOnlyLabel: null }
+    return { canEdit: true, canValidate: true, canEditSource, sourceReadOnlyReason, readOnlyLabel: null }
   }
   if (level >= ROLE.REVIEWER) {
     return {
       canEdit: false,
       canValidate: true,
       canEditSource,
+      sourceReadOnlyReason,
       readOnlyLabel: "Viewing as reviewer — you can validate and comment",
     }
   }
@@ -90,6 +128,7 @@ export function resolveEditorCapabilities(project: ProjectRecord | null | undefi
       canEdit: false,
       canValidate: false,
       canEditSource,
+      sourceReadOnlyReason,
       readOnlyLabel: "Viewing as commenter — you can comment",
     }
   }
@@ -98,6 +137,7 @@ export function resolveEditorCapabilities(project: ProjectRecord | null | undefi
     canEdit: false,
     canValidate: false,
     canEditSource,
+    sourceReadOnlyReason,
     readOnlyLabel: "Viewing as viewer — read only",
   }
 }
@@ -110,6 +150,13 @@ export function useProjectPermissions(project: ProjectRecord | null | undefined)
   return useMemo(() => resolvePermissions(project), [project]);
 }
 
-export function useEditorCapabilities(project: ProjectRecord | null | undefined): EditorCapabilities {
-  return useMemo(() => resolveEditorCapabilities(project), [project]);
+export function useEditorCapabilities(
+  project: ProjectRecord | null | undefined,
+  opts?: EditorCapabilityOpts,
+): EditorCapabilities {
+  const hasDcsUpstream = opts?.hasDcsUpstream
+  return useMemo(
+    () => resolveEditorCapabilities(project, { hasDcsUpstream }),
+    [project, hasDcsUpstream],
+  );
 }

@@ -18,8 +18,18 @@
 // in the cloud). `DIARIZATION_PUBLIC_BASE` is the externally-reachable base URL
 // of this worker (incl. any `/sync` apex prefix). Local dev needs a tunnel.
 
+import { timingSafeEqual } from "node:crypto"
 import { verifyTokenForFile } from "./auth"
 import { audioObjectKey } from "./audio"
+
+// Constant-time compare — a plain `!==` leaks timing information to anyone
+// hitting this publicly-reachable callback route.
+function constantTimeEqual(a: string, b: string): boolean {
+  const aBytes = Buffer.from(a)
+  const bBytes = Buffer.from(b)
+  if (aBytes.length !== bBytes.length) return false
+  return timingSafeEqual(aBytes, bBytes)
+}
 
 export interface DiarizationEnv {
   SNAPSHOTS: R2Bucket
@@ -178,7 +188,7 @@ async function serveAudio(_request: Request, env: DiarizationEnv, url: URL): Pro
 async function callback(request: Request, env: DiarizationEnv): Promise<Response> {
   if (
     !env.DIARIZATION_SHARED_SECRET ||
-    request.headers.get("X-Diarization-Secret") !== env.DIARIZATION_SHARED_SECRET
+    !constantTimeEqual(request.headers.get("X-Diarization-Secret") ?? "", env.DIARIZATION_SHARED_SECRET)
   ) {
     return new Response("unauthorized", { status: 401 })
   }

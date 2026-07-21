@@ -40,6 +40,26 @@ function isNotFound(err: unknown): boolean {
   return /not\s*found|no such file|enoent|does not exist|404/i.test(msg)
 }
 
+/**
+ * Constant-time bearer-token check (adversarial-panel authz-m1). A naive
+ * `token !== expected` short-circuits on the first differing byte, leaking token
+ * length/prefix through timing. We SHA-256 both sides (fixed 32-byte digests,
+ * so length never leaks) and compare with a no-early-exit XOR accumulator.
+ */
+async function tokenMatches(token: string, expected: string): Promise<boolean> {
+  if (!expected) return false
+  const enc = new TextEncoder()
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(token)),
+    crypto.subtle.digest("SHA-256", enc.encode(expected)),
+  ])
+  const av = new Uint8Array(a)
+  const bv = new Uint8Array(b)
+  let diff = 0
+  for (let i = 0; i < av.length; i++) diff |= av[i] ^ bv[i]
+  return diff === 0
+}
+
 export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>()
 
@@ -51,7 +71,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     const expected = c.env.AGENT_SANDBOX_KEY
     const auth = c.req.header("Authorization") ?? ""
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : ""
-    if (!expected || token !== expected) {
+    if (!(await tokenMatches(token, expected))) {
       return jsonError(c, "unauthorized", "missing or invalid bearer token")
     }
     await next()

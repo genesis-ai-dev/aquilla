@@ -78,6 +78,14 @@ promote → dev push.
 | when | branch | result | notes |
 |---|---|---|---|
 | 2026-07-21 | (setup) | worktree created @ 05530248e | |
+| 01:00 | swarm/agent-w1e | merged 83dfc77d0 | memory UI; 28 tests; flagged missing GET /brief/proposals (relayed to W1C) |
+| 01:01 | swarm/agent-w1d | merged 9e06e1633 | frames+components; add/add on AgentMemoryTab resolved to W1E's real file; TRACES unioned |
+| 01:01 | (fixup) | f671c480e | roleLevel threaded W1D→W1E seam (agent.roleLevel available in workbench prop bundle) |
+| 01:02 | swarm/agent-w1f | merged f191c07eb | fixtures/e2e/docs; TRACES unioned; SPA gate green (tsc + tsc.e2e + agent suites 128) |
+
+Wave-2 must-do (from W1F): add `data-frame-type` on run-timeline rows and `data-memory-path`
+on memory rows in W1D/W1E components; reconcile e2e/pages/agent-page.ts location vs
+e2e/helpers/page-objects convention; wire composer attach-file affordance (W1F guessed it).
 
 ## Lessons inherited from prior swarms (BINDING)
 

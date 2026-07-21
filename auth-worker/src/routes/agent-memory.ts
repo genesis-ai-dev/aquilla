@@ -48,6 +48,7 @@ type ErrorCode =
   | "permission_denied"
   | "validation_failed"
   | "human_edit_protected"
+  | "agent_edit_forbidden"
   | "brief_human_only"
   | "agent_review_denied"
   | "conflict"
@@ -226,14 +227,16 @@ agentMemory.patch(
       return c.json(body, status)
     }
 
-    // Agent channel can never overwrite a human-touched row.
-    // SWARM-TODO(aqu-agent): contract only names the human_edited guard for the
-    // agent channel; a non-human-edited agent PATCH still sets human_edited=true
-    // (odd semantics). Left literal per contract — see AQU-AGENT-TRACES.md.
-    if (c.req.header(AGENT_RUN_HEADER) && memory.humanEdited) {
+    // The agent channel can never PATCH at all: humanEdit() marks the row
+    // human_edited, so an agent PATCH would launder agent output into the
+    // protected human-authored state. Agents propose (POST) or ask; only
+    // humans edit in place.
+    if (c.req.header(AGENT_RUN_HEADER)) {
       const { body, status } = errorJson(
-        "human_edit_protected",
-        "this memory was edited by a human and cannot be modified by the agent",
+        memory.humanEdited ? "human_edit_protected" : "agent_edit_forbidden",
+        memory.humanEdited
+          ? "this memory was edited by a human and cannot be modified by the agent"
+          : "agents cannot edit memories in place — submit a new proposal instead",
         403,
       )
       return c.json(body, status)

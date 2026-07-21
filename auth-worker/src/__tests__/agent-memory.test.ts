@@ -176,6 +176,36 @@ describe("human edit protection", () => {
     const err = (await agentPatch.json()) as { error: { code: string } }
     expect(err.error.code).toBe("human_edit_protected")
   })
+
+  it("agent-channel PATCH on a NON-human-edited row → 403 agent_edit_forbidden (agents propose, never edit)", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    const leadJwt = await jwtFor("lead")
+
+    const p = await req("POST", `${PROJECT}/agent-memory`, leadJwt, { path: "notes/agent-target.md", content: "v1" })
+    const { memoryId } = (await p.json()) as { memoryId: string }
+
+    // Agent channel PATCH with no prior human edit: would launder agent output
+    // into the protected human_edited state — must be rejected outright.
+    const agentPatch = await req(
+      "PATCH",
+      `${PROJECT}/agent-memory/${memoryId}`,
+      leadJwt,
+      { content: "agent overwrite" },
+      agentHeader(leadJwt),
+    )
+    expect(agentPatch.status).toBe(403)
+    const err = (await agentPatch.json()) as { error: { code: string } }
+    expect(err.error.code).toBe("agent_edit_forbidden")
+
+    // Row untouched: still v1, not human_edited.
+    const list = await req("GET", `${PROJECT}/agent-memory?status=proposed`, leadJwt)
+    const { memories } = (await list.json()) as { memories: Array<{ id: string; content: string; humanEdited: boolean }> }
+    const row = memories.find((m) => m.id === memoryId)
+    expect(row?.content).toBe("v1")
+    expect(row?.humanEdited).toBe(false)
+  })
 })
 
 // ──────────────────────────────────────────────────────────────────────────

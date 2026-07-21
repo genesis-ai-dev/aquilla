@@ -25,10 +25,13 @@ function isFullQuorum(progress: number): boolean {
 function CompleteStatusPieGlyph({
   sizePx,
   strokeColor,
+  mutedCheck = false,
   className,
 }: {
   sizePx: number
   strokeColor?: string
+  /** Grey idle preview — softer check; green done keeps white on the disc. */
+  mutedCheck?: boolean
   className?: string
 }) {
   return (
@@ -72,7 +75,14 @@ function CompleteStatusPieGlyph({
         />
       </svg>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <Check className="size-3 text-white" strokeWidth={3} aria-hidden />
+        <Check
+          className={cn(
+            "size-3",
+            mutedCheck ? "text-neutral-600 dark:text-neutral-700" : "text-white",
+          )}
+          strokeWidth={3}
+          aria-hidden
+        />
       </div>
     </div>
   )
@@ -216,7 +226,12 @@ export function StatusPie({
         <div className="pointer-events-none absolute inset-0 opacity-0 group-hover/validate:opacity-100">
           {/* Grey check until the cell is actually complete — don't flash green
               for an unvalidated hover preview. */}
-          <CompleteStatusPieGlyph sizePx={sizePx} strokeColor={STATUS_PIE_IDLE} />
+          <CompleteStatusPieGlyph
+            sizePx={sizePx}
+            strokeColor={STATUS_PIE_IDLE}
+            mutedCheck
+            className={progressPieToneClass("idle")}
+          />
         </div>
       ) : null}
       {children ? (

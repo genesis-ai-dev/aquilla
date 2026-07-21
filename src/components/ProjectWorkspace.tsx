@@ -29,7 +29,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileOrderedBy, fileTypeHasSections, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -3550,10 +3550,11 @@ export function ProjectWorkspace() {
     // The button may render optimistically (canExport=true before settings load) but the
     // ACTION must wait until org settings have been fetched so we gate on the real floor.
     if (!orgSettingsFetched) return
-    // If org policy disallows export (explicit floor set and user below it), no-op.
-    if (!canExportByOrgPolicy) return
+    // AQU-253 (revised): open even when org policy disallows export — the
+    // dialog renders an explicit permission gate with a help link instead of
+    // silently no-opping, so users can see WHY export is unavailable.
     setExportOpen(true)
-  }, [orgSettingsFetched, canExportByOrgPolicy])
+  }, [orgSettingsFetched])
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
@@ -3963,7 +3964,13 @@ export function ProjectWorkspace() {
       optimisticFileIdsRef.current = new Set(next.map((file) => file.id))
       return next
     })
-    if (refs.length > 0) workspaceTabs.openFile(refs[0].id)
+    if (refs.length > 0) {
+      workspaceTabs.openFile(refs[0].id)
+      // AQU (mp3 "unusable" report): a media import has no text cells, so the
+      // Text lens greets the user with "No text segments in this file" — which
+      // reads as a failed import. Land them on the Media/Audio lens instead.
+      if (isMediaFileType(refs[0].type)) setLens("audio")
+    }
     // The bulk importer (lib/import.ts → POST /import) has already persisted
     // file.create + every source.cell.create server-side before resolving, so
     // there's nothing to flush — just pull the fresh projection in.
@@ -4995,8 +5002,7 @@ export function ProjectWorkspace() {
           projectName={project.name ?? project.id}
           activeFileId={activeFileId ?? null}
           activeFileName={activeFile?.name ?? null}
-          isUsfmFile={activeFile?.type === "usfm"}
-          isDocxFile={activeFile?.type === "docx"}
+          activeFileType={activeFile?.type ?? null}
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}

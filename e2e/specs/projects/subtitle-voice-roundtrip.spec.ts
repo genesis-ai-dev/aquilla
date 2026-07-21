@@ -41,13 +41,14 @@ test("import VTT with <v Name> tags → cast created → WebVTT export round-tri
   await expect(alice.locator("[data-cell-id]")).toHaveCount(4, { timeout: 10_000 })
 
   // 3. Export as WebVTT and capture the downloaded file. AQU-331 moved
-  // "Export file" into the header ⋯ overflow menu — use the helper.
+  // "Export file" into the header ⋯ overflow menu — use the helper. WebVTT is
+  // the file's NATIVE format, so the primary "Download <name>.vtt" button is
+  // the journey (export-ergonomics redesign) — no format picking needed.
   const downloadPromise = alice.waitForEvent("download", { timeout: 15_000 })
   await ws.openExportDialog()
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
-  await dialog.getByText("WebVTT (subtitles)").click()
-  await dialog.getByRole("button", { name: "Export", exact: true }).click()
+  await dialog.getByRole("button", { name: /^Download voices-roundtrip\.vtt$/ }).click()
 
   const download = await downloadPromise
   const readable = await download.createReadStream()

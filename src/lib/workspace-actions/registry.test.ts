@@ -79,16 +79,18 @@ describe("getDefaultAction", () => {
   })
 })
 
-describe("export org-policy gate (AQU-253)", () => {
-  // The header's duplicate "Export file" overflow item was removed, so the
-  // registry action is the ONLY export entry point — it must honor the org
-  // export floor, not just rely on openExportFlow's runtime no-op.
+describe("export org-policy gate (AQU-253, revised)", () => {
+  // AQU-253 revised: the export action stays VISIBLE regardless of the org
+  // export floor. The gate moved into ExportDialog, which shows an explicit
+  // "you don't have export permission" panel with a help link — a menu item
+  // that silently disappears left users unable to learn why. The actual
+  // export routes still enforce the floor server-side.
   const exportAction = workspaceActions.find((a) => a.id === "export")!
 
-  it("hides Export when org policy forbids it", () => {
+  it("stays visible when org policy forbids export (dialog shows the gate)", () => {
     expect(
       exportAction.isAvailable(ctx({ activeFileId: "f1", canExportByOrgPolicy: false })),
-    ).toBe(false)
+    ).toBe(true)
   })
 
   it("shows Export while policy is unknown (optimistic pre-fetch) or allowed", () => {

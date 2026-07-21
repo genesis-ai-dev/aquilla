@@ -279,6 +279,22 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 
+  /**
+   * Expand the ExportDialog's "Export to another format" section (collapsed
+   * by default when the file has a native round-trip download). No-op when
+   * already open (e.g. file types without a native format).
+   */
+  async openExportFormatsSection(): Promise<void> {
+    const dialog = this.page.getByRole("dialog")
+    const details = dialog
+      .locator("details", { has: this.page.getByText("Export to another format") })
+      .first()
+    await expect(details).toBeVisible({ timeout: 5_000 })
+    if ((await details.getAttribute("open")) == null) {
+      await details.locator("summary").first().click()
+    }
+  }
+
   /** AQU-331: next unfinished lives in the header overflow menu. */
   async jumpNextUnfinished(): Promise<void> {
     await this.openHeaderOverflowMenu()

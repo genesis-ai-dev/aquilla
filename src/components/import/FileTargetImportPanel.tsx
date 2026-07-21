@@ -42,6 +42,8 @@ export interface FileTargetImportPanelProps {
   getToken: (fileId: string) => Promise<string | null>
   onImported: (committedCount: number) => void
   onCancel: () => void
+  /** Surfaced alongside the inline error so the host can instrument failures. */
+  onError?: (message: string, phase: "parse" | "apply") => void
   /** Optimistically patch many cells at once so the editor reflects the
    *  imported translations before the outbox finishes flushing. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
@@ -60,6 +62,7 @@ export function FileTargetImportPanel({
   getToken,
   onImported,
   onCancel,
+  onError,
   applyOptimisticTargetEdits,
 }: FileTargetImportPanelProps) {
   const [step, setStep] = useState<PanelStep>("file")
@@ -113,9 +116,11 @@ export function FileTargetImportPanel({
         setError("Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet (.csv/.tsv/.xlsx).")
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to parse file")
+      const message = err instanceof Error ? err.message : "Failed to parse file"
+      setError(message)
+      onError?.(message, "parse")
     }
-  }, [cells, showReview])
+  }, [cells, showReview, onError])
 
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
@@ -157,7 +162,9 @@ export function FileTargetImportPanel({
       // revalidate. Restore each cell's pre-import value (empty for fresh cells,
       // the prior translation for conflicts).
       applyOptimisticTargetEdits(selected.map((m) => ({ cellId: m.cellId, value: m.currentText })))
-      setError(err instanceof Error ? err.message : "Import failed")
+      const message = err instanceof Error ? err.message : "Import failed"
+      setError(message)
+      onError?.(message, "apply")
       setApplying(false)
     }
   }

@@ -103,7 +103,10 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "export", label: "Export", icon: Download, group: "primary",
-    isAvailable: (c) => c.activeFileId != null && c.canExportByOrgPolicy !== false,
+    // AQU-253 (revised): stay visible even when org policy forbids export —
+    // the ExportDialog shows a permission gate explaining the block, which
+    // beats a menu item that silently disappears.
+    isAvailable: (c) => c.activeFileId != null,
     isDefault: (c) => {
       if (!c.activeFileId) return false
       const p = c.fileProgress.get(c.activeFileId)

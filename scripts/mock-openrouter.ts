@@ -100,11 +100,19 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   const lastUserIndex = messages.findLastIndex((message) => message.role === "user")
   const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex]?.content ?? "" : ""
   const userText = typeof lastUser === "string" ? lastUser : ""
+  const importerSystemPrompt = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You classify file structure for a translation import pipeline."),
+  )
 
   // Unified importer classification: the browser sends a sample and asks for
   // a constrained declarative recipe. Return data only; the client validates
-  // and applies it locally to the complete file.
-  if (/classification step inside a file importer/i.test(userText)) {
+  // and applies it locally to the complete file. Route on the server-owned
+  // system contract, not sample/user wording, so adversarial file contents
+  // cannot select mock behavior and harmless prompt copy edits do not break
+  // this E2E boundary.
+  if (importerSystemPrompt && userText.includes("<file-sample>")) {
     return respond(JSON.stringify({
       category: "scripture",
       confidence: 0.98,

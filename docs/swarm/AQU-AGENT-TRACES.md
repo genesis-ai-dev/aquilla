@@ -2,6 +2,53 @@
 
 Format: `- [STATUS] (id) description — how to pick up`
 
+## Wave-2 integrator (W2-INT) — 2026-07-21
+
+- [DONE] (w2int-selector-contract) Added `data-frame-type="<contract frame>"` on run-timeline
+  rows (CodeActivityBlock start/output, ChangesetCard, MemoryProposalNotice+BriefProposalNotice,
+  BudgetMeter budget/budget.exhausted) and `data-memory-path="<path>"` on memory rows
+  (Proposed/ApprovedMemoryList + MemoryProposalNotice). Component tests extended to lock them.
+  Closes w1f-selector-contract.
+- [DONE] (w2int-page-object) Moved `e2e/pages/agent-page.ts` → `e2e/helpers/page-objects/AgentPage.ts`
+  (repo convention); spec import fixed. Closes w1f-page-object-location.
+- [DONE] (w2int-attach-affordance) Real composer attach-file: paperclip button + hidden file
+  input in the agent composer (AgentDockView) → `uploadAgentArtifact` → new auth-worker route
+  `POST /api/v2/projects/:projectId/agent-artifacts` → `{artifactId, fileName}` rides the run
+  request (AgentRunRequest.artifacts) → server injects an "attached artifacts" system message
+  pointing the model at load_artifact. AgentPage.attachFixture waits on `[data-attachment-id]`.
+  Closes w1f-attach-affordance.
+- [DONE] (w2int-memory-schema-helper) Deleted `auth-worker/src/__tests__/helpers/agent-memory-schema.ts`
+  + its 3 usages — schema.sql now carries the 0066 DDL and the PGlite loader applies schema.sql.
+  Closes the agent-memory-schema half of w1b-memory-stub (memory-context-stub.ts already gone at W1B merge).
+- [DONE] (w2int-workbench-memory-tab) AgentWorkbench Memory-tab test now mounts W1E's real
+  AgentMemoryTab (mocked session + memory-api) instead of the deleted W1D placeholder stub.
+  Closes w1d-memory-tab-stub.
+
+- [OPEN] (w2int-live-smoke) Live sandbox exec round-trip NOT verified: Docker daemon is up
+  (colima) but `docker pull docker.io/cloudflare/sandbox:0.7.0` hangs — the registry/base-image
+  egress is blocked/too slow in this env, so `wrangler dev` on agent-worker fails at "load metadata
+  for cloudflare/sandbox:0.7.0" (DeadlineExceeded). VERIFIER: on a box with registry access, run
+  `cd agent-worker && npx wrangler dev --port 8790 --var AGENT_SANDBOX_KEY:dev-sandbox-key WRANGLER_LOCAL:1`,
+  then `curl -H 'Authorization: Bearer dev-sandbox-key' -X POST 127.0.0.1:8790/sessions/s1/exec
+  -d '{"language":"python","code":"print(1+1)"}'` and confirm `/health`. Ties into W1A/dockerfile-pip.
+- [OPEN] (w2int-artifact-contract) Artifact-upload route contract for the QA verifier:
+  `POST /api/v2/projects/:projectId/agent-artifacts` (auth-worker, session JWT, CONTRIBUTOR+).
+  Request: raw file bytes as the body; headers `x-artifact-name` (percent-encoded file name,
+  required) + `content-type`. ≤25MB (413/400 over). Response 201
+  `{artifactId, fileName, sizeBytes, sha256}`. Errors `{error:{code,message}}` with codes
+  permission_denied(403)/validation_failed(400)/storage_unavailable(503)/job_failed(500).
+  Side effects: bytes → SNAPSHOTS R2 at `artifacts/{projectId}/{artifactId}` (empty R2_KEY_PREFIX)
+  + `artifacts` row (kind='source', credential_id sentinel `'session'`). This is EXACTLY where the
+  harness `load_artifact` tool reads (artifacts.r2_key → sandbox fetch-artifact), so an attached
+  file is loadable with no other wiring. Local dev: all workers run wrangler's default profile with
+  a shared `--persist-to .wrangler-dev-state`, all binding SNAPSHOTS→`aquilla-snapshots`, so the
+  auth-worker write and the agent-worker sandbox read hit the same local bucket.
+- [NOTE] (w2int-preexisting-failures) Root `vitest run`: 4654 passed, 3 pre-existing failures NOT
+  from this work — `ExportDialog.format-reset.test.tsx` (1) + `ImportDialog.import-failed.test.tsx`
+  (2). Reproduced on clean base dev@05530248e (and on the integration tip 12f88a0c4); unrelated to
+  agent work. auth-worker 750/750, agent-worker 26/26, all typechecks (root tsc -b, tsc.e2e,
+  auth-worker, agent-worker) clean.
+
 - [OPEN] (contracts) Orchestrator: write agent-worker contracts + SPA mirror post-recon, commit before Wave 1.
 - [OPEN] (tier1-isolates) Ladder Tier 1 as true dynamic-worker isolates (Code Mode) — v1 runs agent JS inside the sandbox container instead.
 - [OPEN] (integrations) Monday.com hosted MCP + per-org integration registry — v2.

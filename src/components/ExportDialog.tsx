@@ -2,8 +2,8 @@
 // server-side USFM download. Project scope zips each file's cells client-side
 // (except USFM, which uses the server side-car route).
 //
-// For non-USFM formats, project scope uses useProjectCells to fan-out over all
-// project files (up to MAX_FILES=40) and buildProjectZip to produce a zip.
+// For non-USFM formats, project scope uses useProjectCells to load every file
+// with bounded concurrency and buildProjectZip to produce a zip.
 //
 // AQU-253 (b fix): auto-closes when canExport flips false after settings load,
 // so a settings change mid-session doesn't leave the dialog open for a user who
@@ -347,14 +347,15 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
 
-  const { files: projectFileCells, isLoading: projectCellsLoading, isTruncated } =
+  const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
       projectId,
       projectFiles,
       getToken,
       enabled: projectScopeEnabled,
+      lane: targetLang,
     })
 
   /**
@@ -496,6 +497,10 @@ export function ExportDialog({
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
           return
         }
+        if (projectCellsError) {
+          setStatus({ kind: "error", msg: `Couldn't load the complete project: ${projectCellsError.message}` })
+          return
+        }
         const byCellId = new Map<string, string>()
         for (const f of projectFileCells) {
           for (const c of f.cells) {
@@ -523,14 +528,17 @@ export function ExportDialog({
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
           return
         }
+        if (projectCellsError) {
+          setStatus({ kind: "error", msg: `Couldn't load the complete project: ${projectCellsError.message}` })
+          return
+        }
         // AQU-441: metadata-csv project scope — flatten all file cells into one sheet.
         if (format === "metadata-csv") {
           const allCells = projectFileCells.flatMap((f) => f.cells)
           const csvBlob = exportMetadataCsv(allCells, ttsSettings)
           const safeName = buildExportStem(true)
           downloadBlob(csvBlob, `${safeName}.csv`)
-          const truncNote = isTruncated ? " (first 40 files only)" : ""
-          setStatus({ kind: "ok", msg: `Downloaded ${safeName}.csv (${allCells.length} rows)${truncNote}` })
+          setStatus({ kind: "ok", msg: `Downloaded ${safeName}.csv (${allCells.length} rows)` })
           return
         }
         setStatus({ kind: "busy", msg: `Building zip for ${projectFileCells.length} files…` })
@@ -544,8 +552,7 @@ export function ExportDialog({
         const ext = selectedFormat.ext
         downloadBlob(zipBlob, `${safeName}${ext}.zip`)
         setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
-        const truncNote = isTruncated ? " (first 40 files only)" : ""
-        setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files${truncNote}` })
+        setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files` })
       } else {
         // Client-side single-file exporter
         // AQU-439: apply voice filter before passing to any exporter.
@@ -733,14 +740,6 @@ export function ExportDialog({
               <Skeleton className="h-2 w-2 rounded-full shrink-0" />
               <Skeleton className="h-3 w-40" />
             </div>
-          )}
-          {effectiveScope === "project" && format !== "usfm" && isTruncated && (
-            <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400 mt-1">
-              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-              This project has more than 40 files — zip will include the first 40 only.
-              {/* SWARM-TODO(project-export-scale): server batch-export endpoint for
-                  large projects; see src/hooks/useProjectCells.ts for the proposed shape. */}
-            </p>
           )}
         </fieldset>
 

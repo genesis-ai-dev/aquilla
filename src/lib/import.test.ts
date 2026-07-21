@@ -13,6 +13,7 @@ interface CapturedBody {
   fileId: string
   file?: { name: string; role?: string; kind?: string }
   cells: Array<{ id: string; cellId: string; anchorCellId: string | null; value: string }>
+  targets?: Array<{ id: string; cellId: string; parentId: string; value: string; targetLang?: string }>
   complete?: boolean
 }
 
@@ -103,7 +104,7 @@ describe("import — bulk upload", () => {
     expect(captured[0].cells.length).toBe(refs[0].cellCount)
   })
 
-  it("writes bilingual target values to the selected lane against the paired source cells", async () => {
+  it("publishes bilingual target values atomically in the selected lane against the paired source cells", async () => {
     await emitParsedFile(
       {
         name: "memory.xlf",
@@ -117,18 +118,13 @@ describe("import — bulk upload", () => {
     )
 
     const sourceCell = captured[0].cells[0]
-    const targetRows = await peekOutboxBatch(100)
-    expect(targetRows).toHaveLength(1)
-    expect(targetRows[0].event).toMatchObject({
-      kind: "target.cell.commit",
-      projectId: "p-lanes",
+    expect(captured[0].targets).toEqual([expect.objectContaining({
       cellId: sourceCell.cellId,
       parentId: sourceCell.id,
-      payload: {
-        value: "Bonjour",
-        sourceEventId: sourceCell.id,
-        targetLang: "fr-CA",
-      },
-    })
+      value: "Bonjour",
+      targetLang: "fr-CA",
+    })])
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
+    expect(captured.at(-1)).toMatchObject({ complete: true, cells: [] })
   })
 })

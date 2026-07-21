@@ -81,6 +81,7 @@ import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
+import agentMemoryRoutes from "./routes/agent-memory"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -215,6 +216,10 @@ app.route("/api/v2/projects", projectSettingsRoutes)
 app.route("/api/v2/projects", sourceLinkingRoutes)
 app.route("/api/v2/projects", mergeSiblingRoutes)
 app.route("/api/v2/projects", termbaseSubscriptionRoutes)
+// Agent memory + project brief (AQU-AGENT contracts §3). Sibling router — new
+// file, doesn't touch projects.ts. Session-JWT authed; agent-channel semantics
+// keyed off the x-aquilla-agent-run header (see routes/agent-memory.ts).
+app.route("/api/v2/projects", agentMemoryRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)

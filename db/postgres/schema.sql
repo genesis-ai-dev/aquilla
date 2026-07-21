@@ -861,6 +861,56 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
 
+-- Agent memory + project brief (0066_agent_memory.sql; AQU-AGENT contracts §3).
+-- Long-term, human-reviewed agent memory. `agent_memories` rows move
+-- proposed → approved → archived (superseded) / rejected; the partial UNIQUE
+-- index keeps exactly one approved row per (project_id, path). `project_briefs`
+-- is the single human-authored brief injected verbatim into the agent prompt;
+-- `project_brief_proposals` are agent/human brief edits awaiting review.
+-- `human_edited` pins a row a human touched so the agent channel can never
+-- overwrite it (403 human_edit_protected).
+CREATE TABLE IF NOT EXISTS agent_memories (
+  id uuid PRIMARY KEY,
+  project_id text NOT NULL,
+  path text NOT NULL,
+  content text NOT NULL,
+  status text NOT NULL DEFAULT 'proposed' CHECK (status IN ('proposed','approved','rejected','archived')),
+  human_edited boolean NOT NULL DEFAULT false,
+  rationale text,
+  provenance jsonb,             -- {runId?, sessionId?, credentialId?}
+  created_by text,              -- username
+  reviewed_by text,
+  version integer NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_memories_approved_path
+  ON agent_memories(project_id, path) WHERE status='approved';
+CREATE INDEX IF NOT EXISTS agent_memories_project
+  ON agent_memories(project_id, status);
+
+CREATE TABLE IF NOT EXISTS project_briefs (
+  project_id text PRIMARY KEY,
+  content text NOT NULL DEFAULT '',
+  updated_by text,
+  version integer NOT NULL DEFAULT 1,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS project_brief_proposals (
+  id uuid PRIMARY KEY,
+  project_id text NOT NULL,
+  content text NOT NULL,
+  rationale text,
+  status text NOT NULL DEFAULT 'proposed' CHECK (status IN ('proposed','approved','rejected')),
+  created_by text,
+  reviewed_by text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  reviewed_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS project_brief_proposals_project
+  ON project_brief_proposals(project_id, status);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

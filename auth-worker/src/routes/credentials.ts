@@ -22,7 +22,7 @@ import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { isPlatformAdmin } from "../middleware/platform-admin"
-import { mintApiToken, validateApiCredential } from "../../../db/shared/api-credentials"
+import { mintApiToken } from "../../../db/shared/api-credentials"
 
 // Re-exported so the command layer imports credential validation from one place.
 export { validateApiCredential } from "../../../db/shared/api-credentials"

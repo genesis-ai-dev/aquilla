@@ -59,7 +59,6 @@ import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { ResizableVideoPanel } from "./ResizableVideoPanel"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
@@ -147,6 +146,10 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { summarizeTextDirections } from "@/lib/text-direction"
@@ -3984,6 +3987,7 @@ export function ProjectWorkspace() {
       {/* FRO-308: currentCell for chat panel — derived from focusedCellId */}
       <AppShell
         railCollapsed={dockTab === null}
+        dockStorageKey={projectId}
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
@@ -4001,7 +4005,6 @@ export function ProjectWorkspace() {
         }
         leftDock={
           <LeftDock
-            storageKey={projectId}
             activeTab={dockTab}
             onActiveTabChange={(t) => {
               // While the workbench IS the agent surface, the dock's Agent tab
@@ -4382,20 +4385,6 @@ export function ProjectWorkspace() {
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
             </div>
-            {isSubtitleFile && videoSrc && centerSurface !== "agent" && (
-              <ResizableVideoPanel>
-                {(height) => (
-                  <VideoPlayer
-                    ref={videoPlayerRef}
-                    src={videoSrc}
-                    cues={videoCues}
-                    startOffset={videoStartOffset}
-                    height={height}
-                    onTimeUpdate={setCurrentVideoTime}
-                  />
-                )}
-              </ResizableVideoPanel>
-            )}
             {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
               <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
                 Video file not available on this device. Attach it locally or paste a URL via the Film icon.
@@ -4496,6 +4485,17 @@ export function ProjectWorkspace() {
               </div>
             )}
           </>
+        }
+        resizableTop={
+          isSubtitleFile && videoSrc && centerSurface !== "agent" ? (
+            <VideoPlayer
+              ref={videoPlayerRef}
+              src={videoSrc}
+              cues={videoCues}
+              startOffset={videoStartOffset}
+              onTimeUpdate={setCurrentVideoTime}
+            />
+          ) : undefined
         }
         main={centerSurface === "rules" ? (
           // FRO-194: Rules surface renders inside the shell; shell stays mounted.
@@ -5159,38 +5159,58 @@ function MoveToCorpusDialog({
   onSave: (value: string) => void | Promise<void>
 }) {
   const NEW = "__new__"
+  const UNGROUPED = "__ungrouped__"
   const trimmed = initialValue.trim()
   const initIsNew = trimmed.length > 0 && !existingMarkers.includes(trimmed)
-  const [selection, setSelection] = useState(initIsNew ? NEW : trimmed)
+  const initSelection = initIsNew ? NEW : (trimmed.length === 0 ? UNGROUPED : trimmed)
+  const [selection, setSelection] = useState(initSelection)
   const [customValue, setCustomValue] = useState(initIsNew ? trimmed : "")
   const isNew = selection === NEW
+  const corpusItems = [
+    { value: UNGROUPED, label: "Ungrouped" },
+    ...existingMarkers.map((m) => ({ value: m, label: m })),
+    { value: NEW, label: "Other…" },
+  ]
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent className="max-w-sm">
         <DialogHeader><DialogTitle>Move to corpus</DialogTitle></DialogHeader>
-        <select
-          value={selection}
-          onChange={(e) => setSelection(e.target.value)}
-            className="bg-muted w-full rounded px-2 py-1.5 text-sm"
-        >
-          <option value="">Ungrouped</option>
-          {existingMarkers.map((m) => <option key={m} value={m}>{m}</option>)}
-          <option value={NEW}>Other…</option>
-        </select>
-        {isNew && (
-          <input
-            autoFocus
-            value={customValue}
-            onChange={(e) => setCustomValue(e.target.value)}
-            placeholder="New corpus name"
-              className="bg-muted mt-2 w-full rounded px-2 py-1 text-sm"
-          />
-        )}
+        <div className="flex flex-col gap-2">
+          <Select
+            items={corpusItems}
+            value={selection}
+            onValueChange={(v) => { if (v != null) setSelection(v) }}
+          >
+            <SelectTrigger className="w-full" aria-label="Corpus">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {corpusItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {isNew && (
+            <Input
+              autoFocus
+              value={customValue}
+              onChange={(e) => setCustomValue(e.target.value)}
+              placeholder="New corpus name"
+              aria-label="New corpus name"
+            />
+          )}
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button
             disabled={isNew && !customValue.trim()}
-            onClick={() => { void onSave(isNew ? customValue : selection) }}
+            onClick={() => {
+              void onSave(isNew ? customValue : (selection === UNGROUPED ? "" : selection))
+            }}
           >
             Save
           </Button>

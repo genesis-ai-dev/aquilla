@@ -20,7 +20,7 @@ export function BetaBadge() {
     <Dialog>
       <DialogTrigger
         nativeButton={false}
-        render={<Badge className="cursor-pointer">Beta</Badge>}
+        render={<Badge>Beta</Badge>}
       />
       <DialogContent>
         <DialogHeader>

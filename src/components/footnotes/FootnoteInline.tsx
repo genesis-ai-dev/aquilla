@@ -457,7 +457,7 @@ function FootnoteRow({
             "block w-full rounded text-left text-xs",
             compact ? "px-0.5 py-0 leading-snug" : "px-1 py-0.5",
             editable
-              ? "cursor-pointer text-foreground hover:bg-muted/60"
+              ? "text-foreground hover:bg-muted/60"
               : "cursor-default text-muted-foreground",
             !targetFn.text && editable && "italic text-muted-foreground/60",
           )}

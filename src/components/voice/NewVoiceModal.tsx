@@ -351,7 +351,7 @@ function NewVoiceModalBody({
                 {/* Or reuse audio already in the project. */}
                 {takes.length > 0 && (
                   <details open={seededTakePresent} className="rounded-lg border bg-muted/10">
-                    <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+                    <summary className="px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">
                       Or reuse audio from a line
                     </summary>
                     <div className="space-y-1.5 px-3 pb-3">

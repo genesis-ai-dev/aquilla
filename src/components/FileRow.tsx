@@ -86,7 +86,7 @@ export function FileRow(props: FileRowProps) {
             data-showcase="sidebar.file"
             data-showcase-name={file.name}
             className={cn(
-              "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-[13px] cursor-pointer transition-colors",
+              "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-[13px] transition-colors",
               active ? "bg-accent text-foreground" : "hover:bg-accent",
             )}
             onClick={() => { if (!editing) onSelect() }}

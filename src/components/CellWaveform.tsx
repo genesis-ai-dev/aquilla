@@ -116,7 +116,7 @@ export function CellWaveform({
       <div
         className={cn(
           "group/wf bg-muted relative w-full select-none rounded-xl transition-shadow",
-          hasPeaks ? "cursor-pointer" : "cursor-default",
+          hasPeaks ? undefined : "cursor-default",
           peaksState === "error" && "ring-1 ring-amber-500/30 ring-inset",
           className,
         )}

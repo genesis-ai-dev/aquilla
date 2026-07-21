@@ -55,7 +55,7 @@ test("term lookup Apply rendering inserts the rendering into target cell", async
   await ws.waitForEditor()
 
   // Click on the "content" chip in the source column (dotted underline span).
-  const chip = alice.locator('span.cursor-pointer.underline').filter({ hasText: /^content$/i }).first()
+  const chip = alice.locator("span.underline").filter({ hasText: /^content$/i }).first()
   await expect(chip).toBeVisible({ timeout: 10_000 })
   await chip.click()
 
@@ -73,7 +73,7 @@ test("term lookup Apply rendering inserts the rendering into target cell", async
   // word "content").
   const chipRow = alice
     .locator("[data-cell-id]")
-    .filter({ has: alice.locator("span.cursor-pointer.underline").filter({ hasText: /^content$/i }) })
+    .filter({ has: alice.locator("span.underline").filter({ hasText: /^content$/i }) })
     .first()
   const targetCell = chipRow.locator('[data-cell-type="target"]').first()
   await expect(targetCell).toContainText(/échantillon/, { timeout: 5_000 })

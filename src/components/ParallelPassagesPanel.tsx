@@ -141,7 +141,7 @@ function DiffPreviewRow({
   return (
     <label
       className={cn(
-        "flex items-start gap-2 rounded-xl px-3 py-2.5 text-sm transition-colors cursor-pointer",
+        "flex items-start gap-2 rounded-xl px-3 py-2.5 text-sm transition-colors",
         "hover:bg-accent/60",
         selected ? "bg-accent/30" : "",
       )}

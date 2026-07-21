@@ -57,8 +57,9 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(screen.getByPlaceholderText("Search voices…")).toBeTruthy()
     expect(screen.getByText("Mary")).toBeTruthy()
     expect(screen.getByText(/1\/2 voiced/)).toBeTruthy()
-    // The narrator (default) row carries the narrator badge.
-    expect(screen.getByTitle(/lines without an explicit speaker/)).toBeTruthy()
+    // The narrator (default) row carries the narrator badge (AppTooltip no longer
+    // sets a native `title` — assert the badge label instead).
+    expect(screen.getAllByText("Narrator").length).toBeGreaterThanOrEqual(2)
     expect(screen.getByRole("button", { name: /New voice/ })).toBeTruthy()
   })
 

@@ -210,7 +210,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
       onPointerMove={(e) => { if (!disabled && e.buttons === 1) onSeek(fracFromEvent(e)) }}
       className={cn(
         "group/bar relative h-1 w-full touch-none bg-muted",
-        disabled ? "cursor-default" : "cursor-pointer",
+        disabled ? "cursor-default" : undefined,
       )}
     >
       <div className="absolute inset-y-0 left-0 bg-primary" style={{ width: `${fraction * 100}%` }} />

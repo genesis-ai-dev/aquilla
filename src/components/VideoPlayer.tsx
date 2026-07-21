@@ -19,7 +19,9 @@ interface VideoPlayerProps {
   src: string
   onTimeUpdate?: (seconds: number) => void  // receives playbackTime (raw, unadjusted)
   onDurationChange?: (seconds: number) => void
-  height: number
+  /** Fixed pixel height. Omit to fill the parent (`h-full`) — used when the
+   *  player sits inside a shadcn Resizable panel. */
+  height?: number
   className?: string
   // Live subtitle overlay driven by our own rendering (bypasses YouTube's
   // built-in CC, which we can't disable for third-party content). Pass current
@@ -90,8 +92,12 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
 
   return (
     <div
-      className={cn("relative flex items-center justify-center overflow-hidden bg-black", className)}
-      style={{ height }}
+      className={cn(
+        "relative flex items-center justify-center overflow-hidden bg-black",
+        height == null && "h-full",
+        className,
+      )}
+      style={height != null ? { height } : undefined}
     >
       <ReactPlayer
         ref={playerRef}

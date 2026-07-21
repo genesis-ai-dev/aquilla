@@ -420,7 +420,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                         className={cn(
                           "group/row flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                          hasMore && "hover:bg-muted/60 cursor-pointer",
+                          hasMore && "hover:bg-muted/60",
                           !hasMore && "cursor-default",
                         )}
                       >

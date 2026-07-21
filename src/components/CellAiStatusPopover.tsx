@@ -44,7 +44,7 @@ export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Prop
             <p className="text-muted-foreground leading-snug">{error.body}</p>
             {error.body !== error.raw && (
               <details className="mt-1">
-                <summary className="cursor-pointer text-[10px] text-muted-foreground/70 hover:text-muted-foreground">
+                <summary className="text-[10px] text-muted-foreground/70 hover:text-muted-foreground">
                   Technical detail
                 </summary>
                 <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-1.5 text-[10px] text-muted-foreground">

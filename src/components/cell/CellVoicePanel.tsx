@@ -124,7 +124,7 @@ function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f
       tabIndex={0}
       onPointerDown={handleDown}
       onPointerMove={handleMove}
-      className="flex h-full cursor-pointer touch-none items-center gap-px"
+      className="flex h-full touch-none items-center gap-px"
     >
       {bars.map((h, i) => {
         const on = (i + 0.5) / bars.length <= active

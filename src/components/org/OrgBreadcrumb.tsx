@@ -9,7 +9,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { AppTooltip } from "@/components/ui/tooltip"
 
 interface OrgBreadcrumbParent {
   label: string
@@ -43,39 +42,31 @@ interface Crumb {
 
 function CrumbLink({ crumb }: { crumb: Crumb }) {
   const labelClass = crumb.isRoot
-    ? "block shrink-0 whitespace-nowrap rounded-md px-1.5 py-1"
-    : "block max-w-[clamp(7rem,20vw,18rem)] truncate rounded-md px-1.5 py-1"
+    ? "block shrink-0 cursor-default whitespace-nowrap rounded-md px-1.5 py-1"
+    : "block max-w-[clamp(7rem,20vw,18rem)] cursor-default truncate rounded-md px-1.5 py-1"
   if (crumb.isCurrent) {
-    return (
-      <AppTooltip content={crumb.label}>
-        <BreadcrumbPage className={labelClass}>{crumb.label}</BreadcrumbPage>
-      </AppTooltip>
-    )
+    return <BreadcrumbPage className={labelClass}>{crumb.label}</BreadcrumbPage>
   }
   if (crumb.to) {
     return (
-      <AppTooltip content={crumb.label}>
-        <BreadcrumbLink
-          className={`${labelClass} hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50`}
-          render={<Link to={crumb.to} />}
-          onClick={crumb.onClick}
-        >
-          {crumb.label}
-        </BreadcrumbLink>
-      </AppTooltip>
+      <BreadcrumbLink
+        className={`${labelClass} hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50`}
+        render={<Link to={crumb.to} />}
+        onClick={crumb.onClick}
+      >
+        {crumb.label}
+      </BreadcrumbLink>
     )
   }
   if (crumb.onClick) {
     return (
-      <AppTooltip content={crumb.label}>
-        <BreadcrumbLink
-          className={`${labelClass} hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50`}
-          render={<button type="button" />}
-          onClick={crumb.onClick}
-        >
-          {crumb.label}
-        </BreadcrumbLink>
-      </AppTooltip>
+      <BreadcrumbLink
+        className={`${labelClass} hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50`}
+        render={<button type="button" />}
+        onClick={crumb.onClick}
+      >
+        {crumb.label}
+      </BreadcrumbLink>
     )
   }
   return <span className="font-normal text-foreground">{crumb.label}</span>

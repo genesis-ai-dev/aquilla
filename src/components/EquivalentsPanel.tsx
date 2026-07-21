@@ -109,7 +109,7 @@ function PredictedRow({
           type="button"
           className={cn(
             "flex items-center gap-1 text-left",
-            hasExamples ? "cursor-pointer hover:text-foreground" : "cursor-default",
+            hasExamples ? "hover:text-foreground" : "cursor-default",
           )}
           onClick={() => hasExamples && setOpen((v) => !v)}
           aria-expanded={hasExamples ? open : undefined}

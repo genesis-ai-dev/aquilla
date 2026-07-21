@@ -67,7 +67,6 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
             badgeVariants({ variant: "secondary" }),
             PILL,
             "text-emerald-700 dark:text-emerald-400",
-            onJumpToTranscript && "cursor-pointer",
           )}
         >
           <CheckCircle2 className="h-2.5 w-2.5" />
@@ -120,7 +119,7 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
         trigger={
           <button
             type="button"
-            className={cn(badgeVariants({ variant: "destructive" }), PILL, "cursor-pointer")}
+            className={cn(badgeVariants({ variant: "destructive" }), PILL)}
           >
             Transcription failed
           </button>

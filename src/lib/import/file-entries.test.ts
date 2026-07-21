@@ -39,4 +39,17 @@ describe("filesToProjectEntries Paratext preservation", () => {
     expect(await packed.file("Demo/audio/clip.mp3")!.async("uint8array"))
       .toEqual(new Uint8Array([1, 2, 3]))
   })
+
+  it("produces identical package bytes regardless of picker order or retry time", async () => {
+    const settings = new File(["<ScriptureText/>"], "Settings.xml")
+    const book = new File(["\\id GEN\n\\c 1\n\\v 1 Text"], "01GEN.SFM")
+    Object.defineProperty(settings, "webkitRelativePath", { value: "Demo/Settings.xml" })
+    Object.defineProperty(book, "webkitRelativePath", { value: "Demo/01GEN.SFM" })
+
+    const forward = await filesToProjectEntries([settings, book])
+    const reversed = await filesToProjectEntries([book, settings])
+
+    expect(new Uint8Array(await forward.sourceArtifact!.bytes()))
+      .toEqual(new Uint8Array(await reversed.sourceArtifact!.bytes()))
+  })
 })

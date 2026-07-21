@@ -5,6 +5,11 @@
 import type { ProjectEntryCollection } from "../parsers/paratext-project"
 
 type FileWithPath = File & { webkitRelativePath?: string }
+const ZIP_EPOCH = new Date("1980-01-01T00:00:00.000Z")
+
+function relativePath(file: FileWithPath): string {
+  return file.webkitRelativePath || file.name
+}
 
 /**
  * Convert a file selection into project entries:
@@ -34,7 +39,7 @@ export async function filesToProjectEntries(files: File[]): Promise<ProjectEntry
     return entries
   }
   const entries = files.map((f) => ({
-    name: (f as FileWithPath).webkitRelativePath || f.name,
+    name: relativePath(f as FileWithPath),
     text: () => f.text(),
     bytes: () => f.arrayBuffer(),
   })) as ProjectEntryCollection
@@ -47,9 +52,16 @@ export async function filesToProjectEntries(files: File[]): Promise<ProjectEntry
       bytes: async () => {
         const JSZip = (await import("jszip")).default
         const zip = new JSZip()
-        for (const file of files) {
-          const path = (file as FileWithPath).webkitRelativePath || file.name
-          zip.file(path, await file.arrayBuffer())
+        // Browser file pickers do not guarantee enumeration order, and JSZip
+        // otherwise stamps entries with the current time. Sort paths and use
+        // the ZIP epoch so the same folder produces the same checksum on every
+        // retry, independent of OS/picker order.
+        const ordered = [...files].sort((left, right) =>
+          relativePath(left as FileWithPath).localeCompare(relativePath(right as FileWithPath)),
+        )
+        for (const file of ordered) {
+          const path = relativePath(file as FileWithPath)
+          zip.file(path, await file.arrayBuffer(), { date: ZIP_EPOCH, createFolders: false })
         }
         return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE", compressionOptions: { level: 6 } })
       },

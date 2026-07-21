@@ -464,3 +464,33 @@ path.
    before recipes become ad-hoc code again?
 3. Rate-limit and job-size numbers for `get_capabilities`.
 4. Credential UX in the app (mint/scope/revoke screens) — v1 gate or CLI-first?
+
+---
+
+## Status addendum (2026-07-21, AQU-AGENT swarm)
+
+This section is additive — nothing above is superseded. The **AQU-AGENT** swarm
+(`docs/swarm/AQU-AGENT-CONTRACTS.md`, `docs/swarm/AQU-AGENT-ORCHESTRATION.md`) is building a new
+**in-app agent harness** (Cloudflare Sandbox containers for code execution + living memory) that
+is a *caller* of this Agent API's command/changeset layer, not a replacement for it.
+
+Concretely: the in-app agent's new `plan_import` tool answers "how does the agent-driven import
+UI in the chat/workbench actually write anything?" by minting an **ephemeral, project-scoped,
+ask-mode** internal `aqk_` credential per run (`agent-run:<runId>`, 2h expiry, via
+`db/shared/api-credentials.ts`'s `mintApiToken()`) and calling this doc's own `PlanImport`
+command through the **existing** `POST /api/v1/external/projects/:projectId/changesets`
+endpoint — the same REST path an external partner integration would use. The credential is
+hardcoded `mode='ask'` regardless of the invoking user's own credential ceiling, so an
+agent-staged import always lands on the **existing** `/approve/:changesetId` page (§3, D5) for a
+one-time human approval assertion before it commits. No new write path, no raw-event
+short-circuit, no agent-specific changeset shape — the in-app agent is simply another authorized
+caller of the command layer this document specifies, subject to every gate in §6 (permission
+parity, provenance envelope, `plan_stale`, etc.).
+
+What's genuinely new (out of scope for this document, covered in
+[`docs/AGENT-SANDBOX.md`](AGENT-SANDBOX.md)): the sandbox code-execution service
+(`agent-worker/`, no model keys, default-deny egress), the harness tool surface
+(`run_code`/`load_artifact`/`plan_import`/memory tools) that sits in front of the command layer,
+and the living-memory/brief tables and review UI. None of it changes the credential, command,
+changeset, or provenance model documented above — read `docs/AGENT-SANDBOX.md` for the sandbox
+architecture and come back here for what a `PlanImport` changeset actually *is* once staged.

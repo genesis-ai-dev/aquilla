@@ -10,7 +10,7 @@ FROM docker.io/cloudflare/sandbox:0.7.0-python
 # Use the SDK's Python variant explicitly. The generic image is not guaranteed
 # to contain pip, which made the previous first deployment dependent on an
 # unverified image detail.
-RUN pip install --no-cache-dir \
+RUN pip3 install --no-cache-dir \
     pandas \
     openpyxl \
     lxml \

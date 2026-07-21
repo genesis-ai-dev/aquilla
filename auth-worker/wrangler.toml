@@ -354,5 +354,6 @@ BASE_URL = "http://127.0.0.1:5173"
 SYNC_WORKER_URL = "http://127.0.0.1:8789"
 ENVIRONMENT = "development"
 ADMIN_EMAILS = "alice@example.test"
-# AQU-AGENT §6 — local sandbox worker (dev-stack :8790); key passed as --var.
-AGENT_SANDBOX_URL = "http://127.0.0.1:8790"
+# A deployed e2e worker must use an explicitly provisioned remote sandbox.
+# Local e2e is started through scripts/dev-stack.ts, which injects the paired
+# URL/key only after its sandbox health check succeeds.

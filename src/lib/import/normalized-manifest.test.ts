@@ -47,6 +47,36 @@ describe("normalized import manifest", () => {
     expect(manifest.warnings).toEqual([])
   })
 
+  it("does not number a heading merely because an inferred parser attached a nearby verse reference", () => {
+    const manifest = normalizeTranslatableStrings([{
+      id: "heading",
+      original: "The beginning",
+      translated: "",
+      context: "GEN 1:1",
+      group: "GEN 1:1",
+      globalReferences: ["GEN 1:1"],
+      type: "heading",
+    }, {
+      id: "verse",
+      original: "In the beginning",
+      translated: "",
+      context: "GEN 1:1",
+      group: "GEN 1:1",
+      globalReferences: ["GEN 1:1"],
+      type: "verse",
+    }], { fileName: "custom", fileType: "custom" })
+
+    expect(manifest.units[0]).toMatchObject({ kind: "heading", displayLabel: null })
+    expect(manifest.units[0].canonicalRef).toBeUndefined()
+    expect(manifest.units[0].address).toEqual({ scheme: "sequence", index: 1 })
+    expect(manifest.units[1]).toMatchObject({
+      kind: "verse",
+      displayLabel: "1",
+      canonicalRef: "GEN 1:1",
+      address: { scheme: "scripture", book: "GEN", chapter: 1, verse: "1" },
+    })
+  })
+
   it("preserves package locations and disambiguates split segments in one block", () => {
     const strings: TranslatableString[] = [
       {
@@ -236,6 +266,36 @@ describe("normalized import manifest", () => {
       deterministic: false,
       fidelity: "content-only",
       recipe,
+    })
+  })
+
+  it("keeps recipe-parsed headings in their Scripture chapter without treating them as verses", () => {
+    const manifest = normalizeTranslatableStrings([{
+      id: "heading",
+      original: "The beginning",
+      translated: "",
+      context: "GEN 1:1",
+      group: "GEN 1:h:1",
+      section: "GEN 1",
+      globalReferences: ["GEN 1:h:1"],
+      type: "heading",
+      metadata: { aquillaRecipe: { recipeId: "sandbox-parser", record: 1 } },
+    }], {
+      fileName: "legacy.odd",
+      fileType: "custom",
+    })
+
+    expect(manifest.units[0]).toMatchObject({
+      canonicalRef: "GEN 1:h:1",
+      displayLabel: null,
+      address: {
+        scheme: "scripture-structure",
+        book: "GEN",
+        chapter: 1,
+        marker: "h",
+        occurrence: 1,
+      },
+      sourceLocator: { kind: "recipe", recipeId: "sandbox-parser", record: 1 },
     })
   })
 

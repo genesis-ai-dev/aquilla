@@ -78,7 +78,7 @@ export interface CodeActivityItem {
   durationMs?: number
 }
 
-/** A PlanImport changeset staged via changeset-bridge, awaiting human approval. */
+/** A legacy persisted PlanImport changeset awaiting human approval. */
 export interface ChangesetItem {
   id: string
   kind: "changeset"

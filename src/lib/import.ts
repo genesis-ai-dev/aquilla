@@ -83,6 +83,7 @@ import {
 } from "./import/ai-recipe"
 import type { DeclarativeImportRecipe } from "./import/normalized-manifest"
 import type { RoundTripFidelity } from "../../shared/import-contract"
+import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -420,7 +421,7 @@ export interface ImportResult {
   originalName?: string
   /** AI-assisted unknown-format recipe, shown in preview and persisted. */
   importRecipe?: DeclarativeImportRecipe
-  importClassification?: AiImportClassification
+  importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -462,6 +463,52 @@ export interface ImportContext {
   /** Advanced orchestrators can keep fresh files hidden while persisting
    * package-level or format-specific secondary data. */
   deferPublication?: boolean
+}
+
+type PrepareImportContext = Pick<
+  ImportContext,
+  "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal"
+>
+
+function preparedParsedFile(
+  file: File,
+  fileType: FileType,
+  results: ImportResult[],
+): PreparedImportFile {
+  if (results.length === 0 || results.every((result) => result.strings.length === 0)) {
+    throw new Error(`${file.name} did not contain any content the ${fileType} adapter could import.`)
+  }
+  return { fileType, results }
+}
+
+async function prepareSandboxImport(
+  file: File,
+  ctx: PrepareImportContext & { identityToken: string },
+  firstError: unknown,
+  retainedBytes?: ArrayBuffer,
+): Promise<PreparedImportFile> {
+  const sandboxed = await parseUnknownFileInSandbox(file, {
+    identityToken: ctx.identityToken,
+    projectId: ctx.projectId,
+    sourceLanguage: ctx.sourceLanguage,
+    targetLanguage: ctx.targetLanguage,
+    signal: ctx.signal,
+  }).catch((sandboxError) => {
+    const first = firstError instanceof Error ? firstError.message : String(firstError)
+    const second = sandboxError instanceof Error ? sandboxError.message : String(sandboxError)
+    throw new Error(`${first}. Sandbox fallback also failed: ${second}`)
+  })
+  return {
+    fileType: "custom",
+    results: [{
+      name: file.name,
+      strings: sandboxed.strings,
+      rawBytes: retainedBytes ?? await file.arrayBuffer(),
+      rawSourceFormat: "custom-original",
+      importRecipe: sandboxed.classification.recipe,
+      importClassification: sandboxed.classification,
+    }],
+  }
 }
 
 function normalizeImportedDirection(value: string | undefined | null): "ltr" | "rtl" | undefined {
@@ -579,7 +626,7 @@ export async function importFile(
  * recipe and parsed units. Deterministic content sniffing precedes AI. */
 export async function prepareImportFile(
   file: File,
-  ctx: Pick<ImportContext, "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal">,
+  ctx: PrepareImportContext,
 ): Promise<PreparedImportFile> {
   if (file.size === 0) throw new Error(`${file.name} is empty.`)
   // Fail before parsing/decompression and before any server event. The same
@@ -590,49 +637,65 @@ export async function prepareImportFile(
     // Opaque packages/media need their deterministic binary adapter. Textual
     // extensions are sniffed as content first so a USFM document named .txt,
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
-    if (isMediaFileType(extensionType) || extensionType === "docx" || extensionType === "pptx") {
-      return {
-        fileType: extensionType,
-        results: isMediaFileType(extensionType) ? [] : await parseFile(file, extensionType),
+    if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
+    try {
+      if (extensionType === "docx" || extensionType === "pptx") {
+        return preparedParsedFile(file, extensionType, await parseFile(file, extensionType))
       }
-    }
-    const bytes = await file.arrayBuffer()
-    const text = decodeImportText(bytes, file.name)
-    const sniffedType = sniffKnownTextFile(text)
-    const fileType = sniffedType ?? extensionType
-    return {
-      fileType,
-      results: await parseFile(file, fileType),
+      const bytes = await file.arrayBuffer()
+      const text = decodeImportText(bytes, file.name)
+      const sniffedType = sniffKnownTextFile(text)
+      const fileType = sniffedType ?? extensionType
+      return preparedParsedFile(file, fileType, await parseFile(file, fileType))
+    } catch (error) {
+      if (!ctx.identityToken) throw error
+      return prepareSandboxImport(file, { ...ctx, identityToken: ctx.identityToken }, error)
     }
   }
 
-  const inspected = await readUnknownTextFile(file, ctx.signal)
-  const { text } = inspected
-  const sniffedType = sniffKnownTextFile(text)
-  if (sniffedType) {
-    return { fileType: sniffedType, results: await parseFile(file, sniffedType) }
+  let inspected: Awaited<ReturnType<typeof readUnknownTextFile>> | undefined
+  let declarativeError: unknown
+  try {
+    inspected = await readUnknownTextFile(file, ctx.signal)
+    const sniffedType = sniffKnownTextFile(inspected.text)
+    if (sniffedType) {
+      return preparedParsedFile(file, sniffedType, await parseFile(file, sniffedType))
+    }
+    if (!ctx.identityToken) {
+      throw new Error(`Unsupported file type: ${file.name}. Sign in to use AI-assisted format detection.`)
+    }
+    const assisted = await classifyAndParseUnknownText(file, {
+      identityToken: ctx.identityToken,
+      projectId: ctx.projectId,
+      sourceLanguage: ctx.sourceLanguage,
+      targetLanguage: ctx.targetLanguage,
+      signal: ctx.signal,
+    }, inspected)
+    return {
+      fileType: "custom",
+      results: [{
+        name: file.name,
+        strings: assisted.strings,
+        rawBytes: inspected.bytes,
+        rawSourceFormat: "custom-original",
+        importRecipe: assisted.classification.recipe,
+        importClassification: assisted.classification,
+      }],
+    }
+  } catch (error) {
+    declarativeError = error
   }
-  if (!ctx.identityToken) {
-    throw new Error(`Unsupported file type: ${file.name}. Sign in to use AI-assisted format detection.`)
-  }
-  const assisted = await classifyAndParseUnknownText(file, {
-    identityToken: ctx.identityToken,
-    projectId: ctx.projectId,
-    sourceLanguage: ctx.sourceLanguage,
-    targetLanguage: ctx.targetLanguage,
-    signal: ctx.signal,
-  }, inspected)
-  return {
-    fileType: "custom",
-    results: [{
-      name: file.name,
-      strings: assisted.strings,
-      rawBytes: inspected.bytes,
-      rawSourceFormat: "custom-original",
-      importRecipe: assisted.classification.recipe,
-      importClassification: assisted.classification,
-    }],
-  }
+  if (!ctx.identityToken) throw declarativeError
+
+  // The safe declarative recipe is the preferred AI path. Only formats it
+  // cannot decode or express are escalated to generated code, and that code
+  // executes in the isolated import sandbox—not in this browser/runtime.
+  return prepareSandboxImport(
+    file,
+    { ...ctx, identityToken: ctx.identityToken },
+    declarativeError,
+    inspected?.bytes,
+  )
 }
 
 export async function importEBible(

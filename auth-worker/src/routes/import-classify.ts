@@ -107,15 +107,14 @@ imports.post(
   authMiddleware,
   zValidator("json", classifyRequestSchema),
   async (c) => {
-    if (!c.env.OPENROUTER_API_KEY) {
-      return c.json({ error: "OPENROUTER_API_KEY is not configured" }, 500)
-    }
-
     const input = c.req.valid("json")
     const user = c.get("user")
     const role = await resolveProjectRole(c.env, user, input.projectId)
     if (!role || role.level < MIN_IMPORT_ROLE) {
       return c.json({ error: "project_lead_required", message: "Project lead access is required to import files." }, 403)
+    }
+    if (!c.env.OPENROUTER_API_KEY) {
+      return c.json({ error: "import_classifier_unavailable", message: "AI import classification is not configured" }, 503)
     }
 
     const settings = await getPlatformSettingsCached(c.env)
@@ -153,6 +152,7 @@ imports.post(
           reasoning: { effort: "none" },
           response_format: { type: "json_object" },
         }),
+        signal: c.req.raw.signal,
       })
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "")

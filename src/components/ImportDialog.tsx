@@ -119,7 +119,7 @@ interface ImportDialogProps {
   targetLanguage: string
   /** Active target-lane storage key. Empty means the project default lane. */
   targetLang?: string
-  /** Identity JWT used only when an unknown text format needs AI analysis. */
+  /** Identity JWT used only when a format needs AI-assisted analysis. */
   identityToken?: string
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
@@ -974,6 +974,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
+  const parseAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => () => parseAbortRef.current?.abort(), [])
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
   // importing.
@@ -1044,6 +1046,9 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       const allParsedResults: ImportResult[] = []
       const preparedByFile = new Map<File, PreparedImportFile>()
       if (textFiles.length > 0 && onPreview) {
+        parseAbortRef.current?.abort()
+        const parseController = new AbortController()
+        parseAbortRef.current = parseController
         try {
           for (const file of textFiles) {
             const knownType = detectFileType(file.name)
@@ -1053,11 +1058,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               identityToken,
               sourceLanguage,
               targetLanguage,
+              signal: parseController.signal,
             })
             preparedByFile.set(file, prepared)
             allParsedResults.push(...prepared.results)
           }
         } catch (err) {
+          if (parseController.signal.aborted) return
           posthog.captureException(err, { import_stage: "parse", project_id: projectId, file_exts: fileExts(list) })
           posthog.capture(IMPORT_FAILED, {
             import_stage: "parse",
@@ -1069,6 +1076,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           setImporting(false)
           setPhase("")
           return
+        } finally {
+          if (parseAbortRef.current === parseController) parseAbortRef.current = null
         }
         setImporting(false)
         setPhase("")
@@ -1335,7 +1344,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             <p><span className="font-medium text-foreground/70">Localization</span> — PO/POT, Java properties</p>
             <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT, SBV</p>
             <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
-            <p><span className="font-medium text-foreground/70">Other text formats</span> — analyzed with AI before you confirm</p>
+            <p><span className="font-medium text-foreground/70">Other formats</span> — AI-assisted when configured, always reviewed before import</p>
           </div>
         </>
       )}

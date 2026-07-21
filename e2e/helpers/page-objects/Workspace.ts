@@ -1,5 +1,11 @@
 import { type Page, type Locator, expect } from "@playwright/test"
 
+interface FilePayload {
+  name: string
+  mimeType: string
+  buffer: Buffer
+}
+
 /** Page object for the project workspace route ("/project/:id"). */
 export class Workspace {
   private readonly page: Page
@@ -13,6 +19,14 @@ export class Workspace {
     await this.chooseImportFiles(filePath)
     const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
     await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Select an in-memory payload. Useful when the bytes are a real fixture but
+   * its supplied filename intentionally has an unknown legacy extension. */
+  async previewImportPayload(payload: FilePayload): Promise<void> {
+    await this.chooseImportFiles(payload)
+    await expect(this.page.getByRole("button", { name: /Confirm import/i }))
+      .toBeVisible({ timeout: 180_000 })
   }
 
   /** Commit the currently visible import preview and await publication. */
@@ -38,7 +52,7 @@ export class Workspace {
 
   /** Shared import prologue: dismiss the setup checklist, open the
    * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string): Promise<void> {
+  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
     // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.

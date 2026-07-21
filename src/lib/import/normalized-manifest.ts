@@ -141,16 +141,28 @@ function unitKind(value: TranslatableString): ImportUnitKind {
   }
 }
 
-function canonicalRef(value: TranslatableString): string | undefined {
+function canonicalRef(value: TranslatableString, kind: ImportUnitKind): string | undefined {
   const explicit = nonEmptyString(value.globalReferences?.[0])
-  if (explicit) return explicit
+  if (explicit) {
+    // Structural cells can carry a nearby verse as context, but that must not
+    // turn a heading into a numbered verse. Only explicit structure locators
+    // are identity-bearing for headings/paratext.
+    if (kind === "heading" || kind === "paratext") {
+      return SCRIPTURE_STRUCTURE_RE.test(explicit) ? explicit : undefined
+    }
+    return explicit
+  }
 
   // USFM headings and structural markers intentionally carry their canonical
   // locator in `group`, while general-purpose parsers often put a freshly
   // generated UUID there. Only accept group values that are recognizable
   // Scripture addresses; random parser grouping must never become identity.
   const grouped = nonEmptyString(value.group)
-  return grouped && (SCRIPTURE_VERSE_RE.test(grouped) || SCRIPTURE_STRUCTURE_RE.test(grouped))
+  if (!grouped) return undefined
+  if (kind === "heading" || kind === "paratext") {
+    return SCRIPTURE_STRUCTURE_RE.test(grouped) ? grouped : undefined
+  }
+  return SCRIPTURE_VERSE_RE.test(grouped) || SCRIPTURE_STRUCTURE_RE.test(grouped)
     ? grouped
     : undefined
 }
@@ -163,6 +175,20 @@ function addressAndLocator(
   contentOrder: number,
   locationSegment: number,
 ): { address: ImportAddress; sourceLocator: ImportSourceLocator; keyBase: string; displayLabel: string | null } {
+  const recipe = value.metadata?.aquillaRecipe as RecipeMetadata | undefined
+  const recipeId = nonEmptyString(recipe?.recipeId)
+  const recipeRecord = typeof recipe?.record === "number" && Number.isInteger(recipe.record)
+    ? recipe.record
+    : undefined
+  const recipeField = nonEmptyString(recipe?.field)
+  const recipeLocator: ImportSourceLocator | undefined = recipeId && recipeRecord !== undefined
+    ? {
+        kind: "recipe",
+        recipeId,
+        record: recipeRecord,
+        ...(recipeField ? { field: recipeField } : {}),
+      }
+    : undefined
   const verse = ref?.match(SCRIPTURE_VERSE_RE)
   if (verse) {
     const normalizedRef = `${verse[1].toUpperCase()} ${Number(verse[2])}:${verse[3]}`
@@ -191,7 +217,7 @@ function addressAndLocator(
         marker,
         occurrence,
       },
-      sourceLocator: { kind: "usfm", ref: ref!, marker, occurrence },
+      sourceLocator: recipeLocator ?? { kind: "usfm", ref: ref!, marker, occurrence },
       keyBase: `scripture-structure:${ref}`,
       displayLabel: null,
     }
@@ -230,21 +256,10 @@ function addressAndLocator(
     }
   }
 
-  const recipe = value.metadata?.aquillaRecipe as RecipeMetadata | undefined
-  const recipeId = nonEmptyString(recipe?.recipeId)
-  const recipeRecord = typeof recipe?.record === "number" && Number.isInteger(recipe.record)
-    ? recipe.record
-    : undefined
   if (recipeId && recipeRecord !== undefined) {
-    const field = nonEmptyString(recipe?.field)
     return {
       address: { scheme: "custom", recipeId, record: recipeRecord },
-      sourceLocator: {
-        kind: "recipe",
-        recipeId,
-        record: recipeRecord,
-        ...(field ? { field } : {}),
-      },
+      sourceLocator: recipeLocator!,
       keyBase: `custom:${recipeId}:${recipeRecord}`,
       displayLabel: kind === "heading" || kind === "paratext" ? null : String(recipeRecord),
     }
@@ -340,7 +355,7 @@ export function normalizeTranslatableStrings(
   const units = strings.map((value, physicalOrder): NormalizedImportUnit => {
     const kind = unitKind(value)
     if (kind !== "heading" && kind !== "paratext") contentOrder += 1
-    const ref = canonicalRef(value)
+    const ref = canonicalRef(value, kind)
     const locationBase = value.sourceLocation
       ? `${value.sourceLocation.file}:${value.sourceLocation.blockPath}`
       : ""

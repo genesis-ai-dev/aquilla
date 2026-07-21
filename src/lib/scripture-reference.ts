@@ -79,6 +79,13 @@ export function cellNumberLabel({
 }: CellNumberLabelInput): string | null {
   if (!lineNumbersEnabled) return null
 
+  // Structural identity wins over a nearby verse reference. Importers often
+  // retain that reference so a heading stays scoped to its chapter, but it is
+  // contextual—not the heading's display number.
+  if (displayLabel === null || cellType === "heading" || cellType === "paratext") {
+    return null
+  }
+
   const canonicalVerse = verseLabelFromCanonical(canonicalRef)
     ?? verseLabelFromCanonical(sourceCanonicalRef)
   if (canonicalVerse) return canonicalVerse
@@ -86,10 +93,6 @@ export function cellNumberLabel({
   // A normalized manifest owns presentation identity. In particular, null is
   // how headings/titles/introductions say "I am structural, not verse zero".
   if (displayLabel !== undefined) return displayLabel
-
-  // Legacy rows predate normalized metadata. Preserve the structural rule by
-  // semantic type so Markdown/DOCX headings behave like Scripture headings.
-  if (cellType === "heading" || cellType === "paratext") return null
 
   return scriptureNumbering ? null : String(contentNumber ?? rowIndex + 1)
 }

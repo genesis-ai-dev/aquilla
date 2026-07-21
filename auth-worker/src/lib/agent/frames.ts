@@ -23,8 +23,9 @@ export interface ToolCodeOutputFrame {
   durationMs: number
 }
 
-/** A PlanImport changeset was staged via changeset-bridge — the client links
- *  `approvalUrl` for the human to approve. Never carries the ephemeral token. */
+/** Backward-compatible frame for previously staged PlanImport changesets. The
+ * current product importer runs through the dedicated Import dialog, but old
+ * persisted agent timelines may still contain this frame. */
 export interface ChangesetStagedFrame {
   type: "changeset.staged"
   runId: string

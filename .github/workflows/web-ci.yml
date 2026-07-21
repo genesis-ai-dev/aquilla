@@ -184,3 +184,9 @@ jobs:
 
       - run: npm test
         working-directory: agent-worker
+
+      # The route suite uses an injected Sandbox and deliberately needs no
+      # local container engine. Deployment does build this image, though, so
+      # CI must also prove the pinned SDK base and Python package layer resolve.
+      - run: docker build --tag aquilla-agent-sandbox:ci .
+        working-directory: agent-worker

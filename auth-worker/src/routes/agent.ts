@@ -41,13 +41,11 @@ import {
 } from "../lib/agent/frames"
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
-import { revokeRunCredential, type RunCredential } from "../lib/agent/changeset-bridge"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import {
   runCode,
   loadArtifact,
   readSandboxFile,
-  planImport,
   proposeMemoryTool,
   proposeBriefUpdateTool,
   readMemoryTool,
@@ -55,7 +53,6 @@ import {
   type RunCodeArgs,
   type LoadArtifactArgs,
   type ReadSandboxFileArgs,
-  type PlanImportArgs,
   type ProposeMemoryArgs,
   type ProposeBriefArgs,
   type ReadMemoryArgs,
@@ -120,8 +117,9 @@ type AgentFrame =
   | { type: "usage"; promptTokens: number; completionTokens: number; costCents: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
-  // AQU-AGENT §4 — new harness frames (tool.code.*, changeset.staged,
-  // memory.proposed, brief.proposed, budget, budget.exhausted).
+  // AQU-AGENT §4 — harness frames (tool.code.*, memory.proposed,
+  // brief.proposed, budget, budget.exhausted) plus changeset.staged for
+  // backward-compatible rendering of persisted runs.
   | HarnessFrame
 
 // ── Tool schema (OpenAI tool-calling, served to the model) ──────────────────
@@ -303,39 +301,6 @@ function buildTools(bibleResourcesEnabled: boolean) {
             maxBytes: { type: "number" },
           },
           required: ["path"],
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "plan_import",
-        description:
-          "STAGE a file import as a changeset for human approval (nothing is written until a human approves). Each cell needs an `original` string. Max 5000 cells — split larger files.",
-        parameters: {
-          type: "object",
-          properties: {
-            fileName: { type: "string" },
-            fileType: { type: "string" },
-            sourceLanguage: { type: "string" },
-            targetLanguage: { type: "string" },
-            cells: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  original: { type: "string" },
-                  translated: { type: "string" },
-                  context: { type: "string" },
-                  group: { type: "string" },
-                  type: { type: "string" },
-                },
-                required: ["original"],
-              },
-            },
-          },
-          required: ["fileName", "fileType", "cells"],
         },
       },
     },
@@ -762,15 +727,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   let stagedCount = 0
   let status: "ok" | "capped" | "error" = "ok"
 
-  // AQU-AGENT §2 run state: cost cap, untrusted-content guard, ephemeral
-  // changeset credentials to revoke, and the sandbox container id.
+  // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
+  // container id.
   const costCapCents = resolveRunCostCapCents(env.AGENT_RUN_COST_CAP_CENTS)
   // `active` seeds from the session's carried-over bit so a run that inherits
   // untrusted content starts locked; `usedThisTurn` gates the within-run clear;
   // `runHad` records whether ANY turn in this run used an untrusted tool, which
   // is what we persist back to the session (adversarial-panel authz-M2/races-F2).
   const untrusted = { active: storedUntrusted, usedThisTurn: false, runHad: false }
-  const runCredentials: RunCredential[] = []
   // races-F4: one sandbox container PER RUN (never reuse the session's). Cross-run
   // container reuse is deferred to v2 — the model reloads artifacts each run via
   // load_artifact (see the attached-artifacts prompt). See AQU-AGENT-TRACES.md.
@@ -792,7 +756,6 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       untrusted.runHad = true
     },
     isUntrustedActive: () => untrusted.active,
-    registerCredential: (cred) => runCredentials.push(cred),
   }
 
   send({ type: "run_start", runId, ...(body.sessionId ? { sessionId: body.sessionId } : {}) })
@@ -955,12 +918,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     status = "error"
   }
 
-  // AQU-AGENT §2 — best-effort teardown: revoke every ephemeral changeset
-  // credential and destroy the sandbox container. Never blocks the run's
+  // AQU-AGENT §2 — best-effort sandbox teardown. Never blocks the run's
   // settlement; failures are logged, not surfaced.
-  for (const cred of runCredentials) {
-    await revokeRunCredential(env, cred)
-  }
   if (env.AGENT_SANDBOX_URL && env.AGENT_SANDBOX_KEY) {
     await sandboxDestroy(env, sandboxSessionId)
   }
@@ -1026,12 +985,12 @@ interface ToolCallEnv {
 }
 
 /** Does this tool call consume the write/SQL iteration budget? Write-shaped
- *  harness tools (plan_import stages a changeset; propose_* persist proposals)
+ *  harness tools (propose_* persist proposals)
  *  count too; sandbox reads + read_memory stay free (MAX_TOTAL_ROUNDS backstop). */
 function budgetedCall(call: ToolCall): boolean {
   const name = call.function.name
   if (name === "draft" || name === "propose" || name === "sql") return true
-  if (name === "plan_import" || name === "propose_memory" || name === "propose_brief_update") return true
+  if (name === "propose_memory" || name === "propose_brief_update") return true
   if (name !== "execute") return false
   try {
     const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
@@ -1214,8 +1173,6 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
       return loadArtifact(args as LoadArtifactArgs, t.harness)
     case "read_sandbox_file":
       return readSandboxFile(args as ReadSandboxFileArgs, t.harness)
-    case "plan_import":
-      return planImport(args as PlanImportArgs, t.harness)
     case "propose_memory":
       return proposeMemoryTool(args as ProposeMemoryArgs, t.harness)
     case "propose_brief_update":

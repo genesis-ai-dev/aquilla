@@ -3,12 +3,13 @@
 // The SPA and external/agent surfaces use the same semantic envelope. The SPA
 // derives it from deterministic parsers; PlanImport may submit it explicitly
 // after bounded artifact inspection or an AI-assisted recipe proposal. This
-// module never executes model-generated code. Recipes are declarative,
-// versioned provenance only; cells still pass through ordinary validation and
-// compile to the canonical event perimeter.
+// module never executes model-generated code. A sandbox-program recipe is
+// retained as versioned provenance only; cells still pass through ordinary
+// validation and compile to the canonical event perimeter.
 
 import {
   IMPORT_UNIT_KINDS,
+  MAX_SANDBOX_PROGRAM_CHARS,
   NORMALIZED_IMPORT_VERSION,
   ROUND_TRIP_FIDELITIES,
   type ImportUnitKind,
@@ -277,8 +278,26 @@ export function validatePlanImportManifest(input: PlanImportInput): string[] {
       if (!nonEmpty(manifest.recipe.id)) issues.push('manifest.recipe.id must be a non-empty string')
       if (!nonEmpty(manifest.recipe.name)) issues.push('manifest.recipe.name must be a non-empty string')
       if (!nonEmpty(manifest.recipe.inputFormat)) issues.push('manifest.recipe.inputFormat must be a non-empty string')
-      if (manifest.recipe.strategy !== 'records') {
+      if (!['records', 'sandbox-program'].includes(manifest.recipe.strategy)) {
         issues.push('manifest.recipe.strategy is unsupported')
+      }
+      if (manifest.recipe.strategy === 'sandbox-program') {
+        const program = manifest.recipe.program
+        if (!program || !['python', 'javascript'].includes(program.language)) {
+          issues.push('manifest.recipe.program.language is unsupported')
+        }
+        if (!nonEmpty(program?.source)) issues.push('manifest.recipe.program.source must be a non-empty string')
+        if (program?.source && program.source.length > MAX_SANDBOX_PROGRAM_CHARS) {
+          issues.push(`manifest.recipe.program.source exceeds ${MAX_SANDBOX_PROGRAM_CHARS} characters`)
+        }
+        if (!program?.sha256?.match(/^[a-f0-9]{64}$/)) {
+          issues.push('manifest.recipe.program.sha256 must be a SHA-256 hex digest')
+        }
+        if (program?.sha256 && manifest.recipe.config.programSha256 !== program.sha256) {
+          issues.push('manifest.recipe.config.programSha256 must match program.sha256')
+        }
+      } else if (manifest.recipe.program !== undefined) {
+        issues.push('manifest.recipe.program is only allowed for sandbox-program recipes')
       }
       if (!['ai', 'user'].includes(manifest.recipe.proposedBy)) {
         issues.push('manifest.recipe.proposedBy is unsupported')

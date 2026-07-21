@@ -105,6 +105,45 @@ describe('normalized PlanImport compiler', () => {
     expect(compiled.fileSummary.recipe).toEqual(input.manifest?.recipe)
   })
 
+  it('retains valid sandbox parser provenance as inert data and rejects incomplete programs', () => {
+    const digest = 'a'.repeat(64)
+    const input: PlanImportInput = {
+      fileType: 'custom',
+      manifest: {
+        version: 1,
+        profileId: 'agent:sandbox-parser',
+        profileVersion: '1',
+        deterministic: false,
+        fidelity: 'content-only',
+        recipe: {
+          version: 1,
+          id: 'sandbox-parser',
+          name: 'Sandbox parser',
+          inputFormat: 'legacy',
+          strategy: 'sandbox-program',
+          config: { outputSchema: 'aquilla-import-units-v1', programSha256: digest },
+          proposedBy: 'ai',
+          program: { language: 'python', source: 'raise SystemExit()', sha256: digest },
+        },
+      },
+      cells: [{ content: 'Parsed safely elsewhere' }],
+    }
+
+    expect(validatePlanImportManifest(input)).toEqual([])
+    expect(compilePlanImport(input).fileSummary.recipe).toEqual(input.manifest?.recipe)
+
+    input.manifest!.recipe!.program!.sha256 = 'bad'
+    expect(validatePlanImportManifest(input)).toContain(
+      'manifest.recipe.program.sha256 must be a SHA-256 hex digest',
+    )
+
+    input.manifest!.recipe!.program!.sha256 = digest
+    input.manifest!.recipe!.config.programSha256 = 'b'.repeat(64)
+    expect(validatePlanImportManifest(input)).toContain(
+      'manifest.recipe.config.programSha256 must match program.sha256',
+    )
+  })
+
   it('rejects structural labels, duplicate explicit keys, invalid timing, and unverified fidelity claims', () => {
     const issues = validatePlanImportManifest({
       fileType: 'custom',

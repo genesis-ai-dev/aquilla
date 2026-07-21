@@ -1,5 +1,5 @@
 // AQU-AGENT §2 — new harness tool handlers (run_code, load_artifact,
-// read_sandbox_file, plan_import, propose_memory, propose_brief_update,
+// read_sandbox_file, propose_memory, propose_brief_update,
 // read_memory). Each returns the tool-result TEXT the model sees and emits the
 // relevant §4 SSE frame(s) via `ctx.send`. Registration + dispatch live in a
 // minimal diff in agent.ts; the logic lives here to keep that file small.
@@ -10,18 +10,9 @@ import {
   sandboxReadFile,
   type SandboxEnv,
 } from "./sandbox-client"
-import {
-  stageImportViaChangeset,
-  type ChangesetBridgeEnv,
-  type PlanImportCellInput,
-  type RunCredential,
-} from "./changeset-bridge"
 import { proposeMemory, proposeBriefUpdate, type MemoryProvenance } from "./memory-writes"
 import type { HarnessFrame } from "./frames"
 import type { MemoryContext } from "../../../../db/shared/agent-memory"
-
-/** Cell cap for plan_import (contracts §2 PLAN_IMPORT_MAX_CELLS). */
-export const PLAN_IMPORT_MAX_CELLS = 5000
 
 /** read_sandbox_file default/utf-8 cap (contracts §2: 48KB). */
 const READ_SANDBOX_MAX_BYTES = 48 * 1024
@@ -31,7 +22,7 @@ const CODE_PREVIEW_MAX = 400
 
 /** Context threaded from the run loop into every harness tool. */
 export interface HarnessToolCtx {
-  env: SandboxEnv & ChangesetBridgeEnv & { AQUILLA_PG: AquillaDb }
+  env: SandboxEnv & { AQUILLA_PG: AquillaDb }
   runId: string
   /** The sandbox container id — one per session, or the runId when sessionless. */
   sandboxSessionId: string
@@ -48,8 +39,6 @@ export interface HarnessToolCtx {
   markUntrusted: () => void
   /** True while memory writes must be disabled (untrusted content in flight). */
   isUntrustedActive: () => boolean
-  /** Register the ephemeral changeset credential for revoke at run end. */
-  registerCredential: (cred: RunCredential) => void
 }
 
 const UNTRUSTED_BLOCK_MSG =
@@ -191,84 +180,6 @@ export async function readSandboxFile(
   const out = await sandboxReadFile(ctx.env, ctx.sandboxSessionId, path, maxBytes, ctx.signal)
   if (!out.available) return `error: ${out.reason}`
   return out.data.truncated ? `${out.data.text}\n…(truncated at ${maxBytes} bytes)` : out.data.text
-}
-
-// ── plan_import ───────────────────────────────────────────────────────────────
-
-export interface PlanImportArgs {
-  fileName?: unknown
-  fileType?: unknown
-  sourceLanguage?: unknown
-  targetLanguage?: unknown
-  cells?: unknown
-}
-
-function normalizeCells(raw: unknown): PlanImportCellInput[] | null {
-  if (!Array.isArray(raw)) return null
-  const cells: PlanImportCellInput[] = []
-  for (const c of raw) {
-    if (typeof c !== "object" || c === null) return null
-    const rec = c as Record<string, unknown>
-    if (typeof rec.original !== "string" || rec.original.length === 0) return null
-    cells.push({
-      original: rec.original,
-      ...(typeof rec.id === "string" ? { id: rec.id } : {}),
-      ...(typeof rec.translated === "string" ? { translated: rec.translated } : {}),
-      ...(typeof rec.context === "string" ? { context: rec.context } : {}),
-      ...(typeof rec.group === "string" ? { group: rec.group } : {}),
-      ...(typeof rec.type === "string" ? { type: rec.type } : {}),
-    })
-  }
-  return cells
-}
-
-export async function planImport(args: PlanImportArgs, ctx: HarnessToolCtx): Promise<string> {
-  const fileName = typeof args.fileName === "string" ? args.fileName : null
-  const fileType = typeof args.fileType === "string" ? args.fileType : null
-  if (!fileName || !fileType) {
-    return "error: plan_import needs {fileName: string, fileType: string, cells: [...]}"
-  }
-  const cells = normalizeCells(args.cells)
-  if (!cells || cells.length === 0) {
-    return "error: plan_import needs a non-empty cells array; each cell needs an `original` string"
-  }
-  if (cells.length > PLAN_IMPORT_MAX_CELLS) {
-    // Do NOT chunk silently — tell the model to split the file (contracts §2).
-    return `error: ${cells.length} cells exceeds the ${PLAN_IMPORT_MAX_CELLS}-cell limit per import — split this into multiple smaller files instead of chunking one file`
-  }
-
-  const { result, credential } = await stageImportViaChangeset(
-    ctx.env,
-    {
-      userId: ctx.userId,
-      projectId: ctx.projectId,
-      runId: ctx.runId,
-      request: {
-        fileName,
-        fileType,
-        sourceLanguage: typeof args.sourceLanguage === "string" ? args.sourceLanguage : undefined,
-        targetLanguage: typeof args.targetLanguage === "string" ? args.targetLanguage : undefined,
-        cells,
-      },
-    },
-    ctx.signal,
-  )
-  if (credential) ctx.registerCredential(credential)
-
-  if (!result.ok) return `error: ${result.error}`
-
-  ctx.send({
-    type: "changeset.staged",
-    runId: ctx.runId,
-    changesetId: result.staged.changesetId,
-    approvalUrl: result.staged.approvalUrl,
-    summary: result.staged.summary,
-    cellCount: result.staged.cellCount,
-  })
-  return (
-    `STAGED import changeset ${result.staged.changesetId} — ${result.staged.summary}. ` +
-    `A human must approve it at ${result.staged.approvalUrl}; nothing is written until they do.`
-  )
 }
 
 // ── propose_memory ─────────────────────────────────────────────────────────────

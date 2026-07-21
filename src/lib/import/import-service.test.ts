@@ -180,4 +180,47 @@ describe("ImportService", () => {
       targetText: "target",
     })
   })
+
+  it("persists sandbox parser provenance without claiming native round-trip fidelity", async () => {
+    const { instance } = service({ detectFileType: vi.fn(() => null) })
+    const digest = "d74ff0ee8da3b9806b18c877dbf29bbde50b5bd8e4dad7a3a725000feb82e8f1"
+    const recipe = {
+      version: 1 as const,
+      id: `sandbox-${digest.slice(0, 32)}`,
+      name: "Legacy parser",
+      inputFormat: "legacy",
+      strategy: "sandbox-program" as const,
+      config: { outputSchema: "aquilla-import-units-v1", programSha256: digest },
+      proposedBy: "ai" as const,
+      program: {
+        language: "python" as const,
+        source: "pass",
+        sha256: digest,
+      },
+    }
+
+    const result = await instance.importFile(new File(["source"], "unknown.bin"), {}, {
+      fileType: "custom",
+      results: [{
+        name: "unknown.bin",
+        strings: [{
+          id: "source-cell",
+          original: "source",
+          translated: "target",
+          context: "Record 1",
+          group: "record-1",
+          type: "text",
+          metadata: { aquillaRecipe: { recipeId: recipe.id, record: 1 } },
+        }],
+        importRecipe: recipe,
+      }],
+    })
+
+    expect(result.manifests[0]).toMatchObject({
+      profileId: `agentic:${recipe.id}`,
+      deterministic: false,
+      fidelity: "content-only",
+      recipe,
+    })
+  })
 })

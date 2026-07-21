@@ -10,6 +10,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
 import { parseFile, prepareImportFile, emitParsedFile } from "./import"
 
+const PASS_PROGRAM_DIGEST = "d74ff0ee8da3b9806b18c877dbf29bbde50b5bd8e4dad7a3a725000feb82e8f1"
+
 // ─── fetch mock ─────────────────────────────────────────────────────────────
 interface CapturedBody {
   projectId: string
@@ -150,6 +152,70 @@ describe("parseFile — parse phase only (no upload)", () => {
     const ole = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0])
     await expect(prepareImportFile(new File([ole], "legacy.doc"), { projectId: "p1" }))
       .rejects.toThrow(/appears to be binary/)
+  })
+
+  it("escalates an unsupported binary to the isolated parser and keeps the exact original for commit", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      classification: {
+        category: "document",
+        confidence: 0.9,
+        explanation: "Legacy document records",
+        recipe: {
+          version: 1,
+          id: `sandbox-${PASS_PROGRAM_DIGEST.slice(0, 32)}`,
+          name: "Legacy document parser",
+          inputFormat: "legacy-doc",
+          strategy: "sandbox-program",
+          config: { outputSchema: "aquilla-import-units-v1", programSha256: PASS_PROGRAM_DIGEST },
+          proposedBy: "ai",
+          program: { language: "python", source: "pass", sha256: PASS_PROGRAM_DIGEST },
+        },
+      },
+      units: [{ sourceText: "Legacy heading", type: "heading" }, { sourceText: "Legacy body", type: "text" }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })))
+    const bytes = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])
+
+    const prepared = await prepareImportFile(new File([bytes], "legacy.odd"), {
+      projectId: "p1",
+      identityToken: "identity-token",
+    })
+
+    expect(prepared.fileType).toBe("custom")
+    expect(prepared.results[0].strings.map((cell) => [cell.original, cell.type])).toEqual([
+      ["Legacy heading", "heading"],
+      ["Legacy body", "text"],
+    ])
+    expect(new Uint8Array(prepared.results[0].rawBytes!)).toEqual(bytes)
+    expect(prepared.results[0].importRecipe).toMatchObject({ strategy: "sandbox-program" })
+  })
+
+  it("escalates when a recognized adapter yields no importable cells", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      classification: {
+        category: "document",
+        confidence: 0.84,
+        explanation: "Content is stored outside ordinary HTML body blocks.",
+        recipe: {
+          version: 1,
+          id: `sandbox-${PASS_PROGRAM_DIGEST.slice(0, 32)}`,
+          name: "Embedded HTML record parser",
+          inputFormat: "legacy-html",
+          strategy: "sandbox-program",
+          config: { outputSchema: "aquilla-import-units-v1", programSha256: PASS_PROGRAM_DIGEST },
+          proposedBy: "ai",
+          program: { language: "python", source: "pass", sha256: PASS_PROGRAM_DIGEST },
+        },
+      },
+      units: [{ sourceText: "Recovered embedded text", type: "text" }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })))
+
+    const prepared = await prepareImportFile(
+      makeFile("empty.html", "<!doctype html><html><body></body></html>"),
+      { projectId: "p1", identityToken: "identity-token" },
+    )
+
+    expect(prepared.fileType).toBe("custom")
+    expect(prepared.results[0].strings[0].original).toBe("Recovered embedded text")
   })
 
   it("uses the deterministic HTML adapter and preserves structural headings", async () => {

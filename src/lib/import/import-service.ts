@@ -17,7 +17,7 @@ export interface ParsedImportResult {
   corpusMarker?: "OT" | "NT"
   originalName?: string
   importRecipe?: DeclarativeImportRecipe
-  importClassification?: AiImportClassification
+  importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
   roundTripFidelity?: RoundTripFidelity
   /** Exact multi-member container retained once and bound to every emitted file. */
   sharedSourceArtifact?: { name: string; bytes: ArrayBuffer; format: string }

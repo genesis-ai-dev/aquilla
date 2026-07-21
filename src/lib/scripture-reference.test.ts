@@ -46,6 +46,18 @@ describe("scripture references", () => {
     }))).toEqual([null, "1", "2", "13"])
   })
 
+  it("keeps a chapter-scoped heading unnumbered even when it carries a nearby verse ref", () => {
+    expect(cellNumberLabel({
+      lineNumbersEnabled: true,
+      cellType: "heading",
+      canonicalRef: "GEN 1:1",
+      sourceCanonicalRef: "GEN 1:1",
+      scriptureNumbering: true,
+      rowIndex: 0,
+      displayLabel: null,
+    })).toBeNull()
+  })
+
   it("uses the source verse reference for a paired target row", () => {
     expect(cellNumberLabel({
       lineNumbersEnabled: true,

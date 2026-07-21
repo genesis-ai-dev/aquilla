@@ -76,13 +76,15 @@ describe("POST /api/v1/import/classify", () => {
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, 2, 400, 1)",
     ).bind(PROJECT_ID).run()
 
+    const upstream = vi.spyOn(globalThis, "fetch")
     const response = await app.request("/api/v1/import/classify", {
       method: "POST",
       headers: authHeader(await jwtFor("contributor")),
       body: requestBody(),
-    }, testEnv())
+    }, Object.assign(Object.create(testEnv()), { OPENROUTER_API_KEY: undefined }))
     expect(response.status).toBe(403)
     expect(await response.json()).toMatchObject({ error: "project_lead_required" })
+    expect(upstream).not.toHaveBeenCalled()
   })
 
   it("owns the prompt, validates the recipe, and strips unknown output fields", async () => {

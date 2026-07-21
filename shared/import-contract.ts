@@ -4,10 +4,12 @@
  * Keep this module free of browser, React, Node, and Cloudflare dependencies so
  * both TypeScript projects compile the exact same manifest vocabulary. Parser
  * implementations remain adapters behind this contract; model-produced code
- * is never part of it.
+ * may be retained as inert provenance but is never executed by this contract.
  */
 
 export const NORMALIZED_IMPORT_VERSION = 1 as const
+/** Maximum retained source length for an isolated model-produced parser. */
+export const MAX_SANDBOX_PROGRAM_CHARS = 60_000
 
 /**
  * Largest immutable source/package artifact accepted by the browser import
@@ -118,15 +120,28 @@ export type ImportSourceLocator =
       field?: string
     }
 
-/** A constrained data recipe. It describes records; it cannot contain code. */
+/**
+ * Versioned import provenance. Deterministic/declarative recipes describe
+ * records. A sandbox-program recipe may retain model-produced parser code so
+ * the exact interpretation can be audited and considered for later controlled
+ * promotion. Retained programs are never reused or executed automatically and
+ * are only eligible to run in the isolated, default-deny import sandbox.
+ */
 export interface DeclarativeImportRecipe {
   version: typeof NORMALIZED_IMPORT_VERSION
   id: string
   name: string
   inputFormat: string
-  strategy: "records"
+  strategy: "records" | "sandbox-program"
   config: Record<string, unknown>
   proposedBy: "ai" | "user"
+  /** Present only for sandbox-program recipes. Never execute in the browser,
+   * auth worker, sync worker, or export worker. */
+  program?: {
+    language: "python" | "javascript"
+    source: string
+    sha256: string
+  }
   /** Required before a caller may claim verified-recipe round-trip fidelity. */
   roundTripVerified?: boolean
 }

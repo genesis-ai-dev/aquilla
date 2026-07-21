@@ -160,6 +160,7 @@ function addressAndLocator(
   kind: ImportUnitKind,
   ref: string | undefined,
   physicalOrder: number,
+  contentOrder: number,
   locationSegment: number,
 ): { address: ImportAddress; sourceLocator: ImportSourceLocator; keyBase: string; displayLabel: string | null } {
   const verse = ref?.match(SCRIPTURE_VERSE_RE)
@@ -214,7 +215,7 @@ function addressAndLocator(
         ...(segmentId ? { segmentId } : {}),
       },
       keyBase: `xliff:${xliffUnitId}${segmentId ? `:${segmentId}` : ""}`,
-      displayLabel: String(physicalOrder + 1),
+      displayLabel: String(contentOrder),
     }
   }
 
@@ -225,7 +226,7 @@ function addressAndLocator(
       address: { scheme: "translation-unit", format: "tmx", unitId: tmxUnitId },
       sourceLocator: { kind: "translation-unit", format: "tmx", unitId: tmxUnitId },
       keyBase: `tmx:${tmxUnitId}`,
-      displayLabel: String(physicalOrder + 1),
+      displayLabel: String(contentOrder),
     }
   }
 
@@ -264,7 +265,7 @@ function addressAndLocator(
         segment: locationSegment,
       },
       keyBase: `document:${value.sourceLocation.file}:${value.sourceLocation.blockPath}:${locationSegment}`,
-      displayLabel: kind === "heading" ? null : String(physicalOrder + 1),
+      displayLabel: kind === "heading" || kind === "paratext" ? null : String(contentOrder),
     }
   }
 
@@ -276,7 +277,7 @@ function addressAndLocator(
       address: { scheme: "timeline", cue, ...(startMs === undefined ? {} : { startMs }), ...(endMs === undefined ? {} : { endMs }) },
       sourceLocator: { kind: "cue", index: cue, ...(startMs === undefined ? {} : { startMs }), ...(endMs === undefined ? {} : { endMs }) },
       keyBase: `cue:${nonEmptyString(value.context) ?? `${startMs ?? "untimed"}:${endMs ?? "untimed"}`}`,
-      displayLabel: String(cue),
+      displayLabel: String(contentOrder),
     }
   }
 
@@ -289,7 +290,7 @@ function addressAndLocator(
     address: { scheme: "sequence", index },
     sourceLocator: { kind: "sequence", index },
     keyBase: `sequence:${stableHint}`,
-    displayLabel: kind === "heading" || kind === "paratext" ? null : String(index),
+    displayLabel: kind === "heading" || kind === "paratext" ? null : String(contentOrder),
   }
 }
 
@@ -333,9 +334,11 @@ export function normalizeTranslatableStrings(
   const locationOccurrences = new Map<string, number>()
   const canonicalOccurrences = new Map<string, number>()
   const warnings: ImportWarning[] = []
+  let contentOrder = 0
 
   const units = strings.map((value, physicalOrder): NormalizedImportUnit => {
     const kind = unitKind(value)
+    if (kind !== "heading" && kind !== "paratext") contentOrder += 1
     const ref = canonicalRef(value)
     const locationBase = value.sourceLocation
       ? `${value.sourceLocation.file}:${value.sourceLocation.blockPath}`
@@ -345,7 +348,7 @@ export function normalizeTranslatableStrings(
       : 1
     if (locationBase) locationOccurrences.set(locationBase, locationSegment)
 
-    const described = addressAndLocator(value, kind, ref, physicalOrder, locationSegment)
+    const described = addressAndLocator(value, kind, ref, physicalOrder, contentOrder, locationSegment)
     const { key: unitKey } = occurrenceKey(described.keyBase, occurrences)
 
     if (value.original.trim() === "") {

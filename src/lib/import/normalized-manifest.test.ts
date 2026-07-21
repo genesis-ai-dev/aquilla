@@ -274,6 +274,7 @@ describe("normalized import manifest", () => {
       "sequence:Paragraph",
     ])
     expect(first.units.map((unit) => unit.canonicalRef)).toEqual([undefined, undefined])
+    expect(first.units.map((unit) => unit.displayLabel)).toEqual([null, "1"])
     expect(second.units.map((unit) => unit.unitKey)).toEqual(
       first.units.map((unit) => unit.unitKey),
     )

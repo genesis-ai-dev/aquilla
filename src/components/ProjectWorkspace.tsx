@@ -27,9 +27,9 @@ import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
-import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
+import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, fileTypeHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileOrderedBy, fileTypeHasSections, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -655,7 +655,7 @@ export function ProjectWorkspace() {
     redirectTo,
   ])
   const [importOpen, setImportOpen] = useState(false)
-  // File-scoped target import dialog ("Import translations into this file").
+  // File-scoped target import dialog ("Import target translations into this file").
   const [fileImportOpen, setFileImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
@@ -1188,10 +1188,12 @@ export function ProjectWorkspace() {
   }, [findNextUnfinished])
   const activeFile = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeSourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
-  // The DEFAULT (`''`) lane's target language — file's, then project's. Used to
+  // The DEFAULT (`''`) lane's target language — the PROJECT default only. Used to
   // label the default-lane switch option, which must always name the project
-  // default regardless of which lane is active.
-  const activeTargetLanguage = activeFile?.targetLanguage || project?.targetLanguage
+  // default regardless of which lane is active. AQU-583: the per-file target is
+  // NOT consulted — it would otherwise both shadow a later Settings change and
+  // surface a stamped language when the project has none set.
+  const activeTargetLanguage = project?.targetLanguage
   // AQU-602: the target language of the ACTIVE lane. A non-default lane's tag IS
   // its target language, so switching lanes switches what the editor
   // reads/writes/translates into (source stays shared). The completion path was
@@ -1542,6 +1544,25 @@ export function ProjectWorkspace() {
     author: currentUsername,
   })
 
+  // AQU-599: per-cell "has comment" indicator. useHealth also exposes a
+  // cellOpenCommentCount, but it derives from cell.threads which useCells
+  // leaves empty in Phase 2a — so it never lit up from live data. Derive the
+  // real per-cell count from the live comments feed instead: count open
+  // (unresolved, non-deleted) root threads (replies don't open a thread) keyed
+  // by cellId. This feeds EditorTable's existing ring + rail-dot affordance so
+  // cells carrying comments are discoverable without opening each one.
+  const liveCellOpenCommentCount = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const c of allProjectComments) {
+      if (c.scopeKind !== "cell" || !c.cellId) continue
+      if (c.parentCommentId) continue
+      if (c.deletedAt !== null) continue
+      if (c.resolved) continue
+      map.set(c.cellId, (map.get(c.cellId) ?? 0) + 1)
+    }
+    return map
+  }, [allProjectComments])
+
   const addThread = useCallback(async (cellId: string, text: string) => {
     if (!project?.id || !activeFileId) return
     await addCommentEvent({
@@ -1815,6 +1836,15 @@ export function ProjectWorkspace() {
     // lane-aware derivation as the editor project + file metadata.
     project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
+  )
+
+  // AQU-620: adapter so the editor's per-cell AI action can request a plain
+  // draft (`onCompleteSingle(cell)`) or an explicit regenerate
+  // (`onCompleteSingle(cell, { regenerate: true })`) — the latter maps to the
+  // hook's third argument so a second iteration samples at a higher temperature.
+  const handleCompleteSingle = useCallback(
+    (cell: CellData, opts?: { regenerate?: boolean }) => { void completeSingle(cell, undefined, opts) },
+    [completeSingle],
   )
 
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
@@ -2253,7 +2283,10 @@ export function ProjectWorkspace() {
     rules,
     { decaySettings: project?.decaySettings, requiredValidations },
   )
-  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount, cellOpenCommentCount } = health
+  // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
+  // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
+  // 2a). openCommentCount (file-level) is still health-derived.
+  const { healthMap, fileHealth: _fileHealth, projectHealth, fileProgress: liveFileProgress, infractions, openCommentCount } = health
 
   // AQU-516: useHealth (above) only ever sees the currently-open file, so
   // fileProgress historically had an entry for at most one file — every
@@ -3550,19 +3583,21 @@ export function ProjectWorkspace() {
     // The button may render optimistically (canExport=true before settings load) but the
     // ACTION must wait until org settings have been fetched so we gate on the real floor.
     if (!orgSettingsFetched) return
-    // If org policy disallows export (explicit floor set and user below it), no-op.
-    if (!canExportByOrgPolicy) return
+    // AQU-253 (revised): open even when org policy disallows export — the
+    // dialog renders an explicit permission gate with a help link instead of
+    // silently no-opping, so users can see WHY export is unavailable.
     setExportOpen(true)
-  }, [orgSettingsFetched, canExportByOrgPolicy])
+  }, [orgSettingsFetched])
 
   const actionArgs = useMemo(() => ({
     openImport: openImportFlow,
     runCompletions: () => {
-      if (!activeFileId) return
+      if (!activeFileId || !project) return
       const cells = getActiveCells()
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
-      completeBatch(untranslated.slice(0, MAX_BATCH_COMPLETIONS))
+      // AQU-586: honor the project's configured completion batch size (default 10).
+      completeBatch(untranslated.slice(0, completionBatchSizeFor(project)))
     },
     runCompleteAll: () => {
       if (!activeFileId) return
@@ -3581,9 +3616,14 @@ export function ProjectWorkspace() {
     runBatchValidate: () => {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
-      const validatable = cellSummaries.filter(
+      const eligible = cellSummaries.filter(
         (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
       )
+      // AQU-586: cap how many eligible cells one batch-validate processes.
+      // 0/undefined = validate all eligible (unchanged default behavior).
+      const cap = project.completionSettings?.validationBatchSize
+      const validatable =
+        typeof cap === "number" && cap > 0 ? eligible.slice(0, cap) : eligible
       if (validatable.length === 0) return
       void (async () => {
         for (const cell of validatable) {
@@ -3673,6 +3713,18 @@ export function ProjectWorkspace() {
       revalidateCells()
     }
   }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
+
+  // AQU-616: bulk validate/unvalidate from the SelectionBar enqueues N events
+  // but has no per-cell commit callback, so without this the events would wait
+  // for the ~5s periodic flusher before syncing — the confirmed state lags for
+  // seconds. Flush + revalidate immediately, mirroring handleCellCommitted and
+  // the "validate all" workspace action.
+  const handleBulkValidationCommitted = useCallback(async () => {
+    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await refreshOutboxPending()
+    revalidateAuditStats()
+    revalidateCells()
+  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
     const diarizeLabel =
@@ -3963,7 +4015,13 @@ export function ProjectWorkspace() {
       optimisticFileIdsRef.current = new Set(next.map((file) => file.id))
       return next
     })
-    if (refs.length > 0) workspaceTabs.openFile(refs[0].id)
+    if (refs.length > 0) {
+      workspaceTabs.openFile(refs[0].id)
+      // AQU (mp3 "unusable" report): a media import has no text cells, so the
+      // Text lens greets the user with "No text segments in this file" — which
+      // reads as a failed import. Land them on the Media/Audio lens instead.
+      if (isMediaFileType(refs[0].type)) setLens("audio")
+    }
     // The bulk importer (lib/import.ts → POST /import) has already persisted
     // file.create + every source.cell.create server-side before resolving, so
     // there's nothing to flush — just pull the fresh projection in.
@@ -4344,6 +4402,7 @@ export function ProjectWorkspace() {
                   username={currentUsername}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
+                  onValidationCommitted={handleBulkValidationCommitted}
                   audioMode={lens === "audio"}
                   onVoiceTogether={async (sel) => {
                     if (!activeFileId || !project) return
@@ -4627,11 +4686,19 @@ export function ProjectWorkspace() {
             username={currentUsername}
             activeLane={activeLane}
             lanes={availableLanes}
+            archivedLanes={project?.archivedLanes}
             onLaneChange={setActiveLane}
             defaultLaneLabel={activeTargetLanguage || "Target"}
+            // AQU-583: the TARGET tag is the discoverable entry point to change
+            // the target language — deep-link to settings filtered to the
+            // Project Info + Languages sections (both carry the "target language"
+            // keyword), where the field is edited (server enforces the role floor).
+            onEditTargetLanguage={() =>
+              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`)
+            }
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
-            onCompleteSingle={completeSingle} onCompleteBatch={completeBatch}
+            onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}
@@ -4639,7 +4706,7 @@ export function ProjectWorkspace() {
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             backtranslationByCellId={backtranslationCache}
-            cellOpenCommentCount={cellOpenCommentCount}
+            cellOpenCommentCount={liveCellOpenCommentCount}
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
             getStatisticalBt={getStatisticalBt}
@@ -4999,9 +5066,7 @@ export function ProjectWorkspace() {
           projectName={project.name ?? project.id}
           activeFileId={activeFileId ?? null}
           activeFileName={activeFile?.name ?? null}
-          isUsfmFile={activeFile?.type === "usfm"}
-          isDocxFile={activeFile?.type === "docx"}
-          isPptxFile={activeFile?.type === "pptx"}
+          activeFileType={activeFile?.type ?? null}
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}

@@ -34,6 +34,7 @@
 | Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
 | AI          | Sparkle button fills cell and marks it for individual human review | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings) | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
+| AI          | Agent sandbox session imports a messy uploaded file via staged PlanImport changeset → human approval → memory proposal → human-edit protection (AQU-AGENT) | `e2e/specs/agent-import.spec.ts` (skipped until sandbox stack lands — `AGENT_SANDBOX_E2E=1`, see `docs/AGENT-SANDBOX.md`) | |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
 | Collab      | Conflict resolution on same cell                     | _gap — Plan 2_                                                |        |
@@ -47,7 +48,7 @@
 | Sharing     | Toggle invite mode between @user and email           | `e2e/specs/projects/share-invite-mode-toggle.smoke.spec.ts`   |   ✅   |
 | Sharing     | Invite landing pages name inviter + workspace (AQU-471) | `e2e/specs/projects/join-page.smoke.spec.ts` (test 2) + `e2e/specs/orgs/join-org-context.smoke.spec.ts` | ✅ |
 | Sharing     | Email invites to multiple projects from the org view (AQU-471) | `e2e/specs/orgs/multi-project-invite-submit.smoke.spec.ts` (test 2) | ✅ |
-| Audio/Video | Import audio file                                    | _gap — Plan 2_                                                |        |
+| Audio/Video | Import mp3 → silence-split clips → Play all          | `e2e/specs/editor/audio-import-playback.smoke.spec.ts`        |   ✅   |
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |

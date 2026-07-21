@@ -152,27 +152,9 @@ export async function handleCommit(
       return errorResponse('validation_failed', 'changeset has expired')
     }
 
-    // Autonomy: ask requires a consumed one-time confirmation.
-    if (cs.autonomyMode === 'ask') {
-      const consumed = await db
-        .prepare(
-          `UPDATE changeset_confirmations SET consumed_at = now()
-             WHERE changeset_id = ? AND credential_id = ? AND digest = ?
-               AND consumed_at IS NULL AND expires_at > now()
-           RETURNING id`,
-        )
-        .bind(id, cs.credentialId, cs.digest)
-        .first<{ id: string }>()
-      if (!consumed) {
-        return errorResponse(
-          'confirmation_required',
-          'ask-mode changeset requires a valid, unconsumed human approval',
-        )
-      }
-      confirmationId = consumed.id
-    }
-
-    // Re-check preconditions against the live projection.
+    // Re-check preconditions against the live projection BEFORE we take the
+    // commit or touch the confirmation — a drifted plan must be rejected without
+    // burning the approval.
     const liveStates = await resolveCellStates(db, projectId, cs.preconditions)
     const drift: { fileId: string; cellId: string }[] = []
     for (const pre of cs.preconditions) {
@@ -191,28 +173,70 @@ export async function handleCommit(
       return errorResponse('plan_stale', 'project state changed since prepare', { drift })
     }
 
-    // Flip to 'committing' before applying and persist the consumed confirmation
-    // id, so a crash after this point re-enters as a retry (skipping the gates
-    // above) and can rebuild provenance without a second approval. Guarded on
-    // status='staged' so a concurrent double-commit can't both flip.
+    // races-F1 (burn-without-apply): flip to 'committing' FIRST — this guarded
+    // UPDATE is the mutual-exclusion gate (only one concurrent committer wins the
+    // staged→committing race). We consume the one-time confirmation ONLY AFTER we
+    // own the commit, so a losing/aborted attempt can never burn an approval that
+    // then goes unapplied.
+    //
+    // Ordering rationale over a single consume+flip transaction: the pg shim's
+    // batch() is atomic but cannot thread the consume's RETURNING id into the
+    // flip's bind, and a 0-row UPDATE is not a batch error (so a lost flip
+    // wouldn't roll back the consume). Flip-then-consume is provably safe with a
+    // narrow, benign crash window: if we crash AFTER the flip but before/around
+    // the consume, the retry re-enters via the 'committing' gate below (which
+    // skips consume) and applies idempotently — confirmation_id is simply absent
+    // from provenance (not a second-approval demand, not a burn).
     const flip = await db
       .prepare(
-        `UPDATE changesets SET status = 'committing', confirmation_id = ?
+        `UPDATE changesets SET status = 'committing'
            WHERE id = ? AND status = 'staged'`,
       )
-      .bind(confirmationId, id)
+      .bind(id)
       .run()
-    // Inspect the flip: a 0-row result means a CONCURRENT commit of this same
-    // changeset already won the staged→committing race. Do NOT proceed to apply
-    // (and, critically, do NOT fall through to a stale-write that could clobber
-    // the winner's committed receipt). Re-load: if the winner already committed,
-    // return its stored receipt (idempotent); otherwise it is still mid-apply —
-    // refuse rather than double-apply.
+    // A 0-row result means a CONCURRENT commit already won the race. Do NOT
+    // proceed to apply, and do NOT consume the confirmation (it stays intact for
+    // the winner). Re-load: if the winner committed, return its receipt
+    // (idempotent); otherwise it is still mid-apply — refuse rather than double-apply.
     if ((flip.meta?.changes ?? 0) === 0) {
       const fresh = await loadChangeset(db, projectId, id)
       if (fresh?.status === 'committed') return Response.json({ receipt: fresh.receipt })
       return errorResponse('conflict', 'commit already in progress')
     }
+
+    // We own the commit. Now consume the ask-mode one-time confirmation.
+    if (cs.autonomyMode === 'ask') {
+      const consumed = await db
+        .prepare(
+          `UPDATE changeset_confirmations SET consumed_at = now()
+             WHERE changeset_id = ? AND credential_id = ? AND digest = ?
+               AND consumed_at IS NULL AND expires_at > now()
+           RETURNING id`,
+        )
+        .bind(id, cs.credentialId, cs.digest)
+        .first<{ id: string }>()
+      if (!consumed) {
+        // No valid approval — RELEASE the commit back to 'staged' so a fresh
+        // approval + retry can proceed. Nothing was burned; the changeset is
+        // recoverable (races-F1: never strand it in 'committing').
+        await db
+          .prepare(`UPDATE changesets SET status = 'staged' WHERE id = ? AND status = 'committing'`)
+          .bind(id)
+          .run()
+        return errorResponse(
+          'confirmation_required',
+          'ask-mode changeset requires a valid, unconsumed human approval',
+        )
+      }
+      confirmationId = consumed.id
+    }
+
+    // Persist the consumed confirmation id so a crash-retry (status='committing')
+    // rebuilds provenance without a second approval. Guarded on 'committing'.
+    await db
+      .prepare(`UPDATE changesets SET confirmation_id = ? WHERE id = ? AND status = 'committing'`)
+      .bind(confirmationId, id)
+      .run()
   }
 
   // ── PlanImport takes its own compile/commit path ──────────────────────────

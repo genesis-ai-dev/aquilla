@@ -1407,7 +1407,15 @@ async function decodeAudioFile(
   const buf = await file.arrayBuffer()
   const audioCtx = new AC()
   try {
-    const audio = await audioCtx.decodeAudioData(buf)
+    // decodeAudioData rejects with a cryptic DOMException ("EncodingError:
+    // Decoding failed") — rewrap so anything that surfaces or logs the message
+    // is user-actionable. The original error is preserved as `cause`.
+    const audio = await audioCtx.decodeAudioData(buf).catch((err: unknown) => {
+      throw new Error(
+        `Couldn't decode ${file.name} — the file may be corrupt or in an unsupported codec. Try re-exporting it as mp3 or wav.`,
+        { cause: err },
+      )
+    })
     return {
       channel: audio.getChannelData(0),
       sampleRate: audio.sampleRate,

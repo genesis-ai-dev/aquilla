@@ -191,6 +191,7 @@ export default defineConfig(({ mode }) => ({
       // own directory.
       "auth-worker/**",
       "sync-worker/**",
+      "agent-worker/**",
       "worker/**",
       // Parity-run acceptance/roundtrip suites run via `pnpm parity:score` /
       // `pnpm roundtrip:score` with parity/vitest.config.ts — rows there are

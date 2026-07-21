@@ -16,6 +16,14 @@ export interface CommentRecord {
   updatedAt: number
   /** Non-null means soft-deleted. UI renders "[deleted]" placeholder. */
   deletedAt: number | null
+  /**
+   * AQU-599: the target cell's human-readable reference (canonical verse
+   * address, e.g. "GEN 1:1") resolved server-side from the source cell. Null
+   * for non-cell scopes, non-scripture cells with no canonical ref, or when the
+   * cell no longer exists. Optional so responses from an older worker still
+   * parse.
+   */
+  cellRef?: string | null
 }
 
 export interface CommentsResponse {

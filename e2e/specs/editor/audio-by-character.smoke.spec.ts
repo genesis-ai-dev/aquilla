@@ -39,6 +39,7 @@ test("alice sees Audio-by-character export, scope-locked to file, and gets a zip
   await ws.openExportDialog()
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await ws.openExportFormatsSection()
 
   // The "Audio by character" format option is present; select it.
   await dialog.getByText("Audio by character").click()

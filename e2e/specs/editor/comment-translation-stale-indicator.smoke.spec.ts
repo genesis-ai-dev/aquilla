@@ -71,7 +71,9 @@ test("comment stale indicator appears when translation changes after thread was 
 
   // Step 4: Re-open the CommentsDrawer for cell 0.
   await row.hover()
-  await addCommentBtn.click()
+  const openCommentsBtn = row.locator('button[aria-label*="open comment" i]').first()
+  await expect(openCommentsBtn).toBeVisible({ timeout: 5_000 })
+  await openCommentsBtn.click()
   const drawer2 = alice.locator("[data-testid='comments-drawer']").first()
   await expect(drawer2).toBeVisible({ timeout: 5_000 })
   await expect(drawer2).toContainText(commentText, { timeout: 5_000 })

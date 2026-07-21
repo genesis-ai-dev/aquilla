@@ -55,7 +55,9 @@ test("cell details panel expands and shows its tabs", async ({ alice }) => {
 
   // 4. Close the panel with the chevron (now aria-label "Close cell details").
   await row.hover()
-  const closeChevron = row.locator('button[aria-label="Close cell details"]')
+  // CellExpansion also has its own accessible close control now; select the
+  // panel control explicitly instead of matching both it and the action rail.
+  const closeChevron = row.locator("[data-cell-detail-close]")
   await expect(closeChevron).toBeVisible({ timeout: 3_000 })
   await closeChevron.click()
   await expect(panel).not.toBeVisible({ timeout: 3_000 })

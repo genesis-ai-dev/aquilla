@@ -466,7 +466,11 @@ function FootnoteRow({
           aria-label={editable ? "Click to edit footnote" : "Footnote translation"}
           disabled={!editable}
         >
-          {targetFn.text || (editable ? "Add translation..." : "Empty target footnote")}
+          {targetFn.text
+            ? renderFootnoteRichText(targetFn.text)
+            : editable
+              ? "Add translation..."
+              : "Empty target footnote"}
         </button>
       )}
     </div>
@@ -490,7 +494,11 @@ function FootnoteRow({
           )}
         >
           <span className="sr-only">Target footnote</span>
-          <FootnoteMarkerBadge label={callerLabel} active />
+          <FootnoteMarkerBadge
+            label={callerLabel}
+            active
+            onActivate={editable && !editing ? () => setEditing(true) : undefined}
+          />
           {targetContent}
         </div>
       </div>
@@ -515,7 +523,13 @@ function FootnoteRow({
 
       <div className="flex min-w-0 items-start gap-1.5 border-border/40 md:border-l md:pl-2">
         <span className="sr-only">Target footnote</span>
-        {targetFn && <FootnoteMarkerBadge label={callerLabel} active />}
+        {targetFn && (
+          <FootnoteMarkerBadge
+            label={callerLabel}
+            active
+            onActivate={editable && !editing ? () => setEditing(true) : undefined}
+          />
+        )}
         {targetContent}
       </div>
     </div>
@@ -576,15 +590,31 @@ export function FootnotedTextValue({
   )
 }
 
-function FootnoteMarkerBadge({ label, active }: { label: string; active?: boolean }) {
+function FootnoteMarkerBadge({
+  label,
+  active,
+  onActivate,
+}: {
+  label: string
+  active?: boolean
+  /** When set, the number badge becomes a button that re-opens the note for editing (AQU-598). */
+  onActivate?: () => void
+}) {
+  const className = cn(
+    "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[9px] font-bold",
+    active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+    onActivate &&
+      "cursor-pointer hover:ring-1 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+  )
+  if (onActivate) {
+    return (
+      <button type="button" className={className} onClick={onActivate} aria-label={`Edit footnote ${label}`}>
+        {label}
+      </button>
+    )
+  }
   return (
-    <span
-      className={cn(
-        "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[9px] font-bold",
-        active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
-      )}
-      aria-hidden
-    >
+    <span className={className} aria-hidden>
       {label}
     </span>
   )

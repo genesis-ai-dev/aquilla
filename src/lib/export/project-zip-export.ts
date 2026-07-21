@@ -22,8 +22,8 @@ import { exportSrt } from "./exporters/srt"
 
 /** Formats handled by the project-zip path (excludes server-side USFM,
  *  audio-by-character which has its own orchestrator, vtt which needs
- *  per-project ttsSettings not available in the zip path, docx which
- *  requires the raw sidecar bytes from the server, plain-text-dump which
+ *  per-project ttsSettings not available in the zip path, docx/pptx which
+ *  require the raw sidecar bytes from the server, plain-text-dump which
  *  is advanced/single-file only, and metadata-csv which has its own
  *  project-scope path in ExportDialog that flattens all cells into one sheet). */
 export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "vtt" | "docx" | "pptx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml">

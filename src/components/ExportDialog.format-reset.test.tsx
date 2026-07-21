@@ -1,8 +1,7 @@
 // Format-state reset — WHY: the dialog stays mounted in ProjectWorkspace
 // across file switches, so its format state must follow the active file.
-// A stale "usfm"/"docx" selection is filtered out of the radio list (nothing
-// appears selected) yet still drives handleExport down the server side-car
-// path, which fails for files that were never imported as USFM/DOCX.
+// A stale "usfm"/"docx" selection can otherwise drive handleExport down the
+// wrong server side-car path after the user switches files.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ExportDialog } from "./ExportDialog"
@@ -46,7 +45,7 @@ const USFM_FILE_PROPS = {
   projectName: "Format reset",
   activeFileId: "f-usfm",
   activeFileName: "gen.usfm",
-  isUsfmFile: true,
+  activeFileType: "usfm",
   projectFiles: PROJECT_FILES,
   targetLanguage: "es",
   getToken: async () => null,
@@ -56,14 +55,14 @@ const TXT_FILE_PROPS = {
   ...USFM_FILE_PROPS,
   activeFileId: "f-txt",
   activeFileName: "notes.txt",
-  isUsfmFile: false,
+  activeFileType: "txt",
 }
 
 const PPTX_FILE_PROPS = {
   ...TXT_FILE_PROPS,
   activeFileId: "f-pptx",
   activeFileName: "slides.pptx",
-  isPptxFile: true,
+  activeFileType: "pptx",
 }
 
 beforeEach(() => {
@@ -85,16 +84,17 @@ describe("ExportDialog — format follows the active file", () => {
     rerender(<ExportDialog {...TXT_FILE_PROPS} />)
     expect(screen.queryByText("USFM")).not.toBeInTheDocument()
 
-    // Export must run the client-side path for the new file — not the stale
-    // USFM server round-trip (which would fail: no side-car for a .txt file).
-    fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
+    // The primary action must now be the TXT file's native export — not the
+    // stale USFM server round-trip.
+    fireEvent.click(screen.getByRole("button", { name: /^Download notes\.txt$/i }))
     await waitFor(() => expect(mockDownload).toHaveBeenCalledTimes(1))
     const [, name] = mockDownload.mock.calls[0]
-    expect(name).toMatch(/\.tsv$/)
+    expect(name).toBe("notes.txt")
   })
 
   it("keeps the user's format choice while the same file stays active", () => {
     const { rerender } = render(<ExportDialog {...TXT_FILE_PROPS} />)
+    fireEvent.click(screen.getByText("Export to another format"))
     fireEvent.click(screen.getByText("Markdown"))
 
     // Unrelated prop churn on the same file must not clobber the choice.
@@ -109,6 +109,8 @@ describe("ExportDialog — format follows the active file", () => {
 
   it("offers and preselects native PPTX round-trip for a PPTX file", () => {
     render(<ExportDialog {...PPTX_FILE_PROPS} />)
+    expect(screen.getByRole("button", { name: /^Download slides\.pptx$/i })).toBeVisible()
+    fireEvent.click(screen.getByText("Export to another format"))
     expect(screen.getByRole("radio", { name: /PowerPoint \(.pptx\)/i })).toBeChecked()
     expect(screen.queryByText("USFM")).not.toBeInTheDocument()
   })

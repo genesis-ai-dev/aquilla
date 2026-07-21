@@ -1025,7 +1025,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     }
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
     const scheduleRefresh = () => {
-      if (refreshTimer !== null) return
+      // Use a trailing debounce, not a leading throttle. IndexedDB enqueues are
+      // asynchronous, so a large logical burst can take longer than 50 ms on a
+      // busy device. Resetting the timer ensures the whole burst produces one
+      // overlay read instead of one read per 50 ms slice.
+      if (refreshTimer !== null) clearTimeout(refreshTimer)
       refreshTimer = setTimeout(() => {
         refreshTimer = null
         void refresh()

@@ -32,22 +32,24 @@ async function writeMinimalDocx(filePath: string): Promise<void> {
 }
 
 /**
- * Export dialog smoke — converted TSV and native DOCX downloads.
+ * Export dialog smoke — the primary "Download <file>" action.
  *
  * What this covers:
- *  - ExportDialog opens from the toolbar "Export file" button.
- *  - "Bilingual TSV" format radio is pre-selected (non-USFM files default to TSV).
- *  - A DOCX source is persisted and can be downloaded again in its native format.
- *  - Clicking "Export" triggers a client-side Blob download (URL.createObjectURL
- *    + programmatic anchor click) that Playwright intercepts as a download event.
- *  - The downloaded filename ends with ".tsv".
+ *  - ExportDialog opens from the header actions menu.
+ *  - The headline action is a primary "Download <name>.<ext>" button in the
+ *    file's OWN format (a .md import → "Download sample.md"); format
+ *    conversions live behind the collapsed "Export to another format" section.
+ *  - Clicking the primary button triggers a client-side Blob download that
+ *    Playwright intercepts as a download event, named after the source file.
+ *  - A DOCX source artifact is persisted atomically and can be downloaded in
+ *    its original structure without a missing-source error.
  *
  * What this does NOT cover:
- *  - USFM format (needs a .SFM fixture + different server code path).
- *  - Audio-by-character export (needs seeded audio blobs + AI key).
+ *  - USFM/PPTX side-car round-trips (need fixtures + server code path).
+ *  - Format conversions (covered by export-format-switch.smoke.spec.ts).
  *  - Project-scope zip (different code path; covered by manual verification).
  */
-test("export dialog opens and downloads a TSV file for the open file", async ({ alice }) => {
+test("export dialog's primary action downloads the file back in its own format", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `Export ${Date.now()}`
@@ -67,22 +69,26 @@ test("export dialog opens and downloads a TSV file for the open file", async ({ 
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await expect(dialog.getByRole("heading", { name: "Export" })).toBeVisible()
 
-  // 2. Verify the Bilingual TSV radio is available and pre-selected (default for MD).
-  const tsvRadio = dialog.locator('input[type="radio"][value="tsv"]')
-  await expect(tsvRadio).toBeVisible({ timeout: 3_000 })
-  await expect(tsvRadio).toBeChecked()
+  // 2. The primary action is a big "Download sample.md" button — the file's
+  //    own format, no format picking required.
+  const primary = dialog.getByRole("button", { name: /^Download sample\.md$/i })
+  await expect(primary).toBeVisible({ timeout: 3_000 })
 
-  // 3. Click "Export" and wait for the download event.
-  //    exportTsv() builds a Blob and calls downloadBlob():
+  // The conversion section is collapsed by default for files with a native format.
+  await expect(dialog.getByText("Export to another format")).toBeVisible()
+  await expect(dialog.getByRole("radiogroup", { name: "Export format" })).not.toBeVisible()
+
+  // 3. Click the primary download and wait for the download event.
+  //    exportMarkdownStructured() builds a Blob and calls downloadBlob():
   //      URL.createObjectURL → <a href=…> → a.click()
   //    Playwright intercepts this as a "download" event on the page.
   const [download] = await Promise.all([
     alice.waitForEvent("download", { timeout: 10_000 }),
-    dialog.getByRole("button", { name: /^Export$/i }).click(),
+    primary.click(),
   ])
 
-  // The filename should end with ".tsv".
-  expect(download.suggestedFilename()).toMatch(/\.tsv$/i)
+  // The file comes back under its own name and extension.
+  expect(download.suggestedFilename()).toMatch(/^sample\.md$/i)
 
   // 4. Dismiss the dialog.
   await alice.keyboard.press("Escape")

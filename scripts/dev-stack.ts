@@ -31,9 +31,12 @@
 // user has in `.env.local`.
 //
 // Flags:
-//   --no-sync    skip sync-worker (rare; some flows need only auth)
-//   --vite-port  override the Vite port (default 5173)
-//   --verbose    stream each Worker's stdout/stderr to this terminal
+//   --no-sync     skip sync-worker (rare; some flows need only auth)
+//   --no-sandbox  skip the agent-worker sandbox service (also auto-skipped
+//                 when Docker is unavailable — the agent code-exec tools then
+//                 report "sandbox unavailable" and the rest of the stack boots)
+//   --vite-port   override the Vite port (default 5173)
+//   --verbose     stream each Worker's stdout/stderr to this terminal
 //
 // Stop with Ctrl+C. The cleanup handler kills every spawned child tree
 // and removes `.env.development.local`.
@@ -69,6 +72,7 @@ const REPO_ROOT = path.resolve(__dirname, "..")
 
 const IDENTITY_DIR = path.join(REPO_ROOT, "auth-worker")
 const SYNC_DIR = path.join(REPO_ROOT, "sync-worker")
+const AGENT_DIR = path.join(REPO_ROOT, "agent-worker")
 
 // Shared wrangler state so auth-worker + sync-worker read each other's writes
 // to aquilla-db. Wrangler defaults to `<cwd>/.wrangler/state` which would
@@ -81,6 +85,11 @@ const LOG_DIR = path.join(REPO_ROOT, ".dev-stack-logs")
 // (e.g. a parallel worktree) without freePort() evicting the other's workers.
 const IDENTITY_PORT = Number(process.env.DEV_STACK_IDENTITY_PORT) || 8788
 const SYNC_PORT = Number(process.env.DEV_STACK_SYNC_PORT) || 8789
+// agent-worker (sandbox execution service, AQU-AGENT §6). Container-backed, so
+// it only boots when Docker is available; the harness degrades to a "sandbox
+// unavailable" error otherwise.
+const AGENT_PORT = Number(process.env.DEV_STACK_AGENT_PORT) || 8790
+const AGENT_SANDBOX_KEY_DEV = "dev-sandbox-key"
 const DEFAULT_VITE_PORT = 5173
 // Scripted OpenRouter mock (scripts/mock-openrouter.ts) — booted when the
 // identity worker has no real OPENROUTER_API_KEY, so the agent/chat paths
@@ -111,6 +120,8 @@ const MANAGE_PG_CONTAINER = !EXTERNAL_PG_URL
 
 const args = process.argv.slice(2)
 const WITHOUT_SYNC = args.includes("--no-sync")
+// --no-sandbox forces the agent-worker to be skipped even when Docker is up.
+const WITHOUT_SANDBOX = args.includes("--no-sandbox")
 const VERBOSE = args.includes("--verbose") || process.env.DEV_STACK_VERBOSE === "1"
 const VITE_PORT_ARG = args.find((a) => a.startsWith("--vite-port="))
 // Also accept bare `--port <N>` forwarded by `npm run dev -- --port 1420`
@@ -471,6 +482,26 @@ async function reconcilePgSchema(
     patched.push("rebuilt file_section_progress PK with target_lang")
   }
 
+  // AQU-AGENT: the Agent API changeset lifecycle added the transitional
+  // 'committing' status (schema.sql line ~782, used by commit.ts). The generic
+  // loop above never touches CHECK constraints, so a container created before
+  // that status existed still carries the old 5-value check and 500s every
+  // external `commit` with `changesets_status_check` violations. Rebuild the
+  // check to match schema.sql if 'committing' is missing (idempotent).
+  const { rows: csCheck } = await client.query(
+    `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'changesets_status_check'`,
+  )
+  const csDef = (csCheck[0] as { def?: string } | undefined)?.def ?? ""
+  if (csDef && !csDef.includes("committing")) {
+    await run(
+      `ALTER TABLE changesets DROP CONSTRAINT changesets_status_check;
+       ALTER TABLE changesets ADD CONSTRAINT changesets_status_check
+         CHECK (status IN ('staged','committing','committed','discarded','stale','expired'))`,
+      "rebuilding changesets_status_check with the 'committing' status (AQU-AGENT)",
+    )
+    patched.push("rebuilt changesets_status_check with 'committing'")
+  }
+
   if (patched.length) {
     console.log(
       `[dev-stack] local Postgres schema patched from db/postgres/schema.sql: ${patched.join(", ")}`,
@@ -520,9 +551,27 @@ async function main(): Promise<void> {
   ensureDevVars(IDENTITY_DIR, "identity")
   if (!WITHOUT_SYNC) ensureDevVars(SYNC_DIR, "sync")
 
+  // Decide whether to boot the agent sandbox worker. It is container-backed
+  // (Cloudflare Sandbox → Docker), so it only runs when Docker is available and
+  // --no-sandbox was not passed. When skipped, the harness's code-exec tools
+  // surface a "sandbox unavailable" error and the rest of the stack boots
+  // normally.
+  const sandboxRequested = !WITHOUT_SANDBOX && existsSync(AGENT_DIR)
+  const dockerAvailable = sandboxRequested && hasDocker()
+  const bootSandbox = sandboxRequested && dockerAvailable
+  if (!WITHOUT_SANDBOX && existsSync(AGENT_DIR) && !dockerAvailable) {
+    console.warn(
+      "[dev-stack] Docker not detected — skipping the agent sandbox worker (:%d). " +
+        "Agent code-exec tools will report 'sandbox unavailable'. " +
+        "Start Docker (or pass --no-sandbox to silence this).",
+      AGENT_PORT,
+    )
+  }
+
   // Free any ports left behind by an aborted prior run.
   await freePort(IDENTITY_PORT)
   if (!WITHOUT_SYNC) await freePort(SYNC_PORT)
+  if (bootSandbox) await freePort(AGENT_PORT)
   await freePort(VITE_PORT)
 
   await ensureLocalPostgres()
@@ -543,6 +592,38 @@ async function main(): Promise<void> {
     attachOutput(mockLlm, "mock-llm", openLogFile(path.join(LOG_DIR, "mock-llm.log")), VERBOSE)
     cleanup.push(() => killChildTree(mockLlm))
   }
+
+  // Boot the agent sandbox worker (best-effort). Its container image builds on
+  // first `wrangler dev` and can be slow; if it never comes up we warn and
+  // continue rather than tearing the whole stack down. Booted BEFORE identity
+  // so we know whether to hand identity the AGENT_SANDBOX_URL.
+  let agent: SpawnedWorker | null = null
+  if (bootSandbox) {
+    console.log(`[dev-stack] starting agent-worker (sandbox) on :${AGENT_PORT}…`)
+    try {
+      agent = await spawnWranglerDev({
+        cwd: AGENT_DIR,
+        port: AGENT_PORT,
+        label: "agent",
+        extraArgs: [
+          "--persist-to", PERSIST_DIR,
+          "--var", `AGENT_SANDBOX_KEY:${AGENT_SANDBOX_KEY_DEV}`,
+          "--var", "WRANGLER_LOCAL:1",
+        ],
+        logFile: openLogFile(path.join(LOG_DIR, "agent.log")),
+        streamToParent: VERBOSE,
+      })
+      cleanup.push(() => agent!.kill())
+    } catch (err) {
+      console.warn(
+        `[dev-stack] agent-worker failed to start (${String(err)}). ` +
+          `Continuing without it — agent code-exec tools will report 'sandbox unavailable'. ` +
+          `See ${path.relative(REPO_ROOT, path.join(LOG_DIR, "agent.log"))}.`,
+      )
+      agent = null
+    }
+  }
+  const agentUp = agent !== null
 
   console.log(`[dev-stack] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
   const identity: SpawnedWorker = await spawnWranglerDev({
@@ -591,6 +672,18 @@ async function main(): Promise<void> {
       // both the linked-projects and PD7 live QA passes).
       "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_PORT}`,
       "--var", "ENVIRONMENT:development",
+      // AQU-AGENT §6: point the harness (auth-worker) at the local sandbox
+      // service. Only passed when the agent-worker actually came up — absent
+      // AGENT_SANDBOX_URL, the harness's code-exec tools report "sandbox
+      // unavailable" instead of hitting a dead port. Both vars are read from
+      // c.env by application code, so they must be --var (process env alone
+      // never reaches c.env under wrangler dev).
+      ...(agentUp
+        ? [
+            "--var", `AGENT_SANDBOX_URL:http://127.0.0.1:${AGENT_PORT}`,
+            "--var", `AGENT_SANDBOX_KEY:${AGENT_SANDBOX_KEY_DEV}`,
+          ]
+        : []),
     ],
     logFile: openLogFile(path.join(LOG_DIR, "identity.log")),
     streamToParent: VERBOSE,
@@ -682,6 +775,11 @@ async function main(): Promise<void> {
     sync
       ? `         sync     -> http://127.0.0.1:${SYNC_PORT}/  (logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "sync.log"))})`
       : `         sync     -> skipped (--no-sync)`,
+    agentUp
+      ? `         agent    -> http://127.0.0.1:${AGENT_PORT}/  (sandbox; logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "agent.log"))})`
+      : WITHOUT_SANDBOX
+        ? `         agent    -> skipped (--no-sandbox)`
+        : `         agent    -> skipped (no Docker — code-exec tools report "sandbox unavailable")`,
     `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/chat/  (served by identity worker)`,
     useMockLlm
       ? `         llm      -> http://127.0.0.1:${MOCK_LLM_PORT}/  (scripted mock — set OPENROUTER_API_KEY in auth-worker/.dev.vars for a real model)`

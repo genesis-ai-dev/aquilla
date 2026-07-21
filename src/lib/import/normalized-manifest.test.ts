@@ -8,7 +8,7 @@ import {
 } from "./normalized-manifest"
 
 describe("normalized import manifest", () => {
-  it("keeps Scripture headings unnumbered without shifting canonical verse labels", () => {
+  it("keeps in-body Scripture headings unnumbered without shifting canonical verse labels", () => {
     const raw = [
       "\\id GEN",
       "\\mt1 Genesis",
@@ -33,14 +33,12 @@ describe("normalized import manifest", () => {
       label: unit.displayLabel,
       ref: unit.canonicalRef,
     }))).toEqual([
-      { kind: "paratext", label: null, ref: "GEN:mt1:1" },
       { kind: "heading", label: null, ref: "GEN 1:s1:1" },
       { kind: "verse", label: "1", ref: "GEN 1:1" },
       { kind: "verse", label: "2", ref: "GEN 1:2" },
       { kind: "verse", label: "3-4", ref: "GEN 1:3-4" },
     ])
     expect(manifest.units.map((unit) => unit.unitKey)).toEqual([
-      "scripture-structure:GEN:mt1:1",
       "scripture-structure:GEN 1:s1:1",
       "scripture:GEN 1:1",
       "scripture:GEN 1:2",

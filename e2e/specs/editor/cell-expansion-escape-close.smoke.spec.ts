@@ -46,7 +46,9 @@ test("Escape key closes the cell expansion panel", async ({ alice }) => {
   await expandBtn.click()
 
   // The "Close cell details" button confirms the panel is open.
-  const closeBtn = alice.getByRole("button", { name: /Close cell details/i })
+  // The action rail and the panel both expose "Close cell details". The
+  // panel-specific marker is stable and disappears when Escape closes it.
+  const closeBtn = row.locator("[data-cell-detail-close]")
   await expect(closeBtn).toBeVisible({ timeout: 5_000 })
 
   // Press Escape while focus is INSIDE the panel — the keydown listener lives

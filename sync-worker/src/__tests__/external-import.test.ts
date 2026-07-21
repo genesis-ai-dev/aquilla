@@ -22,7 +22,11 @@ vi.mock('partyserver', () => ({
   }),
 }))
 
-import { handleExternalArtifactsRequest, MAX_ARTIFACT_BYTES } from '../external/artifacts-route'
+import {
+  handleExternalArtifactsRequest,
+  INSPECT_SNIFF_BYTES,
+  MAX_ARTIFACT_BYTES,
+} from '../external/artifacts-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { handleEventsWriteRequest } from '../events/route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
@@ -42,11 +46,16 @@ interface StoredObject {
 
 function makeStubBucket() {
   const store = new Map<string, StoredObject>()
+  const getRanges: Array<{ offset: number; length: number } | undefined> = []
   return {
-    async get(key: string) {
+    async get(key: string, options?: { range?: { offset: number; length: number } }) {
+      getRanges.push(options?.range)
       const obj = store.get(key)
       if (!obj) return null
-      return { arrayBuffer: async () => obj.body, httpMetadata: obj.httpMetadata }
+      const body = options?.range
+        ? obj.body.slice(options.range.offset, options.range.offset + options.range.length)
+        : obj.body
+      return { arrayBuffer: async () => body, httpMetadata: obj.httpMetadata }
     },
     async put(
       key: string,
@@ -70,6 +79,9 @@ function makeStubBucket() {
     },
     _allKeys() {
       return Array.from(store.keys())
+    },
+    _getRanges() {
+      return getRanges
     },
   }
 }
@@ -238,6 +250,18 @@ describe('artifacts — upload + retrieval', () => {
     expect(await tdb.rows('artifacts')).toHaveLength(0)
   })
 
+  it('rejects a declared oversize upload before buffering or writing it', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const req = uploadReq(token, 'huge.bin', new Uint8Array([1]))
+    req.headers.set('content-length', String(MAX_ARTIFACT_BYTES + 1))
+
+    const res = (await handleExternalArtifactsRequest(req, env))!
+
+    expect(res.status).toBe(400)
+    expect(bucket._size()).toBe(0)
+    expect(await tdb.rows('artifacts')).toHaveLength(0)
+  })
+
   it('requires the x-artifact-name header', async () => {
     const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
     const req = new Request(`https://w/api/v1/external/projects/${PROJECT}/artifacts`, {
@@ -277,6 +301,7 @@ describe('artifacts — upload + retrieval', () => {
       ? JSON.parse(inspected.metadata)
       : inspected?.metadata
     expect(metadata.inspection.detectedFormat).toBe('json')
+    expect(bucket._getRanges()).toContainEqual({ offset: 0, length: INSPECT_SNIFF_BYTES })
   })
 
   it('classifies a Paratext ZIP from its member inventory without inflating it', async () => {
@@ -415,13 +440,14 @@ describe('PlanImport — commit', () => {
     const res = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id, { model: 'claude' }), env))!
     expect(res.status).toBe(200)
     const commit = (await res.json()) as { receipt: { appliedCount: number; fileId: string; eventIds: string[] } }
-    expect(commit.receipt.appliedCount).toBe(3) // 1 file.create + 2 source.cell.create
+    expect(commit.receipt.appliedCount).toBe(5) // create + hide + 2 cells + reveal
     const fileId = commit.receipt.fileId
     expect(fileId).toBeTruthy()
 
     // File projection.
-    const files = await tdb.rows<{ id: string; name: string }>('files')
+    const files = await tdb.rows<{ id: string; name: string; deleted_at: number | null }>('files')
     expect(files.find((f) => f.id === fileId)?.name).toBe('Genesis.usfm')
+    expect(files.find((f) => f.id === fileId)?.deleted_at).toBeNull()
 
     // Source cell projection.
     const cells = await tdb.rows<{ side: string; value: string; cell_id: string; file_id: string }>('cells')
@@ -431,9 +457,8 @@ describe('PlanImport — commit', () => {
 
     // Provenance stamped on the file + cell events.
     const events = await tdb.rows<{ kind: string; provenance: unknown }>('events')
-    const created = events.filter((e) => e.kind === 'file.create' || e.kind === 'source.cell.create')
-    expect(created).toHaveLength(3)
-    for (const e of created) {
+    expect(events).toHaveLength(5)
+    for (const e of events) {
       const prov = typeof e.provenance === 'string' ? JSON.parse(e.provenance) : e.provenance
       expect(prov).not.toBeNull()
       expect(prov.origin).toBe('agent')
@@ -499,8 +524,10 @@ describe('PlanImport — commit', () => {
             version: 1,
             name: 'Custom tagged Scripture',
             inputFormat: 'custom-sfm',
-            strategy: 'model-assisted',
+            id: 'ai-verse-prefix',
+            strategy: 'records',
             config: { versePrefix: '@v' },
+            proposedBy: 'ai',
           },
         },
         cells: [{
@@ -545,7 +572,7 @@ describe('PlanImport — commit', () => {
       fidelity: 'content-only',
     })
     const recipe = typeof bindings[0].recipe === 'string' ? JSON.parse(bindings[0].recipe) : bindings[0].recipe
-    expect(recipe).toMatchObject({ strategy: 'model-assisted', config: { versePrefix: '@v' } })
+    expect(recipe).toMatchObject({ strategy: 'records', config: { versePrefix: '@v' } })
 
     const cells = await tdb.rows<{
       side: string
@@ -569,7 +596,7 @@ describe('PlanImport — commit', () => {
     expect(fileMeta.aquillaImport).toMatchObject({
       profileId: 'agent:custom-scripture',
       unitCount: 1,
-      recipe: { strategy: 'model-assisted' },
+      recipe: { strategy: 'records' },
     })
   })
 
@@ -605,8 +632,8 @@ describe('PlanImport — commit replay (crash-retry idempotency)', () => {
     env = makeEnv(tdb.db, bucket)
     const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
 
-    // 150 cells → file.create + 150 source.cell.create = 151 events, spanning
-    // multiple PLAN_IMPORT_CHUNK (100) posts on commit.
+    // 150 cells → create + hide + 150 source cells + reveal = 153 events,
+    // spanning multiple PLAN_IMPORT_CHUNK (100) posts on commit.
     const cells = Array.from({ length: 150 }, (_, i) => ({ content: `c${i}` }))
     const prepRes = (await handleExternalChangesetsRequest(
       prepareReq(token, { kind: 'PlanImport', fileName: 'Big.usfm', fileType: 'usfm', cells }),
@@ -625,6 +652,7 @@ describe('PlanImport — commit replay (crash-retry idempotency)', () => {
     const planned = summary.plannedIds.planImport as {
       fileId: string
       fileEventId: string
+      hideEventId: string
       cells: { cellId: string; eventId: string }[]
     }
 
@@ -650,6 +678,17 @@ describe('PlanImport — commit replay (crash-retry idempotency)', () => {
       payload: { name: 'Big.usfm', fileType: 'usfm' },
       clientTs: 1,
     }
+    const hideEvent: RawEvent<'file.delete'> = {
+      id: planned.hideEventId,
+      schemaVersion: 1,
+      kind: 'file.delete',
+      projectId: PROJECT,
+      fileId: planned.fileId,
+      parentId: null,
+      author: 'lead',
+      payload: {},
+      clientTs: 1,
+    }
     const partialCells: RawEvent<'source.cell.create'>[] = []
     let prev: string | null = null
     for (let i = 0; i < 80; i++) {
@@ -668,7 +707,7 @@ describe('PlanImport — commit replay (crash-retry idempotency)', () => {
       })
       prev = pc.cellId
     }
-    const partial: RawEvent[] = [fileEvent, ...partialCells]
+    const partial: RawEvent[] = [fileEvent, hideEvent, ...partialCells]
     const partialRes = await handleEventsWriteRequest(
       new Request('https://w/events', {
         method: 'POST',
@@ -678,25 +717,32 @@ describe('PlanImport — commit replay (crash-retry idempotency)', () => {
       env,
     )
     const partialBody = (await partialRes!.json()) as { accepted: unknown[] }
-    expect(partialBody.accepted).toHaveLength(81) // file + 80 cells landed
+    expect(partialBody.accepted).toHaveLength(82) // file + hide + 80 cells landed
+
+    const hiddenFile = await tdb.db
+      .prepare(`SELECT deleted_at FROM files WHERE id = ? AND project_id = ?`)
+      .bind(planned.fileId, PROJECT)
+      .first<{ deleted_at: number | null }>()
+    expect(hiddenFile?.deleted_at).not.toBeNull()
 
     await tdb.db
       .prepare(`UPDATE changesets SET status = 'committing' WHERE id = ?`)
       .bind(csId)
       .run()
 
-    // Retry the commit: re-posts file.create + ALL 150 cells; the 81 already
-    // applied dedupe by id, the remaining 70 apply.
+    // Retry the commit: re-posts create + hide + all cells; the 82 already
+    // applied dedupe by id, the remaining cells apply, then reveal publishes.
     const res = (await handleExternalChangesetsRequest(commitReq(token, csId), env))!
     expect(res.status).toBe(200)
     const commit = (await res.json()) as { receipt: { appliedCount: number; fileId: string } }
     expect(commit.receipt.fileId).toBe(planned.fileId) // stored id, not a fresh mint
-    expect(commit.receipt.appliedCount).toBe(151)
+    expect(commit.receipt.appliedCount).toBe(153)
 
     // Exactly one file — NOT a duplicate from a re-minted file id (the old bug).
-    const files = await tdb.rows<{ id: string }>('files')
+    const files = await tdb.rows<{ id: string; deleted_at: number | null }>('files')
     expect(files).toHaveLength(1)
     expect(files[0].id).toBe(planned.fileId)
+    expect(files[0].deleted_at).toBeNull()
 
     // All 150 source cells, no duplicates.
     const sourceCells = (await tdb.rows<{ side: string; file_id: string }>('cells')).filter(
@@ -704,11 +750,12 @@ describe('PlanImport — commit replay (crash-retry idempotency)', () => {
     )
     expect(sourceCells).toHaveLength(150)
 
-    // 1 file.create + 150 source.cell.create = 151 events, no duplicates.
+    // Create + 150 source cells remain unique; hide/reveal are also unique.
     const createEvents = (await tdb.rows<{ kind: string }>('events')).filter(
       (e) => e.kind === 'file.create' || e.kind === 'source.cell.create',
     )
     expect(createEvents).toHaveLength(151)
+    expect(await tdb.rows('events')).toHaveLength(153)
 
     // Single changeset row, converged to committed.
     const cs = await tdb.rows<{ status: string }>('changesets')

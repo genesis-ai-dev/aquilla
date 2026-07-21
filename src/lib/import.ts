@@ -59,7 +59,12 @@ import {
 } from "./import/normalized-manifest"
 import { ImportService } from "./import/import-service"
 import type { PreparedImportFile } from "./import/import-service"
-import { classifyAndParseUnknownText, sniffKnownTextFile, type AiImportClassification } from "./import/ai-recipe"
+import {
+  classifyAndParseUnknownText,
+  readUnknownTextFile,
+  sniffKnownTextFile,
+  type AiImportClassification,
+} from "./import/ai-recipe"
 import type { DeclarativeImportRecipe } from "./import/normalized-manifest"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
@@ -431,7 +436,8 @@ export async function prepareImportFile(
     }
   }
 
-  const text = await file.text()
+  const inspected = await readUnknownTextFile(file, ctx.signal)
+  const { text } = inspected
   const sniffedType = sniffKnownTextFile(text)
   if (sniffedType) {
     return { fileType: sniffedType, results: await parseFile(file, sniffedType) }
@@ -445,13 +451,13 @@ export async function prepareImportFile(
     sourceLanguage: ctx.sourceLanguage,
     targetLanguage: ctx.targetLanguage,
     signal: ctx.signal,
-  })
+  }, inspected)
   return {
     fileType: "custom",
     results: [{
       name: file.name,
       strings: assisted.strings,
-      rawBytes: await file.arrayBuffer(),
+      rawBytes: inspected.bytes,
       rawSourceFormat: "custom-original",
       importRecipe: assisted.classification.recipe,
       importClassification: assisted.classification,
@@ -1565,13 +1571,22 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       }))
     }
     case "usfm": {
-      const raw = await file.text()
+      const bytes = await file.arrayBuffer()
+      const raw = new TextDecoder().decode(bytes)
       // USX (Paratext's XML export) → USFM conversion uses the Window-only
       // DOMParser, so it runs HERE on the main thread; the heavy lossless parse
       // (verse extraction, \id book split, side-car capture) then happens in the
       // worker via parse-text-formats.ts.
-      const text = looksLikeUsx(raw) ? usxToUsfm(raw) : raw
-      return parseTextFormatOffMainThread({ fileType: "usfm", text, name: file.name })
+      const isUsx = looksLikeUsx(raw)
+      const text = isUsx ? usxToUsfm(raw) : raw
+      const results = await parseTextFormatOffMainThread({ fileType: "usfm", text, name: file.name })
+      return isUsx
+        ? results.map((result) => ({
+            ...result,
+            rawBytes: bytes,
+            rawSourceFormat: "usx",
+          }))
+        : results
     }
     case "docx": {
       const buffer = await file.arrayBuffer()

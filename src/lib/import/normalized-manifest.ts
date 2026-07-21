@@ -1,112 +1,23 @@
 import type { FileType, SourceLocation, TranslatableString } from "@/lib/parsers/types"
+import {
+  NORMALIZED_IMPORT_VERSION,
+  type DeclarativeImportRecipe,
+  type ImportAddress,
+  type ImportSourceLocator,
+  type ImportUnitKind,
+  type NormalizedImportSummary,
+  type RoundTripFidelity,
+} from "../../../shared/import-contract"
 
-export const NORMALIZED_IMPORT_VERSION = 1 as const
-
-export type ImportUnitKind =
-  | "verse"
-  | "heading"
-  | "paratext"
-  | "paragraph"
-  | "list"
-  | "blockquote"
-  | "cue"
-  | "segment"
-  | "media"
-  | "other"
-
-export type RoundTripFidelity =
-  | "native"
-  | "verified-recipe"
-  | "content-only"
-  | "preserved-only"
-
-export type ImportAddress =
-  | {
-      scheme: "scripture"
-      book: string
-      chapter: number
-      verse: string
-    }
-  | {
-      scheme: "scripture-structure"
-      book: string
-      chapter: number | null
-      marker: string
-      occurrence: number
-    }
-  | {
-      scheme: "document"
-      memberPath: string
-      blockPath: string
-      segment: number
-    }
-  | {
-      scheme: "translation-unit"
-      format: "xliff" | "tmx"
-      unitId: string
-      segmentId?: string
-    }
-  | {
-      scheme: "timeline"
-      cue: number
-      startMs?: number
-      endMs?: number
-    }
-  | {
-      scheme: "sequence"
-      index: number
-    }
-  | {
-      scheme: "custom"
-      recipeId: string
-      record: number
-    }
-
-export type ImportSourceLocator =
-  | {
-      kind: "usfm"
-      ref: string
-      marker: string
-      occurrence?: number
-    }
-  | {
-      kind: "package-block"
-      memberPath: string
-      blockPath: string
-      segment: number
-    }
-  | {
-      kind: "translation-unit"
-      format: "xliff" | "tmx"
-      unitId: string
-      segmentId?: string
-    }
-  | {
-      kind: "cue"
-      index: number
-      startMs?: number
-      endMs?: number
-    }
-  | {
-      kind: "sequence"
-      index: number
-    }
-  | {
-      kind: "recipe"
-      recipeId: string
-      record: number
-      field?: string
-    }
-
-export interface DeclarativeImportRecipe {
-  version: 1
-  id: string
-  name: string
-  inputFormat: string
-  strategy: "records"
-  config: Record<string, unknown>
-  proposedBy: "ai" | "user"
-}
+export {
+  NORMALIZED_IMPORT_VERSION,
+  type DeclarativeImportRecipe,
+  type ImportAddress,
+  type ImportSourceLocator,
+  type ImportUnitKind,
+  type NormalizedImportSummary,
+  type RoundTripFidelity,
+} from "../../../shared/import-contract"
 
 export interface NormalizedImportUnit {
   unitKey: string
@@ -156,17 +67,6 @@ export interface NormalizedImportFile {
  * addresses and locators stay on cells, so this summary remains small even for
  * large books or subtitle files.
  */
-export interface NormalizedImportSummary {
-  version: typeof NORMALIZED_IMPORT_VERSION
-  profileId: string
-  profileVersion: string
-  deterministic: boolean
-  fidelity: RoundTripFidelity
-  unitCount: number
-  warningCounts: Partial<Record<ImportWarning["code"], number>>
-  recipe?: DeclarativeImportRecipe
-}
-
 export interface AquillaImportMetadata {
   version: typeof NORMALIZED_IMPORT_VERSION
   profileId: string

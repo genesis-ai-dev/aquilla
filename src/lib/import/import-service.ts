@@ -123,12 +123,20 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
       const manifest = normalizeTranslatableStrings(result.strings, {
         fileName: result.name,
         fileType,
-        profileId: result.importRecipe ? `agentic:${result.importRecipe.id}` : profileId(fileType),
+        profileId: result.importRecipe
+          ? `agentic:${result.importRecipe.id}`
+          : result.rawSourceFormat === "usx"
+            ? "builtin:usx-to-usfm"
+            : profileId(fileType),
         profileVersion: "1",
         ...(result.importRecipe ? {
           deterministic: false,
           fidelity: "content-only" as const,
           recipe: result.importRecipe,
+        } : result.rawSourceFormat === "usx" ? {
+          // The exact USX artifact is retained, but translated content is not
+          // yet serialized back into USX. Do not claim native round-trip.
+          fidelity: "content-only" as const,
         } : {}),
       })
       const committed = await this.dependencies.emitParsedFile(

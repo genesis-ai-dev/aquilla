@@ -44,6 +44,11 @@ function makeStubBucket() {
 }
 
 describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
+  it("uses a lossless .usx object key for preserved USX originals", () => {
+    expect(sourceObjectKey({}, "p1", "f1", "usx"))
+      .toContain("projects/p1/files/f1/source/original.usx")
+  })
+
   it("uploads docx bytes to SNAPSHOTS and writes a file_source_blobs row", async () => {
     const { db } = await makeTestDb({
       projects: [{ id: "p1", name: "Test Project", created_by: 1 }],

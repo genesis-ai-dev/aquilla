@@ -7,42 +7,18 @@
 // versioned provenance only; cells still pass through ordinary validation and
 // compile to the canonical event perimeter.
 
-export type ImportFidelity =
-  | 'native'
-  | 'verified-recipe'
-  | 'content-only'
-  | 'preserved-only'
+import {
+  IMPORT_UNIT_KINDS,
+  NORMALIZED_IMPORT_VERSION,
+  ROUND_TRIP_FIDELITIES,
+  type ImportUnitKind,
+  type NormalizedImportSummary,
+  type RoundTripFidelity,
+} from '../../../shared/import-contract'
 
-export type ImportUnitKind =
-  | 'verse'
-  | 'heading'
-  | 'paratext'
-  | 'paragraph'
-  | 'list'
-  | 'blockquote'
-  | 'cue'
-  | 'segment'
-  | 'media'
-  | 'other'
-
-export interface PlanImportRecipe {
-  version: 1
-  name: string
-  inputFormat: string
-  strategy: 'delimiter' | 'regex' | 'json-path' | 'xml-path' | 'model-assisted'
-  config: Record<string, unknown>
-  roundTripVerified?: boolean
-}
-
-export interface PlanImportManifest {
-  version: 1
-  profileId: string
-  profileVersion: string
-  deterministic: boolean
-  fidelity: ImportFidelity
+export interface PlanImportManifest extends Omit<NormalizedImportSummary, 'unitCount' | 'warningCounts'> {
   memberPath?: string
   warningCounts?: Record<string, number>
-  recipe?: PlanImportRecipe
 }
 
 export interface PlanImportVariant {
@@ -105,28 +81,15 @@ function nonEmpty(value: unknown): value is string {
 }
 
 function normalizedKind(value: string | undefined): ImportUnitKind {
-  switch (value) {
-    case 'verse':
-    case 'heading':
-    case 'paratext':
-    case 'paragraph':
-    case 'list':
-    case 'blockquote':
-    case 'cue':
-    case 'segment':
-    case 'media':
-    case 'other':
-      return value
-    case 'text':
-    case undefined:
-      return 'segment'
-    default:
-      return 'other'
-  }
+  if (value === 'text' || value === undefined) return 'segment'
+  return (IMPORT_UNIT_KINDS as readonly string[]).includes(value)
+    ? value as ImportUnitKind
+    : 'other'
 }
 
-function defaultFidelity(fileType: string): ImportFidelity {
-  if (['usfm', 'usx', 'sfm', 'docx', 'pptx'].includes(fileType.toLowerCase())) return 'native'
+function defaultFidelity(fileType: string): RoundTripFidelity {
+  if (['usfm', 'sfm', 'docx', 'pptx'].includes(fileType.toLowerCase())) return 'native'
+  if (fileType.toLowerCase() === 'usx') return 'content-only'
   if (['audio', 'video'].includes(fileType.toLowerCase())) return 'preserved-only'
   return 'content-only'
 }
@@ -172,21 +135,25 @@ export function validatePlanImportManifest(input: PlanImportInput): string[] {
   const issues: string[] = []
   const manifest = input.manifest
   if (manifest) {
-    if (manifest.version !== 1) issues.push('manifest.version must be 1')
+    if (manifest.version !== NORMALIZED_IMPORT_VERSION) issues.push('manifest.version must be 1')
     if (!nonEmpty(manifest.profileId)) issues.push('manifest.profileId must be a non-empty string')
     if (!nonEmpty(manifest.profileVersion)) issues.push('manifest.profileVersion must be a non-empty string')
-    if (!['native', 'verified-recipe', 'content-only', 'preserved-only'].includes(manifest.fidelity)) {
+    if (!(ROUND_TRIP_FIDELITIES as readonly string[]).includes(manifest.fidelity)) {
       issues.push('manifest.fidelity is unsupported')
     }
     if (manifest.fidelity === 'verified-recipe' && !manifest.recipe?.roundTripVerified) {
       issues.push('verified-recipe fidelity requires recipe.roundTripVerified=true')
     }
     if (manifest.recipe) {
-      if (manifest.recipe.version !== 1) issues.push('manifest.recipe.version must be 1')
+      if (manifest.recipe.version !== NORMALIZED_IMPORT_VERSION) issues.push('manifest.recipe.version must be 1')
+      if (!nonEmpty(manifest.recipe.id)) issues.push('manifest.recipe.id must be a non-empty string')
       if (!nonEmpty(manifest.recipe.name)) issues.push('manifest.recipe.name must be a non-empty string')
       if (!nonEmpty(manifest.recipe.inputFormat)) issues.push('manifest.recipe.inputFormat must be a non-empty string')
-      if (!['delimiter', 'regex', 'json-path', 'xml-path', 'model-assisted'].includes(manifest.recipe.strategy)) {
+      if (manifest.recipe.strategy !== 'records') {
         issues.push('manifest.recipe.strategy is unsupported')
+      }
+      if (!['ai', 'user'].includes(manifest.recipe.proposedBy)) {
+        issues.push('manifest.recipe.proposedBy is unsupported')
       }
     }
   }

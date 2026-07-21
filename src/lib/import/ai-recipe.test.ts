@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest"
 import {
   applyDeclarativeRecipe,
   classifyAndParseUnknownText,
+  MAX_UNKNOWN_TEXT_BYTES,
+  readUnknownTextFile,
   sniffKnownTextFile,
   type AiImportClassification,
   type AiRecipeConfig,
@@ -115,6 +117,79 @@ describe("AI-assisted declarative import recipes", () => {
     const request = fetchImpl.mock.calls[0][1] as RequestInit
     expect(request.headers).toMatchObject({ Authorization: "Bearer identity-token" })
     expect(String(request.body)).not.toContain("second record")
+  })
+
+  it("derives a stable recipe id from executable semantics across content edits", async () => {
+    const responseBody = JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        category: "document",
+        confidence: 0.9,
+        explanation: "Line records",
+        recipe: {
+          name: "Line records",
+          inputFormat: "unknown-lines",
+          config: { recordMode: "line" },
+        },
+      }) } }],
+    })
+    const fetchImpl = vi.fn(async () => new Response(responseBody, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }))
+    const file = new File(["one\ntwo"], "records.odd", { type: "text/plain" })
+
+    const first = await classifyAndParseUnknownText(file, {
+      identityToken: "token",
+      projectId: "p",
+      fetchImpl,
+    })
+    const second = await classifyAndParseUnknownText(new File(["one edited\ntwo"], "records.odd"), {
+      identityToken: "token",
+      projectId: "p",
+      fetchImpl,
+    })
+
+    expect(first.classification.recipe.id).toMatch(/^ai-[a-f0-9]{32}$/)
+    expect(second.classification.recipe.id).toBe(first.classification.recipe.id)
+    expect(second.strings.map((cell) => cell.group)).toEqual(first.strings.map((cell) => cell.group))
+    expect(first.strings[0]).toMatchObject({
+      original: "one",
+      translated: "",
+      context: "Line records 1",
+      type: "text",
+    })
+    expect(first.strings[0].group).toBe(`${first.classification.recipe.id}:1`)
+    expect(first.strings[0].globalReferences).toBeUndefined()
+    expect(first.strings[0].speaker).toBeUndefined()
+  })
+
+  it("rejects oversized and binary unknown files before invoking AI", async () => {
+    const fetchImpl = vi.fn()
+    const oversized = {
+      name: "huge.odd",
+      size: MAX_UNKNOWN_TEXT_BYTES + 1,
+      arrayBuffer: vi.fn(),
+    } as unknown as File
+
+    await expect(classifyAndParseUnknownText(oversized, {
+      identityToken: "token",
+      projectId: "p",
+      fetchImpl,
+    })).rejects.toThrow("too large")
+    expect(oversized.arrayBuffer).not.toHaveBeenCalled()
+
+    await expect(classifyAndParseUnknownText(
+      new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], "binary.odd"),
+      { identityToken: "token", projectId: "p", fetchImpl },
+    )).rejects.toThrow("appears to be binary")
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it("decodes UTF-16 unknown text without misclassifying its NUL bytes", async () => {
+    const bytes = new Uint8Array([0xff, 0xfe, 0x48, 0x00, 0x69, 0x00])
+    const inspected = await readUnknownTextFile(new File([bytes], "utf16.odd"))
+    expect(inspected.text.replace(/^\uFEFF/, "")).toBe("Hi")
+    expect(inspected.bytes.byteLength).toBe(bytes.byteLength)
   })
 
   it("rejects malformed model output instead of guessing a structure", async () => {

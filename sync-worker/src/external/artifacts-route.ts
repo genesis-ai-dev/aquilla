@@ -188,6 +188,14 @@ async function handleUpload(
     }
   }
 
+  const declaredLength = Number(request.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_ARTIFACT_BYTES) {
+    return errorResponse('validation_failed', 'artifact exceeds maximum size', {
+      sizeBytes: declaredLength,
+      maxBytes: MAX_ARTIFACT_BYTES,
+    })
+  }
+
   const bytes = new Uint8Array(await request.arrayBuffer())
   if (bytes.byteLength === 0) {
     return errorResponse('validation_failed', 'artifact body is empty')
@@ -303,7 +311,7 @@ async function handleGetContent(
 
 /** How many leading bytes to sniff — enough to see structural markers without
  *  reading a large file into the worker. */
-const INSPECT_SNIFF_BYTES = 64 * 1024
+export const INSPECT_SNIFF_BYTES = 64 * 1024
 
 interface InspectDetails {
   byteCount: number
@@ -465,20 +473,24 @@ async function handleInspect(
     })
   }
 
-  const obj = await env.SNAPSHOTS.get(row.r2_key)
+  // Format detection only needs a bounded prefix. R2 range reads avoid loading
+  // an entire 25 MB artifact into worker memory for a 64 KB inspection.
+  const obj = await env.SNAPSHOTS.get(row.r2_key, {
+    range: { offset: 0, length: INSPECT_SNIFF_BYTES },
+  })
   if (!obj) return errorResponse('not_found', 'artifact bytes missing from storage')
-  const full = new Uint8Array(await obj.arrayBuffer())
-  const sniff = full.subarray(0, INSPECT_SNIFF_BYTES)
+  const ranged = new Uint8Array(await obj.arrayBuffer())
+  const sniff = ranged.subarray(0, INSPECT_SNIFF_BYTES)
   const text = new TextDecoder().decode(sniff)
 
-  const { detectedFormat, confidence, extra } = detectFormat(text, full, row.name)
+  const { detectedFormat, confidence, extra } = detectFormat(text, sniff, row.name)
   const lineCount = text === '' ? 0 : text.split(/\r?\n/).length
 
   const details: InspectDetails = {
-    byteCount: full.byteLength,
+    byteCount: Number(row.size_bytes),
     sniffedBytes: sniff.byteLength,
     lineCount,
-    truncated: full.byteLength > sniff.byteLength,
+    truncated: Number(row.size_bytes) > sniff.byteLength,
     confidence,
     ...extra,
   }

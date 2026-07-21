@@ -35,6 +35,18 @@ describe('normalized PlanImport compiler', () => {
     })
   })
 
+  it('does not claim native round-trip fidelity for legacy USX imports', () => {
+    const compiled = compilePlanImport({
+      fileType: 'usx',
+      cells: [{ content: 'In the beginning', type: 'verse', canonicalRef: 'GEN 1:1' }],
+    })
+
+    expect(compiled.fileSummary).toMatchObject({
+      profileId: 'agent:usx',
+      fidelity: 'content-only',
+    })
+  })
+
   it('preserves explicit recipe locators and does not execute recipe config', () => {
     const marker = { called: false }
     const input: PlanImportInput = {
@@ -47,10 +59,12 @@ describe('normalized PlanImport compiler', () => {
         fidelity: 'content-only',
         recipe: {
           version: 1,
+          id: 'ai-custom-lines',
           name: 'Custom lines',
           inputFormat: 'custom',
-          strategy: 'model-assisted',
+          strategy: 'records',
           config: { marker },
+          proposedBy: 'ai',
         },
       },
       cells: [{
@@ -85,10 +99,12 @@ describe('normalized PlanImport compiler', () => {
         fidelity: 'verified-recipe',
         recipe: {
           version: 1,
+          id: 'user-bad',
           name: 'Bad',
           inputFormat: 'custom',
-          strategy: 'regex',
+          strategy: 'records',
           config: {},
+          proposedBy: 'user',
           roundTripVerified: false,
         },
       },

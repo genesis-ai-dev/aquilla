@@ -334,6 +334,8 @@ async function preparePlanImport(
     planImport: {
       fileId: uuidv7(),
       fileEventId: uuidv7(),
+      hideEventId: uuidv7(),
+      revealEventId: uuidv7(),
       cells: cmd.cells.map((cell) => ({
         cellId: cell.id ?? uuidv7(),
         eventId: uuidv7(),

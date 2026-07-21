@@ -87,6 +87,26 @@ describe("parseFile — parse phase only (no upload)", () => {
     expect(captured).toHaveLength(0)
   })
 
+  it("preserves exact USX bytes and labels the original format honestly", async () => {
+    const usx = [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<usx version="3.0">',
+      '<book code="GEN" style="id">Genesis</book>',
+      '<chapter number="1" style="c" sid="GEN 1" />',
+      '<para style="s1">Creation</para>',
+      '<para style="p"><verse number="1" style="v" sid="GEN 1:1" />In the beginning.</para>',
+      '</usx>',
+    ].join("\n")
+
+    const [result] = await parseFile(makeFile("Genesis.usx", usx), "usfm")
+
+    expect(result.rawSourceFormat).toBe("usx")
+    expect(new TextDecoder().decode(result.rawBytes!)).toBe(usx)
+    expect(result.strings.map((cell) => cell.type)).toEqual(["heading", "verse"])
+    expect(result.strings.find((cell) => cell.type === "verse")?.globalReferences).toEqual(["GEN 1:1"])
+    expect(captured).toHaveLength(0)
+  })
+
   it("throws for media file type — caller must use emitMediaFile()", async () => {
     const file = makeFile("clip.mp3", "binary")
     await expect(parseFile(file, "audio")).rejects.toThrow(/media files/)

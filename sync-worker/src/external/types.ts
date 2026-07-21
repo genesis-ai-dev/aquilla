@@ -80,6 +80,9 @@ export interface PlannedEventIds {
   planImport?: {
     fileId: string
     fileEventId: string
+    /** Soft-hide/reveal events keep a partial multi-chunk import invisible. */
+    hideEventId?: string
+    revealEventId?: string
     cells: { cellId: string; eventId: string; variantEventIds?: string[] }[]
     /** Stable id for the artifact_bindings row when an artifact is supplied. */
     artifactBindingId?: string

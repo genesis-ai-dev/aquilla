@@ -400,16 +400,17 @@ function buildProvenance(
 
 /** Statements per POST to the /events perimeter — mirrors the perimeter's own
  *  BATCH_LIMIT (100). A PlanImport can seed thousands of source cells, so the
- *  compiled events are chunked; the receipt reports applied counts accurately
- *  across chunks (all-or-nothing is not required, but a partial apply is
- *  surfaced honestly and fails the changeset — no silent truncation). */
+ *  compiled events are chunked. The new file remains soft-hidden until every
+ *  chunk and artifact binding succeeds; an interrupted apply is retryable and
+ *  never exposes a silently truncated file. */
 const PLAN_IMPORT_CHUNK = 100
 
 /**
  * Compile a PlanImport into one file.create + N genesis source.cell.create
  * events (chained by anchorCellId, mirroring the SPA import + bulk /import
  * semantics), route them through the SAME /events perimeter Wave 1 uses (source.*
- * requires PROJECT_LEAD (500) — a contributor credential is 403'd there), stamp
+ * requires PROJECT_LEAD (500) — a contributor credential is 403'd there), keep
+ * the file soft-hidden while its chunks are being applied, and stamp
  * provenance on applied events, link the artifact, and write the receipt.
  */
 async function commitPlanImport(
@@ -449,6 +450,32 @@ async function commitPlanImport(
       ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
       importManifest: compiled.fileSummary,
     },
+    clientTs,
+  }
+
+  // A staged import is soft-hidden from ordinary file listings until every
+  // chunk and artifact binding succeeds. These ids are minted at prepare, so
+  // a worker-eviction retry repeats the same state transitions idempotently.
+  const hideEvent: RawEvent<'file.delete'> = {
+    id: plannedImport?.hideEventId ?? `${fileEvent.id}:import-hide`,
+    schemaVersion: 1,
+    kind: 'file.delete',
+    projectId,
+    fileId,
+    parentId: null,
+    author: cred.username,
+    payload: {},
+    clientTs,
+  }
+  const revealEvent: RawEvent<'file.restore'> = {
+    id: plannedImport?.revealEventId ?? `${fileEvent.id}:import-reveal`,
+    schemaVersion: 1,
+    kind: 'file.restore',
+    projectId,
+    fileId,
+    parentId: null,
+    author: cred.username,
+    payload: {},
     clientTs,
   }
 
@@ -513,8 +540,10 @@ async function commitPlanImport(
     }
   })
 
-  // file.create must land in the first chunk (it seeds the files row).
-  const allEvents: RawEvent[] = [fileEvent, ...cellEvents, ...targetEvents]
+  // file.create + file.delete land in the first chunk. file.restore is sent
+  // separately only after all content and provenance bindings succeed.
+  const stagedEvents: RawEvent[] = [fileEvent, hideEvent, ...cellEvents, ...targetEvents]
+  const allEvents: RawEvent[] = [...stagedEvents, revealEvent]
   const allEventIds = allEvents.map((e) => e.id)
 
   let token: string
@@ -526,8 +555,8 @@ async function commitPlanImport(
 
   const acceptedIds = new Set<string>()
   const rejected: { id: string; status: number; reason: string }[] = []
-  for (let i = 0; i < allEvents.length; i += PLAN_IMPORT_CHUNK) {
-    const chunk = allEvents.slice(i, i + PLAN_IMPORT_CHUNK)
+  for (let i = 0; i < stagedEvents.length; i += PLAN_IMPORT_CHUNK) {
+    const chunk = stagedEvents.slice(i, i + PLAN_IMPORT_CHUNK)
     const req = new Request('https://internal/events', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -538,6 +567,16 @@ async function commitPlanImport(
     const out = (await res.json()) as EventsWriteResponse
     for (const a of out.accepted) acceptedIds.add(a.id)
     for (const r of out.rejected) rejected.push(r)
+
+    // Defence in depth: if file.create projected but file.delete unexpectedly
+    // rejected, keep the incomplete file out of normal listings. A successful
+    // reveal event below is the sole transition back to deleted_at = NULL.
+    if (i === 0 && acceptedIds.has(fileEvent.id)) {
+      await db
+        .prepare(`UPDATE files SET deleted_at = COALESCE(deleted_at, -1) WHERE id = ? AND project_id = ?`)
+        .bind(fileId, projectId)
+        .run()
+    }
   }
 
   // Nothing applied but events were rejected — surface the reason (a contributor
@@ -551,20 +590,10 @@ async function commitPlanImport(
     )
   }
 
-  // Stamp provenance on the applied events.
-  const provenance = buildProvenance(request, cs, confirmationId)
-  const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
-  if (appliedIds.length > 0) {
-    const placeholders = appliedIds.map(() => '?').join(', ')
-    await db
-      .prepare(`UPDATE events SET provenance = ?::jsonb WHERE id IN (${placeholders})`)
-      .bind(JSON.stringify(provenance), ...appliedIds)
-      .run()
-  }
-
-  // Link the uploaded artifact to the created file, if one was referenced.
+  // Link the uploaded artifact while the file is still hidden. A binding
+  // failure therefore cannot publish a file whose provenance is incomplete.
   const fileApplied = acceptedIds.has(fileEvent.id)
-  if (cmd.artifactId && fileApplied) {
+  if (rejected.length === 0 && cmd.artifactId && fileApplied) {
     await db
       .prepare(`UPDATE artifacts SET file_id = ? WHERE id::text = ? AND project_id = ?`)
       .bind(fileId, cmd.artifactId, projectId)
@@ -596,6 +625,32 @@ async function commitPlanImport(
         JSON.stringify(compiled.fileSummary),
         cmd.manifest?.recipe ? JSON.stringify(cmd.manifest.recipe) : null,
       )
+      .run()
+  }
+
+  // Reveal only after every staged event and optional binding succeeded.
+  if (rejected.length === 0) {
+    const revealRequest = new Request('https://internal/events', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: [revealEvent] }),
+    })
+    const revealResponse = await handleEventsWriteRequest(revealRequest, env, ctx)
+    if (!revealResponse) return errorResponse('job_failed', 'events perimeter did not respond')
+    const revealResult = (await revealResponse.json()) as EventsWriteResponse
+    for (const accepted of revealResult.accepted) acceptedIds.add(accepted.id)
+    for (const rejectedEvent of revealResult.rejected) rejected.push(rejectedEvent)
+  }
+
+  // Stamp server-verified provenance on everything that did land, including a
+  // partial hidden import. This keeps crash investigation fully auditable.
+  const provenance = buildProvenance(request, cs, confirmationId)
+  const appliedIds = allEventIds.filter((eventId) => acceptedIds.has(eventId))
+  if (appliedIds.length > 0) {
+    const placeholders = appliedIds.map(() => '?').join(', ')
+    await db
+      .prepare(`UPDATE events SET provenance = ?::jsonb WHERE id IN (${placeholders})`)
+      .bind(JSON.stringify(provenance), ...appliedIds)
       .run()
   }
 
@@ -844,7 +899,7 @@ async function commitLinkMedia(
   // Fall back to minting for changesets staged before the linkMedia ledger.
   const plannedByKey = new Map(
     (cs.plannedIds?.linkMedia ?? []).map((p) => [
-      `${cellKey(p.fileId, p.cellId)} ${p.artifactId}`,
+      `${cellKey(p.fileId, p.cellId)}\u0000${p.artifactId}`,
       p,
     ]),
   )
@@ -901,7 +956,7 @@ async function commitLinkMedia(
       httpMetadata: artifact.content_type ? { contentType: artifact.content_type } : undefined,
     })
 
-    const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)} ${cmd.artifactId}`)
+    const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)}\u0000${cmd.artifactId}`)
     const attachId = planned?.attachEventId ?? uuidv7()
     const selectId = planned?.selectEventId ?? uuidv7()
     const url = `frontier-audio://${artifact.audio_id}`

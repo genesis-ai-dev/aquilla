@@ -43,6 +43,90 @@ export interface AiParsedImport {
 
 const SAMPLE_CHARS = 12_000
 const MAX_RECORDS = 20_000
+export const MAX_UNKNOWN_TEXT_BYTES = 10 * 1024 * 1024
+const BINARY_SCAN_BYTES = 8192
+
+export interface PreparedUnknownText {
+  text: string
+  bytes: ArrayBuffer
+}
+
+function abortIfNeeded(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error("Import cancelled")
+}
+
+function decodeUnknownText(bytes: ArrayBuffer, fileName: string): string {
+  const head = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, BINARY_SCAN_BYTES))
+  const utf16Le = head[0] === 0xff && head[1] === 0xfe
+  const utf16Be = head[0] === 0xfe && head[1] === 0xff
+  const hasPrefix = (...prefix: number[]) => prefix.every((byte, index) => head[index] === byte)
+  const knownBinary = [
+    [0x50, 0x4b, 0x03, 0x04], // ZIP / OOXML
+    [0xd0, 0xcf, 0x11, 0xe0], // legacy OLE .doc
+    [0x25, 0x50, 0x44, 0x46], // PDF
+    [0x89, 0x50, 0x4e, 0x47], // PNG
+    [0xff, 0xd8, 0xff], // JPEG
+    [0x47, 0x49, 0x46, 0x38], // GIF
+    [0x49, 0x44, 0x33], // tagged MP3
+  ].some((signature) => hasPrefix(...signature))
+  const controlBytes = head.reduce(
+    (count, byte) => count + (byte < 0x20 && ![0x09, 0x0a, 0x0c, 0x0d].includes(byte) ? 1 : 0),
+    0,
+  )
+  if (
+    !utf16Le
+    && !utf16Be
+    && (knownBinary || head.includes(0) || (head.length >= 32 && controlBytes / head.length > 0.02))
+  ) {
+    throw new Error(`${fileName} appears to be binary; use a supported package or document format`)
+  }
+  try {
+    return new TextDecoder(utf16Le ? "utf-16le" : utf16Be ? "utf-16be" : "utf-8", {
+      fatal: true,
+    }).decode(bytes)
+  } catch {
+    throw new Error(`${fileName} is not valid UTF-8 or UTF-16 text; use a supported package or document format`)
+  }
+}
+
+/** Read an unknown extension once, with a client-memory cap and binary guard. */
+export async function readUnknownTextFile(
+  file: File,
+  signal?: AbortSignal,
+): Promise<PreparedUnknownText> {
+  abortIfNeeded(signal)
+  if (file.size > MAX_UNKNOWN_TEXT_BYTES) {
+    throw new Error(
+      `${file.name} is too large for AI-assisted text detection (maximum ${MAX_UNKNOWN_TEXT_BYTES / 1024 / 1024} MB)`,
+    )
+  }
+  const bytes = await file.arrayBuffer()
+  abortIfNeeded(signal)
+  const text = decodeUnknownText(bytes, file.name)
+  if (!text.trim()) throw new Error(`${file.name} is empty`)
+  return { text, bytes }
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`
+  if (isObject(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`
+  }
+  return JSON.stringify(value) ?? "null"
+}
+
+async function deterministicRecipeId(
+  category: ImportContentCategory,
+  config: AiRecipeConfig,
+): Promise<string> {
+  // A recipe identifies parser semantics, not one artifact. Keeping content
+  // out of the digest means a text edit does not re-key every record on
+  // re-import; unit identity remains file-scoped through the imported file.
+  const material = stableJson({ category, config })
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material))
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  return `ai-${hex.slice(0, 32)}`
+}
 
 function stripCodeFence(value: string): string {
   const trimmed = value.trim()
@@ -188,8 +272,13 @@ function recordsFor(text: string, config: AiRecipeConfig): { records: RecordValu
   }
 }
 
-function readField(record: RecordValue, ref: FieldRef | undefined, headers?: string[]): string | undefined {
-  if (ref === undefined) return typeof record === "string" ? record : undefined
+function readField(
+  record: RecordValue,
+  ref: FieldRef | undefined,
+  headers?: string[],
+  wholeRecordFallback = false,
+): string | undefined {
+  if (ref === undefined) return wholeRecordFallback && typeof record === "string" ? record : undefined
   if (Array.isArray(record)) {
     const index = typeof ref === "number" ? ref : headers?.indexOf(ref) ?? -1
     const value = index >= 0 ? record[index] : undefined
@@ -234,7 +323,7 @@ export function applyDeclarativeRecipe(
   const strings: TranslatableString[] = []
   records.forEach((record, index) => {
     const config = classification.recipe.config
-    const source = readField(record, config.sourceField, headers)?.trim()
+    const source = readField(record, config.sourceField, headers, true)?.trim()
     if (!source) return
     const target = readField(record, config.targetField, headers) ?? ""
     const reference = readField(record, config.referenceField, headers)
@@ -290,9 +379,10 @@ export async function classifyAndParseUnknownText(
     signal?: AbortSignal
     fetchImpl?: typeof fetch
   },
+  prepared?: PreparedUnknownText,
 ): Promise<AiParsedImport> {
-  const text = await file.text()
-  if (!text.trim()) throw new Error(`${file.name} is empty`)
+  abortIfNeeded(options.signal)
+  const { text } = prepared ?? await readUnknownTextFile(file, options.signal)
   if (text.includes("\0")) throw new Error(`${file.name} appears to be binary; use a supported package or document format`)
   const sample = text.slice(0, SAMPLE_CHARS)
   const prompt = `You are the classification step inside a file importer. Classify the content and propose ONE constrained record recipe. Do not translate or rewrite text. Prefer line or paragraph records for prose; delimited for tables; json-array for JSON record arrays. Identify headings/verse references through fields when present. The recipe is interpreted locally and cannot run code.\n\nFile: ${file.name}\nMIME: ${file.type || "unknown"}\nSource language hint: ${options.sourceLanguage || "unknown"}\nTarget language hint: ${options.targetLanguage || "unknown"}\n\nReturn JSON only with: category (scripture|translation|document|subtitles|study-material|other), confidence (0..1), explanation, recipe {name,inputFormat,config}. config: recordMode (line|paragraph|delimited|json-array); optionally delimiter (comma, tab, semicolon, or pipe literal), hasHeader, recordsPath, sourceField, targetField, referenceField, typeField, speakerField, startField, endField, timeUnit (milliseconds|seconds|timestamp). Fields are header names for object/header data or zero-based indexes.\n\nSample:\n${sample}`
@@ -332,7 +422,7 @@ export async function classifyAndParseUnknownText(
   const proposed = validatedClassification(decoded)
   const recipe: AiImportClassification["recipe"] = {
     version: 1,
-    id: `ai-${uuidv7()}`,
+    id: await deterministicRecipeId(proposed.category, proposed.recipe.config),
     name: proposed.recipe.name,
     inputFormat: proposed.recipe.inputFormat,
     strategy: "records",

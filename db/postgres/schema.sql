@@ -348,7 +348,8 @@ CREATE TABLE files (
     -- human-edited or validated). Recomputed by fileCountersRecomputeStmt on every
     -- target.cell.commit or cell.validate projection. Forward-only: 0 for all cells
     -- predating migration 0037.
-    ai_drafted_count INTEGER NOT NULL DEFAULT 0
+    ai_drafted_count INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (id, project_id)
 );
 
 CREATE TABLE cells (
@@ -860,7 +861,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
     -- AQU-635: format inspection/classification facts that belong to the
     -- immutable artifact rather than any one file interpretation.
     metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (id, project_id)
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
 
@@ -870,7 +872,7 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
 CREATE TABLE IF NOT EXISTS artifact_bindings (
     id              UUID PRIMARY KEY,
     project_id      TEXT NOT NULL,
-    artifact_id     UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    artifact_id     UUID NOT NULL,
     file_id         TEXT NOT NULL,
     binding_role    TEXT NOT NULL
                       CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
@@ -884,7 +886,15 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     recipe          JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path)
+    UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path),
+    CONSTRAINT artifact_bindings_artifact_project_fkey
+      FOREIGN KEY (artifact_id, project_id)
+      REFERENCES artifacts(id, project_id)
+      ON DELETE CASCADE,
+    CONSTRAINT artifact_bindings_file_project_fkey
+      FOREIGN KEY (file_id, project_id)
+      REFERENCES files(id, project_id)
+      ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_artifact_bindings_project_file
   ON artifact_bindings(project_id, file_id);

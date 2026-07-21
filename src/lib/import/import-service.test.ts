@@ -54,6 +54,33 @@ describe("ImportService", () => {
     })
   })
 
+  it("preserves USX provenance without claiming a translated USX round trip", async () => {
+    const { instance } = service({
+      parseFile: vi.fn(async () => [{
+        name: "Genesis.usx",
+        rawSourceFormat: "usx",
+        rawBytes: new ArrayBuffer(8),
+        strings: [{
+          id: "source-cell",
+          original: "In the beginning",
+          translated: "",
+          context: "GEN 1:1",
+          group: "GEN 1:1",
+          globalReferences: ["GEN 1:1"],
+          type: "verse" as const,
+        }],
+      }]),
+    })
+
+    const result = await instance.importFile(new File(["<usx />"], "Genesis.usx"), {})
+
+    expect(result.manifests[0]).toMatchObject({
+      profileId: "builtin:usx-to-usfm",
+      deterministic: true,
+      fidelity: "content-only",
+    })
+  })
+
   it("honours existing whole-file and per-book collision skip decisions", async () => {
     const first = service()
     const skippedFile = await first.instance.importFile(

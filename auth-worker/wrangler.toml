@@ -257,9 +257,11 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
-# AQU-AGENT §6 — local sandbox worker (dev-stack boots it on :8790). The
-# matching AGENT_SANDBOX_KEY is passed as a --var by scripts/dev-stack.ts.
-AGENT_SANDBOX_URL = "http://127.0.0.1:8790"
+# AQU-AGENT §6 — intentionally unset until the development sandbox has a
+# stable deployed URL. `127.0.0.1` here would mean the deployed auth Worker's
+# own runtime, not a developer laptop. Local dev-stack injects either its
+# optional :8790 container or an explicitly configured remote endpoint.
+# AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-dev-url>"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 

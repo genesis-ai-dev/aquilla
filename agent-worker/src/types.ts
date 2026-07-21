@@ -3,7 +3,8 @@ import type { Sandbox } from "@cloudflare/sandbox"
 
 /**
  * Worker bindings. `Sandbox` is the container-backed Durable Object namespace
- * declared in wrangler.toml (class `Sandbox`, re-exported from index.ts).
+ * declared in wrangler.toml (the egress-disabled `Sandbox` subclass exported
+ * from index.ts).
  * `SNAPSHOTS` is the R2 bucket (`aquilla-snapshots`) that the sync-worker also
  * binds — the source of agent artifacts pulled into the container.
  */

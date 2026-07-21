@@ -67,6 +67,21 @@ auth-worker  ── agent.ts (harness loop, OpenRouter)
 - **Memory / brief** (new Postgres tables + auth-worker routes + SPA review UI) — see "Memory
   gating" below.
 
+### Local and deployed runtime
+
+`pnpm dev` continues to run the auth and sync Workers locally through Wrangler/workerd; those
+Workers do not require Docker. Code execution is an optional, separately isolated capability:
+
+- If `AGENT_SANDBOX_URL` and `AGENT_SANDBOX_KEY` are configured together in the process
+  environment or `auth-worker/.dev.vars`, the local auth Worker uses that endpoint and no local
+  container is started.
+- Otherwise, `scripts/dev-stack.ts` may start `agent-worker` on port 8790 when a compatible local
+  container engine is available. This path remains available for developers who use it.
+- `--no-sandbox` disables both choices. The rest of the stack still starts, and code-execution
+  tools report a clear unavailable result.
+- Deployed auth Workers must use a stable deployed sandbox URL. A `127.0.0.1` URL in deployed
+  Wrangler configuration points back at that Worker runtime, not at a developer's machine.
+
 ## Security model
 
 - **No secrets in the container.** The sandbox never receives an OpenRouter key, a sync
@@ -74,7 +89,9 @@ auth-worker  ── agent.ts (harness loop, OpenRouter)
   files explicitly pushed to it (`POST /sessions/:id/files`, `fetch-artifact`), and returns
   stdout/stderr/a result value. The harness — outside the container — is the only thing that
   ever holds the ephemeral `aqk_` credential, and it is never passed into the sandbox.
-- **Default-deny egress.** The sandbox container has no arbitrary network access. It cannot
+- **Default-deny egress.** `agent-worker` subclasses the Cloudflare Sandbox Durable Object with
+  `enableInternet = false`, because Cloudflare Containers otherwise permit outbound internet
+  access by default. The sandbox container therefore has no arbitrary network access. It cannot
   exfiltrate data to an external host, cannot fetch a credentialed third-party URL on the
   user's behalf (contrast with the client-side agent pattern in `docs/AGENT-API.md` §5's
   "External-asset wrinkle" — that's a *different*, browser-context agent; the sandbox is

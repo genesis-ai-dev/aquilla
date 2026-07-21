@@ -32,9 +32,9 @@
 //
 // Flags:
 //   --no-sync     skip sync-worker (rare; some flows need only auth)
-//   --no-sandbox  skip the agent-worker sandbox service (also auto-skipped
-//                 when Docker is unavailable — the agent code-exec tools then
-//                 report "sandbox unavailable" and the rest of the stack boots)
+//   --no-sandbox  skip the agent-worker sandbox service. Without this flag,
+//                 an explicitly configured endpoint is used first; otherwise
+//                 a local container is auto-started when Docker is available.
 //   --vite-port   override the Vite port (default 5173)
 //   --verbose     stream each Worker's stdout/stderr to this terminal
 //
@@ -66,6 +66,10 @@ import {
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
 import { parsePgSchema } from "./dev-stack-schema-parser"
+import {
+  resolveConfiguredAgentSandbox,
+  type AgentSandboxConnection,
+} from "./dev-stack-sandbox"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
@@ -85,9 +89,9 @@ const LOG_DIR = path.join(REPO_ROOT, ".dev-stack-logs")
 // (e.g. a parallel worktree) without freePort() evicting the other's workers.
 const IDENTITY_PORT = Number(process.env.DEV_STACK_IDENTITY_PORT) || 8788
 const SYNC_PORT = Number(process.env.DEV_STACK_SYNC_PORT) || 8789
-// agent-worker (sandbox execution service, AQU-AGENT §6). Container-backed, so
-// it only boots when Docker is available; the harness degrades to a "sandbox
-// unavailable" error otherwise.
+// agent-worker (sandbox execution service, AQU-AGENT §6). Developers may point
+// the local auth worker at a deployed sandbox, or let Wrangler start the
+// container locally when a compatible Docker engine is available.
 const AGENT_PORT = Number(process.env.DEV_STACK_AGENT_PORT) || 8790
 const AGENT_SANDBOX_KEY_DEV = "dev-sandbox-key"
 const DEFAULT_VITE_PORT = 5173
@@ -192,6 +196,13 @@ function identityHasRealOpenRouterKey(): boolean {
   const m = readFileSync(p, "utf8").match(/^OPENROUTER_API_KEY\s*=\s*"?([^"\n]*)"?\s*$/m)
   const key = m?.[1]?.trim() ?? ""
   return key !== "" && key !== "mock"
+}
+
+/** Explicit remote/custom sandbox endpoint, if configured for local dev. */
+function configuredAgentSandbox(): AgentSandboxConnection | null {
+  const p = path.join(IDENTITY_DIR, ".dev.vars")
+  const source = existsSync(p) ? readFileSync(p, "utf8") : ""
+  return resolveConfiguredAgentSandbox(process.env, source)
 }
 
 async function freePort(port: number): Promise<void> {
@@ -551,19 +562,21 @@ async function main(): Promise<void> {
   ensureDevVars(IDENTITY_DIR, "identity")
   if (!WITHOUT_SYNC) ensureDevVars(SYNC_DIR, "sync")
 
-  // Decide whether to boot the agent sandbox worker. It is container-backed
-  // (Cloudflare Sandbox → Docker), so it only runs when Docker is available and
-  // --no-sandbox was not passed. When skipped, the harness's code-exec tools
-  // surface a "sandbox unavailable" error and the rest of the stack boots
-  // normally.
-  const sandboxRequested = !WITHOUT_SANDBOX && existsSync(AGENT_DIR)
-  const dockerAvailable = sandboxRequested && hasDocker()
-  const bootSandbox = sandboxRequested && dockerAvailable
-  if (!WITHOUT_SANDBOX && existsSync(AGENT_DIR) && !dockerAvailable) {
+  // Prefer an explicitly configured deployed/custom endpoint. If none is set,
+  // preserve the existing optional local-container path for developers with a
+  // compatible Docker engine. Ordinary auth/sync Wrangler workers remain
+  // workerd processes and never depend on this container path.
+  const configuredSandbox = WITHOUT_SANDBOX ? null : configuredAgentSandbox()
+  const localSandboxRequested =
+    !WITHOUT_SANDBOX && configuredSandbox === null && existsSync(AGENT_DIR)
+  const dockerAvailable = localSandboxRequested && hasDocker()
+  const bootSandbox = localSandboxRequested && dockerAvailable
+  if (localSandboxRequested && !dockerAvailable) {
     console.warn(
       "[dev-stack] Docker not detected — skipping the agent sandbox worker (:%d). " +
         "Agent code-exec tools will report 'sandbox unavailable'. " +
-        "Start Docker (or pass --no-sandbox to silence this).",
+        "Configure AGENT_SANDBOX_URL + AGENT_SANDBOX_KEY, start Docker, " +
+        "or pass --no-sandbox to silence this.",
       AGENT_PORT,
     )
   }
@@ -623,7 +636,15 @@ async function main(): Promise<void> {
       agent = null
     }
   }
-  const agentUp = agent !== null
+  const localAgentUp = agent !== null
+  const agentConnection: AgentSandboxConnection | null = WITHOUT_SANDBOX
+    ? null
+    : configuredSandbox ?? (localAgentUp
+      ? {
+          url: `http://127.0.0.1:${AGENT_PORT}`,
+          key: AGENT_SANDBOX_KEY_DEV,
+        }
+      : null)
 
   console.log(`[dev-stack] starting identity (auth-worker) on :${IDENTITY_PORT}…`)
   const identity: SpawnedWorker = await spawnWranglerDev({
@@ -678,10 +699,10 @@ async function main(): Promise<void> {
       // unavailable" instead of hitting a dead port. Both vars are read from
       // c.env by application code, so they must be --var (process env alone
       // never reaches c.env under wrangler dev).
-      ...(agentUp
+      ...(agentConnection
         ? [
-            "--var", `AGENT_SANDBOX_URL:http://127.0.0.1:${AGENT_PORT}`,
-            "--var", `AGENT_SANDBOX_KEY:${AGENT_SANDBOX_KEY_DEV}`,
+            "--var", `AGENT_SANDBOX_URL:${agentConnection.url}`,
+            "--var", `AGENT_SANDBOX_KEY:${agentConnection.key}`,
           ]
         : []),
     ],
@@ -775,11 +796,13 @@ async function main(): Promise<void> {
     sync
       ? `         sync     -> http://127.0.0.1:${SYNC_PORT}/  (logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "sync.log"))})`
       : `         sync     -> skipped (--no-sync)`,
-    agentUp
+    localAgentUp
       ? `         agent    -> http://127.0.0.1:${AGENT_PORT}/  (sandbox; logs: ${path.relative(REPO_ROOT, path.join(LOG_DIR, "agent.log"))})`
+      : configuredSandbox
+        ? `         agent    -> ${configuredSandbox.url}  (configured sandbox endpoint)`
       : WITHOUT_SANDBOX
         ? `         agent    -> skipped (--no-sandbox)`
-        : `         agent    -> skipped (no Docker — code-exec tools report "sandbox unavailable")`,
+        : `         agent    -> skipped (no endpoint/container engine — code-exec tools report "sandbox unavailable")`,
     `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/chat/  (served by identity worker)`,
     useMockLlm
       ? `         llm      -> http://127.0.0.1:${MOCK_LLM_PORT}/  (scripted mock — set OPENROUTER_API_KEY in auth-worker/.dev.vars for a real model)`

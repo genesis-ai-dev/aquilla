@@ -45,6 +45,12 @@ ENVIRONMENT="development"
 OPENROUTER_API_KEY=""
 DEFAULT_LLM_MODEL="anthropic/claude-sonnet-4.5"
 
+# Optional Docker-free agent code execution. Point these at an already deployed
+# development sandbox. Leave both empty to let scripts/dev-stack.ts try the
+# optional local-container path; omit --no-sandbox if you want that fallback.
+AGENT_SANDBOX_URL=""
+AGENT_SANDBOX_KEY=""
+
 # DO NOT put WRANGLER_LOCAL in this file (or in any deployed env). It's
 # injected by `scripts/dev-stack.ts` only and unlocks /__test__/reset and
 # /__dev__/{seed,login} — see routes/dev-seed.ts and routes/test-reset.ts.

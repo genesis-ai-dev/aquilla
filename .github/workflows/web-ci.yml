@@ -162,3 +162,25 @@ jobs:
       # TEST-1: sync-worker tests now run in CI
       - run: pnpm test
         working-directory: sync-worker
+
+  agent-worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent-worker/package-lock.json
+
+      # Agent route tests inject a fake Sandbox binding, so PR validation does
+      # not require Docker or another local container engine.
+      - run: npm ci
+        working-directory: agent-worker
+
+      - run: npm run type-check
+        working-directory: agent-worker
+
+      - run: npm test
+        working-directory: agent-worker

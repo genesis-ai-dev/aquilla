@@ -11,8 +11,12 @@ import {
   buildEventProjectionStmts,
   type PersistedEvent,
 } from '../events/event-projection'
+import { handleCommentsReadRequest, type CommentRowOut } from '../events/comments-read-route'
 import { makeTestDb } from './helpers/pg-test-db'
+import { makeTestToken } from './helpers/auth'
 import type { EventKind } from '../events/types'
+
+const READ_SECRET = 'comments-read-secret'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -252,5 +256,74 @@ describe('comment.resolve', () => {
     const reply = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-reply2')
     // The UPDATE WHERE ... parent_comment_id IS NULL matched nothing, so resolved stays 0.
     expect(reply.resolved).toBe(0)
+  })
+})
+
+// AQU-599: the comments read route LEFT JOINs the source cell so each cell-scoped
+// comment carries the cell's human-readable canonical reference (cellRef). The
+// project-wide comments panel shows that instead of the opaque cellId.
+describe('GET /comments — cellRef (AQU-599)', () => {
+  async function readComments(projectId: string) {
+    const { db } = await makeTestDb({
+      cells: [
+        {
+          project_id: 'p1', file_id: 'f1', cell_id: 'c1', side: 'source',
+          value: 'In the beginning', canonical_ref: 'GEN 1:1',
+          event_id: 'ev-c1', last_edit_at: 10,
+        },
+        // Target-side row for the same cell must NOT be joined (no canonical_ref
+        // there) and must not duplicate the comment row.
+        {
+          project_id: 'p1', file_id: 'f1', cell_id: 'c1', side: 'target',
+          value: 'Au commencement', canonical_ref: null,
+          event_id: 'ev-c1t', last_edit_at: 11,
+        },
+      ],
+      comments: [
+        {
+          comment_id: 'cmt-known', project_id: 'p1', scope_kind: 'cell',
+          file_id: 'f1', cell_id: 'c1', parent_comment_id: null,
+          body: 'on a resolved cell', resolved: 0, author_id: 'alice',
+          created_at: 100, updated_at: 100, deleted_at: null,
+        },
+        {
+          comment_id: 'cmt-orphan', project_id: 'p1', scope_kind: 'cell',
+          file_id: 'f1', cell_id: 'missing', parent_comment_id: null,
+          body: 'on a cell with no projected source row', resolved: 0,
+          author_id: 'alice', created_at: 200, updated_at: 200, deleted_at: null,
+        },
+      ],
+    })
+    const token = await makeTestToken(READ_SECRET, { projectId, fileId: 'f1' })
+    const req = new Request(
+      `https://w/api/v1/projects/${projectId}/comments`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCommentsReadRequest(req, {
+      AQUILLA_PG: db,
+      SYNC_SECRET_KEY: READ_SECRET,
+    }))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { comments: CommentRowOut[] }
+    return body.comments
+  }
+
+  it('resolves cellRef from the source cell canonical_ref', async () => {
+    const comments = await readComments('p1')
+    const known = comments.find((c) => c.commentId === 'cmt-known')
+    expect(known).toBeDefined()
+    expect(known!.cellRef).toBe('GEN 1:1')
+  })
+
+  it('does not duplicate a comment when the cell has both source and target rows', async () => {
+    const comments = await readComments('p1')
+    expect(comments.filter((c) => c.commentId === 'cmt-known')).toHaveLength(1)
+  })
+
+  it('returns null cellRef when no source cell exists (deleted / non-scripture)', async () => {
+    const comments = await readComments('p1')
+    const orphan = comments.find((c) => c.commentId === 'cmt-orphan')
+    expect(orphan).toBeDefined()
+    expect(orphan!.cellRef).toBeNull()
   })
 })

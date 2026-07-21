@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { getBookName, isKnownBookCode } from "./bible-book-names"
+import { getBookName, isKnownBookCode, compareByCanonicalBookOrder } from "./bible-book-names"
 
 describe("getBookName", () => {
   it("returns English name for OT book codes", () => {
@@ -32,5 +32,28 @@ describe("isKnownBookCode", () => {
   })
   it("returns false for unknown", () => {
     expect(isKnownBookCode("ZZZ")).toBe(false)
+  })
+})
+
+describe("compareByCanonicalBookOrder (AQU-582)", () => {
+  it("sorts book names into canonical reading order, not alphabetic", () => {
+    const names = ["Numbers", "Genesis", "Leviticus", "Exodus"]
+    expect([...names].sort(compareByCanonicalBookOrder))
+      .toEqual(["Genesis", "Exodus", "Leviticus", "Numbers"])
+  })
+
+  it("orders OT before NT", () => {
+    expect([...["Revelation", "Genesis", "Matthew"]].sort(compareByCanonicalBookOrder))
+      .toEqual(["Genesis", "Matthew", "Revelation"])
+  })
+
+  it("understands raw USFM codes too", () => {
+    expect([...["MRK", "MAT", "GEN"]].sort(compareByCanonicalBookOrder))
+      .toEqual(["GEN", "MAT", "MRK"])
+  })
+
+  it("sorts unknown (non-book) names after all known books, alphabetically", () => {
+    expect([...["Zeta Notes", "John", "Alpha Notes", "Mark"]].sort(compareByCanonicalBookOrder))
+      .toEqual(["Mark", "John", "Alpha Notes", "Zeta Notes"])
   })
 })

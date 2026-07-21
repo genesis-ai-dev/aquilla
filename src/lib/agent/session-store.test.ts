@@ -300,4 +300,23 @@ describe("AgentSessionStore persistence", () => {
     // A different project is a different bucket.
     expect(localStoragePersistence("proj-other-test").load()).toBeNull()
   })
+
+  it("markMemoryReviewed/markBriefReviewed flip the matching notice across all runs (mem-M5)", async () => {
+    const { impl, calls, finish } = deferredRunAgent()
+    const store = new AgentSessionStore(impl)
+    store.send(sendOptions("propose stuff"))
+    await flush()
+    calls[0].onFrame({ type: "memory.proposed", runId: "r1", memoryId: "m1", path: "a.md", preview: "a" })
+    calls[0].onFrame({ type: "brief.proposed", runId: "r1", proposalId: "b1", preview: "b" })
+    calls[0].onFrame({ type: "done", runId: "r1", status: "ok" })
+    finish(0)
+    await flush()
+
+    store.markMemoryReviewed("m1")
+    store.markBriefReviewed("b1")
+
+    const [memoryItem, briefItem] = store.getState().runs[0].items
+    expect(memoryItem).toMatchObject({ kind: "memory-proposed", status: "reviewed" })
+    expect(briefItem).toMatchObject({ kind: "brief-proposed", status: "reviewed" })
+  })
 })

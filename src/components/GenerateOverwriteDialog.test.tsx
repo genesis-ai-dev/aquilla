@@ -57,7 +57,7 @@ describe("GenerateOverwriteDialog", () => {
 
   // ── Confirm path ──────────────────────────────────────────────────────────
 
-  it("calls onConfirm when Replace is clicked and does not call onCancel", () => {
+  it("calls onConfirm(false) when Replace is clicked without opting out, and does not call onCancel", () => {
     const onConfirm = vi.fn()
     const onCancel = vi.fn()
     renderDialog({ onConfirm, onCancel })
@@ -65,7 +65,27 @@ describe("GenerateOverwriteDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /replace/i }))
 
     expect(onConfirm).toHaveBeenCalledOnce()
+    expect(onConfirm).toHaveBeenCalledWith(false)
     expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  // ── "Don't ask again" opt-out (AQU-591) ───────────────────────────────────
+
+  it("offers a 'Don't ask again' opt-out for non-validated cells and passes it to onConfirm", () => {
+    const onConfirm = vi.fn()
+    renderDialog({ isValidated: false, onConfirm })
+
+    // Base UI checkbox toggles when its wrapping <label> is clicked.
+    const optOut = screen.getByRole("checkbox", { name: /don't ask again/i })
+    fireEvent.click(optOut.closest("label")!)
+    fireEvent.click(screen.getByRole("button", { name: /replace/i }))
+
+    expect(onConfirm).toHaveBeenCalledWith(true)
+  })
+
+  it("does NOT offer the opt-out for validated cells (always confirm)", () => {
+    renderDialog({ isValidated: true })
+    expect(screen.queryByRole("checkbox", { name: /don't ask again/i })).not.toBeInTheDocument()
   })
 
   // ── Cancel path ───────────────────────────────────────────────────────────

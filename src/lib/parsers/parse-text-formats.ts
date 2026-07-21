@@ -16,7 +16,7 @@ import { extractMarkdownStrings } from "./markdown"
 import { parseObsStories } from "./obs"
 import { extractVttStrings, extractSrtStrings } from "./subtitle"
 import { parseCsvBilingual } from "./csv-bilingual"
-import { parseUsfmLossless } from "./usfm-lossless"
+import { parseUsfmLossless, isBookTitleOrIntroMarker } from "./usfm-lossless"
 import type { TranslatableString } from "./types"
 // Type-only import — erased by the bundler, so this does NOT pull import.ts (or
 // its DOMParser-using parsers) into the worker bundle.
@@ -72,14 +72,20 @@ export function usfmSectionToStrings(section: string): {
       type: "verse" as const,
       paragraphStart: v.paragraphStart,
     })),
-    ...doc.headings.map((h) => ({
-      order: h.textStart,
-      ref: h.ref,
-      text: h.text.trim(),
-      section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
-      type: h.kind,
-      paragraphStart: undefined as boolean | undefined,
-    })),
+    // AQU-585: book names (running header / TOC / main title) and the whole
+    // introduction section are front matter, not translatable source cells —
+    // drop them here so they never land as cells. They remain in the lossless
+    // doc, so export still round-trips their original bytes.
+    ...doc.headings
+      .filter((h) => !isBookTitleOrIntroMarker(h.marker))
+      .map((h) => ({
+        order: h.textStart,
+        ref: h.ref,
+        text: h.text.trim(),
+        section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
+        type: h.kind,
+        paragraphStart: undefined as boolean | undefined,
+      })),
   ].sort((a, b) => a.order - b.order)
   const strings: TranslatableString[] = allSpans.map((s) => ({
     id: uuidv7(),

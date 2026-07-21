@@ -138,6 +138,28 @@ describe("OrgProvider", () => {
     })
   })
 
+  // A single-org auto-selection is a default, not a user choice — it must NOT
+  // be persisted. If it were, a user who later joins a second org would stay
+  // silently scoped to their original org instead of getting the all-orgs
+  // default (orgs/members.smoke covers the journey end-to-end).
+  it("does not persist an auto-selected single org, so joining a second org restores the all-orgs default", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    const first = render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByTestId("active").textContent).toBe("1"))
+    expect(localStorage.getItem("org:active")).not.toBe("1")
+    first.unmount()
+
+    // Same client, next load: the user was added to org 2 in the meantime.
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "A", role: { level: 700, name: "owner" } },
+      { id: 2, name: "B", role: { level: 400, name: "contributor" } },
+    ])
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"))
+    expect(screen.getByTestId("all").textContent).toBe("yes")
+    expect(screen.getByTestId("active").textContent).toBe("none")
+  })
+
   // FRO-367: when a cross-tab account switch leaves a persisted org id the new
   // account can't see, the clamp must ALSO rewrite localStorage — otherwise a
   // reload resurrects the stale id and hits a "no access to org" 403.

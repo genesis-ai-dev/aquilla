@@ -41,6 +41,9 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   // AQU-538: the lane registry must reach the workspace or the LaneSwitcher
   // never renders (found by the add-target-language e2e journey).
   assign("targetLanes", settings.targetLanes)
+  // AQU-601: archived-lane markers overlay alongside the registry so the
+  // workspace switcher can hide archived lanes by default.
+  assign("archivedLanes", settings.archivedLanes)
   if (settings.systemPrompt != null) {
     if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
       draft().completionSettings = buildCompletionSettings(

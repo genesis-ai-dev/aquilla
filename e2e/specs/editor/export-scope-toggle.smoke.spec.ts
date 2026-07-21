@@ -12,10 +12,12 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * ExportDialog uses SegmentTabs (aria-label="Export scope") with tabs
  * "Current file" (default) and "Whole project". Selection is reflected via
- * aria-selected on each tab.
+ * aria-selected on each tab. Scope lives inside the "Export to another
+ * format" section (the primary download is always current-file).
  *
- * This spec: open the export dialog → verify "Current file" is selected →
- * click "Whole project" → verify it becomes selected.
+ * This spec: open the export dialog → expand the formats section → verify
+ * "Current file" is selected → click "Whole project" → verify it becomes
+ * selected.
  */
 test("export dialog scope toggle switches between file and project", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -34,6 +36,7 @@ test("export dialog scope toggle switches between file and project", async ({ al
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await ws.openExportFormatsSection()
 
   const fileTab = dialog.getByRole("tab", { name: "Current file" })
   await expect(fileTab).toHaveAttribute("aria-selected", "true", { timeout: 3_000 })

@@ -20,12 +20,14 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   - "Plain text" (.txt) → lossy: true
  *   - "Audio by character" (.zip) → lossy: false
  *
- * The default selected format is TSV (lossy), so the warning shows by default.
- * Switching to "Audio by character" hides it (lossy: false).
+ * The warning lives inside the "Export to another format" section. For a .md
+ * import the native Markdown format is pre-selected and lossy, so the warning
+ * shows once the section is expanded. Switching to "Audio by character" hides
+ * it (lossy: false).
  *
- * This spec: open export dialog → verify warning is present (TSV is default) →
- * switch to "Audio by character" → verify warning is gone → switch back to
- * "Plain text" → verify warning reappears.
+ * This spec: open export dialog → expand formats section → verify warning is
+ * present (Markdown default is lossy) → switch to "Audio by character" →
+ * verify warning is gone → switch to "Plain text" → verify warning reappears.
  */
 test("export dialog shows lossy warning for lossy formats and hides it for non-lossy", async ({
   alice,
@@ -46,8 +48,9 @@ test("export dialog shows lossy warning for lossy formats and hides it for non-l
 
   const dialog = alice.getByRole("dialog")
   await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await ws.openExportFormatsSection()
 
-  // TSV (default) is lossy — warning should be visible.
+  // Markdown (native default for .md) is lossy — warning should be visible.
   const warning = dialog.locator('[aria-label="Lossy format warning"]')
   await expect(warning).toBeVisible({ timeout: 3_000 })
 

@@ -58,4 +58,26 @@ describe("groupByCorpus", () => {
     const groups = groupByCorpus([f("ZZZ Misc", "OT"), f("AAA Misc", "OT")])
     expect(groups[0].files.map((x) => x.name)).toEqual(["AAA Misc", "ZZZ Misc"])
   })
+
+  // AQU-582: existing Codex projects carry no corpusMarker, so every file lands
+  // in the marker-less bucket. That bucket must still read like a Bible
+  // (canonical order) instead of A–Z, which was the reported sidebar bug.
+  it("sorts marker-less (Ungrouped) Bible books in canonical order", () => {
+    const groups = groupByCorpus([
+      f("Numbers"),
+      f("Genesis"),
+      f("Matthew"),
+      f("Leviticus"),
+      f("Revelation"),
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].label).toBe("Ungrouped")
+    expect(groups[0].files.map((x) => x.name))
+      .toEqual(["Genesis", "Leviticus", "Numbers", "Matthew", "Revelation"])
+  })
+
+  it("keeps non-book marker-less files alphabetic, after any known books", () => {
+    const groups = groupByCorpus([f("zeta"), f("John"), f("alpha")])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["John", "alpha", "zeta"])
+  })
 })

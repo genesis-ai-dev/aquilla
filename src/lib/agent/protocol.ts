@@ -68,6 +68,16 @@ export type AgentFrame =
   | { type: 'usage'; promptTokens: number; completionTokens: number; costCents: number }
   | { type: 'done'; runId: string; status: 'ok' | 'capped' | 'error' }
   | { type: 'error'; message: string }
+  // ── AQU-AGENT wave-1 additions (docs/swarm/AQU-AGENT-CONTRACTS.md §4) ────
+  // Additive only — existing consumers (run-state reducer, older server
+  // builds) are unaffected by these new variants.
+  | { type: 'tool.code.start'; runId: string; language: 'js' | 'python'; codePreview: string } // first 400 chars
+  | { type: 'tool.code.output'; runId: string; stdout: string; stderr: string; truncated: boolean; durationMs: number }
+  | { type: 'changeset.staged'; runId: string; changesetId: string; approvalUrl: string; summary: string; cellCount: number }
+  | { type: 'memory.proposed'; runId: string; memoryId: string; path: string; preview: string }
+  | { type: 'brief.proposed'; runId: string; proposalId: string; preview: string }
+  | { type: 'budget'; runId: string; spentCents: number; capCents: number }
+  | { type: 'budget.exhausted'; runId: string; spentCents: number; capCents: number }
 
 // ── Staged proposal shape ──────────────────────────────────────────────────
 
@@ -133,4 +143,20 @@ export interface AgentRunRequest {
     geographicalSetting?: string
     otherInfo?: string
   }
+  /**
+   * Files the user attached in the composer, already uploaded as project
+   * artifacts (POST /api/v2/projects/:id/agent-artifacts). The server tells the
+   * model they're available and how to pull them into the sandbox with the
+   * `load_artifact` tool. Server re-caps the count. Must match the server
+   * schema in auth-worker/src/routes/agent.ts (runRequestSchema.artifacts).
+   */
+  artifacts?: { artifactId: string; fileName: string }[]
+}
+
+/** Result of POST /api/v2/projects/:projectId/agent-artifacts. */
+export interface UploadedArtifact {
+  artifactId: string
+  fileName: string
+  sizeBytes: number
+  sha256: string
 }

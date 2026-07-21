@@ -1,0 +1,50 @@
+Fieldwork interview — village elder, language documentation session 3
+Recorded on a phone; timestamps re-keyed by hand afterward, formatting not standardized.
+
+[00:00:00] INTERVIEWER: Thank you for meeting with us again today. Can you tell me
+   about how greetings work in the morning versus the evening?
+
+00:00:12 - ELDER (Amharic): ጥሩ ነው። በጠዋት እንዲህ እንላለን፣ "እንደምን አደርክ?"
+    Translator's gloss (inline, not offset): that means "how did you spend the night"
+
+Q: And in the evening?
+A: በማታ ግን "እንደምን ዋልክ" እንላለን — that is "how did you spend the day."
+
+[00:01:03]      INTERVIEWER:   Interesting. Is there a different greeting for elders
+specifically, or someone of higher status?
+
+00:01:20 - ELDER: አዎ አለ። ለሽማግሌዎች የተለየ አክብሮት የሚያሳይ አገላለጽ አለን, similar to formal
+registers in other languages I suppose.
+
+[unclear — overlapping speech, 00:01:45]
+
+INTERVIEWER (in Hindi, code-switched mid-question): ठीक है, और क्या यह अभिवादन सभी
+गांवों में एक जैसा है, या अलग-अलग जगह अलग होता है?
+
+00:02:10 ELDER: नहीं, हर गांव में थोड़ा फ़र्क़ है। हमारे यहाँ हम बड़ों को हमेशा पहले
+नमस्कार करते हैं।
+
+[02:31] INTERVIEWER: Got it. One more question — do children learn this greeting
+formally, or just by hearing it?
+
+00:02:50 - ELDER: Just by hearing it, mostly. ልጆች ሲያድጉ ከወላጆቻቸው ይማራሉ። No one sits
+them down and teaches it as a lesson — it's absorbed.
+
+---
+[session paused — recorder restarted at 00:00:00 on a new file, timestamps below
+restart from zero and do NOT continue from above]
+
+00:00:05: Interviewer — Okay we're recording again. Sorry about that gap.
+00:00:09: Elder — No problem at all.
+
+[00:00:15] INTERVIEWER: Let's go back to the topic of proverbs. Do you have a
+favorite one about patience?
+
+00:00:22 - ELDER: አዎ አለኝ። "ውሃ ቢወስድ ሸክላ ድስት አይረሳም" — literal translation is tricky,
+it roughly means patience preserves what haste would break.
+
+Q (Hindi): क्या आप इसे और समझा सकते हैं?
+A: यह कहावत सिखाती है कि जल्दबाज़ी में लिया गया फैसला अक्सर टूट जाता है।
+
+[END OF SESSION 3 — total runtime approx 00:07:40, but the two timestamp
+sequences above do not sum to that; recorder metadata is unreliable]

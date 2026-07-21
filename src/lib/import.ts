@@ -1179,7 +1179,10 @@ export interface ParatextPlan {
  * parsing), so the dialog can show a preview of every book's cells before the
  * user confirms the import.
  */
-export async function prepareParatextProject(entries: ProjectEntry[]): Promise<ParatextPlan> {
+export async function prepareParatextProject(
+  entries: ProjectEntry[],
+  opts?: { excludeFrontMatter?: boolean },
+): Promise<ParatextPlan> {
   const project = await assembleParatextProject(entries)
   if (!project) {
     throw new Error(
@@ -1187,7 +1190,9 @@ export async function prepareParatextProject(entries: ProjectEntry[]): Promise<P
     )
   }
   const books: ParatextBookPlan[] = project.books.map((book) => {
-    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource)
+    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource, {
+      excludeFrontMatter: opts?.excludeFrontMatter,
+    })
     return { book, strings, duplicateRefs, cellCount: strings.length }
   })
   return { project, books }
@@ -1432,7 +1437,18 @@ export async function importParatextAsTarget(
   return { refs, settings: project.settings, skipped }
 }
 
-export async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
+export interface ParseFileOptions {
+  /** USFM only: per-project opt-out that excludes book-name/title/TOC +
+   *  intro-block front matter from the imported cells (AQU-634). Default:
+   *  false (import front matter). */
+  excludeFrontMatter?: boolean
+}
+
+export async function parseFile(
+  file: File,
+  fileType: FileType,
+  opts?: ParseFileOptions,
+): Promise<ImportResult[]> {
   switch (fileType) {
     case "txt":
     case "md":
@@ -1455,7 +1471,12 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       // (verse extraction, \id book split, side-car capture) then happens in the
       // worker via parse-text-formats.ts.
       const text = looksLikeUsx(raw) ? usxToUsfm(raw) : raw
-      return parseTextFormatOffMainThread({ fileType: "usfm", text, name: file.name })
+      return parseTextFormatOffMainThread({
+        fileType: "usfm",
+        text,
+        name: file.name,
+        excludeFrontMatter: opts?.excludeFrontMatter,
+      })
     }
     case "docx": {
       const buffer = await file.arrayBuffer()

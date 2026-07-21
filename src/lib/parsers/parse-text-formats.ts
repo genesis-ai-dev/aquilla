@@ -45,17 +45,24 @@ export interface TextParseRequest {
   text: string
   /** Display name (file name) — used for result naming and OBS story refs. */
   name: string
+  /** USFM only: when true, exclude book-name/title/TOC + intro-block front
+   *  matter from the emitted cells (per-project opt-out, AQU-634). Default:
+   *  false (import front matter). */
+  excludeFrontMatter?: boolean
 }
 
 /** Parse one USFM book section into translatable cells (verse bodies + heading/
  *  title/intro paratext), in document order. Shared by plain-USFM import and the
  *  per-book split below. Moved verbatim from import.ts. */
-export function usfmSectionToStrings(section: string): {
+export function usfmSectionToStrings(
+  section: string,
+  opts?: { excludeFrontMatter?: boolean },
+): {
   bookId: string
   strings: TranslatableString[]
   duplicateRefs: string[]
 } {
-  const doc = parseUsfmLossless(section)
+  const doc = parseUsfmLossless(section, { excludeFrontMatter: opts?.excludeFrontMatter })
   const bookId = doc.bookId || "unknown"
   const seen = new Set<string>()
   const duplicateRefs: string[] = []
@@ -102,7 +109,7 @@ export function usfmSectionToStrings(section: string): {
  * File (so this can run off the main thread).
  */
 export function parseTextFormat(req: TextParseRequest): ImportResult[] {
-  const { fileType, text, name } = req
+  const { fileType, text, name, excludeFrontMatter } = req
   switch (fileType) {
     case "txt":
       return [{ name, strings: extractPlaintextStrings(text) }]
@@ -124,7 +131,9 @@ export function parseTextFormat(req: TextParseRequest): ImportResult[] {
         ? text.split(/(?=\\id\s)/).filter((s) => s.trim().length > 0)
         : [text]
       return sections.map((section) => {
-        const { bookId, strings, duplicateRefs } = usfmSectionToStrings(section)
+        const { bookId, strings, duplicateRefs } = usfmSectionToStrings(section, {
+          excludeFrontMatter,
+        })
         if (duplicateRefs.length > 0) {
           console.warn(
             `[usfm import] ${name}: ${duplicateRefs.length} duplicate verse ref(s) — ` +

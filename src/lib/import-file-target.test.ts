@@ -131,4 +131,23 @@ describe("usfmToTargetRows", () => {
     expect(refs.some((r) => r?.includes("mt1"))).toBe(true)
     expect(refs.some((r) => r?.includes(":s"))).toBe(true)
   })
+
+  it("AQU-634: excludeFrontMatter drops the \\mt1 title row but keeps section headings", () => {
+    const usfm = [
+      "\\id MAT",
+      "\\mt1 Matthew",
+      "\\c 1",
+      "\\s1 The Genealogy",
+      "\\p",
+      "\\v 1 The book of the genealogy.",
+    ].join("\n")
+    const rows = usfmToTargetRows(usfm, { excludeFrontMatter: true })
+    const refs = rows.map((r) => r.ref)
+    // Title front matter is gone…
+    expect(refs.some((r) => r?.includes("mt1"))).toBe(false)
+    // …but the in-body section heading + verse remain, so target rows stay
+    // aligned with source cells imported under the same setting.
+    expect(refs.some((r) => r?.includes(":s"))).toBe(true)
+    expect(refs).toContain("MAT 1:1")
+  })
 })

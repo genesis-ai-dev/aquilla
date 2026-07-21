@@ -30,6 +30,28 @@ describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
     expect(results[0].strings.some((s) => s.original.includes("In the beginning"))).toBe(true)
   })
 
+  it("AQU-634: imports USFM front matter by default, excludes it when opted out", () => {
+    const usfm =
+      "\\id GEN\n\\h Genesis\n\\mt1 Genesis\n\\ip An introduction.\n" +
+      "\\c 1\n\\s The Creation\n\\v 1 In the beginning.\n"
+
+    const withFront = parseTextFormat({ fileType: "usfm", text: usfm, name: "gen.usfm" })
+    const defaultTexts = withFront[0].strings.map((s) => s.original)
+    expect(defaultTexts).toEqual(expect.arrayContaining(["Genesis", "An introduction.", "The Creation", "In the beginning."]))
+
+    const withoutFront = parseTextFormat({
+      fileType: "usfm",
+      text: usfm,
+      name: "gen.usfm",
+      excludeFrontMatter: true,
+    })
+    const optedTexts = withoutFront[0].strings.map((s) => s.original)
+    // Book name/title/intro dropped; section heading + verse still present.
+    expect(optedTexts).not.toContain("An introduction.")
+    expect(optedTexts.filter((t) => t === "Genesis")).toHaveLength(0)
+    expect(optedTexts).toEqual(expect.arrayContaining(["The Creation", "In the beginning."]))
+  })
+
   it("declares exactly the DOM-free file types it can handle", () => {
     expect(TEXT_PARSE_FILE_TYPES.has("usfm")).toBe(true)
     expect(TEXT_PARSE_FILE_TYPES.has("txt")).toBe(true)

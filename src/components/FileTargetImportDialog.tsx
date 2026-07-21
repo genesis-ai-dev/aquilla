@@ -30,6 +30,9 @@ export interface FileTargetImportDialogProps {
   onImported: (committedCount: number) => void
   /** Optimistically patch many cells so the editor reflects imports immediately. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
+  /** AQU-634: per-project USFM front-matter opt-out (forwarded to the panel's
+   *  usfmToTargetRows). */
+  excludeFrontMatter?: boolean
 }
 
 export function FileTargetImportDialog({
@@ -42,6 +45,7 @@ export function FileTargetImportDialog({
   getToken,
   onImported,
   applyOptimisticTargetEdits,
+  excludeFrontMatter,
 }: FileTargetImportDialogProps) {
   // Remount the panel each time the dialog opens so a previous run's step
   // state never leaks into the next one.
@@ -80,6 +84,7 @@ export function FileTargetImportDialog({
               onOpenChange(false)
             }}
             onCancel={() => onOpenChange(false)}
+            excludeFrontMatter={excludeFrontMatter}
           />
         </div>
       </DialogContent>

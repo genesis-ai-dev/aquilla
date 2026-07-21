@@ -64,6 +64,28 @@ describe("extractUsfmStrings", () => {
     expect(strings[0].type).toBe("paratext")
   })
 
+  it("AQU-634: excludeFrontMatter drops the \\mt title but keeps \\ms/\\s + verses", () => {
+    const usfm = `\\id GEN
+\\mt Genesis
+\\ms A major section
+\\c 1
+\\s The Creation
+\\v 1 In the beginning.`
+
+    const withFront = extractUsfmStrings(usfm)[0].strings.map((s) => s.original)
+    expect(withFront).toContain("Genesis")
+
+    const withoutFront = extractUsfmStrings(usfm, { excludeFrontMatter: true })[0].strings.map(
+      (s) => s.original,
+    )
+    // \mt book title is front matter → dropped…
+    expect(withoutFront).not.toContain("Genesis")
+    // …but \ms/\s section headings and the verse remain.
+    expect(withoutFront).toEqual(
+      expect.arrayContaining(["A major section", "The Creation", "In the beginning."]),
+    )
+  })
+
   it("treats file without \\id as single document", () => {
     const usfm = `\\c 1
 \\v 1 A verse without book ID.`

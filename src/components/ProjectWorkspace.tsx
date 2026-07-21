@@ -4921,6 +4921,7 @@ export function ProjectWorkspace() {
           existingFiles={project.files}
           projectFiles={labelPickerFiles}
           activeFileId={activeFileId}
+          excludeFrontMatter={project.importExcludeFrontMatter}
           onLabelsImported={(r) => {
             setTransientNotice(
               r.applied === 0
@@ -4958,6 +4959,7 @@ export function ProjectWorkspace() {
             cells={fileTargetCells}
             getToken={getTokenForFile}
             applyOptimisticTargetEdits={applyOptimisticTargetEdits}
+            excludeFrontMatter={project.importExcludeFrontMatter}
             onImported={() => { /* reconciliation handled by drain-complete effect (next task) */ }}
           />
         </Suspense>

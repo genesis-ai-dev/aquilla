@@ -328,7 +328,7 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
               </div>
             }
           >
-            <AgentMemoryTab projectId={agent.projectId} />
+            <AgentMemoryTab projectId={agent.projectId} roleLevel={agent.roleLevel ?? null} />
           </Suspense>
         </TabsContent>
       </Tabs>

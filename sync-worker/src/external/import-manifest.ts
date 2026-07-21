@@ -184,6 +184,7 @@ function defaultAddress(
   cell: PlanImportCell,
   kind: ImportUnitKind,
   index: number,
+  contentOrder: number,
 ): {
   unitKey: string
   displayLabel: string | null
@@ -209,7 +210,7 @@ function defaultAddress(
   const ordinal = index + 1
   return {
     unitKey: `sequence:${ordinal}`,
-    displayLabel: kind === 'heading' || kind === 'paratext' ? null : String(ordinal),
+    displayLabel: kind === 'heading' || kind === 'paratext' ? null : String(contentOrder),
     address: { scheme: 'sequence', index: ordinal },
     sourceLocator: { kind: 'sequence', index: ordinal },
   }
@@ -284,10 +285,12 @@ export function compilePlanImport(input: PlanImportInput): CompiledPlanImport {
   const profileId = manifest?.profileId ?? `agent:${input.fileType.toLowerCase()}`
   const profileVersion = manifest?.profileVersion ?? '1'
   const fidelity = manifest?.fidelity ?? defaultFidelity(input.fileType)
+  let contentOrder = 0
 
   const units = input.cells.map((cell, index): CompiledPlanImportUnit => {
     const kind = normalizedKind(cell.type)
-    const defaults = defaultAddress(cell, kind, index)
+    if (kind !== 'heading' && kind !== 'paratext') contentOrder += 1
+    const defaults = defaultAddress(cell, kind, index, contentOrder)
     const keyBase = cell.unitKey ?? defaults.unitKey
     const occurrence = (occurrences.get(keyBase) ?? 0) + 1
     occurrences.set(keyBase, occurrence)

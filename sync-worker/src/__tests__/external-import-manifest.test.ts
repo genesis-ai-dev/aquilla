@@ -35,6 +35,23 @@ describe('normalized PlanImport compiler', () => {
     })
   })
 
+  it('keeps generated non-Scripture labels gap-free around structural cells', () => {
+    const compiled = compilePlanImport({
+      fileType: 'md',
+      cells: [
+        { content: 'Title', type: 'heading' },
+        { content: 'First paragraph', type: 'text' },
+        { content: 'Aside', type: 'paratext' },
+        { content: 'Second paragraph', type: 'text' },
+      ],
+    })
+
+    expect(compiled.units.map((unit) =>
+      (unit.metadata.aquillaImport as { displayLabel: string | null }).displayLabel,
+    )).toEqual([null, '1', null, '2'])
+    expect(compiled.units.map((unit) => unit.sequenceIndex)).toEqual([0, 1, 2, 3])
+  })
+
   it('does not claim native round-trip fidelity for legacy USX imports', () => {
     const compiled = compilePlanImport({
       fileType: 'usx',

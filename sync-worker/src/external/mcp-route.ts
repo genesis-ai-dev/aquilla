@@ -14,6 +14,7 @@
 // returns tool results whose errors carry the same stable codes as REST.
 
 import { externalError } from './errors'
+import { AUTH_HINT } from './discovery-route'
 import { MCP_TOOLS } from './mcp-tools'
 import { callTool, UNKNOWN_TOOL } from './mcp-handlers'
 import type { ExternalEnv } from './types'
@@ -57,20 +58,38 @@ export async function handleExternalMcpRequest(
   if (url.pathname !== MCP_PATH) return null
 
   if (request.method !== 'POST') {
-    return new Response('method not allowed — POST JSON-RPC only', {
-      status: 405,
-      headers: { Allow: 'POST' },
-    })
+    // Teach, don't just refuse: a GET here is almost always a cold-start agent
+    // probing the endpoint. Same JSON error envelope as everything else, with
+    // enough detail to self-correct in one step.
+    return Response.json(
+      {
+        error: {
+          code: 'validation_failed',
+          message:
+            'this is an MCP server: POST JSON-RPC 2.0 only (no SSE stream). ' +
+            'Send Authorization: Bearer aqk_... and a body like ' +
+            '{"jsonrpc":"2.0","id":1,"method":"tools/list"}, then tools/call ' +
+            'get_capabilities. Prefer plain REST? GET /api/v1/external for the API map.',
+        },
+      },
+      { status: 405, headers: { Allow: 'POST' } },
+    )
   }
 
   if (!env.AQUILLA_PG) return externalError('job_failed', 'AQUILLA_PG not configured', 500)
 
   // Stateless auth: re-validate the credential on every request.
   const token = bearer(request)
-  if (!token) return externalError('permission_denied', 'missing Authorization header', 401)
+  if (!token) {
+    return externalError('permission_denied', `missing Authorization header — ${AUTH_HINT}`, 401)
+  }
   const cred = await validateApiCredential(env.AQUILLA_PG, token)
   if (!cred) {
-    return externalError('permission_denied', 'invalid, revoked, or expired API credential', 401)
+    return externalError(
+      'permission_denied',
+      `invalid, revoked, or expired API credential — ${AUTH_HINT}`,
+      401,
+    )
   }
 
   let message: JsonRpcRequest

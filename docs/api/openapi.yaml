@@ -573,6 +573,83 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DiscardOrRejectResponse" }
 
+  /api/v1/external:
+    get:
+      summary: Discovery root — machine-readable API map (unauthenticated)
+      description: >
+        Returns a static JSON map of the external API: conceptual model
+        (prepare → approve → commit), auth header shape, quickstart steps,
+        endpoint list, MCP connect config, and the error-code contract.
+        No auth required; exposes no data. Any unmatched /api/v1/external/*
+        path returns an ErrorEnvelope 404 whose details.hint points back here.
+      responses:
+        "200":
+          description: The API map.
+          content:
+            application/json:
+              schema: { type: object }
+
+  /api/v1/external/me:
+    get:
+      summary: Identity bootstrap — who am I, what mode, what scope
+      security: [{ apiCredentialBearer: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId: { type: string }
+                  username: { type: string }
+                  mode: { type: string, enum: [ask, act] }
+                  orgId: { type: [string, "null"] }
+                  projectId: { type: [string, "null"] }
+                  credentialId: { type: string }
+                  hints:
+                    type: object
+                    properties:
+                      mode: { type: string }
+                      next: { type: string }
+        "401":
+          description: permission_denied — missing/invalid/revoked/expired credential.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /api/v1/external/projects:
+    get:
+      summary: List accessible projects (up to 100)
+      description: >
+        REST mirror of the MCP list_projects tool (same shared query):
+        projects visible via creation, membership, or org membership,
+        narrowed to the credential's scope. Archived projects excluded.
+      security: [{ apiCredentialBearer: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        org_id: { type: [string, "null"] }
+                        role_source: { type: string, enum: [creator, member, org] }
+                  nextCursor: { type: "null" }
+        "401":
+          description: permission_denied — missing/invalid/revoked/expired credential.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
   /api/v1/external/projects/{projectId}/search:
     get:
       summary: Full-text search a project's cells

@@ -1012,6 +1012,12 @@ export async function emitParsedFile(
   const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
     normalizedFile: normalized,
   })
+  const targets: TargetCommit[] = cells.flatMap((cell, index) => {
+    const value = result.strings[index]?.translated
+    return value
+      ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
+      : []
+  })
 
   // Timeline-segment-model: subtitle imports are time-true (their cues carry
   // timecodes and the timeline is the spine); every text/document format is
@@ -1042,29 +1048,10 @@ export async function emitParsedFile(
     rawSource: result.rawSource,
     rawSourceFormat: result.rawSourceFormat,
     rawBytes: result.rawBytes,
+    targets,
+    targetLang: ctx.targetLang,
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
-    signal: ctx.signal,
-  })
-
-  // Translation-oriented formats (XLIFF, TMX, bilingual spreadsheets, and
-  // reviewed custom recipes) can carry source and target text together. The
-  // source cells are shared across every lane; translated values belong only
-  // to the lane selected by the importer. Use the source create-event id as
-  // the target chain parent, exactly as the Paratext target importer does.
-  const targets: TargetCommit[] = cells.flatMap((cell, index) => {
-    const value = result.strings[index]?.translated
-    return value
-      ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
-      : []
-  })
-  await enqueueTargetCommits({
-    projectId: ctx.projectId,
-    fileId,
-    author: ctx.author,
-    targetLang: ctx.targetLang,
-    commits: targets,
-    getToken: ctx.getToken,
     signal: ctx.signal,
   })
 
@@ -1531,19 +1518,10 @@ export async function importParatextAsTarget(
         cells,
         rawSource: bookPlan.rawSource,
         rawSourceFormat: "usfm",
+        targets,
+        targetLang: ctx.targetLang,
         getToken: ctx.getToken,
         onProgress: (uploaded) => bookProgress(uploaded),
-        signal: ctx.signal,
-      })
-
-      await enqueueTargetCommits({
-        projectId: ctx.projectId,
-        fileId,
-        author: ctx.author,
-        targetLang: ctx.targetLang,
-        commits: targets,
-        getToken: ctx.getToken,
-        onProgress: (uploaded) => bookProgress(cells.length + uploaded),
         signal: ctx.signal,
       })
 

@@ -6,6 +6,7 @@ describe("uploadSourceOriginal", () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
     await uploadSourceOriginal({
       projectId: "p1", fileId: "f1",
+      artifactId: "01900000-0000-7000-8000-000000000001",
       bytes: new Uint8Array([1, 2, 3]).buffer, format: "docx",
       getToken: async () => "tok", fetchFn,
       baseUrl: "https://sync.test",
@@ -15,13 +16,14 @@ describe("uploadSourceOriginal", () => {
     expect(url).toBe("https://sync.test/api/v1/projects/p1/files/f1/source")
     expect(init.method).toBe("PUT")
     expect(init.headers["X-Source-Format"]).toBe("docx")
+    expect(init.headers["X-Artifact-Id"]).toBe("01900000-0000-7000-8000-000000000001")
     expect(init.headers.Authorization).toBe("Bearer tok")
   })
 
   it("throws on non-2xx", async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response("nope", { status: 403 }))
     await expect(uploadSourceOriginal({
-      projectId: "p1", fileId: "f1", bytes: new ArrayBuffer(3), format: "docx",
+      projectId: "p1", fileId: "f1", artifactId: "01900000-0000-7000-8000-000000000002", bytes: new ArrayBuffer(3), format: "docx",
       getToken: async () => "tok", fetchFn, baseUrl: "https://sync.test",
     })).rejects.toThrow(/403/)
   })
@@ -29,7 +31,7 @@ describe("uploadSourceOriginal", () => {
   it("throws if getToken returns null", async () => {
     const fetchFn = vi.fn()
     await expect(uploadSourceOriginal({
-      projectId: "p1", fileId: "f1", bytes: new ArrayBuffer(3), format: "docx",
+      projectId: "p1", fileId: "f1", artifactId: "01900000-0000-7000-8000-000000000003", bytes: new ArrayBuffer(3), format: "docx",
       getToken: async () => null, fetchFn, baseUrl: "https://sync.test",
     })).rejects.toThrow(/token/)
     expect(fetchFn).not.toHaveBeenCalled()
@@ -42,7 +44,7 @@ describe("uploadSourceOriginal", () => {
       .mockResolvedValueOnce(new Response("boom", { status: 500 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
     await uploadSourceOriginal({
-      projectId: "p1", fileId: "f1", bytes: new ArrayBuffer(3), format: "docx",
+      projectId: "p1", fileId: "f1", artifactId: "01900000-0000-7000-8000-000000000004", bytes: new ArrayBuffer(3), format: "docx",
       getToken: async () => "tok", fetchFn, baseUrl: "https://sync.test",
       retryDelaysMs: [0, 0],
     })
@@ -58,7 +60,7 @@ describe("uploadSourceOriginal", () => {
   it("does not retry a non-retryable 403", async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response("nope", { status: 403 }))
     await expect(uploadSourceOriginal({
-      projectId: "p1", fileId: "f1", bytes: new ArrayBuffer(3), format: "docx",
+      projectId: "p1", fileId: "f1", artifactId: "01900000-0000-7000-8000-000000000005", bytes: new ArrayBuffer(3), format: "docx",
       getToken: async () => "tok", fetchFn, baseUrl: "https://sync.test",
       retryDelaysMs: [0, 0],
     })).rejects.toThrow(/403/)

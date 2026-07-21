@@ -11,6 +11,7 @@ const migration = (name: string) => readFileSync(
 )
 const M0066 = migration("0066_artifact_import_bindings.sql")
 const M0067 = migration("0067_artifact_binding_project_consistency.sql")
+const M0068 = migration("0068_browser_artifact_provenance.sql")
 
 const ARTIFACT_1 = "00000000-0000-0000-0000-000000000001"
 const ARTIFACT_2 = "00000000-0000-0000-0000-000000000002"
@@ -76,12 +77,14 @@ afterEach(async () => {
   await pg.close()
 })
 
-describe("0066/0067 normalized import provenance migrations", () => {
+describe("0066-0068 normalized import provenance migrations", () => {
   it("upgrades the prior schema idempotently with complete constraints, indexes, grants, and RLS", async () => {
     await pg.exec(M0066)
     await pg.exec(M0067)
+    await pg.exec(M0068)
     await pg.exec(M0066)
     await pg.exec(M0067)
+    await pg.exec(M0068)
 
     const metadata = await pg.query<{ column_default: string | null; is_nullable: string }>(
       `SELECT column_default, is_nullable
@@ -90,6 +93,12 @@ describe("0066/0067 normalized import provenance migrations", () => {
     )
     expect(metadata.rows[0]).toMatchObject({ is_nullable: "NO" })
     expect(metadata.rows[0].column_default).toContain("jsonb")
+
+    const credential = await pg.query<{ is_nullable: string }>(
+      `SELECT is_nullable FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'artifacts' AND column_name = 'credential_id'`,
+    )
+    expect(credential.rows[0]).toEqual({ is_nullable: "YES" })
 
     const indexes = await pg.query<{ indexname: string }>(
       `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'artifact_bindings'`,

@@ -31,6 +31,7 @@ import { withCors } from '../cors'
 import {
   buildEventProjectionStmts,
   buildBulkSourceCellCreateStmt,
+  buildBulkTargetCellCommitStmt,
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
@@ -101,12 +102,24 @@ interface ImportCell {
   metadata?: Record<string, unknown>
 }
 
+interface ImportTarget {
+  id: string
+  cellId: string
+  parentId: string
+  value: string
+  targetLang?: string
+}
+
 interface ImportBody {
   projectId: string
   fileId: string
   /** Present only on the first chunk → emits the genesis file.create. */
   file?: { id: string } & ImportFileMeta
   cells: ImportCell[]
+  /** Bilingual genesis commits paired to source cells in this same chunk. */
+  targets?: ImportTarget[]
+  /** Hide the file in the same transaction that creates it. */
+  stageEventId?: string
   clientTs?: number
   /** Raw bytes of the source file for formats that need round-trip fidelity
    *  (USFM today). Sent once with the first chunk alongside `file`. Stored in
@@ -119,6 +132,8 @@ interface ImportBody {
   /** Empty final request sent after concurrent source chunks finish. It emits
    * one accurate realtime progress invalidation and writes no cell events. */
   complete?: boolean
+  /** Reveal only after every source/target chunk and artifact upload succeeds. */
+  publishEventId?: string
 }
 
 function isImportBody(x: unknown): x is ImportBody {
@@ -128,6 +143,7 @@ function isImportBody(x: unknown): x is ImportBody {
     typeof b.projectId === 'string' &&
     typeof b.fileId === 'string' &&
     Array.isArray(b.cells) &&
+    (b.targets === undefined || Array.isArray(b.targets)) &&
     (b.complete === undefined || typeof b.complete === 'boolean')
   )
 }
@@ -186,6 +202,12 @@ export async function handleBulkImportRequest(
     return withCors(new Response('role too low for source import', { status: 403 }), request)
   }
 
+  const author =
+    typeof auth.claims.username === 'string' && auth.claims.username.trim() !== ''
+      ? auth.claims.username
+      : `user:${auth.claims.userId}`
+  const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
+
   // The browser sends this empty, authenticated marker only after every
   // concurrent data chunk has settled. Source chunks intentionally perform no
   // full-file scans; finalize all derived counters exactly once here. The
@@ -193,11 +215,43 @@ export async function handleBulkImportRequest(
   // safe after a dropped response or a partial import.
   if (body.complete && !body.file && body.cells.length === 0) {
     const finalizedAt = Date.now()
+    const finalizeStmts: AquillaStatement[] = [
+      fileCountersRecomputeStmt(db, body.projectId, body.fileId, finalizedAt),
+      ...fullProgressRecomputeStmts(db, body.projectId, body.fileId, finalizedAt),
+    ]
     try {
-      await runImportBatch(db, [
-        fileCountersRecomputeStmt(db, body.projectId, body.fileId, finalizedAt),
-        ...fullProgressRecomputeStmts(db, body.projectId, body.fileId, finalizedAt),
-      ])
+      if (body.publishEventId) {
+        const restoreEvent: PersistedEvent<'file.restore'> = {
+          id: body.publishEventId,
+          schemaVersion: 1,
+          projectId: body.projectId,
+          fileId: body.fileId,
+          cellId: null,
+          parentId: null,
+          kind: 'file.restore',
+          author,
+          payload: {},
+          clientTs,
+          serverTs: finalizedAt,
+        }
+        const seqBase = await allocateSeqRange(db, body.projectId, 1)
+        finalizeStmts.push(buildBulkEventInsertStmt(db, [{
+          id: restoreEvent.id,
+          schemaVersion: restoreEvent.schemaVersion,
+          projectId: restoreEvent.projectId,
+          fileId: restoreEvent.fileId,
+          cellId: null,
+          parentId: null,
+          kind: restoreEvent.kind,
+          author: restoreEvent.author,
+          payloadJson: '{}',
+          clientTs: restoreEvent.clientTs,
+          serverTs: restoreEvent.serverTs,
+          serverSeq: seqBase,
+        }]))
+        buildEventProjectionStmts(db, restoreEvent, finalizeStmts)
+      }
+      await runImportBatch(db, finalizeStmts)
     } catch (err) {
       return withCors(
         Response.json({ error: `Import finalization failed: ${String(err)}` }, { status: 500 }),
@@ -219,18 +273,13 @@ export async function handleBulkImportRequest(
     return withCors(Response.json({ accepted: 0, fileId: body.fileId }), request)
   }
 
-  const author =
-    typeof auth.claims.username === 'string' && auth.claims.username.trim() !== ''
-      ? auth.claims.username
-      : `user:${auth.claims.userId}`
-  const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
-
   let serverTs = Date.now()
 
   const stmts: AquillaStatement[] = []
 
   // file.create (first chunk only).
   let fileEvent: PersistedEvent | null = null
+  let stageEvent: PersistedEvent<'file.delete'> | null = null
   if (body.file) {
     const f = body.file
     fileEvent = {
@@ -264,6 +313,23 @@ export async function handleBulkImportRequest(
       serverTs: serverTs++,
     }
     buildEventProjectionStmts(db, fileEvent, stmts)
+
+    if (body.stageEventId) {
+      stageEvent = {
+        id: body.stageEventId,
+        schemaVersion: 1,
+        projectId: body.projectId,
+        fileId: body.fileId,
+        cellId: null,
+        parentId: null,
+        kind: 'file.delete',
+        author,
+        payload: {},
+        clientTs,
+        serverTs: serverTs++,
+      }
+      buildEventProjectionStmts(db, stageEvent, stmts)
+    }
 
     // Side-car raw source for round-trip-fidelity formats. Only written on the
     // first chunk (when `file` is present). UPSERT so re-imports replace.
@@ -322,11 +388,49 @@ export async function handleBulkImportRequest(
     cellEvents.push(cellEvent)
   }
 
+  const targetEvents: PersistedEvent<'target.cell.commit'>[] = []
+  const sourceParentByCell = new Map(cellEvents.map((event) => [event.cellId, event.id]))
+  for (const target of body.targets ?? []) {
+    if (
+      typeof target.id !== 'string'
+      || typeof target.cellId !== 'string'
+      || typeof target.parentId !== 'string'
+      || typeof target.value !== 'string'
+      || (target.targetLang !== undefined && typeof target.targetLang !== 'string')
+    ) {
+      return withCors(new Response('each target needs string id, cellId, parentId, and value', { status: 400 }), request)
+    }
+    if (sourceParentByCell.get(target.cellId) !== target.parentId) {
+      return withCors(
+        new Response('each target must reference its source parent in the same import chunk', { status: 400 }),
+        request,
+      )
+    }
+    targetEvents.push({
+      id: target.id,
+      schemaVersion: 1,
+      projectId: body.projectId,
+      fileId: body.fileId,
+      cellId: target.cellId,
+      parentId: target.parentId,
+      kind: 'target.cell.commit',
+      author,
+      payload: {
+        value: target.value,
+        sourceEventId: target.parentId,
+        ...(target.targetLang ? { targetLang: target.targetLang } : {}),
+      },
+      clientTs,
+      serverTs: serverTs++,
+    })
+  }
+
   try {
     // One counter bump reserves a contiguous server_seq block for every event
     // in this request (file.create first, then cells in payload order — the
     // same ordering the old per-statement allocator produced).
-    const allEvents = fileEvent ? [fileEvent, ...cellEvents] : cellEvents
+    const lifecycleEvents = [fileEvent, stageEvent].filter((event): event is PersistedEvent => event !== null)
+    const allEvents = [...lifecycleEvents, ...cellEvents, ...targetEvents]
     if (allEvents.length > 0) {
       const seqBase = await allocateSeqRange(db, body.projectId, allEvents.length)
       for (let i = 0; i < allEvents.length; i += BULK_ROWS) {
@@ -357,6 +461,9 @@ export async function handleBulkImportRequest(
     // explicit completion request after every concurrent chunk settles.
     for (let i = 0; i < cellEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkSourceCellCreateStmt(db, cellEvents.slice(i, i + BULK_ROWS)))
+    }
+    for (let i = 0; i < targetEvents.length; i += BULK_ROWS) {
+      stmts.push(buildBulkTargetCellCommitStmt(db, targetEvents.slice(i, i + BULK_ROWS)))
     }
 
     // Keep each data request to the event log + direct projections only. The

@@ -94,6 +94,75 @@ async function makeCompletionRequest(token: string): Promise<Request> {
 }
 
 describe('POST /import — server_seq is race-safe', () => {
+  it('keeps a bilingual import hidden until an explicit idempotent publish', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    const sourceEventId = 'source-genesis-1'
+    const first = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-genesis-1', name: 'pairs.xlf', fileType: 'xliff' },
+        stageEventId: 'file-stage-1',
+        cells: [{ id: sourceEventId, cellId: 'unit-1', value: 'Hello' }],
+        targets: [{
+          id: 'target-genesis-1',
+          cellId: 'unit-1',
+          parentId: sourceEventId,
+          value: 'Bonjour',
+          targetLang: 'fr-CA',
+        }],
+      }),
+    })
+    expect((await handleBulkImportRequest(first, makeEnv(db)))?.status).toBe(200)
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+    expect((await rows<any>('cells')).map((cell) => [cell.side, cell.target_lang, cell.value]))
+      .toEqual(expect.arrayContaining([
+        ['source', '', 'Hello'],
+        ['target', 'fr-CA', 'Bonjour'],
+      ]))
+
+    const publish = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-publish-1',
+      }),
+    })
+    const publishRetry = publish.clone()
+    expect((await handleBulkImportRequest(publish, makeEnv(db)))?.status).toBe(200)
+    expect((await rows<any>('files'))[0].deleted_at).toBeNull()
+    expect((await rows<any>('events')).filter((event) => event.id === 'file-publish-1')).toHaveLength(1)
+
+    // A dropped publish response is safe to retry with the same event id.
+    expect((await handleBulkImportRequest(publishRetry, makeEnv(db)))?.status).toBe(200)
+    expect((await rows<any>('events')).filter((event) => event.id === 'file-publish-1')).toHaveLength(1)
+  })
+
+  it('rejects a bulk target that is not paired to a source parent in the same chunk', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    const request = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [{ id: 'source-1', cellId: 'cell-1', value: 'Source' }],
+        targets: [{ id: 'target-1', cellId: 'cell-1', parentId: 'foreign-parent', value: 'Target' }],
+      }),
+    })
+    expect((await handleBulkImportRequest(request, makeEnv(db)))?.status).toBe(400)
+    expect(await rows('events')).toHaveLength(0)
+    expect(await rows('cells')).toHaveLength(0)
+  })
+
   it('defers derived rollups until one idempotent completion request', async () => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()

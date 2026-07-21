@@ -67,6 +67,69 @@ function countWords(text: string): number {
   return trimmed.split(/\s+/).length
 }
 
+/** Set-based projection for bilingual genesis imports. These events are
+ * created alongside their source parents by POST /import, so no pre-existing
+ * target branch can exist. The event log still retains the parent/source pin;
+ * this helper only avoids thousands of one-row projection statements. */
+export function buildBulkTargetCellCommitStmt(
+  db: AquillaDb,
+  events: PersistedEvent<'target.cell.commit'>[],
+): AquillaStatement {
+  if (events.length === 0) throw new Error('buildBulkTargetCellCommitStmt: empty events')
+  const byCellLane = new Map<string, PersistedEvent<'target.cell.commit'>>()
+  for (const event of events) {
+    if (!event.fileId || !event.cellId) {
+      throw new Error(`target.cell.commit event ${event.id} is missing fileId or cellId`)
+    }
+    const payload = event.payload as EventPayloads['target.cell.commit']
+    byCellLane.set(`${event.cellId}\u0000${laneOfEvent(event.kind, payload)}`, event)
+  }
+
+  const rows = [...byCellLane.values()]
+  const binds: unknown[] = []
+  for (const event of rows) {
+    const payload = event.payload as EventPayloads['target.cell.commit']
+    const value = payload.value ?? ''
+    binds.push(
+      event.projectId,
+      event.fileId,
+      event.cellId,
+      laneOfEvent(event.kind, payload),
+      value,
+      payload.valueHtml ?? null,
+      event.id,
+      payload.sourceEventId ?? null,
+      event.author,
+      event.serverTs,
+      countWords(value),
+      contentHash(value),
+      payload.ai_suggestion ? 1 : 0,
+    )
+  }
+  const placeholders = Array(rows.length)
+    .fill("(?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?)")
+    .join(',\n')
+  return db.prepare(
+    `INSERT INTO cells (
+      project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+      canonical_ref, anchor_cell_id, event_id, source_event_id,
+      last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted
+    ) VALUES ${placeholders}
+    ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+      value = excluded.value,
+      value_html = excluded.value_html,
+      event_id = excluded.event_id,
+      source_event_id = excluded.source_event_id,
+      last_editor = excluded.last_editor,
+      last_edit_at = excluded.last_edit_at,
+      word_count = excluded.word_count,
+      content_hash = excluded.content_hash,
+      validated = 0,
+      endorsement_count = 0,
+      ai_drafted = excluded.ai_drafted`,
+  ).bind(...binds)
+}
+
 /**
  * AQU-538: the target-language lane a target-side cell event addresses.
  * '' for the default lane (absent/empty `targetLang` — every pre-lane

@@ -67,18 +67,24 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
       "https://x/api/v1/projects/p1/files/f1/source",
       {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "X-Source-Format": "docx" },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "docx",
+          "X-Artifact-Id": "01900000-0000-7000-8000-000000000001",
+        },
         body: bytes,
       },
     )
 
     const res = await handleSourceUploadRequest(req, env)
     expect(res?.status).toBe(200)
-    const body = (await res!.json()) as { ok: boolean; key: string }
+    const body = (await res!.json()) as { ok: boolean; artifactId: string; key: string; sha256: string }
     expect(body.ok).toBe(true)
+    expect(body.artifactId).toBe("01900000-0000-7000-8000-000000000001")
+    expect(body.sha256).toMatch(/^[0-9a-f]{64}$/)
 
-    const key = sourceObjectKey(env, "p1", "f1", "docx")
-    expect(key).toContain("projects/p1/files/f1/source/original.docx")
+    const key = sourceObjectKey(env, "p1", "f1", "docx", body.artifactId)
+    expect(key).toContain(`artifacts/p1/${body.artifactId}/original.docx`)
     expect(SNAPSHOTS._allKeys()).toContain(key)
     expect(body.key).toBe(key)
 
@@ -89,6 +95,25 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     expect(row).not.toBeNull()
     expect(row!.r2_key).toBe(key)
     expect(row!.raw_source).toBeNull()
+
+    const artifact = await db.prepare(
+      "SELECT id::text AS id, credential_id, file_id, sha256 FROM artifacts WHERE id::text = ?",
+    ).bind(body.artifactId).first<{ id: string; credential_id: string | null; file_id: string; sha256: string }>()
+    expect(artifact).toMatchObject({
+      id: body.artifactId,
+      credential_id: null,
+      file_id: "f1",
+      sha256: body.sha256,
+    })
+    const binding = await db.prepare(
+      "SELECT artifact_id::text AS artifact_id, file_id, binding_role, profile_id FROM artifact_bindings WHERE artifact_id::text = ?",
+    ).bind(body.artifactId).first<{ artifact_id: string; file_id: string; binding_role: string; profile_id: string }>()
+    expect(binding).toMatchObject({
+      artifact_id: body.artifactId,
+      file_id: "f1",
+      binding_role: "source",
+      profile_id: "legacy:docx",
+    })
   })
 
   it("preserves a custom text original with its explicit format", async () => {

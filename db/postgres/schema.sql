@@ -849,7 +849,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
     id                  UUID PRIMARY KEY,
     project_id          TEXT NOT NULL,
     uploaded_by_user_id TEXT NOT NULL,
-    credential_id       TEXT NOT NULL,
+    credential_id       TEXT,
     name                TEXT NOT NULL,
     content_type        TEXT,
     size_bytes          BIGINT NOT NULL,

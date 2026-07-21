@@ -16,6 +16,7 @@ import { verifyTokenForDoc } from "../auth"
 import { ROLE } from "./role-policy"
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 // No documented product limit on original-source size; 50 MB comfortably
 // covers real DOCX/PPTX imports while capping unbounded R2 writes / memory use.
@@ -32,6 +33,7 @@ export function sourceObjectKey(
   projectId: string,
   fileId: string,
   format: string,
+  artifactId?: string,
 ): string {
   const knownExtensions: Record<string, string> = {
     docx: "docx",
@@ -49,7 +51,30 @@ export function sourceObjectKey(
     "custom-original": "bin",
   }
   const ext = knownExtensions[format] ?? "bin"
+  if (artifactId) {
+    return `${r2KeyPrefix(env)}artifacts/${projectId}/${artifactId}/original.${ext}`
+  }
   return `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/source/original.${ext}`
+}
+
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {}
+    } catch {
+      return {}
+    }
+  }
+  return {}
 }
 
 export async function handleSourceUploadRequest(
@@ -91,6 +116,10 @@ export async function handleSourceUploadRequest(
   if (!/^[a-z0-9][a-z0-9+._-]{0,63}$/.test(format)) {
     return withCors(new Response("invalid source format", { status: 400 }), request)
   }
+  const requestedArtifactId = request.headers.get('X-Artifact-Id')?.trim()
+  if (requestedArtifactId && !UUID_RE.test(requestedArtifactId)) {
+    return withCors(new Response('invalid artifact id', { status: 400 }), request)
+  }
 
   // Reject oversize uploads before buffering the whole body when the client
   // advertises the size; the post-buffer check below is the backstop.
@@ -107,7 +136,8 @@ export async function handleSourceUploadRequest(
     return withCors(new Response("source too large", { status: 413 }), request)
   }
 
-  const key = sourceObjectKey(env, projectId, fileId, format)
+  const artifactId = requestedArtifactId ?? crypto.randomUUID()
+  const key = sourceObjectKey(env, projectId, fileId, format, artifactId)
   const contentTypes: Record<string, string> = {
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -123,25 +153,99 @@ export async function handleSourceUploadRequest(
     tsv: "text/tab-separated-values; charset=utf-8",
   }
   const contentType = contentTypes[format] ?? "application/octet-stream"
+  const sha256 = await sha256Hex(body)
+
+  const file = await db.prepare(
+    `SELECT name, meta FROM files WHERE id = ? AND project_id = ?`,
+  ).bind(fileId, projectId).first<{ name: string; meta: unknown }>()
+  if (!file) {
+    return withCors(new Response('file not found', { status: 404 }), request)
+  }
+  const existing = await db.prepare(
+    `SELECT project_id, sha256 FROM artifacts WHERE id::text = ?`,
+  ).bind(artifactId).first<{ project_id: string; sha256: string }>()
+  if (existing && (existing.project_id !== projectId || existing.sha256 !== sha256)) {
+    return withCors(new Response('artifact id already refers to different bytes', { status: 409 }), request)
+  }
+
+  const fileMeta = objectRecord(file.meta)
+  const manifest = objectRecord(fileMeta.aquillaImport)
+  const fidelityValues = new Set(['native', 'verified-recipe', 'content-only', 'preserved-only'])
+  const fidelity = typeof manifest.fidelity === 'string' && fidelityValues.has(manifest.fidelity)
+    ? manifest.fidelity
+    : 'content-only'
+  const profileId = typeof manifest.profileId === 'string' && manifest.profileId
+    ? manifest.profileId
+    : `legacy:${format}`
+  const profileVersion = typeof manifest.profileVersion === 'string' && manifest.profileVersion
+    ? manifest.profileVersion
+    : '1'
+  const memberPath = typeof manifest.memberPath === 'string' ? manifest.memberPath : ''
+  const recipe = manifest.recipe && typeof manifest.recipe === 'object'
+    ? JSON.stringify(manifest.recipe)
+    : null
 
   await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
 
-  await db.prepare(
-    `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
-     VALUES (?, ?, ?, NULL, ?, ?, ?)
-     ON CONFLICT (file_id) DO UPDATE SET
-       project_id = EXCLUDED.project_id,
-       format     = EXCLUDED.format,
-       raw_source = NULL,
-       r2_key     = EXCLUDED.r2_key,
-       size_bytes = EXCLUDED.size_bytes,
-       created_at = EXCLUDED.created_at`,
-  )
-    .bind(fileId, projectId, format, key, body.byteLength, Date.now())
-    .run()
+  await db.batch([
+    db.prepare(
+      `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?)
+       ON CONFLICT (file_id) DO UPDATE SET
+         project_id = EXCLUDED.project_id,
+         format     = EXCLUDED.format,
+         raw_source = NULL,
+         r2_key     = EXCLUDED.r2_key,
+         size_bytes = EXCLUDED.size_bytes,
+         created_at = EXCLUDED.created_at`,
+    ).bind(fileId, projectId, format, key, body.byteLength, Date.now()),
+    db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, metadata
+       ) VALUES (?::uuid, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'source', ?::jsonb)
+       ON CONFLICT (id) DO NOTHING`,
+    ).bind(
+      artifactId,
+      projectId,
+      String(auth.claims.userId),
+      file.name,
+      contentType,
+      body.byteLength,
+      sha256,
+      key,
+      fileId,
+      JSON.stringify({ origin: 'browser-import', sourceFormat: format }),
+    ),
+    db.prepare(
+      `INSERT INTO artifact_bindings (
+         id, project_id, artifact_id, file_id, binding_role, target_lang,
+         member_path, profile_id, profile_version, fidelity, manifest, recipe
+       ) VALUES (?::uuid, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+       ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+       DO UPDATE SET
+         profile_id = EXCLUDED.profile_id,
+         profile_version = EXCLUDED.profile_version,
+         fidelity = EXCLUDED.fidelity,
+         manifest = EXCLUDED.manifest,
+         recipe = EXCLUDED.recipe,
+         updated_at = now()`,
+    ).bind(
+      crypto.randomUUID(),
+      projectId,
+      artifactId,
+      fileId,
+      memberPath,
+      profileId,
+      profileVersion,
+      fidelity,
+      JSON.stringify(manifest),
+      recipe,
+    ),
+  ])
 
   return withCors(
-    new Response(JSON.stringify({ ok: true, key }), {
+    new Response(JSON.stringify({ ok: true, artifactId, key, sha256 }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     }),

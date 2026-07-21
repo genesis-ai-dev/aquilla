@@ -14,6 +14,7 @@
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
 import { uploadSourceOriginal } from "./source-upload"
+import { v7 as uuidv7 } from "uuid"
 
 /** Cells per HTTP request. The worker turns each chunk into bounded multi-row
  *  Postgres inserts, keeping request bodies manageable while still amortizing
@@ -104,6 +105,11 @@ export interface BulkUploadArgs {
    *  PUT …/files/{fileId}/source after the first chunk lands. Not bundled in
    *  the JSON payload. */
   rawBytes?: ArrayBuffer
+  /** Optional bilingual target rows. They are committed in the same staged
+   * publication as their source parents instead of appearing later via the
+   * background outbox. */
+  targets?: TargetCommit[]
+  targetLang?: string
   /** Mints a sync-token scoped to (projectId, fileId). */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired after each chunk lands — drives the progress UI. */
@@ -129,6 +135,9 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const url = `${syncWorkerHttpOrigin()}/import`
   const total = args.cells.length
   let uploaded = 0
+  const stageEventId = uuidv7()
+  const publishEventId = uuidv7()
+  const artifactId = uuidv7()
 
   // Chunk offsets. `do…while` semantics: at least one request (carrying
   // file.create) even for a zero-cell file.
@@ -146,8 +155,14 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
       cells: chunk,
       clientTs: Date.now(),
     }
+    const sourceEventIds = new Set(chunk.map((cell) => cell.id))
+    const targets = (args.targets ?? [])
+      .filter((target) => sourceEventIds.has(target.parentId))
+      .map((target) => ({ ...target, ...(args.targetLang ? { targetLang: args.targetLang } : {}) }))
+    if (targets.length > 0) payload.targets = targets
     if (isFirst) {
       payload.file = args.file
+      payload.stageEventId = stageEventId
       // Side-car raw bytes go alongside the first chunk so they land atomically
       // with the file.create. Subsequent chunks omit them.
       if (args.rawSource !== undefined && args.rawSourceFormat) {
@@ -205,7 +220,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
     throw lastError ?? new Error("Upload failed")
   }
 
-  const finalize = async (): Promise<void> => {
+  const finalize = async (publish: boolean): Promise<void> => {
     let lastError: Error | null = null
 
     for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
@@ -220,6 +235,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
             fileId: args.fileId,
             cells: [],
             complete: true,
+            ...(publish ? { publishEventId } : {}),
             clientTs: Date.now(),
           }),
           signal: args.signal,
@@ -265,14 +281,22 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // formats also need an exact original for audit and future round-trip
   // serializers. Runs before subsequent chunks so provenance is available as
   // soon as any cell is written.
-  if (args.rawBytes && args.rawSourceFormat) {
-    await uploadSourceOriginal({
-      projectId: args.projectId,
-      fileId: args.fileId,
-      bytes: args.rawBytes,
-      format: args.rawSourceFormat,
-      getToken: args.getToken,
-    })
+  let uploadFailure: unknown | null = null
+  const sourceBytes = args.rawBytes
+    ?? (args.rawSource !== undefined ? new TextEncoder().encode(args.rawSource).buffer as ArrayBuffer : undefined)
+  if (sourceBytes && args.rawSourceFormat) {
+    try {
+      await uploadSourceOriginal({
+        projectId: args.projectId,
+        fileId: args.fileId,
+        artifactId,
+        bytes: sourceBytes,
+        format: args.rawSourceFormat,
+        getToken: args.getToken,
+      })
+    } catch (error) {
+      uploadFailure = error
+    }
   }
 
   // The remaining chunks are independent genesis source.cell.create batches:
@@ -286,7 +310,6 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const rest = offsets.slice(1)
   const POOL = 4
   let cursor = 0
-  let uploadFailure: unknown | null = null
   const worker = async (): Promise<void> => {
     while (uploadFailure === null && cursor < rest.length) {
       const i = cursor++
@@ -308,7 +331,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // chunks settle. It also runs after a partial failure so whatever did land
   // remains internally consistent and recoverable.
   try {
-    await finalize()
+    await finalize(uploadFailure === null)
   } catch (finalizeError) {
     if (uploadFailure !== null) {
       const uploadMessage = uploadFailure instanceof Error

@@ -3,6 +3,8 @@ import { syncWorkerHttpOrigin } from "./sync-worker-url"
 export interface UploadSourceArgs {
   projectId: string
   fileId: string
+  /** Client-minted id makes retries converge on one immutable artifact row. */
+  artifactId: string
   bytes: ArrayBuffer
   /** Stable import format label persisted beside the immutable original. */
   format: string
@@ -15,6 +17,12 @@ export interface UploadSourceArgs {
   retryDelaysMs?: readonly number[]
 }
 
+export interface UploadSourceResult {
+  artifactId: string
+  key: string
+  sha256: string
+}
+
 // Same attempts/backoff as the bulk-import chunk uploads: a transient network
 // blip or 5xx on the R2 PUT shouldn't abort a whole import mid-way.
 const IMPORT_ATTEMPTS = 3
@@ -24,7 +32,7 @@ function isRetryableImportStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500
 }
 
-export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<void> {
+export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<UploadSourceResult> {
   let token = await args.getToken(args.fileId)
   if (!token) throw new Error("Couldn't get an upload token — sign in and try again.")
   const origin = args.baseUrl ?? syncWorkerHttpOrigin()
@@ -38,7 +46,11 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<void
     try {
       res = await fetchFn(url, {
         method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "X-Source-Format": args.format },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": args.format,
+          "X-Artifact-Id": args.artifactId,
+        },
         body: args.bytes,
       })
     } catch (err) {
@@ -46,7 +58,7 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<void
     }
 
     if (res) {
-      if (res.ok) return
+      if (res.ok) return await res.json() as UploadSourceResult
       const detail = await res.text().catch(() => "")
       lastError = new Error(`Source upload failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`)
 

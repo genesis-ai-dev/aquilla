@@ -2296,21 +2296,25 @@ export function ProjectWorkspace() {
   // fetchProjectFiles source). Then open one file and confirm its bars stay
   // live-accurate (move on edit) rather than freezing at the snapshot value.
 
-  // PROTOTYPE (AD-14 health-as-confidence): derive per-cell health on read from
-  // FTS5 similarity to validated cells, and overlay it onto the endorsement
-  // healthMap for the editor rings/tooltip so we can compare the two live.
+  // AD-14 health-as-confidence: derive per-cell health on read from FTS
+  // similarity to validated cells, and use it as the editor's health source
+  // (rings/tooltip). This is what makes health GRADED — the endorsement-count
+  // path alone reads 0% until Validate then 100% (binary), which is the bug in
+  // AQU-641.
   //
-  // OPT-IN, default OFF. The overlay's async refetch re-renders the editor when
-  // it resolves, which races fast in-cell interactions (it reset cells mid-edit
-  // and mid-completion, failing the validate + AI-completion e2e smokes). Until
-  // that re-render is made non-disruptive, keep it behind a flag. Enable while
-  // exploring with: `localStorage.setItem("health-confidence-overlay","1")` then
-  // reload. When off, the hook is fully inert and the editor matches baseline.
+  // Default ON (AQU-641). The overlay was previously gated OFF because the
+  // confidence route ran one FTS query per unvalidated cell (N+1, up to 5000
+  // per file); that slow, late-resolving refetch raced fast in-cell edits.
+  // AQU-641 batched the route to a single JOIN LATERAL query per file, so the
+  // fetch resolves quickly and the health map (which the editor's TipTap
+  // hydration does NOT depend on) updates without disrupting typing. A kill
+  // switch remains: `localStorage.setItem("health-confidence-overlay","0")`
+  // then reload falls back to the endorsement-decay health.
   const confidenceOverlayEnabled = useMemo(() => {
     try {
-      return localStorage.getItem("health-confidence-overlay") === "1"
+      return localStorage.getItem("health-confidence-overlay") !== "0"
     } catch {
-      return false
+      return true
     }
   }, [])
   const confidence = useCellConfidence({

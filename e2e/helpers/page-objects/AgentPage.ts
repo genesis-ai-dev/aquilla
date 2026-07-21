@@ -6,32 +6,17 @@ import { type Page, type Locator, expect } from "@playwright/test"
  * staged `PlanImport` changeset → `/approve/:changesetId` → memory proposal
  * review → human-edit protection.
  *
- * NOTE on location: every other page object in this repo lives under
- * `e2e/helpers/page-objects/` (see `e2e/helpers/page-objects/Workspace.ts`).
- * This file lives at `e2e/pages/agent-page.ts` per the explicit AQU-AGENT
- * swarm task assignment (W1F). That's a real deviation from the codebase's
- * own page-object convention (AGENTS.md "Reuse helpers in
- * e2e/helpers/page-objects/") — flagged per CLAUDE.md Rule 11 rather than
- * silently forked. SWARM-TODO(aqu-agent): Wave 2 integrator should decide
- * whether to move this into `e2e/helpers/page-objects/AgentPage.ts` for
- * consistency, or keep `e2e/pages/` as a deliberate new convention for
- * full-screen-route page objects (this journey is largely the
- * `/project/:id/agent` full-screen workbench, not the docked chat panel).
+ * LOCATION (resolved, Wave 2): moved here into `e2e/helpers/page-objects/`
+ * from the W1F-assigned `e2e/pages/agent-page.ts` so it matches every other
+ * page object in the repo (AGENTS.md "Reuse helpers in
+ * e2e/helpers/page-objects/"). The former SWARM-TODO on location is closed.
  *
- * NOTE on selectors: `docs/swarm/AQU-AGENT-CONTRACTS.md` §4 defines NEW SSE
- * frame types (`tool.code.start`, `tool.code.output`, `changeset.staged`,
- * `memory.proposed`, `brief.proposed`, `budget`, `budget.exhausted`) that
- * W1D/W1E render into the DOM. Those components don't exist yet at the time
- * this file was written (W1F runs in parallel with W1D/W1B/W1C). Selectors
- * below therefore lead with resilient, spec-shaped fallbacks (role/text) and
- * a documented `data-frame-type` attribute convention mirroring the contract
- * frame names 1:1 (e.g. `[data-frame-type="changeset.staged"]`) — Wave 2's
- * UI verifier should either (a) confirm the real components already emit
- * `data-frame-type` on their run-timeline rows and this file's selectors
- * "just work," or (b) add that attribute to the new frame renderers so this
- * file's selectors resolve without edits, matching the existing convention
- * of `data-cell-id` / `data-cell-type` / `data-testid="lane-switcher"` etc.
- * seen elsewhere in this repo's components (see Workspace.ts).
+ * SELECTORS (resolved, Wave 2): the run-timeline renderers now emit
+ * `data-frame-type="<contract frame name>"` (CodeActivityBlock, ChangesetCard,
+ * MemoryProposalNotice, BriefProposalNotice, BudgetMeter) and the memory rows
+ * emit `data-memory-path="<path>"` (Proposed/ApprovedMemoryList), so the
+ * selectors below resolve against the real components — mirroring this repo's
+ * existing `data-cell-id` / `data-testid="lane-switcher"` convention.
  */
 export class AgentPage {
   private readonly page: Page
@@ -71,22 +56,23 @@ export class AgentPage {
 
   /**
    * Attach a fixture file to the session before sending the prompt.
-   * SWARM-TODO(aqu-agent): the harness's `load_artifact` tool (contracts §2)
-   * resolves an artifact already uploaded to the project (R2-backed), not a
-   * raw local-filesystem attach — so "attach a fixture" in the real UI is
-   * likely "upload the fixture as a project artifact first, then reference
-   * it," not a literal file-input drop on the composer. This method's
-   * `input[type=file]` guess is a placeholder pending W1D's composer
-   * attachment affordance; adjust once that UI lands (see AgentDockView.tsx
-   * / the composer's `SuggestedAction`/attachment props).
+   *
+   * The real affordance (AgentDockView, Wave 2): the composer's "Attach file"
+   * button opens a hidden `input[type=file]`; choosing a file uploads it as a
+   * project artifact via `POST /api/v2/projects/:id/agent-artifacts`, and an
+   * attachment pill (`[data-attachment-id]`) appears once the upload lands.
+   * The next prompt's run request carries `{artifactId, fileName}` so the
+   * harness can `load_artifact` it into the sandbox.
+   *
+   * We set files directly on the hidden input (the robust Playwright pattern —
+   * clicking the button would open a native file chooser), then wait for the
+   * pill so the artifact id is registered before `sendPrompt`.
    */
   async attachFixture(filePath: string): Promise<void> {
-    const attachButton = this.page.getByRole("button", { name: /Attach file|Add attachment/i })
-    if (await attachButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await attachButton.click()
-    }
     const fileInput = this.page.locator('input[type="file"]').first()
     await fileInput.setInputFiles(filePath)
+    // Upload is async — wait for the attachment pill that confirms it landed.
+    await expect(this.page.locator("[data-attachment-id]").first()).toBeVisible({ timeout: 30_000 })
   }
 
   // ── Streamed activity ──────────────────────────────────────────────────

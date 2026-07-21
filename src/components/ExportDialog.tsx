@@ -55,7 +55,7 @@ import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "pptx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -72,6 +72,13 @@ const FORMAT_OPTIONS: FormatOption[] = [
     label: "USFM",
     ext: ".SFM",
     description: "Round-trip USFM with translations injected back into the original markup. Requires the original file data on the server (re-import to enable for older files).",
+    lossy: false,
+  },
+  {
+    id: "pptx",
+    label: "PowerPoint (.pptx)",
+    ext: ".pptx",
+    description: "Translations injected back into the original presentation. Slides, shapes, and paragraph structure are preserved; mixed run formatting is simplified to the first run and reported.",
     lossy: false,
   },
   {
@@ -198,6 +205,8 @@ interface ExportDialogProps {
    * Word (.docx) round-trip export option when a side-car blob exists.
    */
   isDocxFile?: boolean
+  /** Whether the active file was imported from a PPTX skeleton. */
+  isPptxFile?: boolean
   /** All project files — used only for project-scope USFM zip. */
   projectFiles: { id: string; name: string; type: string }[]
   sourceLanguage?: string
@@ -219,6 +228,7 @@ export function ExportDialog({
   activeFileName,
   isUsfmFile,
   isDocxFile = false,
+  isPptxFile = false,
   projectFiles,
   sourceLanguage = "und",
   targetLanguage = "und",
@@ -236,7 +246,7 @@ export function ExportDialog({
     prevCanExportRef.current = canExport
   }, [open, canExport, onOpenChange])
 
-  const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : isDocxFile ? "docx" : "tsv")
+  const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : isDocxFile ? "docx" : isPptxFile ? "pptx" : "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
@@ -259,11 +269,11 @@ export function ExportDialog({
   // list (nothing appears selected) yet still drives handleExport down the
   // wrong side-car path for the new file.
   useEffect(() => {
-    setFormat(isUsfmFile ? "usfm" : isDocxFile ? "docx" : "tsv")
-  }, [activeFileId, isUsfmFile, isDocxFile])
+    setFormat(isUsfmFile ? "usfm" : isDocxFile ? "docx" : isPptxFile ? "pptx" : "tsv")
+  }, [activeFileId, isUsfmFile, isDocxFile, isPptxFile])
 
   // audio-by-character, vtt, docx, and plain-text-dump only support file scope.
-  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "pptx", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   const isProjectOnlyFormat = format === "sdbh-xml"
@@ -429,6 +439,26 @@ export function ExportDialog({
           ...collectInlineStyleWarnings(cells),
         ])
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.docx${note}` })
+      } else if (format === "pptx") {
+        setStatus({ kind: "busy", msg: "Fetching original presentation…" })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken })
+        setStatus({ kind: "busy", msg: "Injecting translations…" })
+        const { exportPptx } = await import("@/lib/export/exporters/pptx")
+        const result = await exportPptx(rawBytes, cells)
+        const baseName = buildExportStem(false)
+        downloadBlob(result.blob, `${baseName}.pptx`)
+        setFidelityWarnings([
+          ...result.warnings.map((warning) => ({
+            kind: "inline-style-simplified" as const,
+            segment: warning.segment,
+            detail: warning.detail,
+          })),
+          ...collectInlineStyleWarnings(cells),
+        ])
+        const note = result.injected === 0
+          ? " (no translations to inject — downloaded original structure)"
+          : ` (${result.injected} paragraph${result.injected === 1 ? "" : "s"} translated)`
+        setStatus({ kind: "ok", msg: `Downloaded ${baseName}.pptx${note}` })
       } else if (format === "audio-by-character") {
         setStatus({ kind: "busy", msg: "Decoding audio…" })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
@@ -612,6 +642,7 @@ export function ExportDialog({
             {FORMAT_OPTIONS.filter((f) => {
               if (f.id === "usfm") return isUsfmFile
               if (f.id === "docx") return isDocxFile // AQU-233: only for docx imports
+              if (f.id === "pptx") return isPptxFile
               if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
               if (f.id === "plain-text-dump") return false // shown in Advanced section only
               return true

@@ -679,13 +679,6 @@ export function detectFileType(fileName: string): FileType | null {
     md: "md",
     markdown: "md",
     docx: "docx",
-    // AQU-431: .doc files — modern Word often saves OOXML under a .doc extension;
-    // attempt the same ZIP/XML parse path as .docx. True legacy binary .doc
-    // (OLE2 compound document) will fail with a JSZip error; the error surface is
-    // the same "Import failed" message the user already sees for corrupt .docx files.
-    // SWARM-TODO(AQU-431): add a dedicated legacy .doc binary parser (e.g. via
-    // cfb + a doc-text extractor) once a suitable in-repo dependency is available.
-    doc: "docx",
     pptx: "pptx",
     txt: "txt",
     vtt: "vtt",

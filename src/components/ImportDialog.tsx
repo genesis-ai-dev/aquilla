@@ -594,6 +594,7 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
+            targetLang={targetLang}
             getToken={getToken}
             ttsSettings={ttsSettings}
             onCastUpdated={onCastUpdated}
@@ -757,7 +758,7 @@ type ImportOption = {
 
 const POPULAR_OPTIONS: ImportOption[] = [
   { id: "upload", title: "Upload files", icon: Upload,
-    description: "USFM, DOC, DOCX, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
+    description: "USFM, DOCX, PPTX, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
   { id: "ebible", title: "eBible Corpus", hint: "public library", icon: Library,
     description: "Openly-licensed Bible translations, imported directly — no download." },
   { id: "helloao", title: "Bible API", hint: "helloao.org", icon: Globe,
@@ -781,8 +782,8 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     description: "Import any released Door43 resource as source and pin it to a release — pull upstream changes later." },
   { id: "sdbh", title: "SDBH Hebrew Lexicon", hint: "UBS MARBLE", icon: BookA, badge: "beta",
     description: "Semantic Dictionary of Biblical Hebrew — localize definitions and glosses by semantic domain, with lossless export back to the MARBLE XML." },
-  { title: "Translation Memory", hint: "TMX", icon: Database, badge: "soon", disabled: true,
-    description: "Reuse prior translations from TMX memory files." },
+  { id: "upload", title: "Translation Memory", hint: "TMX", icon: Database,
+    description: "Import source/target pairs from a TMX memory file." },
 ]
 
 function OptionBadge({ kind }: { kind: "beta" | "soon" }) {
@@ -1270,7 +1271,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
             <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
-            <p><span className="font-medium text-foreground/70">Documents</span> — DOC, DOCX, TXT, MD, PPTX</p>
+            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, PPTX</p>
             <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT</p>
             <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
             <p><span className="font-medium text-foreground/70">Other text formats</span> — analyzed with AI before you confirm</p>

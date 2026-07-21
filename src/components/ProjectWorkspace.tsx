@@ -5000,6 +5000,7 @@ export function ProjectWorkspace() {
           activeFileName={activeFile?.name ?? null}
           isUsfmFile={activeFile?.type === "usfm"}
           isDocxFile={activeFile?.type === "docx"}
+          isPptxFile={activeFile?.type === "pptx"}
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}

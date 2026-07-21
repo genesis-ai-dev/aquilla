@@ -976,6 +976,9 @@ case 'cell.audio.attach': {
       // alongside languages — no files-table column needed.
       if (p.orderedBy) langMeta.orderedBy = p.orderedBy
       if (p.importManifest) langMeta.aquillaImport = p.importManifest
+      if (p.r2Key) langMeta.r2Key = p.r2Key
+      if (p.importFormat) langMeta.importFormat = p.importFormat
+      if (p.parserVersion) langMeta.parserVersion = p.parserVersion
       stmts.push(
         db
           .prepare(
@@ -988,7 +991,7 @@ case 'cell.audio.attach': {
               meta
             ) VALUES (
               ?, ?, ?,
-              NULL, ?, NULL, NULL, NULL,
+              ?, ?, ?, ?, ?,
               ?,
               0, 0, 0, NULL,
               ?, (extract(epoch from now()) * 1000)::bigint, (extract(epoch from now()) * 1000)::bigint,
@@ -996,7 +999,11 @@ case 'cell.audio.attach': {
             )
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
+              role = excluded.role,
               kind = excluded.kind,
+              book_code = excluded.book_code,
+              source_file_id = excluded.source_file_id,
+              anchor_file_id = excluded.anchor_file_id,
               event_id = excluded.event_id,
               meta = excluded.meta,
               updated_at = (extract(epoch from now()) * 1000)::bigint`,
@@ -1005,7 +1012,11 @@ case 'cell.audio.attach': {
             event.fileId,
             event.projectId,
             p.name,
-            p.fileType ?? null,
+            p.role ?? null,
+            p.kind ?? p.fileType ?? null,
+            p.bookCode ?? null,
+            p.sourceFileId ?? null,
+            p.anchorFileId ?? null,
             event.id,
             event.author,
             JSON.stringify(langMeta),

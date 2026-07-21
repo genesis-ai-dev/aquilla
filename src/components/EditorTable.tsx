@@ -97,6 +97,7 @@ import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
   chapterLabelFromCanonical,
+  importDisplayLabel,
   verseLabelFromCanonical,
 } from "@/lib/scripture-reference"
 import {
@@ -1350,7 +1351,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       const map = new Map<string, number>()
       let ordinal = 0
       for (const id of displayCellIds) {
-        if (cellStore.getCellView(id)?.type === "paratext") continue
+        const view = cellStore.getCellView(id)
+        if (!view) continue
+        if (
+          view.type === "paratext"
+          || view.type === "heading"
+          || importDisplayLabel(view.metadata) === null
+        ) continue
         map.set(id, ++ordinal)
       }
       return map
@@ -4042,6 +4049,7 @@ function EditorRow({
     scriptureNumbering,
     rowIndex,
     contentNumber,
+    displayLabel: importDisplayLabel(cell.metadata),
   })
   const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>

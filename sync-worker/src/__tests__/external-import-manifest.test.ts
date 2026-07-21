@@ -19,7 +19,7 @@ describe('normalized PlanImport compiler', () => {
       version: 1,
       profileId: 'agent:usfm',
       deterministic: true,
-      fidelity: 'native',
+      fidelity: 'content-only',
       unitCount: 2,
     })
     expect(compiled.units[0].metadata.aquillaImport).toMatchObject({
@@ -71,8 +71,8 @@ describe('normalized PlanImport compiler', () => {
         content: 'Hello',
         unitKey: 'custom:line:7',
         displayLabel: '7',
-        address: { scheme: 'custom', line: 7 },
-        sourceLocator: { kind: 'line', line: 7 },
+        address: { scheme: 'custom', recipeId: 'ai-custom-lines', record: 7 },
+        sourceLocator: { kind: 'recipe', recipeId: 'ai-custom-lines', record: 7 },
       }],
     }
 
@@ -82,8 +82,8 @@ describe('normalized PlanImport compiler', () => {
     expect(compiled.units[0].metadata.aquillaImport).toMatchObject({
       unitKey: 'custom:line:7',
       displayLabel: '7',
-      address: { scheme: 'custom', line: 7 },
-      sourceLocator: { kind: 'line', line: 7 },
+      address: { scheme: 'custom', recipeId: 'ai-custom-lines', record: 7 },
+      sourceLocator: { kind: 'recipe', recipeId: 'ai-custom-lines', record: 7 },
     })
     expect(compiled.fileSummary.recipe).toEqual(input.manifest?.recipe)
   })
@@ -137,5 +137,30 @@ describe('normalized PlanImport compiler', () => {
 
     valid.cells[0].variants!.push({ laneId: 'fr-formal', content: 'Rebonjour' })
     expect(validatePlanImportManifest(valid)).toContain('cells[0].variants[2].laneId is duplicated')
+  })
+
+  it('rejects contradictory canonical addresses and derives warning counts itself', () => {
+    const invalid: PlanImportInput = {
+      fileType: 'usfm',
+      manifest: {
+        version: 1,
+        profileId: 'agent:usfm',
+        profileVersion: '1',
+        deterministic: true,
+        fidelity: 'content-only',
+        warningCounts: {},
+      },
+      cells: [{
+        content: '',
+        type: 'verse',
+        canonicalRef: 'GEN 1:1',
+        address: { scheme: 'scripture', book: 'GEN', chapter: 1, verse: '2' },
+        sourceLocator: { kind: 'usfm', ref: 'GEN 1:1', marker: 'v' },
+      }],
+    }
+    expect(validatePlanImportManifest(invalid)).toContain('cells[0].address does not match canonicalRef')
+
+    invalid.cells[0].address = { scheme: 'scripture', book: 'GEN', chapter: 1, verse: '1' }
+    expect(compilePlanImport(invalid).fileSummary.warningCounts).toEqual({ 'empty-source': 1 })
   })
 })

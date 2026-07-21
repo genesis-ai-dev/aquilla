@@ -63,6 +63,7 @@ import {
   classifyAndParseUnknownText,
   readUnknownTextFile,
   sniffKnownTextFile,
+  decodeImportText,
   type AiImportClassification,
 } from "./import/ai-recipe"
 import type { DeclarativeImportRecipe } from "./import/normalized-manifest"
@@ -396,6 +397,13 @@ export interface ImportFileResult {
   speakerPairs: { cellId: string; speaker: string | undefined }[]
 }
 
+/** Stable domain kind is intentionally distinct from the parser/extension.
+ * TMX files participate in translation-memory retrieval even though their
+ * deterministic parser id remains `tmx`. */
+export function importedFileKind(fileType: FileType): string {
+  return fileType === "tmx" ? "translation-memory" : fileType
+}
+
 /**
  * Import a single user-supplied file. Each `ImportResult` (one per book for
  * USFM, one overall for single-blob formats) becomes one Aquilla File with
@@ -430,9 +438,22 @@ export async function prepareImportFile(
 ): Promise<PreparedImportFile> {
   const extensionType = detectFileType(file.name)
   if (extensionType) {
+    // Opaque packages/media need their deterministic binary adapter. Textual
+    // extensions are sniffed as content first so a USFM document named .txt,
+    // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
+    if (isMediaFileType(extensionType) || extensionType === "docx" || extensionType === "pptx") {
+      return {
+        fileType: extensionType,
+        results: isMediaFileType(extensionType) ? [] : await parseFile(file, extensionType),
+      }
+    }
+    const bytes = await file.arrayBuffer()
+    const text = decodeImportText(bytes, file.name)
+    const sniffedType = sniffKnownTextFile(text)
+    const fileType = sniffedType ?? extensionType
     return {
-      fileType: extensionType,
-      results: isMediaFileType(extensionType) ? [] : await parseFile(file, extensionType),
+      fileType,
+      results: await parseFile(file, fileType),
     }
   }
 
@@ -1006,7 +1027,7 @@ export async function emitParsedFile(
       name: result.name,
       fileType,
       role: "source",
-      kind: fileType,
+      kind: importedFileKind(fileType),
       importFormat: fileType,
       parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
       importManifest: summarizeNormalizedImport(normalized),
@@ -1138,7 +1159,7 @@ export async function emitMediaFile(
       name: file.name,
       fileType,
       role: "source",
-      kind: fileType,
+      kind: importedFileKind(fileType),
       importFormat: fileType,
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
@@ -1562,7 +1583,7 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       // worker can't be created (SSR / tests). Per-format logic + the multi-book
       // USFM split live in parse-text-formats.ts (worker-safe core).
       const bytes = await file.arrayBuffer()
-      const text = new TextDecoder().decode(bytes)
+      const text = decodeImportText(bytes, file.name)
       const parsed = await parseTextFormatOffMainThread({ fileType, text, name: file.name })
       return parsed.map((result) => ({
         ...result,
@@ -1572,7 +1593,7 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
     }
     case "usfm": {
       const bytes = await file.arrayBuffer()
-      const raw = new TextDecoder().decode(bytes)
+      const raw = decodeImportText(bytes, file.name)
       // USX (Paratext's XML export) → USFM conversion uses the Window-only
       // DOMParser, so it runs HERE on the main thread; the heavy lossless parse
       // (verse extraction, \id book split, side-car capture) then happens in the
@@ -1586,7 +1607,11 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
             rawBytes: bytes,
             rawSourceFormat: "usx",
           }))
-        : results
+        : results.map((result) => ({
+            ...result,
+            rawBytes: bytes,
+            rawSourceFormat: "usfm",
+          }))
     }
     case "docx": {
       const buffer = await file.arrayBuffer()
@@ -1602,12 +1627,12 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
     }
     case "xliff": {
       const bytes = await file.arrayBuffer()
-      const text = new TextDecoder().decode(bytes)
+      const text = decodeImportText(bytes, file.name)
       return [{ name: file.name, strings: parseXliff(text), rawBytes: bytes, rawSourceFormat: "xliff" }]
     }
     case "tmx": {
       const bytes = await file.arrayBuffer()
-      const text = new TextDecoder().decode(bytes)
+      const text = decodeImportText(bytes, file.name)
       return [{ name: file.name, strings: parseTmx(text), rawBytes: bytes, rawSourceFormat: "tmx" }]
     }
     case "ebible":

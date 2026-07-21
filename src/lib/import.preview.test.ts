@@ -8,12 +8,13 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
-import { parseFile, emitParsedFile } from "./import"
+import { parseFile, prepareImportFile, emitParsedFile } from "./import"
 
 // ─── fetch mock ─────────────────────────────────────────────────────────────
 interface CapturedBody {
   projectId: string
   fileId: string
+  file?: { kind?: string; fileType?: string }
   cells: Array<{ id: string; cellId: string; anchorCellId: string | null; value: string }>
 }
 let captured: CapturedBody[]
@@ -107,6 +108,35 @@ describe("parseFile — parse phase only (no upload)", () => {
     expect(captured).toHaveLength(0)
   })
 
+  it("sniffs Scripture content before trusting a generic .txt extension", async () => {
+    const file = makeFile("misnamed.txt", "\\id GEN\n\\c 1\n\\v 1 In the beginning.\n")
+    const prepared = await prepareImportFile(file, { projectId: "p1" })
+    expect(prepared.fileType).toBe("usfm")
+    expect(prepared.results[0].strings[0].type).toBe("verse")
+  })
+
+  it("strictly decodes UTF-16 known text instead of importing NUL-corrupted content", async () => {
+    const value = "First paragraph\n\nSecond paragraph"
+    const payload = new Uint8Array(2 + value.length * 2)
+    payload[0] = 0xff
+    payload[1] = 0xfe
+    for (let index = 0; index < value.length; index++) {
+      const code = value.charCodeAt(index)
+      payload[2 + index * 2] = code & 0xff
+      payload[3 + index * 2] = code >> 8
+    }
+    const [result] = await parseFile(new File([payload], "utf16.txt"), "txt")
+    expect(result.strings.map((cell) => cell.original).join(" ")).toContain("First paragraph")
+    expect(result.strings.map((cell) => cell.original).join(" ")).toContain("Second paragraph")
+    expect(result.strings.some((cell) => cell.original.includes("\0"))).toBe(false)
+  })
+
+  it("rejects legacy OLE .doc explicitly instead of misrouting it through DOCX", async () => {
+    const ole = new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0])
+    await expect(prepareImportFile(new File([ole], "legacy.doc"), { projectId: "p1" }))
+      .rejects.toThrow(/appears to be binary/)
+  })
+
   it("throws for media file type — caller must use emitMediaFile()", async () => {
     const file = makeFile("clip.mp3", "binary")
     await expect(parseFile(file, "audio")).rejects.toThrow(/media files/)
@@ -142,6 +172,24 @@ describe("emitParsedFile — commit phase calls bulk upload", () => {
     // FileReference has the expected shape.
     expect(result.ref.name).toBe("test.txt")
     expect(result.ref.cellCount).toBe(2)
+  })
+
+  it("stores TMX as translation-memory while retaining the TMX parser type", async () => {
+    await emitParsedFile(
+      {
+        name: "memory.tmx",
+        strings: [{ id: "tu-1", original: "Hello", translated: "", context: "tu-1", group: "tu-1", type: "text" }],
+      },
+      "tmx",
+      {
+        projectId: "proj-1",
+        author: "tester",
+        sourceLanguage: "en",
+        targetLanguage: "fr",
+        getToken: async () => "tok",
+      },
+    )
+    expect(captured[0].file).toMatchObject({ fileType: "tmx", kind: "translation-memory" })
   })
 })
 

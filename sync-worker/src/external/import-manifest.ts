@@ -88,10 +88,96 @@ function normalizedKind(value: string | undefined): ImportUnitKind {
 }
 
 function defaultFidelity(fileType: string): RoundTripFidelity {
-  if (['usfm', 'sfm', 'docx', 'pptx'].includes(fileType.toLowerCase())) return 'native'
-  if (fileType.toLowerCase() === 'usx') return 'content-only'
   if (['audio', 'video'].includes(fileType.toLowerCase())) return 'preserved-only'
+  // Native is an evidence-backed declaration, never an extension-based guess.
+  // Callers that preserved + inspected an artifact may request it explicitly;
+  // preparePlanImport verifies the profile/format pair before staging.
   return 'content-only'
+}
+
+function validateAddressShape(
+  cell: PlanImportCell,
+  kind: ImportUnitKind,
+  path: string,
+): string[] {
+  const issues: string[] = []
+  const address = cell.address
+  const locator = cell.sourceLocator
+  if (address !== undefined) {
+    const scheme = address.scheme
+    if (typeof scheme !== 'string') issues.push(`${path}.address.scheme must be a string`)
+    if (scheme === 'scripture') {
+      if (typeof address.book !== 'string' || !Number.isInteger(address.chapter) || typeof address.verse !== 'string') {
+        issues.push(`${path}.address has invalid scripture fields`)
+      }
+      if (cell.canonicalRef) {
+        const expected = `${String(address.book).toUpperCase()} ${address.chapter}:${address.verse}`
+        if (expected !== cell.canonicalRef.toUpperCase()) issues.push(`${path}.address does not match canonicalRef`)
+      }
+    } else if (scheme === 'scripture-structure') {
+      if (typeof address.book !== 'string' || !(address.chapter === null || Number.isInteger(address.chapter)) || typeof address.marker !== 'string' || !Number.isInteger(address.occurrence)) {
+        issues.push(`${path}.address has invalid scripture-structure fields`)
+      }
+    } else if (scheme === 'document') {
+      if (typeof address.memberPath !== 'string' || typeof address.blockPath !== 'string' || !Number.isInteger(address.segment)) {
+        issues.push(`${path}.address has invalid document fields`)
+      }
+    } else if (scheme === 'translation-unit') {
+      if (!['xliff', 'tmx'].includes(String(address.format)) || typeof address.unitId !== 'string') {
+        issues.push(`${path}.address has invalid translation-unit fields`)
+      }
+    } else if (scheme === 'timeline') {
+      if (!Number.isInteger(address.cue)) issues.push(`${path}.address.cue must be an integer`)
+    } else if (scheme === 'sequence') {
+      if (!Number.isInteger(address.index)) issues.push(`${path}.address.index must be an integer`)
+    } else if (scheme === 'custom') {
+      if (typeof address.recipeId !== 'string' || !Number.isInteger(address.record)) {
+        issues.push(`${path}.address has invalid custom fields`)
+      }
+    } else if (scheme !== undefined) {
+      issues.push(`${path}.address.scheme is unsupported`)
+    }
+  }
+  if (locator !== undefined) {
+    const locatorKind = locator.kind
+    if (typeof locatorKind !== 'string') issues.push(`${path}.sourceLocator.kind must be a string`)
+    if (locatorKind === 'usfm') {
+      if (typeof locator.ref !== 'string' || typeof locator.marker !== 'string') issues.push(`${path}.sourceLocator has invalid usfm fields`)
+    } else if (locatorKind === 'package-block') {
+      if (typeof locator.memberPath !== 'string' || typeof locator.blockPath !== 'string' || !Number.isInteger(locator.segment)) {
+        issues.push(`${path}.sourceLocator has invalid package-block fields`)
+      }
+    } else if (locatorKind === 'translation-unit') {
+      if (!['xliff', 'tmx'].includes(String(locator.format)) || typeof locator.unitId !== 'string') {
+        issues.push(`${path}.sourceLocator has invalid translation-unit fields`)
+      }
+    } else if (locatorKind === 'cue') {
+      if (!Number.isInteger(locator.index)) issues.push(`${path}.sourceLocator.index must be an integer`)
+    } else if (locatorKind === 'sequence') {
+      if (!Number.isInteger(locator.index)) issues.push(`${path}.sourceLocator.index must be an integer`)
+    } else if (locatorKind === 'recipe') {
+      if (typeof locator.recipeId !== 'string' || !Number.isInteger(locator.record)) {
+        issues.push(`${path}.sourceLocator has invalid recipe fields`)
+      }
+    } else if (locatorKind !== undefined) {
+      issues.push(`${path}.sourceLocator.kind is unsupported`)
+    }
+  }
+  if ((kind === 'heading' || kind === 'paratext') && address?.scheme === 'scripture') {
+    issues.push(`${path}.address cannot describe structural content as a scripture verse`)
+  }
+  return issues
+}
+
+function computedWarningCounts(input: PlanImportInput): Record<string, number> {
+  const counts: Record<string, number> = {}
+  const add = (key: string) => { counts[key] = (counts[key] ?? 0) + 1 }
+  for (const cell of input.cells) {
+    const kind = normalizedKind(cell.type)
+    if (!cell.content.trim()) add('empty-source')
+    if (kind === 'verse' && !cell.canonicalRef) add('verse-without-canonical-ref')
+  }
+  return counts
 }
 
 function defaultAddress(
@@ -178,6 +264,7 @@ export function validatePlanImportManifest(input: PlanImportInput): string[] {
     if ((kind === 'heading' || kind === 'paratext') && cell.displayLabel != null) {
       issues.push(`${path}.displayLabel must be null for structural content`)
     }
+    issues.push(...validateAddressShape(cell, kind, path))
     const lanes = new Set<string>()
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
       if (lanes.has(variant.laneId)) {
@@ -243,7 +330,9 @@ export function compilePlanImport(input: PlanImportInput): CompiledPlanImport {
       deterministic: manifest?.deterministic ?? true,
       fidelity,
       unitCount: units.length,
-      warningCounts: manifest?.warningCounts ?? {},
+      // Warning counts are derived from the submitted cells. A caller cannot
+      // suppress warnings by declaring a more flattering summary.
+      warningCounts: computedWarningCounts(input),
       ...(manifest?.memberPath ? { memberPath: manifest.memberPath } : {}),
       ...(manifest?.recipe ? { recipe: manifest.recipe } : {}),
     },

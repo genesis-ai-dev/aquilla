@@ -55,7 +55,7 @@ function abortIfNeeded(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw new Error("Import cancelled")
 }
 
-function decodeUnknownText(bytes: ArrayBuffer, fileName: string): string {
+export function decodeImportText(bytes: ArrayBuffer, fileName: string): string {
   const head = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, BINARY_SCAN_BYTES))
   const utf16Le = head[0] === 0xff && head[1] === 0xfe
   const utf16Be = head[0] === 0xfe && head[1] === 0xff
@@ -102,7 +102,7 @@ export async function readUnknownTextFile(
   }
   const bytes = await file.arrayBuffer()
   abortIfNeeded(signal)
-  const text = decodeUnknownText(bytes, file.name)
+  const text = decodeImportText(bytes, file.name)
   if (!text.trim()) throw new Error(`${file.name} is empty`)
   return { text, bytes }
 }

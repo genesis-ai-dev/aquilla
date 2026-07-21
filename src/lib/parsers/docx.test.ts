@@ -39,6 +39,18 @@ describe("extractDocxStrings", () => {
     expect(result[0].type).toBe("heading")
   })
 
+  it("treats the Word Title style as structural heading content", async () => {
+    const buffer = await makeDocx(`
+      <w:p>
+        <w:pPr><w:pStyle w:val="Title"/></w:pPr>
+        <w:r><w:t>Document Title</w:t></w:r>
+      </w:p>
+    `)
+    const result = await extractDocxStrings(buffer)
+    expect(result[0].context).toBe("Title")
+    expect(result[0].type).toBe("heading")
+  })
+
   it("extracts bold formatting as originalHtml", async () => {
     const buffer = await makeDocx(`
       <w:p>

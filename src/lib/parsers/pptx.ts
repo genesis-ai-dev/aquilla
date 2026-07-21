@@ -25,6 +25,9 @@ export async function extractPptxStrings(buffer: ArrayBuffer): Promise<Translata
     for (let spIdx = 0; spIdx < shapes.length; spIdx++) {
       const shape = shapes[spIdx]
       const paragraphs = shape.getElementsByTagName("a:p")
+      const placeholder = shape.getElementsByTagName("p:ph")[0]
+      const placeholderType = placeholder?.getAttribute("type")?.toLowerCase()
+      const isTitleShape = placeholderType === "title" || placeholderType === "ctrtitle"
 
       for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
         const p = paragraphs[pIdx]
@@ -46,7 +49,7 @@ export async function extractPptxStrings(buffer: ArrayBuffer): Promise<Translata
             translated: "",
             context,
             group: seg.group,
-            type: "text",
+            type: isTitleShape ? "heading" : "text",
             sourceLocation,
           })
         }

@@ -29,6 +29,8 @@ export interface SpreadsheetImportPanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  /** Active target-language lane. Empty/undefined is the default lane. */
+  targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
   ttsSettings?: ProjectTtsSettings
   onCastUpdated?: (settings: Partial<ProjectTtsSettings>) => void | Promise<void>
@@ -44,6 +46,7 @@ export function SpreadsheetImportPanel({
   username,
   sourceLanguage,
   targetLanguage,
+  targetLang,
   getToken,
   ttsSettings,
   onCastUpdated,
@@ -121,6 +124,7 @@ export function SpreadsheetImportPanel({
         author: username,
         sourceLanguage,
         targetLanguage,
+        targetLang,
         getToken,
       }
       const { ref, speakerPairs } = await emitParsedFile(importResult, "csv", ctx)

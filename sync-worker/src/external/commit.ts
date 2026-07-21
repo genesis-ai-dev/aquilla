@@ -446,6 +446,7 @@ async function commitPlanImport(
     payload: {
       name: cmd.fileName,
       fileType: cmd.fileType,
+      kind: cmd.fileType.toLowerCase() === 'tmx' ? 'translation-memory' : cmd.fileType,
       ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
       ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
       importManifest: compiled.fileSummary,

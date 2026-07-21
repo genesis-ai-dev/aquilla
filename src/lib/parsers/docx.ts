@@ -17,7 +17,9 @@ export async function extractDocxStrings(buffer: ArrayBuffer): Promise<Translata
 
     const style = getParaStyle(p)
     const context = style || "Paragraph"
-    const type = style?.startsWith("Heading") ? ("heading" as const) : ("text" as const)
+    const type = style?.startsWith("Heading") || style === "Title"
+      ? ("heading" as const)
+      : ("text" as const)
     const segments = splitIntoSegments(plain)
     const sourceLocation = {
       file: "word/document.xml",

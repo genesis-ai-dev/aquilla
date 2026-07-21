@@ -339,6 +339,16 @@ export interface EventPayloads {
     name: string
     /** "codex" | "vtt" | "srt" | etc. — matches `files.file_type`. */
     fileType: string
+    /** Stable domain semantics may differ from the parser id (for example,
+     * TMX parses with `fileType=tmx` but is a translation-memory file). */
+    kind?: string
+    role?: string
+    bookCode?: string
+    sourceFileId?: string
+    anchorFileId?: string
+    r2Key?: string
+    importFormat?: string
+    parserVersion?: string
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string

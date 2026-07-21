@@ -410,6 +410,47 @@ describe('PlanImport — prepare', () => {
     const d2 = ((await r2.json()) as { digest: string }).digest
     expect(d1).toBe(d2)
   })
+
+  it('rejects native fidelity without an inspected artifact and verified built-in profile', async () => {
+    tdb = await seedProject()
+    bucket = makeStubBucket()
+    env = makeEnv(tdb.db, bucket)
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const command = {
+      kind: 'PlanImport',
+      fileName: 'Genesis.usfm',
+      fileType: 'usfm',
+      manifest: {
+        version: 1,
+        profileId: 'builtin:usfm-lossless',
+        profileVersion: '1',
+        deterministic: true,
+        fidelity: 'native',
+      },
+      cells: [{ content: 'In the beginning', type: 'verse', canonicalRef: 'GEN 1:1' }],
+    }
+
+    const withoutArtifact = (await handleExternalChangesetsRequest(prepareReq(token, command), env))!
+    expect(withoutArtifact.status).toBe(400)
+
+    const upload = (await handleExternalArtifactsRequest(
+      uploadReq(token, 'Genesis.usfm', new TextEncoder().encode('\\id GEN\n\\c 1\n\\v 1 In the beginning')),
+      env,
+    ))!
+    const artifactId = ((await upload.json()) as { artifactId: string }).artifactId
+    const beforeInspection = (await handleExternalChangesetsRequest(
+      prepareReq(token, { ...command, artifactId }),
+      env,
+    ))!
+    expect(beforeInspection.status).toBe(400)
+
+    await handleExternalArtifactsRequest(getReq(token, `/${artifactId}/inspect`), env)
+    const verified = (await handleExternalChangesetsRequest(
+      prepareReq(token, { ...command, artifactId }),
+      env,
+    ))!
+    expect(verified.status).toBe(200)
+  })
 })
 
 // ── PlanImport commit ────────────────────────────────────────────────────────
@@ -505,6 +546,11 @@ describe('PlanImport — commit', () => {
     const bytes = new TextEncoder().encode('\\id GEN\n\\v 1 x')
     const up = (await handleExternalArtifactsRequest(uploadReq(token, 'Genesis.usfm', bytes), env))!
     const artifactId = ((await up.json()) as { artifactId: string }).artifactId
+    await tdb.pg.query(
+      `INSERT INTO project_settings (project_id, settings, version)
+       VALUES ($1, $2::jsonb, 1)`,
+      [PROJECT, JSON.stringify({ targetLanes: ['fr', 'arq'] })],
+    )
 
     const prepRes = (await handleExternalChangesetsRequest(
       prepareReq(token, {
@@ -537,10 +583,10 @@ describe('PlanImport — commit', () => {
           unitKey: 'scripture:GEN 1:1',
           displayLabel: '1',
           address: { scheme: 'scripture', book: 'GEN', chapter: 1, verse: '1' },
-          sourceLocator: { kind: 'recipe', line: 3 },
+          sourceLocator: { kind: 'recipe', recipeId: 'ai-verse-prefix', record: 3 },
           variants: [
-            { laneId: 'fr-formal', languageTag: 'fr', content: 'Au commencement' },
-            { laneId: 'ar-dz', languageTag: 'arq', content: 'فالبداية' },
+            { laneId: 'fr', languageTag: 'fr', content: 'Au commencement' },
+            { laneId: 'arq', languageTag: 'arq', content: 'فالبداية' },
           ],
         }],
       }),
@@ -588,7 +634,7 @@ describe('PlanImport — commit', () => {
       displayLabel: '1',
     })
     expect(cells.filter((cell) => cell.side === 'target').map((cell) => cell.target_lang).sort())
-      .toEqual(['ar-dz', 'fr-formal'])
+      .toEqual(['arq', 'fr'])
 
     const files = await tdb.rows<{ id: string; meta: unknown }>('files')
     const file = files.find((row) => row.id === commit.receipt.fileId)!
@@ -598,6 +644,23 @@ describe('PlanImport — commit', () => {
       unitCount: 1,
       recipe: { strategy: 'records' },
     })
+  })
+
+  it('rejects target variants for lanes the workspace cannot select', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const response = (await handleExternalChangesetsRequest(
+      prepareReq(token, {
+        kind: 'PlanImport',
+        fileName: 'pairs.xlf',
+        fileType: 'xliff',
+        targetLanguage: 'fr',
+        cells: [{ content: 'Hello', variants: [{ laneId: 'de', languageTag: 'de', content: 'Hallo' }] }],
+      }),
+      env,
+    ))!
+    expect(response.status).toBe(400)
+    expect(JSON.stringify(await response.json())).toMatch(/unregistered lane/)
+    expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
   it('rejects a PlanImport whose artifactId does not exist in the project', async () => {

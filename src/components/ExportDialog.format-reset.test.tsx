@@ -35,6 +35,7 @@ function cell(id: string): CellData {
 const PROJECT_FILES = [
   { id: "f-usfm", name: "gen.usfm", type: "usfm" },
   { id: "f-txt", name: "notes.txt", type: "txt" },
+  { id: "f-pptx", name: "slides.pptx", type: "pptx" },
 ]
 
 const USFM_FILE_PROPS = {
@@ -56,6 +57,13 @@ const TXT_FILE_PROPS = {
   activeFileId: "f-txt",
   activeFileName: "notes.txt",
   isUsfmFile: false,
+}
+
+const PPTX_FILE_PROPS = {
+  ...TXT_FILE_PROPS,
+  activeFileId: "f-pptx",
+  activeFileName: "slides.pptx",
+  isPptxFile: true,
 }
 
 beforeEach(() => {
@@ -97,5 +105,11 @@ describe("ExportDialog — format follows the active file", () => {
       const [, name] = mockDownload.mock.calls[0]
       expect(name).toMatch(/\.md$/)
     })
+  })
+
+  it("offers and preselects native PPTX round-trip for a PPTX file", () => {
+    render(<ExportDialog {...PPTX_FILE_PROPS} />)
+    expect(screen.getByRole("radio", { name: /PowerPoint \(.pptx\)/i })).toBeChecked()
+    expect(screen.queryByText("USFM")).not.toBeInTheDocument()
   })
 })

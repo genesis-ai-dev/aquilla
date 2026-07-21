@@ -392,6 +392,10 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
         id: 'f-obs',
         name: 'Open Bible Stories',
         fileType: 'obs',
+        role: 'source',
+        kind: 'story',
+        importFormat: 'json',
+        parserVersion: 'builtin:obs@1',
         importManifest,
       },
       cells: [
@@ -425,6 +429,8 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
       ? JSON.parse(fileRows[0].meta)
       : fileRows[0].meta
     expect(fileMeta.aquillaImport).toEqual(importManifest)
+    expect(fileRows[0]).toMatchObject({ role: 'source', kind: 'story' })
+    expect(fileMeta).toMatchObject({ importFormat: 'json', parserVersion: 'builtin:obs@1' })
   })
 
   it('duplicate cellIds within one chunk dedupe last-wins (multi-row ON CONFLICT safety)', async () => {

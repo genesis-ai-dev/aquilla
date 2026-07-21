@@ -23,11 +23,6 @@ class FakeBucket {
   async delete(key: string): Promise<void> {
     this.store.delete(key)
   }
-  async get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null> {
-    const v = this.store.get(key)
-    if (!v) return null
-    return { arrayBuffer: async () => v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength) }
-  }
 }
 
 async function seedProject(projectId: string, createdBy: number): Promise<void> {
@@ -44,7 +39,7 @@ async function grant(projectId: string, userId: number, role: number): Promise<v
     .run()
 }
 
-function upload(
+async function upload(
   projectId: string,
   jwt: string,
   body: BodyInit | undefined,

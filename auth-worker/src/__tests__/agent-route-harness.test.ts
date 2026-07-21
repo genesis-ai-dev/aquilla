@@ -9,7 +9,6 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
-import { ensureAgentMemoryTables } from "./helpers/agent-memory-schema"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
 
@@ -36,7 +35,6 @@ async function seedWorld() {
   )
     .bind(PROJECT)
     .run()
-  await ensureAgentMemoryTables()
 }
 
 /** A scripted OpenRouter turn with a controllable per-turn cost (dollars). */

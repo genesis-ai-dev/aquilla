@@ -5,7 +5,7 @@
 // path shape, size cap, secret rejection, and the invariant that an agent write
 // is ALWAYS status `proposed` with provenance — never self-approved.
 import { env } from "cloudflare:test"
-import { describe, it, expect, beforeAll } from "vitest"
+import { describe, it, expect } from "vitest"
 import {
   proposeMemory,
   proposeBriefUpdate,
@@ -14,13 +14,8 @@ import {
   SECRET_PATTERNS,
   MEMORY_MAX_BYTES,
 } from "../lib/agent/memory-writes"
-import { ensureAgentMemoryTables } from "./helpers/agent-memory-schema"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
-
-beforeAll(async () => {
-  await ensureAgentMemoryTables()
-})
 
 describe("memory-writes — path validation", () => {
   it("accepts lowercase slash/dash .md paths", () => {

@@ -39,6 +39,7 @@ export function sourceObjectKey(
   const knownExtensions: Record<string, string> = {
     docx: "docx",
     pptx: "pptx",
+    xlsx: "xlsx",
     usfm: "usfm",
     usx: "usx",
     md: "md",
@@ -54,8 +55,16 @@ export function sourceObjectKey(
     tmx: "tmx",
     csv: "csv",
     tsv: "tsv",
+    obs: "md",
     "paratext-project": "zip",
     "custom-original": "bin",
+    "macula-tsv": "tsv",
+    "tn-tsv": "tsv",
+    ebible: "txt",
+    helloao: "json",
+    "obs-package": "json",
+    "sdbh-master": "json",
+    "sdbh-localized": "json",
   }
   const ext = knownExtensions[format] ?? "bin"
   if (artifactId) {
@@ -162,15 +171,19 @@ async function handleSourceBindingRequest(
   const profileId = typeof body.profileId === 'string' ? body.profileId : ''
   const profileVersion = typeof body.profileVersion === 'string' ? body.profileVersion : ''
   const fidelity = typeof body.fidelity === 'string' ? body.fidelity : ''
+  const bindingRole = typeof body.bindingRole === 'string' ? body.bindingRole : ''
+  const targetLang = typeof body.targetLang === 'string' ? body.targetLang : ''
   if (
     !UUID_RE.test(artifactId)
-    || body.bindingRole !== 'support'
+    || !['support', 'target'].includes(bindingRole)
+    || (bindingRole !== 'target' && targetLang.length > 0)
     || !profileId
     || !profileVersion
     || profileId.length > 255
     || profileVersion.length > 64
     || !['native', 'verified-recipe', 'content-only', 'preserved-only'].includes(fidelity)
     || memberPath.length > 1024
+    || targetLang.length > 255
   ) {
     return withCors(new Response('invalid artifact binding', { status: 400 }), request)
   }
@@ -188,14 +201,14 @@ async function handleSourceBindingRequest(
       `INSERT INTO artifact_bindings (
          id, project_id, artifact_id, file_id, binding_role, target_lang,
          member_path, profile_id, profile_version, fidelity, manifest
-       ) VALUES (?::uuid, ?, ?::uuid, ?, 'support', '', ?, ?, ?, ?, '{}'::jsonb)
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, '{}'::jsonb)
        ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
          profile_version = EXCLUDED.profile_version,
          fidelity = EXCLUDED.fidelity,
          updated_at = now()`,
-    ).bind(crypto.randomUUID(), projectId, artifactId, fileId, memberPath, profileId, profileVersion, fidelity).run()
+    ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, targetLang, memberPath, profileId, profileVersion, fidelity).run()
   } catch (error) {
     return withCors(Response.json({ error: `Artifact binding failed: ${String(error)}` }, { status: 500 }), request)
   }
@@ -306,6 +319,7 @@ export async function handleSourceUploadRequest(
   const contentTypes: Record<string, string> = {
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     usfm: "text/plain; charset=utf-8",
     usx: "application/xml; charset=utf-8",
     md: "text/markdown; charset=utf-8",
@@ -321,22 +335,36 @@ export async function handleSourceUploadRequest(
     tmx: "application/xml",
     csv: "text/csv; charset=utf-8",
     tsv: "text/tab-separated-values; charset=utf-8",
+    obs: "text/markdown; charset=utf-8",
     "paratext-project": "application/zip",
+    "macula-tsv": "text/tab-separated-values; charset=utf-8",
+    "tn-tsv": "text/tab-separated-values; charset=utf-8",
+    ebible: "text/plain; charset=utf-8",
+    helloao: "application/json; charset=utf-8",
+    "obs-package": "application/json; charset=utf-8",
+    "sdbh-master": "application/json; charset=utf-8",
+    "sdbh-localized": "application/json; charset=utf-8",
   }
   const contentType = contentTypes[format] ?? "application/octet-stream"
   const bindingRoleHeader = request.headers.get('X-Artifact-Binding-Role')?.trim()
-  if (bindingRoleHeader && !['source', 'support'].includes(bindingRoleHeader)) {
+  if (bindingRoleHeader && !['source', 'target', 'support'].includes(bindingRoleHeader)) {
     return withCors(new Response('invalid artifact binding role', { status: 400 }), request)
   }
   if (
     hasInvalidEncodedHeader(request, 'X-Artifact-Name')
     || hasInvalidEncodedHeader(request, 'X-Artifact-Member-Path')
+    || hasInvalidEncodedHeader(request, 'X-Artifact-Target-Lang')
   ) {
     return withCors(new Response('invalid encoded artifact metadata', { status: 400 }), request)
   }
-  const bindingRole = bindingRoleHeader === 'support' ? 'support' : 'source'
+  const bindingRole = bindingRoleHeader === 'support'
+    ? 'support'
+    : bindingRoleHeader === 'target'
+      ? 'target'
+      : 'source'
   const artifactName = decodedHeader(request, 'X-Artifact-Name')
   const headerMemberPath = decodedHeader(request, 'X-Artifact-Member-Path')
+  const headerTargetLang = decodedHeader(request, 'X-Artifact-Target-Lang')
   const headerProfileId = request.headers.get('X-Artifact-Profile-Id')?.trim()
   const headerProfileVersion = request.headers.get('X-Artifact-Profile-Version')?.trim()
   const headerFidelity = request.headers.get('X-Artifact-Fidelity')?.trim()
@@ -344,14 +372,21 @@ export async function handleSourceUploadRequest(
   if (
     (artifactName && artifactName.length > 1024)
     || (headerMemberPath && headerMemberPath.length > 1024)
+    || (headerTargetLang && headerTargetLang.length > 255)
     || (headerProfileId && headerProfileId.length > 255)
     || (headerProfileVersion && headerProfileVersion.length > 64)
     || (headerFidelity && !['native', 'verified-recipe', 'content-only', 'preserved-only'].includes(headerFidelity))
     || (updateSourceHeader && !['true', 'false'].includes(updateSourceHeader))
+    || (bindingRole !== 'target' && Boolean(headerTargetLang))
   ) {
     return withCors(new Response('invalid artifact metadata', { status: 400 }), request)
   }
-  const updateSourceSidecar = updateSourceHeader !== 'false'
+  // Source originals are the default export skeleton. Target/support artifacts
+  // never replace it unless the importer deliberately opts in (Paratext target
+  // imports do, because their target USFM is the round-trip skeleton).
+  const updateSourceSidecar = updateSourceHeader
+    ? updateSourceHeader === 'true'
+    : bindingRole === 'source'
   const file = await db.prepare(
     `SELECT name, meta FROM files WHERE id = ? AND project_id = ?`,
   ).bind(fileId, projectId).first<{ name: string; meta: unknown }>()
@@ -359,9 +394,21 @@ export async function handleSourceUploadRequest(
     return withCors(new Response('file not found', { status: 404 }), request)
   }
   const existing = await db.prepare(
-    `SELECT project_id, sha256 FROM artifacts WHERE id::text = ?`,
-  ).bind(artifactId).first<{ project_id: string; sha256: string }>()
-  if (existing && (existing.project_id !== projectId || existing.sha256 !== sha256)) {
+    `SELECT project_id, kind, sha256, r2_key, size_bytes FROM artifacts WHERE id::text = ?`,
+  ).bind(artifactId).first<{
+    project_id: string
+    kind: string
+    sha256: string
+    r2_key: string
+    size_bytes: number
+  }>()
+  if (existing && (
+    existing.project_id !== projectId
+    || existing.kind !== 'source'
+    || existing.sha256 !== sha256
+    || existing.r2_key !== key
+    || Number(existing.size_bytes) !== byteLength
+  )) {
     return withCors(new Response('artifact id already refers to different bytes', { status: 409 }), request)
   }
 
@@ -407,7 +454,10 @@ export async function handleSourceUploadRequest(
   }
 
   const statements: AquillaStatement[] = []
-  if (updateSourceSidecar && bindingRole === 'source') {
+  // The sidecar is the export skeleton, not necessarily the source lane's
+  // original. A target-side Paratext import deliberately selects its target
+  // USFM skeleton; other target artifacts explicitly send update=false.
+  if (updateSourceSidecar) {
     statements.push(db.prepare(
       `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
        VALUES (?, ?, ?, NULL, ?, ?, ?)
@@ -443,7 +493,7 @@ export async function handleSourceUploadRequest(
       `INSERT INTO artifact_bindings (
          id, project_id, artifact_id, file_id, binding_role, target_lang,
          member_path, profile_id, profile_version, fidelity, manifest, recipe
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb)
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb)
        ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,
@@ -458,6 +508,7 @@ export async function handleSourceUploadRequest(
       artifactId,
       fileId,
       bindingRole,
+      headerTargetLang ?? '',
       memberPath,
       profileId,
       profileVersion,

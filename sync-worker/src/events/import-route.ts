@@ -43,6 +43,34 @@ import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcas
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
  *  order of magnitude under it while keeping SQL text small. */
 const BULK_ROWS = 1000
+const MAX_IMPORT_ATTACHMENTS = 10_000
+const MAX_IMPORT_WORD_TIMINGS = 50_000
+
+function optionalFiniteNonNegative(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+}
+
+function validImportTimings(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value) || value.length > MAX_IMPORT_WORD_TIMINGS) return false
+  return value.every((timing) => {
+    if (!timing || typeof timing !== 'object' || Array.isArray(timing)) return false
+    const row = timing as Record<string, unknown>
+    return (
+      typeof row.word === 'string'
+      && row.word.length <= 1024
+      && optionalFiniteNonNegative(row.t0)
+      && optionalFiniteNonNegative(row.t1)
+      && typeof row.t0 === 'number'
+      && typeof row.t1 === 'number'
+      && row.t1 >= row.t0
+      && Number.isSafeInteger(row.start)
+      && Number.isSafeInteger(row.end)
+      && (row.start as number) >= 0
+      && (row.end as number) >= (row.start as number)
+    )
+  })
+}
 
 async function runImportBatch(
   db: AquillaDb,
@@ -110,6 +138,21 @@ interface ImportTarget {
   targetLang?: string
 }
 
+interface ImportAudioAttachment {
+  id: string
+  cellId: string
+  audioId: string
+  url: string
+  slot: 'recording' | 'generatedVoice'
+  mimeType?: string
+  voiceId?: string
+  referenceAudioId?: string
+  durationMs?: number
+  trimStartMs?: number
+  trimEndMs?: number
+  timings?: Array<{ word: string; t0: number; t1: number; start: number; end: number }>
+}
+
 interface ImportBody {
   projectId: string
   fileId: string
@@ -134,6 +177,8 @@ interface ImportBody {
   complete?: boolean
   /** Reveal only after every source/target chunk and artifact upload succeeds. */
   publishEventId?: string
+  /** Media metadata persisted atomically with the reveal event. */
+  attachments?: ImportAudioAttachment[]
 }
 
 function isImportBody(x: unknown): x is ImportBody {
@@ -144,6 +189,7 @@ function isImportBody(x: unknown): x is ImportBody {
     typeof b.fileId === 'string' &&
     Array.isArray(b.cells) &&
     (b.targets === undefined || Array.isArray(b.targets)) &&
+    (b.attachments === undefined || Array.isArray(b.attachments)) &&
     (b.complete === undefined || typeof b.complete === 'boolean')
   )
 }
@@ -220,6 +266,89 @@ export async function handleBulkImportRequest(
       ...fullProgressRecomputeStmts(db, body.projectId, body.fileId, finalizedAt),
     ]
     try {
+      if ((body.attachments?.length ?? 0) > MAX_IMPORT_ATTACHMENTS) {
+        return withCors(new Response('too many media attachments', { status: 400 }), request)
+      }
+      const finalizeEvents: PersistedEvent[] = []
+      let eventTs = finalizedAt
+      for (const attachment of body.attachments ?? []) {
+        if (
+          typeof attachment.id !== 'string'
+          || attachment.id.length === 0
+          || attachment.id.length > 255
+          || typeof attachment.cellId !== 'string'
+          || attachment.cellId.length === 0
+          || typeof attachment.audioId !== 'string'
+          || attachment.audioId.length === 0
+          || typeof attachment.url !== 'string'
+          || !['recording', 'generatedVoice'].includes(attachment.slot)
+          || attachment.cellId.length > 255
+          || attachment.audioId.length > 1024
+          || (attachment.mimeType !== undefined && (typeof attachment.mimeType !== 'string' || attachment.mimeType.length > 255))
+          || (attachment.voiceId !== undefined && (typeof attachment.voiceId !== 'string' || attachment.voiceId.length > 255))
+          || (attachment.referenceAudioId !== undefined && (typeof attachment.referenceAudioId !== 'string' || attachment.referenceAudioId.length > 1024))
+          || attachment.url !== `frontier-audio://${attachment.audioId}`
+          || !optionalFiniteNonNegative(attachment.durationMs)
+          || !optionalFiniteNonNegative(attachment.trimStartMs)
+          || !optionalFiniteNonNegative(attachment.trimEndMs)
+          || !validImportTimings(attachment.timings)
+          || (
+            attachment.trimStartMs !== undefined
+            && attachment.trimEndMs !== undefined
+            && attachment.trimEndMs < attachment.trimStartMs
+          )
+        ) {
+          return withCors(new Response('invalid media attachment', { status: 400 }), request)
+        }
+        finalizeEvents.push({
+          id: attachment.id,
+          schemaVersion: 1,
+          projectId: body.projectId,
+          fileId: body.fileId,
+          cellId: attachment.cellId,
+          parentId: null,
+          kind: 'cell.audio.attach',
+          author,
+          payload: {
+            audioId: attachment.audioId,
+            url: attachment.url,
+            slot: attachment.slot,
+            ...(attachment.mimeType !== undefined ? { mimeType: attachment.mimeType } : {}),
+            ...(attachment.voiceId !== undefined ? { voiceId: attachment.voiceId } : {}),
+            ...(attachment.referenceAudioId !== undefined ? { referenceAudioId: attachment.referenceAudioId } : {}),
+            ...(attachment.durationMs !== undefined ? { durationMs: attachment.durationMs } : {}),
+            ...(attachment.trimStartMs !== undefined ? { trimStartMs: attachment.trimStartMs } : {}),
+            ...(attachment.trimEndMs !== undefined ? { trimEndMs: attachment.trimEndMs } : {}),
+            ...(attachment.timings !== undefined ? { timings: attachment.timings } : {}),
+          },
+          clientTs,
+          serverTs: eventTs++,
+        } as PersistedEvent<'cell.audio.attach'>)
+      }
+      if (finalizeEvents.length > 0) {
+        const cellIds = [...new Set(finalizeEvents.map((event) => event.cellId!))]
+        const audioIds = [...new Set((body.attachments ?? []).map((attachment) => attachment.audioId))]
+        const cellPlaceholders = cellIds.map(() => '?').join(', ')
+        const audioPlaceholders = audioIds.map(() => '?').join(', ')
+        const [cells, artifacts] = await Promise.all([
+          db.prepare(
+            `SELECT cell_id FROM cells
+              WHERE project_id = ? AND file_id = ? AND side = 'source'
+                AND cell_id IN (${cellPlaceholders})`,
+          ).bind(body.projectId, body.fileId, ...cellIds).all<{ cell_id: string }>(),
+          db.prepare(
+            `SELECT audio_id FROM artifacts
+              WHERE project_id = ? AND file_id = ? AND kind = 'audio'
+                AND audio_id IN (${audioPlaceholders})`,
+          ).bind(body.projectId, body.fileId, ...audioIds).all<{ audio_id: string }>(),
+        ])
+        if (new Set(cells.results.map((row) => row.cell_id)).size !== cellIds.length) {
+          return withCors(new Response('media attachment refers to a cell outside this file', { status: 409 }), request)
+        }
+        if (new Set(artifacts.results.map((row) => row.audio_id)).size !== audioIds.length) {
+          return withCors(new Response('media attachment has no matching uploaded artifact', { status: 409 }), request)
+        }
+      }
       if (body.publishEventId) {
         const restoreEvent: PersistedEvent<'file.restore'> = {
           id: body.publishEventId,
@@ -232,24 +361,27 @@ export async function handleBulkImportRequest(
           author,
           payload: {},
           clientTs,
-          serverTs: finalizedAt,
+          serverTs: eventTs++,
         }
-        const seqBase = await allocateSeqRange(db, body.projectId, 1)
-        finalizeStmts.push(buildBulkEventInsertStmt(db, [{
-          id: restoreEvent.id,
-          schemaVersion: restoreEvent.schemaVersion,
-          projectId: restoreEvent.projectId,
-          fileId: restoreEvent.fileId,
-          cellId: null,
-          parentId: null,
-          kind: restoreEvent.kind,
-          author: restoreEvent.author,
-          payloadJson: '{}',
-          clientTs: restoreEvent.clientTs,
-          serverTs: restoreEvent.serverTs,
-          serverSeq: seqBase,
-        }]))
-        buildEventProjectionStmts(db, restoreEvent, finalizeStmts)
+        finalizeEvents.push(restoreEvent)
+      }
+      if (finalizeEvents.length > 0) {
+        const seqBase = await allocateSeqRange(db, body.projectId, finalizeEvents.length)
+        finalizeStmts.push(buildBulkEventInsertStmt(db, finalizeEvents.map((event, index) => ({
+          id: event.id,
+          schemaVersion: event.schemaVersion,
+          projectId: event.projectId,
+          fileId: event.fileId ?? null,
+          cellId: event.cellId ?? null,
+          parentId: event.parentId ?? null,
+          kind: event.kind,
+          author: event.author,
+          payloadJson: JSON.stringify(event.payload),
+          clientTs: event.clientTs,
+          serverTs: event.serverTs,
+          serverSeq: seqBase + index,
+        }))))
+        for (const event of finalizeEvents) buildEventProjectionStmts(db, event, finalizeStmts)
       }
       await runImportBatch(db, finalizeStmts)
     } catch (err) {

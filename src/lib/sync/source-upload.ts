@@ -10,7 +10,8 @@ export interface UploadSourceArgs {
   /** Stable import format label persisted beside the immutable original. */
   format: string
   artifactName?: string
-  bindingRole?: "source" | "support"
+  bindingRole?: "source" | "target" | "support"
+  targetLang?: string
   memberPath?: string
   profileId?: string
   profileVersion?: string
@@ -37,12 +38,16 @@ export interface UploadSourceResult {
 const IMPORT_ATTEMPTS = 3
 const IMPORT_RETRY_DELAYS_MS = [200, 800] as const
 
-export function assertSourceUploadSize(bytes: ArrayBuffer): void {
-  if (bytes.byteLength === 0) throw new Error("Source upload failed: the original file is empty.")
-  if (bytes.byteLength > MAX_SOURCE_ARTIFACT_BYTES) {
+export function assertSourceUploadByteLength(byteLength: number): void {
+  if (byteLength === 0) throw new Error("Source upload failed: the original file is empty.")
+  if (byteLength > MAX_SOURCE_ARTIFACT_BYTES) {
     const maxMb = MAX_SOURCE_ARTIFACT_BYTES / 1024 / 1024
     throw new Error(`Source upload failed: the original file exceeds the ${maxMb} MB limit.`)
   }
+}
+
+export function assertSourceUploadSize(bytes: ArrayBuffer): void {
+  assertSourceUploadByteLength(bytes.byteLength)
 }
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
@@ -81,11 +86,14 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
           "X-Artifact-Id": args.artifactId,
           ...(args.artifactName ? { "X-Artifact-Name": encodeURIComponent(args.artifactName) } : {}),
           ...(args.bindingRole ? { "X-Artifact-Binding-Role": args.bindingRole } : {}),
+          ...(args.targetLang ? { "X-Artifact-Target-Lang": encodeURIComponent(args.targetLang) } : {}),
           ...(args.memberPath ? { "X-Artifact-Member-Path": encodeURIComponent(args.memberPath) } : {}),
           ...(args.profileId ? { "X-Artifact-Profile-Id": args.profileId } : {}),
           ...(args.profileVersion ? { "X-Artifact-Profile-Version": args.profileVersion } : {}),
           ...(args.fidelity ? { "X-Artifact-Fidelity": args.fidelity } : {}),
-          ...(args.updateSourceSidecar === false ? { "X-Update-Source-Sidecar": "false" } : {}),
+          ...(args.updateSourceSidecar !== undefined
+            ? { "X-Update-Source-Sidecar": String(args.updateSourceSidecar) }
+            : {}),
         },
         body: args.bytes,
       })
@@ -126,6 +134,8 @@ export interface BindSourceArtifactArgs {
   profileId: string
   profileVersion: string
   fidelity: "native" | "verified-recipe" | "content-only" | "preserved-only"
+  bindingRole?: "support" | "target"
+  targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
   fetchFn?: typeof fetch
   baseUrl?: string
@@ -144,7 +154,8 @@ export async function bindSourceArtifact(args: BindSourceArtifactArgs): Promise<
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         artifactId: args.artifactId,
-        bindingRole: "support",
+        bindingRole: args.bindingRole ?? "support",
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
         memberPath: args.memberPath ?? "",
         profileId: args.profileId,
         profileVersion: args.profileVersion,

@@ -121,6 +121,40 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     })
   })
 
+  it("rejects an artifact id that already identifies a different artifact kind", async () => {
+    const artifactId = "01900000-0000-7000-8000-000000000001"
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04])
+    const digest = await crypto.subtle.digest("SHA-256", bytes)
+    const sha = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("")
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "test.docx", event_id: "ev1" }],
+    })
+    await db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+       ) VALUES (?::uuid, 'p1', '1', NULL, 'clip.wav', 'audio/wav', 4, ?, 'audio-key', 'f1', 'audio', 'clip.wav', '{}'::jsonb)`,
+    ).bind(artifactId, sha).run()
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const SNAPSHOTS = makeStubBucket()
+    const response = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "docx",
+          "X-Artifact-Id": artifactId,
+        },
+        body: bytes,
+      },
+    ), { SNAPSHOTS, AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+
+    expect(response?.status).toBe(409)
+    expect(SNAPSHOTS._allKeys()).toHaveLength(0)
+  })
+
   it("returns a CORS-readable error and removes a new R2 object when metadata persistence fails", async () => {
     const { db } = await makeTestDb({
       projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
@@ -178,6 +212,77 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     expect(row).toMatchObject({ format: "custom-original", raw_source: null })
     expect(row?.r2_key).toContain("original.bin")
     expect(SNAPSHOTS._allKeys()).toContain(row?.r2_key)
+  })
+
+  it("persists target artifacts against the selected language lane only", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "Genesis", event_id: "ev1" }],
+    })
+    await db.prepare(
+      `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+       VALUES ('f1', 'p1', 'usfm', NULL, 'source-key', 12, 1)`,
+    ).run()
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const artifactId = "01900000-0000-7000-8000-000000000009"
+    const response = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "xlsx",
+          "X-Artifact-Id": artifactId,
+          "X-Artifact-Binding-Role": "target",
+          "X-Artifact-Target-Lang": "fr-CA",
+        },
+        body: new Uint8Array([0x50, 0x4b, 1]),
+      },
+    ), { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+
+    expect(response?.status).toBe(200)
+    const binding = await db.prepare(
+      `SELECT binding_role, target_lang FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ binding_role: string; target_lang: string }>()
+    expect(binding).toEqual({ binding_role: "target", target_lang: "fr-CA" })
+    const sourceSidecar = await db.prepare(
+      `SELECT format, r2_key FROM file_source_blobs WHERE file_id = 'f1'`,
+    ).first<{ format: string; r2_key: string }>()
+    expect(sourceSidecar).toEqual({ format: "usfm", r2_key: "source-key" })
+  })
+
+  it("replaces the round-trip sidecar for an explicitly selected target skeleton", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "Genesis", event_id: "ev1" }],
+    })
+    await db.prepare(
+      `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+       VALUES ('f1', 'p1', 'usfm', NULL, 'source-key', 12, 1)`,
+    ).run()
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const response = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "usfm",
+          "X-Artifact-Id": "01900000-0000-7000-8000-000000000012",
+          "X-Artifact-Binding-Role": "target",
+          "X-Artifact-Target-Lang": "fr",
+          "X-Update-Source-Sidecar": "true",
+        },
+        body: new TextEncoder().encode("\\id GEN\n\\c 1\n\\v 1 Au commencement"),
+      },
+    ), { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+
+    expect(response?.status).toBe(200)
+    const sidecar = await db.prepare(
+      `SELECT format, r2_key FROM file_source_blobs WHERE file_id = 'f1'`,
+    ).first<{ format: string; r2_key: string }>()
+    expect(sidecar?.format).toBe("usfm")
+    expect(sidecar?.r2_key).not.toBe("source-key")
   })
 
   it("stores one complete Paratext package and binds it to every book without replacing book sidecars", async () => {

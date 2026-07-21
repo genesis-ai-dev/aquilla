@@ -145,6 +145,155 @@ describe('POST /import — server_seq is race-safe', () => {
     expect((await rows<any>('events')).filter((event) => event.id === 'file-publish-1')).toHaveLength(1)
   })
 
+  it('persists media attachments and reveals the file in one final transaction', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    const first = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-media-1', name: 'recording.wav', fileType: 'audio' },
+        stageEventId: 'file-media-stage-1',
+        cells: [{ id: 'source-media-1', cellId: 'media-cell-1', value: 'recording.wav', medium: 'media' }],
+      }),
+    })
+    expect((await handleBulkImportRequest(first, makeEnv(db)))?.status).toBe(200)
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+    await db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+       ) VALUES (?::uuid, ?, '1', NULL, 'recording.wav', 'audio/wav', 3, ?, ?, ?, 'audio', 'audio-1.wav', '{}'::jsonb)`,
+    ).bind(
+      '01900000-0000-7000-8000-000000000101',
+      PROJECT_ID,
+      'a'.repeat(64),
+      'projects/project-race/files/file-race/audio/audio-1.wav',
+      FILE_ID,
+    ).run()
+
+    const publish = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-media-publish-1',
+        attachments: [{
+          id: 'media-attach-1',
+          cellId: 'media-cell-1',
+          audioId: 'audio-1.wav',
+          url: 'frontier-audio://audio-1.wav',
+          slot: 'recording',
+          mimeType: 'audio/wav',
+          durationMs: 1200,
+          trimStartMs: 0,
+          trimEndMs: 1200,
+        }],
+      }),
+    })
+    const retry = publish.clone()
+    const publishResponse = await handleBulkImportRequest(publish, makeEnv(db))
+    expect({ status: publishResponse?.status, body: await publishResponse?.clone().text() }).toEqual({
+      status: 200,
+      body: JSON.stringify({ accepted: 0, fileId: FILE_ID }),
+    })
+    expect((await rows<any>('files'))[0].deleted_at).toBeNull()
+    expect(await rows('cell_audio')).toHaveLength(1)
+    expect((await rows<any>('cell_audio'))[0]).toMatchObject({
+      cell_id: 'media-cell-1',
+      audio_id: 'audio-1.wav',
+      selected: 1,
+    })
+
+    expect((await handleBulkImportRequest(retry, makeEnv(db)))?.status).toBe(200)
+    expect(await rows('cell_audio')).toHaveLength(1)
+    expect((await rows<any>('events')).filter((event) => event.id === 'media-attach-1')).toHaveLength(1)
+  })
+
+  it('does not reveal staged media when the attachment has no matching artifact', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    expect((await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-media-2', name: 'recording.wav', fileType: 'audio' },
+        stageEventId: 'file-media-stage-2',
+        cells: [{ id: 'source-media-2', cellId: 'media-cell-2', value: 'recording.wav', medium: 'media' }],
+      }),
+    }), makeEnv(db)))?.status).toBe(200)
+
+    const response = await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-media-publish-2',
+        attachments: [{
+          id: 'media-attach-2',
+          cellId: 'media-cell-2',
+          audioId: 'missing.wav',
+          url: 'frontier-audio://missing.wav',
+          slot: 'recording',
+        }],
+      }),
+    }), makeEnv(db))
+
+    expect(response?.status).toBe(409)
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+    expect(await rows('cell_audio')).toHaveLength(0)
+  })
+
+  it('rejects malformed media timing metadata before revealing the staged file', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    expect((await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-media-3', name: 'recording.wav', fileType: 'audio' },
+        stageEventId: 'file-media-stage-3',
+        cells: [{ id: 'source-media-3', cellId: 'media-cell-3', value: 'recording.wav', medium: 'media' }],
+      }),
+    }), makeEnv(db)))?.status).toBe(200)
+
+    const response = await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-media-publish-3',
+        attachments: [{
+          id: 'media-attach-3',
+          cellId: 'media-cell-3',
+          audioId: 'audio-3.wav',
+          url: 'frontier-audio://audio-3.wav',
+          slot: 'recording',
+          timings: [{ word: 'bad', t0: 2, t1: 1, start: 0, end: 3 }],
+        }],
+      }),
+    }), makeEnv(db))
+
+    expect(response?.status).toBe(400)
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+    expect(await rows('cell_audio')).toHaveLength(0)
+  })
+
   it('rejects a bulk target that is not paired to a source parent in the same chunk', async () => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()

@@ -120,6 +120,57 @@ describe("uploadSourceOriginal", () => {
       "X-Update-Source-Sidecar": "false",
     })
   })
+
+  it("marks target-side originals with their lane without replacing the source sidecar", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    await uploadSourceOriginal({
+      projectId: "p1",
+      fileId: "f1",
+      artifactId: "01900000-0000-7000-8000-000000000007",
+      artifactName: "French.xlsx",
+      bytes: new ArrayBuffer(3),
+      format: "xlsx",
+      bindingRole: "target",
+      targetLang: "fr-CA",
+      profileId: "builtin:target-xlsx",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      updateSourceSidecar: false,
+      getToken: async () => "tok",
+      fetchFn,
+      baseUrl: "https://sync.test",
+    })
+
+    const [, init] = fetchFn.mock.calls[0]
+    expect(init.headers).toMatchObject({
+      "X-Artifact-Binding-Role": "target",
+      "X-Artifact-Target-Lang": "fr-CA",
+      "X-Update-Source-Sidecar": "false",
+    })
+  })
+
+  it("can explicitly select a target original as the round-trip sidecar", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    await uploadSourceOriginal({
+      projectId: "p1",
+      fileId: "f1",
+      artifactId: "01900000-0000-7000-8000-000000000008",
+      bytes: new ArrayBuffer(3),
+      format: "usfm",
+      bindingRole: "target",
+      targetLang: "fr",
+      updateSourceSidecar: true,
+      getToken: async () => "tok",
+      fetchFn,
+      baseUrl: "https://sync.test",
+    })
+
+    expect(fetchFn.mock.calls[0][1].headers).toMatchObject({
+      "X-Artifact-Binding-Role": "target",
+      "X-Artifact-Target-Lang": "fr",
+      "X-Update-Source-Sidecar": "true",
+    })
+  })
 })
 
 describe("bindSourceArtifact", () => {
@@ -163,5 +214,27 @@ describe("bindSourceArtifact", () => {
       fetchFn: vi.fn().mockResolvedValue(new Response("missing", { status: 404 })),
       baseUrl: "https://sync.test",
     })).rejects.toThrow(/404.*missing/)
+  })
+
+  it("binds a shared target artifact to the selected lane", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    await bindSourceArtifact({
+      projectId: "p1",
+      fileId: "f2",
+      artifactId: "01900000-0000-7000-8000-000000000006",
+      profileId: "builtin:target-xlsx",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      bindingRole: "target",
+      targetLang: "fr-CA",
+      getToken: async () => "tok",
+      fetchFn,
+      baseUrl: "https://sync.test",
+    })
+
+    expect(JSON.parse(fetchFn.mock.calls[0][1].body)).toMatchObject({
+      bindingRole: "target",
+      targetLang: "fr-CA",
+    })
   })
 })

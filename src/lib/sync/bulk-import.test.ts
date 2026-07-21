@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { bulkUploadSource, reconcileSourceImport, type BulkImportCell } from "./bulk-import"
+import {
+  bulkUploadSource,
+  publishStagedImport,
+  reconcileSourceImport,
+  type BulkImportCell,
+} from "./bulk-import"
 import * as sourceUpload from "./source-upload"
 
 // Stub syncWorkerHttpOrigin so no VITE env lookup is needed.
@@ -338,14 +343,17 @@ describe("bulkUploadSource", () => {
 
     const uploadMock = vi.mocked(sourceUpload.uploadSourceOriginal)
     expect(uploadMock).toHaveBeenCalledTimes(1)
-    expect(uploadMock).toHaveBeenCalledWith({
+    expect(uploadMock).toHaveBeenCalledWith(expect.objectContaining({
       projectId: "p1",
       fileId: "f1",
       artifactId: expect.any(String),
       bytes: rawBytes,
       format: "docx",
       getToken: expect.any(Function),
-    })
+      artifactName: "test.docx",
+      bindingRole: "source",
+      fidelity: "native",
+    }))
   })
 
   it("preserves text originals as first-class artifacts too", async () => {
@@ -429,6 +437,67 @@ describe("bulkUploadSource", () => {
       expect.objectContaining({ id: "target-0", targetLang: "fr-CA" }),
       expect.objectContaining({ id: "target-1", targetLang: "fr-CA" }),
     ])
+  })
+
+  it("can finalize a file without publishing it for post-processing", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(init?.body as string))
+      return Response.json({ accepted: 1, fileId: "f1" })
+    }) as typeof fetch
+
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "recording.wav" },
+      cells: [makeCell(0)],
+      deferPublication: true,
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(bodies.at(-1)).toMatchObject({ complete: true })
+    expect(bodies.at(-1)).not.toHaveProperty("publishEventId")
+  })
+
+  it("publishes a staged file with stable attachment event ids", async () => {
+    vi.useFakeTimers()
+    const bodies: Array<Record<string, unknown>> = []
+    let attempts = 0
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(init?.body as string))
+      attempts++
+      if (attempts === 1) return new Response("temporary", { status: 503 })
+      return Response.json({ accepted: 1, fileId: "f1" })
+    }) as typeof fetch
+
+    const publishing = publishStagedImport({
+      projectId: "p1",
+      fileId: "f1",
+      attachments: [{
+        cellId: "cell-0",
+        audioId: "audio-1.wav",
+        url: "frontier-audio://audio-1.wav",
+        slot: "recording",
+        mimeType: "audio/wav",
+      }],
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    await vi.runAllTimersAsync()
+    await publishing
+
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toEqual(bodies[1])
+    expect(bodies[0]).toMatchObject({
+      complete: true,
+      publishEventId: expect.any(String),
+      attachments: [{
+        id: expect.any(String),
+        cellId: "cell-0",
+        audioId: "audio-1.wav",
+      }],
+    })
   })
 })
 

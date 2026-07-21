@@ -93,6 +93,23 @@ Wave-2 must-do (from W1F): add `data-frame-type` on run-timeline rows and `data-
 on memory rows in W1D/W1E components; reconcile e2e/pages/agent-page.ts location vs
 e2e/helpers/page-objects convention; wire composer attach-file affordance (W1F guessed it).
 
+## Adversarial panel results (01:5x)
+
+Four lenses, no BLOCKERs-by-severity, but memory-lens B1 (+latent B2) is a trust-model
+blocker by intent. Fix batch (Wave 3 fixers FIX-A backend / FIX-B SPA):
+- B1/B2 reviewMemory human_edited supersede guard + route conflict + UI warning
+- authz-M1 membership check in agent-channel review branch
+- authz-M2 + races-F2: read_sandbox_file marks untrusted; untrusted bit persisted per session
+- races-F1 commit consume/flip reorder (burn-without-apply)
+- races-F3 budget re-check inside tool_calls loop
+- races-F4 per-run sandbox ids (DECISION: drop cross-run container reuse in v1)
+- races-F5 functional revert in AgentMemoryTab
+- mem-M2/M3 brief base_version + history table (0067) + diff UI
+- mem-M4 humanEdited exposed to model + ask-don't-repropose prompt line
+- mem-M5 staged-card status polling; mem-m1 index cap; mem-m2 badge refetch; authz-m1 timing-safe compare
+- DECISION: agentMemoryAutonomy stays backend-enforced but UN-SURFACED in v1 (no settings UI; default 'human'); traced for v2.
+Cleared: regressions lens fully; double-apply/gate-bypass; SSE pairing; tenancy on artifacts/bridge/sandbox.
+
 ## Lessons inherited from prior swarms (BINDING)
 
 - EVERY git command prefixed with explicit `cd <worktree>` — never trust persistent cwd

@@ -83,6 +83,10 @@ promote → dev push.
 | 01:01 | (fixup) | f671c480e | roleLevel threaded W1D→W1E seam (agent.roleLevel available in workbench prop bundle) |
 | 01:02 | swarm/agent-w1f | merged f191c07eb | fixtures/e2e/docs; TRACES unioned; SPA gate green (tsc + tsc.e2e + agent suites 128) |
 
+| 01:04 | INCIDENT | recovered | W1C merge ran in MAIN worktree → landed on local dev (cwd reset between turns; missing explicit cd). dev hard-reset to 05530248e, clean tree verified, nothing pushed. Rule re-affirmed: EVERY git command gets an explicit cd. |
+| 01:06 | swarm/agent-w1c | merged e36a15eb7 | memory backend; auth-worker 718/718 + tsc clean on integration |
+| 01:08 | (fixup) | agent-PATCH guard | ALL agent-channel PATCHes now 403 (agent_edit_forbidden) — an agent PATCH would set human_edited=true, laundering agent output into protected state. +1 test (16 in file). |
+
 Wave-2 must-do (from W1F): add `data-frame-type` on run-timeline rows and `data-memory-path`
 on memory rows in W1D/W1E components; reconcile e2e/pages/agent-page.ts location vs
 e2e/helpers/page-objects convention; wire composer attach-file affordance (W1F guessed it).

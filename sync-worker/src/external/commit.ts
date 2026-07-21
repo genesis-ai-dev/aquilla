@@ -335,7 +335,7 @@ export async function handleCommit(
   if (appliedIds.length > 0) {
     const placeholders = appliedIds.map(() => '?').join(', ')
     await db
-      .prepare(`UPDATE events SET provenance = ?::jsonb WHERE id IN (${placeholders})`)
+      .prepare(`UPDATE events SET provenance = ?::text::jsonb WHERE id IN (${placeholders})`)
       .bind(JSON.stringify(provenance), ...appliedIds)
       .run()
   }
@@ -361,7 +361,7 @@ export async function handleCommit(
   await db
     .prepare(
       `UPDATE changesets
-          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+          SET status = 'committed', receipt = ?::text::jsonb, confirmation_id = ?, committed_at = now()
         WHERE id = ?`,
     )
     .bind(JSON.stringify(receipt), confirmationId, id)
@@ -604,7 +604,7 @@ async function commitPlanImport(
         `INSERT INTO artifact_bindings (
            id, project_id, artifact_id, file_id, binding_role, target_lang,
            member_path, profile_id, profile_version, fidelity, manifest, recipe
-         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+         ) VALUES (?, ?, ?::uuid, ?, 'source', '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb)
          ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
          DO UPDATE SET
            profile_id = excluded.profile_id,
@@ -650,7 +650,7 @@ async function commitPlanImport(
   if (appliedIds.length > 0) {
     const placeholders = appliedIds.map(() => '?').join(', ')
     await db
-      .prepare(`UPDATE events SET provenance = ?::jsonb WHERE id IN (${placeholders})`)
+      .prepare(`UPDATE events SET provenance = ?::text::jsonb WHERE id IN (${placeholders})`)
       .bind(JSON.stringify(provenance), ...appliedIds)
       .run()
   }
@@ -674,7 +674,7 @@ async function commitPlanImport(
   // prepare-time ids and converges through event idempotency.
   if (rejected.length > 0) {
     await db
-      .prepare(`UPDATE changesets SET receipt = ?::jsonb WHERE id = ? AND status = 'committing'`)
+      .prepare(`UPDATE changesets SET receipt = ?::text::jsonb WHERE id = ? AND status = 'committing'`)
       .bind(JSON.stringify(receipt), cs.id)
       .run()
     return errorResponse('job_failed', 'import partially failed — retry will resume the same import', {
@@ -685,7 +685,7 @@ async function commitPlanImport(
   await db
     .prepare(
       `UPDATE changesets
-          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+          SET status = 'committed', receipt = ?::text::jsonb, confirmation_id = ?, committed_at = now()
         WHERE id = ?`,
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
@@ -859,7 +859,7 @@ async function commitCreateProject(
   await db
     .prepare(
       `UPDATE changesets
-          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+          SET status = 'committed', receipt = ?::text::jsonb, confirmation_id = ?, committed_at = now()
         WHERE id = ?`,
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
@@ -1038,7 +1038,7 @@ async function commitLinkMedia(
   if (appliedIds.length > 0) {
     const placeholders = appliedIds.map(() => '?').join(', ')
     await db
-      .prepare(`UPDATE events SET provenance = ?::jsonb WHERE id IN (${placeholders})`)
+      .prepare(`UPDATE events SET provenance = ?::text::jsonb WHERE id IN (${placeholders})`)
       .bind(JSON.stringify(provenance), ...appliedIds)
       .run()
   }
@@ -1059,7 +1059,7 @@ async function commitLinkMedia(
   await db
     .prepare(
       `UPDATE changesets
-          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+          SET status = 'committed', receipt = ?::text::jsonb, confirmation_id = ?, committed_at = now()
         WHERE id = ?`,
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
@@ -1181,7 +1181,7 @@ async function finishUpdateSettingsReceipt(
   await db
     .prepare(
       `UPDATE changesets
-          SET status = 'committed', receipt = ?::jsonb, confirmation_id = ?, committed_at = now()
+          SET status = 'committed', receipt = ?::text::jsonb, confirmation_id = ?, committed_at = now()
         WHERE id = ?`,
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)

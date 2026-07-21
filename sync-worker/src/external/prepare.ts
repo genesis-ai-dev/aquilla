@@ -227,7 +227,7 @@ export async function handlePrepare(
       `INSERT INTO changesets (
          id, project_id, created_by_user_id, credential_id, autonomy_mode,
          status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(
@@ -430,7 +430,7 @@ async function preparePlanImport(
       `INSERT INTO changesets (
          id, project_id, created_by_user_id, credential_id, autonomy_mode,
          status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(
@@ -505,7 +505,7 @@ async function stageReceiptOnlyChangeset(
       `INSERT INTO changesets (
          id, project_id, created_by_user_id, credential_id, autonomy_mode,
          status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(
@@ -597,7 +597,7 @@ async function prepareLinkMedia(
       `INSERT INTO changesets (
          id, project_id, created_by_user_id, credential_id, autonomy_mode,
          status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(

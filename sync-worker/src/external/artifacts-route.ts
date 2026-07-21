@@ -500,7 +500,7 @@ async function handleInspect(
     inspectedAt: new Date().toISOString(),
   }
   await (env.AQUILLA_PG as AquillaDb)
-    .prepare(`UPDATE artifacts SET metadata = metadata || ?::jsonb WHERE id::text = ? AND project_id = ?`)
+    .prepare(`UPDATE artifacts SET metadata = metadata || ?::text::jsonb WHERE id::text = ? AND project_id = ?`)
     .bind(JSON.stringify({ inspection }), artifactId, projectId)
     .run()
   return Response.json({ detectedFormat, details })

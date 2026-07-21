@@ -72,8 +72,17 @@ project brief (verbatim, marked human-authored) → approved-memory index (JIT d
 the user in the project's working language: <lang>." While a run is parsing untrusted artifact
 content, memory tools are READ-ONLY (`propose_memory`/`propose_brief_update` return
 `validation_failed` "memory writes disabled while processing untrusted content") — flag is set
-when `load_artifact`/`run_code` has touched artifact bytes in the current model turn; resets
-only after a turn with no untrusted-content tool use. Cost cap: accumulate OpenRouter
+when `load_artifact`/`run_code`/`read_sandbox_file` has touched artifact bytes in the current
+model turn; resets only after a turn with no untrusted-content tool use.
+
+> **Panel addendum (FIX-A):** `read_sandbox_file` is in the untrusted-content set — reading a
+> sandbox file pulls untrusted artifact-derived bytes into the model's context, so it locks
+> memory writes exactly like `run_code`/`load_artifact`. The untrusted bit is ALSO persisted per
+> session (`agent_sessions.untrusted_active`): a run that ends with any untrusted tool use starts
+> the next run on that session locked, and one sandbox container is provisioned PER RUN
+> (`sandboxSessionId = runId`; cross-run container reuse deferred to v2 — re-`load_artifact` each
+> run). The mid-turn cost/token cap is re-checked before each budgeted tool call, not only between
+> turns; on trip the run halts (`budget.exhausted`, status `capped`) without running later calls. Cost cap: accumulate OpenRouter
 `usage.cost`; halt gracefully at `AGENT_RUN_COST_CAP_CENTS` (env, default 500) with a
 `budget.exhausted` frame.
 
@@ -129,6 +138,15 @@ Routes (session JWT via authMiddleware; role via `resolveProjectRole`):
   and content matching secret patterns (`aqk_`, `sk-`, `-----BEGIN`, `AKIA[0-9A-Z]{16}`, `password\s*[:=]`).
 - `POST /api/v2/projects/:projectId/agent-memory/:id/review` `{action: "approve"|"reject"}` (PROJECT_LEAD+).
   Approving when another approved row holds the same path → supersede: old row → `archived`.
+
+  > **Panel addendum (FIX-A, B1/B2):** if the row being superseded is `human_edited=true`, approve
+  > is REFUSED unless the request carries `supersedeHumanEdited: true` (HUMAN callers only). Human
+  > without the flag → **409** `{error:{code:"supersedes_human_edited", details:{path, existingId}}}`;
+  > human WITH the flag → succeeds (archives the human row). The AGENT channel may NEVER supersede a
+  > human-edited row regardless of the flag (the route forces it off) → **403**
+  > `{error:{code:"supersedes_human_edited", details:{path, existingId}}}`. Agent-channel review also
+  > now requires CONTRIBUTOR+ membership (checked BEFORE the autonomy gate; non-member → 403
+  > `permission_denied`) — authz-M1.
 - `PATCH /api/v2/projects/:projectId/agent-memory/:id` `{content}` — human edit: sets
   `human_edited=true`, `version+1` (PROJECT_LEAD+, or CONTRIBUTOR on own proposal).
 - **Agent-channel enforcement**: requests carrying header `x-aquilla-agent-run: <runId>` are
@@ -140,6 +158,14 @@ Routes (session JWT via authMiddleware; role via `resolveProjectRole`):
   (PROJECT_LEAD+, humans only — agent channel 403 `brief_human_only`; version conflict 409) ·
   `POST /brief/proposals` `{content, rationale}` (agent or human) ·
   `POST /brief/proposals/:id/review` `{action}` (PROJECT_LEAD+, NEVER agent channel).
+
+  > **Panel addendum (FIX-A, mem-M2/M3):** brief proposals now stamp `base_version` (the brief
+  > version they were drafted against; migration 0067). Approving a proposal whose `base_version`
+  > no longer matches the current brief version → **409**
+  > `{error:{code:"conflict", details:{baseVersion, currentVersion}}}` (legacy NULL base_version is
+  > treated as stale if the brief has advanced past version 0). Every brief `PUT`/approve also
+  > snapshots the prior content into `project_brief_history(project_id, version, content, …)` before
+  > overwriting, so a superseded brief is recoverable.
 
 Shared module `db/shared/agent-memory.ts` (W1C owns): `buildMemoryContext(db, projectId)` →
 `{brief: string, memoryIndex: Array<{path, firstLine}>, readMemory(path): Promise<string|null>}`

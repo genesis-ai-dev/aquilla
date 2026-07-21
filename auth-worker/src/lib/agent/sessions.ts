@@ -22,13 +22,29 @@ export interface AgentSession {
   projectId: string
   userId: number
   convo: StoredMessage[]
+  /**
+   * True when the run that last saved this session ended with untrusted content
+   * still in scope (a tool touched untrusted artifact bytes and no later clean
+   * turn cleared it). The next run on this session initialises its
+   * untrusted-content guard from this flag so memory writes stay locked across
+   * runs (adversarial-panel authz-M2 / races-F2). Defaults to false.
+   */
+  untrustedActive?: boolean
 }
 
 export async function loadSession(db: AquillaDb, sessionId: string): Promise<AgentSession | null> {
   const row = await db
-    .prepare("SELECT session_id, project_id, user_id, convo FROM agent_sessions WHERE session_id = ?")
+    .prepare(
+      "SELECT session_id, project_id, user_id, convo, untrusted_active FROM agent_sessions WHERE session_id = ?",
+    )
     .bind(sessionId)
-    .first<{ session_id: string; project_id: string; user_id: number; convo: string }>()
+    .first<{
+      session_id: string
+      project_id: string
+      user_id: number
+      convo: string
+      untrusted_active: boolean | null
+    }>()
   if (!row) return null
   let convo: StoredMessage[] = []
   try {
@@ -37,7 +53,13 @@ export async function loadSession(db: AquillaDb, sessionId: string): Promise<Age
   } catch {
     /* corrupt convo degrades to a fresh session — never fails the run */
   }
-  return { sessionId: row.session_id, projectId: row.project_id, userId: Number(row.user_id), convo }
+  return {
+    sessionId: row.session_id,
+    projectId: row.project_id,
+    userId: Number(row.user_id),
+    convo,
+    untrustedActive: row.untrusted_active === true,
+  }
 }
 
 /** Upsert the session with its post-run conversation (already compacted). */
@@ -46,9 +68,12 @@ export async function saveSession(db: AquillaDb, session: AgentSession): Promise
   const now = Date.now()
   await db
     .prepare(
-      `INSERT INTO agent_sessions (session_id, project_id, user_id, title, convo, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (session_id) DO UPDATE SET convo = EXCLUDED.convo, updated_at = EXCLUDED.updated_at`,
+      `INSERT INTO agent_sessions (session_id, project_id, user_id, title, convo, untrusted_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (session_id) DO UPDATE SET
+         convo = EXCLUDED.convo,
+         untrusted_active = EXCLUDED.untrusted_active,
+         updated_at = EXCLUDED.updated_at`,
     )
     .bind(
       session.sessionId,
@@ -56,6 +81,7 @@ export async function saveSession(db: AquillaDb, session: AgentSession): Promise
       session.userId,
       title,
       JSON.stringify(session.convo),
+      session.untrustedActive ?? false,
       now,
       now,
     )

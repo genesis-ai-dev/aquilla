@@ -51,6 +51,7 @@ type ErrorCode =
   | "agent_edit_forbidden"
   | "brief_human_only"
   | "agent_review_denied"
+  | "supersedes_human_edited"
   | "conflict"
 
 function errorJson(
@@ -155,17 +156,22 @@ agentMemory.post(
 )
 
 const reviewSchema = z.object({ action: z.enum(["approve", "reject"]) })
+const memoryReviewSchema = z.object({
+  action: z.enum(["approve", "reject"]),
+  // Human callers only: confirm intent to supersede a human-edited approved row.
+  supersedeHumanEdited: z.boolean().optional(),
+})
 
 // POST /:projectId/agent-memory/:id/review — approve/reject (PROJECT_LEAD+, or
 // agent channel under agent-low-risk autonomy for observations/ paths).
 agentMemory.post(
   "/:projectId/agent-memory/:id/review",
   authMiddleware,
-  zValidator("json", reviewSchema),
+  zValidator("json", memoryReviewSchema),
   async (c) => {
     const projectId = c.req.param("projectId") ?? ""
     const id = c.req.param("id") ?? ""
-    const { action } = c.req.valid("json")
+    const { action, supersedeHumanEdited } = c.req.valid("json")
     const db = c.env.AQUILLA_PG
 
     const memory = await getMemory(db, id)
@@ -176,6 +182,11 @@ agentMemory.post(
 
     const isAgent = !!c.req.header(AGENT_RUN_HEADER)
     if (isAgent) {
+      // authz-M1: the agent still acts as a project member — require CONTRIBUTOR+
+      // membership BEFORE the autonomy gate, so a non-member with the agent
+      // header can never reach the review path (adversarial-panel authz-M1).
+      const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
+      if (!gate.ok) return gate.res
       // Agent review is gated by project autonomy + observations/ path only.
       const { settings } = await loadProjectSettings(db, projectId)
       const autonomy = readAgentMemoryAutonomy(settings)
@@ -193,13 +204,34 @@ agentMemory.post(
     }
 
     const user = c.get("user")
-    const result = await reviewMemory(db, { id, action, reviewedBy: user.username })
+    // The agent channel must NEVER supersede a human-edited row, regardless of
+    // any flag it sends — force the flag off for agent callers (B1/B2).
+    const result = await reviewMemory(db, {
+      id,
+      action,
+      reviewedBy: user.username,
+      supersedeHumanEdited: isAgent ? false : supersedeHumanEdited,
+    })
     if (result.status === "not_found") {
       const { body, status } = errorJson("not_found", `memory ${id} not found`, 404)
       return c.json(body, status)
     }
     if (result.status === "invalid_state") {
       const { body, status } = errorJson("validation_failed", result.message, 409)
+      return c.json(body, status)
+    }
+    if (result.status === "supersedes_human_edited") {
+      // Agent: a human-edited row is human-owned — the agent may never overwrite
+      // it (403). Human: recoverable by re-POSTing with supersedeHumanEdited=true
+      // (409, so the UI can prompt for explicit confirmation).
+      const { body, status } = errorJson(
+        "supersedes_human_edited",
+        isAgent
+          ? "the approved memory at this path was edited by a human — the agent cannot supersede it"
+          : "approving this would overwrite a human-edited memory — resubmit with supersedeHumanEdited to confirm",
+        isAgent ? 403 : 409,
+        { path: result.existing.path, existingId: result.existing.id },
+      )
       return c.json(body, status)
     }
     return c.json({ memory: result.memory })
@@ -414,6 +446,17 @@ agentMemory.post(
     }
     if (result.status === "invalid_state") {
       const { body, status } = errorJson("validation_failed", result.message, 409)
+      return c.json(body, status)
+    }
+    if (result.status === "stale_base") {
+      // The brief advanced past what this proposal was drafted against — approving
+      // would clobber a human edit (adversarial-panel mem-M2/M3).
+      const { body, status } = errorJson(
+        "conflict",
+        "the brief changed since this proposal was drafted — reload and re-propose",
+        409,
+        { baseVersion: result.baseVersion, currentVersion: result.currentVersion },
+      )
       return c.json(body, status)
     }
     return c.json({ proposal: result.proposal, brief: result.brief })

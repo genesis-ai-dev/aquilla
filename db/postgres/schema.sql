@@ -719,6 +719,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     user_id    BIGINT NOT NULL,
     title      TEXT NOT NULL DEFAULT '',
     convo      TEXT NOT NULL DEFAULT '[]',
+    untrusted_active BOOLEAN NOT NULL DEFAULT false,  -- 0068: run left untrusted content in scope
     created_at BIGINT NOT NULL,
     updated_at BIGINT NOT NULL
 );
@@ -905,11 +906,24 @@ CREATE TABLE IF NOT EXISTS project_brief_proposals (
   status text NOT NULL DEFAULT 'proposed' CHECK (status IN ('proposed','approved','rejected')),
   created_by text,
   reviewed_by text,
+  base_version integer,         -- 0067: brief version this proposal was drafted against
   created_at timestamptz NOT NULL DEFAULT now(),
   reviewed_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS project_brief_proposals_project
   ON project_brief_proposals(project_id, status);
+
+-- 0067: prior-content snapshots for the brief. `version` is the version being
+-- REPLACED (content BEFORE the write that created the row); putBrief writes one
+-- of these before every update so a superseded brief is recoverable.
+CREATE TABLE IF NOT EXISTS project_brief_history (
+  project_id text NOT NULL,
+  version integer NOT NULL,
+  content text NOT NULL,
+  updated_by text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, version)
+);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

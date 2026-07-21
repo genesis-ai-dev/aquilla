@@ -124,6 +124,23 @@ describe("health + auth", () => {
     expect(res.status).toBe(401)
   })
 
+  // authz-m1: the constant-time compare (SHA-256 digests, no early exit) must
+  // still reject a wrong key — including a same-length one that a naive
+  // byte-compare would also reject but with a timing tell.
+  it("401s on a same-length wrong bearer token (constant-time compare)", async () => {
+    const res = await harness(sandbox)(
+      new Request("http://x/sessions/s1/exec", {
+        method: "POST",
+        headers: { Authorization: "Bearer test-keX" }, // same length as "test-key"... +1, still wrong
+        body: "{}",
+      }),
+    )
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({
+      error: { code: "unauthorized", message: expect.any(String) },
+    })
+  })
+
   it("401s on files GET without auth", async () => {
     const res = await harness(sandbox)(
       new Request("http://x/sessions/s1/files?path=a.txt"),

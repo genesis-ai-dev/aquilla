@@ -285,6 +285,127 @@ describe("agent-channel memory review autonomy", () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
+// Supersede guard (adversarial-panel B1/B2): approving must not silently
+// overwrite a HUMAN-EDITED approved memory. WHY: a human edit is the human's
+// authoritative word; the agent (and even a hasty human) must not clobber it
+// without an explicit, deliberate confirmation.
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("supersede human-edited memory guard", () => {
+  /** Create an APPROVED, human-edited memory at `path`; return its id. */
+  async function humanEditedApproved(path: string, leadJwt: string): Promise<string> {
+    const p = await req("POST", `${PROJECT}/agent-memory`, leadJwt, { path, content: "v1" })
+    const { memoryId } = (await p.json()) as { memoryId: string }
+    await req("POST", `${PROJECT}/agent-memory/${memoryId}/review`, leadJwt, { action: "approve" })
+    // Human edit → human_edited=true, still approved (holds the path).
+    await req("PATCH", `${PROJECT}/agent-memory/${memoryId}`, leadJwt, { content: "human word" })
+    return memoryId
+  }
+
+  it("human approve over a human-edited row → 409 supersedes_human_edited (with details)", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    const leadJwt = await jwtFor("lead")
+    const existingId = await humanEditedApproved("glossary/g.md", leadJwt)
+
+    // A second proposal on the same path; approving would archive the human row.
+    const p2 = await req("POST", `${PROJECT}/agent-memory`, leadJwt, { path: "glossary/g.md", content: "v2" })
+    const { memoryId: id2 } = (await p2.json()) as { memoryId: string }
+    const a2 = await req("POST", `${PROJECT}/agent-memory/${id2}/review`, leadJwt, { action: "approve" })
+    expect(a2.status).toBe(409)
+    const err = (await a2.json()) as { error: { code: string; details: { path: string; existingId: string } } }
+    expect(err.error.code).toBe("supersedes_human_edited")
+    expect(err.error.details).toMatchObject({ path: "glossary/g.md", existingId })
+  })
+
+  it("human approve WITH supersedeHumanEdited → succeeds and archives the human row", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    const leadJwt = await jwtFor("lead")
+    const existingId = await humanEditedApproved("glossary/g.md", leadJwt)
+
+    const p2 = await req("POST", `${PROJECT}/agent-memory`, leadJwt, { path: "glossary/g.md", content: "v2" })
+    const { memoryId: id2 } = (await p2.json()) as { memoryId: string }
+    const a2 = await req("POST", `${PROJECT}/agent-memory/${id2}/review`, leadJwt, {
+      action: "approve",
+      supersedeHumanEdited: true,
+    })
+    expect(a2.status).toBe(200)
+
+    const list = await req("GET", `${PROJECT}/agent-memory`, leadJwt)
+    const { memories } = (await list.json()) as { memories: Array<{ id: string; status: string }> }
+    const byId = Object.fromEntries(memories.map((m) => [m.id, m.status]))
+    expect(byId[existingId]).toBe("archived")
+    expect(byId[id2]).toBe("approved")
+  })
+
+  it("agent-channel approve over a human-edited row → 403 EVEN WITH the flag", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    await setAutonomy(PROJECT, "agent-low-risk")
+    const leadJwt = await jwtFor("lead")
+    // observations/ path so the autonomy gate would otherwise allow the review.
+    await humanEditedApproved("observations/o.md", leadJwt)
+
+    const p2 = await req("POST", `${PROJECT}/agent-memory`, leadJwt, {
+      path: "observations/o.md",
+      content: "agent v2",
+    })
+    const { memoryId: id2 } = (await p2.json()) as { memoryId: string }
+    const a2 = await req(
+      "POST",
+      `${PROJECT}/agent-memory/${id2}/review`,
+      leadJwt,
+      { action: "approve", supersedeHumanEdited: true }, // flag is IGNORED for agents
+      agentHeader(leadJwt),
+    )
+    expect(a2.status).toBe(403)
+    const err = (await a2.json()) as { error: { code: string } }
+    expect(err.error.code).toBe("supersedes_human_edited")
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// Agent-channel membership (adversarial-panel authz-M1): the agent still acts
+// as a project member — a non-member cannot reach the review path even under
+// agent-low-risk autonomy.
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("agent-channel review membership", () => {
+  it("non-member with the agent header on an agent-low-risk project → 403", async () => {
+    await seedUser(1, "lead")
+    await seedUser(4, "outsider") // valid user, NOT a project member
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    await setAutonomy(PROJECT, "agent-low-risk")
+    const leadJwt = await jwtFor("lead")
+    const outsiderJwt = await jwtFor("outsider")
+
+    // Lead proposes an observations/ memory (would be agent-reviewable).
+    const p = await req("POST", `${PROJECT}/agent-memory`, leadJwt, {
+      path: "observations/m.md",
+      content: "seen",
+    })
+    const { memoryId } = (await p.json()) as { memoryId: string }
+
+    // Non-member sends the agent header — must be denied BEFORE the autonomy gate.
+    const r = await req(
+      "POST",
+      `${PROJECT}/agent-memory/${memoryId}/review`,
+      outsiderJwt,
+      { action: "approve" },
+      agentHeader(outsiderJwt),
+    )
+    expect(r.status).toBe(403)
+    const err = (await r.json()) as { error: { code: string } }
+    expect(err.error.code).toBe("permission_denied")
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
 // Validation — secrets + path shape
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -426,6 +547,93 @@ describe("project brief", () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
+// Brief base_version + history (adversarial-panel mem-M2/M3): a proposal
+// drafted against version N must not silently clobber a human edit that lands
+// as N+1 between propose and approve; every brief write snapshots prior content.
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("brief base_version + history", () => {
+  it("putBrief snapshots prior content into project_brief_history", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    const leadJwt = await jwtFor("lead")
+
+    await req("PUT", `${PROJECT}/brief`, leadJwt, { content: "A", ifMatchVersion: 0 })
+    await req("PUT", `${PROJECT}/brief`, leadJwt, { content: "B", ifMatchVersion: 1 })
+
+    const rows = await env.AQUILLA_PG.prepare(
+      "SELECT version, content FROM project_brief_history WHERE project_id = ? ORDER BY version",
+    )
+      .bind(PROJECT)
+      .all<{ version: number; content: string }>()
+    // The version-1 content ("A") is snapshotted before it becomes version 2.
+    expect(rows.results).toContainEqual({ version: 1, content: "A" })
+  })
+
+  it("approving a proposal whose base_version is stale → 409 conflict (with versions)", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    const leadJwt = await jwtFor("lead")
+
+    await req("PUT", `${PROJECT}/brief`, leadJwt, { content: "base v1", ifMatchVersion: 0 })
+    // Agent proposes against v1.
+    const prop = await req(
+      "POST",
+      `${PROJECT}/brief/proposals`,
+      leadJwt,
+      { content: "agent draft", rationale: "gap" },
+      agentHeader(leadJwt),
+    )
+    const { proposalId } = (await prop.json()) as { proposalId: string }
+    // A human edit lands FIRST → brief advances to v2.
+    await req("PUT", `${PROJECT}/brief`, leadJwt, { content: "human edit v2", ifMatchVersion: 1 })
+
+    // Approving the now-stale proposal is refused.
+    const review = await req("POST", `${PROJECT}/brief/proposals/${proposalId}/review`, leadJwt, {
+      action: "approve",
+    })
+    expect(review.status).toBe(409)
+    const err = (await review.json()) as { error: { code: string; details: { baseVersion: number; currentVersion: number } } }
+    expect(err.error.code).toBe("conflict")
+    expect(err.error.details).toMatchObject({ baseVersion: 1, currentVersion: 2 })
+
+    // The brief was NOT clobbered.
+    const b = await req("GET", `${PROJECT}/brief`, leadJwt)
+    const { brief } = (await b.json()) as { brief: { content: string } }
+    expect(brief.content).toBe("human edit v2")
+  })
+
+  it("approving a proposal whose base_version is current → applies", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    const leadJwt = await jwtFor("lead")
+
+    await req("PUT", `${PROJECT}/brief`, leadJwt, { content: "base v1", ifMatchVersion: 0 })
+    const prop = await req(
+      "POST",
+      `${PROJECT}/brief/proposals`,
+      leadJwt,
+      { content: "agent draft", rationale: "gap" },
+      agentHeader(leadJwt),
+    )
+    const { proposalId } = (await prop.json()) as { proposalId: string }
+
+    // No intervening edit → base_version still matches → approve applies.
+    const review = await req("POST", `${PROJECT}/brief/proposals/${proposalId}/review`, leadJwt, {
+      action: "approve",
+    })
+    expect(review.status).toBe(200)
+    const b = await req("GET", `${PROJECT}/brief`, leadJwt)
+    const { brief } = (await b.json()) as { brief: { content: string; version: number } }
+    expect(brief.content).toBe("agent draft")
+    expect(brief.version).toBe(2)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
 // buildMemoryContext (harness prompt assembly)
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -453,7 +661,9 @@ describe("buildMemoryContext", () => {
 
     const ctx = await buildMemoryContext(env.AQUILLA_PG, PROJECT)
     expect(ctx.brief).toBe("Project brief text.")
-    expect(ctx.memoryIndex).toEqual([{ path: "glossary/grace.md", firstLine: "# Grace" }])
+    expect(ctx.memoryIndex).toEqual([
+      { path: "glossary/grace.md", firstLine: "# Grace", humanEdited: false },
+    ])
     expect(await ctx.readMemory("glossary/grace.md")).toBe("# Grace\ngrace → gracia")
     // Proposed (unapproved) memory is not readable through the context.
     expect(await ctx.readMemory("glossary/pending.md")).toBeNull()

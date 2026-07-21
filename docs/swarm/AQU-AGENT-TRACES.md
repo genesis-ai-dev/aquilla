@@ -117,3 +117,74 @@ Golden path (items 1–5, no-LLM) PASS after 3 small fixes; sandbox (item 6) BLO
 - [OPEN] (w1b-plan-import-translated) plan_import maps cells original→content, group→section, type→type; `translated`/`context` are dropped (PlanImport seeds SOURCE cells only). A create-then-translate flow (follow-up SetTranslation changeset carrying `translated`) is a Wave-3 item — see changeset-bridge.ts toCommandCells SWARM-TODO.
 - [OPEN] (w1b-load-artifact-key) load_artifact reads artifacts.r2_key directly from the shared DB (project-scoped) rather than the sync-worker external metadata GET (which omits r2_key by design). If artifact storage moves behind a signed-URL service, switch to a sync-worker GET that returns a fetch key — see harness-tools.ts loadArtifact SWARM-TODO.
 - [OPEN] (w1b-sandbox-url) auth-worker wrangler.toml sets AGENT_SANDBOX_URL only for dev/e2e (127.0.0.1:8790); top-level/prod/staging leave it commented until aquilla-agent-sandbox has a stable URL. Set it + the AGENT_SANDBOX_KEY secret before agent code-exec works in those envs (harness degrades to a clear "sandbox unavailable" tool error meanwhile).
+
+## Wave-3 FIX-B (SPA fixer) — 2026-07-21
+
+Applied all 5 adversarial-panel SPA fixes. Coded against FIX-A's stated NEW backend contracts
+(memory review 409 `supersedes_human_edited` w/ `details:{path,existingId}`; brief proposal
+approve 409 `conflict` w/ `details:{baseVersion,currentVersion}`) — not yet verified against a
+live FIX-A route since it lands in parallel; if the actual envelope differs, only
+`memory-api.ts`'s `parseErrorAndThrow` needs updating (both new error classes are the only
+readers of `error.details`).
+
+- [FIXED] (races-F5) `AgentMemoryTab.tsx` reviewMemory/reviewProposal now revert by id
+  (`cur.map(m => m.id===original.id ? original : m)`) instead of restoring an absolute
+  pre-action snapshot — a concurrent review's optimistic flip on another row survives a sibling
+  row's failure. Proof test: `AgentMemoryTab.test.tsx` "races-F5: a failed review only reverts
+  its own row, not a concurrent successful one".
+- [FIXED] (B1/supersede) `memory-api.ts` adds `SupersedesHumanEditedError` (path/existingId) and
+  `reviewAgentMemory` takes an optional `supersedeHumanEdited` flag, sent ONLY on explicit
+  re-confirm (never auto-retried). `AgentMemoryTab.tsx` shows a destructive confirm dialog
+  ("Approving will replace the human-edited memory at <path>...") on that 409; confirm resends
+  with the flag, cancel leaves the (already-reverted) row untouched. Proof tests: "supersede-
+  human-edited confirm (B1)" × 3 (dialog shows + reverts meanwhile / confirm resends with flag /
+  cancel never resends).
+- [FIXED] (mem-M2/M3) New `src/lib/agent/text-diff.ts` — hand-rolled LCS line diff, no new deps
+  (`diffLines`/`hasChanges`, 5 unit tests). `BriefPanel.tsx` renders each pending proposal as a
+  diff of `brief.content` vs `proposal.content` (green `+`/red `-` lines) instead of a bare
+  markdown re-render. `VersionConflictError` extended with `baseVersion`; a 409 `conflict` on
+  approve marks that proposal card "Stale — brief changed since this was proposed (vN → vM)"
+  with Approve disabled (Reject still works) via a `staleProposals: Map<id, info>` state in
+  `AgentMemoryTab.tsx`, cleared optimistically on retry. Proof tests: "brief proposal diff +
+  stale state (mem-M2/M3)" × 2.
+- [FIXED] (mem-M5, changeset half) `ChangesetCard.tsx` now polls
+  `GET /api/v2/changesets/:id/approval` (same shape as `pages/ApproveChangeset/ApproveChangeset.tsx`)
+  every 5s via `useFrontierSession` + `AUTH_BASE`, while mounted and non-terminal; flips a status
+  badge and disables the "Review & approve" link (renders as plain text) once
+  approved/committed/discarded, and stops polling. Proof tests: "polls the approval route and
+  flips the badge…" / "stops polling once a terminal status is reached" (fake timers).
+- [FIXED] (mem-M5, memory-notice half) — DEVIATION FROM THE BRIEF: rather than a
+  `window.dispatchEvent`/`aquilla:agent-memory-reviewed` custom event, used the EXISTING
+  per-project `AgentSessionStore` singleton (`src/lib/agent/session-store.ts`) as the clean
+  channel: `AgentMemoryTab` already knows `projectId`, so on a successful review it calls
+  `agentSessionStore(projectId).markMemoryReviewed(id)` / `.markBriefReviewed(id)` directly — new
+  pure reducers `markMemoryReviewed`/`markBriefReviewed` in `run-state.ts`, new store methods in
+  `session-store.ts` that scan all runs. `MemoryProposedItem`/`BriefProposedItem` gained an
+  optional `status?: "pending"|"reviewed"` field (frames default it to `"pending"`).
+  `MemoryProposalNotice`/`BriefProposalNotice` render a "Reviewed" badge instead of the "Review in
+  Memory tab" link once flipped — any mounted `AgentRunView` on the same project re-renders via
+  the shared store, no window event needed. Flag for orchestrator: if a cross-tab (multi-window)
+  notice sync is ever wanted, THAT would need the window-event fallback the task described —
+  the store is same-tab-only. Proof tests: `run-state.test.ts` (2), `session-store.test.ts`
+  ("markMemoryReviewed/markBriefReviewed flip the matching notice across all runs"),
+  `MemoryProposalNotice.test.tsx` (2), `AgentMemoryTab.test.tsx` ("calls markMemoryReviewed on
+  the shared session store after a successful review").
+- [FIXED] (mem-m2) `AgentMemoryTab.tsx` subscribes to `useAgentSession(projectId)` and counts
+  `memory-proposed` timeline items across all runs; when the count grows while mounted, it
+  refetches `listAgentMemories` (best-effort, swallows errors — the next full `load()` retries).
+  Proof test: "refetches the memory list when a new memory-proposed run item lands (mem-m2)".
+
+Verification: root `npx tsc -b --noEmit` clean. `npx vitest run src/components/agent
+src/lib/agent` — 23 files, 179 tests, all green (was 164 before this batch; +15 new tests, no
+regressions). `npx eslint` clean on all touched/new files. No new dependencies. All touched
+files well under 500 lines (largest: `AgentMemoryTab.tsx` 388, `run-state.ts` 342).
+
+- [OPEN] (fixb-contract-unverified) The 409 envelope shapes for `supersedes_human_edited` and
+  brief-proposal `conflict` are coded from the orchestrator's stated contract, not a live FIX-A
+  route (parallel work) — re-verify `memory-api.ts`'s `parseErrorAndThrow` against FIX-A's actual
+  auth-worker response once merged; only that function and the two new error classes would need
+  adjusting if the shape drifts.
+- [OPEN] (fixb-changeset-status-values) `ChangesetCard.tsx`'s terminal-status set
+  (`approved`/`committed`/`discarded`) is inferred from `ApproveChangeset.tsx`'s UI copy — the
+  `/approval` route's `status` field is untyped (`string`) server-side. If the backend adds/
+  renames a terminal status, update `TERMINAL_STATUSES` in `ChangesetCard.tsx`.

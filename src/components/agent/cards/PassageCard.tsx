@@ -14,8 +14,9 @@
  */
 
 import { useMemo, useRef, useState } from "react"
-import { BookOpen, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
+import { BookOpen, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { PassageRow } from "@/lib/agent/protocol"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
@@ -172,7 +173,7 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
             </Button>
           </span>
         )}
-        {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-label="Loading chapter" />}
+        {loading && <Spinner className="size-3 text-muted-foreground" />}
       </div>
 
       {navError && <p className="px-2 py-1 text-[10px] text-destructive">{navError}</p>}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff, LoaderCircle } from "lucide-react"
+import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
@@ -322,7 +323,7 @@ function GroupItem({
         )}
         {terminal.syncState === "pending" && (
           <span className="flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
-            <LoaderCircle className="h-3 w-3 animate-spin" />
+            <Spinner className="size-3" />
             syncing
           </span>
         )}

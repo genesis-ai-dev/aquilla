@@ -17,7 +17,6 @@ import {
   ChevronRight,
   Database,
   FileText,
-  Loader2,
   PenLine,
   Quote,
   Search,
@@ -73,7 +72,7 @@ function ToolChip({ item }: { item: ToolItem }) {
         <span className="font-mono text-muted-foreground">{TOOL_LABEL[item.tool] ?? item.tool}</span>
         <span className="min-w-0 flex-1 truncate font-mono">{item.summary}</span>
         {item.ok === undefined ? (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" aria-label="Step running" />
+          <Spinner className="size-3 shrink-0 text-muted-foreground" />
         ) : item.ok ? (
           <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Step succeeded" />
         ) : (

@@ -8,11 +8,11 @@
  */
 
 import { useState } from "react"
-import { Book, Check, ExternalLink, Loader2 } from "lucide-react"
+import { Book, Check, ExternalLink } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import type { AquiferPublishProposal } from "@/lib/agent/protocol"
 import { aquiferPublishAnswer } from "@/lib/aquifer/client"
 
@@ -151,7 +151,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
             >
             {state === "applying" ? (
               <>
-                <Loader2 className={cn("h-3 w-3 animate-spin")} /> Publishing…
+                <Spinner className="size-3" /> Publishing…
               </>
             ) : (
               "Apply"

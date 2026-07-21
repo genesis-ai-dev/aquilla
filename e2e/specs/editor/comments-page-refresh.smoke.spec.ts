@@ -7,7 +7,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * CommentsPage.tsx has a "Refresh" button (outline, sm) that calls `refresh()`
  * which re-fetches the comment threads from the server.
  * 
- * The button displays a Loader2 spinner while loading (disabled),
+ * The button displays a Spinner while loading (disabled),
  * then returns to "Refresh" text once done.
  *
  * This spec: navigate to /comments → click "Refresh" → verify the button

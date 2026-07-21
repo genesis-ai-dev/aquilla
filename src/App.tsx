@@ -26,7 +26,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { SpinnerCustom } from "@/components/ui/spinner"
+import { Spinner } from "@/components/ui/spinner"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -125,7 +125,7 @@ function RootRedirect() {
 function RouteLoadingFallback() {
   return (
     <div className="flex h-screen items-center justify-center text-muted-foreground">
-      <SpinnerCustom />
+      <Spinner />
     </div>
   )
 }

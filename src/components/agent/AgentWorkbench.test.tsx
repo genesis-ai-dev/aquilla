@@ -214,3 +214,21 @@ describe("AgentWorkbench review loop", () => {
     expect(screen.queryByText("La casa è rossa")).not.toBeInTheDocument()
   })
 })
+
+describe("AgentWorkbench Sessions | Memory tab slot (AQU-AGENT §5)", () => {
+  it("defaults to the Sessions tab and offers a Memory tab that lazy-loads its content", async () => {
+    render(<AgentWorkbench {...workbenchProps()} />)
+
+    expect(screen.getByRole("tab", { name: "Sessions" })).toHaveAttribute("aria-selected", "true")
+    const memoryTab = screen.getByRole("tab", { name: "Memory" })
+    expect(memoryTab).toHaveAttribute("aria-selected", "false")
+
+    fireEvent.click(memoryTab)
+    await waitFor(() => expect(memoryTab).toHaveAttribute("aria-selected", "true"))
+    // The Memory tab's real content is owned by W1E; this worktree renders
+    // the SWARM-TODO placeholder stub so the lazy import resolves.
+    await waitFor(() =>
+      expect(screen.getByText(/Memory tab placeholder/)).toBeInTheDocument(),
+    )
+  })
+})

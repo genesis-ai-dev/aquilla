@@ -112,6 +112,24 @@ const PARATEXT_KINDS: Record<string, "heading" | "paratext"> = {
   "iot": "heading",
 }
 
+/** True for book-name and book-introduction front-matter markers, whose content
+ *  is NOT wanted as a translatable source cell (AQU-585). Two families:
+ *
+ *  - **Book name / title:** running header (`\h`, `\h1`-`\h3`), table of contents
+ *    names (`\toc1`-`\toc3`, `\toca1`-`\toca3`), and the printed main title
+ *    (`\mt`, `\mt1`-`\mt4`, `\mte`, `\mte1`-`\mte2`).
+ *  - **Introduction:** every USFM introduction marker begins with `i` — intro
+ *    titles/sections/paragraphs/outlines (`\imt*`, `\is*`, `\ip*`, `\im*`,
+ *    `\iq*`, `\io*`, `\iot`, `\ior`, `\iex`, `\ib`, `\ie`, `\ili*`).
+ *
+ *  In-body section headings (`\s*`, `\ms*`, `\sr`, `\mr`, `\r`) and Psalm
+ *  descriptive titles (`\d`) are deliberately NOT matched — they are content the
+ *  reviewer still translates. Filtering happens only at the import→cell boundary;
+ *  the lossless parser keeps these spans so export round-trips byte-for-byte. */
+export function isBookTitleOrIntroMarker(marker: string): boolean {
+  return /^(?:h\d*|toca?\d|mte?\d*|i[a-z]*\d*)$/.test(marker)
+}
+
 export interface UsfmVerse {
   /** Verse number string as it appears in source: "1", "1-3", "1a". */
   number: string

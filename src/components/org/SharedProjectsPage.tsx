@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { Share2 } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { EmptyState } from "@/components/ui/page"
@@ -33,6 +33,17 @@ export function SharedProjectsPage() {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
 
+  // AQU-624: the org switcher sends a guest org's click here scoped to that org
+  // (`/shared?org=<id>`). When present, this page acts as that org's overview —
+  // narrowed to its shared projects. Unscoped, it stays the org-agnostic
+  // "everything shared with you" list (AQU-417/AQU-475).
+  const [searchParams] = useSearchParams()
+  const scopedOrgParam = searchParams.get("org")
+  const scopedOrgId =
+    scopedOrgParam != null && Number.isFinite(Number(scopedOrgParam))
+      ? Number(scopedOrgParam)
+      : null
+
   const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -52,17 +63,25 @@ export function SharedProjectsPage() {
     return () => { cancelled = true }
   }, [jwt, orgs, activeOrgId, orgLoading])
 
-  const sharedProjects = partitionSharedProjects(
+  const allSharedProjects = partitionSharedProjects(
     accessibleProjects,
     orgs,
     activeOrgId,
     "all-orgs",
   ).sharedWithMe
+  const sharedProjects =
+    scopedOrgId == null
+      ? allSharedProjects
+      : allSharedProjects.filter((p) => p.orgId === scopedOrgId)
+  const scopedOrgName =
+    scopedOrgId == null
+      ? null
+      : sharedProjects.find((p) => p.orgName)?.orgName ?? `Org #${scopedOrgId}`
 
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Shared with you" />}
+      header={<OrgBreadcrumb section={scopedOrgName ?? "Shared with you"} />}
       statusBar={null}
       main={
         // See ProjectsList.tsx / AssignedToMe.tsx for why `h-full overflow-y-auto
@@ -72,10 +91,11 @@ export function SharedProjectsPage() {
           data-testid="shared-projects-scroll"
         >
           <div>
-            <h1 className="text-lg font-semibold">Shared with you</h1>
+            <h1 className="text-lg font-semibold">{scopedOrgName ?? "Shared with you"}</h1>
             <p className="text-sm text-muted-foreground">
-              Projects shared with you from organizations you&rsquo;re not a member of,
-              gathered in one place.
+              {scopedOrgName
+                ? `Projects in ${scopedOrgName} shared with you.`
+                : "Projects shared with you from organizations you’re not a member of, gathered in one place."}
             </p>
           </div>
           {loading ? (
@@ -83,7 +103,7 @@ export function SharedProjectsPage() {
           ) : sharedProjects.length === 0 ? (
             <EmptyState
               icon={Share2}
-              title="Nothing shared with you yet."
+              title={scopedOrgName ? `Nothing shared with you from ${scopedOrgName} yet.` : "Nothing shared with you yet."}
               description="When someone invites you to a project in another organization, it shows up here."
             />
           ) : (

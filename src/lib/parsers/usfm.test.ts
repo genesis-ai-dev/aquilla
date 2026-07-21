@@ -52,7 +52,19 @@ describe("extractUsfmStrings", () => {
     expect(strings[1].type).toBe("verse")
   })
 
-  it("parses paratext markers", () => {
+  it("keeps in-body paratext markers (major section / parallel ref)", () => {
+    const usfm = `\\id GEN
+\\c 1
+\\ms Primeval History
+\\v 1 In the beginning.`
+
+    const result = extractUsfmStrings(usfm)
+    const strings = result[0].strings
+    expect(strings[0].original).toBe("Primeval History")
+    expect(strings[0].type).toBe("paratext")
+  })
+
+  it("filters the book name (\\mt) out of source cells (AQU-585)", () => {
     const usfm = `\\id GEN
 \\mt Genesis
 \\c 1
@@ -60,8 +72,9 @@ describe("extractUsfmStrings", () => {
 
     const result = extractUsfmStrings(usfm)
     const strings = result[0].strings
-    expect(strings[0].original).toBe("Genesis")
-    expect(strings[0].type).toBe("paratext")
+    // The \mt book title is front matter, not a translatable cell.
+    expect(strings.map((s) => s.original)).toEqual(["In the beginning."])
+    expect(strings.some((s) => s.type === "paratext")).toBe(false)
   })
 
   it("treats file without \\id as single document", () => {
@@ -112,11 +125,11 @@ describe("extractUsfmStrings — section labels", () => {
     expect(heading?.section).toBe("GEN 3")
   })
 
-  it("sets section to '<BOOK> intro' for paratext (book-level front matter)", () => {
+  it("does not emit a cell for book-level front matter (\\mt1) — AQU-585", () => {
     const usfm = "\\id GEN\n\\mt1 Genesis\n\\c 1\n\\v 1 hi\n"
     const [book] = extractUsfmStrings(usfm)
-    const paratext = book.strings.find(s => s.type === "paratext")
-    expect(paratext?.section).toBe("GEN intro")
+    expect(book.strings.find(s => s.type === "paratext")).toBeUndefined()
+    expect(book.strings.map(s => s.original)).toEqual(["hi"])
   })
 })
 
@@ -142,7 +155,10 @@ describe("extractUsfmStrings — aligned USFM3 (unfoldingWord)", () => {
 
   it("leaves no alignment markup or attribute residue in any cell", () => {
     const [book] = extractUsfmStrings(ultTitRaw)
-    expect(book.strings.length).toBeGreaterThanOrEqual(4)
+    // Verse cells only — the \mt1/\h/\toc book-name front matter is filtered
+    // out on import (AQU-585), leaving the three excerpted Titus verses.
+    expect(book.strings.length).toBeGreaterThanOrEqual(3)
+    expect(book.strings.every((s) => s.type === "verse")).toBe(true)
     for (const s of book.strings) {
       expect(s.original).not.toMatch(/\\zaln|\\w|x-occurrence|x-strong|\|/)
       expect(s.original).not.toMatch(/\s[,.;:!?]/)
@@ -192,8 +208,9 @@ describe("extractUsfmStrings — aligned USFM3 (unfoldingWord)", () => {
 the heavens , and the earth.
 \\v 2 The earth was without form.`
     const [book] = extractUsfmStrings(plain)
+    // \mt Genesis (book name) is filtered out per AQU-585; the section heading
+    // and verse bodies are preserved byte-for-byte.
     expect(book.strings.map((s) => s.original)).toEqual([
-      "Genesis",
       "The Creation",
       "In the beginning God created the heavens , and the earth.",
       "The earth was without form.",
@@ -413,7 +430,9 @@ describe("extractUsfmStrings — globalReferences", () => {
   })
 
   it("does not tag headings or paratext with globalReferences", () => {
-    const usfm = "\\id LUK\n\\mt1 Luke\n\\c 1\n\\s1 The Coming.\n\\v 1 First verse.\n"
+    // \ms (major section) is in-body paratext that survives the AQU-585 filter,
+    // unlike the \mt book title.
+    const usfm = "\\id LUK\n\\c 1\n\\ms The Coming Age\n\\s1 The Coming.\n\\v 1 First verse.\n"
     const [book] = extractUsfmStrings(usfm)
     const heading = book.strings.find(s => s.type === "heading")
     const paratext = book.strings.find(s => s.type === "paratext")

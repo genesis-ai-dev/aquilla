@@ -38,6 +38,7 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
+import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
   AudioMediaStrategy,
   CompletionProvider,
@@ -67,6 +68,7 @@ import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
+import { humanRoleName } from "@/lib/frontier/roles"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
 import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
@@ -131,6 +133,8 @@ interface Baseline {
   useOnlyValidatedExamples: boolean
   main_chat_language: string
   fewShotExampleFormat: "source-and-target" | "target-only"
+  completionBatchSize: number
+  validationBatchSize: number
   autoSyncEnabled: boolean
   autoSyncInterval: number
   validationCount: number
@@ -168,6 +172,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     useOnlyValidatedExamples: true,
     main_chat_language: project.completionSettings?.main_chat_language ?? "",
     fewShotExampleFormat: project.completionSettings?.fewShotExampleFormat ?? "source-and-target",
+    completionBatchSize: project.completionSettings?.completionBatchSize ?? MAX_BATCH_COMPLETIONS,
+    // 0 = validate all eligible cells (default, unchanged behavior).
+    validationBatchSize: project.completionSettings?.validationBatchSize ?? 0,
     autoSyncEnabled: project.syncSettings?.autoSync.enabled ?? false,
     autoSyncInterval: project.syncSettings?.autoSync.intervalMinutes ?? 5,
     validationCount: readValidationCount(project),
@@ -260,6 +267,13 @@ export function ProjectSettings() {
     : reasonCannotEdit === "role" ? "Maintainer or higher can edit shared settings."
     : null
 
+  // AQU-623: a below-floor member's shared inputs are disabled up-front, so a
+  // role-blocked save can never actually fire — show the denial alert
+  // persistently for them instead of only after a rejected PATCH. Gated on
+  // isCloudProject because unsynced projects also report reason "role"
+  // (roleLevel is null) but have no shared-settings permission model.
+  const roleBlocked = isCloudProject && reasonCannotEdit === "role"
+
   // Baseline is the last-saved snapshot of every field on the page. The diff
   // between baseline and the form state determines `isDirty` and which writes
   // we actually have to fire on Save.
@@ -286,6 +300,8 @@ export function ProjectSettings() {
   const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
   const [fewShotExampleFormat, setFewShotExampleFormat] = useState<"source-and-target" | "target-only">("source-and-target")
   const [mainChatLanguage, setMainChatLanguage] = useState("")
+  const [completionBatchSize, setCompletionBatchSize] = useState(MAX_BATCH_COMPLETIONS)
+  const [validationBatchSize, setValidationBatchSize] = useState(0)
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const [autoSyncInterval, setAutoSyncInterval] = useState(5)
   const [validationCount, setValidationCount] = useState(1)
@@ -339,6 +355,8 @@ export function ProjectSettings() {
     setUseOnlyValidatedExamples(true)
     setFewShotExampleFormat(b.fewShotExampleFormat)
     setMainChatLanguage(b.main_chat_language)
+    setCompletionBatchSize(b.completionBatchSize)
+    setValidationBatchSize(b.validationBatchSize)
     setAutoSyncEnabled(b.autoSyncEnabled)
     setAutoSyncInterval(b.autoSyncInterval)
     setValidationCount(b.validationCount)
@@ -435,6 +453,8 @@ export function ProjectSettings() {
       useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples ||
       fewShotExampleFormat !== baseline.fewShotExampleFormat ||
       mainChatLanguage !== baseline.main_chat_language ||
+      completionBatchSize !== baseline.completionBatchSize ||
+      validationBatchSize !== baseline.validationBatchSize ||
       autoSyncEnabled !== baseline.autoSyncEnabled ||
       autoSyncInterval !== baseline.autoSyncInterval ||
       validationCount !== baseline.validationCount ||
@@ -453,6 +473,7 @@ export function ProjectSettings() {
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
+    completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
@@ -568,6 +589,8 @@ export function ProjectSettings() {
       if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) { completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples; changedFieldLabels.push("validated examples only") }
       if (fewShotExampleFormat !== baseline.fewShotExampleFormat) { completionUpdates.fewShotExampleFormat = fewShotExampleFormat; changedFieldLabels.push("reference example format") }
       if (mainChatLanguage !== baseline.main_chat_language) { completionUpdates.main_chat_language = mainChatLanguage || undefined; changedFieldLabels.push("assisted language") }
+      if (completionBatchSize !== baseline.completionBatchSize) { completionUpdates.completionBatchSize = completionBatchSize; changedFieldLabels.push("AI completions batch size") }
+      if (validationBatchSize !== baseline.validationBatchSize) { completionUpdates.validationBatchSize = validationBatchSize; changedFieldLabels.push("batch validation size") }
 
       const localUpdates: Partial<ProjectRecord> = {}
       if (name !== baseline.name) { localUpdates.name = name; changedFieldLabels.push("project name") }
@@ -671,6 +694,8 @@ export function ProjectSettings() {
         useOnlyValidatedExamples,
         fewShotExampleFormat,
         main_chat_language: mainChatLanguage,
+        completionBatchSize,
+        validationBatchSize,
         autoSyncEnabled,
         autoSyncInterval: Math.max(1, autoSyncInterval),
         validationCount,
@@ -714,6 +739,7 @@ export function ProjectSettings() {
     id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
     model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
+    completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
@@ -765,7 +791,7 @@ export function ProjectSettings() {
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
-    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions"] },
+    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
@@ -974,10 +1000,13 @@ export function ProjectSettings() {
           <BackLink to="?" label="Settings" />
         )}
 
-        {permissionBlocked && (
+        {(permissionBlocked || roleBlocked) && (
           <PermissionDeniedAlert
             action="change shared settings"
             requiredRole="Maintainer or higher"
+            currentRole={
+              project?.syncRole ? humanRoleName(project.syncRole.level) : undefined
+            }
           />
         )}
         {sharedConflict && (
@@ -1078,6 +1107,7 @@ export function ProjectSettings() {
           <LanguagesSection
             defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
             targetLanes={sharedSettingsBlob?.targetLanes ?? []}
+            archivedLanes={sharedSettingsBlob?.archivedLanes ?? []}
             canEdit={canEditShared}
             disabledTooltip={sharedDisabledTooltip}
             patch={patchShared}
@@ -1179,6 +1209,47 @@ export function ProjectSettings() {
                   />
                   <p className="text-xs text-muted-foreground">
                     How many reference examples the AI retrieves per translation (1–20). Default: 5.
+                  </p>
+                </div>
+
+                {/* AQU-586: configurable batch sizes for the Run AI completions
+                    and Batch validate workspace actions. */}
+                <div className="space-y-1">
+                  <FieldLabel htmlFor="completion-batch-size">AI completions batch size</FieldLabel>
+                  <Input
+                    id="completion-batch-size"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={completionBatchSize}
+                    onChange={(e) =>
+                      setCompletionBatchSize(Math.max(1, Math.min(50, Number(e.target.value) || 1)))
+                    }
+                    className="w-24"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    How many untranslated cells one "Run AI completions" package drafts (1–50).
+                    Run again to advance further. Default: {MAX_BATCH_COMPLETIONS}.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <FieldLabel htmlFor="validation-batch-size">Batch validation size</FieldLabel>
+                  <Input
+                    id="validation-batch-size"
+                    type="number"
+                    min={0}
+                    max={500}
+                    value={validationBatchSize}
+                    onChange={(e) =>
+                      setValidationBatchSize(Math.max(0, Math.min(500, Number(e.target.value) || 0)))
+                    }
+                    className="w-24"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    How many eligible cells one "Batch validate" run approves (0–500).
+                    <strong> 0 validates all eligible cells</strong> (default); set a cap to
+                    validate in bounded batches.
                   </p>
                 </div>
 

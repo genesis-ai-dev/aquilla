@@ -14,7 +14,7 @@
 // target.cell.commit events, AD-2 parentId = targetEventId ?? sourceEventId.
 
 import type { SourceCellRef, EBibleMatchedCell } from "./import"
-import { parseUsfmLossless } from "./parsers/usfm-lossless"
+import { parseUsfmLossless, isBookTitleOrIntroMarker } from "./parsers/usfm-lossless"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
@@ -127,15 +127,20 @@ export function matchTargetRowsByOrder(
   }
 }
 
-/** Extract target rows from a USFM file: verse bodies + heading/title/intro
+/** Extract target rows from a USFM file: verse bodies + in-body heading
  *  paratext in document order, refs and text conventions identical to the
  *  source-import path (usfmSectionToStrings in lib/import.ts) so refs match
- *  cells that were originally imported from USFM. */
+ *  cells that were originally imported from USFM. Book-name and introduction
+ *  front matter is excluded here for the same reason it is on source import
+ *  (AQU-585) — those never become cells, so a target row for them could never
+ *  match. */
 export function usfmToTargetRows(raw: string): TargetRow[] {
   const doc = parseUsfmLossless(raw)
   return [
     ...doc.verses.map((v) => ({ order: v.textStart, ref: v.ref, text: v.text.trim() })),
-    ...doc.headings.map((h) => ({ order: h.textStart, ref: h.ref, text: h.text.trim() })),
+    ...doc.headings
+      .filter((h) => !isBookTitleOrIntroMarker(h.marker))
+      .map((h) => ({ order: h.textStart, ref: h.ref, text: h.text.trim() })),
   ]
     .sort((a, b) => a.order - b.order)
     .map(({ ref, text }) => ({ ref, text }))

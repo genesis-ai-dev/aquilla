@@ -1,7 +1,7 @@
 /**
  * Dialog host for the file-scoped target import (FileTargetImportPanel):
  * populate the OPEN file's target column from USFM or a spreadsheet.
- * Opened from the workspace action menu ("Import translations into this file").
+ * Opened from the workspace action menu ("Import target translations into this file").
  */
 
 import { useEffect, useState } from "react"
@@ -57,7 +57,7 @@ export function FileTargetImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Import translations</DialogTitle>
+          <DialogTitle>Import target translations</DialogTitle>
         </DialogHeader>
         {/* The panel owns its own header / scroll / footer layout; give it the
             full remaining height so its review step can pin the footer. */}

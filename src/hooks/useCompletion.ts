@@ -57,6 +57,14 @@ import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 // reviewable chunks.
 const MAX_CELLS_PER_CALL = 10
 
+// AQU-620: a "regenerate" request re-drafts a cell that already has a
+// prediction. The project's configured temperature is tuned low for a stable
+// first draft, so repeating generation yields effectively the same text. When
+// the user explicitly asks for another iteration we raise the sampling
+// temperature (unless the project is already hotter) so the new candidate
+// differs. Scoped to regenerate only — first-draft generation is unchanged.
+const REGENERATE_TEMPERATURE = 0.8
+
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
 // Exported for other LLM call sites (e.g. back-translation) that must apply
@@ -186,8 +194,17 @@ export function useCompletion(
     },
   }), [effectiveSettings.systemPrompt, modelName, provider, sourceLanguage, targetLanguage])
 
-  const completeSingle = useCallback(async (cell: CellData, signal?: AbortSignal) => {
+  const completeSingle = useCallback(async (
+    cell: CellData,
+    signal?: AbortSignal,
+    opts?: { regenerate?: boolean },
+  ) => {
     if (!isConfigured || !isAvailable) return
+    // AQU-620: raise the temperature for an explicit regenerate so the second
+    // request varies; leave first-draft generation on the configured value.
+    const generationSettings: CompletionSettings = opts?.regenerate
+      ? { ...effectiveSettings, temperature: Math.max(effectiveSettings.temperature ?? 0, REGENERATE_TEMPERATURE) }
+      : effectiveSettings
 
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
     // top_k controls how many approved examples are requested. The injected
@@ -243,7 +260,7 @@ export function useCompletion(
         precedingContext,
       })
       const result = await complete({
-        settings: effectiveSettings, session,
+        settings: generationSettings, session,
         messages,
         stream: true,
         onChunk: (text) => {
@@ -262,6 +279,7 @@ export function useCompletion(
         example_count: found.length,
         validated_pair_count: validatedPairs.length,
         rule_count: (rules ?? []).filter((r) => r.enabled).length,
+        regenerate: Boolean(opts?.regenerate),
       })
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.

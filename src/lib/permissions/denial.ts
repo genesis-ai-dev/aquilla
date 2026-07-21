@@ -16,9 +16,16 @@ import { roleName, roleDisplayText } from "@/lib/frontier/roles"
 /**
  * Human-readable explanation for why an action is denied.
  *
+ * AQU-623 — every denial should speak the permission vocabulary: name the
+ * caller's *current* role using the plural role noun ("Viewers cannot perform
+ * this action") so the user (or whoever is helping them) immediately sees both
+ * who they are and how to remedy it (get a higher role). When the current role
+ * is unknown (local projects), fall back to the minimum-role remedy only.
+ *
  * @param minRoleLevel  Minimum role level required for the action.
  * @param currentLevel  Caller's current role level (null = unknown / local project).
- * @returns  A string like "You need at least contributor access to do this."
+ * @returns  A string like "Viewers cannot perform this action — you need at
+ *           least Contributor access."
  */
 export function denialMessage(minRoleLevel: number, currentLevel: number | null | undefined): string {
   const minName = roleDisplayText(roleName(minRoleLevel))
@@ -26,7 +33,7 @@ export function denialMessage(minRoleLevel: number, currentLevel: number | null 
     return `You need at least ${minName} access to do this.`
   }
   const currentName = roleDisplayText(roleName(currentLevel))
-  return `Your current role (${currentName}) does not have permission to do this. At least ${minName} is required.`
+  return `${currentName}s cannot perform this action — you need at least ${minName} access.`
 }
 
 /**

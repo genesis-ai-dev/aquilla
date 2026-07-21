@@ -1,6 +1,6 @@
 /**
  * AQU-430 — Import progress visible after Confirm
- * AQU-431 — .doc file acceptance
+ * AQU-431 — .doc file gateway behavior
  *
  * AQU-430 WHY: Before the fix, clicking "Confirm import" in PreviewPanel switched
  * the button to "Uploading…" but showed no further progress; the dialog appeared
@@ -10,10 +10,12 @@
  * clicking Confirm, the preview list is replaced by an in-progress view with the
  * phase label and (when cell counts are available) a progress bar.
  *
- * AQU-431 WHY: The file picker and detectFileType() only accepted ".docx"; users
- * with ".doc" files were silently unable to import without manual conversion. The
- * fix maps ".doc" → "docx" in detectFileType(). The unified picker now allows
- * every file extension so unknown text formats can reach reviewed AI analysis.
+ * AQU-431 WHY: The unified picker must allow every extension through the
+ * one-time preparation gateway. Legacy OLE .doc is not DOCX, however, and must
+ * never be sent to the OOXML parser under a false type. Unknown textual files
+ * can reach reviewed AI analysis; real OLE files receive an explicit binary
+ * rejection instead of a corrupt parse, while the Agent API can preserve an
+ * original alongside a separately verified import recipe.
  */
 
 import React from "react"
@@ -194,9 +196,9 @@ describe("AQU-430 — import progress visible after Confirm", () => {
 
 // ── AQU-431 tests ────────────────────────────────────────────────────────────
 
-describe("AQU-431 — .doc file acceptance", () => {
-  it("detectFileType maps .doc extension to 'docx' type", () => {
-    expect(detectFileType("myfile.doc")).toBe("docx")
+describe("AQU-431 — .doc file gateway behavior", () => {
+  it("does not misclassify legacy OLE .doc as OOXML .docx", () => {
+    expect(detectFileType("myfile.doc")).toBeNull()
   })
 
   it("detectFileType still maps .docx to 'docx' (regression guard)", () => {

@@ -15,12 +15,36 @@
  * to actual run/session ids end-to-end (this UI already renders
  * `provenance.runId`/`sessionId` when present — nothing further needed here
  * unless the shape drifts from §3).
+ *
+ * mem-M5 (memory-notice liveness): this tab and AgentRunView's chat timeline
+ * both key off `projectId`, so a review here calls straight into
+ * `agentSessionStore(projectId).markMemoryReviewed/markBriefReviewed` — the
+ * store already exists as the single source of truth for run state (see
+ * session-store.ts), so that's the "clean channel" rather than a window
+ * event: any mounted AgentRunView subscribed to the same store re-renders
+ * with the notice flipped to "reviewed".
+ *
+ * mem-m2 (badge refetch): this tab also subscribes to the same store to
+ * count `memory-proposed` timeline items; when that count grows (a new
+ * `memory.proposed` frame landed on a run for this project while the tab is
+ * open), it refetches the memory list so the Proposed badge/queue catch up
+ * without waiting for the next full remount.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { agentSessionStore, useAgentSession } from "@/lib/agent/session-store"
 import {
   editAgentMemory,
   getProjectBrief,
@@ -29,13 +53,21 @@ import {
   putProjectBrief,
   reviewAgentMemory,
   reviewBriefProposal,
+  SupersedesHumanEditedError,
+  VersionConflictError,
   type AgentMemory,
   type ProjectBrief,
   type ProjectBriefProposal,
 } from "@/lib/agent/memory-api"
 import { ApprovedMemoryList } from "./ApprovedMemoryList"
-import { BriefPanel } from "./BriefPanel"
+import { BriefPanel, type StaleProposalInfo } from "./BriefPanel"
 import { ProposedMemoryList } from "./ProposedMemoryList"
+
+interface SupersedePrompt {
+  memory: AgentMemory
+  path: string
+  existingId?: string
+}
 
 export interface AgentMemoryTabProps {
   projectId: string
@@ -49,6 +81,7 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const username = session?.username ?? null
+  const { state: agentSessionState } = useAgentSession(projectId)
 
   const [memories, setMemories] = useState<AgentMemory[]>([])
   const [brief, setBrief] = useState<ProjectBrief | null>(null)
@@ -57,6 +90,8 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   const [error, setError] = useState<string | null>(null)
   const [busyMemoryIds, setBusyMemoryIds] = useState<Set<string>>(new Set())
   const [busyProposalIds, setBusyProposalIds] = useState<Set<string>>(new Set())
+  const [supersedePrompt, setSupersedePrompt] = useState<SupersedePrompt | null>(null)
+  const [staleProposals, setStaleProposals] = useState<Map<string, StaleProposalInfo>>(new Map())
 
   const load = useCallback(async () => {
     if (!jwt) return
@@ -85,6 +120,25 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
     void load()
   }, [load])
 
+  // mem-m2: refetch the memory list whenever a new memory.proposed item shows
+  // up on any run in this project's agent session while the tab is mounted,
+  // so the Proposed badge/queue stay live without a remount.
+  const memoryProposedCount = useMemo(
+    () => agentSessionState.runs.reduce((n, r) => n + r.items.filter((i) => i.kind === "memory-proposed").length, 0),
+    [agentSessionState.runs],
+  )
+  const prevMemoryProposedCount = useRef(memoryProposedCount)
+  useEffect(() => {
+    if (memoryProposedCount > prevMemoryProposedCount.current && jwt) {
+      listAgentMemories(jwt, projectId)
+        .then(setMemories)
+        .catch(() => {
+          // Best-effort refresh — the next full load() will retry.
+        })
+    }
+    prevMemoryProposedCount.current = memoryProposedCount
+  }, [memoryProposedCount, jwt, projectId])
+
   const reloadBrief = useCallback(() => {
     if (!jwt) return
     getProjectBrief(jwt, projectId)
@@ -109,25 +163,42 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   }, [])
 
   const reviewMemory = useCallback(
-    (memory: AgentMemory, action: "approve" | "reject") => {
+    (memory: AgentMemory, action: "approve" | "reject", supersedeHumanEdited?: boolean) => {
       if (!jwt) return
-      const prevMemories = memories
-      // Optimistic flip; revert to the pre-action snapshot on failure.
+      const original = memory
+      // Optimistic flip; revert only this row (by id) on failure — races-F5:
+      // an absolute-snapshot revert would clobber other rows that changed
+      // (from a concurrent review) while this request was in flight.
       setMemories((cur) =>
         cur.map((m) => (m.id === memory.id ? { ...m, status: action === "approve" ? "approved" : "rejected" } : m)),
       )
       void withBusyMemory(memory.id, async () => {
         try {
-          const updated = await reviewAgentMemory(jwt, projectId, memory.id, action)
+          const updated = supersedeHumanEdited
+            ? await reviewAgentMemory(jwt, projectId, memory.id, action, true)
+            : await reviewAgentMemory(jwt, projectId, memory.id, action)
           setMemories((cur) => cur.map((m) => (m.id === updated.id ? updated : m)))
+          // mem-M5: flip the matching memory.proposed chat notice, if any.
+          agentSessionStore(projectId).markMemoryReviewed(updated.id)
         } catch (err) {
-          setMemories(prevMemories)
+          setMemories((cur) => cur.map((m) => (m.id === original.id ? original : m)))
+          if (err instanceof SupersedesHumanEditedError) {
+            setSupersedePrompt({ memory: original, path: err.path ?? original.path, existingId: err.existingId })
+            return
+          }
           setError(err instanceof Error ? err.message : "Failed to review memory.")
         }
       })
     },
-    [jwt, memories, projectId, withBusyMemory],
+    [jwt, projectId, withBusyMemory],
   )
+
+  const confirmSupersede = useCallback(() => {
+    if (!supersedePrompt) return
+    const { memory } = supersedePrompt
+    setSupersedePrompt(null)
+    reviewMemory(memory, "approve", true)
+  }, [supersedePrompt, reviewMemory])
 
   const editMemory = useCallback(
     async (memory: AgentMemory, content: string) => {
@@ -163,7 +234,16 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   const reviewProposal = useCallback(
     (proposal: ProjectBriefProposal, action: "approve" | "reject") => {
       if (!jwt) return
-      const prevProposals = briefProposals
+      const original = proposal
+      // A retried approve on a proposal already marked stale clears the mark
+      // optimistically — either the retry succeeds, or the catch re-marks it.
+      setStaleProposals((cur) => {
+        if (!cur.has(proposal.id)) return cur
+        const next = new Map(cur)
+        next.delete(proposal.id)
+        return next
+      })
+      // Functional single-id revert (races-F5) — see reviewMemory above.
       setBriefProposals((cur) =>
         cur.map((p) => (p.id === proposal.id ? { ...p, status: action === "approve" ? "approved" : "rejected" } : p)),
       )
@@ -171,14 +251,27 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
         try {
           const updated = await reviewBriefProposal(jwt, projectId, proposal.id, action)
           setBriefProposals((cur) => cur.map((p) => (p.id === updated.id ? updated : p)))
+          // mem-M5: flip the matching brief.proposed chat notice, if any.
+          agentSessionStore(projectId).markBriefReviewed(updated.id)
           if (action === "approve") reloadBrief()
         } catch (err) {
-          setBriefProposals(prevProposals)
+          setBriefProposals((cur) => cur.map((p) => (p.id === original.id ? original : p)))
+          // mem-M3: a stale approve (the brief moved since this was proposed)
+          // marks the card in place instead of a generic error banner —
+          // Approve stays disabled until the proposal is dropped/re-proposed.
+          if (err instanceof VersionConflictError && action === "approve") {
+            setStaleProposals((cur) => {
+              const next = new Map(cur)
+              next.set(proposal.id, { baseVersion: err.baseVersion, currentVersion: err.currentVersion })
+              return next
+            })
+            return
+          }
           setError(err instanceof Error ? err.message : "Failed to review brief proposal.")
         }
       })
     },
-    [jwt, briefProposals, projectId, withBusyProposal, reloadBrief],
+    [jwt, projectId, withBusyProposal, reloadBrief],
   )
 
   if (!jwt) {
@@ -252,6 +345,7 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
             proposals={briefProposals}
             roleLevel={roleLevel}
             busyProposalIds={busyProposalIds}
+            staleProposals={staleProposals}
             onSaveBrief={saveBrief}
             onReloadBrief={reloadBrief}
             onApproveProposal={(p) => reviewProposal(p, "approve")}
@@ -259,6 +353,36 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           />
         </TabsContent>
       </Tabs>
+
+      {supersedePrompt && (
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setSupersedePrompt(null)
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="text-destructive">Replace the human-edited memory?</DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              <p className="text-sm">
+                Approving will replace the human-edited memory at{" "}
+                <code className="font-mono">{supersedePrompt.path}</code>. The existing human-authored
+                content will be archived.
+              </p>
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSupersedePrompt(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmSupersede}>
+                Replace it
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   )
 }

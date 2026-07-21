@@ -49,6 +49,13 @@ describe("MemoryProposalNotice", () => {
     fireEvent.click(screen.getByRole("button", { name: /Review in Memory tab/ }))
     expect(onReviewMemory).toHaveBeenCalled()
   })
+
+  it("shows a Reviewed badge instead of the jump link once status flips to reviewed (mem-M5)", () => {
+    const onReviewMemory = vi.fn()
+    render(<MemoryProposalNotice item={{ ...memoryItem, status: "reviewed" }} onReviewMemory={onReviewMemory} />)
+    expect(screen.getByText("Reviewed")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Review in Memory tab/ })).not.toBeInTheDocument()
+  })
 })
 
 describe("BriefProposalNotice", () => {
@@ -63,5 +70,11 @@ describe("BriefProposalNotice", () => {
   it('tags the notice with data-frame-type="brief.proposed" for e2e', () => {
     const { container } = render(<BriefProposalNotice item={briefItem} />)
     expect(container.querySelector('[data-frame-type="brief.proposed"]')).not.toBeNull()
+  })
+
+  it("shows a Reviewed badge instead of the jump link once status flips to reviewed (mem-M5)", () => {
+    render(<BriefProposalNotice item={{ ...briefItem, status: "reviewed" }} onReviewMemory={vi.fn()} />)
+    expect(screen.getByText("Reviewed")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Review in Memory tab/ })).not.toBeInTheDocument()
   })
 })

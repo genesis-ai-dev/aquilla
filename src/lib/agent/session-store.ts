@@ -23,7 +23,14 @@
 import { useCallback, useSyncExternalStore } from "react"
 import { runAgent as realRunAgent } from "./agent-client"
 import type { AgentRunRequest } from "./protocol"
-import { createRun, failRun, reduceRunFrame, type AgentRunUi } from "./run-state"
+import {
+  createRun,
+  failRun,
+  markBriefReviewed as markBriefReviewedInRun,
+  markMemoryReviewed as markMemoryReviewedInRun,
+  reduceRunFrame,
+  type AgentRunUi,
+} from "./run-state"
 import type { RowDecision } from "./working-set"
 
 export interface AgentSendOptions {
@@ -220,6 +227,18 @@ export class AgentSessionStore {
     const next = new Map(this.state.decided)
     for (const [key, decision] of entries) next.set(key, decision)
     this.set({ decided: next })
+  }
+
+  /** Flip a memory.proposed notice to "reviewed" across all runs (mem-M5) —
+   *  the Memory tab knows this project's store id but not which run/item the
+   *  proposal landed in, so this scans every run rather than taking a localId. */
+  markMemoryReviewed = (memoryId: string): void => {
+    this.set({ runs: this.state.runs.map((r) => markMemoryReviewedInRun(r, memoryId)) })
+  }
+
+  /** Same as markMemoryReviewed, for brief.proposed notices. */
+  markBriefReviewed = (proposalId: string): void => {
+    this.set({ runs: this.state.runs.map((r) => markBriefReviewedInRun(r, proposalId)) })
   }
 
   private async dispatch(options: AgentSendOptions): Promise<void> {

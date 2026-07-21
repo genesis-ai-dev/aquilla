@@ -98,17 +98,45 @@ export class BriefHumanOnlyError extends MemoryApiError {
   }
 }
 
-/** 409 — the brief (or memory) changed underneath an `ifMatchVersion` write. */
+/** 409 — the brief (or memory) changed underneath an `ifMatchVersion` write,
+ * or (code `conflict`) a brief proposal was approved against a stale
+ * `baseVersion` — the brief moved since the proposal was created. */
 export class VersionConflictError extends MemoryApiError {
   public currentVersion?: number
-  constructor(message = "This was changed by someone else. Reload and try again.", currentVersion?: number) {
+  public baseVersion?: number
+  constructor(
+    message = "This was changed by someone else. Reload and try again.",
+    currentVersion?: number,
+    baseVersion?: number,
+  ) {
     super(message, 409)
     this.currentVersion = currentVersion
+    this.baseVersion = baseVersion
+  }
+}
+
+/** 409 `supersedes_human_edited` — approving this proposal would overwrite a
+ * human-edited memory at the same path. The caller must get explicit user
+ * confirmation, then resend the review with `supersedeHumanEdited: true`. */
+export class SupersedesHumanEditedError extends MemoryApiError {
+  public path?: string
+  public existingId?: string
+  constructor(
+    message = "Approving will replace a human-edited memory.",
+    details?: { path?: string; existingId?: string },
+  ) {
+    super(message, 409)
+    this.path = details?.path
+    this.existingId = details?.existingId
   }
 }
 
 interface ErrorEnvelope {
-  error?: { code?: string; message?: string }
+  error?: {
+    code?: string
+    message?: string
+    details?: { path?: string; existingId?: string; baseVersion?: number; currentVersion?: number }
+  }
   currentVersion?: number
 }
 
@@ -128,8 +156,13 @@ async function parseErrorAndThrow(res: Response, fallback: string): Promise<neve
   if (res.status === 403 && code === "brief_human_only") {
     throw new BriefHumanOnlyError(message)
   }
+  if (res.status === 409 && code === "supersedes_human_edited") {
+    throw new SupersedesHumanEditedError(message, body?.error?.details)
+  }
   if (res.status === 409) {
-    throw new VersionConflictError(message, body?.currentVersion)
+    const currentVersion = body?.currentVersion ?? body?.error?.details?.currentVersion
+    const baseVersion = body?.error?.details?.baseVersion
+    throw new VersionConflictError(message, currentVersion, baseVersion)
   }
   throw new MemoryApiError(`${fallback}: HTTP ${res.status} — ${message}`, res.status)
 }
@@ -171,16 +204,23 @@ export async function proposeAgentMemory(
   return (await res.json()) as AgentMemory
 }
 
-/** POST /api/v2/projects/:projectId/agent-memory/:id/review (PROJECT_LEAD+). */
+/** POST /api/v2/projects/:projectId/agent-memory/:id/review (PROJECT_LEAD+).
+ * On a 409 `supersedes_human_edited`, resend with `supersedeHumanEdited: true`
+ * after explicit user confirmation — never resend it automatically. */
 export async function reviewAgentMemory(
   jwt: string,
   projectId: string,
   memoryId: string,
   action: MemoryReviewAction,
+  supersedeHumanEdited?: boolean,
 ): Promise<AgentMemory> {
   const res = await fetchWithTimeout(
     `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/agent-memory/${encodeURIComponent(memoryId)}/review`,
-    { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ action }) },
+    {
+      method: "POST",
+      headers: authHeaders(jwt),
+      body: JSON.stringify(supersedeHumanEdited ? { action, supersedeHumanEdited } : { action }),
+    },
   )
   if (!res.ok) return parseErrorAndThrow(res, "review memory failed")
   return (await res.json()) as AgentMemory

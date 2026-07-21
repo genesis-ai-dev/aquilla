@@ -5,6 +5,7 @@ import {
   Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines,
 } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import {
@@ -219,13 +220,6 @@ export function ProjectSettings() {
     returnParam && returnParam.startsWith("/") && !returnParam.startsWith("//")
       ? returnParam
       : `/project/${id}/editor`
-
-  const [conflictBy, setConflictBy] = useState<string | null>(null)
-  useEffect(() => {
-    if (!conflictBy) return
-    const t = setTimeout(() => setConflictBy(null), 4000)
-    return () => clearTimeout(t)
-  }, [conflictBy])
 
   const {
     canEdit: canEditShared,
@@ -510,8 +504,8 @@ export function ProjectSettings() {
   }, [session?.username, canEditShared])
   // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
-  // like the sibling `conflictBy` notice above. The modal/page itself stays
-  // open on save — only an explicit "Save and close" leaves it.
+  // after a few seconds. The modal/page itself stays open on save — only an
+  // explicit "Save and close" leaves it.
   const [savedMessage, setSavedMessage] = useState<string | null>(null)
   const savedMessageTimerRef = useRef<number | null>(null)
   useEffect(() => () => {
@@ -652,7 +646,9 @@ export function ProjectSettings() {
       if (Object.keys(sharedUpdates).length > 0) {
         const out = await patchShared(sharedUpdates)
         if (out.kind === "conflict") {
-          setConflictBy(out.latest.updatedBy?.username ?? "another collaborator")
+          toast.warning(
+            `Synced settings update from ${out.latest.updatedBy?.username ?? "another collaborator"}.`,
+          )
           setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
           return false
         }
@@ -1864,15 +1860,6 @@ export function ProjectSettings() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {conflictBy && (
-        <div
-          role="status"
-          className="fixed bottom-4 right-4 z-60 rounded border bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-md dark:bg-amber-950 dark:text-amber-100"
-        >
-          Synced settings update from <span className="font-medium">{conflictBy}</span>.
-        </div>
-      )}
     </>
   )
 }

@@ -26,6 +26,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Toaster } from "@/components/ui/sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
@@ -159,6 +160,7 @@ export default function App() {
         <GlobalAudioShortcuts />
         <VersionBadge />
         <UpdateBanner />
+        <Toaster />
       </SyncingProvider>
     </TooltipProvider>
   )

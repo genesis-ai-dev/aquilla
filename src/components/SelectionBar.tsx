@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Languages, Sparkles, Wand2, X } from "lucide-react"
+import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
 import { type CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
@@ -60,7 +61,6 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
-  const [toastMsg, setToastMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (selected.size === 0) return
@@ -78,11 +78,6 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [selected.size])
-
-  const showToast = useCallback((msg: string) => {
-    setToastMsg(msg)
-    setTimeout(() => setToastMsg(null), 3000)
-  }, [])
 
   const selectedCells = useMemo(() => {
     return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected))
@@ -185,7 +180,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
       const msg = alreadyValidated > 0
         ? `Validated ${validated} cell${validated === 1 ? "" : "s"} (${alreadyValidated} already validated)`
         : `Validated ${validated} cell${validated === 1 ? "" : "s"}`
-      showToast(msg)
+      toast.success(msg)
     } finally {
       setRunning({ kind: "idle" })
     }
@@ -210,7 +205,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
         })
         removed++
       }
-      showToast(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
+      toast.success(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
     } finally {
       setRunning({ kind: "idle" })
     }
@@ -229,16 +224,6 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
   if (selectedCells.length === 0) return null
 
   return (
-    <>
-    {toastMsg && (
-      <div
-        role="status"
-        aria-live="polite"
-        className="pointer-events-none fixed bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-lg border bg-card px-4 py-2 text-xs font-medium ring-1 ring-foreground/10"
-      >
-        {toastMsg}
-      </div>
-    )}
     <div
       className={cn(
         "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
@@ -393,6 +378,5 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
         </Button>
       </AppTooltip>
     </div>
-    </>
   )
 }

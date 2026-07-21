@@ -16,8 +16,7 @@ import {
   STATUS_PIE_WEDGE_RADIUS,
   statusPieWedgePath,
 } from "@/components/status-pie-math"
-
-export type StatusPieTone = "idle" | "partial" | "others"
+import type { StatusPieTone } from "@/components/status-pie-validation"
 
 function isFullQuorum(progress: number): boolean {
   return progress >= 1 - 1e-6
@@ -27,22 +26,15 @@ function CompleteStatusPieGlyph({
   sizePx,
   strokeColor,
   className,
-  interactiveHover = false,
 }: {
   sizePx: number
   strokeColor?: string
   className?: string
-  interactiveHover?: boolean
 }) {
   return (
     <div
       className={cn(
         "relative flex size-full items-center justify-center text-green-600 dark:text-green-500",
-        interactiveHover && [
-          "opacity-90 transition-[opacity,filter] duration-150",
-          "group-hover/validate:opacity-100 group-hover/validate:brightness-[0.92]",
-          "dark:opacity-90 dark:group-hover/validate:opacity-100 dark:group-hover/validate:brightness-110",
-        ],
         className,
       )}
       style={strokeColor ? { color: strokeColor } : undefined}
@@ -52,7 +44,9 @@ function CompleteStatusPieGlyph({
         height={sizePx}
         viewBox={`0 0 ${STATUS_PIE_VIEWBOX} ${STATUS_PIE_VIEWBOX}`}
         fill="none"
-        className="workflow-state-icon"
+        // `size-full` both fills the tile and opts out of Button's
+        // `[&_svg:not([class*='size-'])]:size-4` override.
+        className="workflow-state-icon size-full"
         aria-hidden
       >
         <circle
@@ -78,37 +72,24 @@ function CompleteStatusPieGlyph({
         />
       </svg>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <Check className="size-2 text-white" strokeWidth={3} aria-hidden />
+        <Check className="size-3 text-white" strokeWidth={3} aria-hidden />
       </div>
     </div>
   )
 }
 
-/** Same geometry at rest and hover — only color / opacity shifts. */
-function progressPieToneClass(tone: StatusPieTone, hoverAffordance: boolean): string {
-  const hover = hoverAffordance
-    ? cn(
-        "transition-[opacity,filter] duration-150",
-        "group-hover/validate:opacity-100 group-hover/validate:brightness-[0.88]",
-        "dark:group-hover/validate:opacity-95 dark:group-hover/validate:brightness-[1.12]",
-      )
-    : ""
-
+/** Rest opacity only — no filter/brightness (those subpixel-shift the glyph on hover). */
+function progressPieToneClass(tone: StatusPieTone): string {
   if (tone === "partial") {
     // Linear yellow — you validated, quorum still open
-    return cn("opacity-90", hover, "dark:opacity-80")
+    return "opacity-90 dark:opacity-80"
   }
   if (tone === "others") {
     // Linear steel grey — others validated, you have not
-    return cn("opacity-85", hover, "dark:opacity-70")
+    return "opacity-85 dark:opacity-70"
   }
   // Linear pale grey — empty / idle
-  return cn(
-    "opacity-55",
-    hoverAffordance && "group-hover/validate:opacity-75",
-    hover,
-    "dark:opacity-45 dark:group-hover/validate:opacity-65",
-  )
+  return "opacity-55 dark:opacity-45"
 }
 
 function progressPieToneColor(tone: StatusPieTone, progress: number): string {
@@ -151,22 +132,19 @@ export function StatusPie({
   const hoverAffordance =
     hoverP !== null && Math.abs(hoverP - p) > 1e-6
   // Done preview only when progress actually changes into a full quorum
-  // (e.g. last click). Already-full grey (full-others) stays grey on hover.
+  // (e.g. last click). Preview glyph stays grey — green only once complete.
   const hoverShowsComplete =
     !complete && hoverAffordance && hoverP !== null && isFullQuorum(hoverP)
   const hoverShowsWedge =
     hoverAffordance && hoverP !== null && hoverP > 0 && !isFullQuorum(hoverP)
-  const box = sizePx + 6
+  // Tile matches the glyph — padding comes from the surrounding button only.
+  const box = sizePx
   const tileStyle: CSSProperties = { width: box, height: box }
 
   if (complete) {
     return (
       <div className={cn("relative shrink-0", className)} style={tileStyle}>
-        <CompleteStatusPieGlyph
-          sizePx={sizePx}
-          strokeColor={stroke}
-          interactiveHover
-        />
+        <CompleteStatusPieGlyph sizePx={sizePx} strokeColor={stroke} />
       </div>
     )
   }
@@ -190,7 +168,7 @@ export function StatusPie({
     >
       <div
         className={cn(
-          "flex items-center justify-center transition-opacity duration-150",
+          "flex size-full items-center justify-center",
           hoverShowsComplete && "group-hover/validate:opacity-0",
         )}
       >
@@ -199,9 +177,11 @@ export function StatusPie({
           height={sizePx}
           viewBox={`0 0 ${STATUS_PIE_VIEWBOX} ${STATUS_PIE_VIEWBOX}`}
           fill="none"
+          // `size-full` both fills the tile and opts out of Button's
+          // `[&_svg:not([class*='size-'])]:size-4` override.
           className={cn(
-            "workflow-state-icon",
-            progressPieToneClass(tone, hoverAffordance && !hoverShowsComplete),
+            "workflow-state-icon size-full",
+            progressPieToneClass(tone),
           )}
           style={{ color: toneColor }}
           aria-hidden
@@ -220,28 +200,23 @@ export function StatusPie({
             <path
               d={wedgeD}
               fill="currentColor"
-              className={cn(
-                hoverShowsWedge && "transition-opacity duration-150 group-hover/validate:opacity-0",
-              )}
+              className={cn(hoverShowsWedge && "group-hover/validate:opacity-0")}
             />
           ) : null}
           {previewD ? (
             <path
               d={previewD}
               fill="currentColor"
-              className="opacity-0 transition-opacity duration-150 group-hover/validate:opacity-100"
+              className="opacity-0 group-hover/validate:opacity-100"
             />
           ) : null}
         </svg>
       </div>
       {hoverShowsComplete ? (
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-150",
-            "group-hover/validate:opacity-100",
-          )}
-        >
-          <CompleteStatusPieGlyph sizePx={sizePx} />
+        <div className="pointer-events-none absolute inset-0 opacity-0 group-hover/validate:opacity-100">
+          {/* Grey check until the cell is actually complete — don't flash green
+              for an unvalidated hover preview. */}
+          <CompleteStatusPieGlyph sizePx={sizePx} strokeColor={STATUS_PIE_IDLE} />
         </div>
       ) : null}
       {children ? (
@@ -251,47 +226,4 @@ export function StatusPie({
       ) : null}
     </div>
   )
-}
-
-export function validationProgress(
-  validatorCount: number,
-  requirement: number,
-): number {
-  if (requirement <= 0) return 0
-  return Math.min(1, validatorCount / requirement)
-}
-
-/** Quorum fill after the user adds their validation (one click). */
-export function validationProgressAfterClick(
-  validatorCount: number,
-  requirement: number,
-): number {
-  const req = Math.max(1, requirement)
-  return Math.min(1, (validatorCount + 1) / req)
-}
-
-/** Quorum fill after the user removes their validation (one click). */
-export function validationProgressAfterUnvalidate(
-  validatorCount: number,
-  requirement: number,
-): number {
-  const req = Math.max(1, requirement)
-  return Math.max(0, (validatorCount - 1) / req)
-}
-
-export function isFullValidationStatus(
-  vs: "none" | "self" | "others" | "full" | "full-self" | "full-others" | "empty",
-): boolean {
-  // Purple "done" only when you personally validated and quorum is met.
-  return vs === "full-self"
-}
-
-export function validationPieTone(
-  vs: "none" | "self" | "others" | "full" | "full-self" | "full-others" | "empty",
-): StatusPieTone {
-  // Colored fill only when you personally validated but quorum isn't met yet.
-  // Others-only progress (including full-others) stays grey until full-self.
-  if (vs === "self") return "partial"
-  if (vs === "others" || vs === "full-others" || vs === "full") return "others"
-  return "idle"
 }

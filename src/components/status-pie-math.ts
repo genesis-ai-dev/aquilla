@@ -14,8 +14,6 @@ export const STATUS_PIE_COMPLETE_INNER_C = 2 * Math.PI * STATUS_PIE_COMPLETE_INN
 
 /** Matches former CheckCheck validation icon: text-green-600 / dark:text-green-500. */
 export const STATUS_PIE_COMPLETE_STROKE = "var(--color-green-600)"
-export const STATUS_PIE_COMPLETE_BACKGROUND =
-  "color-mix(in oklch, var(--color-green-600) 25%, transparent)"
 
 /** Linear-style workflow palette. */
 export const STATUS_PIE_IDLE = "#BEC2C8"
@@ -23,6 +21,34 @@ export const STATUS_PIE_OTHERS = "#95A2B3"
 export const STATUS_PIE_PARTIAL = "#F2C94C"
 /** Linear cyan — used at ~¾ (75%) quorum progress. */
 export const STATUS_PIE_CYAN = "#5DB1C9"
+
+/** Soft hover well — Linear-style wash (~15% of the pie accent). */
+export function statusPieHoverBackground(color: string, amount = 15): string {
+  return `color-mix(in srgb, ${color} ${amount}%, transparent)`
+}
+
+/** Linear “In Progress” / Fixed well behind the yellow pie. */
+export const STATUS_PIE_PARTIAL_BACKGROUND = statusPieHoverBackground(STATUS_PIE_PARTIAL)
+
+export const STATUS_PIE_COMPLETE_BACKGROUND = statusPieHoverBackground(
+  STATUS_PIE_COMPLETE_STROKE,
+)
+
+export type StatusPieAccentTone = "idle" | "partial" | "others"
+
+/** Main fill color for a pie state (matches StatusPie rendering). */
+export function statusPieAccentColor(
+  tone: StatusPieAccentTone,
+  progress: number,
+  complete = false,
+): string {
+  // Green well whenever quorum is met (full-self or full-others).
+  if (complete) return STATUS_PIE_COMPLETE_STROKE
+  if (progress >= 0.75 - 1e-6 && progress < 1 - 1e-6) return STATUS_PIE_CYAN
+  if (tone === "partial") return STATUS_PIE_PARTIAL
+  if (tone === "others") return STATUS_PIE_OTHERS
+  return STATUS_PIE_IDLE
+}
 
 const INNER_C = 2 * Math.PI * STATUS_PIE_INNER_R
 /** Matches Linear's inner dash length (~97% of circumference). */

@@ -40,7 +40,19 @@ import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
-import { StatusPie, isFullValidationStatus, validationPieTone, validationProgress, validationProgressAfterClick, validationProgressAfterUnvalidate } from "./StatusPie"
+import { StatusPie } from "./StatusPie"
+import {
+  isFullValidationStatus,
+  statusPieValidationButtonClass,
+  validationPieTone,
+  validationProgress,
+  validationProgressAfterClick,
+  validationProgressAfterUnvalidate,
+} from "./status-pie-validation"
+import {
+  statusPieAccentColor,
+  statusPieHoverBackground,
+} from "./status-pie-math"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
@@ -4006,6 +4018,11 @@ function EditorRow({
       ? validationProgressAfterUnvalidate(displayedValidators.length, validationRequirement)
       : validationProgressAfterClick(displayedValidators.length, validationRequirement)
     : null
+  // Hover well matches the pie's *current* accent (idle grey stays grey —
+  // don't force yellow just because a click would add your validation).
+  const validationHoverBg = statusPieHoverBackground(
+    statusPieAccentColor(pieTone, validationPieProgress, validationComplete),
+  )
 
   const toggleMyValidation = useCallback(() => {
     emitValidationChange(!isSelfValidated)
@@ -4328,7 +4345,7 @@ function EditorRow({
     <Button
       type="button"
       variant="ghost"
-      size="icon-xs"
+      size="icon-sm"
       data-showcase="cell.health"
       // FRO-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
@@ -4349,11 +4366,13 @@ function EditorRow({
         e.stopPropagation()
         onClick()
       }}
-      className={cn(
-        "group/validate size-6 shrink-0 rounded-md p-0",
-        "hover:bg-transparent active:bg-transparent aria-expanded:bg-transparent",
-        "hover:!bg-transparent active:!bg-transparent",
-      )}
+      className={cn("group/validate shrink-0", statusPieValidationButtonClass)}
+      style={
+        {
+          transform: "none",
+          "--status-pie-hover-bg": validationHoverBg,
+        } as React.CSSProperties
+      }
       disabled={!canValidate}
     >
       <StatusPie
@@ -4361,6 +4380,7 @@ function EditorRow({
         tone={pieTone}
         complete={validationComplete}
         hoverPreviewProgress={validationHoverPreview}
+        sizePx={18}
         className="pointer-events-none"
       />
     </Button>

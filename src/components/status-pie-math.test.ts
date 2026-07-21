@@ -25,27 +25,27 @@ describe("statusPieInnerStroke", () => {
 
 describe("validationProgressAfterClick", () => {
   it("steps 0% → 50% when requirement is 2", async () => {
-    const { validationProgressAfterClick } = await import("@/components/StatusPie")
+    const { validationProgressAfterClick } = await import("@/components/status-pie-validation")
     expect(validationProgressAfterClick(0, 2)).toBe(0.5)
   })
 
   it("steps 50% → 100% when requirement is 2", async () => {
-    const { validationProgressAfterClick } = await import("@/components/StatusPie")
+    const { validationProgressAfterClick } = await import("@/components/status-pie-validation")
     expect(validationProgressAfterClick(1, 2)).toBe(1)
   })
 })
 
 describe("isFullValidationStatus / validationPieTone", () => {
-  it("treats only full-self as the done glyph", async () => {
-    const { isFullValidationStatus } = await import("@/components/StatusPie")
+  it("treats quorum-met statuses as the done glyph", async () => {
+    const { isFullValidationStatus } = await import("@/components/status-pie-validation")
     expect(isFullValidationStatus("full-self")).toBe(true)
-    expect(isFullValidationStatus("full-others")).toBe(false)
-    expect(isFullValidationStatus("full")).toBe(false)
+    expect(isFullValidationStatus("full-others")).toBe(true)
+    expect(isFullValidationStatus("full")).toBe(true)
     expect(isFullValidationStatus("others")).toBe(false)
   })
 
   it("colors only when you validated and quorum is still open", async () => {
-    const { validationPieTone } = await import("@/components/StatusPie")
+    const { validationPieTone } = await import("@/components/status-pie-validation")
     expect(validationPieTone("self")).toBe("partial")
     expect(validationPieTone("others")).toBe("others")
     expect(validationPieTone("full-others")).toBe("others")

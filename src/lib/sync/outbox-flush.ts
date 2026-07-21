@@ -58,6 +58,20 @@ export interface StaleSiblingEntry {
   cellId: string | null
 }
 
+/** AQU-633: an event the server refused with a 403 (non-retryable) and that the
+ *  flusher quarantined. Carries the server's `reason` so the UI can tell the
+ *  user WHY (e.g. "file '…' not in scope", "self-validation is not allowed")
+ *  instead of silently reverting the optimistic change behind a bare "N failed"
+ *  pill. `kind` lets the caller tailor copy per event type. */
+export interface ForbiddenEntry {
+  id: string
+  status: number
+  reason: string
+  kind: string
+  fileId: string | null
+  cellId: string | null
+}
+
 export interface FlushDeps {
   /** Mint a sync-token scoped to the EVENT's own project + file — not the
    *  workspace's current project. The outbox is a single global store shared

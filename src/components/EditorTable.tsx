@@ -120,6 +120,7 @@ import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
+import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
@@ -3092,7 +3093,12 @@ function EditorRow({
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
-  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
+  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording, myScopes } = useEditorActions()
+  // AQU-633: a scoped member can only validate cells in their assigned lane/file.
+  // Combine the role capability with the per-cell scope check so an out-of-scope
+  // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
+  // members (empty scopes) → always in scope, so this is a no-op for them.
+  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
@@ -3406,7 +3412,18 @@ function EditorRow({
       // floor already required to reach this commit path), so anyone who can
       // edit can validate; guard defensively anyway. Skip empty commits so
       // clearing a cell doesn't mark an empty row "validated".
-      if (value.trim() && canValidate && canPerform("cell.validate", project.syncRole?.level ?? null)) {
+      // AQU-633: auto-validate-on-edit IS self-validation (you just authored the
+      // cell), so honor the project's allowSelfValidation rule. When it's off,
+      // your own work must wait for someone else — don't auto-validate. The
+      // server's self-check reads cells.last_editor, which isn't committed yet
+      // for this same-action commit+validate, so it can't catch this; the gate
+      // has to be here. Default/undefined = allowed, preserving codex behavior.
+      if (
+        value.trim() &&
+        canValidate &&
+        project.allowSelfValidation !== false &&
+        canPerform("cell.validate", project.syncRole?.level ?? null)
+      ) {
         void emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,
@@ -3435,7 +3452,7 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, canValidate, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -3733,6 +3750,14 @@ function EditorRow({
       console.warn("[validate] aborting: role too low for", validated ? "cell.validate" : "cell.unvalidate")
       return
     }
+    // AQU-633: additive lane/file scope guard. A scoped member's validate on an
+    // out-of-scope cell is a guaranteed 403 — don't optimistically flip then
+    // revert. The toggle is already greyed (canValidateThisCell); this covers
+    // keyboard/programmatic triggers too. Unscoped members are always in scope.
+    if (!isInMemberScope(myScopes, cell.fileId, activeLane)) {
+      console.warn("[validate] aborting: cell out of the caller's assigned scope")
+      return
+    }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
     setOptimisticSelfValidation(validated)
@@ -3755,7 +3780,7 @@ function EditorRow({
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback(() => {
@@ -3965,7 +3990,7 @@ function EditorRow({
     // on pointer press. The trigger button's own click handler performs the
     // validation, so the popover only needs to stay closed on first touch.
     if (details.reason === "trigger-press" || details.reason === "keyboard") {
-      if (canValidate && !isSelfValidated) {
+      if (canValidateThisCell && !isSelfValidated) {
         details.cancel()
         return
       }
@@ -4267,7 +4292,11 @@ function EditorRow({
   const cellRef = cell.context?.trim()
     || cell.globalReferences?.[0]?.trim()
     || `row ${rowIndex + 1}`
-  const validationTooltip = canValidate ? "Not validated — click to validate" : "Validation unavailable"
+  const validationTooltip = canValidateThisCell
+    ? "Not validated — click to validate"
+    : canValidate
+      ? "Outside your assigned files or lanes" // AQU-633: scoped-out, not a role gate
+      : "Validation unavailable"
   type PreventableReactEvent<T> = React.SyntheticEvent<T> & {
     preventBaseUIHandler?: () => void
   }
@@ -4306,7 +4335,7 @@ function EditorRow({
         vs === "others" && "hover:text-green-500",
         vs === "full-others" && "hover:text-green-500",
       )}
-      disabled={!canValidate}
+      disabled={!canValidateThisCell}
     >
       <HealthRing
         health={healthValue}
@@ -4419,7 +4448,7 @@ function EditorRow({
                 delay={400}
                 closeDelay={100}
                 render={renderValidationButton(
-                  canValidate && !isSelfValidated
+                  canValidateThisCell && !isSelfValidated
                     ? () => emitValidationChange(true)
                     : undefined,
                 )}
@@ -4469,7 +4498,7 @@ function EditorRow({
           {hasContent && !hasValidatorInfo && (
             <AppTooltip content={validationTooltip}>
               {renderValidationButton(
-                canValidate && !isSelfValidated
+                canValidateThisCell && !isSelfValidated
                   ? () => emitValidationChange(true)
                   : undefined,
               )}

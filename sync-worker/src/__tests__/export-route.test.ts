@@ -253,3 +253,21 @@ describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
     expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")
   })
 })
+
+describe("custom source preservation (AQU-635)", () => {
+  it("returns the exact original text without pretending target injection is lossless", async () => {
+    const raw = "kind|source|target\nheading|Opening|Ouverture\n"
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "custom-original", raw_source: raw },
+      }),
+      SNAPSHOTS: makeStubBucket(),
+    }
+
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(await res?.text()).toBe(raw)
+    expect(res?.headers.get("X-Export-Mode")).toBe("raw-original")
+  })
+})

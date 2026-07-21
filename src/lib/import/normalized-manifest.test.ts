@@ -200,4 +200,44 @@ describe("normalized import manifest", () => {
       warningCounts: {},
     })
   })
+
+  it("persists a reviewed custom recipe and stable record locators", () => {
+    const recipe = {
+      version: 1 as const,
+      id: "ai-recipe-1",
+      name: "Pipe records",
+      inputFormat: "legacy-text",
+      strategy: "records" as const,
+      config: { recordMode: "delimited", delimiter: "|" },
+      proposedBy: "ai" as const,
+    }
+    const manifest = normalizeTranslatableStrings([{
+      id: "one",
+      original: "Heading",
+      translated: "Titre",
+      context: "Record 4",
+      group: "record-4",
+      type: "heading",
+      metadata: { aquillaRecipe: { recipeId: recipe.id, record: 4, field: "source" } },
+    }], {
+      fileName: "legacy.weird",
+      fileType: "custom",
+      profileId: `agentic:${recipe.id}`,
+      deterministic: false,
+      fidelity: "content-only",
+      recipe,
+    })
+
+    expect(manifest.units[0]).toMatchObject({
+      unitKey: "custom:ai-recipe-1:4",
+      displayLabel: null,
+      address: { scheme: "custom", recipeId: "ai-recipe-1", record: 4 },
+      sourceLocator: { kind: "recipe", recipeId: "ai-recipe-1", record: 4, field: "source" },
+    })
+    expect(summarizeNormalizedImport(manifest)).toMatchObject({
+      deterministic: false,
+      fidelity: "content-only",
+      recipe,
+    })
+  })
 })

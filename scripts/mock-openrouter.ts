@@ -101,6 +101,30 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex]?.content ?? "" : ""
   const userText = typeof lastUser === "string" ? lastUser : ""
 
+  // Unified importer classification: the browser sends a sample and asks for
+  // a constrained declarative recipe. Return data only; the client validates
+  // and applies it locally to the complete file.
+  if (/classification step inside a file importer/i.test(userText)) {
+    return respond(JSON.stringify({
+      category: "scripture",
+      confidence: 0.98,
+      explanation: "Pipe-delimited bilingual Scripture records with explicit structural types.",
+      recipe: {
+        name: "Pipe-delimited Scripture records",
+        inputFormat: "legacy-pipe-records",
+        config: {
+          recordMode: "delimited",
+          delimiter: "pipe",
+          hasHeader: true,
+          sourceField: "source",
+          targetField: "target",
+          referenceField: "reference",
+          typeField: "kind",
+        },
+      },
+    }))
+  }
+
   // The draft tool's INTERNAL model call: numbered source segments in, strict
   // [{i,t}] JSON out. Detected by the user-turn shape the tool builds.
   const translateMatch = userText.match(/^Translate these \d+ segments:/)

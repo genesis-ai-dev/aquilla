@@ -1,6 +1,6 @@
 // PUT /api/v1/projects/:projectId/files/:fileId/source
 //
-// Accepts the raw .docx (or .pptx) bytes from the client during import and
+// Accepts immutable original bytes from the client during import and
 // stores them in the SNAPSHOTS R2 bucket. Writes a file_source_blobs pointer
 // row so downstream export/diff tooling can retrieve the original without the
 // client re-uploading it.
@@ -33,7 +33,21 @@ export function sourceObjectKey(
   fileId: string,
   format: string,
 ): string {
-  const ext = format === "pptx" ? "pptx" : "docx"
+  const knownExtensions: Record<string, string> = {
+    docx: "docx",
+    pptx: "pptx",
+    usfm: "usfm",
+    md: "md",
+    txt: "txt",
+    vtt: "vtt",
+    srt: "srt",
+    xliff: "xlf",
+    tmx: "tmx",
+    csv: "csv",
+    tsv: "tsv",
+    "custom-original": "bin",
+  }
+  const ext = knownExtensions[format] ?? "bin"
   return `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/source/original.${ext}`
 }
 
@@ -72,8 +86,10 @@ export async function handleSourceUploadRequest(
     )
   }
 
-  const format =
-    request.headers.get("X-Source-Format") === "pptx" ? "pptx" : "docx"
+  const format = request.headers.get("X-Source-Format")?.trim().toLowerCase() ?? ""
+  if (!/^[a-z0-9][a-z0-9+._-]{0,63}$/.test(format)) {
+    return withCors(new Response("invalid source format", { status: 400 }), request)
+  }
 
   // Reject oversize uploads before buffering the whole body when the client
   // advertises the size; the post-buffer check below is the backstop.
@@ -91,10 +107,20 @@ export async function handleSourceUploadRequest(
   }
 
   const key = sourceObjectKey(env, projectId, fileId, format)
-  const contentType =
-    format === "pptx"
-      ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-      : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  const contentTypes: Record<string, string> = {
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    usfm: "text/plain; charset=utf-8",
+    md: "text/markdown; charset=utf-8",
+    txt: "text/plain; charset=utf-8",
+    vtt: "text/vtt; charset=utf-8",
+    srt: "application/x-subrip; charset=utf-8",
+    xliff: "application/xliff+xml",
+    tmx: "application/xml",
+    csv: "text/csv; charset=utf-8",
+    tsv: "text/tab-separated-values; charset=utf-8",
+  }
+  const contentType = contentTypes[format] ?? "application/octet-stream"
 
   await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
 

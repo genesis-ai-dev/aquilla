@@ -45,7 +45,7 @@ import {
   type ParatextPlan,
   prepareEBibleTargetImport,
   applyEBibleTargetImport,
-  parseFile,
+  prepareImportFile,
   type EBibleProgress,
   type EBibleTargetProgress,
   type EBibleMatchResult,
@@ -55,6 +55,7 @@ import {
   type SourceCellRef,
   type ImportResult,
 } from "@/lib/import"
+import type { PreparedImportFile } from "@/lib/import/import-service"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
 import { formatBytesProgress } from "@/lib/format-bytes"
@@ -111,6 +112,8 @@ interface ImportDialogProps {
   targetLanguage: string
   /** Active target-lane storage key. Empty means the project default lane. */
   targetLang?: string
+  /** Identity JWT used only when an unknown text format needs AI analysis. */
+  identityToken?: string
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean }) => void | Promise<void>
@@ -173,6 +176,7 @@ export function ImportDialog({
   sourceLanguage,
   targetLanguage,
   targetLang,
+  identityToken,
   getToken,
   onImported,
   ttsSettings,
@@ -464,6 +468,7 @@ export function ImportDialog({
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
             targetLang={targetLang}
+            identityToken={identityToken}
             getToken={getToken}
             ttsSettings={ttsSettings}
             onCastUpdated={onCastUpdated}
@@ -917,6 +922,7 @@ interface UploadPanelProps {
   sourceLanguage: string
   targetLanguage: string
   targetLang?: string
+  identityToken?: string
   getToken: (fileId: string) => Promise<string | null>
   /** AQU-277: third argument carries skipped books for partial Paratext imports. */
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
@@ -951,7 +957,7 @@ function fileExts(list: File[]): string {
   return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -994,7 +1000,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doImportFiles(list)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision]
   )
 
   /** Inner helper: import a resolved list of files (after collision resolution).
@@ -1025,14 +1031,20 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
       // Parse text files client-side for the preview.
       const allParsedResults: ImportResult[] = []
+      const preparedByFile = new Map<File, PreparedImportFile>()
       if (textFiles.length > 0 && onPreview) {
         try {
           for (const file of textFiles) {
-            setPhase(`Reading ${file.name}…`)
-            const ft = detectFileType(file.name)
-            if (!ft) continue
-            const results = await parseFile(file, ft)
-            allParsedResults.push(...results)
+            const knownType = detectFileType(file.name)
+            setPhase(knownType ? `Reading ${file.name}…` : `Analyzing ${file.name}…`)
+            const prepared = await prepareImportFile(file, {
+              projectId,
+              identityToken,
+              sourceLanguage,
+              targetLanguage,
+            })
+            preparedByFile.set(file, prepared)
+            allParsedResults.push(...prepared.results)
           }
         } catch (err) {
           posthog.captureException(err, { import_stage: "parse", project_id: projectId, file_exts: fileExts(list) })
@@ -1053,7 +1065,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         // Hand off to parent to show the preview screen.
         // The commit closure does the actual upload.
         onPreview(allParsedResults, async () => {
-          await doCommit(list)
+          await doCommit(list, preparedByFile)
         })
         return
       }
@@ -1062,12 +1074,12 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, onPreview]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
   const doCommit = useCallback(
-    async (list: File[]) => {
+    async (list: File[], preparedByFile?: ReadonlyMap<File, PreparedImportFile>) => {
       setImporting(true)
       setProgress(null)
       setPhase("")
@@ -1098,6 +1110,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             sourceLanguage,
             targetLanguage,
             targetLang,
+            identityToken,
             getToken,
             onCellEnqueued: (count, total) => {
               const p = `Uploading ${file.name}`
@@ -1109,7 +1122,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               setProgress(next)
               onCommitProgress?.(next)
             },
-          })
+          }, preparedByFile?.get(file))
           bytesBefore += file.size || 0
           allRefs.push(...refs)
           allSpeakerPairs.push(...speakerPairs)
@@ -1150,7 +1163,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -1238,7 +1251,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 type="file"
                 multiple
                 className="hidden"
-                accept=".md,.markdown,.doc,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.usx,.zip,.xlf,.xliff,.tmx,.csv,.tsv,.mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov,.webm,.mkv"
                 onChange={handleFileInput}
               />
             </Button>
@@ -1261,6 +1273,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             <p><span className="font-medium text-foreground/70">Documents</span> — DOC, DOCX, TXT, MD, PPTX</p>
             <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT</p>
             <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
+            <p><span className="font-medium text-foreground/70">Other text formats</span> — analyzed with AI before you confirm</p>
           </div>
         </>
       )}

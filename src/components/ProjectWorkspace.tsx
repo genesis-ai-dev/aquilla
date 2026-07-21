@@ -4909,6 +4909,7 @@ export function ProjectWorkspace() {
           getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
           targetLang={activeLane}
+          identityToken={frontierSession?.jwt}
           onImported={handleImported}
           sourceCells={importSourceCells}
           ttsSettings={tts.settings}

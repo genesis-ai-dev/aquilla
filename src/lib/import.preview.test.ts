@@ -51,6 +51,8 @@ describe("parseFile — parse phase only (no upload)", () => {
     expect(results[0].name).toBe("sample.txt")
     expect(results[0].strings.length).toBeGreaterThan(0)
     expect(results[0].strings[0].original).toMatch(/Hello world/)
+    expect(results[0].rawSourceFormat).toBe("txt")
+    expect(new TextDecoder().decode(results[0].rawBytes!)).toBe("Hello world\n\nSecond paragraph\n")
     // No network call during parse.
     expect(captured).toHaveLength(0)
   })
@@ -71,6 +73,8 @@ describe("parseFile — parse phase only (no upload)", () => {
     expect(results[0].strings).toHaveLength(2)
     expect(results[0].strings[0].original).toBe("First cue text")
     expect(results[0].strings[0].type).toBe("cue")
+    expect(results[0].rawSourceFormat).toBe("vtt")
+    expect(results[0].rawBytes).toBeInstanceOf(ArrayBuffer)
     expect(captured).toHaveLength(0)
   })
 

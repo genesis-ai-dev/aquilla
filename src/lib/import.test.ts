@@ -3,8 +3,10 @@
 // and assert the request shape (file metadata + anchor-chain order).
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
+import "fake-indexeddb/auto"
 import { importFile, emitParsedFile } from "./import"
 import type { TranslatableString } from "./parsers/types"
+import { peekOutboxBatch, resetOutboxConnectionForTests } from "./sync/outbox"
 
 interface CapturedBody {
   projectId: string
@@ -16,11 +18,21 @@ interface CapturedBody {
 
 let captured: CapturedBody[]
 
-beforeEach(() => {
+beforeEach(async () => {
+  await resetOutboxConnectionForTests()
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+    request.onblocked = () => resolve()
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error)
+  })
   captured = []
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.body instanceof ArrayBuffer) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }
       const body = JSON.parse(String(init?.body)) as CapturedBody
       captured.push(body)
       return new Response(JSON.stringify({ accepted: body.cells.length, fileId: body.fileId }), {
@@ -31,7 +43,8 @@ beforeEach(() => {
   )
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await resetOutboxConnectionForTests()
   vi.unstubAllGlobals()
 })
 
@@ -88,5 +101,34 @@ describe("import — bulk upload", () => {
     expect(captured[1].complete).toBe(true)
     expect(captured[0].file?.name).toBe("notes.txt")
     expect(captured[0].cells.length).toBe(refs[0].cellCount)
+  })
+
+  it("writes bilingual target values to the selected lane against the paired source cells", async () => {
+    await emitParsedFile(
+      {
+        name: "memory.xlf",
+        strings: [
+          { id: "unit-1", original: "Hello", translated: "Bonjour", context: "1", group: "1", type: "text" },
+          { id: "unit-2", original: "World", translated: "", context: "2", group: "2", type: "text" },
+        ],
+      },
+      "xliff",
+      { projectId: "p-lanes", author: "alice", targetLang: "fr-CA", getToken },
+    )
+
+    const sourceCell = captured[0].cells[0]
+    const targetRows = await peekOutboxBatch(100)
+    expect(targetRows).toHaveLength(1)
+    expect(targetRows[0].event).toMatchObject({
+      kind: "target.cell.commit",
+      projectId: "p-lanes",
+      cellId: sourceCell.cellId,
+      parentId: sourceCell.id,
+      payload: {
+        value: "Bonjour",
+        sourceEventId: sourceCell.id,
+        targetLang: "fr-CA",
+      },
+    })
   })
 })

@@ -141,10 +141,31 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                   {r.strings.length.toLocaleString()} cells
                 </span>
               </p>
+              {r.importClassification ? (
+                <div className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="ai-import-classification">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">AI-assisted structure</span>
+                    <span className="rounded-full bg-background px-2 py-0.5 text-muted-foreground">
+                      {r.importClassification.category}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {Math.round(r.importClassification.confidence * 100)}% confidence
+                    </span>
+                  </div>
+                  <p className="mt-1 text-muted-foreground">{r.importClassification.explanation}</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Recipe: {r.importClassification.recipe.name}. The original is preserved; translated round-trip is not yet verified.
+                  </p>
+                </div>
+              ) : null}
               <ul className="space-y-1">
                 {r.strings.slice(0, PREVIEW_LIMIT).map((s, i) => (
                   <li key={i} className="flex items-start gap-2 text-xs">
-                    {s.globalReferences?.[0] ? (
+                    {s.type === "heading" || s.type === "paratext" ? (
+                      <span className="shrink-0 font-mono text-muted-foreground w-20 truncate" aria-label="Structural content">
+                        —
+                      </span>
+                    ) : s.globalReferences?.[0] ? (
                       <span className="shrink-0 font-mono text-muted-foreground w-20 truncate">
                         {s.globalReferences[0]}
                       </span>

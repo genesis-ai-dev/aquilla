@@ -86,6 +86,48 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     expect(row!.raw_source).toBeNull()
   })
 
+  it("preserves a custom text original with its explicit format", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "records.odd", event_id: "ev1" }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const SNAPSHOTS = makeStubBucket()
+    const env = { SNAPSHOTS, AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any
+    const original = new TextEncoder().encode("source|target\nHello|Bonjour\n")
+
+    const res = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "X-Source-Format": "custom-original" },
+        body: original,
+      },
+    ), env)
+
+    expect(res?.status).toBe(200)
+    const row = await db.prepare(
+      "SELECT format, r2_key, raw_source FROM file_source_blobs WHERE file_id = ?",
+    ).bind("f1").first<{ format: string; r2_key: string; raw_source: string | null }>()
+    expect(row).toMatchObject({ format: "custom-original", raw_source: null })
+    expect(row?.r2_key).toContain("original.bin")
+    expect(SNAPSHOTS._allKeys()).toContain(row?.r2_key)
+  })
+
+  it("rejects an unsafe source-format header", async () => {
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const env = { SNAPSHOTS: makeStubBucket(), AQUILLA_PG: {} as any, SYNC_SECRET_KEY: SECRET } as any
+    const res = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "X-Source-Format": "../../secret" },
+        body: new Uint8Array([1]),
+      },
+    ), env)
+    expect(res?.status).toBe(400)
+  })
+
   it("returns null for non-matching path", async () => {
     const env = { SNAPSHOTS: makeStubBucket(), SYNC_SECRET_KEY: SECRET } as any
     const res = await handleSourceUploadRequest(

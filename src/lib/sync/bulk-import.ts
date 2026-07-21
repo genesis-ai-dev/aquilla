@@ -260,15 +260,17 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // before the rest so the file row exists. Send it alone.
   await sendChunk(offsets[0], true)
 
-  // After the first chunk lands (file.create projected), upload raw binary
-  // bytes to R2 for DOCX/PPTX round-trip. Runs before subsequent chunks so the
-  // source blob is available as soon as any cell is written.
+  // After the first chunk lands (file.create projected), preserve immutable
+  // original bytes in R2. This is not limited to Office packages: text-based
+  // formats also need an exact original for audit and future round-trip
+  // serializers. Runs before subsequent chunks so provenance is available as
+  // soon as any cell is written.
   if (args.rawBytes && args.rawSourceFormat) {
     await uploadSourceOriginal({
       projectId: args.projectId,
       fileId: args.fileId,
       bytes: args.rawBytes,
-      format: args.rawSourceFormat as "docx" | "pptx",
+      format: args.rawSourceFormat,
       getToken: args.getToken,
     })
   }

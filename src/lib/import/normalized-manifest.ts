@@ -56,6 +56,11 @@ export type ImportAddress =
       scheme: "sequence"
       index: number
     }
+  | {
+      scheme: "custom"
+      recipeId: string
+      record: number
+    }
 
 export type ImportSourceLocator =
   | {
@@ -86,6 +91,22 @@ export type ImportSourceLocator =
       kind: "sequence"
       index: number
     }
+  | {
+      kind: "recipe"
+      recipeId: string
+      record: number
+      field?: string
+    }
+
+export interface DeclarativeImportRecipe {
+  version: 1
+  id: string
+  name: string
+  inputFormat: string
+  strategy: "records"
+  config: Record<string, unknown>
+  proposedBy: "ai" | "user"
+}
 
 export interface NormalizedImportUnit {
   unitKey: string
@@ -127,6 +148,7 @@ export interface NormalizedImportFile {
   fidelity: RoundTripFidelity
   units: NormalizedImportUnit[]
   warnings: ImportWarning[]
+  recipe?: DeclarativeImportRecipe
 }
 
 /**
@@ -142,6 +164,7 @@ export interface NormalizedImportSummary {
   fidelity: RoundTripFidelity
   unitCount: number
   warningCounts: Partial<Record<ImportWarning["code"], number>>
+  recipe?: DeclarativeImportRecipe
 }
 
 export interface AquillaImportMetadata {
@@ -163,6 +186,8 @@ export interface NormalizeImportOptions {
   profileId?: string
   profileVersion?: string
   fidelity?: RoundTripFidelity
+  deterministic?: boolean
+  recipe?: DeclarativeImportRecipe
 }
 
 interface XliffMetadata {
@@ -172,6 +197,12 @@ interface XliffMetadata {
 
 interface TmxMetadata {
   tuid?: unknown
+}
+
+interface RecipeMetadata {
+  recipeId?: unknown
+  record?: unknown
+  field?: unknown
 }
 
 const SCRIPTURE_VERSE_RE = /^([1-3]?[A-Z]{2,3})\s+(\d+):(\d+[a-z]?(?:-\d+[a-z]?)?)$/i
@@ -288,6 +319,26 @@ function addressAndLocator(
     }
   }
 
+  const recipe = value.metadata?.aquillaRecipe as RecipeMetadata | undefined
+  const recipeId = nonEmptyString(recipe?.recipeId)
+  const recipeRecord = typeof recipe?.record === "number" && Number.isInteger(recipe.record)
+    ? recipe.record
+    : undefined
+  if (recipeId && recipeRecord !== undefined) {
+    const field = nonEmptyString(recipe?.field)
+    return {
+      address: { scheme: "custom", recipeId, record: recipeRecord },
+      sourceLocator: {
+        kind: "recipe",
+        recipeId,
+        record: recipeRecord,
+        ...(field ? { field } : {}),
+      },
+      keyBase: `custom:${recipeId}:${recipeRecord}`,
+      displayLabel: kind === "heading" || kind === "paratext" ? null : String(recipeRecord),
+    }
+  }
+
   if (value.sourceLocation) {
     return {
       address: {
@@ -351,6 +402,7 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "helloao":
     case "obs":
     case "sdbh":
+    case "custom":
       return "content-only"
   }
 }
@@ -447,10 +499,11 @@ export function normalizeTranslatableStrings(
     fileType: options.fileType,
     profileId: options.profileId ?? `builtin:${options.fileType}`,
     profileVersion: options.profileVersion ?? "1",
-    deterministic: true,
+    deterministic: options.deterministic ?? true,
     fidelity: options.fidelity ?? fidelityFor(options.fileType),
     units,
     warnings,
+    ...(options.recipe ? { recipe: options.recipe } : {}),
   }
 }
 
@@ -487,6 +540,7 @@ export function summarizeNormalizedImport(
     fidelity: file.fidelity,
     unitCount: file.units.length,
     warningCounts,
+    ...(file.recipe ? { recipe: file.recipe } : {}),
   }
 }
 

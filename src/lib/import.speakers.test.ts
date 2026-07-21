@@ -25,6 +25,9 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.body instanceof ArrayBuffer) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 })
+      }
       const body = JSON.parse(String(init?.body)) as CapturedBody
       captured.push(body)
       return new Response(

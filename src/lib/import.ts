@@ -58,6 +58,9 @@ import {
   type NormalizedImportFile,
 } from "./import/normalized-manifest"
 import { ImportService } from "./import/import-service"
+import type { PreparedImportFile } from "./import/import-service"
+import { classifyAndParseUnknownText, sniffKnownTextFile, type AiImportClassification } from "./import/ai-recipe"
+import type { DeclarativeImportRecipe } from "./import/normalized-manifest"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -340,6 +343,9 @@ export interface ImportResult {
   /** Original filename (e.g. "01GENarONAV12.SFM") — preserved for export naming
    *  and hover-to-see-original when we rename the file to a localized book name. */
   originalName?: string
+  /** AI-assisted unknown-format recipe, shown in preview and persisted. */
+  importRecipe?: DeclarativeImportRecipe
+  importClassification?: AiImportClassification
 }
 
 export interface ImportContext {
@@ -352,6 +358,8 @@ export interface ImportContext {
   targetLanguage?: string
   /** Target-lane storage key. Empty/absent means the project's default lane. */
   targetLang?: string
+  /** Identity JWT used only for AI-assisted classification of unknown text. */
+  identityToken?: string
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
@@ -395,6 +403,7 @@ export interface ImportFileResult {
 export async function importFile(
   file: File,
   ctx: ImportContext,
+  prepared?: PreparedImportFile,
 ): Promise<ImportFileResult> {
   const service = new ImportService<ImportContext, FileReference>({
     detectFileType,
@@ -403,8 +412,51 @@ export async function importFile(
     emitMediaFile,
     emitParsedFile,
   })
-  const { refs, speakerPairs } = await service.importFile(file, ctx)
+  const ready = prepared ?? await prepareImportFile(file, ctx)
+  const { refs, speakerPairs } = await service.importFile(file, ctx, ready)
   return { refs, speakerPairs }
+}
+
+/** Parse/classify exactly once so preview and commit use the same immutable
+ * recipe and parsed units. Deterministic content sniffing precedes AI. */
+export async function prepareImportFile(
+  file: File,
+  ctx: Pick<ImportContext, "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal">,
+): Promise<PreparedImportFile> {
+  const extensionType = detectFileType(file.name)
+  if (extensionType) {
+    return {
+      fileType: extensionType,
+      results: isMediaFileType(extensionType) ? [] : await parseFile(file, extensionType),
+    }
+  }
+
+  const text = await file.text()
+  const sniffedType = sniffKnownTextFile(text)
+  if (sniffedType) {
+    return { fileType: sniffedType, results: await parseFile(file, sniffedType) }
+  }
+  if (!ctx.identityToken) {
+    throw new Error(`Unsupported file type: ${file.name}. Sign in to use AI-assisted format detection.`)
+  }
+  const assisted = await classifyAndParseUnknownText(file, {
+    identityToken: ctx.identityToken,
+    projectId: ctx.projectId,
+    sourceLanguage: ctx.sourceLanguage,
+    targetLanguage: ctx.targetLanguage,
+    signal: ctx.signal,
+  })
+  return {
+    fileType: "custom",
+    results: [{
+      name: file.name,
+      strings: assisted.strings,
+      rawBytes: await file.arrayBuffer(),
+      rawSourceFormat: "custom-original",
+      importRecipe: assisted.classification.recipe,
+      importClassification: assisted.classification,
+    }],
+  }
 }
 
 export async function importEBible(
@@ -968,6 +1020,27 @@ export async function emitParsedFile(
     signal: ctx.signal,
   })
 
+  // Translation-oriented formats (XLIFF, TMX, bilingual spreadsheets, and
+  // reviewed custom recipes) can carry source and target text together. The
+  // source cells are shared across every lane; translated values belong only
+  // to the lane selected by the importer. Use the source create-event id as
+  // the target chain parent, exactly as the Paratext target importer does.
+  const targets: TargetCommit[] = cells.flatMap((cell, index) => {
+    const value = result.strings[index]?.translated
+    return value
+      ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
+      : []
+  })
+  await enqueueTargetCommits({
+    projectId: ctx.projectId,
+    fileId,
+    author: ctx.author,
+    targetLang: ctx.targetLang,
+    commits: targets,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
+
   return {
     ref: {
       id: fileId,
@@ -1482,8 +1555,14 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       // freezes the UI. The worker client falls back to inline parsing when a
       // worker can't be created (SSR / tests). Per-format logic + the multi-book
       // USFM split live in parse-text-formats.ts (worker-safe core).
-      const text = await file.text()
-      return parseTextFormatOffMainThread({ fileType, text, name: file.name })
+      const bytes = await file.arrayBuffer()
+      const text = new TextDecoder().decode(bytes)
+      const parsed = await parseTextFormatOffMainThread({ fileType, text, name: file.name })
+      return parsed.map((result) => ({
+        ...result,
+        rawBytes: bytes,
+        rawSourceFormat: fileType,
+      }))
     }
     case "usfm": {
       const raw = await file.text()
@@ -1507,12 +1586,14 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
     }
     case "xliff": {
-      const text = await file.text()
-      return [{ name: file.name, strings: parseXliff(text) }]
+      const bytes = await file.arrayBuffer()
+      const text = new TextDecoder().decode(bytes)
+      return [{ name: file.name, strings: parseXliff(text), rawBytes: bytes, rawSourceFormat: "xliff" }]
     }
     case "tmx": {
-      const text = await file.text()
-      return [{ name: file.name, strings: parseTmx(text) }]
+      const bytes = await file.arrayBuffer()
+      const text = new TextDecoder().decode(bytes)
+      return [{ name: file.name, strings: parseTmx(text), rawBytes: bytes, rawSourceFormat: "tmx" }]
     }
     case "ebible":
       throw new Error("eBible translations import via importEBible(), not importFile()")
@@ -1520,6 +1601,8 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       throw new Error("Hello AO translations import via importHelloao(), not importFile()")
     case "sdbh":
       throw new Error("SDBH lexicon editions import via importSdbh(), not importFile()")
+    case "custom":
+      throw new Error("Custom formats must be prepared by the AI-assisted recipe service")
     case "audio":
     case "video":
       // Media files have no text parser; importFile() routes them to

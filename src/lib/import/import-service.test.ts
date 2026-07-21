@@ -93,4 +93,46 @@ describe("ImportService", () => {
     expect(dependencies.parseFile).not.toHaveBeenCalled()
     expect(dependencies.emitParsedFile).not.toHaveBeenCalled()
   })
+
+  it("commits a prepared AI recipe without parsing or classifying the file again", async () => {
+    const { instance, dependencies } = service({ detectFileType: vi.fn(() => null) })
+    const recipe = {
+      version: 1 as const,
+      id: "ai-recipe-1",
+      name: "Line records",
+      inputFormat: "unknown-lines",
+      strategy: "records" as const,
+      config: { recordMode: "line" },
+      proposedBy: "ai" as const,
+    }
+
+    const result = await instance.importFile(new File(["source"], "unknown.odd"), {}, {
+      fileType: "custom",
+      results: [{
+        name: "unknown.odd",
+        strings: [{
+          id: "source-cell",
+          original: "source",
+          translated: "target",
+          context: "Line 1",
+          group: "line-1",
+          type: "text",
+          metadata: { aquillaRecipe: { recipeId: recipe.id, record: 1 } },
+        }],
+        importRecipe: recipe,
+      }],
+    })
+
+    expect(dependencies.parseFile).not.toHaveBeenCalled()
+    expect(result.manifests[0]).toMatchObject({
+      fileType: "custom",
+      deterministic: false,
+      fidelity: "content-only",
+      recipe,
+    })
+    expect(result.manifests[0].units[0]).toMatchObject({
+      address: { scheme: "custom", recipeId: "ai-recipe-1", record: 1 },
+      targetText: "target",
+    })
+  })
 })

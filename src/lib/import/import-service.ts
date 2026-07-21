@@ -1,8 +1,10 @@
 import type { FileType, TranslatableString } from "@/lib/parsers/types"
 import {
   normalizeTranslatableStrings,
+  type DeclarativeImportRecipe,
   type NormalizedImportFile,
 } from "./normalized-manifest"
+import type { AiImportClassification } from "./ai-recipe"
 
 export interface ParsedImportResult {
   name: string
@@ -13,6 +15,13 @@ export interface ParsedImportResult {
   bookCode?: string
   corpusMarker?: "OT" | "NT"
   originalName?: string
+  importRecipe?: DeclarativeImportRecipe
+  importClassification?: AiImportClassification
+}
+
+export interface PreparedImportFile {
+  fileType: FileType
+  results: ParsedImportResult[]
 }
 
 export interface ImportServiceContext {
@@ -76,8 +85,12 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
     this.dependencies = dependencies
   }
 
-  async importFile(file: File, context: Context): Promise<ImportServiceResult<Reference>> {
-    const fileType = this.dependencies.detectFileType(file.name)
+  async importFile(
+    file: File,
+    context: Context,
+    prepared?: PreparedImportFile,
+  ): Promise<ImportServiceResult<Reference>> {
+    const fileType = prepared?.fileType ?? this.dependencies.detectFileType(file.name)
     if (!fileType) {
       throw new Error(`Unsupported file type: ${file.name}`)
     }
@@ -92,7 +105,7 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
       return { refs: [], speakerPairs: [], manifests: [] }
     }
 
-    const results = await this.dependencies.parseFile(file, fileType)
+    const results = prepared?.results ?? await this.dependencies.parseFile(file, fileType)
     const refs: Reference[] = []
     const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
     const manifests: NormalizedImportFile[] = []
@@ -110,8 +123,13 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
       const manifest = normalizeTranslatableStrings(result.strings, {
         fileName: result.name,
         fileType,
-        profileId: profileId(fileType),
+        profileId: result.importRecipe ? `agentic:${result.importRecipe.id}` : profileId(fileType),
         profileVersion: "1",
+        ...(result.importRecipe ? {
+          deterministic: false,
+          fidelity: "content-only" as const,
+          recipe: result.importRecipe,
+        } : {}),
       })
       const committed = await this.dependencies.emitParsedFile(
         result,

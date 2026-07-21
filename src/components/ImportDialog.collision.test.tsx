@@ -30,6 +30,10 @@ vi.mock("@/lib/import", () => ({
   parseFile: vi.fn(async () => [
     { name: "genesis.usfm", strings: [{ id: "s1", original: "content" }] },
   ]),
+  prepareImportFile: vi.fn(async () => ({
+    fileType: "usfm",
+    results: [{ name: "genesis.usfm", strings: [{ id: "s1", original: "content" }] }],
+  })),
 }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({

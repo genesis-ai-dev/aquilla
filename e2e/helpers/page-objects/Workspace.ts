@@ -8,7 +8,8 @@ export class Workspace {
     this.page = page
   }
 
-  async importFile(filePath: string): Promise<void> {
+  /** Select a file and stop at the human-review preview boundary. */
+  async previewImportFile(filePath: string): Promise<void> {
     // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.
@@ -43,6 +44,12 @@ export class Workspace {
     // off the actual bulk upload.
     const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
     await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Commit the currently visible import preview and await the sidebar row. */
+  async confirmImportPreview(): Promise<void> {
+    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
     await confirmBtn.click()
     // A hidden confirm button is only the transient "Uploading…" state, not a
     // success signal. Wait for the authoritative sidebar row, while surfacing
@@ -65,6 +72,11 @@ export class Workspace {
       return "pending"
     }, { timeout: 30_000 }).toBe("settled")
     if (outcome.startsWith("error:")) throw new Error(outcome.slice("error:".length))
+  }
+
+  async importFile(filePath: string): Promise<void> {
+    await this.previewImportFile(filePath)
+    await this.confirmImportPreview()
   }
 
   private uploadFilesCard(): Locator {

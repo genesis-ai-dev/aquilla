@@ -4,7 +4,8 @@ export interface UploadSourceArgs {
   projectId: string
   fileId: string
   bytes: ArrayBuffer
-  format: "docx" | "pptx"
+  /** Stable import format label persisted beside the immutable original. */
+  format: string
   getToken: (fileId: string) => Promise<string | null>
   fetchFn?: typeof fetch
   /** Override the base URL (for tests). Defaults to syncWorkerHttpOrigin(). */

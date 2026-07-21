@@ -160,6 +160,52 @@ export async function handleExportSourceRequest(
     )
   }
 
+  if (blob.format === "custom-original") {
+    if (blob.r2_key) {
+      const object = await env.SNAPSHOTS.get(blob.r2_key)
+      if (!object) return withCors(new Response("original source bytes are missing", { status: 404 }), request)
+      return withCors(new Response(await object.arrayBuffer(), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          "X-Export-Mode": "raw-original",
+        },
+      }), request)
+    }
+    if (blob.raw_source == null) return withCors(new Response("original source text is missing", { status: 404 }), request)
+    return withCors(
+      new Response(blob.raw_source, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          // The exact original is recoverable, but translated cells have not
+          // been injected. The import manifest reports content-only fidelity.
+          "X-Export-Mode": "raw-original",
+        },
+      }),
+      request,
+    )
+  }
+
+  // Formats without a verified target serializer still retain their exact
+  // source artifact. Returning it explicitly as raw-original is honest about
+  // fidelity while ensuring VTT/SRT/XLIFF/TMX/CSV/TSV/document sources are
+  // never discarded during normalization.
+  if (blob.format !== "usfm" && blob.r2_key) {
+    const object = await env.SNAPSHOTS.get(blob.r2_key)
+    if (!object) return withCors(new Response("original source bytes are missing", { status: 404 }), request)
+    return withCors(new Response(await object.arrayBuffer(), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+        "X-Export-Mode": "raw-original",
+      },
+    }), request)
+  }
+
   if (blob.format !== "usfm") {
     return withCors(
       new Response(`export not yet supported for format "${blob.format}"`, { status: 501 }),

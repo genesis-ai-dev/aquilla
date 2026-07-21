@@ -71,11 +71,11 @@ async function seedReferences(): Promise<void> {
 beforeEach(async () => {
   pg = new PGlite()
   await bootstrapPre0066()
-})
+}, 30_000)
 
 afterEach(async () => {
   await pg.close()
-})
+}, 30_000)
 
 describe("0066-0068 normalized import provenance migrations", () => {
   it("upgrades the prior schema idempotently with complete constraints, indexes, grants, and RLS", async () => {

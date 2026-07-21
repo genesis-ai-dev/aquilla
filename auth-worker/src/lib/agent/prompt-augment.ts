@@ -13,6 +13,11 @@ import type { MemoryContext } from "../../../../db/shared/agent-memory"
 /** Fallback phrasing when no working language is resolvable from settings. */
 const WORKING_LANGUAGE_FALLBACK = "the project's working language"
 
+/** Max approved-memory entries to render in the index (adversarial-panel
+ *  mem-m1). The index is ordered most-recently-updated first; the rest are
+ *  reachable via read_memory. */
+const MEMORY_INDEX_RENDER_CAP = 50
+
 export interface AugmentArgs {
   memory: MemoryContext
   /** Project working (target) language, if resolvable; else the fallback. */
@@ -40,13 +45,23 @@ export function buildAugmentSystemPrompt(args: AugmentArgs): string {
   }
 
   // 2. Approved-memory index — JIT: only the index up front; the model calls
-  // read_memory(path) to pull the full text of an entry it needs.
+  // read_memory(path) to pull the full text of an entry it needs. Human-edited
+  // entries are annotated [human-edited] so the model treats them as human-owned
+  // (mem-M4). The index is capped (mem-m1) with an overflow pointer.
   if (args.memory.memoryIndex.length > 0) {
-    const lines = args.memory.memoryIndex.map((m) => `- ${m.path}: ${m.firstLine}`).join("\n")
+    const shown = args.memory.memoryIndex.slice(0, MEMORY_INDEX_RENDER_CAP)
+    const overflow = args.memory.memoryIndex.length - shown.length
+    const lines = shown
+      .map((m) => `- ${m.path}${m.humanEdited ? " [human-edited]" : ""}: ${m.firstLine}`)
+      .join("\n")
+    const overflowLine =
+      overflow > 0 ? `\n- …and ${overflow} more — use read_memory to list or read them.` : ""
     sections.push(
       "## Approved project memory (index)\n" +
-        "These are approved, durable notes about this project. Call read_memory(path) for the full text of any entry:\n\n" +
-        lines,
+        "These are approved, durable notes about this project. Call read_memory(path) for the full text of any entry. " +
+        "Entries marked [human-edited] are human-owned: do not silently re-propose over them — raise a question to the user instead.\n\n" +
+        lines +
+        overflowLine,
     )
   } else {
     sections.push(

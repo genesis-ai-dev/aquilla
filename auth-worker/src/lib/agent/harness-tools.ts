@@ -177,6 +177,12 @@ export async function readSandboxFile(
 ): Promise<string> {
   const path = typeof args.path === "string" ? args.path : null
   if (!path) return "error: read_sandbox_file needs {path: string}"
+
+  // Reading a sandbox file pulls (potentially untrusted) artifact-derived bytes
+  // into the model's context — mark the turn untrusted so memory writes lock,
+  // exactly like run_code / load_artifact (adversarial-panel authz-M2).
+  ctx.markUntrusted()
+
   const maxBytes =
     typeof args.maxBytes === "number" && args.maxBytes > 0
       ? Math.min(args.maxBytes, READ_SANDBOX_MAX_BYTES)
@@ -351,11 +357,19 @@ export interface ReadMemoryArgs {
 export async function readMemoryTool(args: ReadMemoryArgs, ctx: HarnessToolCtx): Promise<string> {
   const path = typeof args.path === "string" ? args.path : null
   if (!path) {
-    // No path → the approved-memory index (path + first line).
+    // No path → the approved-memory index (path + first line). Human-edited
+    // entries are flagged so the model knows they are human-owned (mem-M4).
     if (ctx.memory.memoryIndex.length === 0) return "No approved memories for this project yet."
-    return ctx.memory.memoryIndex.map((m) => `- ${m.path}: ${m.firstLine}`).join("\n")
+    return ctx.memory.memoryIndex
+      .map((m) => `- ${m.path}${m.humanEdited ? " [human-edited]" : ""}: ${m.firstLine}`)
+      .join("\n")
   }
   const content = await ctx.memory.readMemory(path)
   if (content == null) return `error: no approved memory at ${path}`
-  return content
+  // Surface the human-edited status alongside the content (mem-M4). Content
+  // itself stays pure; the marker is a separate prefixed line the model reads.
+  const humanEdited = ctx.memory.memoryIndex.some((m) => m.path === path && m.humanEdited)
+  return humanEdited
+    ? `[human-edited — human-owned; do not silently re-propose over this, ask the user instead]\n${content}`
+    : content
 }

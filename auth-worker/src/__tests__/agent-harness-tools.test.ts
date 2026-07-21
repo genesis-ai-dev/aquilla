@@ -139,6 +139,20 @@ describe("read_sandbox_file", () => {
     const text = await readSandboxFile({ path: "/workspace/out.txt" }, h.ctx)
     expect(text).toBe("file contents")
   })
+
+  // authz-M2: reading a sandbox file pulls untrusted artifact-derived bytes into
+  // the model's context, so it MUST lock memory writes exactly like run_code /
+  // load_artifact — otherwise the model could read untrusted output and launder
+  // it into a memory proposal in the same turn.
+  it("marks the turn untrusted (locks memory writes)", async () => {
+    const h = makeHarness({ sandbox: true })
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new TextEncoder().encode("untrusted output"), { status: 200 }),
+    )
+    expect(h.guard.active).toBe(false)
+    await readSandboxFile({ path: "/workspace/out.txt" }, h.ctx)
+    expect(h.guard.active).toBe(true)
+  })
 })
 
 describe("plan_import", () => {
@@ -204,7 +218,7 @@ describe("read_memory", () => {
   it("returns the index without a path and full content with one", async () => {
     const h = makeHarness({
       memory: {
-        memoryIndex: [{ path: "observations/terms.md", firstLine: "Render covenant" }],
+        memoryIndex: [{ path: "observations/terms.md", firstLine: "Render covenant", humanEdited: false }],
         readMemory: async (p) => (p === "observations/terms.md" ? "full content here" : null),
       },
     })

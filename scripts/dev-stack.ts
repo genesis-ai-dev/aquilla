@@ -58,6 +58,7 @@ import {
 } from "./lib/spawn-worker"
 import {
   finalizeArtifactBindingSchema,
+  finalizeSourceBlobSchema,
   prepareArtifactBindingSchema,
 } from "./dev-stack-artifact-schema"
 import { parsePgSchema } from "./dev-stack-schema-parser"
@@ -404,6 +405,8 @@ async function reconcilePgSchema(
       await run(index, `ensuring an index on ${name}`)
     }
   }
+
+  patched.push(...await finalizeSourceBlobSchema(client, run))
 
   if (tables.has("artifact_bindings")) {
     patched.push(...await finalizeArtifactBindingSchema(client, run))

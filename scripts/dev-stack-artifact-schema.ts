@@ -127,3 +127,30 @@ export async function finalizeArtifactBindingSchema(
 
   return patched
 }
+
+/** Mirror migration 0046 for long-lived local databases. The generic dev
+ * reconciler can add the R2 pointer columns, but it intentionally does not
+ * rewrite existing column constraints. Without this targeted repair, a local
+ * database first created before 0046 rejects every R2-backed DOCX/PPTX source
+ * because those rows correctly store raw_source = NULL. */
+export async function finalizeSourceBlobSchema(
+  client: PgSchemaClient,
+  run: RunSchemaSql,
+): Promise<string[]> {
+  if (!(await tableExists(client, "file_source_blobs"))) return []
+
+  const { rows } = await client.query(
+    `SELECT is_nullable
+       FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'file_source_blobs'
+        AND column_name = 'raw_source'`,
+  )
+  if (rows[0]?.is_nullable !== "NO") return []
+
+  await run(
+    "ALTER TABLE file_source_blobs ALTER COLUMN raw_source DROP NOT NULL",
+    "allowing R2-backed source originals (migration 0046)",
+  )
+  return ["made file_source_blobs.raw_source nullable"]
+}

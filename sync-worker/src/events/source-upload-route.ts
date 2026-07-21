@@ -466,7 +466,23 @@ export async function handleSourceUploadRequest(
       recipe,
     ),
   )
-  await db.batch(statements)
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    // Keep R2 and Postgres convergent. A new artifact has no durable owner if
+    // its metadata transaction fails, so remove its object before returning.
+    // An already-recorded artifact may be a retry after a lost response; never
+    // delete that established object on a later metadata failure.
+    if (!existing) {
+      try {
+        await env.SNAPSHOTS.delete(key)
+      } catch (cleanupError) {
+        console.error(`[source-upload] failed to clean up ${key}:`, cleanupError)
+      }
+    }
+    console.error(`[source-upload] metadata persistence failed for ${projectId}/${fileId}:`, error)
+    return withCors(new Response("source metadata write failed", { status: 500 }), request)
+  }
 
   return withCors(
     new Response(JSON.stringify({ ok: true, artifactId, key, sha256 }), {

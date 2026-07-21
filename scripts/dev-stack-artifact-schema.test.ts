@@ -2,6 +2,7 @@ import { PGlite } from "@electric-sql/pglite"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   finalizeArtifactBindingSchema,
+  finalizeSourceBlobSchema,
   prepareArtifactBindingSchema,
   type PgSchemaClient,
 } from "./dev-stack-artifact-schema"
@@ -19,6 +20,15 @@ beforeEach(async () => {
       id UUID PRIMARY KEY,
       project_id TEXT NOT NULL,
       credential_id TEXT NOT NULL
+    );
+    CREATE TABLE file_source_blobs (
+      file_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      format TEXT NOT NULL,
+      raw_source TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      r2_key TEXT,
+      size_bytes BIGINT
     );
   `)
 }, 30_000)
@@ -79,5 +89,27 @@ describe("local dev artifact schema reconciliation", () => {
 
     expect(await prepareArtifactBindingSchema(client(), run)).toEqual([])
     expect(await finalizeArtifactBindingSchema(client(), run)).toEqual([])
+  })
+
+  it("allows R2-backed originals in a long-lived pre-0046 local database", async () => {
+    expect(await finalizeSourceBlobSchema(client(), run)).toEqual([
+      "made file_source_blobs.raw_source nullable",
+    ])
+
+    const rawSource = await pg.query<{ is_nullable: string }>(
+      `SELECT is_nullable
+         FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'file_source_blobs'
+          AND column_name = 'raw_source'`,
+    )
+    expect(rawSource.rows).toEqual([{ is_nullable: "YES" }])
+
+    await expect(pg.query(
+      `INSERT INTO file_source_blobs
+         (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+       VALUES ('f1', 'p1', 'docx', NULL, 'artifacts/p1/a/original.docx', 4, 1)`,
+    )).resolves.toBeDefined()
+    expect(await finalizeSourceBlobSchema(client(), run)).toEqual([])
   })
 })

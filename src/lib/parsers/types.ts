@@ -1,4 +1,4 @@
-export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+export type FileType = "md" | "docx" | "pptx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
 export type CellType =
   | "text"
@@ -681,8 +681,16 @@ export function detectFileType(fileName: string): FileType | null {
     docx: "docx",
     pptx: "pptx",
     txt: "txt",
+    html: "html",
+    htm: "html",
+    json: "json",
+    arb: "json",
+    po: "po",
+    pot: "po",
+    properties: "properties",
     vtt: "vtt",
     srt: "srt",
+    sbv: "sbv",
     usfm: "usfm",
     sfm: "usfm",
     usx: "usfm",

@@ -292,8 +292,13 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "tsv":
     case "txt":
     case "md":
+    case "html":
+    case "json":
+    case "po":
+    case "properties":
     case "vtt":
     case "srt":
+    case "sbv":
       return "content-only"
     case "audio":
     case "video":

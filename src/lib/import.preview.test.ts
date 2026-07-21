@@ -137,6 +137,18 @@ describe("parseFile — parse phase only (no upload)", () => {
       .rejects.toThrow(/appears to be binary/)
   })
 
+  it("uses the deterministic HTML adapter and preserves structural headings", async () => {
+    const prepared = await prepareImportFile(
+      makeFile("page.html", "<!doctype html><html><body><h1>Title</h1><p>Body</p></body></html>"),
+      { projectId: "p1" },
+    )
+    expect(prepared.fileType).toBe("html")
+    expect(prepared.results[0].strings.map((value) => [value.original, value.type])).toEqual([
+      ["Title", "heading"],
+      ["Body", "text"],
+    ])
+  })
+
   it("throws for media file type — caller must use emitMediaFile()", async () => {
     const file = makeFile("clip.mp3", "binary")
     await expect(parseFile(file, "audio")).rejects.toThrow(/media files/)

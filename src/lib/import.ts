@@ -35,6 +35,7 @@ import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
 import { enqueueTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
+import { extractHtmlStrings } from "./parsers/html"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
   fetchTranslationText,
@@ -1077,7 +1078,7 @@ export async function emitParsedFile(
 /** Subtitle + media formats are time-ordered (the timeline is the spine);
  *  every text/document format is sequence-ordered. */
 export function orderedByForFileType(fileType: FileType): OrderedBy {
-  return fileType === "vtt" || fileType === "srt" || isMediaFileType(fileType)
+  return fileType === "vtt" || fileType === "srt" || fileType === "sbv" || isMediaFileType(fileType)
     ? "time"
     : "sequence"
 }
@@ -1551,9 +1552,13 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
   switch (fileType) {
     case "txt":
     case "md":
+    case "json":
+    case "po":
+    case "properties":
     case "obs":
     case "vtt":
     case "srt":
+    case "sbv":
     case "csv":
     case "tsv": {
       // DOM-free text formats parse off the main thread so a large import never
@@ -1602,6 +1607,11 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       const strings = await extractPptxStrings(buffer)
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
+    }
+    case "html": {
+      const bytes = await file.arrayBuffer()
+      const text = decodeImportText(bytes, file.name)
+      return [{ name: file.name, strings: extractHtmlStrings(text), rawBytes: bytes, rawSourceFormat: "html" }]
     }
     case "xliff": {
       const bytes = await file.arrayBuffer()

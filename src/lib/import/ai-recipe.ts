@@ -366,6 +366,17 @@ export function sniffKnownTextFile(text: string): FileType | null {
   if (/<usx[\s>]/i.test(head)) return "usfm"
   if (/^WEBVTT(?:\s|$)/i.test(trimmed)) return "vtt"
   if (/^\d+\s*\r?\n\d{2}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+/m.test(text)) return "srt"
+  if (/^\d+:\d{2}:\d{2}\.\d{3},\d+:\d{2}:\d{2}\.\d{3}\s*$/m.test(text)) return "sbv"
+  if (/^\s*(?:<!doctype\s+html|<html[\s>]|<body[\s>])/i.test(trimmed)) return "html"
+  if (/^\s*(?:\{|\[)/.test(trimmed)) {
+    try {
+      JSON.parse(text)
+      return "json"
+    } catch {
+      // Not valid JSON; allow the reviewed AI fallback to classify it.
+    }
+  }
+  if (/^(?:#.*\n)*msgid\s+"/m.test(text) && /^msgstr(?:\[\d+\])?\s+"/m.test(text)) return "po"
   return null
 }
 

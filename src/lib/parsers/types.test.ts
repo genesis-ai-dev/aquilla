@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest"
-import { projectHasScriptureFiles, resolveBibleResourcesEnabled, type FileType } from "./types"
+import { detectFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled, type FileType } from "./types"
+
+describe("detectFileType", () => {
+  it.each([
+    ["page.html", "html"],
+    ["messages.arb", "json"],
+    ["catalog.pot", "po"],
+    ["messages.properties", "properties"],
+    ["captions.sbv", "sbv"],
+  ] as const)("routes %s to the deterministic %s adapter", (name, type) => {
+    expect(detectFileType(name)).toBe(type)
+  })
+})
 
 // AQU-460 derive-on-read: the effective Bible-resources value must never be
 // computed by writing a default on load. These tests encode the trust

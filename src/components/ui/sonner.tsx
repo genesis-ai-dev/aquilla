@@ -1,7 +1,7 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon } from "lucide-react"
 import { useThemeMode } from "@/branding/ThemeMode"
-import { Spinner } from "@/components/ui/spinner"
+import { BarSpinner } from "@/components/ui/bar-spinner"
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { resolved } = useThemeMode()
@@ -25,7 +25,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <OctagonXIcon className="size-4 text-destructive" />
         ),
         loading: (
-          <Spinner className="size-4" />
+          <BarSpinner className="size-4" />
         ),
       }}
       style={

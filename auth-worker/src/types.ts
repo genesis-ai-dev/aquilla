@@ -116,6 +116,18 @@ export interface Env {
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string
 
+  // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
+  /** Base URL of the sandbox worker (aquilla-agent-sandbox). Dev default
+   *  http://127.0.0.1:8790. Unset → run_code/load_artifact/read_sandbox_file
+   *  return a clear "sandbox unavailable" tool error (the run still proceeds). */
+  AGENT_SANDBOX_URL?: string
+  /** Shared bearer secret for the sandbox worker. Secret (never a plain var);
+   *  set locally by the dev-stack. Unset → sandbox tools are unavailable. */
+  AGENT_SANDBOX_KEY?: string
+  /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
+   *  run halts gracefully with a budget.exhausted frame at this ceiling. */
+  AGENT_RUN_COST_CAP_CENTS?: string
+
   // AI budget + allowlist controls (AQU-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.
   //   Unset → uses the hardcoded default list in lib/ai-budget.ts.

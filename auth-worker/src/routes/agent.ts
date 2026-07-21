@@ -35,6 +35,31 @@ import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
 import { insertAgentRun, finishAgentRun, listAgentRuns } from "../lib/agent/runs"
 import { makePostgres } from "../../../db/shim/postgres"
+import {
+  type HarnessFrame,
+  resolveRunCostCapCents,
+} from "../lib/agent/frames"
+import { buildMemoryContext, type MemoryContext } from "../lib/agent/memory-context-stub"
+import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
+import { revokeRunCredential, type RunCredential } from "../lib/agent/changeset-bridge"
+import { sandboxDestroy } from "../lib/agent/sandbox-client"
+import {
+  runCode,
+  loadArtifact,
+  readSandboxFile,
+  planImport,
+  proposeMemoryTool,
+  proposeBriefUpdateTool,
+  readMemoryTool,
+  type HarnessToolCtx,
+  type RunCodeArgs,
+  type LoadArtifactArgs,
+  type ReadSandboxFileArgs,
+  type PlanImportArgs,
+  type ProposeMemoryArgs,
+  type ProposeBriefArgs,
+  type ReadMemoryArgs,
+} from "../lib/agent/harness-tools"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -95,6 +120,9 @@ type AgentFrame =
   | { type: "usage"; promptTokens: number; completionTokens: number; costCents: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
+  // AQU-AGENT §4 — new harness frames (tool.code.*, changeset.staged,
+  // memory.proposed, brief.proposed, budget, budget.exhausted).
+  | HarnessFrame
 
 // ── Tool schema (OpenAI tool-calling, served to the model) ──────────────────
 // Semantic tools carry the recipes in CODE (design 2026-07-02 §3); `sql` stays
@@ -226,6 +254,133 @@ function buildTools(bibleResourcesEnabled: boolean) {
           type: "object",
           properties: { topic: { type: "string" } },
           required: ["topic"],
+        },
+      },
+    },
+    // ── AQU-AGENT §2 harness tools (sandbox / import / memory) ──────────────
+    {
+      type: "function",
+      function: {
+        name: "run_code",
+        description:
+          "Run JS or Python in a locked-down sandbox (no network, no secrets) to parse or inspect files. First use lazily opens the run's container.",
+        parameters: {
+          type: "object",
+          properties: {
+            language: { type: "string", enum: ["js", "python"] },
+            code: { type: "string" },
+            timeoutMs: { type: "number", description: "Optional exec timeout (default 60s, max 300s)." },
+          },
+          required: ["language", "code"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "load_artifact",
+        description:
+          "Copy a project artifact (by id) into the sandbox at `path` so run_code can read it. Untrusted content — memory writes lock after this until a clean turn.",
+        parameters: {
+          type: "object",
+          properties: {
+            artifactId: { type: "string" },
+            path: { type: "string", description: "Destination path in the sandbox (under /workspace)." },
+          },
+          required: ["artifactId", "path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "read_sandbox_file",
+        description: "Read a sandbox file back as utf-8 text (capped ~48KB) to inspect outputs.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            maxBytes: { type: "number" },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "plan_import",
+        description:
+          "STAGE a file import as a changeset for human approval (nothing is written until a human approves). Each cell needs an `original` string. Max 5000 cells — split larger files.",
+        parameters: {
+          type: "object",
+          properties: {
+            fileName: { type: "string" },
+            fileType: { type: "string" },
+            sourceLanguage: { type: "string" },
+            targetLanguage: { type: "string" },
+            cells: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  original: { type: "string" },
+                  translated: { type: "string" },
+                  context: { type: "string" },
+                  group: { type: "string" },
+                  type: { type: "string" },
+                },
+                required: ["original"],
+              },
+            },
+          },
+          required: ["fileName", "fileType", "cells"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "propose_memory",
+        description:
+          "STAGE a durable project note for human review (never approved by you). Path must match ^[a-z0-9-/]+\\.md$, content ≤10KB. Disabled while parsing untrusted content.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            content: { type: "string" },
+            rationale: { type: "string" },
+          },
+          required: ["path", "content", "rationale"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "propose_brief_update",
+        description:
+          "STAGE a proposed change to the project brief for human review. Disabled while parsing untrusted content.",
+        parameters: {
+          type: "object",
+          properties: {
+            content: { type: "string" },
+            rationale: { type: "string" },
+          },
+          required: ["content", "rationale"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "read_memory",
+        description:
+          "Read approved project memory. Without path: the index (path + first line). With path: the full content of one approved memory.",
+        parameters: {
+          type: "object",
+          properties: { path: { type: "string" } },
         },
       },
     },
@@ -515,6 +670,19 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
   // execute.aquifer handler re-checks it before every external call).
   const bibleResourcesEnabled = await isBibleResourcesEnabled(env, body.projectId)
 
+  // AQU-AGENT §2 — read-side memory context (approved memories + brief). Pure
+  // reads; degrades to empty on any failure so a run never dies on grounding.
+  let memory: MemoryContext = {
+    brief: "",
+    memoryIndex: [],
+    readMemory: async () => null,
+  }
+  try {
+    memory = await buildMemoryContext(env.AQUILLA_PG, body.projectId)
+  } catch {
+    /* memory grounding is best-effort */
+  }
+
   const convo: ConvoMessage[] = [
     {
       role: "system" as const,
@@ -538,6 +706,13 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
         briefSummary,
       }),
     },
+    // AQU-AGENT §2 — second system message: verbatim brief + approved-memory
+    // index + new-tool guidance + reply-language rule. Kept separate so the
+    // existing schema-card prompt stays byte-identical.
+    {
+      role: "system" as const,
+      content: buildAugmentSystemPrompt({ memory, workingLanguage: languages.targetLanguage }),
+    },
     ...storedConvo,
     ...body.messages,
   ]
@@ -548,6 +723,32 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
   let steps = 0
   let stagedCount = 0
   let status: "ok" | "capped" | "error" = "ok"
+
+  // AQU-AGENT §2 run state: cost cap, untrusted-content guard, ephemeral
+  // changeset credentials to revoke, and the sandbox container id (one per
+  // session, or the runId when sessionless).
+  const costCapCents = resolveRunCostCapCents(env.AGENT_RUN_COST_CAP_CENTS)
+  const untrusted = { active: false, usedThisTurn: false }
+  const runCredentials: RunCredential[] = []
+  const sandboxSessionId = body.sessionId ?? runId
+  const harness: HarnessToolCtx = {
+    env,
+    runId,
+    sandboxSessionId,
+    sessionId: body.sessionId ?? null,
+    projectId: body.projectId,
+    userId: user.id,
+    username: user.username,
+    signal,
+    send,
+    memory,
+    markUntrusted: () => {
+      untrusted.active = true
+      untrusted.usedThisTurn = true
+    },
+    isUntrustedActive: () => untrusted.active,
+    registerCredential: (cred) => runCredentials.push(cred),
+  }
 
   send({ type: "run_start", runId, ...(body.sessionId ? { sessionId: body.sessionId } : {}) })
 
@@ -571,6 +772,18 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
         send({ type: "error", message: `Token ceiling reached (${Math.round(TOKEN_CEILING / 1000)}k) — run stopped.` })
         break
       }
+      // AQU-AGENT §2 cost cap: halt gracefully BEFORE the next paid model call
+      // once the accumulated OpenRouter cost reaches the ceiling.
+      if (costCents >= costCapCents) {
+        status = "capped"
+        send({ type: "budget.exhausted", runId, spentCents: Math.round(costCents), capCents: costCapCents })
+        break
+      }
+
+      // A new model turn — reset the per-turn untrusted flag. The persisted
+      // `untrusted.active` only clears at the END of a turn that used no
+      // untrusted-content tool (contracts §2).
+      untrusted.usedThisTurn = false
 
       const upstream = await fetch(resolveOpenRouterUrl(env), {
         method: "POST",
@@ -612,6 +825,9 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
         break
       }
 
+      // AQU-AGENT §4 — cost meter after each turn's usage lands.
+      send({ type: "budget", runId, spentCents: Math.round(costCents), capCents: costCapCents })
+
       convo.push({ ...message, role: "assistant" })
 
       const toolCalls = message.tool_calls ?? []
@@ -650,15 +866,31 @@ async function runAgentLoop({ env, body, storedConvo, user, roleLevel, runId, or
           countStaged: (n) => {
             stagedCount += n
           },
+          harness,
         })
         convo.push({ role: "tool", tool_call_id: call.id, content: result })
       }
+
+      // End of turn: the untrusted flag clears ONLY after a turn with no
+      // untrusted-content tool use (contracts §2). A turn that touched artifact
+      // bytes keeps memory writes locked into the next turn too.
+      if (!untrusted.usedThisTurn) untrusted.active = false
     }
   } catch (err) {
     if (!signal.aborted) {
       send({ type: "error", message: err instanceof Error ? err.message : String(err) })
     }
     status = "error"
+  }
+
+  // AQU-AGENT §2 — best-effort teardown: revoke every ephemeral changeset
+  // credential and destroy the sandbox container. Never blocks the run's
+  // settlement; failures are logged, not surfaced.
+  for (const cred of runCredentials) {
+    await revokeRunCredential(env, cred)
+  }
+  if (env.AGENT_SANDBOX_URL && env.AGENT_SANDBOX_KEY) {
+    await sandboxDestroy(env, sandboxSessionId)
   }
 
   send({ type: "usage", promptTokens, completionTokens, costCents })
@@ -713,12 +945,17 @@ interface ToolCallEnv {
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
   /** Folds staged target.cell.commit events into the run's staged_count. */
   countStaged: (n: number) => void
+  /** AQU-AGENT §2 harness context (sandbox / import / memory tools). */
+  harness: HarnessToolCtx
 }
 
-/** Does this tool call consume the write/SQL iteration budget? */
+/** Does this tool call consume the write/SQL iteration budget? Write-shaped
+ *  harness tools (plan_import stages a changeset; propose_* persist proposals)
+ *  count too; sandbox reads + read_memory stay free (MAX_TOTAL_ROUNDS backstop). */
 function budgetedCall(call: ToolCall): boolean {
   const name = call.function.name
   if (name === "draft" || name === "propose" || name === "sql") return true
+  if (name === "plan_import" || name === "propose_memory" || name === "propose_brief_update") return true
   if (name !== "execute") return false
   try {
     const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
@@ -893,6 +1130,22 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
       return runSearchTool(args as SearchArgs, t)
     case "draft":
       return runDraftTool(args as DraftArgs, t)
+    // AQU-AGENT §2 harness tools. These emit their own §4 frames (via
+    // t.harness.send) and return the tool-result text directly.
+    case "run_code":
+      return runCode(args as RunCodeArgs, t.harness)
+    case "load_artifact":
+      return loadArtifact(args as LoadArtifactArgs, t.harness)
+    case "read_sandbox_file":
+      return readSandboxFile(args as ReadSandboxFileArgs, t.harness)
+    case "plan_import":
+      return planImport(args as PlanImportArgs, t.harness)
+    case "propose_memory":
+      return proposeMemoryTool(args as ProposeMemoryArgs, t.harness)
+    case "propose_brief_update":
+      return proposeBriefUpdateTool(args as ProposeBriefArgs, t.harness)
+    case "read_memory":
+      return readMemoryTool(args as ReadMemoryArgs, t.harness)
     case "propose": {
       if (!Array.isArray(args.events)) {
         t.send({ type: "code_start", step: t.step, kind: "emit", summary: "(invalid call)" })

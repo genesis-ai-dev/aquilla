@@ -211,6 +211,8 @@ interface ExportDialogProps {
   projectFiles: { id: string; name: string; type: string }[]
   sourceLanguage?: string
   targetLanguage?: string
+  /** Storage lane for the active target. Distinct from its display language. */
+  targetLang?: string
   /** Project TTS settings including cast assignments and voice library.
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
@@ -232,6 +234,7 @@ export function ExportDialog({
   projectFiles,
   sourceLanguage = "und",
   targetLanguage = "und",
+  targetLang = "",
   ttsSettings,
   getToken,
 }: ExportDialogProps) {
@@ -393,6 +396,7 @@ export function ExportDialog({
             projectName,
             files: projectFiles,
             getToken,
+            targetLang,
             onProgress: (done, total) =>
               setStatus({ kind: "busy", msg: `Downloading ${done}/${total}…` }),
           })
@@ -405,7 +409,7 @@ export function ExportDialog({
           const stem = buildExportStem(false)
           const downloadName = `${stem}.SFM`
           // AQU-276: read lossy-verse count from response header.
-          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
+          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({
@@ -421,7 +425,7 @@ export function ExportDialog({
         // AQU-233: DOCX round-trip export. Fetch the raw DOCX side-car from the
         // server, then inject translations client-side using JSZip + DOMParser.
         setStatus({ kind: "busy", msg: "Fetching original document…" })
-        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: "Injecting translations…" })
         const { exportDocx } = await import("@/lib/export/exporters/docx")
         const result = await exportDocx(rawBytes, cells)
@@ -441,7 +445,7 @@ export function ExportDialog({
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.docx${note}` })
       } else if (format === "pptx") {
         setStatus({ kind: "busy", msg: "Fetching original presentation…" })
-        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: "Injecting translations…" })
         const { exportPptx } = await import("@/lib/export/exporters/pptx")
         const result = await exportPptx(rawBytes, cells)

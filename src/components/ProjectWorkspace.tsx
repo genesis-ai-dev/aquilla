@@ -4048,6 +4048,7 @@ export function ProjectWorkspace() {
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   getTokenForFile={getTokenForFile}
+                  targetLang={activeLane}
                   onSelectFile={(fileId, opts) => {
                     // Workbench: the explorer designates the agent's working
                     // area — stay in the takeover, retarget the session, and
@@ -5004,6 +5005,7 @@ export function ProjectWorkspace() {
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}
+          targetLang={activeLane}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
         />

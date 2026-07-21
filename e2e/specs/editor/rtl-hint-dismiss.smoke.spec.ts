@@ -23,7 +23,8 @@ test("manual target direction mismatch warning can be dismissed", async ({ alice
 
   await ws.editCell(0, "مرحبا بالعالم")
   await ws.openViewSettingsMenu()
-  await alice.getByRole("menu").getByRole("button", { name: "Target direction LTR" }).click()
+  const panel = alice.getByTestId("view-settings-popover")
+  await panel.getByRole("tablist", { name: "Target direction" }).getByRole("tab", { name: "LTR" }).click()
   await alice.keyboard.press("Escape")
 
   const warning = alice.locator('[role="status"]').filter({ hasText: /content looks right-to-left/i })
@@ -33,6 +34,6 @@ test("manual target direction mismatch warning can be dismissed", async ({ alice
 
   // Dismissal does not silently change the user's manual override.
   await ws.openViewSettingsMenu()
-  await expect(alice.getByRole("menu").getByRole("button", { name: "Target direction LTR" }))
-    .toHaveAttribute("aria-pressed", "true")
+  await expect(panel.getByRole("tablist", { name: "Target direction" }).getByRole("tab", { name: "LTR" }))
+    .toHaveAttribute("aria-selected", "true")
 })

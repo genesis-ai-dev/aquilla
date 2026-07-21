@@ -5,9 +5,15 @@ import {
   Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines,
 } from "lucide-react"
-import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
@@ -196,9 +202,6 @@ function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined):
   if (!a || !b) return false
   return JSON.stringify(a) === JSON.stringify(b)
 }
-
-const ITEM_CLASS =
-  "flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent"
 
 export function ProjectSettings() {
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
@@ -966,8 +969,8 @@ export function ProjectSettings() {
             Save changes
           </Button>
           <ButtonGroupSeparator />
-          <Menu.Root>
-            <Menu.Trigger
+          <DropdownMenu>
+            <DropdownMenuTrigger
               render={
                 <Button
                   size="icon-sm"
@@ -978,19 +981,17 @@ export function ProjectSettings() {
                 </Button>
               }
             />
-            <Menu.Portal>
-              <Menu.Positioner sideOffset={4} align="end" className="z-40">
-                <Menu.Popup className="min-w-56 rounded-xl border bg-popover p-1 text-popover-foreground shadow-soft-lg">
-                  <Menu.Item onClick={handleSaveAndClose} className={ITEM_CLASS}>
-                    Save and close
-                  </Menu.Item>
-                  <Menu.Item onClick={() => setDiscardOpen(true)} className={ITEM_CLASS}>
-                    Close without saving
-                  </Menu.Item>
-                </Menu.Popup>
-              </Menu.Positioner>
-            </Menu.Portal>
-          </Menu.Root>
+            <DropdownMenuContent align="end" className="min-w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={handleSaveAndClose}>
+                  Save and close
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDiscardOpen(true)}>
+                  Close without saving
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </ButtonGroup>
       ) : null}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">

@@ -4661,7 +4661,7 @@ function EditorRow({
 
         {/* Multi-select column — sits in the gutter between source and target
             with no surface/border of its own so the circle reads as centered. */}
-        <div className="flex items-start justify-center pt-4">
+        <div className="flex h-full items-center justify-center">
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
               the drag-selection affordance (onPointerDown) uses setSelection()

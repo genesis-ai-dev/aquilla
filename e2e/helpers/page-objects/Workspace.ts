@@ -79,6 +79,33 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  /** Re-import a colliding file through the safe identity-based update path. */
+  async reimportFile(filePath: string): Promise<void> {
+    await this.openImportDialog()
+    await this.uploadFilesCard().click()
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    await expect(this.page.getByText(/re-import detected/i)).toBeVisible({ timeout: 10_000 })
+    const update = this.page.getByRole("button", { name: "Update existing" }).first()
+    await expect(update).toBeVisible()
+    await update.click()
+    await this.page.getByRole("button", { name: /^Continue$/i }).click()
+
+    const confirm = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirm).toBeVisible({ timeout: 10_000 })
+    const reconciled = this.page.waitForResponse(
+      (response) => response.url().endsWith("/import/reconcile") && response.request().method() === "POST",
+      { timeout: 30_000 },
+    )
+    await confirm.click()
+    const response = await reconciled
+    if (!response.ok()) {
+      throw new Error(`Re-import failed (${response.status()}): ${await response.text()}`)
+    }
+  }
+
   private uploadFilesCard(): Locator {
     return this.page.getByRole("button", { name: /^Upload files/i }).first()
   }

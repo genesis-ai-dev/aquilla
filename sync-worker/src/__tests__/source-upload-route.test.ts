@@ -97,22 +97,24 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     expect(row!.raw_source).toBeNull()
 
     const artifact = await db.prepare(
-      "SELECT id::text AS id, credential_id, file_id, sha256 FROM artifacts WHERE id::text = ?",
-    ).bind(body.artifactId).first<{ id: string; credential_id: string | null; file_id: string; sha256: string }>()
+      "SELECT id::text AS id, credential_id, file_id, sha256, jsonb_typeof(metadata) AS metadata_type FROM artifacts WHERE id::text = ?",
+    ).bind(body.artifactId).first<{ id: string; credential_id: string | null; file_id: string; sha256: string; metadata_type: string }>()
     expect(artifact).toMatchObject({
       id: body.artifactId,
       credential_id: null,
       file_id: "f1",
       sha256: body.sha256,
+      metadata_type: "object",
     })
     const binding = await db.prepare(
-      "SELECT artifact_id::text AS artifact_id, file_id, binding_role, profile_id FROM artifact_bindings WHERE artifact_id::text = ?",
-    ).bind(body.artifactId).first<{ artifact_id: string; file_id: string; binding_role: string; profile_id: string }>()
+      "SELECT artifact_id::text AS artifact_id, file_id, binding_role, profile_id, jsonb_typeof(manifest) AS manifest_type FROM artifact_bindings WHERE artifact_id::text = ?",
+    ).bind(body.artifactId).first<{ artifact_id: string; file_id: string; binding_role: string; profile_id: string; manifest_type: string }>()
     expect(binding).toMatchObject({
       artifact_id: body.artifactId,
       file_id: "f1",
       binding_role: "source",
       profile_id: "legacy:docx",
+      manifest_type: "object",
     })
   })
 

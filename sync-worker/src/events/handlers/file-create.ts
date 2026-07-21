@@ -44,7 +44,9 @@ export function handleFileCreate(
   // legacy fileType maps onto `kind`; the read side resolves fileType as
   // `kind ?? role ?? 'codex'`. `event_id` (this file.create's id) is the
   // NOT NULL AD-2 chain head.
-  const langMeta: Record<string, unknown> = {}
+  const langMeta: Record<string, unknown> = event.payload.projectionMeta
+    ? { ...event.payload.projectionMeta }
+    : {}
   if (event.payload.sourceLanguage) langMeta.sourceLanguage = event.payload.sourceLanguage
   if (event.payload.targetLanguage) langMeta.targetLanguage = event.payload.targetLanguage
   if (event.payload.sourceTextDirection) langMeta.sourceTextDirection = event.payload.sourceTextDirection

@@ -142,7 +142,17 @@ function unitKind(value: TranslatableString): ImportUnitKind {
 }
 
 function canonicalRef(value: TranslatableString): string | undefined {
-  return nonEmptyString(value.globalReferences?.[0]) ?? nonEmptyString(value.group)
+  const explicit = nonEmptyString(value.globalReferences?.[0])
+  if (explicit) return explicit
+
+  // USFM headings and structural markers intentionally carry their canonical
+  // locator in `group`, while general-purpose parsers often put a freshly
+  // generated UUID there. Only accept group values that are recognizable
+  // Scripture addresses; random parser grouping must never become identity.
+  const grouped = nonEmptyString(value.group)
+  return grouped && (SCRIPTURE_VERSE_RE.test(grouped) || SCRIPTURE_STRUCTURE_RE.test(grouped))
+    ? grouped
+    : undefined
 }
 
 function addressAndLocator(
@@ -271,7 +281,10 @@ function addressAndLocator(
   }
 
   const index = physicalOrder + 1
-  const stableHint = nonEmptyString(value.group) ?? nonEmptyString(value.context) ?? kind
+  // Parser ids/groups are often freshly generated UUIDs (Markdown segments,
+  // subtitle groups). Human/format context is the stable structural hint;
+  // occurrenceKey below disambiguates repeated contexts deterministically.
+  const stableHint = nonEmptyString(value.context) ?? nonEmptyString(value.group) ?? kind
   return {
     address: { scheme: "sequence", index },
     sourceLocator: { kind: "sequence", index },

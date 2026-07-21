@@ -118,6 +118,122 @@ export interface BulkUploadArgs {
   fetchImpl?: typeof fetch
 }
 
+export interface ReconcileImportResult {
+  fileId: string
+  replayed: boolean
+  matched: number
+  added: number
+  changed: number
+  unchanged: number
+  retainedMissing: number
+  importedTargets: number
+}
+
+export interface ReconcileSourceArgs extends Omit<BulkUploadArgs, "fileId"> {
+  /** Existing file whose stable units are being reconciled. */
+  fileId: string
+}
+
+/**
+ * Re-import a complete parsed file without replacing its logical cells.
+ *
+ * The exact original is uploaded immutably first, without changing the live
+ * sidecar pointer. The reconcile transaction switches the pointer only after
+ * unit matching and all projections succeed, so a failed parse/upload never
+ * leaves new cells paired with an old source artifact (or vice versa).
+ */
+export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<ReconcileImportResult> {
+  const fetchFn = args.fetchImpl ?? fetch
+  let token = await args.getToken(args.fileId)
+  if (!token) {
+    throw new Error("Couldn't get an upload token — you may be signed out. Sign in and import again.")
+  }
+  if (args.signal?.aborted) throw new Error("Import cancelled")
+
+  const fileEventId = args.file.id
+  const artifactId = uuidv7()
+  const sourceBytes = args.rawBytes
+    ?? (args.rawSource !== undefined
+      ? new TextEncoder().encode(args.rawSource).buffer as ArrayBuffer
+      : undefined)
+  let uploadedArtifactId: string | undefined
+  if (sourceBytes && args.rawSourceFormat) {
+    const uploaded = await uploadSourceOriginal({
+      projectId: args.projectId,
+      fileId: args.fileId,
+      artifactId,
+      bytes: sourceBytes,
+      format: args.rawSourceFormat,
+      artifactName: args.file.name,
+      bindingRole: "source",
+      profileId: args.file.parserVersion?.split("@")[0],
+      profileVersion: args.file.parserVersion?.split("@")[1],
+      updateSourceSidecar: false,
+      getToken: args.getToken,
+      fetchFn,
+    })
+    uploadedArtifactId = uploaded.artifactId
+  }
+
+  const url = `${syncWorkerHttpOrigin()}/import/reconcile`
+  const payload = {
+    projectId: args.projectId,
+    fileId: args.fileId,
+    file: args.file,
+    cells: args.cells,
+    targets: (args.targets ?? []).map((target) => ({
+      ...target,
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    })),
+    ...(uploadedArtifactId && args.rawSourceFormat
+      ? { artifactId: uploadedArtifactId, rawSourceFormat: args.rawSourceFormat }
+      : {}),
+    clientTs: Date.now(),
+  }
+
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+    if (args.signal?.aborted) throw new Error("Import cancelled")
+    let response: Response | null = null
+    try {
+      response = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+        signal: args.signal,
+      })
+    } catch (error) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      lastError = new Error(`Re-import failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+
+    if (response) {
+      if (response.ok) {
+        args.onProgress?.(args.cells.length, args.cells.length)
+        return await response.json() as ReconcileImportResult
+      }
+      const detail = await response.text().catch(() => "")
+      lastError = new Error(
+        `Re-import failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+      )
+      if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+        const refreshed = await args.getToken(args.fileId)
+        if (refreshed) {
+          token = refreshed
+          continue
+        }
+      }
+      if (!isRetryableImportStatus(response.status)) throw lastError
+    }
+    if (attempt < IMPORT_ATTEMPTS - 1) {
+      await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+    }
+  }
+  // The immutable artifact remains audit-visible but unselected when this
+  // fails; the old live sidecar and every existing cell remain untouched.
+  throw lastError ?? new Error(`Re-import ${fileEventId} failed`)
+}
+
 /**
  * Upload a parsed source file to the server in chunks. Resolves once every
  * cell has landed; throws (with a human-readable message) on the first failure

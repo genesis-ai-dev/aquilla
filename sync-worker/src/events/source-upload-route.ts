@@ -341,7 +341,7 @@ export async function handleSourceUploadRequest(
       `INSERT INTO artifacts (
          id, project_id, uploaded_by_user_id, credential_id, name, content_type,
          size_bytes, sha256, r2_key, file_id, kind, metadata
-       ) VALUES (?::uuid, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'source', ?::jsonb)
+       ) VALUES (?::uuid, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'source', ?::text::jsonb)
        ON CONFLICT (id) DO NOTHING`,
     ).bind(
       artifactId,
@@ -359,7 +359,7 @@ export async function handleSourceUploadRequest(
       `INSERT INTO artifact_bindings (
          id, project_id, artifact_id, file_id, binding_role, target_lang,
          member_path, profile_id, profile_version, fidelity, manifest, recipe
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, '', ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, '', ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb)
        ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
        DO UPDATE SET
          profile_id = EXCLUDED.profile_id,

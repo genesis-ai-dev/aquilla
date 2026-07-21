@@ -240,4 +240,42 @@ describe("normalized import manifest", () => {
       recipe,
     })
   })
+
+  it("keeps sequence identities stable when a parser regenerates group ids", () => {
+    const parse = (headingGroup: string, paragraphGroup: string, suffix: string) =>
+      normalizeTranslatableStrings([
+        {
+          id: `heading-${suffix}`,
+          original: `Heading ${suffix}`,
+          translated: "",
+          context: "Heading 1",
+          group: headingGroup,
+          type: "heading",
+        },
+        {
+          id: `paragraph-${suffix}`,
+          original: `Paragraph ${suffix}`,
+          translated: "",
+          context: "Paragraph",
+          group: paragraphGroup,
+          type: "text",
+          paragraphStart: true,
+        },
+      ] satisfies TranslatableString[], {
+        fileName: "notes.md",
+        fileType: "md",
+      })
+
+    const first = parse(crypto.randomUUID(), crypto.randomUUID(), "before")
+    const second = parse(crypto.randomUUID(), crypto.randomUUID(), "after")
+
+    expect(first.units.map((unit) => unit.unitKey)).toEqual([
+      "sequence:Heading 1",
+      "sequence:Paragraph",
+    ])
+    expect(first.units.map((unit) => unit.canonicalRef)).toEqual([undefined, undefined])
+    expect(second.units.map((unit) => unit.unitKey)).toEqual(
+      first.units.map((unit) => unit.unitKey),
+    )
+  })
 })

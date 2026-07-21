@@ -90,6 +90,7 @@ interface FileProjection {
   name: string
   type: string
   cellCount: number
+  bookCode?: string
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
@@ -112,7 +113,7 @@ async function loadFilesByProject(
 
   const placeholders = projectIds.map(() => "?").join(",")
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT id, project_id, name, kind, role, cell_count, meta
+    `SELECT id, project_id, name, kind, role, book_code, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
         AND deleted_at IS NULL
@@ -125,6 +126,7 @@ async function loadFilesByProject(
       name: string
       kind: string | null
       role: string | null
+      book_code: string | null
       cell_count: number | null
       meta: string | null
     }>()
@@ -165,6 +167,7 @@ async function loadFilesByProject(
       // `file_type` collapsed into role + kind (0012); derive a compatible value.
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
+      ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(orderedBy ? { orderedBy } : {}),
       ...(sourceLanguage ? { sourceLanguage } : {}),
       ...(targetLanguage ? { targetLanguage } : {}),

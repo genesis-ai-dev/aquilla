@@ -83,6 +83,12 @@ import { getTestament } from "@/lib/codex-editor/bible-books"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
+
+interface CollisionResolution {
+  skipKeys: ReadonlySet<string>
+  /** normalized incoming book-code/name → existing file id */
+  reimportFileIds: ReadonlyMap<string, string>
+}
 import posthog from "@/lib/posthog"
 import {
   IMPORT_STARTED,
@@ -134,11 +140,11 @@ interface ImportDialogProps {
   sourceCells?: SourceCellRef[]
   /**
    * AQU-287: files already in the project. Used by the collision guard to detect
-   * re-imports and offer Skip / Import as duplicate choices. Wired from
+   * re-imports and offer Update existing / Skip / Import as duplicate. Wired from
    * ProjectWorkspace (AQU-272 glue); FileReference satisfies { name }.
    * Fresh projects (empty array or absent) skip the detection step.
    */
-  existingFiles?: { name: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string }[]
   /**
    * DCS (Door43) import (spec §8/§9): persist the `dcsUpstream` cursor to the
    * current project's settings after a successful import, pinning it to the
@@ -211,7 +217,7 @@ export function ImportDialog({
   const [collisionState, setCollisionState] = useState<{
     collisions: CollisionResult[]
     // Callback that continues the pending import once the user resolves collisions.
-    proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>
+    proceed: (resolution: CollisionResolution) => void | Promise<void>
   } | null>(null)
   // AQU-310: preview state — parsed results waiting for user confirmation before upload.
   const [previewState, setPreviewState] = useState<{
@@ -697,25 +703,28 @@ export function ImportDialog({
         {screen === "collision" && collisionState && (
           <CollisionPanel
             collisions={collisionState.collisions}
-            onResolve={async (skipKeys) => {
+            onResolve={async (resolution) => {
               const totalCount = collisionState.collisions.length
-              const skippedCount = skipKeys.size
-              const duplicatedCount = totalCount - skippedCount
+              const skippedCount = resolution.skipKeys.size
+              const updatedCount = resolution.reimportFileIds.size
+              const duplicatedCount = totalCount - skippedCount - updatedCount
               if (skippedCount > 0) {
                 posthog.capture(IMPORT_COLLISION_SKIPPED, {
                   skipped_count: skippedCount,
                   duplicated_count: duplicatedCount,
+                  updated_count: updatedCount,
                   project_id: projectId,
                 })
               } else {
                 posthog.capture(IMPORT_COLLISION_DUPLICATED, {
                   duplicated_count: duplicatedCount,
+                  updated_count: updatedCount,
                   project_id: projectId,
                 })
               }
               setCollisionState(null)
               setScreen("upload")
-              await collisionState.proceed(skipKeys)
+              await collisionState.proceed(resolution)
             }}
             onCancel={() => {
               setCollisionState(null)
@@ -933,9 +942,9 @@ interface UploadPanelProps {
    * AQU-287: files already in the project. Passed to detectCollisions before
    * any import starts; on collision, onCollision is called instead of proceeding.
    */
-  existingFiles?: { name: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string }[]
   /** AQU-287: called when collisions are detected; parent shows the collision screen. */
-  onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
+  onCollision?: (collisions: CollisionResult[], proceed: (resolution: CollisionResolution) => void | Promise<void>) => void
   /**
    * AQU-310: called after client-side parsing completes, before any upload.
    * Parent shows a preview screen; commit() triggers the actual bulk upload.
@@ -988,11 +997,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         const collisions = detectCollisions(incoming, existingFiles)
         if (collisions.length > 0) {
           // Pause and ask the user; once resolved, re-run with a skipKeys set.
-          onCollision(collisions, async (skipKeys) => {
+          onCollision(collisions, async (resolution) => {
             // Filter out skipped files and proceed with the rest.
-            const filtered = list.filter((f) => !skipKeys.has(f.name.trim().toLowerCase()))
+            const filtered = list.filter((f) => !resolution.skipKeys.has(f.name.trim().toLowerCase()))
             if (filtered.length === 0) return
-            await doImportFiles(filtered)
+            await doImportFiles(filtered, resolution.reimportFileIds)
           })
           return
         }
@@ -1012,7 +1021,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
    * Media files bypass preview (they have no text cells to show).
    */
   const doImportFiles = useCallback(
-    async (list: File[]) => {
+    async (list: File[], reimportFileIds?: ReadonlyMap<string, string>) => {
       setImporting(true)
       setProgress(null)
       setError(null)
@@ -1066,13 +1075,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         // Hand off to parent to show the preview screen.
         // The commit closure does the actual upload.
         onPreview(allParsedResults, async () => {
-          await doCommit(list, preparedByFile)
+          await doCommit(list, preparedByFile, reimportFileIds)
         })
         return
       }
 
       // No preview (media-only batch, or no onPreview callback) — commit immediately.
-      await doCommit(list)
+      await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview]
@@ -1080,7 +1089,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
   /** Upload all files (called after preview confirmation, or directly for media). */
   const doCommit = useCallback(
-    async (list: File[], preparedByFile?: ReadonlyMap<File, PreparedImportFile>) => {
+    async (
+      list: File[],
+      preparedByFile?: ReadonlyMap<File, PreparedImportFile>,
+      reimportFileIds?: ReadonlyMap<string, string>,
+    ) => {
       setImporting(true)
       setProgress(null)
       setPhase("")
@@ -1112,6 +1125,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             targetLanguage,
             targetLang,
             identityToken,
+            reimportFileIds,
             getToken,
             onCellEnqueued: (count, total) => {
               const p = `Uploading ${file.name}`
@@ -1298,9 +1312,9 @@ interface ParatextChoiceProps {
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
   onCancel: () => void
   /** AQU-287: files already in the project; used for collision detection. */
-  existingFiles?: { name: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string }[]
   /** AQU-287: called when collisions are detected before running the import. */
-  onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
+  onCollision?: (collisions: CollisionResult[], proceed: (resolution: CollisionResolution) => void | Promise<void>) => void
 }
 
 /** Preview + source-vs-target choice for a detected Paratext project (AQU-310:
@@ -1371,11 +1385,15 @@ function ParatextChoice({
     return detectCollisions(incoming, existingFiles)
   }
 
-  async function runSourceWithSkipKeys(skipKeys: ReadonlySet<string>) {
+  async function runSourceWithResolution(resolution: CollisionResolution) {
     if (!plan) return
     setMode("importing"); setError(null); setPhase("Uploading…"); setProgress(null)
     try {
-      const { refs, settings, skipped } = await commitParatextProject(plan, { ...ctx, skipKeys: mergedSkipKeys(skipKeys) }, onProgress)
+      const { refs, settings, skipped } = await commitParatextProject(plan, {
+        ...ctx,
+        skipKeys: mergedSkipKeys(resolution.skipKeys),
+        reimportFileIds: resolution.reimportFileIds,
+      }, onProgress)
       const inferredLang = settings.languageIsoCode || settings.language
       await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
@@ -1395,11 +1413,11 @@ function ParatextChoice({
     if (onCollision) {
       const collisions = detectPlanCollisions(plan)
       if (collisions.length > 0) {
-        onCollision(collisions, (skipKeys) => runSourceWithSkipKeys(skipKeys))
+        onCollision(collisions, runSourceWithResolution)
         return
       }
     }
-    await runSourceWithSkipKeys(new Set())
+    await runSourceWithResolution({ skipKeys: new Set(), reimportFileIds: new Map() })
   }
 
   async function startTarget() {
@@ -1413,7 +1431,7 @@ function ParatextChoice({
     }
   }
 
-  async function runTargetWithSkipKeys(sel: EBibleTranslation, skipKeys: ReadonlySet<string>) {
+  async function runTargetWithResolution(sel: EBibleTranslation, resolution: CollisionResolution) {
     if (!plan) return
     setMode("importing"); setError(null); setPhase(`Fetching source: ${sel.title}…`); setProgress(null)
     try {
@@ -1423,7 +1441,12 @@ function ParatextChoice({
         text: s.original,
       }))
       const selSourceLang = sel.languageCode || sel.id
-      const { refs, settings, skipped } = await importParatextAsTarget(plan, sourceVerses, { ...ctx, sourceLanguage: selSourceLang, skipKeys: mergedSkipKeys(skipKeys) }, onProgress)
+      const { refs, settings, skipped } = await importParatextAsTarget(plan, sourceVerses, {
+        ...ctx,
+        sourceLanguage: selSourceLang,
+        skipKeys: mergedSkipKeys(resolution.skipKeys),
+        reimportFileIds: resolution.reimportFileIds,
+      }, onProgress)
       const inferredTargetLang = settings.languageIsoCode || settings.language
       await onImported(
         refs,
@@ -1441,11 +1464,11 @@ function ParatextChoice({
     if (onCollision) {
       const collisions = detectPlanCollisions(plan)
       if (collisions.length > 0) {
-        onCollision(collisions, (skipKeys) => runTargetWithSkipKeys(sel, skipKeys))
+        onCollision(collisions, (resolution) => runTargetWithResolution(sel, resolution))
         return
       }
     }
-    await runTargetWithSkipKeys(sel, new Set())
+    await runTargetWithResolution(sel, { skipKeys: new Set(), reimportFileIds: new Map() })
   }
 
   const filtered = useMemo(() => {
@@ -2438,30 +2461,26 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
 // ---------------------------------------------------------------------------
 // Collision guard panel — AQU-287
 // Shown when re-importing into a project that already has matching files.
-// Offers Skip / Import as duplicate per collision. Apply-to-all toggle lets
+// Offers safe identity-based update, Skip, or Import as duplicate per collision. Apply-to-all lets
 // the user resolve the whole batch in one click.
-//
-// Replace-existing is NOT included in this pass because superseding the
-// content of existing cells would require a cross-file cell-update write path
-// that doesn't exist yet (the import pipeline only creates new cells). The UI
-// doesn't show a "Replace" button rather than showing a disabled one so users
-// aren't confused by a grayed-out option.
 // ---------------------------------------------------------------------------
 
-type CollisionChoice = "skip" | "duplicate"
+type CollisionChoice = "update" | "skip" | "duplicate"
 
 interface CollisionPanelProps {
   collisions: CollisionResult[]
-  onResolve: (skipKeys: ReadonlySet<string>) => void | Promise<void>
+  onResolve: (resolution: CollisionResolution) => void | Promise<void>
   onCancel: () => void
 }
 
 /** Per-collision prompt with apply-to-all toggle. */
 function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps) {
-  // Map from incoming name → choice. Default is "skip" (safe default).
+  // Updating preserves logical cell ids and is the safe default when the
+  // existing project listing supplied an id. Legacy name-only callers fall
+  // back to Skip because they cannot address an existing file safely.
   const [choices, setChoices] = useState<Map<string, CollisionChoice>>(() => {
     const m = new Map<string, CollisionChoice>()
-    for (const c of collisions) m.set(c.name, "skip")
+    for (const c of collisions) m.set(c.name, c.existingId ? "update" : "skip")
     return m
   })
   const [resolving, setResolving] = useState(false)
@@ -2474,10 +2493,10 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
     })
   }
 
-  function toggle(name: string) {
+  function setChoice(name: string, choice: CollisionChoice) {
     setChoices((prev) => {
       const next = new Map(prev)
-      next.set(name, prev.get(name) === "skip" ? "duplicate" : "skip")
+      next.set(name, choice)
       return next
     })
   }
@@ -2488,19 +2507,21 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
     try {
       // Build skipKeys: normalized keys for every item the user chose to skip.
       const skipKeys = new Set<string>()
+      const reimportFileIds = new Map<string, string>()
       for (const [name, choice] of choices) {
+        const collision = collisions.find((c) => c.name === name)
+        const key = collision?.bookCode
+          ? collision.bookCode.toUpperCase()
+          : name.trim().toLowerCase()
         if (choice === "skip") {
           // Key must match what importFile / importParatextProject checks.
           // bookCode (uppercase) or normalized name (lowercase trimmed).
-          const collision = collisions.find((c) => c.name === name)
-          if (collision?.bookCode) {
-            skipKeys.add(collision.bookCode.toUpperCase())
-          } else {
-            skipKeys.add(name.trim().toLowerCase())
-          }
+          skipKeys.add(key)
+        } else if (choice === "update" && collision?.existingId) {
+          reimportFileIds.set(key, collision.existingId)
         }
       }
-      await onResolve(skipKeys)
+      await onResolve({ skipKeys, reimportFileIds })
     } finally {
       setResolving(false)
     }
@@ -2508,6 +2529,8 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
 
   const allSkip = [...choices.values()].every((v) => v === "skip")
   const allDup = [...choices.values()].every((v) => v === "duplicate")
+  const allUpdate = [...choices.values()].every((v) => v === "update")
+  const canUpdateAll = collisions.every((collision) => collision.existingId)
 
   return (
     <div className="flex flex-col gap-4 py-2">
@@ -2515,10 +2538,29 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
         The following {collisions.length === 1 ? "file already exists" : `${collisions.length} files already exist`} in this
         project. Choose what to do with each one.
       </p>
+      <p className="text-xs text-muted-foreground">
+        Updating matches stable units and keeps translations, language lanes, comments, audio, and units missing from the new file.
+      </p>
+      {collisions.some((collision) => collision.ambiguous) && (
+        <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+          Some files have multiple matches. Choose Skip or Import as duplicate for those files.
+        </p>
+      )}
 
       {/* Apply-to-all row */}
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">Apply to all:</span>
+        <button
+          type="button"
+          onClick={() => setAll("update")}
+          disabled={!canUpdateAll}
+          className={cn(
+            "rounded border px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+            allUpdate ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
+          )}
+        >
+          Update all
+        </button>
         <button
           type="button"
           onClick={() => setAll("skip")}
@@ -2556,11 +2598,24 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
                     {c.bookCode ? ` (${c.bookCode})` : ""}
                   </p>
                 </div>
-                {/* Toggle between Skip and Duplicate */}
+                {/* Explicit three-way resolution; update never replaces target data. */}
                 <div className="flex shrink-0 gap-1 text-xs">
                   <button
                     type="button"
-                    onClick={() => choice !== "skip" && toggle(c.name)}
+                    disabled={!c.existingId}
+                    onClick={() => setChoice(c.name, "update")}
+                    className={cn(
+                      "rounded border px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                      choice === "update"
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted text-muted-foreground hover:border-foreground/40",
+                    )}
+                  >
+                    Update existing
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChoice(c.name, "skip")}
                     className={cn(
                       "rounded border px-2 py-0.5 transition-colors",
                       choice === "skip"
@@ -2572,7 +2627,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
                   </button>
                   <button
                     type="button"
-                    onClick={() => choice !== "duplicate" && toggle(c.name)}
+                    onClick={() => setChoice(c.name, "duplicate")}
                     className={cn(
                       "rounded border px-2 py-0.5 transition-colors",
                       choice === "duplicate"

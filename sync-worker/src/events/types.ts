@@ -359,6 +359,12 @@ export interface EventPayloads {
     orderedBy?: string
     /** Versioned normalized-import summary persisted under files.meta. */
     importManifest?: Record<string, unknown>
+    /**
+     * Internal re-import fold snapshot. The specialized re-import route uses
+     * this to make event-log rebuilds reproduce the live merged file metadata
+     * exactly. Normal genesis imports omit it.
+     */
+    projectionMeta?: Record<string, unknown>
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
   // (Corpus/grouping marker is not server-backed yet — name only.)

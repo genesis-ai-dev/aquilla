@@ -130,6 +130,26 @@ describe("AQU-287 — collision guard intercepts re-imports", () => {
     expect(importFile).not.toHaveBeenCalled()
   })
 
+  it("defaults identified collisions to updating the existing file", async () => {
+    render(
+      <ImportDialog
+        {...baseProps}
+        existingFiles={[{ id: "existing-genesis", name: "genesis.usfm" }]}
+      />,
+    )
+    await dropCollidingFile()
+    expect(await screen.findByRole("button", { name: "Update existing" })).toHaveClass("text-primary")
+    expect(screen.getByRole("button", { name: "Update all" })).toBeEnabled()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await confirmPreview()
+    await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
+    const context = vi.mocked(importFile).mock.calls[0][1]
+    expect(context.reimportFileIds?.get("genesis.usfm")).toBe("existing-genesis")
+  })
+
   it("Skip choice: importFile is NOT called; onImported fires with no refs", async () => {
     const onImported = vi.fn(async () => undefined)
     const onOpenChange = vi.fn()

@@ -472,6 +472,8 @@ export interface FileReference {
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
+  /** Stable USFM/Scripture book identity used for re-import collision matching. */
+  bookCode?: string
   /**
    * Display lens for this file's segments (timeline-segment-model, Scope A).
    * `'time'`   → rows sort by timing start (sequenceIndex breaks ties / homes

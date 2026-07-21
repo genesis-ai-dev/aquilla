@@ -34,7 +34,7 @@ import {
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
-import { enqueueTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
+import { enqueueTargetCommits, bulkUploadMorphRows, reconcileSourceImport, type MorphRow, type TargetCommit } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractHtmlStrings } from "./parsers/html"
@@ -387,6 +387,9 @@ export interface ImportContext {
    * "skipped by user" rather than being uploaded.
    */
   skipKeys?: ReadonlySet<string>
+  /** Existing files selected for safe unit-identity reconciliation. Keys use
+   * the same normalized book-code/name vocabulary as skipKeys. */
+  reimportFileIds?: ReadonlyMap<string, string>
 }
 
 function normalizeImportedDirection(value: string | undefined | null): "ltr" | "rtl" | undefined {
@@ -1000,7 +1003,15 @@ export async function emitParsedFile(
   ctx: ImportContext,
   normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
-  const fileId = uuidv7()
+  const reimportKeys = [
+    result.bookCode?.trim().toUpperCase(),
+    result.name.trim().toLowerCase(),
+    result.originalName?.trim().toLowerCase(),
+  ].filter((key): key is string => Boolean(key))
+  const existingFileId = reimportKeys
+    .map((key) => ctx.reimportFileIds?.get(key))
+    .find((id): id is string => Boolean(id))
+  const fileId = existingFileId ?? uuidv7()
 
   const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
     fileName: result.name,
@@ -1029,7 +1040,8 @@ export async function emitParsedFile(
   // need to mark the time-ordered case explicitly.
   const orderedBy: OrderedBy = orderedByForFileType(fileType)
 
-  await bulkUploadSource({
+  const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
+  await upload({
     projectId: ctx.projectId,
     fileId,
     file: {
@@ -1073,6 +1085,7 @@ export async function emitParsedFile(
       ...(ctx.targetTextDirection ? { targetTextDirection: ctx.targetTextDirection } : {}),
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
+      ...(result.bookCode ? { bookCode: result.bookCode } : {}),
     },
     speakerPairs,
   }
@@ -1519,7 +1532,8 @@ export async function importParatextAsTarget(
       continue
     }
     try {
-      const fileId = uuidv7()
+      const existingFileId = ctx.reimportFileIds?.get(bookPlan.bookId.toUpperCase())
+      const fileId = existingFileId ?? uuidv7()
       const strings: TranslatableString[] = bookPlan.cells.map((cell) => ({
         id: cell.cellId,
         original: cell.sourceText,
@@ -1554,7 +1568,8 @@ export async function importParatextAsTarget(
         })
       }
 
-      await bulkUploadSource({
+      const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
+      await upload({
         projectId: ctx.projectId,
         fileId,
         file: {
@@ -1591,6 +1606,7 @@ export async function importParatextAsTarget(
         ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
         ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
         ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
+        bookCode: bookPlan.bookId,
       })
       packageBindings.push({
         fileId,

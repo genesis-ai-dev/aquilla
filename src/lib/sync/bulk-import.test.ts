@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { bulkUploadSource, type BulkImportCell } from "./bulk-import"
+import { bulkUploadSource, reconcileSourceImport, type BulkImportCell } from "./bulk-import"
 import * as sourceUpload from "./source-upload"
 
 // Stub syncWorkerHttpOrigin so no VITE env lookup is needed.
@@ -422,5 +422,76 @@ describe("bulkUploadSource", () => {
       expect.objectContaining({ id: "target-0", targetLang: "fr-CA" }),
       expect.objectContaining({ id: "target-1", targetLang: "fr-CA" }),
     ])
+  })
+})
+
+describe("reconcileSourceImport", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.clearAllMocks()
+  })
+
+  it("uploads an immutable original without switching the sidecar before reconciliation", async () => {
+    const responseBody = {
+      fileId: "existing-file",
+      replayed: false,
+      matched: 1,
+      added: 0,
+      changed: 1,
+      unchanged: 0,
+      retainedMissing: 2,
+      importedTargets: 0,
+    }
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(responseBody))
+    const fetchMock = fetchSpy as typeof fetch
+    const result = await reconcileSourceImport({
+      projectId: "p1",
+      fileId: "existing-file",
+      file: { id: "reimport-event", name: "GEN.usfm", fileType: "usfm" },
+      cells: [{
+        ...makeCell(0),
+        metadata: { aquillaImport: { unitKey: "scripture:GEN 1:1" } },
+      }],
+      rawSource: "\\id GEN\n\\c 1\n\\v 1 Updated",
+      rawSourceFormat: "usfm",
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(result).toEqual(responseBody)
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p1",
+      fileId: "existing-file",
+      bindingRole: "source",
+      updateSourceSidecar: false,
+    }))
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(fetchSpy.mock.calls[0][0]).toBe("https://sync.example/import/reconcile")
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
+    expect(payload).toMatchObject({
+      projectId: "p1",
+      fileId: "existing-file",
+      artifactId: "artifact-1",
+      rawSourceFormat: "usfm",
+    })
+  })
+
+  it("does not upload a source artifact when the parsed format has no original bytes", async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      fileId: "existing-file", replayed: false, matched: 0, added: 1,
+      changed: 1, unchanged: 0, retainedMissing: 0, importedTargets: 0,
+    }))
+    const fetchMock = fetchSpy as typeof fetch
+    await reconcileSourceImport({
+      projectId: "p1",
+      fileId: "existing-file",
+      file: { id: "reimport-event", name: "generated.txt", fileType: "txt" },
+      cells: [makeCell(0)],
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).not.toHaveBeenCalled()
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
+    expect(payload.artifactId).toBeUndefined()
   })
 })

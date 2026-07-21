@@ -31,6 +31,7 @@ import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
 import { handleBulkImportRequest } from "./events/import-route"
+import { handleImportReconcileRequest } from "./events/import-reconcile-route"
 import { handleBulkMorphImportRequest } from "./events/import-morph-route"
 import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
 import { handleMigrateSettingsRequest } from "./events/migrate-settings-route"
@@ -287,6 +288,8 @@ const worker = {
     if (branchingSearchResponse) return withCors(branchingSearchResponse, request)
     const bulkImportResponse = await handleBulkImportRequest(request, env, ctx)
     if (bulkImportResponse) return bulkImportResponse
+    const importReconcileResponse = await handleImportReconcileRequest(request, env, ctx)
+    if (importReconcileResponse) return importReconcileResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
     const migrateIngestResponse = await handleMigrateIngestRequest(request, env)

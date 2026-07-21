@@ -14,14 +14,14 @@ import { withCors } from "../cors"
 import { r2KeyPrefix, type AudioEnv } from "../audio"
 import { verifyTokenForDoc } from "../auth"
 import { ROLE } from "./role-policy"
+import { MAX_SOURCE_ARTIFACT_BYTES } from "../../../shared/import-contract"
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
 const BINDING_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source-bindings$/
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-// No documented product limit on original-source size; 50 MB comfortably
-// covers real DOCX/PPTX imports while capping unbounded R2 writes / memory use.
-export const MAX_SOURCE_BYTES = 50 * 1024 * 1024
+export const MAX_SOURCE_BYTES = MAX_SOURCE_ARTIFACT_BYTES
+const MAX_LEGACY_BUFFERED_SOURCE_BYTES = 50 * 1024 * 1024
 
 export interface SourceUploadEnv extends Pick<AudioEnv, "R2_KEY_PREFIX"> {
   SNAPSHOTS: R2Bucket
@@ -67,6 +67,38 @@ export function sourceObjectKey(
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('')
+}
+
+function sha256Bytes(hex: string): ArrayBuffer {
+  const bytes = new Uint8Array(32)
+  for (let index = 0; index < bytes.length; index++) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16)
+  }
+  return bytes.buffer
+}
+
+async function readBodyWithLimit(request: Request, limit: number): Promise<ArrayBuffer> {
+  if (!request.body) return new ArrayBuffer(0)
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > limit) {
+      await reader.cancel("source too large")
+      throw new RangeError("source too large")
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out.buffer
 }
 
 function objectRecord(value: unknown): Record<string, unknown> {
@@ -219,19 +251,54 @@ export async function handleSourceUploadRequest(
     return withCors(new Response('invalid artifact id', { status: 400 }), request)
   }
 
-  // Reject oversize uploads before buffering the whole body when the client
-  // advertises the size; the post-buffer check below is the backstop.
+  const shaHeader = request.headers.get("X-Source-Sha256")?.trim().toLowerCase()
+  const sizeHeader = request.headers.get("X-Source-Size")?.trim()
+  const hasStreamingHeaders = Boolean(shaHeader || sizeHeader)
+  if (
+    hasStreamingHeaders
+    && (!shaHeader || !/^[0-9a-f]{64}$/.test(shaHeader) || !sizeHeader || !/^\d+$/.test(sizeHeader))
+  ) {
+    return withCors(new Response("invalid source checksum metadata", { status: 400 }), request)
+  }
+  const sourceSize = hasStreamingHeaders ? Number(sizeHeader) : undefined
+  if (sourceSize !== undefined && (!Number.isSafeInteger(sourceSize) || sourceSize <= 0)) {
+    return withCors(new Response("invalid source size", { status: 400 }), request)
+  }
+
+  // Reject oversize uploads before reading the body. New clients provide
+  // verified size+checksum metadata and stream to R2; legacy clients use the
+  // bounded reader below and retain the previous 50 MB memory ceiling.
   const declaredLength = Number(request.headers.get("Content-Length"))
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_SOURCE_BYTES) {
+  if (
+    (Number.isFinite(declaredLength) && declaredLength > MAX_SOURCE_BYTES)
+    || (sourceSize !== undefined && sourceSize > MAX_SOURCE_BYTES)
+  ) {
     return withCors(new Response("source too large", { status: 413 }), request)
   }
 
-  const body = await request.arrayBuffer()
-  if (body.byteLength === 0) {
-    return withCors(new Response("empty body", { status: 400 }), request)
-  }
-  if (body.byteLength > MAX_SOURCE_BYTES) {
-    return withCors(new Response("source too large", { status: 413 }), request)
+  let bufferedBody: ArrayBuffer | undefined
+  let sha256: string
+  let byteLength: number
+  if (hasStreamingHeaders) {
+    sha256 = shaHeader!
+    byteLength = sourceSize!
+  } else {
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_LEGACY_BUFFERED_SOURCE_BYTES) {
+      return withCors(new Response("source too large for legacy buffered upload", { status: 413 }), request)
+    }
+    try {
+      bufferedBody = await readBodyWithLimit(request, MAX_LEGACY_BUFFERED_SOURCE_BYTES)
+    } catch (error) {
+      if (error instanceof RangeError) {
+        return withCors(new Response("source too large", { status: 413 }), request)
+      }
+      throw error
+    }
+    if (bufferedBody.byteLength === 0) {
+      return withCors(new Response("empty body", { status: 400 }), request)
+    }
+    byteLength = bufferedBody.byteLength
+    sha256 = await sha256Hex(bufferedBody)
   }
 
   const artifactId = requestedArtifactId ?? crypto.randomUUID()
@@ -285,8 +352,6 @@ export async function handleSourceUploadRequest(
     return withCors(new Response('invalid artifact metadata', { status: 400 }), request)
   }
   const updateSourceSidecar = updateSourceHeader !== 'false'
-  const sha256 = await sha256Hex(body)
-
   const file = await db.prepare(
     `SELECT name, meta FROM files WHERE id = ? AND project_id = ?`,
   ).bind(fileId, projectId).first<{ name: string; meta: unknown }>()
@@ -320,7 +385,26 @@ export async function handleSourceUploadRequest(
     ? JSON.stringify(manifest.recipe)
     : null
 
-  await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
+  let stored: R2Object
+  try {
+    stored = await env.SNAPSHOTS.put(
+      key,
+      bufferedBody ?? request.body!,
+      {
+        httpMetadata: { contentType },
+        ...(bufferedBody ? {} : { sha256: sha256Bytes(sha256) }),
+      },
+    )
+  } catch (error) {
+    return withCors(
+      new Response(`source storage upload failed: ${error instanceof Error ? error.message : String(error)}`, { status: 502 }),
+      request,
+    )
+  }
+  if (stored.size !== byteLength) {
+    await env.SNAPSHOTS.delete(key)
+    return withCors(new Response("source size did not match uploaded bytes", { status: 400 }), request)
+  }
 
   const statements: AquillaStatement[] = []
   if (updateSourceSidecar && bindingRole === 'source') {
@@ -334,7 +418,7 @@ export async function handleSourceUploadRequest(
          r2_key     = EXCLUDED.r2_key,
          size_bytes = EXCLUDED.size_bytes,
          created_at = EXCLUDED.created_at`,
-    ).bind(fileId, projectId, format, key, body.byteLength, Date.now()))
+    ).bind(fileId, projectId, format, key, byteLength, Date.now()))
   }
   statements.push(
     db.prepare(
@@ -349,7 +433,7 @@ export async function handleSourceUploadRequest(
       String(auth.claims.userId),
       artifactName ?? file.name,
       contentType,
-      body.byteLength,
+      byteLength,
       sha256,
       key,
       fileId,

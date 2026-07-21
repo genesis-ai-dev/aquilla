@@ -55,13 +55,13 @@ describe("handleCorsPreflight", () => {
     const res = handleCorsPreflight(
       req("OPTIONS", "/api/v1/projects/p1/files/f1/source", {
         "Access-Control-Request-Method": "PUT",
-        "Access-Control-Request-Headers": "authorization,x-source-format,x-artifact-id,x-artifact-name,x-artifact-binding-role,x-artifact-member-path,x-artifact-profile-id,x-artifact-profile-version,x-artifact-fidelity,x-update-source-sidecar",
+        "Access-Control-Request-Headers": "authorization,x-source-format,x-source-size,x-source-sha256,x-artifact-id,x-artifact-name,x-artifact-binding-role,x-artifact-member-path,x-artifact-profile-id,x-artifact-profile-version,x-artifact-fidelity,x-update-source-sidecar",
       }),
     )
     expect(res?.status).toBe(204)
     const allowed = res!.headers.get("Access-Control-Allow-Headers")!.toLowerCase()
     for (const header of [
-      "x-source-format", "x-artifact-id", "x-artifact-name", "x-artifact-binding-role",
+      "x-source-format", "x-source-size", "x-source-sha256", "x-artifact-id", "x-artifact-name", "x-artifact-binding-role",
       "x-artifact-member-path", "x-artifact-profile-id", "x-artifact-profile-version",
       "x-artifact-fidelity", "x-update-source-sidecar",
     ]) expect(allowed).toContain(header)

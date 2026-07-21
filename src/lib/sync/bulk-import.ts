@@ -13,7 +13,7 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
-import { uploadSourceOriginal } from "./source-upload"
+import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
 import { v7 as uuidv7 } from "uuid"
 
 /** Cells per HTTP request. The worker turns each chunk into bounded multi-row
@@ -241,6 +241,11 @@ export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<
  */
 export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const fetchFn = args.fetchImpl ?? fetch
+  const sourceBytes = args.rawBytes
+    ?? (args.rawSource !== undefined ? new TextEncoder().encode(args.rawSource).buffer as ArrayBuffer : undefined)
+  // Fail before file.create/staging so an unsupported artifact cannot leave a
+  // hidden partial file in the database or trash view.
+  if (sourceBytes && args.rawSourceFormat) assertSourceUploadSize(sourceBytes)
   let token = await args.getToken(args.fileId)
   if (!token) {
     throw new Error(
@@ -279,12 +284,9 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
     if (isFirst) {
       payload.file = args.file
       payload.stageEventId = stageEventId
-      // Side-car raw bytes go alongside the first chunk so they land atomically
-      // with the file.create. Subsequent chunks omit them.
-      if (args.rawSource !== undefined && args.rawSourceFormat) {
-        payload.rawSource = args.rawSource
-        payload.rawSourceFormat = args.rawSourceFormat
-      }
+      // Original bytes are preserved through the checksum-verified R2 route
+      // below before publication. Do not duplicate a potentially-large text
+      // artifact inside this JSON request.
     }
 
     let lastError: Error | null = null
@@ -398,8 +400,6 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // serializers. Runs before subsequent chunks so provenance is available as
   // soon as any cell is written.
   let uploadFailure: unknown | null = null
-  const sourceBytes = args.rawBytes
-    ?? (args.rawSource !== undefined ? new TextEncoder().encode(args.rawSource).buffer as ArrayBuffer : undefined)
   if (sourceBytes && args.rawSourceFormat) {
     try {
       await uploadSourceOriginal({

@@ -9,6 +9,13 @@
 
 export const NORMALIZED_IMPORT_VERSION = 1 as const
 
+/**
+ * Largest immutable source/package artifact accepted by the browser import
+ * path. Kept below Cloudflare's 100 MB request ceiling; workers stream these
+ * bytes directly to R2 instead of buffering them in isolate memory.
+ */
+export const MAX_SOURCE_ARTIFACT_BYTES = 95 * 1024 * 1024
+
 export const ROUND_TRIP_FIDELITIES = [
   "native",
   "verified-recipe",

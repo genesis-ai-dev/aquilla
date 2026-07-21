@@ -1,4 +1,5 @@
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { MAX_SOURCE_ARTIFACT_BYTES } from "../../../shared/import-contract"
 
 export interface UploadSourceArgs {
   projectId: string
@@ -36,11 +37,29 @@ export interface UploadSourceResult {
 const IMPORT_ATTEMPTS = 3
 const IMPORT_RETRY_DELAYS_MS = [200, 800] as const
 
+export function assertSourceUploadSize(bytes: ArrayBuffer): void {
+  if (bytes.byteLength === 0) throw new Error("Source upload failed: the original file is empty.")
+  if (bytes.byteLength > MAX_SOURCE_ARTIFACT_BYTES) {
+    const maxMb = MAX_SOURCE_ARTIFACT_BYTES / 1024 / 1024
+    throw new Error(`Source upload failed: the original file exceeds the ${maxMb} MB limit.`)
+  }
+}
+
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes)
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("")
+}
+
 function isRetryableImportStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500
 }
 
 export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<UploadSourceResult> {
+  assertSourceUploadSize(args.bytes)
+  // Supplying the checksum lets the worker stream the request directly into
+  // R2 while R2 verifies integrity. It also avoids hashing/buffering a 95 MB
+  // Paratext package inside the worker isolate.
+  const sha256 = await sha256Hex(args.bytes)
   let token = await args.getToken(args.fileId)
   if (!token) throw new Error("Couldn't get an upload token — sign in and try again.")
   const origin = args.baseUrl ?? syncWorkerHttpOrigin()
@@ -57,6 +76,8 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
         headers: {
           Authorization: `Bearer ${token}`,
           "X-Source-Format": args.format,
+          "X-Source-Size": String(args.bytes.byteLength),
+          "X-Source-Sha256": sha256,
           "X-Artifact-Id": args.artifactId,
           ...(args.artifactName ? { "X-Artifact-Name": encodeURIComponent(args.artifactName) } : {}),
           ...(args.bindingRole ? { "X-Artifact-Binding-Role": args.bindingRole } : {}),

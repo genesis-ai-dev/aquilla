@@ -12,14 +12,17 @@ const SECRET = "test-secret"
 function makeStubBucket() {
   const store = new Map<string, ArrayBuffer>()
   return {
-    async put(key: string, value: ArrayBuffer | Uint8Array | string) {
-      const body =
+    async put(key: string, value: ArrayBuffer | Uint8Array | string | ReadableStream) {
+      const body = value instanceof ReadableStream
+        ? await new Response(value).arrayBuffer()
+        :
         typeof value === "string"
           ? new TextEncoder().encode(value).buffer
           : value instanceof Uint8Array
             ? value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
             : value
       store.set(key, body as ArrayBuffer)
+      return { size: (body as ArrayBuffer).byteLength }
     },
     async get(key: string) {
       const obj = store.get(key)
@@ -299,9 +302,7 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     expect(res).toBeNull()
   })
 
-  // WHY: the handler buffers the whole body into memory (arrayBuffer) before
-  // writing to R2. Without a cap, an oversize (or hostile) upload can exhaust
-  // memory / write an unbounded object. Reject early on the advertised size.
+  // Reject an oversize upload before reading or streaming its body.
   it("returns 413 when Content-Length exceeds the cap (before buffering)", async () => {
     const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
     const SNAPSHOTS = makeStubBucket()
@@ -322,7 +323,7 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     expect(SNAPSHOTS._allKeys()).toHaveLength(0)
   })
 
-  it("still accepts an at-cap upload (boundary is exclusive of the over-cap case)", async () => {
+  it("does not reject an at-cap streaming declaration as oversized", async () => {
     const { db } = await makeTestDb({
       projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
       files: [{ id: "f1", project_id: "p1", name: "test.docx", event_id: "ev1" }],
@@ -336,13 +337,43 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Source-Format": "docx",
-        // Exactly at the cap must NOT be rejected — only strictly-over is 413.
-        "Content-Length": String(MAX_SOURCE_BYTES),
+        "X-Source-Size": String(MAX_SOURCE_BYTES),
+        "X-Source-Sha256": "00".repeat(32),
       },
       body: new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
     })
     const res = await handleSourceUploadRequest(req, env)
+    // The tiny test body does not match the declared boundary size, but the
+    // request passed the over-cap gate (strictly-over alone is 413).
+    expect(res?.status).toBe(400)
+  })
+
+  it("streams checksum-qualified source bytes directly into R2", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "project.zip", event_id: "ev1" }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const SNAPSHOTS = makeStubBucket()
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3])
+    const digest = await crypto.subtle.digest("SHA-256", bytes)
+    const sha = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("")
+    const res = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "paratext-project",
+          "X-Source-Size": String(bytes.byteLength),
+          "X-Source-Sha256": sha,
+        },
+        body: bytes,
+      },
+    ), { SNAPSHOTS, AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+
     expect(res?.status).toBe(200)
+    expect(SNAPSHOTS._allKeys()).toHaveLength(1)
   })
 
   it("returns 403 for a token with role below PROJECT_LEAD (500)", async () => {

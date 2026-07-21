@@ -9,6 +9,7 @@ vi.mock("./sync-worker-url", () => ({
 
 // Stub source-upload so rawBytes tests don't need a real worker.
 vi.mock("./source-upload", () => ({
+  assertSourceUploadSize: vi.fn(),
   uploadSourceOriginal: vi.fn().mockResolvedValue({ artifactId: "artifact-1", key: "key", sha256: "digest" }),
 }))
 
@@ -348,8 +349,12 @@ describe("bulkUploadSource", () => {
   })
 
   it("preserves text originals as first-class artifacts too", async () => {
+    const bodies: Array<Record<string, unknown>> = []
     const fetchMock = vi.fn(
-      async () => new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 }),
+      async (_url: RequestInfo | URL, init?: RequestInit) => {
+        bodies.push(JSON.parse(init?.body as string))
+        return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+      },
     ) as typeof fetch
 
     await bulkUploadSource({
@@ -369,6 +374,8 @@ describe("bulkUploadSource", () => {
       artifactId: expect.any(String),
       format: "usfm",
     }))
+    expect(bodies[0]).not.toHaveProperty("rawSource")
+    expect(bodies[0]).not.toHaveProperty("rawSourceFormat")
   })
 
   it("keeps a staged file hidden when artifact preservation fails", async () => {

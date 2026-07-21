@@ -41,6 +41,8 @@ const CORS_HEADERS: Record<string, string> = {
     "Authorization",
     "Content-Type",
     "X-Source-Format",
+    "X-Source-Size",
+    "X-Source-Sha256",
     "X-Artifact-Id",
     "X-Artifact-Name",
     "X-Artifact-Binding-Role",

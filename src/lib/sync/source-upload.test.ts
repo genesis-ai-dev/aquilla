@@ -16,6 +16,8 @@ describe("uploadSourceOriginal", () => {
     expect(url).toBe("https://sync.test/api/v1/projects/p1/files/f1/source")
     expect(init.method).toBe("PUT")
     expect(init.headers["X-Source-Format"]).toBe("docx")
+    expect(init.headers["X-Source-Size"]).toBe("3")
+    expect(init.headers["X-Source-Sha256"]).toMatch(/^[0-9a-f]{64}$/)
     expect(init.headers["X-Artifact-Id"]).toBe("01900000-0000-7000-8000-000000000001")
     expect(init.headers.Authorization).toBe("Bearer tok")
   })
@@ -34,6 +36,25 @@ describe("uploadSourceOriginal", () => {
       projectId: "p1", fileId: "f1", artifactId: "01900000-0000-7000-8000-000000000003", bytes: new ArrayBuffer(3), format: "docx",
       getToken: async () => null, fetchFn, baseUrl: "https://sync.test",
     })).rejects.toThrow(/token/)
+    expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it("rejects an oversized artifact before requesting a token or making a request", async () => {
+    const fetchFn = vi.fn()
+    const getToken = vi.fn(async () => "tok")
+    const oversized = new ArrayBuffer(0)
+    Object.defineProperty(oversized, "byteLength", { value: 95 * 1024 * 1024 + 1 })
+    await expect(uploadSourceOriginal({
+      projectId: "p1",
+      fileId: "f1",
+      artifactId: "01900000-0000-7000-8000-000000000003",
+      bytes: oversized,
+      format: "paratext-project",
+      getToken,
+      fetchFn,
+      baseUrl: "https://sync.test",
+    })).rejects.toThrow(/95 MB/)
+    expect(getToken).not.toHaveBeenCalled()
     expect(fetchFn).not.toHaveBeenCalled()
   })
 

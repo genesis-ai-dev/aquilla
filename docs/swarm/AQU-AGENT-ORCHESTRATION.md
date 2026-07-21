@@ -86,6 +86,7 @@ promote → dev push.
 | 01:04 | INCIDENT | recovered | W1C merge ran in MAIN worktree → landed on local dev (cwd reset between turns; missing explicit cd). dev hard-reset to 05530248e, clean tree verified, nothing pushed. Rule re-affirmed: EVERY git command gets an explicit cd. |
 | 01:06 | swarm/agent-w1c | merged e36a15eb7 | memory backend; auth-worker 718/718 + tsc clean on integration |
 | 01:08 | (fixup) | agent-PATCH guard | ALL agent-channel PATCHes now 403 (agent_edit_forbidden) — an agent PATCH would set human_edited=true, laundering agent output into protected state. +1 test (16 in file). |
+| 01:09 | swarm/agent-w1a | merged fb49be732 | sandbox worker; 26/26 tests + tsc clean on integration; wrangler4/types5 standalone (traced) |
 
 Wave-2 must-do (from W1F): add `data-frame-type` on run-timeline rows and `data-memory-path`
 on memory rows in W1D/W1E components; reconcile e2e/pages/agent-page.ts location vs

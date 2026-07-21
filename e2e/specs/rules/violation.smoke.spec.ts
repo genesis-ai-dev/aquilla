@@ -44,14 +44,23 @@ test("alice enables 'Extra whitespace' rule and sees a violation surfaced in edi
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
+  // Markdown headings are structural cells and intentionally have no line
+  // number. Exercise the first numbered content cell so this rule journey
+  // also guards the heading-vs-content numbering contract.
+  await expect(ws.cellRow(0).getByLabel(/^Line /)).toHaveCount(0)
+  const contentRow = ws.cellRow(1)
+  await expect(contentRow.getByLabel("Line 1")).toBeVisible()
+
   // Use insertText (not keyboard.type) to preserve consecutive spaces through
   // ProseMirror — type() fires individual key events that get normalized.
-  await ws.activateTargetCell(0)
-  await alice.keyboard.insertText("this  has  double  spaces") // intentional doubles
+  await ws.activateTargetCell(1)
+  // Preserve the source's `e2e` number and terminal period so the only
+  // infraction introduced by this test is the minor whitespace rule.
+  await alice.keyboard.insertText("this  has  double  spaces in e2e.") // intentional doubles
   await alice.locator("aside").click() // blur
   await alice.waitForTimeout(2_000)
 
   // The cell number is the issue surface and tints amber for minor infractions.
-  const linePill = ws.cellRow(0).locator('[aria-label="Line 1"] span').first()
+  const linePill = contentRow.locator('[aria-label="Line 1"] span').first()
   await expect(linePill).toHaveClass(/text-amber-600/, { timeout: 10_000 })
 })

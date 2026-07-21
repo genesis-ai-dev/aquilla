@@ -60,7 +60,7 @@
 | Editor      | File actions hover menu (rename/delete)               | `e2e/specs/editor/file-actions-button.smoke.spec.ts`          |   ✅   |
 | Editor      | Corpus rename inline edit                             | `e2e/specs/editor/sidebar-corpus-rename.smoke.spec.ts`        |   ✅   |
 | Editor      | Video attachment dialog fill + Save URL               | `e2e/specs/editor/video-attachment-save-url.smoke.spec.ts`    |   ✅   |
-| Editor      | Import coming-soon items are disabled                 | `e2e/specs/editor/import-coming-soon-disabled.smoke.spec.ts`  |   ✅   |
+| Editor      | Specialized import routes enable TMX, Macula, and Translation Notes | `e2e/specs/editor/import-specialized-options.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist coming-soon items visible             | `e2e/specs/editor/setup-checklist-coming-soon-items.smoke.spec.ts` | ✅ |
 | Validation  | Remove validation (unvalidate cell)                   | `e2e/specs/validation/cell-unvalidate.smoke.spec.ts`          |   ✅   |
 | Rules       | Org rule inline edit (pencil button expands editor)   | `e2e/specs/rules/org-rule-edit.smoke.spec.ts`                 |   ✅   |

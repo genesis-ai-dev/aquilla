@@ -7,7 +7,15 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { assistantTextOf, createRun, proposalsOf, reduceRunFrame, failRun } from "./run-state"
+import {
+  assistantTextOf,
+  createRun,
+  proposalsOf,
+  reduceRunFrame,
+  failRun,
+  markMemoryReviewed,
+  markBriefReviewed,
+} from "./run-state"
 import type { AgentFrame } from "./protocol"
 
 function fold(frames: AgentFrame[]) {
@@ -170,14 +178,31 @@ describe("reduceRunFrame — AQU-AGENT additions", () => {
     })
   })
 
-  it("records memory.proposed and brief.proposed as inline notices", () => {
+  it("records memory.proposed and brief.proposed as inline notices, pending by default", () => {
     const run = fold([
       { type: "memory.proposed", runId: "r1", memoryId: "m1", path: "observations/mrk.md", preview: "MRK terms…" },
       { type: "brief.proposed", runId: "r1", proposalId: "b1", preview: "Update tone guidance" },
     ])
     expect(run.items.map((i) => i.kind)).toEqual(["memory-proposed", "brief-proposed"])
-    expect(run.items[0]).toMatchObject({ memoryId: "m1", path: "observations/mrk.md" })
-    expect(run.items[1]).toMatchObject({ proposalId: "b1", preview: "Update tone guidance" })
+    expect(run.items[0]).toMatchObject({ memoryId: "m1", path: "observations/mrk.md", status: "pending" })
+    expect(run.items[1]).toMatchObject({ proposalId: "b1", preview: "Update tone guidance", status: "pending" })
+  })
+
+  it("markMemoryReviewed flips only the matching memory-proposed item (mem-M5)", () => {
+    const run = fold([
+      { type: "memory.proposed", runId: "r1", memoryId: "m1", path: "a.md", preview: "a" },
+      { type: "memory.proposed", runId: "r1", memoryId: "m2", path: "b.md", preview: "b" },
+    ])
+    const reviewed = markMemoryReviewed(run, "m1")
+    expect(reviewed.items[0]).toMatchObject({ memoryId: "m1", status: "reviewed" })
+    expect(reviewed.items[1]).toMatchObject({ memoryId: "m2", status: "pending" })
+  })
+
+  it("markBriefReviewed flips only the matching brief-proposed item (mem-M5)", () => {
+    const run = fold([{ type: "brief.proposed", runId: "r1", proposalId: "b1", preview: "x" }])
+    const reviewed = markBriefReviewed(run, "b1")
+    expect(reviewed.items[0]).toMatchObject({ proposalId: "b1", status: "reviewed" })
+    expect(markBriefReviewed(run, "nope").items[0]).toMatchObject({ status: "pending" })
   })
 
   it("tracks the budget meter across budget frames, and marks it exhausted on budget.exhausted", () => {

@@ -95,6 +95,9 @@ export interface MemoryProposedItem {
   memoryId: string
   path: string
   preview: string
+  /** Flipped to "reviewed" via markMemoryReviewed once the Memory tab acts on
+   *  it (mem-M5). Undefined is treated the same as "pending". */
+  status?: "pending" | "reviewed"
 }
 
 /** A proposed project-brief update, pending review. */
@@ -103,6 +106,9 @@ export interface BriefProposedItem {
   kind: "brief-proposed"
   proposalId: string
   preview: string
+  /** Flipped to "reviewed" via markBriefReviewed once the Memory tab acts on
+   *  it (mem-M5). Undefined is treated the same as "pending". */
+  status?: "pending" | "reviewed"
 }
 
 export type TimelineItem =
@@ -268,6 +274,7 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
         memoryId: frame.memoryId,
         path: frame.path,
         preview: frame.preview,
+        status: "pending",
       })
     case "brief.proposed":
       return appendItem(run, {
@@ -275,6 +282,7 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
         kind: "brief-proposed",
         proposalId: frame.proposalId,
         preview: frame.preview,
+        status: "pending",
       })
     case "budget":
       return { ...run, budget: { spentCents: frame.spentCents, capCents: frame.capCents, exhausted: false } }
@@ -310,4 +318,25 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
 export function failRun(run: AgentRunUi, message: string): AgentRunUi {
   if (run.status === "error") return run
   return { ...run, status: "error", errorMessage: message, progress: undefined }
+}
+
+/** Flip a memory.proposed notice to "reviewed" after the Memory tab acts on
+ * it (mem-M5) — a no-op if this run has no item for that memoryId. */
+export function markMemoryReviewed(run: AgentRunUi, memoryId: string): AgentRunUi {
+  return {
+    ...run,
+    items: run.items.map((item) =>
+      item.kind === "memory-proposed" && item.memoryId === memoryId ? { ...item, status: "reviewed" } : item,
+    ),
+  }
+}
+
+/** Same as markMemoryReviewed, for brief.proposed notices. */
+export function markBriefReviewed(run: AgentRunUi, proposalId: string): AgentRunUi {
+  return {
+    ...run,
+    items: run.items.map((item) =>
+      item.kind === "brief-proposed" && item.proposalId === proposalId ? { ...item, status: "reviewed" } : item,
+    ),
+  }
 }

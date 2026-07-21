@@ -1,4 +1,4 @@
-export type FileType = "md" | "docx" | "pptx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+export type FileType = "md" | "docx" | "pptx" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
 export type CellType =
   | "text"

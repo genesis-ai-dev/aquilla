@@ -6,6 +6,7 @@
 // The BulkImportCell.id is the DETERMINISTIC EVENT id `uuidv5(repo|sha|cellId)`,
 // so re-running the same import dedupes through the server's idempotent /import.
 
+import type { FileReference, FileType } from "@/lib/parsers/types"
 import type { DcsCatalogEntry, DcsCursor, DcsTrackMode, DcsFile } from "./types"
 import type { DcsClient, RefKind } from "./catalog"
 import type { BulkUploadArgs, BulkImportCell, BulkImportFileMeta } from "@/lib/sync/bulk-import"
@@ -36,17 +37,30 @@ export interface ImportDcsArgs {
 export interface ImportDcsSummary {
   files: number
   cells: number
+  refs: FileReference[]
+  skipped: { book: string; reason: string }[]
   cursor: DcsCursor
 }
 
 /** Standard RC manifest filename at the repo root. */
 const MANIFEST_PATH = "manifest.yaml"
+const MAX_DCS_SOURCE_FILES = 2_000
+const MAX_DCS_SOURCE_CHARS = 20 * 1024 * 1024
+
+function routeOwnsPath(routeId: string, path: string): boolean {
+  const lower = path.toLowerCase()
+  if (routeId === "usfm") return lower.endsWith(".usfm")
+  if (routeId === "obs") return /(?:^|\/)\d+\.md$/.test(lower)
+  if (routeId === "tsv-notes" || routeId === "tsv-questions") return lower.endsWith(".tsv")
+  return false
+}
 
 /** Map a route id to the FileType the server projection groups by. */
-function fileTypeForRoute(routeId: string): string {
-  // v1 only routes USFM; Slice E extends this map (obs/tsv/md).
+function fileTypeForRoute(routeId: string): FileType {
   if (routeId === "usfm") return "usfm"
-  return routeId
+  if (routeId === "obs") return "obs"
+  if (routeId === "tsv-notes" || routeId === "tsv-questions") return "tsv"
+  throw new Error(`Door43 route ${routeId} has no Aquilla file type mapping.`)
 }
 
 /** Turn a parsed DcsFile's cells into anchor-chained BulkImportCells whose ids
@@ -95,7 +109,7 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
   const refKind: RefKind = entry.refType === "branch" ? "branch" : "tag"
 
   // 1. Manifest → route.
-  const manifestYaml = await client.fetchRaw(owner, repoName, ref, MANIFEST_PATH, refKind)
+  const manifestYaml = await client.fetchRaw(owner, repoName, ref, MANIFEST_PATH, refKind, args.signal)
   const manifest = parseManifest(manifestYaml)
   const route = routeFor(entry, manifest)
   if (!route) {
@@ -107,11 +121,17 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
   // 2. Fetch the repo tree, pull the raw bytes of every blob (the route filters
   //    which paths it actually parses). We skip the manifest itself.
   const tree = await client.getTree(owner, repoName, ref)
+  const sourcePaths = tree.filter((path) => path !== MANIFEST_PATH && routeOwnsPath(route.id, path))
+  if (sourcePaths.length > MAX_DCS_SOURCE_FILES) {
+    throw new Error(`Door43 resource contains too many importable files (maximum ${MAX_DCS_SOURCE_FILES.toLocaleString()}).`)
+  }
   const files = new Map<string, string>()
-  for (const path of tree) {
+  for (const path of sourcePaths) {
     if (args.signal?.aborted) throw new Error("Import cancelled")
-    if (path === MANIFEST_PATH) continue
-    const text = await client.fetchRaw(owner, repoName, ref, path, refKind)
+    const text = await client.fetchRaw(owner, repoName, ref, path, refKind, args.signal)
+    if (text.length > MAX_DCS_SOURCE_CHARS) {
+      throw new Error(`Door43 source member ${path} exceeds the 20 MB safety limit.`)
+    }
     files.set(path, text)
   }
 
@@ -120,34 +140,62 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
 
   // 4. Emit one bulk upload per parsed file.
   let totalCells = 0
+  const refs: FileReference[] = []
+  const skipped: { book: string; reason: string }[] = []
   for (const file of parsedFiles) {
-    const cells = toBulkCells(file, args.projectId, repo, entry.commitSha)
-    const meta: BulkImportFileMeta = {
-      id: file.fileId,
-      name: file.name,
-      fileType: fileTypeForRoute(route.id),
-      importFormat: route.id,
-      ...(file.bookCode !== undefined ? { bookCode: file.bookCode } : {}),
-    }
-    // The raw source bytes for this file (round-trip fidelity — USFM today).
-    const rawSource = files.get(rawPathForFile(file, tree))
+    try {
+      const cells = toBulkCells(file, args.projectId, repo, entry.commitSha)
+      if (cells.length === 0) throw new Error(`${file.name} did not contain any importable content.`)
+      const fileType = fileTypeForRoute(route.id)
+      const meta: BulkImportFileMeta = {
+        id: file.fileId,
+        name: file.name,
+        fileType,
+        importFormat: route.id,
+        parserVersion: `builtin:dcs-${route.id}@1`,
+        ...(file.bookCode !== undefined ? { bookCode: file.bookCode } : {}),
+      }
+      // The exact source member is mandatory: reconstructed parser output is
+      // not a safe substitute for round-trip/export provenance.
+      const sourcePath = file.sourcePath ?? rawPathForFile(file, tree)
+      const rawSource = files.get(sourcePath)
+      if (rawSource === undefined) {
+        throw new Error(`Import route ${route.id} did not retain the source member for ${file.name}.`)
+      }
 
-    await emit({
-      projectId: args.projectId,
-      fileId: file.fileId,
-      file: meta,
-      cells,
-      ...(rawSource !== undefined ? { rawSource, rawSourceFormat: route.id } : {}),
-      getToken: args.getToken,
-      ...(args.onProgress !== undefined ? { onProgress: args.onProgress } : {}),
-      ...(args.signal !== undefined ? { signal: args.signal } : {}),
-    })
-    totalCells += cells.length
+      await emit({
+        projectId: args.projectId,
+        fileId: file.fileId,
+        file: meta,
+        cells,
+        rawSource,
+        rawSourceFormat: fileType,
+        getToken: args.getToken,
+        ...(args.onProgress !== undefined ? { onProgress: args.onProgress } : {}),
+        ...(args.signal !== undefined ? { signal: args.signal } : {}),
+      })
+      totalCells += cells.length
+      refs.push({
+        id: file.fileId,
+        name: file.name,
+        type: fileType,
+        createdAt: new Date().toISOString(),
+        cellCount: cells.length,
+        ...(file.bookCode ? { bookCode: file.bookCode } : {}),
+      })
+    } catch (error) {
+      skipped.push({ book: file.name, reason: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  if (refs.length === 0 && skipped.length > 0) {
+    throw new Error(`Door43 import could not import any files: ${skipped[0].reason}`)
   }
 
   return {
-    files: parsedFiles.length,
+    files: refs.length,
     cells: totalCells,
+    refs,
+    skipped,
     cursor: buildCursor(entry, args.trackMode ?? "release"),
   }
 }

@@ -18,8 +18,7 @@
 import { v7 as uuidv7 } from "uuid"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType } from "./parsers/types"
-import { buildAudioId, uploadCellAudio, deleteCellAudio } from "./audio/upload"
-import { emitCellAudioAttach } from "./sync/events-emit"
+import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
@@ -34,12 +33,24 @@ import {
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
-import { enqueueTargetCommits, bulkUploadMorphRows, reconcileSourceImport, type MorphRow, type TargetCommit } from "./sync/bulk-import"
+import {
+  enqueueTargetCommitBatch,
+  bulkUploadMorphRows,
+  publishStagedImport,
+  reconcileSourceImport,
+  type MorphRow,
+  type TargetCommit,
+} from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractHtmlStrings } from "./parsers/html"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
-import { bindSourceArtifact, uploadSourceOriginal } from "./sync/source-upload"
+import {
+  assertSourceUploadByteLength,
+  assertSourceUploadSize,
+  bindSourceArtifact,
+  uploadSourceOriginal,
+} from "./sync/source-upload"
 import {
   fetchTranslationText,
   parseEBibleCorpus,
@@ -71,6 +82,7 @@ import {
   type AiImportClassification,
 } from "./import/ai-recipe"
 import type { DeclarativeImportRecipe } from "./import/normalized-manifest"
+import type { RoundTripFidelity } from "../../shared/import-contract"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -134,6 +146,8 @@ export interface EBibleMatchResult {
   /** Cells the incoming corpus never had a verse for (the rare inverse orphan).
    *  Surfaced for completeness — typically 0 for whole-Bible imports. */
   unmatchedSourceCount: number
+  /** Exact imported payload retained until the user confirms the target write. */
+  sourceArtifact?: TargetImportArtifact
 }
 
 export type EBibleTargetPhase = "download" | "parse" | "match" | "save"
@@ -143,6 +157,12 @@ export interface EBibleTargetProgress {
   total?: number
   cellsEnqueued?: number
   cellsTotal?: number
+}
+
+export interface TargetImportArtifact {
+  name: string
+  bytes: ArrayBuffer
+  format: string
 }
 
 /**
@@ -236,7 +256,14 @@ export async function prepareEBibleTargetImport(
   }))
 
   onProgress?.({ phase: "match" })
-  return matchEBibleToSourceCells(verses, sourceCells)
+  return {
+    ...matchEBibleToSourceCells(verses, sourceCells),
+    sourceArtifact: {
+      name: `${translation.id}.txt`,
+      bytes: new TextEncoder().encode(corpusText).buffer as ArrayBuffer,
+      format: "ebible",
+    },
+  }
 }
 
 /**
@@ -250,7 +277,9 @@ export async function prepareEBibleTargetImport(
 export async function applyEBibleTargetImport(
   matchResult: EBibleMatchResult,
   selectedCellIds: Set<string>,
-  ctx: Pick<ImportContext, "projectId" | "author" | "getToken" | "signal" | "targetLang">,
+  ctx: Pick<ImportContext, "projectId" | "author" | "getToken" | "signal" | "targetLang"> & {
+    sourceArtifact?: TargetImportArtifact
+  },
   onProgress?: (p: EBibleTargetProgress) => void,
 ): Promise<{ committedCount: number; skippedCount: number }> {
   const toCommit = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
@@ -266,36 +295,72 @@ export async function applyEBibleTargetImport(
     byFile.set(m.fileId, arr)
   }
 
-  onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: toCommit.length })
-  let totalEnqueued = 0
-
-  for (const [fileId, cells] of byFile) {
-    const commits: TargetCommit[] = cells
-      .filter((c) => c.parentId) // skip cells with no chain parent (edge case)
-      .map((c) => ({
+  const groups = [...byFile].map(([fileId, cells]) => ({
+    fileId,
+    commits: cells
+      .filter((cell) => cell.parentId)
+      .map((cell) => ({
         id: uuidv7(),
-        cellId: c.cellId,
-        parentId: c.parentId,
-        value: c.incomingText,
-      }))
+        cellId: cell.cellId,
+        parentId: cell.parentId!,
+        value: cell.incomingText,
+      })),
+  })).filter((group) => group.commits.length > 0)
+  const committedCount = groups.reduce((count, group) => count + group.commits.length, 0)
 
-    await enqueueTargetCommits({
+  // Preserve the exact target-side input before queuing any edits. One
+  // immutable artifact can bind to several Aquilla files, and the active lane
+  // is part of every binding so later audit/export never confuses languages.
+  const sourceArtifact = ctx.sourceArtifact ?? matchResult.sourceArtifact
+  if (sourceArtifact && groups.length > 0) {
+    const [firstFileId, ...otherFileIds] = groups.map((group) => group.fileId)
+    const artifactId = uuidv7()
+    await uploadSourceOriginal({
       projectId: ctx.projectId,
-      fileId,
-      author: ctx.author,
+      fileId: firstFileId,
+      artifactId,
+      bytes: sourceArtifact.bytes,
+      format: sourceArtifact.format,
+      artifactName: sourceArtifact.name,
+      bindingRole: "target",
       targetLang: ctx.targetLang,
-      commits,
+      profileId: `builtin:target-${sourceArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      updateSourceSidecar: false,
       getToken: ctx.getToken,
-      signal: ctx.signal,
-      onProgress: (count) => {
-        totalEnqueued += count
-        onProgress?.({ phase: "save", cellsEnqueued: totalEnqueued, cellsTotal: toCommit.length })
-      },
     })
+    for (const fileId of otherFileIds) {
+      await bindSourceArtifact({
+        projectId: ctx.projectId,
+        fileId,
+        artifactId,
+        memberPath: sourceArtifact.name,
+        profileId: `builtin:target-${sourceArtifact.format}`,
+        profileVersion: "1",
+        fidelity: "preserved-only",
+        bindingRole: "target",
+        targetLang: ctx.targetLang,
+        getToken: ctx.getToken,
+      })
+    }
   }
 
-  const skippedCount = matchResult.matched.length - toCommit.length
-  return { committedCount: toCommit.length, skippedCount }
+  onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: committedCount })
+  await enqueueTargetCommitBatch({
+    projectId: ctx.projectId,
+    author: ctx.author,
+    targetLang: ctx.targetLang,
+    groups,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+    onProgress: (count) => {
+      onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: committedCount })
+    },
+  })
+
+  const skippedCount = matchResult.matched.length - committedCount
+  return { committedCount, skippedCount }
 }
 
 export type MaculaImportPhase = "parse" | "save" | "morph"
@@ -356,6 +421,10 @@ export interface ImportResult {
   /** AI-assisted unknown-format recipe, shown in preview and persisted. */
   importRecipe?: DeclarativeImportRecipe
   importClassification?: AiImportClassification
+  roundTripFidelity?: RoundTripFidelity
+  /** Exact container for a multi-book import. Stored once and bound to every
+   * emitted book instead of becoming every book's export skeleton. */
+  sharedSourceArtifact?: TargetImportArtifact
 }
 
 export interface ImportContext {
@@ -390,6 +459,9 @@ export interface ImportContext {
   /** Existing files selected for safe unit-identity reconciliation. Keys use
    * the same normalized book-code/name vocabulary as skipKeys. */
   reimportFileIds?: ReadonlyMap<string, string>
+  /** Advanced orchestrators can keep fresh files hidden while persisting
+   * package-level or format-specific secondary data. */
+  deferPublication?: boolean
 }
 
 function normalizeImportedDirection(value: string | undefined | null): "ltr" | "rtl" | undefined {
@@ -402,6 +474,7 @@ export interface ImportFileResult {
   /** Speaker→cellId pairs from every subtitle cue, sharing the same cellIds as
    *  the uploaded cells (single parse). Empty for non-subtitle formats. */
   speakerPairs: { cellId: string; speaker: string | undefined }[]
+  skipped?: { book: string; reason: string }[]
 }
 
 /** Stable domain kind is intentionally distinct from the parser/extension.
@@ -433,8 +506,73 @@ export async function importFile(
     emitParsedFile,
   })
   const ready = prepared ?? await prepareImportFile(file, ctx)
-  const { refs, speakerPairs } = await service.importFile(file, ctx, ready)
-  return { refs, speakerPairs }
+  const sharedArtifact = ready.results.find((result) => result.sharedSourceArtifact)?.sharedSourceArtifact
+  const multiResult = ready.results.length > 1
+  const imported = await service.importFile(
+    file,
+    multiResult ? { ...ctx, deferPublication: true } : ctx,
+    ready,
+  )
+  if (!multiResult) return { refs: imported.refs, speakerPairs: imported.speakerPairs }
+
+  if (sharedArtifact && imported.refs.length > 0) {
+    const artifactId = uuidv7()
+    await uploadSourceOriginal({
+      projectId: ctx.projectId,
+      fileId: imported.refs[0].id,
+      artifactId,
+      artifactName: sharedArtifact.name,
+      bytes: sharedArtifact.bytes,
+      format: sharedArtifact.format,
+      bindingRole: "support",
+      memberPath: imported.refs[0].name,
+      profileId: `builtin:multi-${sharedArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      updateSourceSidecar: false,
+      getToken: ctx.getToken,
+    })
+    for (const ref of imported.refs.slice(1)) {
+      await bindSourceArtifact({
+        projectId: ctx.projectId,
+        fileId: ref.id,
+        artifactId,
+        memberPath: ref.name,
+        profileId: `builtin:multi-${sharedArtifact.format}`,
+        profileVersion: "1",
+        fidelity: "preserved-only",
+        getToken: ctx.getToken,
+      })
+    }
+  }
+
+  const existingFileIds = new Set(ctx.reimportFileIds?.values() ?? [])
+  const refs: FileReference[] = []
+  const skipped: { book: string; reason: string }[] = []
+  for (const ref of imported.refs) {
+    if (existingFileIds.has(ref.id)) {
+      refs.push(ref)
+      continue
+    }
+    try {
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId: ref.id,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+      refs.push(ref)
+    } catch (error) {
+      skipped.push({
+        book: ref.name,
+        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+  if (refs.length === 0 && skipped.length > 0) {
+    throw new Error(`Import could not publish any files: ${skipped[0].reason}`)
+  }
+  return { refs, speakerPairs: imported.speakerPairs, ...(skipped.length ? { skipped } : {}) }
 }
 
 /** Parse/classify exactly once so preview and commit use the same immutable
@@ -443,6 +581,10 @@ export async function prepareImportFile(
   file: File,
   ctx: Pick<ImportContext, "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal">,
 ): Promise<PreparedImportFile> {
+  if (file.size === 0) throw new Error(`${file.name} is empty.`)
+  // Fail before parsing/decompression and before any server event. The same
+  // ceiling is enforced again by the artifact route as a trust boundary.
+  assertSourceUploadByteLength(file.size)
   const extensionType = detectFileType(file.name)
   if (extensionType) {
     // Opaque packages/media need their deterministic binary adapter. Textual
@@ -525,7 +667,7 @@ export async function importEBible(
 
   // eBible has no speaker tags — ignore speakerPairs.
   const { ref } = await emitParsedFile(
-    { name: fileName, strings },
+    { name: fileName, strings, rawSource: corpusText, rawSourceFormat: "ebible" },
     "ebible",
     {
       ...ctx,
@@ -581,18 +723,21 @@ async function downloadObsStoryFiles(
     .sort((a, b) => parseInt(a.name, 10) - parseInt(b.name, 10))
 
   const out: ObsStoryFile[] = []
+  const failed: string[] = []
   for (let i = 0; i < mdFiles.length; i++) {
     if (signal?.aborted) throw new Error("Import cancelled")
     const item = mdFiles[i]
     const rawUrl = `${OBS_REPO.baseUrl}/${OBS_REPO.owner}/${OBS_REPO.repo}/raw/branch/${OBS_REPO.branch}/${item.path}`
     const fileRes = await fetch(rawUrl, { signal })
     if (!fileRes.ok) {
-      // Skip an individual file rather than failing the whole import.
-      console.warn(`[obs import] failed to fetch ${item.name}: ${fileRes.status}`)
+      failed.push(`${item.name} (${fileRes.status})`)
       continue
     }
     out.push({ name: item.name, content: await fileRes.text() })
     onProgress?.(i + 1, mdFiles.length)
+  }
+  if (failed.length > 0) {
+    throw new Error(`Open Bible Stories download was incomplete: ${failed.join(", ")}. Nothing was imported.`)
   }
   if (out.length === 0) throw new Error("No OBS story files could be downloaded")
   return out
@@ -649,7 +794,12 @@ export async function importObs(
   const fileName = opts?.fileName ?? "Open Bible Stories"
 
   const { ref } = await emitParsedFile(
-    { name: fileName, strings },
+    {
+      name: fileName,
+      strings,
+      rawSource: JSON.stringify(storyFiles),
+      rawSourceFormat: "obs-package",
+    },
     "obs",
     {
       ...ctx,
@@ -680,10 +830,12 @@ export async function importHelloao(
 ): Promise<FileReference> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
+  let rawComplete = ""
   const complete = await fetchHelloaoComplete(
     translation.id,
     (received, total) => onProgress?.({ phase: "download", received, total }),
     signal,
+    (raw) => { rawComplete = raw },
   )
 
   onProgress?.({ phase: "parse" })
@@ -700,7 +852,12 @@ export async function importHelloao(
   const fileName = `${translation.englishName || translation.name} (${translation.id})`
 
   const { ref } = await emitParsedFile(
-    { name: fileName, strings },
+    {
+      name: fileName,
+      strings,
+      rawSource: rawComplete || JSON.stringify(complete),
+      rawSourceFormat: "helloao",
+    },
     "helloao",
     {
       ...ctx,
@@ -732,7 +889,9 @@ export async function importMacula(
 ): Promise<FileReference[]> {
   onProgress?.({ phase: "parse" })
 
-  const text = await file.text()
+  assertSourceUploadByteLength(file.size)
+  const rawBytes = await file.arrayBuffer()
+  const text = decodeImportText(rawBytes, file.name)
   const { strings, morphRows, bookCode, sourceLanguage } = parseMaculaTsv(text)
 
   if (strings.length === 0) {
@@ -764,6 +923,9 @@ export async function importMacula(
       bookCode,
     },
     cells,
+    rawBytes,
+    rawSourceFormat: "macula-tsv",
+    deferPublication: true,
     getToken: ctx.getToken,
     onProgress: (count, total) => {
       onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
@@ -790,32 +952,23 @@ export async function importMacula(
     }
   }
 
-  // Upload morphology rows to /import-morph. If the server doesn't yet support
-  // this endpoint (404), we surface a SWARM-TODO and continue — cells are already
-  // uploaded so the source is usable in the editor.
+  // Morphology is required data for this format. Keep the file staged until
+  // every row is durable; a failure remains retryable and never exposes a
+  // deceptively complete source file.
   if (allMorphRows.length > 0) {
     onProgress?.({ phase: "morph", morphEnqueued: 0, morphTotal: allMorphRows.length })
-    try {
-      await bulkUploadMorphRows({
-        projectId: ctx.projectId,
-        fileId,
-        rows: allMorphRows,
-        getToken: ctx.getToken,
-        onProgress: (count, total) => {
-          onProgress?.({ phase: "morph", morphEnqueued: count, morphTotal: total })
-        },
-      })
-    } catch (err) {
-      // SWARM-TODO(server-morph): /import-morph endpoint not yet implemented in
-      // sync-worker — morph rows are parsed client-side but not persisted to
-      // cell_word_morph on the server. The source text (cells) IS uploaded and
-      // usable in the editor. Morph server persistence requires adding
-      // handleBulkMorphImportRequest to sync-worker/src/events/import-morph-route.ts
-      // and registering it in sync-worker/src/events/route.ts.
-      // For now, log the error rather than failing the whole import.
-      console.warn("[importMacula] morph upload failed (server endpoint may not be deployed):", err)
-    }
+    await bulkUploadMorphRows({
+      projectId: ctx.projectId,
+      fileId,
+      rows: allMorphRows,
+      getToken: ctx.getToken,
+      onProgress: (count, total) => {
+        onProgress?.({ phase: "morph", morphEnqueued: count, morphTotal: total })
+      },
+    })
   }
+
+  await publishStagedImport({ projectId: ctx.projectId, fileId, getToken: ctx.getToken })
 
   return [
     {
@@ -849,7 +1002,9 @@ export async function importTranslationNotes(
 ): Promise<FileReference> {
   onProgress?.({ phase: "parse" })
 
-  const text = await file.text()
+  assertSourceUploadByteLength(file.size)
+  const rawBytes = await file.arrayBuffer()
+  const text = decodeImportText(rawBytes, file.name)
   const { strings, skippedCount } = parseTnTsv(text)
 
   if (strings.length === 0) {
@@ -877,6 +1032,8 @@ export async function importTranslationNotes(
       parserVersion: "tn-tsv-v1",
     },
     cells,
+    rawBytes,
+    rawSourceFormat: "tn-tsv",
     getToken: ctx.getToken,
     onProgress: (count, total) => {
       onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total, skippedCount })
@@ -1064,8 +1221,10 @@ export async function emitParsedFile(
     rawSource: result.rawSource,
     rawSourceFormat: result.rawSourceFormat,
     rawBytes: result.rawBytes,
+    artifactFidelity: normalized.fidelity,
     targets,
     targetLang: ctx.targetLang,
+    ...(!existingFileId && ctx.deferPublication ? { deferPublication: true } : {}),
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
@@ -1142,6 +1301,10 @@ export async function emitMediaFile(
   fileType: FileType,
   ctx: ImportContext,
 ): Promise<FileReference> {
+  if (file.size === 0) throw new Error(`${file.name} is empty.`)
+  if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
+    throw new Error(`${file.name} exceeds the 95 MB media import limit.`)
+  }
   const fileId = uuidv7()
   const { durationMs, specs } = await computeMediaSegmentSpecs(file)
 
@@ -1173,6 +1336,7 @@ export async function emitMediaFile(
       orderedBy: "time",
     },
     cells,
+    deferPublication: true,
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
@@ -1183,36 +1347,39 @@ export async function emitMediaFile(
   // a dedicated source-media slot is a later refinement.
   const ext = (file.name.split(".").pop() || "bin").toLowerCase()
   const audioId = buildAudioId(fileId)
+  const artifactId = uuidv7()
   const upload = await uploadCellAudio({
     projectId: ctx.projectId,
     fileId,
     audioId,
     ext,
     blob: file,
+    artifactId,
+    artifactName: file.name,
     getSyncToken: (_p, f) => ctx.getToken(f),
+    signal: ctx.signal,
   })
-  try {
-    for (const s of specs) {
-      await emitCellAudioAttach({
-        projectId: ctx.projectId,
-        fileId,
-        cellId: s.cellId,
-        audioId: upload.audioId,
-        url: upload.url,
-        slot: "recording",
-        ...(file.type ? { mimeType: file.type } : {}),
-        ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
-        ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
-          ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
-          : {}),
-        author: ctx.author,
-      })
-    }
-  } catch (err) {
-    // The bytes landed but an attach event failed → clean up the orphan.
-    await deleteCellAudio({ projectId: ctx.projectId, fileId, audioId, ext, getSyncToken: (_p, f) => ctx.getToken(f) })
-    throw err
-  }
+  // Persist every attachment and reveal the staged file in one worker
+  // transaction. If the response is lost after commit, publishStagedImport
+  // retries the same event ids; never delete the clip on an ambiguous publish
+  // failure because the server may already have made it live.
+  await publishStagedImport({
+    projectId: ctx.projectId,
+    fileId,
+    attachments: specs.map((s) => ({
+      cellId: s.cellId,
+      audioId: `${upload.audioId}.${upload.ext}`,
+      url: upload.url,
+      slot: "recording",
+      ...(file.type ? { mimeType: file.type } : {}),
+      ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
+      ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
+        ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
+        : {}),
+    })),
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
 
   return {
     id: fileId,
@@ -1327,13 +1494,23 @@ export async function prepareParatextProject(entries: ProjectEntryCollection): P
     const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource)
     return { book, strings, duplicateRefs, cellCount: strings.length }
   })
-  return { project, books, ...(entries.sourceArtifact ? { sourceArtifact: entries.sourceArtifact } : {}) }
+  // Materialize and validate the complete package during preview. Commit then
+  // uploads these exact immutable bytes; a large folder-derived ZIP cannot
+  // fail only after book files have already been staged.
+  let sourceArtifact: ProjectSourceArtifact | undefined
+  if (entries.sourceArtifact) {
+    const bytes = await entries.sourceArtifact.bytes()
+    assertSourceUploadSize(bytes)
+    sourceArtifact = { ...entries.sourceArtifact, bytes: async () => bytes }
+  }
+  return { project, books, ...(sourceArtifact ? { sourceArtifact } : {}) }
 }
 
 async function preserveParatextPackage(
   plan: ParatextPlan,
   bindings: Array<{ fileId: string; memberPath: string }>,
   ctx: Pick<ImportContext, "projectId" | "getToken">,
+  options: { bindingRole?: "support" | "target"; targetLang?: string } = {},
 ): Promise<void> {
   if (!plan.sourceArtifact || bindings.length === 0) return
   const artifactId = uuidv7()
@@ -1345,7 +1522,8 @@ async function preserveParatextPackage(
     artifactName: plan.sourceArtifact.name,
     bytes,
     format: plan.sourceArtifact.format,
-    bindingRole: "support",
+    bindingRole: options.bindingRole ?? "support",
+    targetLang: options.targetLang,
     memberPath: bindings[0].memberPath,
     profileId: "builtin:paratext-project",
     profileVersion: "1",
@@ -1362,6 +1540,8 @@ async function preserveParatextPackage(
       profileId: "builtin:paratext-project",
       profileVersion: "1",
       fidelity: "preserved-only",
+      bindingRole: options.bindingRole,
+      targetLang: options.targetLang,
       getToken: ctx.getToken,
     })
   }
@@ -1413,6 +1593,7 @@ export async function commitParatextProject(
   // inherits it (caller may override per source/target choice).
   const baseCtx: ImportContext = {
     ...ctx,
+    deferPublication: true,
     sourceLanguage: plan.project.settings.languageIsoCode || ctx.sourceLanguage,
     sourceTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.sourceTextDirection,
   }
@@ -1424,6 +1605,7 @@ export async function commitParatextProject(
 
   let done = 0
   let cellsUploaded = 0
+  const existingFileIds = new Set(ctx.reimportFileIds?.values() ?? [])
   const packageBindings: Array<{ fileId: string; memberPath: string }> = []
   for (const bookPlan of plan.books) {
     const book = bookPlan.book
@@ -1482,8 +1664,29 @@ export async function commitParatextProject(
       reason: `package preservation failed: ${error instanceof Error ? error.message : String(error)}`,
     })
   }
+  const visibleRefs: FileReference[] = []
+  for (const ref of refs) {
+    if (existingFileIds.has(ref.id)) {
+      visibleRefs.push(ref)
+      continue
+    }
+    try {
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId: ref.id,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+      visibleRefs.push(ref)
+    } catch (error) {
+      skipped.push({
+        book: ref.name,
+        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
 
-  return { refs, settings: plan.project.settings, skipped }
+  return { refs: visibleRefs, settings: plan.project.settings, skipped }
 }
 
 /**
@@ -1517,6 +1720,7 @@ export async function importParatextAsTarget(
   )
   let cellsUploaded = 0
   let done = 0
+  const existingFileIds = new Set(ctx.reimportFileIds?.values() ?? [])
   const packageBindings: Array<{ fileId: string; memberPath: string }> = []
 
   for (const bookPlan of plans) {
@@ -1589,8 +1793,13 @@ export async function importParatextAsTarget(
         cells,
         rawSource: bookPlan.rawSource,
         rawSourceFormat: "usfm",
+        artifactBindingRole: "target",
+        artifactTargetLang: ctx.targetLang,
+        updateSourceSidecar: true,
+        artifactFidelity: "native",
         targets,
         targetLang: ctx.targetLang,
+        ...(!existingFileId ? { deferPublication: true } : {}),
         getToken: ctx.getToken,
         onProgress: (uploaded) => bookProgress(uploaded),
         signal: ctx.signal,
@@ -1621,7 +1830,10 @@ export async function importParatextAsTarget(
   }
 
   try {
-    await preserveParatextPackage(plan, packageBindings, ctx)
+    await preserveParatextPackage(plan, packageBindings, ctx, {
+      bindingRole: "target",
+      targetLang: ctx.targetLang,
+    })
   } catch (error) {
     skipped.push({
       book: plan.sourceArtifact?.name ?? "Paratext package",
@@ -1629,7 +1841,29 @@ export async function importParatextAsTarget(
     })
   }
 
-  return { refs, settings: project.settings, skipped }
+  const visibleRefs: FileReference[] = []
+  for (const ref of refs) {
+    if (existingFileIds.has(ref.id)) {
+      visibleRefs.push(ref)
+      continue
+    }
+    try {
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId: ref.id,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+      visibleRefs.push(ref)
+    } catch (error) {
+      skipped.push({
+        book: ref.name,
+        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+
+  return { refs: visibleRefs, settings: project.settings, skipped }
 }
 
 export async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
@@ -1668,6 +1902,22 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       const isUsx = looksLikeUsx(raw)
       const text = isUsx ? usxToUsfm(raw) : raw
       const results = await parseTextFormatOffMainThread({ fileType: "usfm", text, name: file.name })
+      if (results.length > 1) {
+        return results.map((result, index) => ({
+          ...result,
+          // Each Aquilla book needs its own valid export skeleton. The exact
+          // original bundle is retained separately and bound to every book.
+          rawSourceFormat: "usfm",
+          roundTripFidelity: "content-only" as const,
+          ...(index === 0 ? {
+            sharedSourceArtifact: {
+              name: file.name,
+              bytes,
+              format: isUsx ? "usx" : "usfm",
+            },
+          } : {}),
+        }))
+      }
       return isUsx
         ? results.map((result) => ({
             ...result,
@@ -1692,6 +1942,8 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
     }
+    case "xlsx":
+      throw new Error("XLSX files import through spreadsheet column mapping")
     case "html": {
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)

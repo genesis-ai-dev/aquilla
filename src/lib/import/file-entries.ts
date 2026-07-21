@@ -3,6 +3,8 @@
 // pure + node-testable) because this touches the File API + JSZip.
 
 import type { ProjectEntryCollection } from "../parsers/paratext-project"
+import { MAX_SOURCE_ARTIFACT_BYTES } from "../../../shared/import-contract"
+import { assertSafeZipArchive } from "../parsers/zip-safety"
 
 type FileWithPath = File & { webkitRelativePath?: string }
 const ZIP_EPOCH = new Date("1980-01-01T00:00:00.000Z")
@@ -19,9 +21,14 @@ function relativePath(file: FileWithPath): string {
  */
 export async function filesToProjectEntries(files: File[]): Promise<ProjectEntryCollection> {
   if (files.length === 1 && /\.zip$/i.test(files[0].name)) {
+    if (files[0].size === 0) throw new Error("The selected Paratext ZIP is empty.")
+    if (files[0].size > MAX_SOURCE_ARTIFACT_BYTES) {
+      throw new Error("The selected Paratext ZIP exceeds the 95 MB import limit.")
+    }
     const JSZip = (await import("jszip")).default
     const originalBytes = await files[0].arrayBuffer()
     const zip = await JSZip.loadAsync(originalBytes)
+    assertSafeZipArchive(zip, "Paratext ZIP")
     const entries: ProjectEntryCollection = []
     zip.forEach((path, entry) => {
       if (entry.dir) return
@@ -37,6 +44,13 @@ export async function filesToProjectEntries(files: File[]): Promise<ProjectEntry
       bytes: async () => originalBytes,
     }
     return entries
+  }
+  if (files.length > 10_000) throw new Error("The selected folder contains too many files.")
+  if (files.some((file) => file.size > 128 * 1024 * 1024)) {
+    throw new Error("The selected folder contains a file larger than 128 MB.")
+  }
+  if (files.reduce((total, file) => total + file.size, 0) > 512 * 1024 * 1024) {
+    throw new Error("The selected folder expands beyond the 512 MB safety limit.")
   }
   const entries = files.map((f) => ({
     name: relativePath(f as FileWithPath),

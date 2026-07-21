@@ -2,9 +2,12 @@ import JSZip from "jszip"
 import { v4 as uuid } from "uuid"
 import type { TranslatableString } from "./types"
 import { splitIntoSegments } from "./text-splitter"
+import { assertSafeArchiveInputSize, assertSafeZipArchive } from "./zip-safety"
 
 export async function extractPptxStrings(buffer: ArrayBuffer): Promise<TranslatableString[]> {
+  assertSafeArchiveInputSize(buffer.byteLength, "PPTX file")
   const zip = await JSZip.loadAsync(buffer)
+  assertSafeZipArchive(zip, "PPTX file")
   const results: TranslatableString[] = []
 
   const slideFiles = Object.keys(zip.files)
@@ -14,6 +17,7 @@ export async function extractPptxStrings(buffer: ArrayBuffer): Promise<Translata
       const numB = parseInt(b.match(/slide(\d+)/)?.[1] || "0")
       return numA - numB
     })
+  if (slideFiles.length === 0) throw new Error("PPTX file does not contain any readable slides")
 
   for (let slideIndex = 0; slideIndex < slideFiles.length; slideIndex++) {
     const slideFile = slideFiles[slideIndex]

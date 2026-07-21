@@ -56,7 +56,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 }))
 
 import { ImportDialog } from "./ImportDialog"
-import { prepareParatextProject, commitParatextProject } from "@/lib/import"
+import { importFile, prepareImportFile, prepareParatextProject, commitParatextProject } from "@/lib/import"
 import { detectParatextProject } from "@/lib/parsers/paratext-project"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 
@@ -135,6 +135,9 @@ async function navigateToRunSource() {
 describe("AQU-277 — partial import holds dialog open", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(filesToProjectEntries).mockResolvedValue([])
+    vi.mocked(detectParatextProject).mockReturnValue(null)
+    vi.mocked(prepareImportFile).mockImplementation(async () => ({ fileType: "txt", results: [] }))
     // Stub clipboard
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -160,7 +163,7 @@ describe("AQU-277 — partial import holds dialog open", () => {
 
     // Result screen heading must be visible
     expect(
-      screen.getByText(/import complete — some books skipped/i),
+      screen.getByText(/import complete — some items skipped/i),
     ).toBeInTheDocument()
 
     // onImported must NOT have been called yet
@@ -263,5 +266,72 @@ describe("AQU-277 — partial import holds dialog open", () => {
     await waitFor(() =>
       expect(onOpenChange).toHaveBeenCalledWith(false),
     )
+  })
+
+  it("reports a partial ordinary multi-file import instead of showing a generic failure", async () => {
+    const first = new File(["one"], "one.txt", { type: "text/plain" })
+    const second = new File(["two"], "two.txt", { type: "text/plain" })
+    const third = new File(["three"], "three.txt", { type: "text/plain" })
+    vi.mocked(prepareImportFile).mockImplementation(async (file) => ({
+      fileType: "txt",
+      results: [{
+        name: file.name,
+        strings: [{ id: file.name, original: file.name, translated: "", context: "", group: "", type: "text" }],
+      }],
+    }))
+    vi.mocked(importFile)
+      .mockResolvedValueOnce({
+        refs: [{ id: "file-one", name: "one.txt", type: "txt", createdAt: "now", cellCount: 1 }],
+        speakerPairs: [],
+      })
+      .mockRejectedValueOnce(new Error("source artifact upload failed"))
+    const onImported = vi.fn(async () => undefined)
+
+    render(<ImportDialog {...baseProps} onImported={onImported} />)
+    fireEvent.click(screen.getByText("Upload files"))
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    await act(async () => {
+      Object.defineProperty(fileInput, "files", { value: [first, second, third], configurable: true })
+      fireEvent.change(fileInput)
+    })
+    fireEvent.click(await screen.findByRole("button", { name: /confirm import/i }))
+
+    expect(await screen.findByText(/import complete — some items skipped/i)).toBeInTheDocument()
+    expect(screen.getByText("two.txt")).toBeInTheDocument()
+    expect(screen.getByText(/source artifact upload failed/i)).toBeInTheDocument()
+    expect(screen.getByText("three.txt")).toBeInTheDocument()
+    expect(screen.getByText(/not attempted after an earlier file failed/i)).toBeInTheDocument()
+    expect(onImported).not.toHaveBeenCalled()
+  })
+
+  it("keeps and reports skips returned from a multi-book file import", async () => {
+    const bundle = new File(["bundle"], "books.usfm", { type: "text/plain" })
+    vi.mocked(prepareImportFile).mockResolvedValue({
+      fileType: "usfm",
+      results: [{
+        name: "Genesis",
+        strings: [{ id: "GEN 1:1", original: "In the beginning", translated: "", context: "GEN 1:1", group: "GEN 1:1", type: "verse" }],
+      }],
+    })
+    vi.mocked(importFile).mockResolvedValue({
+      refs: [{ id: "file-gen", name: "Genesis", type: "usfm", createdAt: "now", cellCount: 1 }],
+      speakerPairs: [],
+      skipped: [{ book: "Exodus", reason: "source artifact upload failed" }],
+    })
+    const onImported = vi.fn(async () => undefined)
+
+    render(<ImportDialog {...baseProps} onImported={onImported} />)
+    fireEvent.click(screen.getByText("Upload files"))
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    await act(async () => {
+      Object.defineProperty(fileInput, "files", { value: [bundle], configurable: true })
+      fireEvent.change(fileInput)
+    })
+    fireEvent.click(await screen.findByRole("button", { name: /confirm import/i }))
+
+    expect(await screen.findByText(/import complete — some items skipped/i)).toBeInTheDocument()
+    expect(screen.getByText("Exodus")).toBeInTheDocument()
+    expect(screen.getByText(/source artifact upload failed/i)).toBeInTheDocument()
+    expect(onImported).not.toHaveBeenCalled()
   })
 })

@@ -5,6 +5,7 @@ import {
   type NormalizedImportFile,
 } from "./normalized-manifest"
 import type { AiImportClassification } from "./ai-recipe"
+import type { RoundTripFidelity } from "../../../shared/import-contract"
 
 export interface ParsedImportResult {
   name: string
@@ -17,6 +18,9 @@ export interface ParsedImportResult {
   originalName?: string
   importRecipe?: DeclarativeImportRecipe
   importClassification?: AiImportClassification
+  roundTripFidelity?: RoundTripFidelity
+  /** Exact multi-member container retained once and bound to every emitted file. */
+  sharedSourceArtifact?: { name: string; bytes: ArrayBuffer; format: string }
 }
 
 export interface PreparedImportFile {
@@ -106,6 +110,9 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
     }
 
     const results = prepared?.results ?? await this.dependencies.parseFile(file, fileType)
+    if (results.length === 0) {
+      throw new Error(`${file.name} did not contain any importable content.`)
+    }
     const refs: Reference[] = []
     const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
     const manifests: NormalizedImportFile[] = []
@@ -118,6 +125,9 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
         || (resultCodeKey && context.skipKeys?.has(resultCodeKey))
       ) {
         continue
+      }
+      if (result.strings.length === 0) {
+        throw new Error(`${result.name} did not contain any importable content.`)
       }
 
       const manifest = normalizeTranslatableStrings(result.strings, {
@@ -137,6 +147,8 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
           // The exact USX artifact is retained, but translated content is not
           // yet serialized back into USX. Do not claim native round-trip.
           fidelity: "content-only" as const,
+        } : result.roundTripFidelity ? {
+          fidelity: result.roundTripFidelity,
         } : {}),
       })
       const committed = await this.dependencies.emitParsedFile(

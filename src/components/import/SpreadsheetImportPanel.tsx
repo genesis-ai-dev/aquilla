@@ -3,14 +3,13 @@
  * mapping. After mapping, parsed cells go through the standard preview →
  * confirm → bulkUploadSource pipeline (same as UploadPanel).
  *
- * XLSX support: zero-dependency, using the native ZIP/DecompressionStream
- * approach in src/lib/parsers/spreadsheet.ts. Each sheet in an XLSX workbook
- * is one importable unit (the user picks which sheet to import).
+ * XLSX support uses the shared central-directory-aware workbook reader. Each
+ * sheet in an XLSX workbook is one importable unit (the user picks which sheet).
  */
 
 import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
-import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { FileReference, FileType, ProjectTtsSettings } from "@/lib/parsers/types"
 import {
   parseCsvToSheet,
   parseXlsxToSheets,
@@ -21,6 +20,8 @@ import {
 } from "@/lib/parsers/spreadsheet"
 import { type ImportResult, emitParsedFile, type ImportContext } from "@/lib/import"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { v7 as uuidv7 } from "uuid"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
 
@@ -59,13 +60,20 @@ export function SpreadsheetImportPanel({
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
   const [selectedSheet, setSelectedSheet] = useState<SpreadsheetSheet | null>(null)
   const [fileName, setFileName] = useState("")
+  const [sourceFile, setSourceFile] = useState<File | null>(null)
 
   const handleFile = useCallback(async (file: File) => {
     setError(null)
     setFileName(file.name)
+    setSourceFile(file)
     const ext = file.name.split(".").pop()?.toLowerCase()
     try {
-      if (ext === "xlsx" || ext === "xls") {
+      assertSourceUploadByteLength(file.size)
+      if (ext === "xls") {
+        setError("Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV and try again.")
+        return
+      }
+      if (ext === "xlsx") {
         const buf = await file.arrayBuffer()
         const parsed = await parseXlsxToSheets(buf)
         if (parsed.length === 0) {
@@ -80,7 +88,7 @@ export function SpreadsheetImportPanel({
           setStep("sheet")
         }
       } else {
-        const text = await file.text()
+        const text = decodeImportText(await file.arrayBuffer(), file.name)
         const sheet = parseCsvToSheet(text, file.name)
         setSheets([sheet])
         setSelectedSheet(sheet)
@@ -92,7 +100,7 @@ export function SpreadsheetImportPanel({
   }, [])
 
   async function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
-    if (!selectedSheet) return
+    if (!selectedSheet || !sourceFile) return
     setError(null)
 
     const mappedRows = applyColumnMapping(selectedSheet.rows, mapping, hasHeader)
@@ -103,20 +111,30 @@ export function SpreadsheetImportPanel({
 
     const strings = mappedRowsToStrings(mappedRows)
     const sheetName = selectedSheet.name === fileName ? fileName : `${fileName} — ${selectedSheet.name}`
-    const importResult: ImportResult = { name: sheetName, strings }
+    const sourceFormat: FileType = sourceFile.name.toLowerCase().endsWith(".xlsx")
+      ? "xlsx"
+      : sourceFile.name.toLowerCase().endsWith(".tsv")
+        ? "tsv"
+        : "csv"
+    const importResult: ImportResult = {
+      name: sheetName,
+      strings,
+      rawBytes: await sourceFile.arrayBuffer(),
+      rawSourceFormat: sourceFormat,
+    }
 
     if (onPreview) {
       onPreview([importResult], async () => {
-        await doCommit(importResult, mapping)
+        await doCommit(importResult, mapping, sourceFormat)
       })
       return
     }
 
     setStep("uploading")
-    await doCommit(importResult, mapping)
+    await doCommit(importResult, mapping, sourceFormat)
   }
 
-  async function doCommit(importResult: ImportResult, _mapping: ColumnMapping) {
+  async function doCommit(importResult: ImportResult, _mapping: ColumnMapping, sourceFormat: FileType) {
     setStep("uploading")
     try {
       const ctx: ImportContext = {
@@ -127,7 +145,7 @@ export function SpreadsheetImportPanel({
         targetLang,
         getToken,
       }
-      const { ref, speakerPairs } = await emitParsedFile(importResult, "csv", ctx)
+      const { ref, speakerPairs } = await emitParsedFile(importResult, sourceFormat, ctx)
 
       // Apply cast additions if any speaker/cast column was mapped
       if (onCastUpdated && speakerPairs.some((p) => p.speaker)) {
@@ -174,7 +192,7 @@ export function SpreadsheetImportPanel({
             </span>
             <input
               type="file"
-              accept=".csv,.tsv,.xlsx,.xls"
+              accept=".csv,.tsv,.xlsx"
               className="sr-only"
               onChange={(e) => {
                 const file = e.target.files?.[0]
@@ -182,7 +200,7 @@ export function SpreadsheetImportPanel({
               }}
             />
           </label>
-          <p className="text-xs text-muted-foreground">CSV, TSV, or XLSX (no library required)</p>
+          <p className="text-xs text-muted-foreground">CSV, TSV, or XLSX</p>
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">

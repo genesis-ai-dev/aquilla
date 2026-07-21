@@ -104,6 +104,35 @@ describe("import — bulk upload", () => {
     expect(captured[0].cells.length).toBe(refs[0].cellCount)
   })
 
+  it("stores a multi-book USFM bundle once and publishes books only after every binding lands", async () => {
+    const requests: Array<{ url: string; body: unknown; headers: HeadersInit | undefined }> = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const isBinary = init?.body instanceof ArrayBuffer
+      const body = isBinary ? init?.body : JSON.parse(String(init?.body))
+      requests.push({ url, body, headers: init?.headers })
+      return new Response(JSON.stringify({ accepted: 1, artifactId: "artifact", key: "key", sha256: "a".repeat(64) }), { status: 200 })
+    }))
+    const bundle = "\\id GEN\n\\c 1\n\\v 1 In the beginning.\n\\id EXO\n\\c 1\n\\v 1 These are the names.\n"
+
+    const result = await importFile(
+      new File([bundle], "bundle.usfm", { type: "text/plain" }),
+      { projectId: "p-bundle", author: "alice", getToken },
+    )
+
+    expect(result.refs).toHaveLength(2)
+    const sourceUploads = requests.filter((request) => request.url.endsWith("/source"))
+    expect(sourceUploads).toHaveLength(3)
+    const supportUpload = sourceUploads.find((request) =>
+      (request.headers as Record<string, string>)["X-Artifact-Binding-Role"] === "support")
+    expect(new TextDecoder().decode(supportUpload?.body as ArrayBuffer)).toBe(bundle)
+    const publishIndexes = requests
+      .map((request, index) => ({ request, index }))
+      .filter(({ request }) => request.body && typeof request.body === "object" && "publishEventId" in (request.body as object))
+      .map(({ index }) => index)
+    expect(publishIndexes).toHaveLength(2)
+    expect(Math.min(...publishIndexes)).toBeGreaterThan(requests.indexOf(supportUpload!))
+  })
+
   it("publishes bilingual target values atomically in the selected lane against the paired source cells", async () => {
     await emitParsedFile(
       {

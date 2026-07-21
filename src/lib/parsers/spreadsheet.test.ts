@@ -4,8 +4,10 @@
  */
 
 import { describe, it, expect } from "vitest"
+import JSZip from "jszip"
 import {
   parseCsvToSheet,
+  parseXlsxToSheets,
   applyColumnMapping,
   mappedRowsToStrings,
   generateLabelTemplate,
@@ -85,6 +87,41 @@ describe("parseCsvToSheet", () => {
   it("returns a single-row sheet for a single line", () => {
     const sheet = parseCsvToSheet("source,target", "x.csv")
     expect(sheet.rows).toHaveLength(1)
+  })
+})
+
+describe("parseXlsxToSheets", () => {
+  it("reads centrally indexed DEFLATE entries produced by common XLSX writers", async () => {
+    const zip = new JSZip()
+    zip.file("xl/workbook.xml", `
+      <workbook xmlns:r="relationships"><sheets>
+        <sheet name="Translations" sheetId="1" r:id="rId1"/>
+      </sheets></workbook>`)
+    zip.file("xl/_rels/workbook.xml.rels", `
+      <Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`)
+    zip.file("xl/sharedStrings.xml", `
+      <sst><si><t>Reference</t></si><si><t>Source</t></si><si><t>GEN 1:1</t></si><si><t>In the beginning</t></si></sst>`)
+    zip.file("xl/worksheets/sheet1.xml", `
+      <worksheet><sheetData>
+        <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+        <row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2" t="s"><v>3</v></c></row>
+      </sheetData></worksheet>`)
+    const bytes = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
+
+    await expect(parseXlsxToSheets(bytes)).resolves.toEqual([{
+      name: "Translations",
+      rows: [
+        ["Reference", "Source"],
+        ["GEN 1:1", "In the beginning"],
+      ],
+    }])
+  })
+
+  it("rejects invalid or empty workbooks instead of showing a blank mapper", async () => {
+    await expect(parseXlsxToSheets(new TextEncoder().encode("not a zip").buffer))
+      .rejects.toThrow(/Could not read XLSX archive/)
+    const empty = await new JSZip().generateAsync({ type: "arraybuffer" })
+    await expect(parseXlsxToSheets(empty)).rejects.toThrow(/readable worksheets/)
   })
 })
 

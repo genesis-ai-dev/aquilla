@@ -304,6 +304,7 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "tmx":
     case "csv":
     case "tsv":
+    case "xlsx":
     case "txt":
     case "md":
     case "html":

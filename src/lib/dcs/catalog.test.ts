@@ -275,6 +275,14 @@ describe("DcsClient.fetchRaw", () => {
       `${DEFAULT_DCS_RAW_BASE}/unfoldingWord/en_ult/raw/branch/master/57-TIT.usfm`,
     )
   })
+
+  it("rejects a raw member that exceeds the bounded download limit", async () => {
+    const fetchImpl = vi.fn(async () => new Response("12345"))
+    const client = new DcsClient({ fetchImpl: fetchImpl as typeof fetch, maxRawBytes: 4 })
+
+    await expect(client.fetchRaw("owner", "repo", "v1", "huge.usfm"))
+      .rejects.toThrow(/safety limit.*huge\.usfm/i)
+  })
 })
 
 describe("DcsClient error handling", () => {

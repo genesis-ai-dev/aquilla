@@ -121,6 +121,24 @@ describe("ImportService", () => {
     expect(dependencies.emitParsedFile).not.toHaveBeenCalled()
   })
 
+  it("rejects empty parser output before creating a file", async () => {
+    const { instance, dependencies } = service({ parseFile: vi.fn(async () => []) })
+
+    await expect(instance.importFile(new File(["x"], "empty.txt"), {}))
+      .rejects.toThrow(/did not contain any importable content/i)
+    expect(dependencies.emitParsedFile).not.toHaveBeenCalled()
+  })
+
+  it("rejects an empty member in a multi-result parse before committing it", async () => {
+    const { instance, dependencies } = service({
+      parseFile: vi.fn(async () => [{ name: "Empty book", strings: [] }]),
+    })
+
+    await expect(instance.importFile(new File(["x"], "bundle.usfm"), {}))
+      .rejects.toThrow(/Empty book did not contain any importable content/i)
+    expect(dependencies.emitParsedFile).not.toHaveBeenCalled()
+  })
+
   it("commits a prepared AI recipe without parsing or classifying the file again", async () => {
     const { instance, dependencies } = service({ detectFileType: vi.fn(() => null) })
     const recipe = {

@@ -101,7 +101,8 @@ export async function fetchHelloaoBooks(
 export async function fetchHelloaoComplete(
   translationId: string,
   onProgress?: (received: number, total: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onRawSource?: (raw: string) => void,
 ): Promise<HelloaoComplete> {
   const res = await fetch(`${API_BASE}/${translationId}/complete.json`, { signal })
   if (!res.ok) {
@@ -109,7 +110,9 @@ export async function fetchHelloaoComplete(
   }
 
   if (!res.body || !onProgress) {
-    return (await res.json()) as HelloaoComplete
+    const raw = await res.text()
+    onRawSource?.(raw)
+    return JSON.parse(raw) as HelloaoComplete
   }
 
   const total = Number(res.headers.get("Content-Length") ?? 0)
@@ -126,7 +129,9 @@ export async function fetchHelloaoComplete(
     onProgress(received, total)
   }
   chunks.push(decoder.decode())
-  return JSON.parse(chunks.join("")) as HelloaoComplete
+  const raw = chunks.join("")
+  onRawSource?.(raw)
+  return JSON.parse(raw) as HelloaoComplete
 }
 
 export interface HelloaoChapterResponse {

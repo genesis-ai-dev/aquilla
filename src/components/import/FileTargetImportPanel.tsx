@@ -16,6 +16,8 @@
 import { useCallback, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { applyEBibleTargetImport } from "@/lib/import"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
@@ -52,7 +54,7 @@ export interface FileTargetImportPanelProps {
 type PanelStep = "file" | "sheet" | "mapping" | "review"
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
-const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xls"])
+const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
 
 export function FileTargetImportPanel({
   projectId,
@@ -69,6 +71,7 @@ export function FileTargetImportPanel({
   const [error, setError] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
   const [selectedSheet, setSelectedSheet] = useState<SpreadsheetSheet | null>(null)
+  const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [matchResult, setMatchResult] = useState<FileTargetMatchResult | null>(null)
   const [matchedByOrder, setMatchedByOrder] = useState(false)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
@@ -85,16 +88,21 @@ export function FileTargetImportPanel({
 
   const handleFile = useCallback(async (file: File) => {
     setError(null)
+    setSourceFile(file)
     const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
     try {
+      assertSourceUploadByteLength(file.size)
       if (USFM_EXTENSIONS.has(ext)) {
-        const rows = usfmToTargetRows(await file.text())
+        const rows = usfmToTargetRows(decodeImportText(await file.arrayBuffer(), file.name))
         if (rows.length === 0) {
           setError("No verses found in this USFM file.")
           return
         }
         showReview(matchTargetRowsByRef(rows, cells), false)
-      } else if (ext === "xlsx" || ext === "xls") {
+      } else if (ext === "xls") {
+        setError("Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV and try again.")
+        return
+      } else if (ext === "xlsx") {
         const parsed = await parseXlsxToSheets(await file.arrayBuffer())
         if (parsed.length === 0) {
           setError("No sheets found in XLSX file.")
@@ -108,7 +116,7 @@ export function FileTargetImportPanel({
           setStep("sheet")
         }
       } else if (SHEET_EXTENSIONS.has(ext)) {
-        const sheet = parseCsvToSheet(await file.text(), file.name)
+        const sheet = parseCsvToSheet(decodeImportText(await file.arrayBuffer(), file.name), file.name)
         setSheets([sheet])
         setSelectedSheet(sheet)
         setStep("mapping")
@@ -138,7 +146,7 @@ export function FileTargetImportPanel({
   async function handleApply() {
     // Guard against double-submit: a second click while the enqueue is in
     // flight would re-optimistic-patch and re-enqueue the same cells.
-    if (!matchResult || applying) return
+    if (!matchResult || !sourceFile || applying) return
     setApplying(true)
     setError(null)
     const selected = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
@@ -151,7 +159,23 @@ export function FileTargetImportPanel({
       const { committedCount } = await applyEBibleTargetImport(
         matchResult,
         selectedCellIds,
-        { projectId, author: username, getToken, targetLang },
+        {
+          projectId,
+          author: username,
+          getToken,
+          targetLang,
+          sourceArtifact: {
+            name: sourceFile.name,
+            bytes: await sourceFile.arrayBuffer(),
+            format: USFM_EXTENSIONS.has(sourceFile.name.split(".").pop()?.toLowerCase() ?? "")
+              ? "usfm"
+              : sourceFile.name.toLowerCase().endsWith(".xlsx")
+                ? "xlsx"
+                : sourceFile.name.toLowerCase().endsWith(".tsv")
+                  ? "tsv"
+                  : "csv",
+          },
+        },
       )
       onImported(committedCount) // closes the dialog — content is already visible + queued
     } catch (err) {
@@ -192,7 +216,7 @@ export function FileTargetImportPanel({
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.xls"
+              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx"
               className="sr-only"
               onChange={(e) => {
                 const file = e.target.files?.[0]

@@ -247,6 +247,28 @@ describe("applyEBibleTargetImport — commit shape", () => {
     expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 
+  it("counts a selected cell without a valid parent as skipped", async () => {
+    const missingParent: EBibleMatchResult = {
+      matched: [{
+        ...matchResult.matched[0],
+        parentId: "",
+      }],
+      orphans: [],
+      unmatchedSourceCount: 0,
+      sourceArtifact: {
+        name: "target.txt",
+        bytes: new TextEncoder().encode("exact target bytes").buffer,
+        format: "ebible",
+      },
+    }
+
+    const result = await applyEBibleTargetImport(missingParent, new Set(["cell-1"]), ctx)
+
+    expect(result).toEqual({ committedCount: 0, skippedCount: 1 })
+    expect(fetchCalls).toBe(0)
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
+  })
+
   it("enqueues commits for every selected file (no network)", async () => {
     // cell-1 and cell-2 are in file-a; cell-3 is in file-b
     const selected = new Set(["cell-1", "cell-2", "cell-3"])
@@ -256,5 +278,44 @@ describe("applyEBibleTargetImport — commit shape", () => {
     const fileIds = new Set(rows.map((r) => r.event.fileId))
     expect(fileIds).toEqual(new Set(["file-a", "file-b"]))
     expect(rows).toHaveLength(3)
+  })
+
+  it("preserves and lane-binds the exact target file before enqueuing edits", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      requests.push({ url, init })
+      return new Response(JSON.stringify({
+        ok: true,
+        artifactId: "01900000-0000-7000-8000-000000000010",
+        key: "artifact-key",
+        sha256: "a".repeat(64),
+      }), { status: 200 })
+    }))
+    const withArtifact: EBibleMatchResult = {
+      ...matchResult,
+      sourceArtifact: {
+        name: "target.txt",
+        bytes: new TextEncoder().encode("exact target bytes").buffer,
+        format: "ebible",
+      },
+    }
+
+    await applyEBibleTargetImport(
+      withArtifact,
+      new Set(["cell-1", "cell-3"]),
+      { ...ctx, targetLang: "fr-CA" },
+    )
+
+    expect(requests).toHaveLength(2)
+    expect(requests[0].init?.headers).toMatchObject({
+      "X-Artifact-Binding-Role": "target",
+      "X-Artifact-Target-Lang": "fr-CA",
+      "X-Update-Source-Sidecar": "false",
+    })
+    expect(JSON.parse(String(requests[1].init?.body))).toMatchObject({
+      bindingRole: "target",
+      targetLang: "fr-CA",
+    })
+    expect(await peekOutboxBatch(100)).toHaveLength(2)
   })
 })

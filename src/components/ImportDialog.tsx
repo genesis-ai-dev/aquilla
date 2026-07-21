@@ -57,6 +57,7 @@ import {
 } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
+import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
@@ -422,7 +423,7 @@ export function ImportDialog({
             ) : screen === "direction" ? (
               "Set translation direction"
             ) : screen === "result" ? (
-              "Import complete — some books skipped"
+              "Import complete — some items skipped"
             ) : screen === "collision" ? (
               "Re-import detected"
             ) : screen === "preview" ? (
@@ -551,8 +552,8 @@ export function ImportDialog({
             getToken={getToken}
             defaultLang={sourceLanguage}
             patchDcsCursor={patchDcsCursor}
-            onImported={async (refs, inferredLanguages) => {
-              await handleChildImported(refs, inferredLanguages)
+            onImported={async (refs, inferredLanguages, skipped) => {
+              await handleChildImported(refs, inferredLanguages, skipped)
             }}
           />
         )}
@@ -587,8 +588,8 @@ export function ImportDialog({
             projectId={projectId}
             username={username}
             getToken={getToken}
-            onImported={async (refs, inferredLanguages) => {
-              await handleChildImported(refs, inferredLanguages)
+            onImported={async (refs, inferredLanguages, skipped) => {
+              await handleChildImported(refs, inferredLanguages, skipped)
             }}
           />
         )}
@@ -1100,6 +1101,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       onCommitProgress?.(null)
       onCommitError?.(null)
       const allRefs: FileReference[] = []
+      const allSkipped: { book: string; reason: string }[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
       const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
       // AQU-520: byte totals so the progress UI can show "X / Y MB", not just a
@@ -1108,8 +1110,25 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       // fraction. `bytesTotal === 0` (media with no size, etc.) hides the readout.
       const bytesTotal = list.reduce((sum, f) => sum + (f.size || 0), 0)
       let bytesBefore = 0
+      let currentFileIndex = 0
+      let castAttempted = false
+      let handoffAttempted = false
+      const persistCastAdditions = async () => {
+        castAttempted = true
+        if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
+          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({
+            voices: additions.voices,
+            castAssignments: {
+              ...(ttsSettings?.castAssignments ?? {}),
+              ...additions.castAssignments,
+            },
+          })
+        }
+      }
       try {
-        for (const file of list) {
+        for (; currentFileIndex < list.length; currentFileIndex++) {
+          const file = list[currentFileIndex]
           const filePhase = `Uploading ${file.name}…`
           setPhase(filePhase)
           // AQU-430: surface phase to parent so PreviewPanel can show progress.
@@ -1118,7 +1137,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           onCommitProgress?.(null)
           // importFile returns speakerPairs from the SAME buildBulkCellsWithSpeakers
           // call that minted the uploaded cells — cellIds are guaranteed to match.
-          const { refs, speakerPairs } = await importFile(file, {
+          const { refs, speakerPairs, skipped } = await importFile(file, {
             projectId,
             author: username,
             sourceLanguage,
@@ -1141,22 +1160,15 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           bytesBefore += file.size || 0
           allRefs.push(...refs)
           allSpeakerPairs.push(...speakerPairs)
+          if (skipped) allSkipped.push(...skipped)
         }
         // Apply cast additions if any subtitle speakers were found.
-        if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
-          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
-          await onCastUpdated({
-            voices: additions.voices,
-            castAssignments: {
-              ...(ttsSettings?.castAssignments ?? {}),
-              ...additions.castAssignments,
-            },
-          })
-        }
+        await persistCastAdditions()
         const finishPhase = "Finishing up…"
         setPhase(finishPhase)
         onCommitPhase?.(finishPhase)
-        await onImported(allRefs)
+        handoffAttempted = true
+        await onImported(allRefs, undefined, allSkipped.length ? allSkipped : undefined)
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed"
         posthog.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
@@ -1166,10 +1178,44 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           file_exts: fileExts(list),
           error_message: message,
         })
-        setError(message)
-        // AQU-430 (fix): also surface to the parent — during the preview screen
-        // this UploadPanel is unmounted, so its local error would never show.
-        onCommitError?.(message)
+        if (allRefs.length > 0 && !handoffAttempted) {
+          const failedAndUnattempted = [
+            ...allSkipped,
+            ...list.slice(currentFileIndex).map((file, index) => ({
+              book: file.name,
+              reason: index === 0 ? message : "not attempted after an earlier file failed",
+            })),
+          ]
+          // Speakers from files that did succeed must not disappear merely
+          // because a later file failed. Report a cast write failure separately
+          // from file failures instead of retrying the file publication.
+          if (!castAttempted) {
+            try {
+              await persistCastAdditions()
+            } catch (castError) {
+              failedAndUnattempted.push({
+                book: "Cast assignments",
+                reason: castError instanceof Error ? castError.message : String(castError),
+              })
+            }
+          }
+          if (failedAndUnattempted.length === 0) {
+            failedAndUnattempted.push({ book: "Import finalization", reason: message })
+          }
+          handoffAttempted = true
+          try {
+            await onImported(allRefs, undefined, failedAndUnattempted)
+          } catch (handoffError) {
+            const handoffMessage = handoffError instanceof Error ? handoffError.message : "Import finalization failed"
+            setError(handoffMessage)
+            onCommitError?.(handoffMessage)
+          }
+        } else {
+          setError(message)
+          // AQU-430 (fix): also surface to the parent — during the preview screen
+          // this UploadPanel is unmounted, so its local error would never show.
+          onCommitError?.(message)
+        }
       } finally {
         setImporting(false)
         setProgress(null)
@@ -2403,9 +2449,9 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
   const [dismissing, setDismissing] = useState(false)
 
   const reportText = [
-    `Import complete: ${importedCount} book${importedCount === 1 ? "" : "s"} imported, ${skipped.length} skipped.`,
+    `Import complete: ${importedCount} item${importedCount === 1 ? "" : "s"} imported, ${skipped.length} skipped.`,
     "",
-    "Skipped books:",
+    "Skipped items:",
     ...skipped.map((s) => `  ${s.book}: ${s.reason}`),
   ].join("\n")
 
@@ -2432,7 +2478,7 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-sm text-muted-foreground">
-        <span className="font-medium text-foreground">{importedCount}</span> book{importedCount === 1 ? "" : "s"} imported
+        <span className="font-medium text-foreground">{importedCount}</span> item{importedCount === 1 ? "" : "s"} imported
         successfully; <span className="font-medium text-amber-600">{skipped.length}</span> could not be imported.
         Review the list below and copy it before closing.
       </p>
@@ -2776,11 +2822,12 @@ interface DcsPanelProps {
   defaultLang?: string
   /** Persist the pinned-release cursor to the project settings. Returns true on save. */
   patchDcsCursor: (cursor: DcsCursor) => Promise<boolean>
-  /** Signal the parent to refresh the project after a successful import. DCS
-   *  writes source cells server-side (bulkUploadSource → POST /import); we pass
-   *  empty refs and let the parent's refresh()/revalidateCells() pull the fresh
-   *  projection — importDcsResource returns counts, not per-file references. */
-  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** Signal the parent to refresh after a successful or partial import. */
+  onImported: (
+    refs: FileReference[],
+    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
+    skipped?: { book: string; reason: string }[],
+  ) => void | Promise<void>
 }
 
 type DcsPanelStage = "browse" | "importing" | "done"
@@ -2822,10 +2869,12 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
       }
       setSummary({ files: result.files, cells: result.cells, ref: result.cursor.ref, pinned })
       setStage("done")
-      // Refresh the project so the new source files/cells appear. DCS imports
-      // have no FileReferences to append optimistically; the server projection
-      // is authoritative and the parent's refresh pulls it in.
-      await onImported([], entry.language ? { sourceLanguage: entry.language } : undefined)
+      // Refresh the project and retain a per-file report if only part landed.
+      await onImported(
+        result.refs,
+        entry.language ? { sourceLanguage: entry.language } : undefined,
+        result.skipped,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed")
       setStage("browse")
@@ -2910,6 +2959,7 @@ interface SdbhPanelProps {
   onImported: (
     refs: FileReference[],
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
+    skipped?: { book: string; reason: string }[],
   ) => void | Promise<void>
 }
 
@@ -2932,6 +2982,8 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
     setProgress({ phase: "parse" })
     abortRef.current = new AbortController()
     try {
+      assertSourceUploadByteLength(masterFile.size)
+      if (localizedFile) assertSourceUploadByteLength(localizedFile.size)
       const masterJson = await masterFile.text()
       const localizedJson = localizedFile ? await localizedFile.text() : null
       const summary = await importSdbh(
@@ -2939,11 +2991,17 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
         localizedJson,
         { projectId, author: username, getToken, signal: abortRef.current.signal },
         setProgress,
+        {
+          master: { name: masterFile.name, bytes: await masterFile.arrayBuffer() },
+          ...(localizedFile ? {
+            localized: { name: localizedFile.name, bytes: await localizedFile.arrayBuffer() },
+          } : {}),
+        },
       )
       await onImported(summary.refs, {
         sourceLanguage: "hbo",
         ...(summary.targetLanguageCode ? { targetLanguage: summary.targetLanguageCode } : {}),
-      })
+      }, summary.skipped)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed")
     } finally {

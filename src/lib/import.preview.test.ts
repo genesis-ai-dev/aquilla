@@ -108,6 +108,21 @@ describe("parseFile — parse phase only (no upload)", () => {
     expect(captured).toHaveLength(0)
   })
 
+  it("gives every book in a concatenated USFM its own export skeleton and retains the exact bundle once", async () => {
+    const bundle = "\\id GEN\n\\c 1\n\\v 1 In the beginning.\n\\id EXO\n\\c 1\n\\v 1 These are the names.\n"
+
+    const results = await parseFile(makeFile("bundle.usfm", bundle), "usfm")
+
+    expect(results).toHaveLength(2)
+    expect(results[0].rawSource).toContain("\\id GEN")
+    expect(results[0].rawSource).not.toContain("\\id EXO")
+    expect(results[1].rawSource).toContain("\\id EXO")
+    expect(results.every((result) => result.rawBytes === undefined)).toBe(true)
+    expect(results.every((result) => result.rawSourceFormat === "usfm")).toBe(true)
+    expect(new TextDecoder().decode(results[0].sharedSourceArtifact?.bytes)).toBe(bundle)
+    expect(results[1].sharedSourceArtifact).toBeUndefined()
+  })
+
   it("sniffs Scripture content before trusting a generic .txt extension", async () => {
     const file = makeFile("misnamed.txt", "\\id GEN\n\\c 1\n\\v 1 In the beginning.\n")
     const prepared = await prepareImportFile(file, { projectId: "p1" })

@@ -13,27 +13,13 @@
 // named <file>_audio-by-character.zip — no crash, clean feedback.
 
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 test("alice sees Audio-by-character export, scope-locked to file, and gets a zip", async ({
   alice,
 }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AudioExport ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "swh" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AudioExport ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Open the export dialog from the header overflow menu (AQU-331).
   await ws.openExportDialog()

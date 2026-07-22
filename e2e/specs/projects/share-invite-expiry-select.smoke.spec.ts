@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * SharePanel InviteLinkTab — "Link expires" select changes value.
@@ -17,14 +17,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * the trigger shows "No expiry" → change to "1 day" → verify "1 day".
  */
 test("share invite expiry select changes value", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ShareExp ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ShareExp ${Date.now()}` })
 
   // Enter the workspace — the sidebar "More project options" menu (which
   // hosts Share) only exists there, not on the org home.
-  await dash.openProject(name)
+  await openSeededProject(alice, seeded)
 
   // Open the share dialog from the sidebar "More" menu.
   await alice.getByRole("button", { name: /More project options/i }).click()

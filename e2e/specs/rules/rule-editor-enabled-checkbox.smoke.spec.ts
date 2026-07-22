@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RuleEditor — "Enabled" switch toggles the rule's enabled state.
@@ -14,17 +14,10 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * off → toggle it back on → verify on again.
  */
 test("rule editor Enabled switch toggles", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `RuleEnabled ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `RuleEnabled ${Date.now()}` })
 
   // Navigate to the project rules page.
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // Open the inline RuleEditor via the header "+ Add Rule" button.

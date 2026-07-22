@@ -90,9 +90,13 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-border bg-muted/60 px-2 py-1 text-left font-semibold">{children}</th>
+    <th className="border border-border bg-muted/60 px-2 py-1 text-left font-semibold [overflow-wrap:anywhere]">
+      {children}
+    </th>
   ),
-  td: ({ children }) => <td className="border border-border px-2 py-1 align-top">{children}</td>,
+  td: ({ children }) => (
+    <td className="border border-border px-2 py-1 align-top [overflow-wrap:anywhere]">{children}</td>
+  ),
   hr: () => <hr className="my-2 border-border" />,
 }
 

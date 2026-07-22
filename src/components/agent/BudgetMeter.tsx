@@ -7,11 +7,8 @@
 
 import { AlertTriangle, Gauge } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatCredits } from "@/lib/credits"
 import type { AgentBudget } from "@/lib/agent/run-state"
-
-function formatCents(cents: number): string {
-  return `$${(cents / 100).toFixed(cents < 1000 ? 2 : 0)}`
-}
 
 export function BudgetMeter({ budget }: { budget: AgentBudget }) {
   if (budget.exhausted) {
@@ -23,13 +20,13 @@ export function BudgetMeter({ budget }: { budget: AgentBudget }) {
       >
         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
         <span>
-          Run stopped at its {formatCents(budget.capCents)} cost cap ({formatCents(budget.spentCents)} spent).
+          Run stopped at its {formatCredits(budget.capCredits)} credit cap ({formatCredits(budget.spentCredits)} spent).
         </span>
       </div>
     )
   }
 
-  const pct = budget.capCents > 0 ? Math.min(100, (budget.spentCents / budget.capCents) * 100) : 0
+  const pct = budget.capCredits > 0 ? Math.min(100, (budget.spentCredits / budget.capCredits) * 100) : 0
   return (
     <div
       className="flex items-center gap-1.5 text-[10px] text-muted-foreground"
@@ -41,7 +38,7 @@ export function BudgetMeter({ budget }: { budget: AgentBudget }) {
         <div className={cn("h-full bg-sky-500", pct > 85 && "bg-amber-500")} style={{ width: `${pct}%` }} />
       </div>
       <span>
-        {formatCents(budget.spentCents)} / {formatCents(budget.capCents)}
+        {formatCredits(budget.spentCredits)} / {formatCredits(budget.capCredits)}
       </span>
     </div>
   )

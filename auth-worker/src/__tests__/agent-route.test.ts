@@ -214,7 +214,8 @@ describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
     const usage = frames.find((f) => f.type === "usage")!
     expect(usage.promptTokens).toBe(300)
     expect(usage.completionTokens).toBe(150)
-    expect(usage.costCents).toBeCloseTo(0.3)
+    // CREDITS on the wire: raw 0.3¢ × agentMarkup 5 = 1.5 → ceil → 2 cr.
+    expect(usage.costCredits).toBe(2)
 
     const done = frames.find((f) => f.type === "done")!
     expect(done).toEqual({ type: "done", runId, status: "ok" })

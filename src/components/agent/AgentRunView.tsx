@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatCredits } from "@/lib/credits"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
@@ -91,10 +92,6 @@ function ToolChip({ item }: { item: ToolItem }) {
       )}
     </div>
   )
-}
-
-function formatCost(costCents: number): string {
-  return `$${(costCents / 100).toFixed(costCents < 10 ? 4 : 2)}`
 }
 
 export interface AgentRunViewProps {
@@ -209,7 +206,7 @@ export function AgentRunView({
         <div className="text-[10px] text-muted-foreground">
           {run.usage.promptTokens.toLocaleString()} prompt + {run.usage.completionTokens.toLocaleString()} completion tokens
           {" · "}
-          {formatCost(run.usage.costCents)}
+          {formatCredits(run.usage.costCredits)}
         </div>
       )}
 

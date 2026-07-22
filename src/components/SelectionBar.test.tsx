@@ -14,6 +14,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
+import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
 
 // AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
@@ -139,13 +140,19 @@ function makeStore(cells: CellData[]): CellStore {
   return store
 }
 
-function renderBar(project: ProjectRecord, cells: CellData[] = CELLS) {
+function renderBar(
+  project: ProjectRecord,
+  cells: CellData[] = CELLS,
+  myScopes: MemberScope[] = [],
+) {
   return render(
     <SelectionBar
       project={project}
       cellStore={makeStore(cells)}
       session={null}
       username="alice"
+      activeLane=""
+      myScopes={myScopes}
       completeBatch={vi.fn()}
     />,
   )
@@ -215,6 +222,30 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     vi.restoreAllMocks()
   })
 
+  it("AQU-633: disables Validate with an out-of-scope reason when the cell's file is not in the user's scope", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(
+      makeProject(ROLE.CONTRIBUTOR),
+      [makeCell({ id: "cell-1", fileId: "file-1", translated: "bonjour" })],
+      [{ kind: "file", value: "some-other-file" }],
+    )
+    const btn = validateButton()
+    expect(btn).toBeDisabled()
+    expect(btn).toHaveAttribute("title", "Some selected cells are outside your assigned files or lanes")
+    vi.restoreAllMocks()
+  })
+
+  it("AQU-633: still enables Validate when the cell's file IS in the user's scope", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    renderBar(
+      makeProject(ROLE.CONTRIBUTOR),
+      [makeCell({ id: "cell-1", fileId: "file-1", translated: "bonjour" })],
+      [{ kind: "file", value: "file-1" }],
+    )
+    expect(validateButton()).toBeEnabled()
+    vi.restoreAllMocks()
+  })
+
   it("disables with an 'already validated by you' reason when all selected are self-validated", () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [
@@ -264,6 +295,8 @@ describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
         cellStore={makeStore(cells)}
         session={null}
         username="alice"
+        activeLane=""
+        myScopes={[]}
         completeBatch={vi.fn()}
         onValidationCommitted={onValidationCommitted}
       />,

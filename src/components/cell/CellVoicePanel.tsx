@@ -36,6 +36,7 @@ import {
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
+import { cellPlaybackWindow } from "@/lib/audio/cell-playback-window"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
@@ -263,8 +264,16 @@ export function CellVoicePanel({
   // controller; null trim bounds = no constraint.
   const pref = useCellPref(projectId, cell.id)
   const volume = pref.volume ?? 1
-  const trimStart = pref.trimStart ?? null
-  const trimEnd = pref.trimEnd ?? null
+  // AQU-647: an imported audio/video FILE is split into N media segments that
+  // all share ONE clip, each windowed by [startTime,endTime). That section
+  // window MUST constrain this local player, exactly as the global play-queue
+  // honors it — otherwise pressing play on any section streams the shared clip
+  // from 0:00 and every section sounds like the file's opening. A manual crop
+  // narrows further within the section; non-media cells are unaffected.
+  const { start: trimStart, end: trimEnd } = useMemo(
+    () => cellPlaybackWindow(cell, { start: pref.trimStart ?? null, end: pref.trimEnd ?? null }),
+    [cell, pref.trimStart, pref.trimEnd],
+  )
   useEffect(() => { setVolume(volume) }, [volume, setVolume])
   useEffect(() => { setTrim(trimStart, trimEnd) }, [trimStart, trimEnd, setTrim])
   const changeVolume = useCallback((v: number) => {

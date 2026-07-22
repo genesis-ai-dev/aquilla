@@ -108,6 +108,7 @@ import {
 } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
+  resolveActiveChapterLabel,
   rowMatchesChapterHeading,
   sectionLabelAtViewportStart,
 } from "@/lib/chapter-navigation"
@@ -745,6 +746,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
   const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
+  const [chapterNavigationSelection, setChapterNavigationSelection] = useState<{
+    fileId: string | null
+    label: string
+  } | null>(null)
+  const clearChapterNavigationSelection = useCallback(() => {
+    setChapterNavigationSelection(null)
+  }, [])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
   // Mirror ref so the imperative handle (getCurrentIndex) reads current
   // values without widening its dependency array — same pattern as
@@ -914,6 +922,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
+    clearChapterNavigationSelection()
     setActiveEditorCellId(targetId)
     lastActiveEditorCellIdRef.current = targetId
     void listRef.current?.scrollToIndex({
@@ -947,11 +956,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     }
     focusWhenMounted()
-  }, [getListQueryRoot])
+  }, [clearChapterNavigationSelection, getListQueryRoot])
 
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
+        clearChapterNavigationSelection()
         void listRef.current?.scrollToIndex({
           index,
           viewPosition: 0.5,
@@ -996,7 +1006,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
       })
     },
-  }), [displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1005,6 +1015,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
+    clearChapterNavigationSelection()
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -1027,7 +1038,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       rowEl.focus()
     }
     focusWhenMounted()
-  }, [getListQueryRoot])
+  }, [clearChapterNavigationSelection, getListQueryRoot])
 
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
@@ -1395,13 +1406,47 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion, displayCellIds])
 
-  const activeChapterLabel = chapterNavigationItems.some((chapter) => chapter.label === currentSectionLabel)
-    ? currentSectionLabel
-    : chapterNavigationItems[0]?.label ?? ""
+  const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
+    ? chapterNavigationSelection.label
+    : null
+  const activeChapterLabel = resolveActiveChapterLabel(
+    chapterNavigationItems.map((chapter) => chapter.label),
+    currentSectionLabel,
+    selectedChapterLabel,
+  )
+
+  const handleChapterListPointerDownCapture = useCallback((event: React.PointerEvent) => {
+    // Touch/pen gestures and a mouse press on the scroll container indicate
+    // manual scrolling. A normal click inside a row should not discard the
+    // chapter the user just chose.
+    if (event.pointerType !== "mouse" || event.target === parentRef.current) {
+      clearChapterNavigationSelection()
+    }
+  }, [clearChapterNavigationSelection])
+
+  const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
+    const target = event.target
+    if (
+      target instanceof HTMLElement
+      && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']"))
+    ) return
+    if (
+      event.key === "ArrowUp"
+      || event.key === "ArrowDown"
+      || event.key === "PageUp"
+      || event.key === "PageDown"
+      || event.key === "Home"
+      || event.key === "End"
+      || event.key === " "
+    ) {
+      clearChapterNavigationSelection()
+    }
+  }, [clearChapterNavigationSelection])
 
   const handleChapterSelect = useCallback((label: string) => {
     const index = cellStore.findIndexBySection(label)
     if (index < 0) return
+    setChapterNavigationSelection({ fileId: audioFileId, label })
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     void listRef.current?.scrollToIndex({
@@ -1409,7 +1454,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       viewPosition: 0,
       animated: true,
     })
-  }, [cellStore])
+  }, [audioFileId, cellStore])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -1845,7 +1890,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       </div>
 
       {displayCellIds.length > 0 ? (
-        <div ref={listRootRef} className="flex min-h-0 flex-1">
+        <div
+          ref={listRootRef}
+          className="flex min-h-0 flex-1"
+          onPointerDownCapture={handleChapterListPointerDownCapture}
+          onWheelCapture={clearChapterNavigationSelection}
+          onKeyDownCapture={handleChapterListKeyDownCapture}
+        >
           <LegendList
             ref={listRef}
             refScrollView={setListScrollElement}

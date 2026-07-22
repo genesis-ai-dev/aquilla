@@ -67,6 +67,7 @@ e2e/.auth/
 e2e/recordings/output/
 
 # Local dev-stack state (wrangler local D1/R2/DO sqlite + worker logs)
+.wrangler/
 .wrangler-dev-state/
 .dev-stack-logs/
 # E2E orchestrator's shared wrangler local D1/R2/DO state

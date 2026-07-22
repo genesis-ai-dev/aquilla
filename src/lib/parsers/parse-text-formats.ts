@@ -16,23 +16,31 @@ import { extractMarkdownStrings } from "./markdown"
 import { parseObsStories } from "./obs"
 import { extractVttStrings, extractSrtStrings } from "./subtitle"
 import { parseCsvBilingual } from "./csv-bilingual"
-import { parseUsfmLossless } from "./usfm-lossless"
+import { parseUsfmLossless, isBookTitleOrIntroMarker } from "./usfm-lossless"
+import { extractJsonStrings } from "./json-i18n"
+import { extractPoStrings } from "./po"
+import { extractPropertiesStrings } from "./properties"
+import { extractSbvStrings } from "./sbv"
 import type { TranslatableString } from "./types"
 // Type-only import — erased by the bundler, so this does NOT pull import.ts (or
 // its DOMParser-using parsers) into the worker bundle.
 import type { ImportResult } from "../import"
 
 /** DOM-free file types handled by this module (and therefore the parse worker). */
-export type TextParseFileType = "txt" | "md" | "obs" | "vtt" | "srt" | "csv" | "tsv" | "usfm"
+export type TextParseFileType = "txt" | "md" | "json" | "po" | "properties" | "obs" | "vtt" | "srt" | "sbv" | "csv" | "tsv" | "usfm"
 
 /** Set form for routing decisions in parseFile(). DOM-bound formats (docx,
  *  pptx, xliff, tmx) are intentionally absent — they need the main thread. */
 export const TEXT_PARSE_FILE_TYPES: ReadonlySet<string> = new Set<TextParseFileType>([
   "txt",
   "md",
+  "json",
+  "po",
+  "properties",
   "obs",
   "vtt",
   "srt",
+  "sbv",
   "csv",
   "tsv",
   "usfm",
@@ -72,14 +80,20 @@ export function usfmSectionToStrings(section: string): {
       type: "verse" as const,
       paragraphStart: v.paragraphStart,
     })),
-    ...doc.headings.map((h) => ({
-      order: h.textStart,
-      ref: h.ref,
-      text: h.text.trim(),
-      section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
-      type: h.kind,
-      paragraphStart: undefined as boolean | undefined,
-    })),
+    // AQU-585: book names (running header / TOC / main title) and the whole
+    // introduction section are front matter, not translatable source cells —
+    // drop them here so they never land as cells. They remain in the lossless
+    // doc, so export still round-trips their original bytes.
+    ...doc.headings
+      .filter((h) => !isBookTitleOrIntroMarker(h.marker))
+      .map((h) => ({
+        order: h.textStart,
+        ref: h.ref,
+        text: h.text.trim(),
+        section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
+        type: h.kind,
+        paragraphStart: undefined as boolean | undefined,
+      })),
   ].sort((a, b) => a.order - b.order)
   const strings: TranslatableString[] = allSpans.map((s) => ({
     id: uuidv7(),
@@ -108,12 +122,20 @@ export function parseTextFormat(req: TextParseRequest): ImportResult[] {
       return [{ name, strings: extractPlaintextStrings(text) }]
     case "md":
       return [{ name, strings: extractMarkdownStrings(text) }]
+    case "json":
+      return [{ name, strings: extractJsonStrings(text) }]
+    case "po":
+      return [{ name, strings: extractPoStrings(text) }]
+    case "properties":
+      return [{ name, strings: extractPropertiesStrings(text) }]
     case "obs":
       return [{ name, strings: parseObsStories(text, name) }]
     case "vtt":
       return [{ name, strings: extractVttStrings(text) }]
     case "srt":
       return [{ name, strings: extractSrtStrings(text) }]
+    case "sbv":
+      return [{ name, strings: extractSbvStrings(text) }]
     case "csv":
     case "tsv":
       return [{ name, strings: parseCsvBilingual(text) }]

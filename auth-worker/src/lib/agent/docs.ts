@@ -119,6 +119,26 @@ diverges from the termbase or from validated usage elsewhere.`
 
 const VALIDATION = `# Validation cookbook — endorsements and the N-of-M gate
 
+What "validated" means (answer this before running any query):
+Validation is a HUMAN sign-off, not a quality score the machine assigns. A cell
+is "validated" (validated=1) only after a person with REVIEWER+ explicitly
+endorses its current text — never automatically. So a correct translation can
+still show as "not validated", and that is expected, not a bug.
+
+The case testers ask about most: "my AI translation is correct but shows as not
+validated — why?" Because an AI draft is a suggestion, not a human judgment.
+When the agent drafts a cell it is marked ai_drafted=1 and validated=0; leaving
+it unchanged does NOT validate it. The expected workflow is that the translator
+reviews the draft and, if it is correct as-is, clicks validate to endorse it —
+validating an unedited-but-correct AI draft is exactly the intended step, not a
+sign anything is wrong. Editing a cell clears ai_drafted (it is now human text)
+but STILL does not validate it on its own; validated only flips when a reviewer
+endorses it (or, on N-of-M projects, once enough reviewers do). So the three
+states are distinct: ai_drafted (machine suggestion, unendorsed) → human-edited
+(ai_drafted cleared, still unendorsed) → validated (a human signed off).
+Never stage a validation on the user's behalf to "fix" this — see the emit note
+below; only the human's own review validates a cell.
+
 The project's validation threshold (how many validators a cell needs):
 SELECT COALESCE(settings::jsonb ->> 'validationCountThreshold', '1') AS threshold
 FROM project_settings WHERE project_id = :project

@@ -78,6 +78,8 @@ export interface DcsCell {
 export interface DcsFile {
   fileId: string // deterministic uuidv5
   name: string // e.g. "57-TIT.usfm" or book/story title
+  /** Exact repository-relative member that produced this file. */
+  sourcePath?: string
   bookCode?: string
   cells: DcsCell[]
 }

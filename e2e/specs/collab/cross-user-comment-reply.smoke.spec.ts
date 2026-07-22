@@ -103,7 +103,13 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   const bobRow = bobWs.cellRow(0)
   await bobRow.scrollIntoViewIfNeeded()
   await bobRow.hover()
-  await bobRow.locator('button[aria-label="Add comment"]').first().click()
+  // A cell with an existing thread replaces "Add comment" with its open
+  // comment count. Either control opens the same drawer.
+  const openComments = bobRow.locator(
+    'button[aria-label="Add comment"], button[aria-label*="open comment" i]',
+  ).first()
+  await expect(openComments).toBeVisible({ timeout: 5_000 })
+  await openComments.click()
 
   const bobDrawer = bob.locator('[data-testid="comments-drawer"]')
   await expect(bobDrawer).toBeVisible({ timeout: 5_000 })

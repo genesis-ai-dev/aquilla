@@ -37,7 +37,21 @@ const CORS_HEADERS: Record<string, string> = {
   // (PUT /api/v1/projects/:id/files/:id/source). Omitting it here fails the
   // preflight, which broke every DOCX/PPTX source upload in prod (no r2_key
   // was ever written).
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Source-Format",
+  "Access-Control-Allow-Headers": [
+    "Authorization",
+    "Content-Type",
+    "X-Source-Format",
+    "X-Source-Size",
+    "X-Source-Sha256",
+    "X-Artifact-Id",
+    "X-Artifact-Name",
+    "X-Artifact-Binding-Role",
+    "X-Artifact-Member-Path",
+    "X-Artifact-Profile-Id",
+    "X-Artifact-Profile-Version",
+    "X-Artifact-Fidelity",
+    "X-Update-Source-Sidecar",
+  ].join(", "),
   // AQU-276: expose custom response headers so the browser-side fetch() can
   // read them via res.headers.get(). Without Expose-Headers, only the CORS
   // "safelisted" headers (Content-Type, etc.) are readable from JS.

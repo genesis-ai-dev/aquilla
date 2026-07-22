@@ -4,7 +4,32 @@ import {
   serializeUsfmLossless,
   hasIntraVerseMarkers,
   stripBom,
+  isBookTitleOrIntroMarker,
 } from "./usfm-lossless"
+
+// AQU-585: classifies book-name/introduction front matter that import must not
+// turn into translatable cells, while leaving in-body headings alone.
+describe("isBookTitleOrIntroMarker", () => {
+  it("matches book-name markers (running header, TOC, main title)", () => {
+    for (const m of ["h", "h1", "h2", "h3", "toc1", "toc2", "toc3", "toca1",
+                     "mt", "mt1", "mt2", "mt3", "mt4", "mte", "mte1", "mte2"]) {
+      expect(isBookTitleOrIntroMarker(m)).toBe(true)
+    }
+  })
+
+  it("matches every introduction marker (all begin with 'i')", () => {
+    for (const m of ["imt", "imt1", "is", "is1", "ip", "ipi", "ipq", "im", "imi",
+                     "iq", "iq1", "io", "io1", "io2", "iot", "ior", "iex", "ib", "ie", "ili", "ili1"]) {
+      expect(isBookTitleOrIntroMarker(m)).toBe(true)
+    }
+  })
+
+  it("does NOT match in-body section headings or Psalm titles", () => {
+    for (const m of ["s", "s1", "s2", "ms", "ms1", "sr", "mr", "r", "d"]) {
+      expect(isBookTitleOrIntroMarker(m)).toBe(false)
+    }
+  })
+})
 
 describe("parseUsfmLossless", () => {
   it("identifies verses with book + chapter context", () => {

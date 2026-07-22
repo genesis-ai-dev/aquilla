@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RuleEditor — Severity button toggle (Minor ↔ Major).
@@ -18,17 +18,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * click "Minor" → verify the color swap → Cancel.
  */
 test("rule editor severity toggle switches between Minor and Major", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `SeverityRule ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `SeverityRule ${Date.now()}` })
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // "+ Add Rule" opens the inline RuleEditor (no dialog).

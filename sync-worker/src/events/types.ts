@@ -339,6 +339,16 @@ export interface EventPayloads {
     name: string
     /** "codex" | "vtt" | "srt" | etc. — matches `files.file_type`. */
     fileType: string
+    /** Stable domain semantics may differ from the parser id (for example,
+     * TMX parses with `fileType=tmx` but is a translation-memory file). */
+    kind?: string
+    role?: string
+    bookCode?: string
+    sourceFileId?: string
+    anchorFileId?: string
+    r2Key?: string
+    importFormat?: string
+    parserVersion?: string
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
@@ -347,6 +357,14 @@ export interface EventPayloads {
     /** Timeline-segment-model: order lens — 'time' | 'sequence'. Stored in
      *  files.meta (JSON). Absent ⇒ client treats as 'sequence'. */
     orderedBy?: string
+    /** Versioned normalized-import summary persisted under files.meta. */
+    importManifest?: Record<string, unknown>
+    /**
+     * Internal re-import fold snapshot. The specialized re-import route uses
+     * this to make event-log rebuilds reproduce the live merged file metadata
+     * exactly. Normal genesis imports omit it.
+     */
+    projectionMeta?: Record<string, unknown>
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
   // (Corpus/grouping marker is not server-backed yet — name only.)

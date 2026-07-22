@@ -1,7 +1,7 @@
 /**
  * Dialog host for the file-scoped target import (FileTargetImportPanel):
  * populate the OPEN file's target column from USFM or a spreadsheet.
- * Opened from the workspace action menu ("Import translations into this file").
+ * Opened from the workspace action menu ("Import target translations into this file").
  */
 
 import { useEffect, useState } from "react"
@@ -14,13 +14,15 @@ import {
 import { FileTargetImportPanel } from "@/components/import/FileTargetImportPanel"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
 import posthog from "@/lib/posthog"
-import { IMPORT_STARTED, IMPORT_SUCCEEDED } from "@/lib/event-names"
+import { IMPORT_STARTED, IMPORT_SUCCEEDED, IMPORT_FAILED } from "@/lib/event-names"
 
 export interface FileTargetImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
   username: string
+  /** Target-lane storage key. Empty/absent means the project's default lane. */
+  targetLang?: string
   fileName: string
   /** The open file's cells, in display order. */
   cells: FileTargetCellRef[]
@@ -37,6 +39,7 @@ export function FileTargetImportDialog({
   onOpenChange,
   projectId,
   username,
+  targetLang,
   fileName,
   cells,
   getToken,
@@ -57,7 +60,7 @@ export function FileTargetImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Import translations</DialogTitle>
+          <DialogTitle>Import target translations</DialogTitle>
         </DialogHeader>
         {/* The panel owns its own header / scroll / footer layout; give it the
             full remaining height so its review step can pin the footer. */}
@@ -66,6 +69,7 @@ export function FileTargetImportDialog({
             key={panelKey}
             projectId={projectId}
             username={username}
+            targetLang={targetLang}
             fileName={fileName}
             cells={cells}
             getToken={getToken}
@@ -78,6 +82,14 @@ export function FileTargetImportDialog({
               })
               onImported(committedCount)
               onOpenChange(false)
+            }}
+            onError={(message, phase) => {
+              posthog.capture(IMPORT_FAILED, {
+                import_type: "file-target",
+                phase,
+                project_id: projectId,
+                error: message,
+              })
             }}
             onCancel={() => onOpenChange(false)}
           />

@@ -56,6 +56,31 @@ describe("createServerInvite", () => {
     expect(body.role).toBe(400)
   })
 
+  it("AQU-528: includes scopeLanes in the body and echoes them back", async () => {
+    const fetchMock = mockFetch(200, {
+      token: "t",
+      projectId: "p",
+      role: 400,
+      expiresAt: "x",
+      scopeLanes: ["es"],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const result = await createServerInvite("j", "p", 400, API, undefined, undefined, ["es"])
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as {
+      scopeLanes?: string[]
+    }
+    expect(body.scopeLanes).toEqual(["es"])
+    expect(result?.scopeLanes).toEqual(["es"])
+  })
+
+  it("AQU-528: omits scopeLanes from the body when empty or unset (unscoped)", async () => {
+    const fetchMock = mockFetch(200, { token: "t", projectId: "p", role: 400, expiresAt: "x" })
+    global.fetch = fetchMock as unknown as typeof fetch
+    await createServerInvite("j", "p", 400, API, undefined, undefined, [])
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as Record<string, unknown>
+    expect("scopeLanes" in body).toBe(false)
+  })
+
   it("returns null on 403 (caller not allowed)", async () => {
     global.fetch = mockFetch(403, { error: "not allowed" }) as unknown as typeof fetch
     const result = await createServerInvite("jwt", "proj-1", 400, API)

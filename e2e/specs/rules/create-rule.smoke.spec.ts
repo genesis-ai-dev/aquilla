@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Create a custom translation rule (inline RuleEditor).
@@ -15,18 +15,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * Creating a complete rule is covered by the violation spec.
  */
 test("add rule inline editor appears and Cancel dismisses", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AddRule ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AddRule ${Date.now()}` })
 
-  // Extract project id and navigate to rules page.
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // "+ Add Rule" button opens the inline editor.

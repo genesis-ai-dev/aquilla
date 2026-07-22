@@ -1,6 +1,6 @@
 /**
  * AQU-430 — Import progress visible after Confirm
- * AQU-431 — .doc file acceptance
+ * AQU-431 — .doc file gateway behavior
  *
  * AQU-430 WHY: Before the fix, clicking "Confirm import" in PreviewPanel switched
  * the button to "Uploading…" but showed no further progress; the dialog appeared
@@ -10,11 +10,12 @@
  * clicking Confirm, the preview list is replaced by an in-progress view with the
  * phase label and (when cell counts are available) a progress bar.
  *
- * AQU-431 WHY: The file picker and detectFileType() only accepted ".docx"; users
- * with ".doc" files were silently unable to import without manual conversion. The
- * fix maps ".doc" → "docx" in detectFileType() and adds ".doc" to the file
- * picker's accept attribute. True legacy OLE2 .doc files may still fail at parse
- * time (JSZip will reject them), but the extension gate no longer blocks them.
+ * AQU-431 WHY: The unified picker must allow every extension through the
+ * one-time preparation gateway. Legacy OLE .doc is not DOCX, however, and must
+ * never be sent to the OOXML parser under a false type. Unknown textual files
+ * can reach reviewed AI analysis; real OLE files receive an explicit binary
+ * rejection instead of a corrupt parse, while the Agent API can preserve an
+ * original alongside a separately verified import recipe.
  */
 
 import React from "react"
@@ -36,6 +37,10 @@ vi.mock("@/lib/import", () => ({
   parseFile: vi.fn(async () => [
     { name: "test.docx", strings: [{ id: "s1", original: "Hello world", context: "Paragraph", group: "1" }] },
   ]),
+  prepareImportFile: vi.fn(async (file: File) => ({
+    fileType: "docx",
+    results: [{ name: file.name, strings: [{ id: "s1", original: "Hello world", context: "Paragraph", group: "1" }] }],
+  })),
 }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({
@@ -57,7 +62,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 }))
 
 import { ImportDialog } from "./ImportDialog"
-import { importFile, parseFile } from "@/lib/import"
+import { importFile, prepareImportFile } from "@/lib/import"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject } from "@/lib/parsers/paratext-project"
 import { detectFileType } from "@/lib/parsers/types"
@@ -191,16 +196,16 @@ describe("AQU-430 — import progress visible after Confirm", () => {
 
 // ── AQU-431 tests ────────────────────────────────────────────────────────────
 
-describe("AQU-431 — .doc file acceptance", () => {
-  it("detectFileType maps .doc extension to 'docx' type", () => {
-    expect(detectFileType("myfile.doc")).toBe("docx")
+describe("AQU-431 — .doc file gateway behavior", () => {
+  it("does not misclassify legacy OLE .doc as OOXML .docx", () => {
+    expect(detectFileType("myfile.doc")).toBeNull()
   })
 
   it("detectFileType still maps .docx to 'docx' (regression guard)", () => {
     expect(detectFileType("document.docx")).toBe("docx")
   })
 
-  it("file picker accept attribute includes .doc", () => {
+  it("file picker does not block unknown extensions", () => {
     vi.clearAllMocks()
     setupTextFileMocks()
 
@@ -209,15 +214,13 @@ describe("AQU-431 — .doc file acceptance", () => {
     // Navigate to upload screen (card title is "Upload files" with lowercase 'f')
     fireEvent.click(screen.getByText(/upload files/i))
 
-    // The Choose Files input should accept .doc
+    // No `accept` filter: deterministic formats and AI-reviewed unknown text
+    // both enter through the same picker.
     const fileInputs = document.querySelectorAll('input[type="file"]')
-    const hasDocAccept = Array.from(fileInputs).some((inp) =>
-      (inp as HTMLInputElement).accept.includes(".doc")
-    )
-    expect(hasDocAccept).toBe(true)
+    expect((fileInputs[0] as HTMLInputElement).accept).toBe("")
   })
 
-  it(".doc file is routed through parseFile as 'docx' type", async () => {
+  it(".doc file is routed through the one-time prepare gateway", async () => {
     vi.clearAllMocks()
     setupTextFileMocks()
 
@@ -226,12 +229,9 @@ describe("AQU-431 — .doc file acceptance", () => {
 
     await dropFileAndWaitForPreview(docFile)
 
-    // parseFile must have been called (the .doc is treated like a docx in the parse phase)
-    expect(parseFile).toHaveBeenCalled()
-    // The file passed to parseFile should be our .doc file
-    const calls = vi.mocked(parseFile).mock.calls
+    expect(prepareImportFile).toHaveBeenCalled()
+    const calls = vi.mocked(prepareImportFile).mock.calls
     expect(calls.length).toBeGreaterThan(0)
-    // The file type arg should be 'docx'
-    expect(calls[0][1]).toBe("docx")
+    expect(calls[0][0]).toBe(docFile)
   })
 })

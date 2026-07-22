@@ -22,6 +22,7 @@
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
+import { packageBlockKey, translationsByPackageBlock } from "../import-locators"
 
 export interface PptxExportResult {
   blob: Blob
@@ -44,9 +45,8 @@ export interface PptxExportResult {
  * paragraph; multiple cells sharing a `group` are segments of the same
  * paragraph and are joined with a space (same rule as exportDocx).
  *
- * Paragraphs are matched positionally: the Nth non-empty paragraph across the
- * deck (slides numerically, shapes and paragraphs in document order — exactly
- * the traversal of extractPptxStrings) maps to the Nth unique group.
+ * Normalized imports match the exact package member + shape/paragraph path.
+ * Legacy cells without locators keep the prior positional fallback.
  * Untranslated groups (empty `translated`) leave the paragraph unchanged.
  */
 export async function exportPptx(
@@ -73,18 +73,21 @@ export async function exportPptx(
   const groupToTranslation = new Map<string, string>()
 
   for (const cell of cells) {
-    if (!groupToTranslation.has(cell.group)) {
-      groupOrder.push(cell.group)
-      groupToTranslation.set(cell.group, "")
+    const legacyGroup = cell.group || cell.id
+    if (!groupToTranslation.has(legacyGroup)) {
+      groupOrder.push(legacyGroup)
+      groupToTranslation.set(legacyGroup, "")
     }
     if (cell.translated.trim()) {
-      const existing = groupToTranslation.get(cell.group) ?? ""
+      const existing = groupToTranslation.get(legacyGroup) ?? ""
       groupToTranslation.set(
-        cell.group,
+        legacyGroup,
         existing ? `${existing} ${cell.translated.trim()}` : cell.translated.trim(),
       )
     }
   }
+  const locatedTranslations = translationsByPackageBlock(cells)
+  const hasLocatedTranslations = locatedTranslations.size > 0
 
   let injected = 0
   let untouched = 0
@@ -110,13 +113,17 @@ export async function exportPptx(
         // Skip-empty rule mirrors the parser: only text inside a:r runs counts.
         if (!paragraphPlainText(p).trim()) continue
 
+        const located = locatedTranslations.get(packageBlockKey(
+          slideFile,
+          `p:sp[${spIdx + 1}]/p:txBody/a:p[${pIdx + 1}]`,
+        ))
         const group = groupOrder[paraCursor]
         paraCursor++
-        if (!group) {
+        if (!located && (hasLocatedTranslations || !group)) {
           untouched++
           continue
         }
-        const translation = groupToTranslation.get(group) ?? ""
+        const translation = located?.plain ?? (group ? groupToTranslation.get(group) : undefined) ?? ""
         if (!translation) {
           untouched++
           continue
@@ -124,7 +131,7 @@ export async function exportPptx(
 
         if (countDistinctRunFormats(p) > 1) {
           warnings.push({
-            segment: group,
+            segment: located?.label ?? group ?? "unknown paragraph",
             detail:
               "slide paragraph had mixed inline formatting; translation keeps only the first run's styling",
           })

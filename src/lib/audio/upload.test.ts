@@ -54,4 +54,50 @@ describe("uploadCellAudio size guard", () => {
     expect(result.sizeBytes).toBe(3)
     expect(result.url).toBe("frontier-audio://audio-c1-1-abc.mp3")
   })
+
+  it("sends immutable provenance headers for imported media", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    await uploadCellAudio({
+      projectId: "p1",
+      fileId: "f1",
+      audioId: "audio-import",
+      ext: "wav",
+      blob: new Blob([new Uint8Array([1])], { type: "audio/wav" }),
+      artifactId: "01900000-0000-7000-8000-000000000001",
+      artifactName: "Interview 1.wav",
+      getSyncToken: async () => "tok",
+    })
+
+    const [, init] = fetchSpy.mock.calls[0]
+    expect(init?.headers).toMatchObject({
+      "X-Artifact-Id": "01900000-0000-7000-8000-000000000001",
+      "X-Artifact-Name": "Interview%201.wav",
+    })
+  })
+
+  it("retries the same immutable upload after a dropped response", async () => {
+    const fetchFn = vi.fn()
+      .mockRejectedValueOnce(new TypeError("network reset"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    const token = vi.fn(async () => "tok")
+    const blob = new Blob([new Uint8Array([1, 2])], { type: "audio/wav" })
+
+    await expect(uploadCellAudio({
+      projectId: "p1",
+      fileId: "f1",
+      audioId: "audio-import",
+      ext: "wav",
+      blob,
+      artifactId: "01900000-0000-7000-8000-000000000001",
+      getSyncToken: token,
+      fetchFn,
+      retryDelaysMs: [0, 0],
+    })).resolves.toMatchObject({ audioId: "audio-import", ext: "wav", sizeBytes: 2 })
+
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(fetchFn.mock.calls[0][1]).toMatchObject({ body: blob })
+    expect(fetchFn.mock.calls[1][1]).toMatchObject({ body: blob })
+  })
 })

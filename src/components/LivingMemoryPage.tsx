@@ -437,7 +437,7 @@ export function LivingMemoryPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
-  const { cells, isLoading, isEmpty, isTruncated, fileCount } = useLivingMemory({
+  const { cells, isLoading, isEmpty, error: cellsError } = useLivingMemory({
     projectId: projectId ?? "",
   })
 
@@ -619,19 +619,13 @@ export function LivingMemoryPage() {
         />
       )}
 
-      {/* Truncation warning */}
-      {isTruncated && (
+      {cellsError && (
         <div
-          className="flex items-start gap-2 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border-y border-amber-200/60 dark:border-amber-800/40"
+          className="flex items-start gap-2 border-y border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
           role="alert"
         >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-          <span>
-            Showing cells from the first {fileCount} files.
-            {/* SWARM-TODO(living-mem-server): replace fan-out with a dedicated
-                GET /api/v2/projects/:projectId/validated-cells endpoint to
-                support projects with >40 files. */}
-          </span>
+          <span>Couldn&apos;t load the complete project memory: {cellsError.message}</span>
         </div>
       )}
 

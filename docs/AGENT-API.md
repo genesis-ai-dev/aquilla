@@ -25,7 +25,7 @@ Status against the §6 release gates:
 | 7 | Permission-parity tests | **Done for the shipped command set** — `sync-worker/src/__tests__/external-permission-parity.test.ts` covers reads, `SetTranslation`, `PlanImport`, and (v1.1) `LinkMedia`; `CreateProject`/`UpdateProjectSettings` role/scope gates are covered in `external-project-commands.test.ts` instead of the shared parity matrix. |
 | 8 | Provenance envelope + execution receipts | **Done.** Envelope stamped on every changeset-committed event (`SetTranslation`/`PlanImport`/`LinkMedia`); `channel` now distinguishes `"mcp"` vs `"rest"` (v1.1 — no longer hardcoded). `CreateProject`/`UpdateProjectSettings` are receipt-only and carry their provenance in the receipt itself (no `events.provenance` row — see `docs/api/agent-api.md` §6). There is still no separate audit ledger for reads/searches/discarded plans. |
 | 9 | Minimal REST + MCP docs with one worked example | **Done** — `docs/api/agent-api.md`, `docs/api/openapi.yaml`, `docs/api/examples/blackfoot-import.md`, kept current through v1.1. |
-| 10 | Cold-start test | **Not run** — no evidence of an executed cold-start session in this repo |
+| 10 | Cold-start test | **Not run** — no evidence of an executed cold-start session in this repo. Cold-start hardening landed 2026-07-21 after real-world agent feedback: unauthenticated discovery root (`GET /api/v1/external` — machine-readable API map), REST bootstrap pair (`GET /me`, `GET /projects`), JSON 404s with hints on unmatched external paths, teaching 401/405 messages, a `quickstart` in `get_capabilities`, and a hand-to-your-agent [`docs/api/QUICKSTART.md`](api/QUICKSTART.md). |
 
 Also not yet implemented, called out explicitly rather than left silent: `run_checks`, jobs
 (`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, rate limiting, and an MCP staging
@@ -464,3 +464,31 @@ path.
    before recipes become ad-hoc code again?
 3. Rate-limit and job-size numbers for `get_capabilities`.
 4. Credential UX in the app (mint/scope/revoke screens) — v1 gate or CLI-first?
+
+---
+
+## Status addendum (2026-07-21, AQU-AGENT swarm)
+
+This section is additive — nothing above is superseded. The **AQU-AGENT** work added an
+**in-app agent harness** (Cloudflare Sandbox containers for code execution + living memory),
+while file importing remains a separate, purpose-built product workflow.
+
+The in-app chat does **not** expose `plan_import` and does not mint an internal API credential.
+Users select files in the Import dialog. Deterministic adapters run first; unsupported or malformed
+inputs may be inspected and parsed in an isolated, default-deny sandbox. The sandbox route writes
+no project state: it returns a validated normalized manifest to the ordinary preview, and a human
+confirmation commits through the browser's `ImportService` path. This prevents chat and generated
+parser code from becoming a second, ambiguous import pipeline.
+
+`PlanImport` remains part of this document's external REST/MCP command layer for authorized
+integrations. Those callers still receive the changeset, permission, provenance, `plan_stale`, and
+ask-mode approval guarantees described above. Historical chat timelines may also render an older
+`changeset.staged` frame, but the current chat harness no longer creates one.
+
+What's genuinely new (out of scope for this document, covered in
+[`docs/AGENT-SANDBOX.md`](AGENT-SANDBOX.md)): the sandbox code-execution service
+(`agent-worker/`, no model keys, default-deny egress), the chat harness tool surface
+(`run_code`/`load_artifact`/memory tools), the dedicated sandbox-assisted import route, and the
+living-memory/brief tables and review UI. None of it changes the external credential, command,
+changeset, or provenance model documented above — read `docs/AGENT-SANDBOX.md` for the sandbox
+architecture and come back here for what an external `PlanImport` changeset is once staged.

@@ -5,8 +5,9 @@
  * CommentsDrawer AQU-427 role-gating test pattern.
  */
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { SelectionBar } from "./SelectionBar"
+import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { CellData } from "@/hooks/useCells"
@@ -15,6 +16,15 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
+
+// AQU-616: mock the emit helpers so bulk validate/unvalidate clicks don't hit
+// the real outbox/IDB, and so we can assert they fired alongside the new
+// immediate-flush callback. Real exports are spread through for anything else.
+vi.mock("@/lib/sync/events-emit", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/events-emit")>()),
+  emitCellValidate: vi.fn(() => Promise.resolve("validate-event")),
+  emitCellUnvalidate: vi.fn(() => Promise.resolve("unvalidate-event")),
+}))
 
 function makeProject(roleLevel: number | null): ProjectRecord {
   const base: ProjectRecord = {
@@ -264,6 +274,78 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     const btn = validateButton()
     expect(btn).toBeDisabled()
     expect(btn).toHaveAttribute("title", "Selected cells need a translation first")
+    vi.restoreAllMocks()
+  })
+})
+
+/**
+ * AQU-616 — bulk validate/unvalidate must flush the outbox immediately so the
+ * confirmed/synced state lands promptly instead of waiting for the ~5s periodic
+ * flusher. The SelectionBar signals this to the parent via onValidationCommitted
+ * right after it enqueues its events.
+ */
+describe("SelectionBar — AQU-616 immediate flush on bulk validate", () => {
+  function renderWithCommitted(
+    onValidationCommitted: () => void,
+    cells: CellData[],
+  ) {
+    return render(
+      <SelectionBar
+        project={makeProject(ROLE.CONTRIBUTOR)}
+        cellStore={makeStore(cells)}
+        session={null}
+        username="alice"
+        activeLane=""
+        myScopes={[]}
+        completeBatch={vi.fn()}
+        onValidationCommitted={onValidationCommitted}
+      />,
+    )
+  }
+
+  it("enqueues the validate AND fires onValidationCommitted so the parent flushes now", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    const onValidationCommitted = vi.fn()
+    renderWithCommitted(onValidationCommitted, [makeCell({ id: "cell-1", translated: "bonjour" })])
+
+    fireEvent.click(screen.getByRole("button", { name: /Validate/i }))
+
+    expect(emitCellValidate).toHaveBeenCalledTimes(1)
+    expect(onValidationCommitted).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it("fires onValidationCommitted after a bulk 'Remove my validations'", () => {
+    vi.mocked(emitCellUnvalidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    const onValidationCommitted = vi.fn()
+    renderWithCommitted(onValidationCommitted, [
+      makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
+    ])
+
+    fireEvent.click(screen.getByRole("button", { name: /Remove my validations/i }))
+
+    expect(emitCellUnvalidate).toHaveBeenCalledTimes(1)
+    expect(onValidationCommitted).toHaveBeenCalledTimes(1)
+    vi.restoreAllMocks()
+  })
+
+  it("does NOT flush when nothing was eligible (button disabled, no emit)", () => {
+    vi.mocked(emitCellValidate).mockClear()
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
+    const onValidationCommitted = vi.fn()
+    // Already self-validated → validatableCount 0 → Validate disabled.
+    renderWithCommitted(onValidationCommitted, [
+      makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
+    ])
+
+    const btn = screen.getByRole("button", { name: /Validate/i })
+    expect(btn).toBeDisabled()
+    fireEvent.click(btn)
+
+    expect(emitCellValidate).not.toHaveBeenCalled()
+    expect(onValidationCommitted).not.toHaveBeenCalled()
     vi.restoreAllMocks()
   })
 })

@@ -168,7 +168,12 @@ export function resolveFileName(
 function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>): string {
   if (comment.scopeKind === "cell") {
     const { name } = resolveFileName(comment.fileId, fileMap)
-    return `Cell ${comment.cellId ?? "?"} in ${name}`
+    // AQU-599: prefer the human-readable cell reference (e.g. "GEN 1:1") the
+    // server resolves from the source cell, so the panel shows the cell number
+    // instead of the opaque cellId. Fall back to the raw id only when no
+    // canonical ref is available (non-scripture / deleted cell / older worker).
+    const cellLabel = comment.cellRef?.trim() || `Cell ${comment.cellId ?? "?"}`
+    return `${cellLabel} in ${name}`
   }
   if (comment.scopeKind === "file") {
     const { name } = resolveFileName(comment.fileId, fileMap)
@@ -798,6 +803,11 @@ export function CommentsPage() {
     projectId: projectId ?? null,
     getToken,
     author: session?.username ?? 'unknown',
+    // AQU-640: on a cold load the page can mount before the session JWT is
+    // available; getToken can only mint a real token once session.jwt exists.
+    // Signal readiness so the auto-load fires when the token arrives instead of
+    // bailing on the null token and requiring a manual Refresh.
+    tokenReady: !!session?.jwt,
   })
 
   // Separate top-level threads from replies.

@@ -22,12 +22,15 @@ export interface SourceVerse {
 }
 
 export interface PairedRow {
-  /** Canonical verse ref, e.g. "MAT 1:1". Doubles as the cell pairing key. */
+  /** Canonical verse or stable synthetic Paratext ref. */
   ref: string
+  /** Headings/titles remain structural units and never become numbered verses. */
+  type: "verse" | "heading" | "paratext"
   /** Source text (eBible). Empty when the source lacks this verse. */
   sourceText: string
   /** Target text (the consultant's translation). Empty when absent. */
   targetText: string
+  paragraphStart?: boolean
 }
 
 export interface PairedBook {
@@ -88,27 +91,75 @@ export function pairSourceTarget(
   for (const book of targetBooks) {
     const bookId = book.bookId.toUpperCase()
     const doc = parseUsfmLossless(book.rawSource)
-    const targetMap = new Map<string, string>()
-    for (const verse of doc.verses) {
-      if (!targetMap.has(verse.ref)) targetMap.set(verse.ref, verse.text.trim())
-    }
     const sourceMap = sourceByBook.get(bookId) ?? new Map<string, string>()
-
-    // Union of refs, canonical order.
-    const refs = new Set<string>([...targetMap.keys(), ...sourceMap.keys()])
-    const ordered = [...refs].sort((a, b) => refSortKey(a) - refSortKey(b))
-
     let both = 0
     let sourceOnly = 0
     let targetOnly = 0
-    const rows: PairedRow[] = ordered.map((ref) => {
-      const sourceText = sourceMap.get(ref) ?? ""
-      const targetText = targetMap.get(ref) ?? ""
-      if (sourceText && targetText) both++
+
+    // Keep the target package's physical structure as the primary order. This
+    // preserves headings/titles exactly where Paratext put them while verses
+    // still align to the source by canonical ref.
+    const targetSpans = [
+      ...doc.verses.map((verse) => ({
+        order: verse.textStart,
+        ref: verse.ref,
+        type: "verse" as const,
+        targetText: verse.text.trim(),
+        paragraphStart: verse.paragraphStart,
+      })),
+      ...doc.headings.map((heading) => ({
+        order: heading.textStart,
+        ref: heading.ref,
+        type: heading.kind,
+        targetText: heading.text.trim(),
+        paragraphStart: undefined,
+      })),
+    ].sort((a, b) => a.order - b.order)
+
+    const targetVerseRefs = new Set<string>()
+    const rows: PairedRow[] = targetSpans.map((span) => {
+      if (span.type !== "verse") {
+        return {
+          ref: span.ref,
+          type: span.type,
+          sourceText: "",
+          targetText: span.targetText,
+        }
+      }
+
+      targetVerseRefs.add(span.ref)
+      const sourceText = sourceMap.get(span.ref) ?? ""
+      if (sourceText && span.targetText) both++
       else if (sourceText) sourceOnly++
-      else if (targetText) targetOnly++
-      return { ref, sourceText, targetText }
+      else if (span.targetText) targetOnly++
+      return {
+        ref: span.ref,
+        type: "verse",
+        sourceText,
+        targetText: span.targetText,
+        ...(span.paragraphStart ? { paragraphStart: true } : {}),
+      }
     })
+
+    // A fuller reference source can contain verses absent from the target.
+    // Insert them by canonical verse order without moving target headings.
+    for (const [ref, sourceText] of [...sourceMap.entries()].sort(
+      ([a], [b]) => refSortKey(a) - refSortKey(b),
+    )) {
+      if (targetVerseRefs.has(ref)) continue
+      sourceOnly++
+      const row: PairedRow = {
+        ref,
+        type: "verse",
+        sourceText,
+        targetText: "",
+      }
+      const nextVerseIndex = rows.findIndex(
+        (candidate) => candidate.type === "verse" && refSortKey(candidate.ref) > refSortKey(ref),
+      )
+      if (nextVerseIndex === -1) rows.push(row)
+      else rows.splice(nextVerseIndex, 0, row)
+    }
 
     const order = getBookOrdinal(bookId)
     out.push({
@@ -132,8 +183,10 @@ export function pairSourceTarget(
 export interface BilingualCell {
   cellId: string
   ref: string
+  type: "verse" | "heading" | "paratext"
   sourceText: string
   targetText: string
+  paragraphStart?: boolean
 }
 
 export interface BilingualBookPlan {
@@ -174,8 +227,10 @@ export function buildBilingualPlan(
     cells: book.rows.map((r) => ({
       cellId: uuidv7(),
       ref: r.ref,
+      type: r.type,
       sourceText: r.sourceText,
       targetText: r.targetText,
+      ...(r.paragraphStart ? { paragraphStart: true } : {}),
     })),
     bothCount: book.bothCount,
     sourceOnlyCount: book.sourceOnlyCount,

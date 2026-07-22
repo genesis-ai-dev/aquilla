@@ -30,6 +30,10 @@ vi.mock("@/lib/import", () => ({
   parseFile: vi.fn(async () => [
     { name: "genesis.usfm", strings: [{ id: "s1", original: "content" }] },
   ]),
+  prepareImportFile: vi.fn(async () => ({
+    fileType: "usfm",
+    results: [{ name: "genesis.usfm", strings: [{ id: "s1", original: "content" }] }],
+  })),
 }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({
@@ -124,6 +128,26 @@ describe("AQU-287 — collision guard intercepts re-imports", () => {
     })
     // importFile must NOT have been called yet
     expect(importFile).not.toHaveBeenCalled()
+  })
+
+  it("defaults identified collisions to updating the existing file", async () => {
+    render(
+      <ImportDialog
+        {...baseProps}
+        existingFiles={[{ id: "existing-genesis", name: "genesis.usfm" }]}
+      />,
+    )
+    await dropCollidingFile()
+    expect(await screen.findByRole("button", { name: "Update existing" })).toHaveClass("text-primary")
+    expect(screen.getByRole("button", { name: "Update all" })).toBeEnabled()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await confirmPreview()
+    await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
+    const context = vi.mocked(importFile).mock.calls[0][1]
+    expect(context.reimportFileIds?.get("genesis.usfm")).toBe("existing-genesis")
   })
 
   it("Skip choice: importFile is NOT called; onImported fires with no refs", async () => {

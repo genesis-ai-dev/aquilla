@@ -44,11 +44,18 @@ export function handleFileCreate(
   // legacy fileType maps onto `kind`; the read side resolves fileType as
   // `kind ?? role ?? 'codex'`. `event_id` (this file.create's id) is the
   // NOT NULL AD-2 chain head.
-  const langMeta: Record<string, string> = {}
+  const langMeta: Record<string, unknown> = event.payload.projectionMeta
+    ? { ...event.payload.projectionMeta }
+    : {}
   if (event.payload.sourceLanguage) langMeta.sourceLanguage = event.payload.sourceLanguage
   if (event.payload.targetLanguage) langMeta.targetLanguage = event.payload.targetLanguage
   if (event.payload.sourceTextDirection) langMeta.sourceTextDirection = event.payload.sourceTextDirection
   if (event.payload.targetTextDirection) langMeta.targetTextDirection = event.payload.targetTextDirection
+  if (event.payload.orderedBy) langMeta.orderedBy = event.payload.orderedBy
+  if (event.payload.importManifest) langMeta.aquillaImport = event.payload.importManifest
+  if (event.payload.r2Key) langMeta.r2Key = event.payload.r2Key
+  if (event.payload.importFormat) langMeta.importFormat = event.payload.importFormat
+  if (event.payload.parserVersion) langMeta.parserVersion = event.payload.parserVersion
 
   const fileUpsert = db
     .prepare(
@@ -61,7 +68,7 @@ export function handleFileCreate(
         meta
       ) VALUES (
         ?, ?, ?,
-        NULL, ?, NULL, NULL, NULL,
+        ?, ?, ?, ?, ?,
         ?,
         0, 0, 0, NULL,
         ?, (extract(epoch from now()) * 1000)::bigint, (extract(epoch from now()) * 1000)::bigint,
@@ -69,7 +76,11 @@ export function handleFileCreate(
       )
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
+        role = excluded.role,
         kind = excluded.kind,
+        book_code = excluded.book_code,
+        source_file_id = excluded.source_file_id,
+        anchor_file_id = excluded.anchor_file_id,
         event_id = excluded.event_id,
         meta = excluded.meta,
         updated_at = (extract(epoch from now()) * 1000)::bigint`,
@@ -78,7 +89,11 @@ export function handleFileCreate(
       event.fileId,
       event.projectId,
       event.payload.name,
-      event.payload.fileType ?? null,
+      event.payload.role ?? null,
+      event.payload.kind ?? event.payload.fileType ?? null,
+      event.payload.bookCode ?? null,
+      event.payload.sourceFileId ?? null,
+      event.payload.anchorFileId ?? null,
       event.id,
       claims.username,
       JSON.stringify(langMeta),

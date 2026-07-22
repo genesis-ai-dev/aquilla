@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Sidebar file filter (ExpandableFileList).
@@ -16,14 +10,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * "No files match …".
  */
 test("sidebar file filter narrows file list and clears", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `FileFilter ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `FileFilter ${Date.now()}` })
+  await openSeededProject(alice, seeded)
 
   // The sidebar should list the imported file.
   const sidebar = alice.locator("aside")

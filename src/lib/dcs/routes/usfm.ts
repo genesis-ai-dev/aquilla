@@ -64,6 +64,7 @@ export const usfmRoute: ResourceRoute = {
       out.push({
         fileId: dcsFileId(repo, path),
         name: bookCode ? `${bookCode} (${path})` : path,
+        sourcePath: path,
         ...(bookCode !== undefined ? { bookCode } : {}),
         cells,
       })

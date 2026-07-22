@@ -1,4 +1,4 @@
-import { getBookOrdinal } from "@/lib/file-labeling/bible-book-names"
+import { compareByCanonicalBookOrder } from "@/lib/file-labeling/bible-book-names"
 
 export interface CorpusGroup<T = unknown> {
   label: string
@@ -11,18 +11,11 @@ function normalize(marker: string): string {
 
 // Bible books in OT/NT corpora are sorted canonically (Genesis → Revelation,
 // not alphabetically) so the sidebar reads like a Bible (#32). Non-book files
-// inside the same corpus, plus any file in a non-OT/NT corpus, fall back to
+// inside the same corpus fall through the shared comparator to alphabetic. Files
+// in a non-OT/NT named corpus (seasons, custom groupings) stay purely
 // alphabetic.
 function corpusFileCompare(label: string, a: { name: string }, b: { name: string }): number {
-  if (label === "OT" || label === "NT") {
-    const oa = getBookOrdinal(a.name)
-    const ob = getBookOrdinal(b.name)
-    if (oa >= 0 || ob >= 0) {
-      if (oa < 0) return 1
-      if (ob < 0) return -1
-      if (oa !== ob) return oa - ob
-    }
-  }
+  if (label === "OT" || label === "NT") return compareByCanonicalBookOrder(a.name, b.name)
   return a.name.localeCompare(b.name)
 }
 
@@ -47,7 +40,11 @@ export function groupByCorpus<T extends { name: string; corpusMarker?: string }>
   for (const group of groupsByKey.values()) {
     group.files.sort((a, b) => corpusFileCompare(group.label, a, b))
   }
-  ungrouped.sort((a, b) => a.name.localeCompare(b.name))
+  // Marker-less files (e.g. existing Codex projects that never carried a
+  // corpusMarker) still read like a Bible: canonical book order first, with
+  // non-book files falling back to alphabetic. Previously this bucket was
+  // purely alphabetic, which is exactly the sidebar complaint in AQU-582.
+  ungrouped.sort((a, b) => compareByCanonicalBookOrder(a.name, b.name))
 
   const named = Array.from(groupsByKey.values()).sort((a, b) => {
     if (a.label === "OT" && b.label !== "OT") return -1

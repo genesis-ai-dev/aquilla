@@ -62,6 +62,15 @@ interface Props {
    * When false, the button is disabled (server is still authoritative).
    */
   canHarmonize?: boolean
+  /**
+   * AQU-616: called right after a bulk validate/unvalidate enqueues its events,
+   * so the parent can flush the outbox immediately + revalidate. Without this,
+   * bulk validations sit in the outbox until the periodic ~5s flusher drains
+   * them, so the "Queued → Synced" confirm lags for seconds even though the
+   * icon updates optimistically. Every other validate path already flushes on
+   * commit; this closes that gap.
+   */
+  onValidationCommitted?: () => void
 }
 
 type Running =
@@ -70,7 +79,7 @@ type Running =
   | { kind: "validate" }
   | { kind: "voice" }
 
-export function SelectionBar({ project, cellStore, username, activeLane, myScopes, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true }: Props) {
+export function SelectionBar({ project, cellStore, username, activeLane, myScopes, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
@@ -215,10 +224,13 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         ? `Validated ${validated} cell${validated === 1 ? "" : "s"} (${alreadyValidated} already validated)`
         : `Validated ${validated} cell${validated === 1 ? "" : "s"}`
       showToast(msg)
+      // AQU-616: flush the just-enqueued validates now instead of waiting for
+      // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
+      if (validated > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, validatableCount, isBusy, project.id])
+  }, [selectedCells, username, activeLane, myScopes, validatableCount, isBusy, project.id, onValidationCommitted])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return
@@ -242,10 +254,12 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         removed++
       }
       showToast(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
+      // AQU-616: flush now rather than waiting for the periodic flusher.
+      if (removed > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, unvalidatableCount, isBusy, project.id])
+  }, [selectedCells, username, activeLane, myScopes, unvalidatableCount, isBusy, project.id, onValidationCommitted])
 
   // AQU-365: viewers (and any role below the lowest gated action here —
   // REVIEWER 300, the validate floor) get no selection affordance at all.

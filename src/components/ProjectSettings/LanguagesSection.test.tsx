@@ -116,27 +116,51 @@ describe("LanguagesSection", () => {
     expect((screen.getByTestId("add-target-lang-input") as HTMLInputElement).value).toBe("fr-BE")
   })
 
-  it("removes a lane after confirmation, calling patch with the filtered array", async () => {
-    const { patch } = renderSection({ targetLanes: ["fr-CA", "fr-BE"] })
-    fireEvent.click(screen.getByTestId("remove-lane-fr-CA"))
-    // Confirm button appears in place of the trash icon.
-    fireEvent.click(screen.getByRole("button", { name: /confirm remove/i }))
-    await waitFor(() => expect(patch).toHaveBeenCalledWith({ targetLanes: ["fr-BE"] }))
+  it("archives a lane after confirmation, calling patch with the appended archivedLanes", async () => {
+    const { patch } = renderSection({ targetLanes: ["fr-CA", "fr-BE"], archivedLanes: [] })
+    fireEvent.click(screen.getByTestId("archive-lane-fr-CA"))
+    // Confirm button appears in place of the archive icon.
+    fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }))
+    // Archiving keeps the lane in targetLanes; it only adds the tag to archivedLanes.
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ archivedLanes: ["fr-CA"] }))
   })
 
-  it("does not call patch if removal is cancelled", () => {
+  it("does not call patch if archive is cancelled", () => {
     const { patch } = renderSection({ targetLanes: ["fr-CA", "fr-BE"] })
-    fireEvent.click(screen.getByTestId("remove-lane-fr-CA"))
+    fireEvent.click(screen.getByTestId("archive-lane-fr-CA"))
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
     expect(patch).not.toHaveBeenCalled()
     expect(screen.getByTestId("target-lanes-list").textContent).toContain("fr-CA")
   })
 
-  it("hides write controls (add button, remove buttons) below the role floor", () => {
-    renderSection({ canEdit: false, disabledTooltip: "Maintainer or higher can edit shared settings." })
+  it("lists archived lanes separately and restores one via patch", async () => {
+    const { patch } = renderSection({
+      targetLanes: ["fr-CA", "fr-BE"],
+      archivedLanes: ["fr-BE"],
+    })
+    // fr-BE is archived → out of the active list, into the archived list.
+    expect(screen.getByTestId("target-lanes-list").textContent).toContain("fr-CA")
+    expect(screen.getByTestId("target-lanes-list").textContent).not.toContain("fr-BE")
+    const archivedList = screen.getByTestId("archived-lanes-list")
+    expect(archivedList.textContent).toContain("fr-BE")
+    // Active lanes don't offer a restore control.
+    expect(screen.queryByTestId("restore-lane-fr-CA")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("restore-lane-fr-BE"))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith({ archivedLanes: [] }))
+  })
+
+  it("hides write controls (add, archive, restore) below the role floor", () => {
+    renderSection({
+      canEdit: false,
+      targetLanes: ["fr-CA", "fr-BE"],
+      archivedLanes: ["fr-BE"],
+      disabledTooltip: "Maintainer or higher can edit shared settings.",
+    })
     expect((screen.getByTestId("add-target-lang-btn") as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByTestId("add-target-lang-input") as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByTestId("remove-lane-fr-CA") as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId("archive-lane-fr-CA") as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId("restore-lane-fr-BE") as HTMLButtonElement).disabled).toBe(true)
   })
 
   it("shows the disabled-reason note when write controls are gated", () => {

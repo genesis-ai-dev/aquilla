@@ -7,7 +7,9 @@
 // growing 30 props.
 
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react"
+import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 
 export interface CellExpansionTab {
@@ -30,8 +32,8 @@ interface Props {
   tab: string
   onTabChange: (next: string) => void
   tabs: CellExpansionTab[]
-  /** Called when the user dismisses the panel via Esc. The chevron is owned
-   *  by the rail and toggles open/close there. */
+  /** Called when the user dismisses the panel — via the header close button or
+   *  Esc. The chevron in the rail also toggles open/close there. */
   onClose?: () => void
   /** Optional className for the outer wrapper. */
   className?: string
@@ -113,7 +115,7 @@ export function CellExpansion({
       onClick={(e) => e.stopPropagation()}
     >
       <Tabs value={renderedTab} onValueChange={onTabChange} className="flex flex-col">
-        <div className="flex items-center justify-between px-2 py-1.5">
+        <div className="flex items-center justify-between gap-2 px-2 py-1.5">
           <TabsList onKeyDownCapture={handleTabListKeyDown}>
             {tabs.map((t) => (
               <TabsTrigger
@@ -128,6 +130,22 @@ export function CellExpansion({
               </TabsTrigger>
             ))}
           </TabsList>
+          {/* Explicit close affordance. The rail chevron and Esc also close the
+              panel, but neither is discoverable once the cell is open — testers
+              couldn't tell how to dismiss the details (AQU-588). */}
+          {onClose && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0 text-muted-foreground"
+              onClick={onClose}
+              aria-label="Close cell details"
+              data-cell-detail-close
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
         </div>
 
         {activeTab && (

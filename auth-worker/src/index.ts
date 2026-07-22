@@ -67,6 +67,7 @@ import orgSettingsRoutes from "./routes/org-settings"
 import sourceLinkingRoutes from "./routes/source-linking"
 import mergeSiblingRoutes from "./routes/merge-sibling"
 import invitesRoutes from "./routes/invites"
+import accessLinksRoutes from "./routes/access-links"
 import orgsRoutes from "./routes/orgs"
 import usersRoutes from "./routes/users"
 import adminRoutes from "./routes/admin"
@@ -81,6 +82,10 @@ import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
+import importClassifyRoutes from "./routes/import-classify"
+import importSandboxRoutes from "./routes/import-sandbox"
+import agentMemoryRoutes from "./routes/agent-memory"
+import agentArtifactsRoutes from "./routes/agent-artifacts"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -95,7 +100,7 @@ const app = new Hono<HonoEnv>()
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
   "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
@@ -178,6 +183,8 @@ app.get("/", (c) =>
       "/api/v2/health",
       "/api/v1/chat/completions",
       "/api/v1/chat/ab-feedback",
+      "/api/v1/import/classify",
+      "/api/v1/import/parse/:projectId",
       "/api/v1/ai/agent/run",
     ],
   }),
@@ -215,9 +222,20 @@ app.route("/api/v2/projects", projectSettingsRoutes)
 app.route("/api/v2/projects", sourceLinkingRoutes)
 app.route("/api/v2/projects", mergeSiblingRoutes)
 app.route("/api/v2/projects", termbaseSubscriptionRoutes)
+// Agent memory + project brief (AQU-AGENT contracts §3). Sibling router — new
+// file, doesn't touch projects.ts. Session-JWT authed; agent-channel semantics
+// keyed off the x-aquilla-agent-run header (see routes/agent-memory.ts).
+app.route("/api/v2/projects", agentMemoryRoutes)
+// Agent artifact upload — session-JWT attach-file path for the SPA agent
+// composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
+// the harness load_artifact tool can read them (routes/agent-artifacts.ts).
+app.route("/api/v2/projects", agentArtifactsRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
+// AQU-626: per-user deep link + PIN (fresh-browser / diode-zone flow). Mint is
+// project_lead-gated; redeem is public (the link + PIN is the credential).
+app.route("/api/v2/access-links", accessLinksRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
@@ -230,6 +248,10 @@ app.route("/api/v2/changesets", changesetApprovalsRoutes)
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
 // need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
+// Unknown-text import classification. Deliberately separate from chat: the
+// server owns the prompt and accepts only bounded file metadata + a sample.
+app.route("/api/v1/import", importClassifyRoutes)
+app.route("/api/v1/import", importSandboxRoutes)
 // Translation agent (SSE) — one-tool SQL agent, staged-write proposals.
 // Same auth + AI-guard path as chat; see routes/agent.ts and the 2026-06-12
 // translation-agent design/implementation-plan specs.

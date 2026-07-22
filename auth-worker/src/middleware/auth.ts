@@ -42,6 +42,24 @@ export const authMiddleware = async (
     return c.json({ error: "User not found" }, 401)
   }
 
+  // [Pen test] Auth & session mgmt (2026-07-20): access tokens are stateless
+  // and long-lived (ACCESS_TOKEN_EXPIRE_MINUTES, 30 days by default) with no
+  // other revocation path, so a token minted before a password reset would
+  // otherwise keep authenticating for up to 30 more days after the reset —
+  // defeating the point of resetting a compromised password. Reject any
+  // token issued before the account's last reset.
+  if (user.password_changed_at) {
+    const changedAtSeconds = Math.floor(
+      new Date(user.password_changed_at).getTime() / 1000,
+    )
+    if (payload.iat < changedAtSeconds) {
+      return c.json(
+        { error: "Token invalidated by a password change. Please log in again." },
+        401,
+      )
+    }
+  }
+
   c.set("user", user)
   await next()
 }

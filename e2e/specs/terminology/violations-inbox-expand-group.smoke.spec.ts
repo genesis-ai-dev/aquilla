@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Glossary } from "../../helpers/page-objects/Glossary"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * TerminologyViolationsInbox — expand concept group row.
@@ -33,15 +27,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   6. Click it → aria-expanded=true, infraction list appears.
  */
 test("violations inbox concept group expands to show infraction list", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ViolExpand ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ViolExpand ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // The rule engine skips untranslated cells, so give the cell whose source
   // contains "sample" a translation that LACKS the approved rendering.
@@ -59,10 +46,8 @@ test("violations inbox concept group expands to show infraction list", async ({ 
   await ws.editCell(sampleIdx, "Ceci est un fichier de test.")
 
   // Navigate to Terminology page.
-  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
-  expect(projectId).toBeTruthy()
   const glossary = new Glossary(alice)
-  await glossary.goto(projectId!)
+  await glossary.goto(seeded.projectId)
   await glossary.addTerm("sample", "échantillon")
   await glossary.openViolations()
 

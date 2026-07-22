@@ -32,6 +32,21 @@ function makeCell(over: Partial<CellRow> & Pick<CellRow, "cell_id" | "anchor_cel
 }
 
 describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
+  it("rejects more than 100 targeted cell ids instead of silently truncating them", async () => {
+    const { db } = await makeTestDb({})
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const ids = Array.from({ length: 101 }, (_, index) => `c${index}`).join(",")
+    const req = new Request(
+      `https://w/api/v1/projects/proj-a/files/file-x/cells?cellIds=${ids}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+
+    expect(res.status).toBe(400)
+    expect(await res.text()).toContain("maximum is 100")
+  })
+
   it("returns cells in anchor-chain order (head → next → tail)", async () => {
     // Insert in a deliberately scrambled order — we want the chain walk to
     // reassemble them correctly regardless of source DB order.

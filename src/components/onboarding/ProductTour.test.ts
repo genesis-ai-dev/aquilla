@@ -14,7 +14,7 @@ import {
   shouldAutoStartTour,
 } from "@/hooks/useProductTour"
 // Import step list directly for data-level assertions (no render harness needed).
-import { TOUR_STEPS, filterStepsByRole, type TourStep } from "./ProductTour"
+import { TOUR_STEPS, filterStepsByRole, ARROW_CLASS, TOUR_ARROW_PX, type TourStep } from "./ProductTour"
 import { ROLE } from "@/lib/frontier/roles"
 
 const TOUR_DONE_KEY = "codex:productTourDone"
@@ -173,5 +173,58 @@ describe("filterStepsByRole (AQU-512)", () => {
     const steps: TourStep[] = [{ anchor: "x", title: "t", body: "b", minRole: ROLE.PROJECT_LEAD }]
     expect(filterStepsByRole(steps, ROLE.REVIEWER)).toHaveLength(0)
     expect(filterStepsByRole(steps, ROLE.PROJECT_LEAD)).toHaveLength(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-596: the tooltip pointer arrow must stay visibly large so testers can
+// see which element each tour step points at. Guards against a silent revert
+// to the original hard-to-see 8px triangle.
+// ---------------------------------------------------------------------------
+
+describe("ARROW_CLASS pointer size (AQU-596)", () => {
+  // The pointing border is the colored one (border-r/l/t/b-popover); its px
+  // width is what makes the arrow read as an arrow. Pull it out per side.
+  const POINTING: Record<"left" | "right" | "top" | "bottom", RegExp> = {
+    left: /border-r-\[(\d+)px\]/,
+    right: /border-l-\[(\d+)px\]/,
+    top: /border-b-\[(\d+)px\]/,
+    bottom: /border-t-\[(\d+)px\]/,
+  }
+
+  it("AQU-596: arrows are noticeably larger than the original 8px", () => {
+    expect(TOUR_ARROW_PX).toBeGreaterThanOrEqual(12)
+  })
+
+  it.each(["left", "right", "top", "bottom"] as const)(
+    "AQU-596: %s arrow's pointing border matches TOUR_ARROW_PX and stays large",
+    (side) => {
+      const cls = ARROW_CLASS[side]
+      const m = cls.match(POINTING[side])
+      expect(m, `expected ${side} arrow to declare a pointing border width`).not.toBeNull()
+      const px = Number(m![1])
+      // Literal Tailwind class must stay in sync with the documented constant…
+      expect(px).toBe(TOUR_ARROW_PX)
+      // …and remain visibly larger than the original hard-to-see 8px.
+      expect(px).toBeGreaterThanOrEqual(12)
+    },
+  )
+
+  it("AQU-596: each arrow keeps its popover color so it renders and points correctly", () => {
+    expect(ARROW_CLASS.left).toContain("border-r-popover")
+    expect(ARROW_CLASS.right).toContain("border-l-popover")
+    expect(ARROW_CLASS.top).toContain("border-b-popover")
+    expect(ARROW_CLASS.bottom).toContain("border-t-popover")
+  })
+
+  it("AQU-596: the off-edge offset matches the arrow size so the tip sits flush", () => {
+    expect(ARROW_CLASS.left).toContain(`left-[-${TOUR_ARROW_PX}px]`)
+    expect(ARROW_CLASS.right).toContain(`right-[-${TOUR_ARROW_PX}px]`)
+    expect(ARROW_CLASS.top).toContain(`top-[-${TOUR_ARROW_PX}px]`)
+    expect(ARROW_CLASS.bottom).toContain(`bottom-[-${TOUR_ARROW_PX}px]`)
+  })
+
+  it("AQU-596: the centre-screen splash step has no arrow", () => {
+    expect(ARROW_CLASS.none).toBe("")
   })
 })

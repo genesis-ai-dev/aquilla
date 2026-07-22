@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 import { pickSelectOption } from "../../helpers/base-ui"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
  * Move to corpus dialog — FileActionMenu → Move.
@@ -20,14 +14,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * This spec verifies the dialog opens, the select works, and Cancel dismisses.
  */
 test("move to corpus dialog opens and shows corpus selector", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Move ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Move ${Date.now()}` })
+  await openSeededProject(alice, seeded)
 
   // Right-click the file row to open the context menu.
   const fileRow = alice.locator("aside").getByText("sample").first()

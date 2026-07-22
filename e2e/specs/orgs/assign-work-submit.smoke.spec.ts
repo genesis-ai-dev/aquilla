@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { expectSelectValue } from "../../helpers/base-ui"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * AssignWork — submitting the assignment form.
@@ -30,22 +24,10 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * assignee + the imported file → clicks Assign → panel collapses.
  */
 test("AssignWork form submits and collapses after success", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AssignSubmit ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  // Import a file so the "Book" dropdown has an option.
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AssignSubmit ${Date.now()}` })
 
   // Navigate to the org project overview (ProjectOverview.tsx).
-  await alice.goto(`/projects/${projectId}`)
+  await alice.goto(`/projects/${seeded.projectId}`)
   await alice.waitForLoadState("networkidle")
 
   // The "Assign…" button should be visible for the project owner.

@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — "Discard changes?" dialog.
@@ -26,19 +26,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   5b. Reopen dialog → Click "Discard" → navigated away from /settings
  */
 test("project settings discard dialog: Keep editing stays on settings page", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `DiscardSettings ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
-  expect(projectId).toBeTruthy()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `DiscardSettings ${Date.now()}` })
 
   // Navigate to project settings.
   // AQU-501: Project name lives in the "General" sub-menu pane.
-  await alice.goto(`/project/${projectId}/settings/general`)
+  await alice.goto(`/project/${seeded.projectId}/settings/general`)
   await alice.waitForLoadState("networkidle")
 
   const sourceLanguage = alice.locator("#sl")
@@ -76,18 +68,10 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
 })
 
 test("project settings discard dialog: Discard navigates away from settings", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `DiscardNav ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
-  expect(projectId).toBeTruthy()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `DiscardNav ${Date.now()}` })
 
   // AQU-501: Project name lives in the "General" sub-menu pane.
-  await alice.goto(`/project/${projectId}/settings/general`)
+  await alice.goto(`/project/${seeded.projectId}/settings/general`)
   await alice.waitForLoadState("networkidle")
 
   const sourceLanguage = alice.locator("#sl")

@@ -4,6 +4,7 @@ import * as targetEqualsSource from "./check-functions/target-equals-source"
 import * as placeholderIntegrity from "./check-functions/placeholder-integrity"
 import * as numberIntegrity from "./check-functions/number-integrity"
 import * as endPunctuationMismatch from "./check-functions/end-punctuation-mismatch"
+import * as punctuationIntegrity from "./check-functions/punctuation-integrity"
 import * as doubleSpace from "./check-functions/double-space"
 import * as repeatedWord from "./check-functions/repeated-word"
 import * as unpairedSymbols from "./check-functions/unpaired-symbols"
@@ -74,6 +75,16 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     run: endPunctuationMismatch.runCheck,
     message: endPunctuationMismatch.MESSAGE,
   },
+  "punctuation-integrity": {
+    id: "punctuation-integrity",
+    name: "Punctuation integrity",
+    description: "Clause punctuation (: or ;) in the source should also appear in the translation — catches mid-cell drops the end-punctuation check misses.",
+    defaultSeverity: "minor",
+    defaultEnabled: true,
+    runsOnEmptyTarget: false,
+    run: punctuationIntegrity.runCheck,
+    message: punctuationIntegrity.MESSAGE,
+  },
   "double-space": {
     id: "double-space",
     name: "Extra whitespace",
@@ -122,6 +133,7 @@ export const BUILTIN_CHECK_IDS: BuiltinCheckId[] = [
   "placeholder-integrity",
   "number-integrity",
   "end-punctuation-mismatch",
+  "punctuation-integrity",
   "double-space",
   "repeated-word",
   "unpaired-symbols",

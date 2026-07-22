@@ -122,7 +122,28 @@ function makeStore(cellId: string): CellStore {
   return store
 }
 
-function renderTable(actions: Partial<EditorActionsContextValue>) {
+// AQU-618: a cell with an EMPTY target so the AI-generate sparkle skips the
+// overwrite-confirm dialog and calls onCompleteSingle directly.
+function makeEmptyTargetStore(cellId: string): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: project.id,
+    fileId: "file-1",
+    username: "tester",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  const rows = makeRows(cellId)
+  const target = rows.find((r) => r.side === "target")
+  if (target) target.value = ""
+  store.replaceRows(rows, { full: true, maxServerSeq: 1 })
+  return store
+}
+
+function renderTable(
+  actions: Partial<EditorActionsContextValue>,
+  completing: Map<string, string> = new Map(),
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -133,7 +154,7 @@ function renderTable(actions: Partial<EditorActionsContextValue>) {
           username="tester"
           isCompletionConfigured={false}
           isCompletionAvailable={false}
-          completing={new Map()}
+          completing={completing}
           examples={new Map()}
           errors={new Map()}
           previews={new Map()}
@@ -187,6 +208,114 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     // A moment for the row to mount before asserting absence.
     await screen.findByText("bonjour")
     expect(screen.queryByRole("button", { name: "Edit history" })).not.toBeInTheDocument()
+  })
+
+  it("shows a Saved confirmation after a single-cell AI generate/Replace resolves (AQU-618)", async () => {
+    const onCompleteSingle = vi.fn().mockResolvedValue(undefined)
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={makeEmptyTargetStore("cell-1")}
+            username="tester"
+            isCompletionConfigured={true}
+            isCompletionAvailable={true}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={onCompleteSingle}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+
+    const sparkle = await screen.findByRole("button", { name: "Translate with AI" })
+    fireEvent.click(sparkle)
+
+    // Empty target → no overwrite dialog; onCompleteSingle runs directly.
+    expect(onCompleteSingle).toHaveBeenCalledTimes(1)
+    expect(onCompleteSingle).toHaveBeenCalledWith(expect.objectContaining({ id: "cell-1" }))
+    // The "Saved" confirmation appears only AFTER the completion promise
+    // resolves — proving the flow returns the user to the cell with a signal
+    // that the change landed (the strand-after-Replace bug this fixes).
+    expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+
+  // AQU-618 regression, dialog path: a NON-empty target routes the sparkle
+  // through GenerateOverwriteDialog. Confirming "Replace" must also end in the
+  // Saved confirmation — the AQU-591 merge rewired the dialog's onConfirm back
+  // to the bare onCompleteSingle and silently dropped it (only the empty-cell
+  // path above was covered, so CI stayed green).
+  it("shows a Saved confirmation after confirming Replace in the overwrite dialog (AQU-618)", async () => {
+    const onCompleteSingle = vi.fn().mockResolvedValue(undefined)
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={makeStore("cell-1")}
+            username="tester"
+            isCompletionConfigured={true}
+            isCompletionAvailable={true}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={onCompleteSingle}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+
+    const sparkle = await screen.findByRole("button", { name: "Translate with AI" })
+    fireEvent.click(sparkle)
+
+    // Non-empty target → the overwrite confirm dialog opens first.
+    expect(onCompleteSingle).not.toHaveBeenCalled()
+    const replace = await screen.findByRole("button", { name: "Replace" })
+    fireEvent.click(replace)
+
+    expect(onCompleteSingle).toHaveBeenCalledTimes(1)
+    expect(onCompleteSingle).toHaveBeenCalledWith(expect.objectContaining({ id: "cell-1" }))
+    expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+  // AQU-590: an in-progress AI translation must be evident ON the cell, even
+  // when the cell already has a translation (the sparkle regenerate/replace
+  // case). Before the fix the target-column overlay was suppressed once the
+  // cell had text, leaving only the easy-to-miss Queued→Synced status chip.
+  it("marks the row as AI-translating while a completion is in progress, even when the cell already has text", async () => {
+    renderTable({}, new Map([["cell-1", "generating"]]))
+
+    const cellText = await screen.findByText("bonjour")
+    const row = cellText.closest("[data-grid-row]")
+    expect(row).not.toBeNull()
+    expect(row).toHaveAttribute("data-ai-translating", "true")
+    expect(row?.className).toContain("animate-pulse")
+  })
+
+  it("does not mark the row as AI-translating when no completion is running", async () => {
+    renderTable({})
+
+    const cellText = await screen.findByText("bonjour")
+    const row = cellText.closest("[data-grid-row]")
+    expect(row).not.toBeNull()
+    expect(row).not.toHaveAttribute("data-ai-translating")
   })
 
   it("raises and unclamps the row while microphone-permission help is open", async () => {

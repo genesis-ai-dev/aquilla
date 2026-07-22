@@ -9,6 +9,27 @@ export class Workspace {
   }
 
   async importFile(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
+    // counts) instead of starting the upload immediately. Confirm it to kick
+    // off the actual bulk upload.
+    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+    await confirmBtn.click()
+    await this.waitForImportSettled()
+  }
+
+  /** Import an audio/video file. Media files bypass the AQU-310 preview panel
+   * (they have no text cells to show) and upload immediately on selection, so
+   * there is no "Confirm import" step — see ImportDialog.doImportFiles. */
+  async importMediaFile(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    await this.waitForImportSettled()
+  }
+
+  /** Shared import prologue: dismiss the setup checklist, open the
+   * ImportDialog's Upload Files panel, and select `filePath`. */
+  private async chooseImportFiles(filePath: string): Promise<void> {
     // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.
@@ -38,12 +59,9 @@ export class Workspace {
     const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
     await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
-    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
-    // counts) instead of starting the upload immediately. Confirm it to kick
-    // off the actual bulk upload.
-    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
-    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
-    await confirmBtn.click()
+  }
+
+  private async waitForImportSettled(): Promise<void> {
     // A hidden confirm button is only the transient "Uploading…" state, not a
     // success signal. Wait for the authoritative sidebar row, while surfacing
     // any import error immediately instead of timing out on an unrelated row.
@@ -271,6 +289,22 @@ export class Workspace {
     await expect(moreActionsBtn).toBeVisible({ timeout: 10_000 })
     await moreActionsBtn.click()
     await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
+  }
+
+  /**
+   * Expand the ExportDialog's "Export to another format" section (collapsed
+   * by default when the file has a native round-trip download). No-op when
+   * already open (e.g. file types without a native format).
+   */
+  async openExportFormatsSection(): Promise<void> {
+    const dialog = this.page.getByRole("dialog")
+    const details = dialog
+      .locator("details", { has: this.page.getByText("Export to another format") })
+      .first()
+    await expect(details).toBeVisible({ timeout: 5_000 })
+    if ((await details.getAttribute("open")) == null) {
+      await details.locator("summary").first().click()
+    }
   }
 
   /** AQU-331: next unfinished lives in the header overflow menu. */

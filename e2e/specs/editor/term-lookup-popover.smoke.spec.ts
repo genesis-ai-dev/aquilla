@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
 import { Glossary } from "../../helpers/page-objects/Glossary"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * TermLookupPopover — source-cell word matching a terminology concept.
@@ -28,30 +22,16 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * bolded "sample" cell never gets the underline affordance.
  */
 test("term lookup popover appears for terminology-matched source word", async ({ alice }) => {
-  // Project create + terminology round-trip + a full AQU-310 import flow can
-  // exceed the 30s harness budget under load.
+  // Terminology round-trip + editor open can exceed the 30s harness budget
+  // under load.
   test.slow()
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `TermPopover ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `TermPopover ${Date.now()}` })
 
   const glossary = new Glossary(alice)
-  await glossary.goto(projectId!)
+  await glossary.goto(seeded.projectId)
   await glossary.addTerm("content", "échantillon")
 
-  // Open the workspace and import the file.
-  await alice.goto(`/project/${projectId}/editor`)
-  await alice.waitForLoadState("networkidle")
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  await openSeededProject(alice, seeded)
 
   // Find the dotted-underline span for "content" in the source column.
   // TermLookupPopover wraps the word in a span with underline decoration.

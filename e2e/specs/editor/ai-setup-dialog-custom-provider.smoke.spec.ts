@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Custom AI provider — selecting "Custom endpoint" reveals endpoint + model inputs.
@@ -7,16 +7,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * Connect stays enabled; empty endpoint shows a validation error on click.
  */
 test("project settings custom provider reveals endpoint and model inputs", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AiCustom ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const projectId = alice.url().match(/\/project\/([^/?]+)/)?.[1]
-  expect(projectId).toBeTruthy()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AiCustom ${Date.now()}` })
   // AQU-501: Advanced LLM lives under the AI & completion settings pane.
-  await alice.goto(`/project/${projectId}/settings/ai`)
+  await alice.goto(`/project/${seeded.projectId}/settings/ai`)
 
   const advancedSummary = alice.getByText("Advanced LLM settings").first()
   await expect(advancedSummary).toBeVisible({ timeout: 10_000 })

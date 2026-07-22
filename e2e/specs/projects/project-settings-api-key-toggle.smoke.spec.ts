@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — ApiKeyField show/hide toggle.
@@ -19,16 +19,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * type="text" → click "Hide key" → type="password" again.
  */
 test("project settings API key toggle shows and hides key", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ApiKeyToggle ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ApiKeyToggle ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings/ai`)
+  await alice.goto(`/project/${seeded.projectId}/settings/ai`)
   await alice.waitForLoadState("networkidle")
 
   // The Gemini ApiKeyField lives inside the Voice card.

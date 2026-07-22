@@ -19,6 +19,7 @@ import { UsageSection } from "@/components/settings/UsageSection"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
+import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import {
   getTranslatorProfile,
   setTranslatorProfile,
@@ -76,28 +77,43 @@ const PROFILE_KEYS: (keyof TranslatorProfile)[] = [
  */
 function WorkspaceSection() {
   const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
+  // AQU-591: the store tracks whether to SKIP the confirm; present it positively.
+  const skipReplaceConfirm = useSkipReplaceConfirm()
   return (
-    <SettingsGroup label="Sidebar">
-      <SettingsRow
-        label="Sidebar tab layout"
-        description="Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar across the top of the sidebar."
-        block
-      >
-        <Tabs
-          value={railPosition}
-          onValueChange={(value) => setRailPosition(value as DockRailPosition)}
-          className="gap-0"
+    <>
+      <SettingsGroup label="Sidebar">
+        <SettingsRow
+          label="Sidebar tab layout"
+          description="Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar across the top of the sidebar."
+          block
         >
-          <TabsList aria-label="Sidebar tab layout">
-            {RAIL_OPTIONS.map(({ id, label }) => (
-              <TabsTrigger key={id} value={id}>
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      </SettingsRow>
-    </SettingsGroup>
+          <Tabs
+            value={railPosition}
+            onValueChange={(value) => setRailPosition(value as DockRailPosition)}
+            className="gap-0"
+          >
+            <TabsList aria-label="Sidebar tab layout">
+              {RAIL_OPTIONS.map(({ id, label }) => (
+                <TabsTrigger key={id} value={id}>
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup label="Editing">
+        <SettingsRow
+          label="Confirm before replacing a translation"
+          description="Ask for confirmation when AI Generate replaces a cell that already has a translation. Validated cells always confirm regardless of this setting."
+        >
+          <Switch
+            checked={!skipReplaceConfirm}
+            onCheckedChange={(on) => setSkipReplaceConfirm(!on)}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+    </>
   )
 }
 
@@ -231,7 +247,7 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
   {
     slug: "workspace",
     title: "Workspace",
-    description: "Layout choices for the project sidebar.",
+    description: "Layout and editing behavior for the project workspace.",
     group: "General",
     icon: PanelLeft,
     render: () => <WorkspaceSection />,

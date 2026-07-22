@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, SlidersHorizontal } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
@@ -54,6 +54,22 @@ import {
 } from "@/components/ui/dialog"
 import { DatePicker, dateToDeadlineString, deadlineStringToDate } from "@/components/ui/date-picker"
 import { cn } from "@/lib/utils"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuCheckboxItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  STAT_WIDGETS,
+  loadHiddenStats,
+  saveHiddenStats,
+  toggleHiddenStat,
+  type StatKey,
+} from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import {
@@ -555,6 +571,16 @@ export function ProjectOverview() {
   // recompute from that lane's PortfolioLane and the drill-down re-reads with
   // `?lane=`.
   const [selectedLaneTag, setSelectedLaneTag] = useState<string | null>(null)
+  // AQU-593: per-user preference for which Progress-card stat widgets to hide.
+  // Client-side only (localStorage); toggling never touches project data.
+  const [hiddenStats, setHiddenStats] = useState<Set<StatKey>>(() => loadHiddenStats())
+  const toggleStat = useCallback((key: StatKey) => {
+    setHiddenStats((prev) => {
+      const next = toggleHiddenStat(prev, key)
+      saveHiddenStats(next)
+      return next
+    })
+  }, [])
   // The lane passed to the per-file progress reads. "All" (null) and the
   // default lane pill both map to '' server-side (the default lane == the
   // no-param request), so the drill-down only ever diverges for a selected
@@ -791,6 +817,18 @@ export function ProjectOverview() {
   const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = "Cross-language stat — not broken down per language."
 
+  // AQU-593: which stat widgets are applicable to this project (drives the
+  // Customize menu). Audio tiles only apply to audio projects; the AI-Drafted
+  // tile only applies once some cells were AI-drafted. A hidden key is honored
+  // at render time via `statVisible`.
+  const availableStatKeys: StatKey[] = [
+    ...(showText ? (["translated"] as StatKey[]) : []),
+    ...(showText && (audio?.aiDraftedCells ?? 0) > 0 ? (["ai-drafted"] as StatKey[]) : []),
+    ...(showText ? (["validated"] as StatKey[]) : []),
+    ...(showAudio ? (["has-audio", "audio-validated"] as StatKey[]) : []),
+  ]
+  const statVisible = (key: StatKey) => !hiddenStats.has(key)
+
   async function saveDeadline(value: string | null) {
     if (!jwt) return
     setBusy(true)
@@ -998,10 +1036,47 @@ export function ProjectOverview() {
                * what's missing.
                */}
               {audio && audio.totalCells > 0 && (
-                <div className="rounded-xl border bg-card p-5">
+                <div className="rounded-xl border bg-card p-5" data-testid="progress-card">
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <h2 className="text-xs font-semibold text-muted-foreground">Progress</h2>
-                    <SectionVisibilityBadge minRole={ROLE.VIEWER} />
+                    <div className="flex items-center gap-1.5">
+                      {/* AQU-593: hide stat widgets you don't find helpful. */}
+                      {availableStatKeys.length > 0 && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            data-testid="customize-stats-trigger"
+                            aria-label="Customize stats"
+                            render={
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground data-popup-open:bg-muted data-popup-open:text-foreground"
+                              />
+                            }
+                          >
+                            <SlidersHorizontal className="size-3.5" aria-hidden />
+                            Customize
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuGroup>
+                              <DropdownMenuLabel>Show stats</DropdownMenuLabel>
+                              <DropdownMenuSeparator />
+                              {STAT_WIDGETS.filter((w) => availableStatKeys.includes(w.key)).map((w) => (
+                                <DropdownMenuCheckboxItem
+                                  key={w.key}
+                                  checked={statVisible(w.key)}
+                                  closeOnClick={false}
+                                  onCheckedChange={() => toggleStat(w.key)}
+                                  data-testid={`customize-stat-${w.key}`}
+                                >
+                                  {w.label}
+                                </DropdownMenuCheckboxItem>
+                              ))}
+                            </DropdownMenuGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                      <SectionVisibilityBadge minRole={ROLE.VIEWER} />
+                    </div>
                   </div>
 
                   {/* AQU-538 §3.3: lane filter pills — All + one per lane
@@ -1037,8 +1112,10 @@ export function ProjectOverview() {
                   <div className="flex flex-wrap gap-3 mb-4">
                     {showText && (
                       <>
-                        <StatTile label="Translated" pct={tileTranslatedPct} colorClass="text-amber-600" />
-                        {audio.aiDraftedCells > 0 && (
+                        {statVisible("translated") && (
+                          <StatTile label="Translated" pct={tileTranslatedPct} colorClass="text-amber-600" />
+                        )}
+                        {audio.aiDraftedCells > 0 && statVisible("ai-drafted") && (
                           <StatTile
                             label="AI Drafted"
                             pct={aiDraftedPct(audio)}
@@ -1046,17 +1123,21 @@ export function ProjectOverview() {
                             tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits."}
                           />
                         )}
-                        <StatTile label="Validated" pct={tileValidatedPct} colorClass="text-emerald-600" />
+                        {statVisible("validated") && (
+                          <StatTile label="Validated" pct={tileValidatedPct} colorClass="text-emerald-600" />
+                        )}
                       </>
                     )}
                     {showAudio && (
                       <>
-                        <StatTile
-                          label="Has Audio"
-                          pct={audioPct(audio)}
-                          colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
-                          tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."}
-                        />
+                        {statVisible("has-audio") && (
+                          <StatTile
+                            label="Has Audio"
+                            pct={audioPct(audio)}
+                            colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-600"}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status."}
+                          />
+                        )}
                         {/*
                          * AQU-490 (was TODO(AQU-168)): a distinct audio-VALIDATION metric
                          * is not reachable today. Investigated 2026-07-08:
@@ -1080,13 +1161,15 @@ export function ProjectOverview() {
                          * analogous to `approved_count`. Until then this is an honest
                          * placeholder, not a fabricated metric.
                          */}
-                        <StatTile
-                          label="Audio Validated"
-                          pct={0}
-                          display="N/A"
-                          colorClass="text-muted-foreground"
-                          tooltip="Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490)."
-                        />
+                        {statVisible("audio-validated") && (
+                          <StatTile
+                            label="Audio Validated"
+                            pct={0}
+                            display="N/A"
+                            colorClass="text-muted-foreground"
+                            tooltip="Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490)."
+                          />
+                        )}
                       </>
                     )}
                   </div>
@@ -1097,14 +1180,16 @@ export function ProjectOverview() {
                   <div className="space-y-2.5">
                     {showText && (
                       <>
-                        <StatBar
-                          label="Translated"
-                          value={activeLane ? activeLane.filledCells : audio.filledCells}
-                          total={activeLane ? activeLane.totalCells : audio.totalCells}
-                          fillClass="bg-amber-500"
-                          suffix=" cells"
-                        />
-                        {!activeLane && audio.aiDraftedCells > 0 && (
+                        {statVisible("translated") && (
+                          <StatBar
+                            label="Translated"
+                            value={activeLane ? activeLane.filledCells : audio.filledCells}
+                            total={activeLane ? activeLane.totalCells : audio.totalCells}
+                            fillClass="bg-amber-500"
+                            suffix=" cells"
+                          />
+                        )}
+                        {!activeLane && audio.aiDraftedCells > 0 && statVisible("ai-drafted") && (
                           <StatBar
                             label="AI Drafted"
                             value={audio.aiDraftedCells}
@@ -1113,16 +1198,18 @@ export function ProjectOverview() {
                             suffix=" cells"
                           />
                         )}
-                        <StatBar
-                          label="Validated"
-                          value={activeLane ? activeLane.validatedCells : audio.validatedCells}
-                          total={activeLane ? activeLane.totalCells : audio.totalCells}
-                          fillClass="bg-emerald-500"
-                          suffix=" cells"
-                        />
+                        {statVisible("validated") && (
+                          <StatBar
+                            label="Validated"
+                            value={activeLane ? activeLane.validatedCells : audio.validatedCells}
+                            total={activeLane ? activeLane.totalCells : audio.totalCells}
+                            fillClass="bg-emerald-500"
+                            suffix=" cells"
+                          />
+                        )}
                       </>
                     )}
-                    {showAudio && !activeLane && (
+                    {showAudio && !activeLane && statVisible("has-audio") && (
                       <>
                         <StatBar
                           label="Has Audio"
@@ -1135,7 +1222,7 @@ export function ProjectOverview() {
                       </>
                     )}
                   </div>
-                  {!activeLane && audio.recordedMs > 0 && (
+                  {!activeLane && audio.recordedMs > 0 && statVisible("has-audio") && (
                     <p className="mt-3 text-xs text-muted-foreground">
                       {recordedMinutes(audio)} min recorded ·{" "}
                       {Math.round(audioPct(audio) * 100)}% of cells have audio

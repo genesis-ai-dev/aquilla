@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * File rename via the FileActionMenu (context menu).
@@ -19,14 +13,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * the new name immediately through the optimistic overlay.
  */
 test("file rename via context menu updates sidebar name", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Rename ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Rename ${Date.now()}` })
+  await openSeededProject(alice, seeded)
 
   // The file row is in the sidebar (aside). Right-click to open context menu.
   const fileRow = alice.locator("aside").getByText("sample").first()

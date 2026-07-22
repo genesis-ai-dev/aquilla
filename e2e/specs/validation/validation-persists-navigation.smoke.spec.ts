@@ -1,11 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Validation state persists across navigation.
@@ -23,22 +18,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   4. Verify cell 0's health button still shows "— validated".
  */
 test("validated cell stays validated after navigating away and back", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ValidPersist ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/editor`)
-  await alice.waitForLoadState("networkidle")
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ValidPersist ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
   await ws.editCell(0, "Persisted translation")
 
   // Validate cell 0 — waits for "— validated" title attribute.
@@ -54,7 +35,7 @@ test("validated cell stays validated after navigating away and back", async ({ a
   })
 
   // Navigate back to the project workspace.
-  await alice.goto(`/project/${projectId}/editor`)
+  await alice.goto(`/project/${seeded.projectId}/editor`)
   await alice.waitForLoadState("networkidle")
 
   const ws2 = new Workspace(alice)

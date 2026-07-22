@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Living Memory — delete an entry via the confirmation dialog.
@@ -11,16 +11,10 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * This spec adds an entry, opens the delete dialog, and confirms deletion.
  */
 test("living memory delete entry dialog confirms and removes the entry", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
   const name = `MemDel ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/memory`)
+  await alice.goto(`/project/${seeded.projectId}/memory`)
   await alice.waitForLoadState("networkidle")
 
   // Add an entry first.

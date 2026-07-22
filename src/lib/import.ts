@@ -16,6 +16,7 @@
 // source blobs in R2; the future re-parse path fetches from R2.
 
 import { v7 as uuidv7 } from "uuid"
+import { proxyOrigin } from "./net/resource-proxy"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType } from "./parsers/types"
 import { buildAudioId, uploadCellAudio, deleteCellAudio } from "./audio/upload"
@@ -481,7 +482,8 @@ export async function importEBible(
 /** door43 (Gitea) repo coordinates for the English OBS source, mirroring the
  *  codex-editor extension's downloadObsRepository. */
 const OBS_REPO = {
-  baseUrl: "https://git.door43.org",
+  // Same-origin resource proxy when configured (AQU-627); no-op when unset.
+  baseUrl: proxyOrigin("https://git.door43.org"),
   owner: "unfoldingWord",
   repo: "en_obs",
   branch: "master",
@@ -1106,7 +1108,15 @@ async function decodeAudioFile(
   const buf = await file.arrayBuffer()
   const audioCtx = new AC()
   try {
-    const audio = await audioCtx.decodeAudioData(buf)
+    // decodeAudioData rejects with a cryptic DOMException ("EncodingError:
+    // Decoding failed") — rewrap so anything that surfaces or logs the message
+    // is user-actionable. The original error is preserved as `cause`.
+    const audio = await audioCtx.decodeAudioData(buf).catch((err: unknown) => {
+      throw new Error(
+        `Couldn't decode ${file.name} — the file may be corrupt or in an unsupported codec. Try re-exporting it as mp3 or wav.`,
+        { cause: err },
+      )
+    })
     return {
       channel: audio.getChannelData(0),
       sampleRate: audio.sampleRate,

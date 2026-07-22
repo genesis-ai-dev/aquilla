@@ -28,10 +28,10 @@ test("switching account in one tab updates the other tab without a reload", asyn
   await tabB.waitForLoadState("networkidle")
   await expect(tabB.getByRole("button", { name: /Account menu: alice/i })).toBeVisible({ timeout: 10_000 })
 
-  // Tab A: open the account menu and switch to bob.
+  // Tab A: open the account menu and switch to bob. Since 2ce62ce4d the menu
+  // lists accounts directly (no "Switch to" section label) — click bob's entry.
   await alice.getByRole("button", { name: /Account menu: alice/i }).click()
-  await alice.getByText("Switch to").waitFor({ timeout: 3_000 })
-  await alice.getByText("bob", { exact: true }).click()
+  await alice.getByRole("menuitem", { name: /bob/i }).click()
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({ timeout: 10_000 })
 
   // Tab B reconciles to bob WITHOUT any reload/navigation — the core of the

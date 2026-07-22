@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — "More save options" dropdown with "Close without saving".
@@ -13,16 +13,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * appears → click it → verify a discard/confirm dialog appears.
  */
 test("project settings More save options shows Close without saving", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `MoreSave ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `MoreSave ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings/general`)
+  await alice.goto(`/project/${seeded.projectId}/settings/general`)
   await alice.waitForLoadState("networkidle")
 
   const sourceLanguage = alice.locator("#sl")

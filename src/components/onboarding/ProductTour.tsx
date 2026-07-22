@@ -295,11 +295,22 @@ function SpotlightSvg({
 // Tooltip card
 // ---------------------------------------------------------------------------
 
-const ARROW_CLASS: Record<NonNullable<TooltipPos["arrowSide"]>, string> = {
-  left: "absolute left-[-8px] top-1/2 -translate-y-1/2 border-y-8 border-r-8 border-y-transparent border-r-popover",
-  right: "absolute right-[-8px] top-1/2 -translate-y-1/2 border-y-8 border-l-8 border-y-transparent border-l-popover",
-  top: "absolute top-[-8px] left-1/2 -translate-x-1/2 border-x-8 border-b-8 border-x-transparent border-b-popover",
-  bottom: "absolute bottom-[-8px] left-1/2 -translate-x-1/2 border-x-8 border-t-8 border-x-transparent border-t-popover",
+/**
+ * AQU-596: tour pointer-arrow size in px. Enlarged from the original 8px so
+ * testers can clearly see which element each tooltip points at during the
+ * initial product tour ("hard to see what the arrows are pointing to").
+ * The literal Tailwind classes below MUST stay in sync with this value —
+ * Tailwind's JIT only picks up class names that appear literally in source,
+ * so they can't be built from this constant at runtime. The regression test
+ * in ProductTour.test.ts asserts the two stay consistent and stay large.
+ */
+export const TOUR_ARROW_PX = 14
+
+export const ARROW_CLASS: Record<NonNullable<TooltipPos["arrowSide"]>, string> = {
+  left: "absolute left-[-14px] top-1/2 -translate-y-1/2 border-y-[14px] border-r-[14px] border-y-transparent border-r-popover",
+  right: "absolute right-[-14px] top-1/2 -translate-y-1/2 border-y-[14px] border-l-[14px] border-y-transparent border-l-popover",
+  top: "absolute top-[-14px] left-1/2 -translate-x-1/2 border-x-[14px] border-b-[14px] border-x-transparent border-b-popover",
+  bottom: "absolute bottom-[-14px] left-1/2 -translate-x-1/2 border-x-[14px] border-t-[14px] border-x-transparent border-t-popover",
   none: "",
 }
 

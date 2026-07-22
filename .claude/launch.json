@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "agent-qa-stack",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev", "--", "--vite-port=5173"],
+      "port": 5173
+    },
+    {
       "name": "web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:vite", "--", "--port", "5180", "--strictPort"],

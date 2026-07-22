@@ -32,6 +32,11 @@ interface CommentRowRaw {
   created_at: number
   updated_at: number
   deleted_at: number | null
+  // AQU-599: the source cell's canonical reference (verse address, e.g.
+  // "GEN 1:1"), LEFT-JOINed in so the comments panel can show which cell each
+  // comment belongs to instead of the opaque cellId. Null when the cell has no
+  // canonical ref (non-scripture) or the cell no longer exists.
+  cell_ref: string | null
 }
 
 export interface CommentRowOut {
@@ -48,6 +53,8 @@ export interface CommentRowOut {
   createdAt: number
   updatedAt: number
   deletedAt: number | null
+  /** AQU-599: human-readable cell reference resolved from the source cell. */
+  cellRef: string | null
 }
 
 function toOut(row: CommentRowRaw): CommentRowOut {
@@ -65,6 +72,7 @@ function toOut(row: CommentRowRaw): CommentRowOut {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
+    cellRef: row.cell_ref,
   }
 }
 
@@ -103,25 +111,36 @@ export async function handleCommentsReadRequest(
   const cellId = url.searchParams.get('cellId')
 
   // Build the query. Always scope to the verified projectId first.
+  // AQU-599: LEFT JOIN the source-side cell to surface its canonical reference
+  // (verse address) so the comments panel can label each comment with the cell
+  // it targets. Keyed on the cells primary key (project_id, file_id, cell_id,
+  // side) so it's an index seek per comment; LEFT keeps comments whose cell was
+  // deleted or has no canonical ref (cell_ref → null).
   const parts: string[] = [
     'SELECT',
-    '  comment_id, project_id, scope_kind, file_id, cell_id,',
-    '  parent_comment_id, body, resolved, author_id, author_label,',
-    '  created_at, updated_at, deleted_at',
-    'FROM comments',
-    'WHERE project_id = ?',
+    '  cm.comment_id, cm.project_id, cm.scope_kind, cm.file_id, cm.cell_id,',
+    '  cm.parent_comment_id, cm.body, cm.resolved, cm.author_id, cm.author_label,',
+    '  cm.created_at, cm.updated_at, cm.deleted_at,',
+    '  c.canonical_ref AS cell_ref',
+    'FROM comments cm',
+    'LEFT JOIN cells c',
+    '  ON c.project_id = cm.project_id',
+    '  AND c.file_id = cm.file_id',
+    '  AND c.cell_id = cm.cell_id',
+    "  AND c.side = 'source'",
+    'WHERE cm.project_id = ?',
   ]
   const binds: unknown[] = [projectId]
 
   if (fileId !== null && cellId !== null) {
-    parts.push("AND scope_kind = 'cell' AND file_id = ? AND cell_id = ?")
+    parts.push("AND cm.scope_kind = 'cell' AND cm.file_id = ? AND cm.cell_id = ?")
     binds.push(fileId, cellId)
   } else if (fileId !== null) {
-    parts.push("AND file_id = ?")
+    parts.push("AND cm.file_id = ?")
     binds.push(fileId)
   }
 
-  parts.push('ORDER BY created_at ASC')
+  parts.push('ORDER BY cm.created_at ASC')
 
   const sql = parts.join(' ')
 

@@ -9,7 +9,10 @@ import DOMPurify from "dompurify"
 import {
   Check, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, Lock, ChevronRight, ChevronDown, Music, Braces,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
+  Languages,
+  Archive,
+  Lock,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -31,8 +34,8 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
+import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
-import { canPerform } from "@/lib/sync/role-policy"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
@@ -64,6 +67,7 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
+import { computeRailPinned } from "@/lib/editor/cell-rail-pin"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
@@ -87,8 +91,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
@@ -132,6 +138,7 @@ import type { Concept } from "@/lib/terminology/types"
 import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
 import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
+import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
@@ -530,6 +537,11 @@ interface EditorTableProps {
    * handler) the tag stays a static pill — byte-identical to the N=1 header.
    */
   lanes?: string[]
+  /** AQU-601: archived lane tags (a subset of `lanes`). Archived lanes are
+   *  hidden from the switcher by default and revealed behind a "show archived"
+   *  toggle, so a mistaken/retired lane stops cluttering the picker while
+   *  staying reachable. Absent/empty ⇒ every lane shows (pre-archive behavior). */
+  archivedLanes?: string[]
   /** Called with the chosen lane (`''` = default) when the TARGET tag dropdown
    *  is used. Omit to keep the tag non-interactive. */
   onLaneChange?: (lane: string) => void
@@ -537,6 +549,14 @@ interface EditorTableProps {
    *  project/file's default target-language name. Non-default lanes label
    *  themselves with their own tag string. */
   defaultLaneLabel?: string
+  /** AQU-583: opens the project's language settings so the target language is
+   *  changeable from the TARGET column header. When provided, the target-language
+   *  tag is always actionable — a single-lane project shows a clickable pill, a
+   *  multi-lane project appends a "Change target language…" item under the lane
+   *  switcher, and a project with no target language yet shows a "Set target
+   *  language" affordance. Omit to keep the tag a static pill (the pre-AQU-583
+   *  behaviour). */
+  onEditTargetLanguage?: () => void
   /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
   audioLens?: AudioLensContext | null
   /** Timeline-segment-model: the active file's order lens. When `'time'`, the
@@ -587,7 +607,7 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   onCompleteBatch: (cells: CellData[]) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
@@ -680,7 +700,8 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, activeLane = "", lanes, onLaneChange, defaultLaneLabel,
+  project, cellStore, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
+  onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
   onCompleteSingle, onCompleteBatch, healthMap,
@@ -755,6 +776,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // ignores it once the cell is off screen or no longer rendered.
   const lastActiveEditorCellIdRef = useRef<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
+  // AQU-601: the lane switcher hides archived lanes by default; this reveals
+  // them within the open dropdown so a retired lane stays reachable.
+  const [showArchivedLanes, setShowArchivedLanes] = useState(false)
+  const laneSwitcher = useMemo(() => {
+    const all = lanes ?? []
+    return {
+      visible: all.filter((l) => !isLaneArchived(l, archivedLanes)),
+      archived: all.filter((l) => isLaneArchived(l, archivedLanes)),
+    }
+  }, [lanes, archivedLanes])
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
@@ -1724,11 +1755,27 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div aria-hidden="true" />
           <div className="flex items-center gap-2">
             Target
-            {/* AQU-602: the target-language tag doubles as the lane switcher.
-                With >1 lane (and a change handler) it's a dropdown that switches
-                the active target lane; otherwise it's a static pill. `''` = the
-                default lane, labelled with the project/file default language. */}
-            {project.targetLanguage && lanes && lanes.length > 1 && onLaneChange ? (
+            {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
+                switcher AND the entry point to change the target language.
+                • >1 lane (+ change handler) → a dropdown that switches the active
+                  lane; with `onEditTargetLanguage` it also gets a "Change target
+                  language…" item so the language is reachable here, not buried in
+                  Settings. The switcher does NOT require a default target to be
+                  set — with extra lanes registered but no default language yet the
+                  dropdown still opens (trigger reads "Set target language"), so the
+                  named lanes stay reachable and the default can be set from here.
+                • otherwise, with `onEditTargetLanguage` → a clickable pill (or a
+                  "Set target language" prompt when none is set yet) opening the
+                  language settings.
+                • with neither handler → the original static pill (byte-identical
+                  to the pre-AQU-583 header for callers that pass no handlers).
+                AQU-608: lane switching is a maintainer-and-above affordance —
+                below maintainer the tag stays a static pill so translators keep
+                to their assigned lane. */}
+            {lanes &&
+            lanes.length > 1 &&
+            onLaneChange &&
+            canSwitchLanes(project.syncRole?.level) ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -1744,11 +1791,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                     />
                   }
                 >
-                  {project.targetLanguage}
+                  {/* AQU-583: on the default lane with no project target set,
+                      `project.targetLanguage` is empty — prompt to set one rather
+                      than showing a blank pill. A named lane always has a tag. */}
+                  {project.targetLanguage || "Set target language"}
                   <ChevronDown className="h-2.5 w-2.5" />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="min-w-[8rem]">
-                  {lanes.map((lane) => {
+                  {/* Active lanes, shown by default. */}
+                  {laneSwitcher.visible.map((lane) => {
                     const active = lane === activeLane
                     const label = lane === "" ? (defaultLaneLabel || "Target") : lane
                     return (
@@ -1764,8 +1815,73 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       </DropdownMenuItem>
                     )
                   })}
+                  {/* AQU-601: archived lanes are hidden behind a reveal so a
+                      retired lane stops cluttering the switcher yet stays
+                      reachable. If the active lane is itself archived we expand
+                      automatically so the current selection is always visible. */}
+                  {laneSwitcher.archived.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {showArchivedLanes || isLaneArchived(activeLane, archivedLanes) ? (
+                        laneSwitcher.archived.map((lane) => {
+                          const active = lane === activeLane
+                          return (
+                            <DropdownMenuItem
+                              key={lane}
+                              data-testid={`lane-option-${lane}`}
+                              data-active={active ? "true" : undefined}
+                              data-archived="true"
+                              onClick={() => onLaneChange(lane)}
+                              className="justify-between gap-2 text-xs text-muted-foreground"
+                            >
+                              <span className="flex items-center gap-1.5">
+                                <Archive className="h-3 w-3" />
+                                {lane}
+                              </span>
+                              {active && <Check className="h-3.5 w-3.5" />}
+                            </DropdownMenuItem>
+                          )
+                        })
+                      ) : (
+                        <DropdownMenuItem
+                          data-testid="lane-show-archived"
+                          closeOnClick={false}
+                          onClick={() => setShowArchivedLanes(true)}
+                          className="gap-1.5 text-xs text-muted-foreground"
+                        >
+                          <Archive className="h-3 w-3" />
+                          Show archived ({laneSwitcher.archived.length})
+                        </DropdownMenuItem>
+                      )}
+                    </>
+                  )}
+                  {/* AQU-583: manage the default target language from the switcher. */}
+                  {onEditTargetLanguage && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        data-testid="edit-target-language"
+                        onClick={onEditTargetLanguage}
+                        className="gap-2 text-xs"
+                      >
+                        <Languages className="h-3.5 w-3.5" />
+                        Change target language…
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
+            ) : onEditTargetLanguage ? (
+              <button
+                type="button"
+                data-testid="edit-target-language"
+                onClick={onEditTargetLanguage}
+                aria-label={project.targetLanguage ? "Change target language" : "Set target language"}
+                className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {project.targetLanguage || "Set target language"}
+                <Languages className="h-2.5 w-2.5" />
+              </button>
             ) : project.targetLanguage ? (
               <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                 {project.targetLanguage}
@@ -1909,7 +2025,7 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2232,7 +2348,7 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -3220,6 +3336,11 @@ function EditorRow({
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
+  // AQU-618: transient "Saved" confirmation shown after a Replace / AI-generate
+  // commit resolves, so the translator can see the change landed instead of
+  // being left on the (now-closed) dialog wondering whether it persisted.
+  const [showSaved, setShowSaved] = useState(false)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
@@ -3493,6 +3614,29 @@ function EditorRow({
       })
     })
   }, [editable, canValidate, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+
+  // AQU-618: run a single-cell AI generate/Replace, then return the translator
+  // to the edited cell and confirm the save. Both entry points — the Replace
+  // confirm dialog and the direct sparkle on an empty cell — used to fire
+  // `onCompleteSingle` and leave focus on the dialog / rail button with no
+  // saved signal, so testers re-applied the change unsure it had persisted.
+  // We await the commit (completeSingle auto-commits and flushes the outbox),
+  // then re-focus the cell editor (the new text is now visible there) and show
+  // a brief "Saved" confirmation.
+  const completeSingleAndReturn = useCallback(async () => {
+    await onCompleteSingle(cell)
+    onActivateEditor(cell.id)
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setShowSaved(true)
+    savedTimerRef.current = setTimeout(() => {
+      setShowSaved(false)
+      savedTimerRef.current = null
+    }, 2400)
+  }, [onCompleteSingle, cell, onActivateEditor])
+
+  useEffect(() => () => {
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+  }, [])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -4180,7 +4324,21 @@ function EditorRow({
   // Pins (expansion open, a rail control focused, a rail popover open) keep the
   // rail visible so an in-progress interaction is never yanked away.
   const railRevealTriggered = isHovering || hasFocusWithin
-  const railPinned = expanded || railHasFocus || showMicDeniedHelp || showGenerateConfirm
+  // AQU-621: a focused target cell also pins the rail, so clicking into a cell
+  // never leaves the user staring at a blank rail — the sparkle/generate
+  // affordance stays visible without hovering (a translated cell keeps its
+  // separate validation control beside the target). The lone exception is
+  // AQU-354's conflict banner: while a remote change is pending we must NOT pin
+  // on focus, or the rail would re-cover the banner's Discard button. See
+  // computeRailPinned for the reconciliation.
+  const railPinned = computeRailPinned({
+    expanded,
+    railHasFocus,
+    showMicDeniedHelp,
+    showGenerateConfirm,
+    hasFocusWithin,
+    remoteChangedWhileFocused,
+  })
   const { revealed: railRevealed, registerActivity: registerRailActivity } = useRailIdleHide({
     revealTriggered: railRevealTriggered,
     pinned: railPinned,
@@ -4425,6 +4583,9 @@ function EditorRow({
         // keyboard so the focused row is clear to sighted keyboard users.
         data-grid-row
         data-cell-expanded={expanded ? "true" : undefined}
+        // AQU-590: exposes AI-translation-in-progress on the row itself so the
+        // signal is testable and not only carried by a transient CSS ring.
+        data-ai-translating={isLoading ? "true" : undefined}
         tabIndex={0}
         aria-label={`${cellRef} cell`}
         className={cn(
@@ -4456,6 +4617,14 @@ function EditorRow({
           // and bulk synth all flow through this status key.
           isSynthBusy && "bg-primary/5 ring-2 ring-primary/50 ring-inset animate-pulse",
           isSynthError && "bg-destructive/5 ring-2 ring-destructive/50 ring-inset",
+          // AQU-590: same "cell is working" treatment while an AI translation
+          // is in progress on this cell. Previously the only in-progress signal
+          // was the Queued→Synced outbox chip in the status bar (easy to miss),
+          // plus a target-column overlay that is suppressed once the cell
+          // already has text (the sparkle regenerate/replace case). A colored,
+          // pulsing inset ring anchored to the exact row makes progress evident
+          // regardless of existing text or whether the action rail is hovered.
+          isLoading && "bg-primary/5 ring-2 ring-primary/50 ring-inset animate-pulse",
           gridCols,
         )}
         onMouseEnter={handleRowMouseEnter}
@@ -4500,6 +4669,23 @@ function EditorRow({
           )}
           {(isSynthBusy || isSynthError) && (
             <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+          )}
+          {/* AQU-599: persistent "has comment" indicator. Unlike the action-rail
+              comment button (which only appears on hover/focus), this icon stays
+              visible in the gutter whenever the cell carries an open comment, so
+              comments are discoverable without opening each cell. Clicking it
+              opens the comments panel for the cell. */}
+          {onOpenComments && openCommentCount > 0 && (
+            <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
+              <button
+                type="button"
+                aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
+                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                onClick={() => onOpenComments(cell.id)}
+              >
+                <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
+              </button>
+            </AppTooltip>
           )}
         </div>
 
@@ -4980,6 +5166,18 @@ function EditorRow({
               </Button>
             </div>
           )}
+          {/* AQU-618: transient saved confirmation after a Replace / AI-generate
+              commit. `role="status"` announces it politely; the check + label
+              give the sighted translator the "it landed" signal they lacked. */}
+          {showSaved && !writeError && (
+            <div
+              role="status"
+              className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
+            >
+              <Check className="h-3 w-3" strokeWidth={3} />
+              <span>Saved</span>
+            </div>
+          )}
         </div>
 
         {/* Floating action rail — anchored to the row's right edge above the
@@ -5039,10 +5237,19 @@ function EditorRow({
                     // FRO-278: if the cell already has human text, confirm
                     // before letting the AI overwrite it. Empty cells proceed
                     // immediately (byte-identical to previous behavior).
+                    // AQU-591: users can opt out of the confirm for
+                    // non-validated cells. Validated cells always confirm —
+                    // replacing them clears validation, which is more
+                    // destructive and always deserves an explicit confirm.
                     if (visibleTranslated.trim()) {
-                      setShowGenerateConfirm(true)
+                      const isValidated = cell.status === "validated"
+                      if (!isValidated && getSkipReplaceConfirm()) {
+                        void completeSingleAndReturn()
+                      } else {
+                        setShowGenerateConfirm(true)
+                      }
                     } else {
-                      onCompleteSingle(cell)
+                      void completeSingleAndReturn()
                     }
                   }
                 }}
@@ -5057,6 +5264,44 @@ function EditorRow({
                 onMouseDown={onDragStart}
                 onMouseEnter={onDragEnter}
               />
+
+              {/* AQU-620: Regenerate — ask the AI for another iteration of an
+                  existing prediction. Shown only for a NON-validated cell that
+                  already has a draft (validated cells route through the Sparkles
+                  overwrite confirm instead — clearing validation is destructive).
+                  Regenerate raises the sampling temperature (useCompletion) so
+                  the new candidate differs, and overwrites the current draft
+                  (last-write-wins; the prior text stays in cell history). */}
+              {editable && !isAnonymous && cell.status !== "validated" && visibleTranslated.trim() && (
+                <RailButton
+                  icon={<RefreshCw className="h-3.5 w-3.5" />}
+                  tooltip={
+                    !isCompletionConfigured
+                      ? "Set up AI to enable"
+                      : !isCompletionAvailable
+                        ? "AI service unavailable — try again shortly"
+                        : isLoading
+                          ? "Generating…"
+                          : "Regenerate — another AI variation"
+                  }
+                  onClick={() => {
+                    if (isLoading) return
+                    if (!isCompletionConfigured) {
+                      onAiSetupNeeded?.()
+                      return
+                    }
+                    if (isCompletionAvailable) {
+                      onCompleteSingle(cell, { regenerate: true })
+                    }
+                  }}
+                  disabled={
+                    (!isCompletionConfigured && !onAiSetupNeeded) ||
+                    !isCompletionAvailable ||
+                    isLoading
+                  }
+                  pulsing={isLoading}
+                />
+              )}
 
               {/* FRO-237: Direct mic button on the rail when no audio — one-click
                   action without needing to open a popover ("just hit the record
@@ -5874,13 +6119,15 @@ function EditorRow({
         />
       )}
 
-      {/* FRO-278: confirm before AI Generate overwrites non-empty cell. */}
+      {/* FRO-278: confirm before AI Generate overwrites non-empty cell.
+          AQU-591: a "Don't ask again" opt-out for non-validated cells. */}
       <GenerateOverwriteDialog
         open={showGenerateConfirm}
         isValidated={cell.status === "validated"}
-        onConfirm={() => {
+        onConfirm={(dontAskAgain) => {
           setShowGenerateConfirm(false)
-          onCompleteSingle(cell)
+          if (dontAskAgain) setSkipReplaceConfirm(true)
+          void completeSingleAndReturn()
         }}
         onCancel={() => setShowGenerateConfirm(false)}
       />
@@ -5920,12 +6167,18 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
 
 interface GenerateOverwriteDialogProps {
   open: boolean
   /** True when cell.status === "validated" — escalates the dialog copy. */
   isValidated: boolean
-  onConfirm: () => void
+  /**
+   * Confirm replacing the translation. `dontAskAgain` is true when the user
+   * ticked "Don't ask again" (AQU-591) — the caller persists the opt-out so
+   * future non-validated replacements skip this dialog.
+   */
+  onConfirm: (dontAskAgain: boolean) => void
   onCancel: () => void
 }
 
@@ -5935,6 +6188,14 @@ export function GenerateOverwriteDialog({
   onConfirm,
   onCancel,
 }: GenerateOverwriteDialogProps) {
+  const [dontAskAgain, setDontAskAgain] = useState(false)
+
+  // Reset the checkbox each time the dialog opens so a prior tick never leaks
+  // into a later confirmation.
+  useEffect(() => {
+    if (open) setDontAskAgain(false)
+  }, [open])
+
   const title = isValidated
     ? "Replace validated translation?"
     : "Replace existing translation?"
@@ -5950,11 +6211,22 @@ export function GenerateOverwriteDialog({
           <DialogTitle id="gen-overwrite-title">{title}</DialogTitle>
           <DialogDescription id="gen-overwrite-desc">{description}</DialogDescription>
         </DialogHeader>
+        {/* AQU-591: opting out only skips the confirm for non-validated cells —
+            replacing a validated translation always confirms, so no opt-out. */}
+        {!isValidated && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+            <Checkbox
+              checked={dontAskAgain}
+              onCheckedChange={(c) => setDontAskAgain(c === true)}
+            />
+            Don't ask again when replacing a translation
+          </label>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button variant="destructive" onClick={onConfirm}>
+          <Button variant="destructive" onClick={() => onConfirm(dontAskAgain)}>
             Replace
           </Button>
         </DialogFooter>

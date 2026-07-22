@@ -216,7 +216,7 @@ function parseBookSection(
 
     if (/^\\p\s*$/.test(trimmed)) continue
 
-    const paratextMatch = trimmed.match(/^\\(mt|ms|r)\d?\s+(.*)/)
+    const paratextMatch = trimmed.match(/^\\(mt|ms|r)(\d?)\s+(.*)/)
     if (paratextMatch) {
       // Opt-out: drop book title (\mt) front matter; \ms and \r are in-body
       // section headings and always import.
@@ -224,7 +224,7 @@ function parseBookSection(
         verseOpen = false
         continue
       }
-      addString(paratextMatch[2], bookId, "paratext", `${bookId} intro`)
+      addString(paratextMatch[3], bookId, "paratext", `${bookId} intro`)
       verseOpen = false
       continue
     }

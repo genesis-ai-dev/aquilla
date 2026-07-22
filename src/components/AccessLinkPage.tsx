@@ -1,0 +1,103 @@
+// AQU-626: per-user deep link + PIN landing page (fresh-browser / diode-zone
+// flow).
+//
+// A translator in a surveillance-sensitive context reaches Aquilla via a link
+// placed inside a diode zone, opened in a Brave profile that wipes on close —
+// so every visit is a fresh browser with no stored session. This page is the
+// destination of `/link/:token`: it collects the per-user PIN, redeems it for a
+// session on the bound account, and lands them straight in their project,
+// skipping onboarding.
+//
+// The link alone grants nothing — the PIN is required. Every failure (unknown /
+// expired / revoked / locked link, or wrong PIN) shows one indistinguishable
+// message, matching the server: a wrong PIN behaves like a dead link.
+
+import { useState, type FormEvent } from "react"
+import { useNavigate, useParams } from "react-router-dom"
+import { redeemAccessLink } from "@/lib/frontier/auth"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+
+const GENERIC_ERROR = "This link is invalid or has expired."
+
+export function AccessLinkPage() {
+  const { token } = useParams<{ token: string }>()
+  const navigate = useNavigate()
+  const [pin, setPin] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!token || submitting) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const { projectId } = await redeemAccessLink(token, pin.trim())
+      // Mark onboarding complete so the fresh browser is never bounced to the
+      // onboarding wizard / marketing homepage — this account is already
+      // provisioned; the link IS the onboarding. saveSession (inside redeem)
+      // already set the aq_hint cookie.
+      try {
+        localStorage.setItem("codex:onboardingComplete", "true")
+      } catch {
+        // Private-mode / storage-blocked: navigation below still works; the
+        // RootRedirect guard only matters at "/", not the project route.
+      }
+      navigate(`/project/${projectId}`, { replace: true })
+    } catch (err) {
+      // Show the generic dead-link message regardless of the specific failure
+      // (no PIN/token oracle). Only a genuine network error gets its own text.
+      const message =
+        err instanceof Error && err.message && !/^Login failed/.test(err.message)
+          ? err.message
+          : GENERIC_ERROR
+      setError(message)
+      setPin("")
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center p-6">
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-sm space-y-5 rounded-lg border bg-card p-6 shadow-sm"
+        aria-label="Enter your access PIN"
+      >
+        <div className="space-y-1 text-center">
+          <h1 className="text-lg font-semibold">Enter your PIN</h1>
+          <p className="text-sm text-muted-foreground">
+            Enter the PIN you were given to open your project.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="access-pin">PIN</Label>
+          <Input
+            id="access-pin"
+            type="password"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
+            disabled={submitting}
+            data-testid="access-pin-input"
+          />
+        </div>
+
+        {error && (
+          <p className="text-sm text-red-600" role="alert" data-testid="access-link-error">
+            {error}
+          </p>
+        )}
+
+        <Button type="submit" className="w-full" disabled={submitting || pin.trim().length === 0}>
+          {submitting ? "Opening…" : "Open project"}
+        </Button>
+      </form>
+    </div>
+  )
+}

@@ -1,11 +1,5 @@
 import { expect, test } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 // Restored codex behaviour (2026-07): directly editing a target cell
 // auto-validates it — "a human has touched it" — in the same gesture, with no
@@ -13,16 +7,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 // unvalidated until the translator clicked the health ring; this asserts the
 // edit alone flips the cell to self-validated (emerald).
 test("directly editing a target cell auto-validates it (self-validated, emerald)", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Validate ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Validate ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Type a translation into an empty cell. This commits the text AND, per the
   // restored behaviour, marks the cell validated by the current user.

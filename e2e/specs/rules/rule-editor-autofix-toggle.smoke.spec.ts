@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RuleEditor — "Add autofix (optional)" toggle reveals/hides the autofix section.
@@ -16,17 +16,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * form disappears.
  */
 test("rule editor autofix toggle shows and hides autofix form", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AutofixToggle ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AutofixToggle ${Date.now()}` })
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // Open the inline RuleEditor.

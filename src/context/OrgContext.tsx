@@ -139,7 +139,12 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       localStorage.setItem(ORG_STORAGE_KEY, String(parsed.orgKey))
       return
     }
-    localStorage.setItem(ORG_STORAGE_KEY, activeOrgId == null ? ALL_ORGS_PARAM : String(activeOrgId))
+    // FRO-367: off org paths, persist only the null (clamped) case. Explicit
+    // selections persist in the setters below; a non-null id that reaches
+    // state without a setter is the single-org auto-select in refresh(),
+    // which is a default, not a choice — persisting it would keep a user
+    // scoped to their original org after they join a second one.
+    if (activeOrgId == null) localStorage.setItem(ORG_STORAGE_KEY, ALL_ORGS_PARAM)
   }, [activeOrgId, guestOrgs, isLoading, location.pathname, orgs])
 
   const setActiveOrg = useCallback((id: number) => {

@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — "Assistant language" input (#main-chat-language).
@@ -12,16 +12,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * verify "Save changes" button appears (form is dirty).
  */
 test("project settings assistant language input marks form dirty", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AssistLang ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AssistLang ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings/ai`)
+  await alice.goto(`/project/${seeded.projectId}/settings/ai`)
   await alice.waitForLoadState("networkidle")
 
   // #main-chat-language input is visible.

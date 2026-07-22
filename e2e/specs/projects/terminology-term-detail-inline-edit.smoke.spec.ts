@@ -1,24 +1,13 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Glossary } from "../../helpers/page-objects/Glossary"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const SAMPLE_MD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../fixtures/sample.md")
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 test("term detail occurrence opens an inline target editor", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  await dash.createProject({ name: `TermDetailEdit ${Date.now()}`, source: "en", target: "fr" })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/editor`)
-  await new Workspace(alice).importFile(SAMPLE_MD)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `TermDetailEdit ${Date.now()}` })
+  const projectId = seeded.projectId
 
   const glossary = new Glossary(alice)
-  await glossary.goto(projectId!)
+  await glossary.goto(projectId)
   await glossary.addTerm("sample", "échantillon")
   await glossary.openDetails("sample")
   await expect(alice.getByText(/occurrence/i).first()).toBeVisible({ timeout: 15_000 })

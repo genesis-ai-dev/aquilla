@@ -39,6 +39,11 @@ export function buildCompletionSettings(
     useOnlyValidatedExamples: true,
     main_chat_language: overrides.main_chat_language ?? base?.main_chat_language ?? "",
     fewShotExampleFormat: overrides.fewShotExampleFormat ?? base?.fewShotExampleFormat ?? "source-and-target",
+    // AQU-586: configurable batch sizes. Preserved through every save the same
+    // way as top_k/contextSize above, so editing an unrelated field can't reset
+    // them. Left `undefined` when never set (consumers fall back to defaults).
+    completionBatchSize: overrides.completionBatchSize ?? base?.completionBatchSize,
+    validationBatchSize: overrides.validationBatchSize ?? base?.validationBatchSize,
   }
 }
 

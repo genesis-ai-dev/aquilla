@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Workspace "Settings" action navigates to project settings.
@@ -20,16 +14,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * click "Settings" → verify the URL changes to /project/:id/settings.
  */
 test("sidebar More project options Settings item navigates to project settings", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `WsSettings ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `WsSettings ${Date.now()}` })
+  await openSeededProject(alice, seeded)
 
   // Get current project ID from URL.
   const projectId = alice.url().match(/\/project\/([^/?]+)/)?.[1]

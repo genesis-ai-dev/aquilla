@@ -123,6 +123,57 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
     expect(pm.getAttribute("contenteditable")).toBe("false")
   })
 
+  // AQU-584: plain Enter confirms the edit (commit-and-exit to grid) instead of
+  // splitting the paragraph and leaving a trailing newline in the cell.
+  it("confirms the edit on plain Enter (commit-and-exit to grid)", async () => {
+    const onEscapeToGrid = vi.fn()
+    const { container } = render(
+      <TranslatedEditor
+        cellId="cell-enter"
+        initialPlain="verse text"
+        onCommit={() => { /* no-op */ }}
+        onEscapeToGrid={onEscapeToGrid}
+      />,
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    const pm = container.querySelector(".ProseMirror") as HTMLElement
+    expect(pm).toBeTruthy()
+
+    let prevented = false
+    act(() => {
+      fireEvent.focus(pm)
+      // fireEvent.keyDown returns false when a handler called preventDefault.
+      prevented = !fireEvent.keyDown(pm, { key: "Enter", code: "Enter" })
+    })
+
+    expect(onEscapeToGrid).toHaveBeenCalledTimes(1)
+    expect(prevented).toBe(true)
+    // The paragraph must not have been split — no trailing newline injected.
+    expect(pm.querySelectorAll("p").length).toBe(1)
+    expect(pm.textContent).toBe("verse text")
+  })
+
+  it("leaves Shift+Enter for a deliberate line break (not a confirm)", async () => {
+    const onEscapeToGrid = vi.fn()
+    const { container } = render(
+      <TranslatedEditor
+        cellId="cell-shift-enter"
+        initialPlain="verse text"
+        onCommit={() => { /* no-op */ }}
+        onEscapeToGrid={onEscapeToGrid}
+      />,
+    )
+    await new Promise((r) => setTimeout(r, 0))
+    const pm = container.querySelector(".ProseMirror") as HTMLElement
+
+    act(() => {
+      fireEvent.focus(pm)
+      fireEvent.keyDown(pm, { key: "Enter", code: "Enter", shiftKey: true })
+    })
+
+    expect(onEscapeToGrid).not.toHaveBeenCalled()
+  })
+
   it("renders the discard-and-reload banner when remoteChangedDuringEdit is true", async () => {
     const onDiscard = vi.fn()
     const { getByText } = render(

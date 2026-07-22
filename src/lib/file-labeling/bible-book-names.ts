@@ -53,3 +53,22 @@ export function getBookOrdinal(codeOrName: string): number {
   const byName = ORDINAL_BY_NAME.get(codeOrName.toLowerCase())
   return byName !== undefined ? byName : -1
 }
+
+/**
+ * `Array#sort` comparator that orders book/file display names by canonical
+ * Bible reading order (Genesis → Revelation). Names that don't resolve to a
+ * known book sort AFTER all known books, alphabetically among themselves.
+ * Use anywhere books should read like a Bible rather than A–Z — the sidebar
+ * corpus groups and the book-assignment pickers both share this so ordering
+ * stays consistent across surfaces (AQU-582).
+ */
+export function compareByCanonicalBookOrder(a: string, b: string): number {
+  const oa = getBookOrdinal(a)
+  const ob = getBookOrdinal(b)
+  if (oa >= 0 || ob >= 0) {
+    if (oa < 0) return 1
+    if (ob < 0) return -1
+    if (oa !== ob) return oa - ob
+  }
+  return a.localeCompare(b)
+}

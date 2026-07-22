@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Verify built-in rule enable + violation surfacing.
@@ -20,14 +14,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 // rather than individual keydown/keypress/keyup events, so ProseMirror
 // does not normalize consecutive spaces away.
 test("alice enables 'Extra whitespace' rule and sees a violation surfaced in editor", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Rules ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  const projectId = alice.url().split("/project/")[1]?.split("/")[0]
-  expect(projectId).toBeTruthy()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Rules ${Date.now()}` })
+  const projectId = seeded.projectId
 
   // Enable the built-in rule on the rules page (shadcn Switch, role="switch").
   await alice.goto(`/project/${projectId}/rules`)
@@ -38,12 +26,8 @@ test("alice enables 'Extra whitespace' rule and sees a violation surfaced in edi
     await expect(toggle).toHaveAttribute("aria-checked", "true", { timeout: 3_000 })
   }
 
-  // Back to workspace, import, type a violation.
-  await alice.goto(`/project/${projectId}/editor`)
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  // Back to workspace, type a violation.
+  const ws = await openSeededProject(alice, seeded)
   // Use insertText (not keyboard.type) to preserve consecutive spaces through
   // ProseMirror — type() fires individual key events that get normalized.
   await ws.activateTargetCell(0)

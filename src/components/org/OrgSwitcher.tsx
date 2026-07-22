@@ -2,8 +2,6 @@ import { useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Building2, Check, ChevronDown, Plus } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
-import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
@@ -69,8 +67,6 @@ function OrgMark({
 
 export function OrgSwitcher() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, refresh } = useActiveOrg()
-  const { session } = useFrontierSession()
-  const jwt = session?.jwt ?? null
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -81,8 +77,28 @@ export function OrgSwitcher() {
   // guest orgs to switch into — don't hide the whole switcher for them.
   if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
 
+  // AQU-624: a guest org isn't a membership, so it can't become the `activeOrg`
+  // without misrepresenting the caller's role (AQU-473). Instead we treat the
+  // scoped shared-projects route (`/shared?org=<id>`) as the guest org's
+  // "selected" state: derive it from the URL so it survives reload/back-forward
+  // and drives the checkmark + trigger label below.
+  const guestScopeParam =
+    location.pathname === "/shared"
+      ? new URLSearchParams(location.search).get("org")
+      : null
+  const selectedGuestOrgId =
+    guestScopeParam != null && Number.isFinite(Number(guestScopeParam))
+      ? Number(guestScopeParam)
+      : null
+  const selectedGuest = guestOrgs.find((g) => g.id === selectedGuestOrgId) ?? null
+  const guestSelected = selectedGuest != null
+
   const showAllOrgs = orgs.length > 1
-  const title = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
+  const title = guestSelected
+    ? selectedGuest.name ?? `Org #${selectedGuest.id}`
+    : isAllOrgs
+      ? "All organizations"
+      : activeOrg?.name ?? "Workspace"
 
   function handleAllOrgs() {
     setAllOrgs()
@@ -93,25 +109,22 @@ export function OrgSwitcher() {
   function handleActiveOrg(orgId: number) {
     setActiveOrg(orgId)
     setOpen(false)
-    if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
+    // `|| guestSelected`: returning to a member org from a guest's scoped
+    // shared view (`/shared?org=<id>`) must navigate to that org's overview,
+    // symmetric with picking a guest org (AQU-624). swapOrgInPath falls back
+    // to the org home when the current path isn't org-scoped (e.g. /shared).
+    if (isOrgScopedRoute(location.pathname) || location.pathname === "/" || guestSelected) {
       navigate(swapOrgInPath(location.pathname, orgId))
     }
   }
 
-  // AQU-473: guest orgs are not activatable (no org membership, so
-  // setActiveOrg/org:active would misrepresent the user's role) — clicking
-  // one just navigates. Single accessible project in that org → straight to
-  // it; multiple → the all-orgs overview, which surfaces "Shared with you".
-  async function handleGuestOrg(org: GuestOrg) {
+  // AQU-473/AQU-624: guest orgs are not activatable (no org membership, so
+  // setActiveOrg/org:active would misrepresent the caller's role) — clicking
+  // one navigates to that org's scoped shared-projects overview
+  // (`/shared?org=<id>`), which also drives the switcher's selected state.
+  function handleGuestOrg(org: GuestOrg) {
     setOpen(false)
-    if (jwt) {
-      const projects = await fetchAccessibleProjects(jwt, org.id)
-      if (projects.length === 1) {
-        navigate(`/projects/${projects[0].id}`)
-        return
-      }
-    }
-    navigate(orgHomePath(ALL_ORGS_PARAM))
+    navigate({ pathname: "/shared", search: `?org=${org.id}` })
   }
 
   async function handleCreated(orgId: number) {
@@ -140,7 +153,7 @@ export function OrgSwitcher() {
             />
           }
         >
-          <OrgMark name={title} allOrgs={isAllOrgs} />
+          <OrgMark name={title} allOrgs={!guestSelected && isAllOrgs} />
           <span className="truncate font-medium">{title}</span>
           <ChevronDown className="ml-auto size-4 opacity-50" />
         </DropdownMenuTrigger>
@@ -152,13 +165,13 @@ export function OrgSwitcher() {
                 <span className="truncate">All organizations</span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <span className="text-xs text-muted-foreground">All projects</span>
-                  {isAllOrgs && <Check className="size-4 opacity-60" />}
+                  {!guestSelected && isAllOrgs && <Check className="size-4 opacity-60" />}
                 </span>
               </DropdownMenuItem>
             )}
             {orgs.map((o) => {
               const name = o.name ?? "Workspace"
-              const selected = activeOrgId === o.id
+              const selected = !guestSelected && activeOrgId === o.id
               return (
                 <DropdownMenuItem
                   key={o.id}
@@ -183,12 +196,13 @@ export function OrgSwitcher() {
                   <DropdownMenuItem
                     key={g.id}
                     className={ORG_MENU_ITEM_CLASS}
-                    onClick={() => void handleGuestOrg(g)}
+                    onClick={() => handleGuestOrg(g)}
                   >
                     <OrgMark name={g.name ?? `Org #${g.id}`} />
                     <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
                     <span className="flex shrink-0 items-center gap-1.5">
                       <RoleLabel name="guest" className="text-xs text-muted-foreground" />
+                      {selectedGuestOrgId === g.id && <Check className="size-4 opacity-60" />}
                     </span>
                   </DropdownMenuItem>
                 ))}

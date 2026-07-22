@@ -1,11 +1,5 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * PendingInvitesSection — create an invite link then revoke it from /members.
@@ -24,17 +18,9 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   6. The row disappears (optimistic removal).
  */
 test("pending invite appears on /members and can be revoked", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
   const name = `RevokeInvite ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  // Import a file (needed to get into project context for the Share button).
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
+  await openSeededProject(alice, seeded)
 
   // Open Share panel → Invite link tab → Create invite link.
   // Share lives in the sidebar "More" menu (sidebar cleanup).

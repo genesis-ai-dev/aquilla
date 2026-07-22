@@ -15,6 +15,7 @@ import type { Voice } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { audioMimeForExt } from "@/lib/audio/mime"
 import {
   buildVoiceReferenceId,
   uploadVoiceReference,
@@ -255,7 +256,10 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
         referenceAudioId,
         getSyncToken: audioSyncTokenFetcherForSession(session),
       })
-      const url = URL.createObjectURL(new Blob([bytes as BlobPart]))
+      // AQU: stamp the container type from the ref id's extension — Safari
+      // refuses to play typeless blobs (see src/lib/audio/mime.ts).
+      const refExt = referenceAudioId.slice(referenceAudioId.lastIndexOf(".") + 1)
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: audioMimeForExt(refExt) }))
       urlRef.current = url
       const audio = new Audio(url)
       audioRef.current = audio

@@ -326,13 +326,15 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
       data-row-index={index}
       onClick={onFocus}
       className={cn(
-        "grid grid-cols-[minmax(64px,auto)_1fr_1fr] gap-x-4 border-b border-l-2 px-3 py-2 text-xs",
+        "grid grid-cols-[minmax(64px,7rem)_1fr_1fr] gap-x-4 border-b border-l-2 px-3 py-2 text-xs",
         focused && !editing && "bg-accent/50",
         rowStripe(row, editing),
       )}
     >
-      <div className="flex flex-col items-start gap-1">
-        <span className="font-mono text-[10px] text-muted-foreground">{row.ref ?? "·"}</span>
+      <div className="flex min-w-0 flex-col items-start gap-1">
+        <span className="max-w-full truncate font-mono text-[10px] text-muted-foreground" title={row.ref}>
+          {row.ref ?? "·"}
+        </span>
         {stateLabel && <span className={cn("text-[10px] font-medium", stateClass)}>{stateLabel}</span>}
         {row.fileId && onJumpToCell && (
           <AppTooltip content="Open in editor">

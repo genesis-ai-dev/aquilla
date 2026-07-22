@@ -52,6 +52,57 @@ describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
     expect(optedTexts).toEqual(expect.arrayContaining(["The Creation", "In the beginning."]))
   })
 
+  // AQU-585/AQU-634: with the per-project opt-out set, book names (running
+  // header / TOC / main title) and the whole introduction block are dropped as
+  // front matter, not imported as translatable source cells.
+  it("filters book-name and book-introduction cells when excludeFrontMatter is set", () => {
+    const usfm = [
+      "\\id MAT",
+      "\\h Matthew",              // running header (book name)
+      "\\toc1 The Gospel of Matthew", // table-of-contents long name
+      "\\toc2 Matthew",           // table-of-contents short name
+      "\\mt1 The Gospel",         // main title (book name)
+      "\\imt Introduction",       // intro main title
+      "\\is Background",          // intro section heading
+      "\\ip This book was written by Matthew.", // intro paragraph
+      "\\io1 The genealogy",      // intro outline
+      "\\c 1",
+      "\\ms The Genealogy Section", // in-body major-section heading — KEPT
+      "\\s1 The Genealogy",       // in-body section heading — KEPT
+      "\\p",
+      "\\v 1 The book of the genealogy of Jesus Christ.",
+      "\\v 2 Abraham fathered Isaac.",
+    ].join("\n")
+
+    const [result] = parseTextFormat({
+      fileType: "usfm",
+      text: usfm,
+      name: "MAT.usfm",
+      excludeFrontMatter: true,
+    })
+    const originals = result.strings.map((s) => s.original)
+
+    // Verses and in-body section headings survive…
+    expect(originals).toEqual([
+      "The Genealogy Section",
+      "The Genealogy",
+      "The book of the genealogy of Jesus Christ.",
+      "Abraham fathered Isaac.",
+    ])
+    // …and none of the book-name / introduction front matter leaks through.
+    for (const frontMatter of [
+      "Matthew",
+      "The Gospel of Matthew",
+      "The Gospel",
+      "Introduction",
+      "Background",
+      "This book was written by Matthew.",
+      "The genealogy",
+    ]) {
+      expect(originals).not.toContain(frontMatter)
+    }
+  })
+
   it("declares exactly the DOM-free file types it can handle", () => {
     expect(TEXT_PARSE_FILE_TYPES.has("usfm")).toBe(true)
     expect(TEXT_PARSE_FILE_TYPES.has("txt")).toBe(true)

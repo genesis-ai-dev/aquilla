@@ -52,15 +52,15 @@ describe("extractUsfmStrings", () => {
     expect(strings[1].type).toBe("verse")
   })
 
-  it("parses paratext markers", () => {
+  it("keeps in-body paratext markers (major section / parallel ref)", () => {
     const usfm = `\\id GEN
-\\mt Genesis
 \\c 1
+\\ms Primeval History
 \\v 1 In the beginning.`
 
     const result = extractUsfmStrings(usfm)
     const strings = result[0].strings
-    expect(strings[0].original).toBe("Genesis")
+    expect(strings[0].original).toBe("Primeval History")
     expect(strings[0].type).toBe("paratext")
   })
 
@@ -435,7 +435,9 @@ describe("extractUsfmStrings — globalReferences", () => {
   })
 
   it("does not tag headings or paratext with globalReferences", () => {
-    const usfm = "\\id LUK\n\\mt1 Luke\n\\c 1\n\\s1 The Coming.\n\\v 1 First verse.\n"
+    // \ms (major section) is in-body paratext that survives the AQU-585 filter,
+    // unlike the \mt book title.
+    const usfm = "\\id LUK\n\\c 1\n\\ms The Coming Age\n\\s1 The Coming.\n\\v 1 First verse.\n"
     const [book] = extractUsfmStrings(usfm)
     const heading = book.strings.find(s => s.type === "heading")
     const paratext = book.strings.find(s => s.type === "paratext")

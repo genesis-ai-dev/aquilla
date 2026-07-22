@@ -7,6 +7,12 @@ rationale and vocabulary live in [`docs/AGENT-API.md`](../AGENT-API.md) (AQU-533
 — this document describes what is actually implemented and callable today. Where the two disagree,
 this document is right; call those spots out explicitly rather than paper over them.
 
+**Pointing an agent at this API? Hand it [`QUICKSTART.md`](QUICKSTART.md)** — a single
+compact page with the conceptual model and the curl-able golden path. The API also
+self-describes at runtime: `GET $SYNC_HOST/api/v1/external` (unauthenticated) returns a
+machine-readable map of endpoints, auth, quickstart, and error codes, and every unmatched
+`/api/v1/external/*` path returns a JSON 404 pointing back at it.
+
 A worked, copy-pasteable example lives in
 [`docs/api/examples/blackfoot-import.md`](examples/blackfoot-import.md). A minimal OpenAPI 3.1
 description of the REST surface lives in [`docs/api/openapi.yaml`](openapi.yaml).
@@ -120,7 +126,7 @@ The MCP endpoint is a single stateless JSON-RPC 2.0 route on the **sync** host:
 
 ```
 POST $SYNC_HOST/api/v1/external/mcp
-GET  $SYNC_HOST/api/v1/external/mcp    # 405 — tools-only, no SSE stream
+GET  $SYNC_HOST/api/v1/external/mcp    # 405 (JSON body explains how to connect) — tools-only, no SSE stream
 ```
 
 There is no session handshake or connector-directory listing (OAuth 2.1 is deferred, D12 in
@@ -253,7 +259,10 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 | `GET /api/v2/changesets/:id/approval` **(identity)** | session | — (must be `created_by_user_id`) | Load changeset for approval UI. |
 | `POST /api/v2/changesets/:id/approve` **(identity)** | session | — | Body `{ digest }`. Mints one-time confirmation. |
 | `POST /api/v2/changesets/:id/reject` **(identity)** | session | — | Discards the changeset. |
-| `POST /api/v1/external/mcp` | `aqk_` | per-tool | JSON-RPC 2.0 (`initialize`, `ping`, `tools/list`, `tools/call`). |
+| `GET /api/v1/external` | none | — | Unauthenticated discovery root: machine-readable API map (endpoints, auth, quickstart, MCP config, error codes). |
+| `GET /api/v1/external/me` | `aqk_` | — | Cold-start bootstrap: identity, mode (ask\|act), scope, next-step hints. |
+| `GET /api/v1/external/projects` | `aqk_` | — | List up to 100 accessible projects (REST mirror of the MCP `list_projects` tool, same shared query). `{ data, nextCursor }`. |
+| `POST /api/v1/external/mcp` | `aqk_` | per-tool | JSON-RPC 2.0 (`initialize`, `ping`, `tools/list`, `tools/call`). GET returns a JSON 405 explaining how to connect. |
 | `GET /api/v1/external/projects/:projectId/search?q=&side=&limit=&cursor=` | `aqk_` | VIEWER | Full-text search. `{ data, nextCursor }`. |
 | `GET /api/v1/external/projects/:projectId/files?limit=&cursor=` | `aqk_` | VIEWER | List files. |
 | `GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=` | `aqk_` | VIEWER | Read a file's cells; supports delta reads via `since`. |

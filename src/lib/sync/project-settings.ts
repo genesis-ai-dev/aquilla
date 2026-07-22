@@ -101,6 +101,14 @@ export interface ProjectWideSettings {
    * cells. In-body section headings and Psalm titles import in both modes.
    */
   importExcludeFrontMatter?: boolean
+  /**
+   * AQU-601: archived lanes — a subset of `targetLanes` tags. Archived lanes
+   * stay registered (their cell data and deep links keep working) but are
+   * hidden by default in the workspace lane switcher and the settings manager.
+   * Archiving never removes a lane from `targetLanes`; restoring just drops the
+   * tag from here. Case-insensitive to match the lane-registry dedupe rule.
+   */
+  archivedLanes?: string[]
 }
 
 export interface ProjectSettingsResponse {

@@ -47,9 +47,11 @@ test("comment submitted via Ctrl+Enter keyboard shortcut", async ({ alice }) => 
   await expect(commentBtn.first()).toBeVisible({ timeout: 5_000 })
   await commentBtn.first().click()
 
-  // CommentsDrawer should open.
+  // CommentsDrawer should open. Match the testid only — an aria-label
+  // fallback like `[aria-label*="Comments" i]` would also match the AQU-599
+  // gutter chip ("1 open comment — open comments") once the comment posts,
+  // and `.or().first()` would then resolve to the chip instead of the drawer.
   const drawer = alice.locator('[data-testid="comments-drawer"]')
-    .or(alice.locator('[aria-label*="Comments" i]').first())
   await expect(drawer.first()).toBeVisible({ timeout: 8_000 })
 
   // Type a unique comment text.

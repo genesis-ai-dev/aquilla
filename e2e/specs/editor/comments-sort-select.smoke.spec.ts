@@ -52,7 +52,7 @@ test("comments page sort select changes sort order", async ({ alice }) => {
   await alice.waitForLoadState("networkidle")
 
   // The Sort control lives inside the collapsed "Filters" panel — expand it.
-  const filtersBtn = alice.getByRole("button", { name: /Filters/i })
+  const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
   await expect(filtersBtn).toBeVisible({ timeout: 10_000 })
   await filtersBtn.click()
 

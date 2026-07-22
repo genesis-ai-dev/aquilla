@@ -246,3 +246,25 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   expect(await organizationsScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
   await expect(projectTable.getByText("Project", { exact: true })).toBeVisible()
 })
+
+test("org overview does not present false zeroes while its portfolio is loading", async ({ alice }) => {
+  let releasePortfolio!: () => void
+  const portfolioGate = new Promise<void>((resolve) => { releasePortfolio = resolve })
+  await alice.route("**/api/v2/orgs/*/portfolio", async (route) => {
+    await portfolioGate
+    await route.continue()
+  })
+
+  try {
+    await alice.goto("/")
+
+    await expect(alice.getByTestId("org-home-skeleton")).toBeVisible()
+    await expect(alice.getByText("Your organization is ready")).toHaveCount(0)
+    await expect(alice.getByText("Avg translated", { exact: true })).toHaveCount(0)
+  } finally {
+    releasePortfolio()
+  }
+
+  await expect(alice.getByTestId("org-home-skeleton")).toHaveCount(0)
+  await expect(alice.getByText("Avg translated", { exact: true })).toBeVisible()
+})

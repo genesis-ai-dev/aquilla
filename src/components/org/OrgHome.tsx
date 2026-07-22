@@ -56,12 +56,12 @@ import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lu
 function ProjectRowSkeleton() {
   return (
     <div className="flex items-center gap-4 p-4">
-      <div className="min-w-0 flex-1 space-y-2">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
         <Skeleton className="h-4 w-1/3" />
         <Skeleton className="h-1.5 w-full rounded-full" />
         <Skeleton className="h-1.5 w-full rounded-full" />
       </div>
-      <div className="shrink-0 space-y-2 text-right">
+      <div className="flex shrink-0 flex-col gap-2 text-right">
         <Skeleton className="ml-auto h-3 w-16" />
         <Skeleton className="ml-auto h-3 w-16" />
       </div>
@@ -71,12 +71,18 @@ function ProjectRowSkeleton() {
 
 function OrgHomeSkeleton({ isAllOrgs }: { isAllOrgs: boolean }) {
   return (
-    <div className="space-y-6">
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="org-home-skeleton"
+      className="flex flex-col gap-6"
+    >
+      <span className="sr-only">Loading dashboard…</span>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-[88px] space-y-2 rounded-2xl border bg-card p-4">
-            <Skeleton className="h-3 w-16" />
+          <div key={i} className="flex h-[88px] flex-col gap-2 rounded-2xl border bg-card p-4">
             <Skeleton className="h-6 w-10" />
+            <Skeleton className="h-3 w-16" />
           </div>
         ))}
       </div>
@@ -507,6 +513,13 @@ export function OrgHome() {
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
   const jwt = session?.jwt ?? null
+  const portfolioScopeKey = !jwt || orgLoading
+    ? null
+    : isAllOrgs
+      ? `all:${orgs.map((org) => org.id).sort((a, b) => a - b).join(",")}`
+      : activeOrgId == null
+        ? null
+        : `org:${activeOrgId}`
 
   // AQU-486: per-section visibility chrome for Team workload / Team usage
   // (both gated by the AQU-485 memberProgressViewMinRole floor — they're both
@@ -525,7 +538,10 @@ export function OrgHome() {
   // AQU-326: unredeemed invites addressed to the caller's email — without
   // this card, an invite whose link never arrived is undiscoverable in-app.
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
-  const [loading, setLoading] = useState(false)
+  // The key records which dashboard scope has actually resolved. Deriving the
+  // first-load state from it prevents a post-render effect from painting an
+  // empty portfolio as real data before its request has even started.
+  const [resolvedPortfolioScopeKey, setResolvedPortfolioScopeKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [projectQuery, setProjectQuery] = useState("")
   const [orgQuery, setOrgQuery] = useState("")
@@ -548,21 +564,18 @@ export function OrgHome() {
   useEffect(() => {
     if (!jwt) {
       setProjects([])
-      setLoading(false)
+      setResolvedPortfolioScopeKey(null)
       return
     }
     if (isAllOrgs) {
-      if (orgLoading) {
-        setLoading(false)
-        return
-      }
+      if (orgLoading) return
       if (orgs.length === 0) {
+        setError(null)
         setProjects([])
-        setLoading(false)
+        setResolvedPortfolioScopeKey(portfolioScopeKey)
         return
       }
       let cancelled = false
-      setLoading(true)
       setError(null)
       const orgById = new Map(orgs.map((org) => [org.id, org]))
       getPortfolios(jwt, orgs.map((org) => org.id))
@@ -586,17 +599,17 @@ export function OrgHome() {
           }
         })
         .finally(() => {
-          if (!cancelled) setLoading(false)
+          if (!cancelled) setResolvedPortfolioScopeKey(portfolioScopeKey)
         })
       return () => { cancelled = true }
     }
     if (activeOrgId == null) {
+      setError(null)
       setProjects([])
-      setLoading(false)
+      setResolvedPortfolioScopeKey(null)
       return
     }
     let cancelled = false
-    setLoading(true)
     setError(null)
     getPortfolio(jwt, activeOrgId)
       .then((list) => {
@@ -617,10 +630,10 @@ export function OrgHome() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setResolvedPortfolioScopeKey(portfolioScopeKey)
       })
     return () => { cancelled = true }
-  }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs, refreshTick])
+  }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs, portfolioScopeKey, refreshTick])
 
   // AQU-335: surface cross-org grants on the Projects page too — otherwise a user
   // whose only project arrived via an invite link sees an empty dashboard.
@@ -676,7 +689,9 @@ export function OrgHome() {
     )
   }
 
-  const isPageLoading = sessionLoading || orgLoading || loading
+  const isPageLoading = sessionLoading
+    || orgLoading
+    || (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey)
   const workspaceLabel = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
 
   // Rollup stats

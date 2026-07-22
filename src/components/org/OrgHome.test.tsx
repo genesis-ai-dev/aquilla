@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgHome, ProjectTable, activityStatus } from "./OrgHome"
@@ -269,6 +269,45 @@ describe("ProjectTable", () => {
 })
 
 describe("OrgHome", () => {
+  it("never paints a false-empty dashboard while the current portfolio is unresolved", async () => {
+    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    let resolvePortfolio!: (projects: PortfolioProject[]) => void
+    vi.mocked(getPortfolio).mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePortfolio = resolve }),
+    )
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const addedText: string[] = []
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) addedText.push(node.textContent ?? "")
+      }
+    })
+    observer.observe(container, { childList: true, subtree: true })
+
+    const view = render(
+      <MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>,
+      { container },
+    )
+
+    try {
+      await waitFor(() => expect(screen.getByTestId("org-home-skeleton")).toBeInTheDocument())
+      await act(async () => { await Promise.resolve() })
+      expect(addedText.join("\n")).not.toContain("Your organization is ready")
+      expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()
+
+      await act(async () => { resolvePortfolio([]) })
+      await waitFor(() => expect(screen.queryByTestId("org-home-skeleton")).not.toBeInTheDocument())
+      expect(screen.getByText("Your organization is ready")).toBeInTheDocument()
+      expect(within(projectsRollupStat()).getByText("0")).toBeInTheDocument()
+    } finally {
+      observer.disconnect()
+      view.unmount()
+      container.remove()
+    }
+  })
+
   it("renders the org name, nav, and admin links for an owner", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
@@ -301,10 +340,7 @@ describe("OrgHome", () => {
       },
     ])
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
-    // The page flashes "Loading…" while the portfolio effect settles, so the card
-    // and its link flicker on mount. Assert them together inside one waitFor so the
-    // checks all run against a single settled frame (a sync getByRole can otherwise
-    // catch a transient frame where the card is unmounted).
+    // Wait for the first portfolio to settle so the dashboard content is mounted.
     await waitFor(() => {
       const card = screen.getByTestId("pending-invitations")
       expect(card).toHaveTextContent("Ruth Translation")

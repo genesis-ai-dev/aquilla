@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RulesSurface — "Edit org rule" inline editor.
@@ -16,16 +16,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   4. Clicks the pencil again to collapse it.
  */
 test("org rule edit pencil opens and closes inline RuleEditor", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const projName = `OrgRuleEdit ${Date.now()}`
-  await dash.createProject({ name: projName, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
+    name: `OrgRuleEdit ${Date.now()}`,
+  })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // Create an org rule first. "+ Add Org Rule" opens an INLINE RuleEditor

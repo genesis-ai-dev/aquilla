@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — search filter (AQU-501).
@@ -15,16 +15,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * verify the matching section's card renders.
  */
 test("project settings search filters and clears sections", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `NavSearch ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `NavSearch ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings`)
+  await alice.goto(`/project/${seeded.projectId}/settings`)
   await alice.waitForLoadState("networkidle")
 
   const searchInput = alice.locator('input[aria-label="Search settings"]')

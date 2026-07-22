@@ -9,8 +9,8 @@
  * and that clicking it mounts an editable source editor.
  */
 
-import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -20,6 +20,33 @@ import type { CellData } from "@/hooks/useCells"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
+import type { DcsCursor } from "@/lib/dcs/types"
+
+// DCS lockdown state (AQU-615). The real hook goes through useProjectSettings
+// → network; in tests there is no session, so `loading` would stay true forever
+// and default-lock every project. Mock the cursor hook with a mutable bag: the
+// default (loading=false, no cursor) restores the pre-DCS behavior these tests
+// pin, and individual tests flip it to exercise the lockdown + mid-edit flip.
+let dcsState: { cursor: DcsCursor | null; loading: boolean } = { cursor: null, loading: false }
+vi.mock("@/hooks/useDcsUpstreamCursor", () => ({
+  useDcsUpstreamCursor: () => dcsState,
+}))
+
+const DCS_CURSOR: DcsCursor = {
+  owner: "unfoldingWord",
+  repo: "en_ult",
+  subject: "Aligned Bible",
+  contentFormat: "usfm",
+  trackMode: "release",
+  ref: "v88",
+  commitSha: "aaa111",
+  released: "2026-05-01T00:00:00Z",
+  importedAt: "2026-07-01T00:00:00Z",
+}
+
+beforeEach(() => {
+  dcsState = { cursor: null, loading: false }
+})
 
 // happy-dom has no layout engine — replace the virtualized list with a trivial
 // "render every row" stand-in (same shim as EditorTable.editorActions.test).
@@ -209,5 +236,71 @@ describe("EditorTable — source-edit affordance", () => {
     const editor = await screen.findByRole("textbox", { name: "Edit source text" })
     expect(editor).toBeInTheDocument()
     expect(editor.className).toContain("ProseMirror")
+  })
+})
+
+describe("EditorTable — DCS source lockdown (AQU-615)", () => {
+  it("hides the pencil while the linked-state is unknown (loading = default-locked)", async () => {
+    dcsState = { cursor: null, loading: true }
+    renderTable(withRole(ROLE.PROJECT_LEAD))
+    await screen.findByText("bonjour")
+    expect(screen.queryByRole("button", { name: "Edit source text" })).not.toBeInTheDocument()
+  })
+
+  it("replaces the pencil with an explained lock hint on a DCS-pinned project", async () => {
+    dcsState = { cursor: DCS_CURSOR, loading: false }
+    renderTable(withRole(ROLE.PROJECT_LEAD))
+    await screen.findByText("bonjour")
+    // No pencil — but the affordance does not just vanish: a lock hint carrying
+    // sourceReadOnlyReason stands in its place.
+    expect(screen.queryByRole("button", { name: "Edit source text" })).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Source is locked")).toBeInTheDocument()
+  })
+
+  it("force-closes an OPEN source editor when canEditSource flips false mid-edit, and says why", async () => {
+    // BLOCKER scenario: the pencil was gated on canEditSource but a mounted
+    // editor was not. A settings revalidate that delivers a DCS cursor mid-edit
+    // used to leave the editor mounted while handleSourceCommit silently
+    // dropped every commit — the user typed into a void.
+    const project = withRole(ROLE.PROJECT_LEAD)
+    const view = renderTable(project)
+    const pencil = await screen.findByRole("button", { name: "Edit source text" })
+    fireEvent.click(pencil)
+    await screen.findByRole("textbox", { name: "Edit source text" })
+
+    // The settings revalidate lands a cursor → capability flips false.
+    dcsState = { cursor: DCS_CURSOR, loading: false }
+    view.rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={makeStore([makeCell("cell-1")], project.id)}
+            username="lead"
+            isCompletionConfigured={false}
+            isCompletionAvailable={false}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={() => {}}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+
+    // The editor unmounts…
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Edit source text" })).not.toBeInTheDocument()
+    })
+    // …and the WHY is surfaced through the row's write-error banner (the DCS
+    // lock reason), not silently.
+    expect(screen.getByText(/synced from Door43/i)).toBeInTheDocument()
   })
 })

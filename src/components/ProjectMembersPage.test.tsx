@@ -138,7 +138,13 @@ describe("ProjectMembersPage", () => {
   // THIS project (not the whole org) without asking anyone.
   it("labels the members list with an explicit project scope", () => {
     renderPage()
-    expect(screen.getByText("Members of this project")).toBeInTheDocument()
+    // With org-sourced members present, the roster is partitioned (AQU-454):
+    // the direct roster is headed "Project members" and the scope copy spells
+    // out that the list covers access to THIS project.
+    expect(screen.getByText("Project members")).toBeInTheDocument()
+    expect(
+      screen.getByText(/everyone who currently has access to this project/i),
+    ).toBeInTheDocument()
   })
 
   // AQU-488: every row must indicate how that person has access — direct

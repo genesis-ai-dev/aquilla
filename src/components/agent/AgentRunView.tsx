@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatCredits } from "@/lib/credits"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker"
@@ -32,6 +33,10 @@ import { Message, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import type { AgentProposal, AquiferPublishProposal } from "@/lib/agent/protocol"
 import type { AgentRunUi, ToolItem, ToolKind } from "@/lib/agent/run-state"
+import { BudgetMeter } from "./BudgetMeter"
+import { ChangesetCard } from "./ChangesetCard"
+import { CodeActivityBlock } from "./CodeActivityBlock"
+import { BriefProposalNotice, MemoryProposalNotice } from "./MemoryProposalNotice"
 
 const TOOL_ICON: Record<ToolKind, typeof Database> = {
   sql: Database,
@@ -89,10 +94,6 @@ function ToolChip({ item }: { item: ToolItem }) {
   )
 }
 
-function formatCost(costCents: number): string {
-  return `$${(costCents / 100).toFixed(costCents < 10 ? 4 : 2)}`
-}
-
 export interface AgentRunViewProps {
   run: AgentRunUi
   /** Renders a staged event-proposal inline where it arrived. The parent owns
@@ -103,9 +104,18 @@ export interface AgentRunViewProps {
   /** Card-registry seam (agent-complete §4): a rich live card rendered UNDER
    *  a tool chip (e.g. PassageCard for read/draft rows). Null → chip only. */
   renderToolCard?: (item: ToolItem) => ReactNode
+  /** Jump to the workbench's Memory tab from a memory/brief proposal notice.
+   *  Omitted where there's no Memory tab to jump to (e.g. the dock panel). */
+  onReviewMemory?: () => void
 }
 
-export function AgentRunView({ run, renderProposal, renderAquiferProposal, renderToolCard }: AgentRunViewProps) {
+export function AgentRunView({
+  run,
+  renderProposal,
+  renderAquiferProposal,
+  renderToolCard,
+  onReviewMemory,
+}: AgentRunViewProps) {
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -150,6 +160,14 @@ export function AgentRunView({ run, renderProposal, renderAquiferProposal, rende
             return renderAquiferProposal ? (
               <div key={item.id}>{renderAquiferProposal(item.proposal)}</div>
             ) : null
+          case "code":
+            return <CodeActivityBlock key={item.id} item={item} />
+          case "changeset":
+            return <ChangesetCard key={item.id} item={item} />
+          case "memory-proposed":
+            return <MemoryProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
+          case "brief-proposed":
+            return <BriefProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
         }
       })}
 
@@ -188,9 +206,11 @@ export function AgentRunView({ run, renderProposal, renderAquiferProposal, rende
         <div className="text-[10px] text-muted-foreground">
           {run.usage.promptTokens.toLocaleString()} prompt + {run.usage.completionTokens.toLocaleString()} completion tokens
           {" · "}
-          {formatCost(run.usage.costCents)}
+          {formatCredits(run.usage.costCredits)}
         </div>
       )}
+
+      {run.budget && <BudgetMeter budget={run.budget} />}
     </div>
   )
 }

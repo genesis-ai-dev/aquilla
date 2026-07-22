@@ -82,10 +82,13 @@ import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
+import agentMemoryRoutes from "./routes/agent-memory"
+import agentArtifactsRoutes from "./routes/agent-artifacts"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { shipLog, shipErrorResponse } from "./posthog-logs"
 
 const app = new Hono<HonoEnv>()
 
@@ -95,7 +98,7 @@ const app = new Hono<HonoEnv>()
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
   "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
@@ -129,6 +132,38 @@ app.use("*", async (c, next) => {
   await next()
   for (const [k, v] of Object.entries(CORS_HEADERS)) {
     c.res.headers.set(k, v)
+  }
+})
+
+// Observability: ship 4xx/5xx responses and unhandled throws to PostHog Logs
+// (fire-and-forget; no-op when POSTHOG_KEY is unset — see posthog-logs.ts).
+// Hono throws on `c.executionCtx` when there is none (vitest calls
+// app.fetch without a ctx), so resolve it defensively and fall back to
+// un-awaited fire-and-forget.
+const runInBackground = (c: { executionCtx: ExecutionContext }, task: Promise<void>) => {
+  try {
+    c.executionCtx.waitUntil(task)
+  } catch {
+    void task
+  }
+}
+
+app.use("*", async (c, next) => {
+  try {
+    await next()
+  } catch (err) {
+    runInBackground(
+      c,
+      shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${c.req.path}`, {
+        "http.method": c.req.method,
+        "http.path": c.req.path,
+        "error.message": err instanceof Error ? err.message : String(err),
+      }),
+    )
+    throw err
+  }
+  if (c.res.status >= 400) {
+    runInBackground(c, shipErrorResponse(c.env, "aquilla-identity", c.req.raw, c.res))
   }
 })
 
@@ -183,6 +218,14 @@ app.route("/api/v2/projects", projectSettingsRoutes)
 app.route("/api/v2/projects", sourceLinkingRoutes)
 app.route("/api/v2/projects", mergeSiblingRoutes)
 app.route("/api/v2/projects", termbaseSubscriptionRoutes)
+// Agent memory + project brief (AQU-AGENT contracts §3). Sibling router — new
+// file, doesn't touch projects.ts. Session-JWT authed; agent-channel semantics
+// keyed off the x-aquilla-agent-run header (see routes/agent-memory.ts).
+app.route("/api/v2/projects", agentMemoryRoutes)
+// Agent artifact upload — session-JWT attach-file path for the SPA agent
+// composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
+// the harness load_artifact tool can read them (routes/agent-artifacts.ts).
+app.route("/api/v2/projects", agentArtifactsRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)

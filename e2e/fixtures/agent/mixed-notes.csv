@@ -1,0 +1,14 @@
+﻿Translation Export — Q3 batch (do not edit column A),,,
+ID,Source Text,Target Translation,Notes
+1,"Hello, world","Bonjour le monde",greeting
+2;Thank you very much;Merci beaucoup;politeness register
+3,"He said ""stop now"" and left",Il a dit "arrête maintenant" et est parti,unescaped inner quote on target
+4,ወደ ቤቴ ና,Come to my house,SWAPPED: col B holds Amharic target text, col C holds the English source
+5,Welcome to our village,आपका हमारे गाँव में स्वागत है,
+6,"Please confirm your address before shipping, thank you",,missing target — flag for review
+7,See attached file for details,Voir le fichier ci-joint pour plus de détails,"note, with a comma that isn't quoted safely by every tool"
+
+8,,Le rapport est prêt pour révision,missing source — target-only row
+9;Second batch resumes here — delimiter reverts to semicolon;Le deuxième lot reprend ici;delimiter drift
+10,"Line one
+continues on a soft-wrapped second line",La ligne continue sur une seconde ligne,embedded newline inside quoted field

@@ -47,6 +47,12 @@ export interface Env {
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
 
+  /** PostHog project token (phc_…) — when set, 4xx/5xx responses are shipped
+   *  to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
+  POSTHOG_KEY?: string
+  /** PostHog ingest host. Defaults to https://us.i.posthog.com. */
+  POSTHOG_HOST?: string
+
   /** Cloudflare Email Service `send_email` binding — password reset and
    *  project invites. Declared only in deployed env blocks (wrangler.toml);
    *  absent in local/e2e profiles, where invites no-op and password reset
@@ -109,6 +115,26 @@ export interface Env {
   /** Injected by index.ts (never configured): raw Postgres connection string
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string
+
+  // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
+  /** Base URL of the sandbox worker (aquilla-agent-sandbox). Dev default
+   *  http://127.0.0.1:8790. Unset → run_code/load_artifact/read_sandbox_file
+   *  return a clear "sandbox unavailable" tool error (the run still proceeds). */
+  AGENT_SANDBOX_URL?: string
+  /** Shared bearer secret for the sandbox worker. Secret (never a plain var);
+   *  set locally by the dev-stack. Unset → sandbox tools are unavailable. */
+  AGENT_SANDBOX_KEY?: string
+  /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
+   *  run halts gracefully with a budget.exhausted frame at this ceiling. */
+  AGENT_RUN_COST_CAP_CENTS?: string
+  /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
+   *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
+   *  writes attached files here so the sandbox's fetch-artifact can read them
+   *  back by r2_key. Absent → the upload route returns a clear 503. */
+  SNAPSHOTS?: R2Bucket
+  /** R2 key prefix, mirroring sync-worker/agent-worker. Unset in every current
+   *  env (→ empty prefix), so artifact keys are `artifacts/{projectId}/{id}`. */
+  R2_KEY_PREFIX?: string
 
   // AI budget + allowlist controls (AQU-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.
@@ -177,6 +203,8 @@ export interface UserRow {
   preferences: string
   created_at: string
   updated_at: string
+  /** Stamped on a successful password-reset; null if never reset. See authMiddleware. */
+  password_changed_at: string | null
 }
 
 /** Hydrated user injected into request context by `authMiddleware`. */
@@ -188,6 +216,7 @@ export interface AuthUser {
   preferences: Record<string, unknown>
   created_at: string
   updated_at: string
+  password_changed_at: string | null
 }
 
 export interface UserResponse {

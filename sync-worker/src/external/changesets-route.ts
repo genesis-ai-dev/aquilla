@@ -10,6 +10,7 @@
 // (errors.ts).
 
 import { errorResponse } from './errors'
+import { AUTH_HINT } from './discovery-route'
 import { handlePrepare } from './prepare'
 import { handleCommit } from './commit'
 import { loadChangeset, changesetToResponse } from './store'
@@ -35,7 +36,7 @@ async function handleGet(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
   const cred = await validateApiCredential(db, bearer(request) ?? "")
-  if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
+  if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
@@ -61,7 +62,7 @@ async function handleDiscard(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
   const cred = await validateApiCredential(db, bearer(request) ?? "")
-  if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
+  if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)

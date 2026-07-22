@@ -19,6 +19,7 @@ import { UsageSection } from "@/components/settings/UsageSection"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
+import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import {
   getTranslatorProfile,
   setTranslatorProfile,
@@ -73,8 +74,10 @@ const PROFILE_KEYS: (keyof TranslatorProfile)[] = [
  */
 function WorkspaceSection() {
   const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
+  // AQU-591: the store tracks whether to SKIP the confirm; present it positively.
+  const skipReplaceConfirm = useSkipReplaceConfirm()
   return (
-    <Section title="Workspace" description="Layout choices for the project sidebar.">
+    <Section title="Workspace" description="Layout and editing behavior for the project workspace.">
       <Field>
         <FieldLabel className="text-sm font-medium">Sidebar tab layout</FieldLabel>
         <FieldDescription>
@@ -95,6 +98,22 @@ function WorkspaceSection() {
           </TabsList>
         </Tabs>
       </Field>
+      <div className="mt-6 flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <FieldLabel htmlFor="confirm-replace" className="text-sm font-medium">
+            Confirm before replacing a translation
+          </FieldLabel>
+          <p className="text-xs text-muted-foreground">
+            Ask for confirmation when AI Generate replaces a cell that already has a translation.
+            Validated cells always confirm regardless of this setting.
+          </p>
+        </div>
+        <Switch
+          id="confirm-replace"
+          checked={!skipReplaceConfirm}
+          onCheckedChange={(on) => setSkipReplaceConfirm(!on)}
+        />
+      </div>
     </Section>
   )
 }

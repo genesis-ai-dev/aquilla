@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RulesSurface — org rule enable/disable toggle.
@@ -15,16 +15,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * click again to re-enable.
  */
 test("org rule enable toggle disables and re-enables an org rule", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const projName = `OrgRuleToggle ${Date.now()}`
-  await dash.createProject({ name: projName, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
+    name: `OrgRuleToggle ${Date.now()}`,
+  })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // Create an org rule. "+ Add Org Rule" opens an INLINE RuleEditor inside

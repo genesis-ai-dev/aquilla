@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — Retrieval support section.
@@ -14,16 +14,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * Changing a value marks the form dirty and shows "Save changes".
  */
 test("project settings decay section expands and changing target marks form dirty", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `DecaySettings ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `DecaySettings ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings?section=validation`)
+  await alice.goto(`/project/${seeded.projectId}/settings?section=validation`)
   await alice.waitForLoadState("networkidle")
 
   const summary = alice.locator("summary").filter({ hasText: /Retrieval support/i })

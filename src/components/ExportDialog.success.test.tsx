@@ -43,7 +43,9 @@ const BASE_PROPS = {
   projectName: "Demo project",
   activeFileId: "f1",
   activeFileName: "gen.txt",
-  isUsfmFile: false,
+  // No native round-trip for an unknown import type — the "Export to another
+  // format" section opens by default and TSV is pre-selected.
+  activeFileType: null,
   projectFiles: [{ id: "f1", name: "gen.txt", type: "txt" }],
   targetLanguage: "es",
   getToken: async () => null,

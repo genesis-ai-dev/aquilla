@@ -140,7 +140,10 @@ function makeEmptyTargetStore(cellId: string): CellStore {
   return store
 }
 
-function renderTable(actions: Partial<EditorActionsContextValue>) {
+function renderTable(
+  actions: Partial<EditorActionsContextValue>,
+  completing: Map<string, string> = new Map(),
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -151,7 +154,7 @@ function renderTable(actions: Partial<EditorActionsContextValue>) {
           username="tester"
           isCompletionConfigured={false}
           isCompletionAvailable={false}
-          completing={new Map()}
+          completing={completing}
           examples={new Map()}
           errors={new Map()}
           previews={new Map()}
@@ -245,6 +248,28 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     // resolves — proving the flow returns the user to the cell with a signal
     // that the change landed (the strand-after-Replace bug this fixes).
     expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+  // AQU-590: an in-progress AI translation must be evident ON the cell, even
+  // when the cell already has a translation (the sparkle regenerate/replace
+  // case). Before the fix the target-column overlay was suppressed once the
+  // cell had text, leaving only the easy-to-miss Queued→Synced status chip.
+  it("marks the row as AI-translating while a completion is in progress, even when the cell already has text", async () => {
+    renderTable({}, new Map([["cell-1", "generating"]]))
+
+    const cellText = await screen.findByText("bonjour")
+    const row = cellText.closest("[data-grid-row]")
+    expect(row).not.toBeNull()
+    expect(row).toHaveAttribute("data-ai-translating", "true")
+    expect(row?.className).toContain("animate-pulse")
+  })
+
+  it("does not mark the row as AI-translating when no completion is running", async () => {
+    renderTable({})
+
+    const cellText = await screen.findByText("bonjour")
+    const row = cellText.closest("[data-grid-row]")
+    expect(row).not.toBeNull()
+    expect(row).not.toHaveAttribute("data-ai-translating")
   })
 
   it("raises and unclamps the row while microphone-permission help is open", async () => {

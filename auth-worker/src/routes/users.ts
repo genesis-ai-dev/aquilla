@@ -5,6 +5,7 @@
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { isPlatformAdmin } from "../middleware/platform-admin"
 import {
   lookupUserByUsername,
   searchUsersByPrefix,
@@ -45,8 +46,16 @@ users.get("/lookup", async (c) => {
  * Username prefix search for the Add-member typeahead. Empty result set
  * returns 200 with an empty array.
  *
- * AQU-321: When ?scoped=1 (the invite picker's default), results are limited
- * to users that share an org or maintainer-accessible project with the caller.
+ * AQU-321 / pen-test (2026-07-21): results are always scoped to users that
+ * share an org or maintainer-accessible project with the caller — the
+ * `?scoped=1` param is accepted for backward compat but no longer has an
+ * "off" position for ordinary callers. The unscoped branch used to be the
+ * *default* (reachable by any authenticated user simply by omitting the
+ * param), which let anyone walk two-character prefixes to enumerate every
+ * username/id on the platform regardless of org/project membership —
+ * defeating the point of the scoping this route already claimed to enforce.
+ * Platform admins (ADMIN_EMAILS) keep the unscoped path for cross-tenant
+ * support lookups, mirroring the access they already have via /admin/users.
  * Exact-match lookup for out-of-scope users is done via GET /users/lookup, which
  * does not confirm-or-deny on miss for privacy reasons.
  */
@@ -69,13 +78,13 @@ users.get("/search", async (c) => {
     }
   }
 
-  // AQU-321: ?scoped=1 restricts results to org/project-overlap users.
-  // Default is unscoped for backward compat; new invite picker passes scoped=1.
-  const scoped = c.req.query("scoped") === "1" || c.req.query("scoped") === "true"
-
-  const matches = scoped
-    ? await searchUsersByScopedPrefix(c.env, user.id, prefix, limit)
-    : await searchUsersByPrefix(c.env, prefix, limit)
+  const wantsUnscoped = !(
+    c.req.query("scoped") === "1" || c.req.query("scoped") === "true"
+  )
+  const matches =
+    wantsUnscoped && isPlatformAdmin(c)
+      ? await searchUsersByPrefix(c.env, prefix, limit)
+      : await searchUsersByScopedPrefix(c.env, user.id, prefix, limit)
 
   return c.json({ users: matches })
 })

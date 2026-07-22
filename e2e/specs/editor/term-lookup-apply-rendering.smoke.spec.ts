@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
 import { Glossary } from "../../helpers/page-objects/Glossary"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * TermLookupPopover — "Apply rendering" button inserts the rendering into
@@ -33,26 +27,14 @@ test("term lookup Apply rendering inserts the rendering into target cell", async
   // Project create + terminology round-trip + a full AQU-310 import flow can
   // exceed the 30s harness budget under load.
   test.slow()
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `TermApply ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `TermApply ${Date.now()}` })
 
   const glossary = new Glossary(alice)
-  await glossary.goto(projectId!)
+  await glossary.goto(seeded.projectId)
   await glossary.addTerm("content", "échantillon")
 
-  // Open workspace and import file.
-  await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  // Open the seeded file's editor.
+  await openSeededProject(alice, seeded)
 
   // Click on the "content" chip in the source column (dotted underline span).
   const chip = alice.locator('span.cursor-pointer.underline').filter({ hasText: /^content$/i }).first()

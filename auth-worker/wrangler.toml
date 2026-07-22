@@ -65,6 +65,14 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
+# R2 bucket for agent-attached artifacts (routes/agent-artifacts.ts). Same
+# bucket sync-worker + agent-worker bind as SNAPSHOTS, so the harness's
+# load_artifact tool reads back what the SPA composer uploads. CI's `wrangler
+# deploy` (no --env) targets this top-level block → the prod bucket.
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots"
+
 # CI's `wrangler deploy` (no --env) targets this top-level block for the
 # actually-live aquilla-identity worker (see ROUTE/ENV note above), so the
 # EMAIL binding must be duplicated here too, not just under [env.production] —
@@ -79,6 +87,10 @@ name = "EMAIL"
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
 #   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions
 #                        to OpenRouter (folded in from aquilla-chat-worker).
+#   AGENT_SANDBOX_KEY  — shared bearer secret for the sandbox worker
+#                        (aquilla-agent-sandbox). AQU-AGENT §2/§6. Unset →
+#                        run_code/load_artifact/read_sandbox_file return a clear
+#                        "sandbox unavailable" tool error (the run still runs).
 # Plain vars: see types.ts for the full list.
 #
 # Outbound email (password reset + project invites) goes through Cloudflare
@@ -120,6 +132,12 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
+# AQU-AGENT §6 — sandbox worker (aquilla-agent-sandbox) base URL for the agent's
+# code-exec tools. Left UNSET at top level until the sandbox worker is deployed:
+# the harness degrades to a clear "sandbox unavailable" tool error when absent,
+# so shipping without it is safe. Set it (and the AGENT_SANDBOX_KEY secret) once
+# the sandbox worker has a stable URL. Dev/e2e point at the local worker below.
+# AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-url>"
 # Site-wide admin surface (/api/v2/admin/*) identity, by ACCOUNT EMAIL — usernames
 # don't matter. Separate axis from the org role ladder; see platform-admin.ts.
 # ADMIN_REQUIRE_ELEVATION="true" adds the emailed 6-digit step-up code (→ 6h
@@ -148,9 +166,18 @@ routes = [
 [env.production.placement]
 mode = "smart"
 
+# Like placement, observability is NOT inherited by env blocks — without this,
+# production has Workers Logs disabled and 4xx/5xx are invisible.
+[env.production.observability]
+enabled = true
+
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
+
+[[env.production.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots"
 
 [[env.production.send_email]]
 name = "EMAIL"
@@ -173,6 +200,9 @@ DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
+# PostHog *project* token (public — same one shipped in the SPA bundle).
+# Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
+POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
 
 # ---------------------------------------------------------------------------
 # Development environment — for the dev branch, deployed to api.dev.aquilla.app
@@ -204,6 +234,10 @@ mode = "smart"
 binding = "HYPERDRIVE"
 id = "53581197ff7a4202a5ed0ef08537d4a6"
 
+[[env.development.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots-dev"
+
 [[env.development.send_email]]
 name = "EMAIL"
 
@@ -223,6 +257,9 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
+# AQU-AGENT §6 — local sandbox worker (dev-stack boots it on :8790). The
+# matching AGENT_SANDBOX_KEY is passed as a --var by scripts/dev-stack.ts.
+AGENT_SANDBOX_URL = "http://127.0.0.1:8790"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 
@@ -257,6 +294,10 @@ mode = "smart"
 [[env.staging.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "822231ade4da4db5b1955702e13d1ac3"
+
+[[env.staging.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots-staging"
 
 [[env.staging.send_email]]
 name = "EMAIL"
@@ -295,6 +336,10 @@ name = "aquilla-identity-e2e"
 binding = "HYPERDRIVE"
 id = "REPLACE_WITH_E2E_HYPERDRIVE_ID"
 
+[[env.e2e.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots-dev"
+
 [env.e2e.vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
@@ -307,3 +352,5 @@ BASE_URL = "http://127.0.0.1:5173"
 SYNC_WORKER_URL = "http://127.0.0.1:8789"
 ENVIRONMENT = "development"
 ADMIN_EMAILS = "alice@example.test"
+# AQU-AGENT §6 — local sandbox worker (dev-stack :8790); key passed as --var.
+AGENT_SANDBOX_URL = "http://127.0.0.1:8790"

@@ -17,7 +17,7 @@
  */
 
 import {
-  forwardRef, useEffect, useImperativeHandle, useRef, useState,
+  forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode,
 } from "react"
 import { useEditor, EditorContent } from "@tiptap/react"
 import type { EditorView } from "@tiptap/pm/view"
@@ -53,10 +53,16 @@ export interface ChatComposerProps {
   queueWhileStreaming?: boolean
   /** Empty-state hint; defaults to "Ask the agent…". */
   placeholder?: string
+  /** Agent-mode attach-file affordance. `attachmentBar` renders full-width
+   *  above the input (attached-file pills); `attachAction` renders at the start
+   *  of the block-end action row (the attach button + its hidden file input).
+   *  Chat mode passes neither, so the composer stays unchanged there. */
+  attachmentBar?: ReactNode
+  attachAction?: ReactNode
 }
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
-  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions, queueWhileStreaming, placeholder },
+  { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions, queueWhileStreaming, placeholder, attachmentBar, attachAction },
   ref,
 ) {
   const [isEmpty, setIsEmpty] = useState(true)
@@ -170,6 +176,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             ))}
           </div>
         )}
+        {attachmentBar}
         <InputGroup>
           <div className="relative w-full min-w-0 flex-1">
             <EditorContent editor={editor} />
@@ -186,6 +193,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             )}
           </div>
           <InputGroupAddon align="block-end">
+            {attachAction}
             <InputGroupText className={cn(compact ? "text-[9px]" : "text-[10px]")}>
               Enter to send · Shift+Enter for newline
             </InputGroupText>

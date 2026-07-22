@@ -45,6 +45,7 @@ Or exercise the model path directly (no web layer / no auth):
     modal run infra/modal/omnivoice_app.py --text "Hello world" --output out.wav
 """
 
+import hmac
 import io
 import os
 
@@ -63,9 +64,12 @@ image = (
     modal.Image.debian_slim(python_version="3.10")
     .apt_install("git", "ffmpeg", "libsndfile1")
     .pip_install(
-        # OmniVoice from source (latest; pinned release tag available once stable)
-        # SWARM-TODO: pin to a stable release tag once k2-fsa publishes one
-        "git+https://github.com/k2-fsa/OmniVoice.git",
+        # OmniVoice from source, pinned to a specific commit — installing the
+        # floating HEAD of a third-party repo would let an upstream compromise
+        # or bad push land in the next image rebuild with GPU-container
+        # privileges (access to OMNIVOICE_TOKEN/HF_TOKEN). Bump deliberately.
+        # SWARM-TODO: switch to a stable release tag once k2-fsa publishes one
+        "git+https://github.com/k2-fsa/OmniVoice.git@5ba967c4d5b0f08244ae856b033eea583d1e4517",
         # soundfile for encoding numpy → WAV bytes in-memory
         "soundfile",
         # FastAPI for the asgi endpoint
@@ -224,7 +228,7 @@ def web():
         x_auth_token: str = Header(default=""),
     ):
         expected = os.environ.get("OMNIVOICE_TOKEN", "")
-        if not expected or x_auth_token != expected:
+        if not expected or not hmac.compare_digest(x_auth_token, expected):
             raise HTTPException(status_code=401, detail="unauthorized")
 
         voice_ref_bytes: bytes | None = None

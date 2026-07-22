@@ -91,6 +91,27 @@ export default defineConfig([
       ],
     },
   },
+  // DOM-global shadow guard (AQU-642): these PascalCase browser globals collide with
+  // lucide-react icon names. If an icon import is dropped (e.g. in a merge-conflict
+  // resolution), the JSX silently resolves to the DOM global — TypeScript accepts it
+  // (lib.dom declares them) and React throws "TypeError: Illegal constructor" at
+  // runtime. Restricting the bare globals makes the missing import a lint error.
+  // Only names with no legitimate bare use in src/ are listed (Audio, Image, File,
+  // Node, Event etc. are excluded because the app uses them as real globals).
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...['Lock', 'Text', 'Option', 'History', 'Selection', 'Comment', 'Notification', 'Touch', 'Screen'].map(
+          (name) => ({
+            name,
+            message: `"${name}" here is the browser global, not an import — if this is meant to be a lucide icon or local symbol, import it (see AQU-642).`,
+          }),
+        ),
+      ],
+    },
+  },
   // Test files: allow `any` for test stubs/mocks, relax unused-vars (many tests
   // intentionally destructure only some fields of a fixture), allow BOM and
   // other special whitespace in string/regex literals that simulate real file

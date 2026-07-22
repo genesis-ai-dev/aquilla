@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Rules page secondary dialogs:
@@ -10,17 +10,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * This spec verifies both open and can be dismissed.
  */
 test("Import from doc and Suggest from edits dialogs open on rules page", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `RuleDialogs ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `RuleDialogs ${Date.now()}` })
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // ── 1. "Import from doc" opens RuleImportDialog ──

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { schema as basicSchema } from "@tiptap/pm/schema-basic"
+import { basicSchema } from "./test-schema"
 import { findTermMatches, buildTerminologyChipDecorationSet } from "./terminology-chip-plugin"
 import type { Concept } from "@/lib/terminology/types"
 

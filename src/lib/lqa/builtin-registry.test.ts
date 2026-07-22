@@ -2,13 +2,14 @@ import { describe, it, expect } from "vitest"
 import { BUILTIN_CHECKS, BUILTIN_CHECK_IDS } from "./builtin-registry"
 
 describe("builtin-registry", () => {
-  it("contains all 9 v1 checks", () => {
+  it("contains all builtin checks", () => {
     expect(BUILTIN_CHECK_IDS).toEqual([
       "empty-target",
       "target-equals-source",
       "placeholder-integrity",
       "number-integrity",
       "end-punctuation-mismatch",
+      "punctuation-integrity",
       "double-space",
       "repeated-word",
       "unpaired-symbols",

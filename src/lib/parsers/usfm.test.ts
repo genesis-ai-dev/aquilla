@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { extractUsfmStrings } from "./usfm"
 import ultTitRaw from "./__fixtures__/ult-tit-1.usfm?raw"
+import ultPsaRaw from "./__fixtures__/ult-psa-1.usfm?raw"
 import uhbExoRaw from "./__fixtures__/uhb-exo-1.usfm?raw"
 
 describe("extractUsfmStrings", () => {
@@ -51,7 +52,19 @@ describe("extractUsfmStrings", () => {
     expect(strings[1].type).toBe("verse")
   })
 
-  it("parses paratext markers", () => {
+  it("keeps in-body paratext markers (major section / parallel ref)", () => {
+    const usfm = `\\id GEN
+\\c 1
+\\ms Primeval History
+\\v 1 In the beginning.`
+
+    const result = extractUsfmStrings(usfm)
+    const strings = result[0].strings
+    expect(strings[0].original).toBe("Primeval History")
+    expect(strings[0].type).toBe("paratext")
+  })
+
+  it("filters the book name (\\mt) out of source cells (AQU-585)", () => {
     const usfm = `\\id GEN
 \\mt Genesis
 \\c 1
@@ -59,8 +72,9 @@ describe("extractUsfmStrings", () => {
 
     const result = extractUsfmStrings(usfm)
     const strings = result[0].strings
-    expect(strings[0].original).toBe("Genesis")
-    expect(strings[0].type).toBe("paratext")
+    // The \mt book title is front matter, not a translatable cell.
+    expect(strings.map((s) => s.original)).toEqual(["In the beginning."])
+    expect(strings.some((s) => s.type === "paratext")).toBe(false)
   })
 
   it("treats file without \\id as single document", () => {
@@ -111,11 +125,11 @@ describe("extractUsfmStrings — section labels", () => {
     expect(heading?.section).toBe("GEN 3")
   })
 
-  it("sets section to '<BOOK> intro' for paratext (book-level front matter)", () => {
+  it("does not emit a cell for book-level front matter (\\mt1) — AQU-585", () => {
     const usfm = "\\id GEN\n\\mt1 Genesis\n\\c 1\n\\v 1 hi\n"
     const [book] = extractUsfmStrings(usfm)
-    const paratext = book.strings.find(s => s.type === "paratext")
-    expect(paratext?.section).toBe("GEN intro")
+    expect(book.strings.find(s => s.type === "paratext")).toBeUndefined()
+    expect(book.strings.map(s => s.original)).toEqual(["hi"])
   })
 })
 
@@ -141,7 +155,10 @@ describe("extractUsfmStrings — aligned USFM3 (unfoldingWord)", () => {
 
   it("leaves no alignment markup or attribute residue in any cell", () => {
     const [book] = extractUsfmStrings(ultTitRaw)
-    expect(book.strings.length).toBeGreaterThanOrEqual(4)
+    // Verse cells only — the \mt1/\h/\toc book-name front matter is filtered
+    // out on import (AQU-585), leaving the three excerpted Titus verses.
+    expect(book.strings.length).toBeGreaterThanOrEqual(3)
+    expect(book.strings.every((s) => s.type === "verse")).toBe(true)
     for (const s of book.strings) {
       expect(s.original).not.toMatch(/\\zaln|\\w|x-occurrence|x-strong|\|/)
       expect(s.original).not.toMatch(/\s[,.;:!?]/)
@@ -191,12 +208,215 @@ describe("extractUsfmStrings — aligned USFM3 (unfoldingWord)", () => {
 the heavens , and the earth.
 \\v 2 The earth was without form.`
     const [book] = extractUsfmStrings(plain)
+    // \mt Genesis (book name) is filtered out per AQU-585; the section heading
+    // and verse bodies are preserved byte-for-byte.
     expect(book.strings.map((s) => s.original)).toEqual([
-      "Genesis",
       "The Creation",
       "In the beginning God created the heavens , and the earth.",
       "The earth was without form.",
     ])
+  })
+})
+
+// Real unfoldingWord OT content: verse text flows across \q1/\q2 poetry lines, the
+// \v marker itself sits mid-line after the poetry marker, zaln milestones nest, and
+// {curly braces} mark implied words that ARE part of ULT's translatable text.
+// Before this fix every \q* line was dropped and Psalm 1:2 was not even detected.
+describe("extractUsfmStrings — poetry (aligned ULT Psalm 1)", () => {
+  it("reconstructs a full verse whose text spans \\q1/\\q2 poetry lines", () => {
+    const [book] = extractUsfmStrings(ultPsaRaw)
+    expect(book.bookId).toBe("PSA")
+    const v1 = book.strings.find((s) => s.context === "PSA 1:1")
+    expect(v1?.original).toBe(
+      "The happinesses of the man who walks not in the advice of the wicked, and stands not in the pathway of sinners, and sits not in the seat of scoffers,",
+    )
+  })
+
+  it("detects a verse whose \\v marker sits mid-line after \\q1, and keeps {braces}", () => {
+    const [book] = extractUsfmStrings(ultPsaRaw)
+    const v2 = book.strings.find((s) => s.context === "PSA 1:2")
+    expect(v2).toBeDefined()
+    expect(v2?.original).toContain("in the instruction of Yahweh")
+    // Nested \zaln-s pairs around "but" must strip cleanly; the {is} implied-word
+    // braces are ULT's translatable-text convention and must survive.
+    expect(v2?.original).toContain("but in the instruction of Yahweh {is} his delight,")
+    expect(v2?.original?.endsWith("he meditates day and night.")).toBe(true)
+  })
+
+  it("leaves no alignment or poetry markup in any cell", () => {
+    const [book] = extractUsfmStrings(ultPsaRaw)
+    for (const s of book.strings) {
+      expect(s.original).not.toMatch(/\\zaln|\\w|\\q|x-occurrence|x-strong|\|/)
+    }
+  })
+})
+
+describe("extractUsfmStrings — footnotes, verse ranges, plain poetry", () => {
+  it("strips \\f …\\f* footnotes (incl. inner \\fqa) leaving clean verse text", () => {
+    const usfm = `\\id MAT
+\\c 5
+\\v 11 Blessed are you when they persecute you \\f + \\ft A few manuscripts do not include \\fqa lying.\\fqa*\\f* for my sake.`
+    const [book] = extractUsfmStrings(usfm)
+    const v11 = book.strings.find((s) => s.context === "MAT 5:11")
+    expect(v11?.original).toBe("Blessed are you when they persecute you for my sake.")
+    expect(v11?.original).not.toMatch(/\\f|\\ft|\\fqa/)
+  })
+
+  it("strips footnotes that span multiple lines, and \\x …\\x* cross-references", () => {
+    const usfm = `\\id MAT
+\\c 1
+\\v 1 The book of the genealogy \\f + \\ft a note
+that continues on the next line\\f* of Jesus Christ \\x + \\xo 1:1 \\xt Luke 3:23\\x* the son of David.`
+    const [book] = extractUsfmStrings(usfm)
+    expect(book.strings[0].original).toBe(
+      "The book of the genealogy of Jesus Christ the son of David.",
+    )
+  })
+
+  it("emits ref 'BOOK C:1-2' for verse ranges with clean text", () => {
+    const usfm = `\\id MRK
+\\c 1
+\\v 1-2 The beginning of the gospel of Jesus Christ.`
+    const [book] = extractUsfmStrings(usfm)
+    const v = book.strings[0]
+    expect(v.context).toBe("MRK 1:1-2")
+    expect(v.globalReferences).toEqual(["MRK 1:1-2"])
+    expect(v.original).toBe("The beginning of the gospel of Jesus Christ.")
+  })
+
+  it("keeps plain-USFM \\q continuation text and treats \\d as heading, \\b as skip", () => {
+    const usfm = `\\id PSA
+\\c 23
+\\d A psalm of David.
+\\q1
+\\v 1 Yahweh is my shepherd;
+\\q2 I shall not want.
+\\b
+\\q1
+\\v 2 He makes me lie down in green pastures.`
+    const [book] = extractUsfmStrings(usfm)
+    const heading = book.strings.find((s) => s.type === "heading")
+    expect(heading?.original).toBe("A psalm of David.")
+    const v1 = book.strings.find((s) => s.context === "PSA 23:1")
+    // The \q2 line's text is verse continuation, not a dropped marker line.
+    expect(v1?.original).toBe("Yahweh is my shepherd; I shall not want.")
+    const v2 = book.strings.find((s) => s.context === "PSA 23:2")
+    expect(v2?.original).toBe("He makes me lie down in green pastures.")
+  })
+})
+
+// Adversarial-review blockers (AQU-615): each test below encodes the exact failure
+// the reviewer reported — malformed/edge USFM that silently lost or corrupted cells.
+describe("extractUsfmStrings — unterminated footnotes must not swallow verses", () => {
+  it("keeps all three verses when a dangling \\f pairs with a later verse's \\f*", () => {
+    // Reviewer probe: the old /\\f\s[\s\S]*?\\f\*/ matched from v1's unterminated
+    // opener to v3's closer, yielding ONE cell "alpha tail" — verses 2,3 vanished.
+    const usfm = `\\id MAT
+\\c 1
+\\v 1 alpha \\f + \\ft dangling note
+\\v 2 beta
+\\v 3 gamma \\f + \\ft real\\f* tail`
+    const [book] = extractUsfmStrings(usfm)
+    const verses = book.strings.filter((s) => s.type === "verse")
+    expect(verses.map((s) => s.context)).toEqual(["MAT 1:1", "MAT 1:2", "MAT 1:3"])
+    expect(verses.map((s) => s.original)).toEqual(["alpha", "beta", "gamma tail"])
+  })
+
+  it("a dangling \\x cross-reference strips only to end-of-line", () => {
+    const usfm = `\\id MAT
+\\c 1
+\\v 1 first \\x + \\xo 1:1 never closed
+\\v 2 second \\x + \\xo 1:2 \\xt Luke 3:23\\x* survives`
+    const [book] = extractUsfmStrings(usfm)
+    const verses = book.strings.filter((s) => s.type === "verse")
+    expect(verses.map((s) => s.original)).toEqual(["first", "second survives"])
+  })
+})
+
+describe("extractUsfmStrings — \\qs (Selah) and \\qa (acrostic heading)", () => {
+  it("keeps \\qs …\\qs* Selah text as part of the verse in plain USFM", () => {
+    const usfm = `\\id PSA
+\\c 3
+\\q1
+\\v 2 There is no salvation for him in God.
+\\q2 \\qs Selah\\qs*`
+    const [book] = extractUsfmStrings(usfm)
+    const v2 = book.strings.find((s) => s.context === "PSA 3:2")
+    expect(v2?.original).toBe("There is no salvation for him in God. Selah")
+  })
+
+  it("keeps Selah in aligned USFM3 where \\qs wraps a \\w word", () => {
+    const usfm = `\\id PSA
+\\c 3
+\\q1
+\\v 2 \\zaln-s |x-strong="H0430"\\*\\w God|x-occurrence="1"\\w*\\zaln-e\\*
+\\q2 \\qs \\w Selah|x-occurrence="1"\\w*\\qs*`
+    const [book] = extractUsfmStrings(usfm)
+    const v2 = book.strings.find((s) => s.context === "PSA 3:2")
+    expect(v2?.original).toBe("God Selah")
+  })
+
+  it("emits \\qa acrostic headings (Psalm 119 letter names) as heading cells", () => {
+    const usfm = `\\id PSA
+\\c 119
+\\qa Aleph
+\\q1
+\\v 1 Blessed are those whose way is blameless.`
+    const [book] = extractUsfmStrings(usfm)
+    const heading = book.strings.find((s) => s.type === "heading")
+    expect(heading?.original).toBe("Aleph")
+    const v1 = book.strings.find((s) => s.context === "PSA 119:1")
+    expect(v1?.original).toBe("Blessed are those whose way is blameless.")
+  })
+})
+
+describe("extractUsfmStrings — ref normalization (deterministic DCS cell ids)", () => {
+  it("'\\v 01' produces the same ref as '\\v 1'", () => {
+    const usfm = "\\id PSA\n\\c 1\n\\v 01 The happinesses of the man.\n"
+    const [book] = extractUsfmStrings(usfm)
+    expect(book.strings[0].context).toBe("PSA 1:1")
+    expect(book.strings[0].globalReferences).toEqual(["PSA 1:1"])
+  })
+
+  it("'\\v 01-02' normalizes each side of the range to 'PSA 1:1-2'", () => {
+    const usfm = "\\id PSA\n\\c 1\n\\v 01-02 Combined verses.\n"
+    const [book] = extractUsfmStrings(usfm)
+    expect(book.strings[0].context).toBe("PSA 1:1-2")
+    expect(book.strings[0].globalReferences).toEqual(["PSA 1:1-2"])
+  })
+})
+
+describe("extractUsfmStrings — pre-verse container text must not mutate headings", () => {
+  it("emits '\\q1 words' after a \\s heading (before any \\v) as a chapter text cell", () => {
+    const usfm = `\\id PSA
+\\c 5
+\\s A morning prayer
+\\q1 pre-verse poetry line
+\\v 1 Give ear to my words, Yahweh.`
+    const [book] = extractUsfmStrings(usfm)
+    const heading = book.strings.find((s) => s.type === "heading")
+    // The heading cell must be untouched — the old continuation path appended the
+    // poetry line onto it.
+    expect(heading?.original).toBe("A morning prayer")
+    const text = book.strings.find((s) => s.type === "text")
+    expect(text?.original).toBe("pre-verse poetry line")
+    expect(text?.context).toBe("PSA 5")
+    const v1 = book.strings.find((s) => s.context === "PSA 5:1")
+    expect(v1?.original).toBe("Give ear to my words, Yahweh.")
+  })
+
+  it("does not append a post-\\c stray line to the previous chapter's last verse", () => {
+    const usfm = `\\id PSA
+\\c 1
+\\v 6 For Yahweh knows the way of the righteous.
+\\c 2
+\\q1 orphan line
+\\v 1 Why do the nations rage?`
+    const [book] = extractUsfmStrings(usfm)
+    const v6 = book.strings.find((s) => s.context === "PSA 1:6")
+    expect(v6?.original).toBe("For Yahweh knows the way of the righteous.")
+    const text = book.strings.find((s) => s.type === "text")
+    expect(text?.context).toBe("PSA 2")
   })
 })
 
@@ -210,7 +430,9 @@ describe("extractUsfmStrings — globalReferences", () => {
   })
 
   it("does not tag headings or paratext with globalReferences", () => {
-    const usfm = "\\id LUK\n\\mt1 Luke\n\\c 1\n\\s1 The Coming.\n\\v 1 First verse.\n"
+    // \ms (major section) is in-body paratext that survives the AQU-585 filter,
+    // unlike the \mt book title.
+    const usfm = "\\id LUK\n\\c 1\n\\ms The Coming Age\n\\s1 The Coming.\n\\v 1 First verse.\n"
     const [book] = extractUsfmStrings(usfm)
     const heading = book.strings.find(s => s.type === "heading")
     const paratext = book.strings.find(s => s.type === "paratext")

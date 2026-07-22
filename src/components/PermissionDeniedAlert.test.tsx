@@ -53,6 +53,33 @@ describe("PermissionDeniedAlert", () => {
     expect(alert.textContent).not.toContain("needs")
   })
 
+  it("AQU-623: names the current project role using the permission vocabulary", async () => {
+    await addSession({ jwt: "j", username: "translator", email: "t@example.com", createdAt: "2026-01-01T00:00:00Z" })
+    render(
+      <PermissionDeniedAlert
+        action="change shared settings"
+        requiredRole="Maintainer or higher"
+        currentRole="Viewer"
+      />,
+      { wrapper },
+    )
+    const alert = await screen.findByRole("alert")
+    await waitFor(() =>
+      expect(alert).toHaveTextContent(
+        "You're signed in as translator (t@example.com) — your role on this project is Viewer, which doesn't have permission to change shared settings (needs Maintainer or higher).",
+      ),
+    )
+  })
+
+  it("AQU-623: links to the permission-levels docs page", async () => {
+    await addSession({ jwt: "j", username: "translator", createdAt: "2026-01-01T00:00:00Z" })
+    render(<PermissionDeniedAlert action="change shared settings" />, { wrapper })
+    const link = await screen.findByRole("link", { name: /learn about permission levels/i })
+    expect(link).toHaveAttribute("href", expect.stringContaining("/permissions"))
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"))
+  })
+
   it("offers a one-click switch to an already signed-in account", async () => {
     // First added becomes active (translator); owner is the other session.
     await addSession({ jwt: "j1", username: "translator", createdAt: "2026-01-01T00:00:00Z" })

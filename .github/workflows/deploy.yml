@@ -45,7 +45,7 @@ jobs:
       deployments: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
@@ -71,10 +71,10 @@ jobs:
         run: |
           echo "::notice::Skipping preview deploy (${{ steps.decide.outputs.reason }}). Add [preview] to a commit message to force one."
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.decide.outputs.deploy == 'true'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.decide.outputs.deploy == 'true'
         with:
           node-version: 22
@@ -139,7 +139,7 @@ jobs:
       - name: Deploy aquilla-web (main/staging/dev)
         id: deploy_prod
         if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
@@ -148,7 +148,7 @@ jobs:
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview
         if: steps.decide.outputs.deploy == 'true' && github.event_name == 'pull_request'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
@@ -156,7 +156,7 @@ jobs:
 
       - name: Comment preview URL on PR
         if: github.event_name == 'pull_request' && steps.decide.outputs.deploy == 'true'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: pages-preview
           message: |

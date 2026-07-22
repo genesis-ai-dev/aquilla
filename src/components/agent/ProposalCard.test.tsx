@@ -120,7 +120,7 @@ describe("role gate", () => {
   it("disables Apply with a reason when the role is below the kind's floor", () => {
     render(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} roleLevel={ROLE.REVIEWER} />)
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
-    expect(screen.getByText("Requires contributor role or higher")).toBeInTheDocument()
+    expect(screen.getByText("Requires Contributor role or higher")).toBeInTheDocument()
   })
 
   it("enables Apply at the floor and fails open when the role is unknown", () => {

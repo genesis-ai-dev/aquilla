@@ -265,6 +265,46 @@ describe('changesets — ask-mode confirmation', () => {
     expect((await res.json() as any).error.code).toBe('confirmation_required')
   })
 
+  // races-F1 (burn-without-apply): the one-time confirmation must be consumed
+  // ONLY once the commit is owned (the staged→committing flip won). A commit that
+  // fails the approval step must burn nothing and leave the changeset RECOVERABLE
+  // (reverted to 'staged', never stranded in 'committing'), so a later commit
+  // with a valid approval still succeeds — and, critically, still REQUIRES that
+  // approval (it is not silently applied).
+  it('a commit blocked at the confirmation step burns nothing and stays recoverable', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred({ mode: 'ask' }))
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'approved' },
+    ])
+
+    // No approval yet → confirmation_required, and NOTHING applied.
+    const res1 = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res1.status).toBe(428)
+    expect((await res1.json() as any).error.code).toBe('confirmation_required')
+    const commits1 = (await tdb.rows('events')).filter((e: any) => e.kind === 'target.cell.commit')
+    expect(commits1).toHaveLength(0)
+
+    // The changeset was RELEASED back to 'staged' (not stranded in 'committing').
+    const csRows = await tdb.rows<{ id: string; status: string }>('changesets')
+    expect(csRows.find((r) => r.id === prep.changeset.id)?.status).toBe('staged')
+
+    // A valid approval now commits it (approval was preserved / never demanded twice).
+    await insertConfirmation(tdb.db, {
+      id: 'conf-ok', changesetId: prep.changeset.id, credentialId: CRED_1, digest: prep.digest,
+    })
+    const res2 = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(res2.status).toBe(200)
+    expect((await res2.json() as any).receipt.appliedCount).toBe(1)
+
+    // Confirmation consumed exactly once; provenance carries it.
+    const conf = await tdb.rows<{ consumed_at: unknown }>('changeset_confirmations')
+    expect(conf.filter((c) => c.consumed_at != null)).toHaveLength(1)
+    const commit = (await tdb.rows<{ kind: string; provenance: unknown }>('events')).find((e) => e.kind === 'target.cell.commit')!
+    const prov = typeof commit.provenance === 'string' ? JSON.parse(commit.provenance) : commit.provenance
+    expect(prov.confirmation_id).toBe('conf-ok')
+  })
+
   it('valid confirmation commits once; a second commit returns the receipt without double-applying', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb, contributorCred({ mode: 'ask' }))

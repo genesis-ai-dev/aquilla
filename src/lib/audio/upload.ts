@@ -11,6 +11,10 @@ import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 
 const AUDIO_URL_SCHEME = "frontier-audio"
 
+/** Server-side upload cap. Mirrors MAX_AUDIO_BYTES in sync-worker/src/audio.ts
+ *  (the client can't import worker code) — keep the two in sync. */
+export const MAX_AUDIO_UPLOAD_BYTES = 95 * 1024 * 1024
+
 export interface AudioUploadResult {
   audioId: string
   ext: string
@@ -94,6 +98,14 @@ export interface UploadCellAudioArgs {
 
 export async function uploadCellAudio(args: UploadCellAudioArgs): Promise<AudioUploadResult> {
   const { projectId, fileId, audioId, ext, blob, getSyncToken } = args
+  if (blob.size > MAX_AUDIO_UPLOAD_BYTES) {
+    const mb = (n: number) => Math.round(n / (1024 * 1024))
+    throw new Error(
+      `This audio file is ${mb(blob.size)} MB — the limit is ` +
+        `${mb(MAX_AUDIO_UPLOAD_BYTES)} MB. Try a compressed format like mp3, ` +
+        `or split the file.`,
+    )
+  }
   const token = await getSyncToken(projectId, fileId)
   if (!token) throw new Error("audio upload: no sync token (not signed in or no project access)")
 
@@ -150,6 +162,21 @@ export async function deleteCellAudio(args: DeleteCellAudioArgs): Promise<void> 
   }).catch((e) => {
     console.warn("[audio/delete] orphan cleanup failed:", e)
   })
+}
+
+/**
+ * Build an authenticated URL an `<audio src>` can stream directly. Media
+ * elements can't send Authorization headers, so the sync-token rides in a
+ * `?t=` query param (GET-only on the worker side). The endpoint supports
+ * Range/206, so playback starts as soon as the browser has buffered enough —
+ * no full-download-into-memory wait. Returns null when no sync token is
+ * available (anonymous session / no project access).
+ */
+export async function getCellAudioStreamUrl(args: FetchCellAudioArgs): Promise<string | null> {
+  const { projectId, fileId, audioId, ext, getSyncToken } = args
+  const token = await getSyncToken(projectId, fileId)
+  if (!token) return null
+  return `${audioEndpoint(projectId, fileId, audioId, ext)}?t=${encodeURIComponent(token)}`
 }
 
 /** Fetch an uploaded audio blob back from sync-worker. Returns the raw

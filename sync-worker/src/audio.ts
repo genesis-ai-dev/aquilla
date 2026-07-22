@@ -121,6 +121,13 @@ export async function handleAudioRequest(
   const projectId = decodeURIComponent(match[1])
   const fileId = decodeURIComponent(match[2])
   const audioId = decodeURIComponent(match[3])
+  // Defense-in-depth: R2 keys are opaque (no path resolution), and callers
+  // are already token-scoped to (projectId, fileId), but reject anything
+  // outside a plain filename charset so a decoded `../` or control character
+  // can't end up embedded in an R2 key at all.
+  if (!/^[A-Za-z0-9._-]+$/.test(audioId)) {
+    return withAudioCors(new Response("invalid audioId", { status: 400 }))
+  }
   const key = audioObjectKey(env, projectId, fileId, audioId)
 
   if (request.method === "DELETE") {

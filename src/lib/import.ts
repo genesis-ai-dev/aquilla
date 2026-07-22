@@ -2022,6 +2022,22 @@ export async function importParatextAsTarget(
   return { refs: visibleRefs, settings: project.settings, skipped }
 }
 
+function withExactSourceArtifact(
+  result: ImportResult,
+  bytes: ArrayBuffer,
+  format: SourceArtifactFormat,
+): ImportResult {
+  // A single-member import has one authoritative original: the exact uploaded
+  // bytes. The USFM parser also returns a decoded/converted rawSource skeleton,
+  // but retaining both makes provenance ambiguous (and for USX they are
+  // different formats). Multi-book imports intentionally keep per-book text
+  // skeletons and preserve their exact shared container through the separate
+  // sharedSourceArtifact path below.
+  const normalized = { ...result, rawBytes: bytes, rawSourceFormat: format }
+  delete normalized.rawSource
+  return normalized
+}
+
 export async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
   switch (fileType) {
     case "txt":
@@ -2074,17 +2090,11 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
           } : {}),
         }))
       }
-      return isUsx
-        ? results.map((result) => ({
-            ...result,
-            rawBytes: bytes,
-            rawSourceFormat: "usx",
-          }))
-        : results.map((result) => ({
-            ...result,
-            rawBytes: bytes,
-            rawSourceFormat: "usfm",
-          }))
+      return results.map((result) => withExactSourceArtifact(
+        result,
+        bytes,
+        isUsx ? "usx" : "usfm",
+      ))
     }
     case "docx": {
       const buffer = await file.arrayBuffer()

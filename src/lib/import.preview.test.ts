@@ -19,13 +19,31 @@ interface CapturedBody {
   file?: { kind?: string; fileType?: string; importManifest?: { hasScriptureContent?: boolean } }
   cells: Array<{ id: string; cellId: string; anchorCellId: string | null; value: string }>
 }
+interface CapturedSourceUpload {
+  bytes: ArrayBuffer
+  format: string | null
+}
 let captured: CapturedBody[]
+let capturedSourceUploads: CapturedSourceUpload[]
 
 beforeEach(() => {
   captured = []
+  capturedSourceUploads = []
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        const headers = new Headers(init.headers)
+        capturedSourceUploads.push({
+          bytes: init.body as ArrayBuffer,
+          format: headers.get("X-Source-Format"),
+        })
+        return new Response(JSON.stringify({
+          artifactId: headers.get("X-Artifact-Id"),
+          key: "source/test",
+          sha256: headers.get("X-Source-Sha256"),
+        }), { status: 200, headers: { "Content-Type": "application/json" } })
+      }
       const body = JSON.parse(String(init?.body)) as CapturedBody
       captured.push(body)
       return new Response(
@@ -105,6 +123,7 @@ describe("parseFile — parse phase only (no upload)", () => {
 
     expect(result.rawSourceFormat).toBe("usx")
     expect(new TextDecoder().decode(result.rawBytes!)).toBe(usx)
+    expect(result.rawSource).toBeUndefined()
     expect(result.strings.map((cell) => cell.type)).toEqual(["heading", "verse"])
     expect(result.strings.find((cell) => cell.type === "verse")?.globalReferences).toEqual(["GEN 1:1"])
     expect(captured).toHaveLength(0)
@@ -293,6 +312,40 @@ describe("parseFile — parse phase only (no upload)", () => {
 // ─── commit phase: emitParsedFile calls the network ──────────────────────────
 
 describe("emitParsedFile — commit phase calls bulk upload", () => {
+  it.each([
+    {
+      name: "single.usfm",
+      original: "\\id GEN\n\\c 1\n\\v 1 In the beginning.\n",
+      format: "usfm",
+    },
+    {
+      name: "Genesis.usx",
+      original: [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<usx version="3.0">',
+        '<book code="GEN" style="id">Genesis</book>',
+        '<chapter number="1" style="c" sid="GEN 1" />',
+        '<para style="p"><verse number="1" style="v" sid="GEN 1:1" />In the beginning.</para>',
+        '</usx>',
+      ].join("\n"),
+      format: "usx",
+    },
+  ])("commits exact $format parser output without ambiguous provenance", async ({ name, original, format }) => {
+    const [parsed] = await parseFile(makeFile(name, original), "usfm")
+
+    await emitParsedFile(parsed, "usfm", {
+      projectId: "proj-1",
+      author: "tester",
+      sourceLanguage: "en",
+      targetLanguage: "fr",
+      getToken: async () => "tok",
+    })
+
+    expect(capturedSourceUploads).toHaveLength(1)
+    expect(capturedSourceUploads[0].format).toBe(format)
+    expect(new TextDecoder().decode(capturedSourceUploads[0].bytes)).toBe(original)
+  })
+
   it("uploads cells after parse and returns a FileReference", async () => {
     const strings = [
       { id: "a", original: "Hello", translated: "", context: "ctx", group: "g", type: "text" as const },

@@ -132,5 +132,6 @@ export function rowToUser(row: UserRow): AuthUser {
     preferences: prefs,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    password_changed_at: row.password_changed_at ?? null,
   }
 }

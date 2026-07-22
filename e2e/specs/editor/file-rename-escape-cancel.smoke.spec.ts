@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * File rename — Escape key cancels without saving.
@@ -25,14 +19,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   5. Verifies the original name "sample" is still shown in the sidebar.
  */
 test("Escape in file rename input cancels without changing the filename", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `RenameCancel ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `RenameCancel ${Date.now()}` })
+  await openSeededProject(alice, seeded)
 
   // Right-click the file row to open the context menu.
   const sidebar = alice.locator("aside")

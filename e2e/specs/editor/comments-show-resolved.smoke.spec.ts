@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * CommentsPage — "Show resolved" checkbox filter.
@@ -18,16 +12,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * verify comment is hidden → check "Show resolved" → comment appears.
  */
 test("comments page Show resolved checkbox reveals resolved threads", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ShowResolved ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ShowResolved ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   const row = ws.cellRow(0)
   await row.scrollIntoViewIfNeeded()

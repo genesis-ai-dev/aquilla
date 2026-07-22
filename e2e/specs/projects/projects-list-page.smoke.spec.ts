@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectsList page — /projects shows org projects grid.
@@ -13,10 +13,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * verify the project name appears in the grid.
  */
 test("projects list page shows created project in grid", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
   const projName = `ListProj ${Date.now()}`
-  await dash.createProject({ name: projName, source: "en", target: "fr" })
+  await seedProjectWithFile(await jwtFor("alice"), { name: projName })
 
   await alice.goto("/projects")
   await alice.waitForLoadState("networkidle")

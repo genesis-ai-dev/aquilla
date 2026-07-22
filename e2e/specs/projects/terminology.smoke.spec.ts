@@ -1,16 +1,11 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 import { Glossary } from "../../helpers/page-objects/Glossary"
 
 test("glossary renders its editor-style append surface", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  await dash.createProject({ name: `Glossary ${Date.now()}`, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Glossary ${Date.now()}` })
 
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await new Glossary(alice).goto(projectId!)
+  await new Glossary(alice).goto(seeded.projectId)
   await expect(alice.getByText("Source", { exact: true })).toBeVisible()
   await expect(alice.getByText("Rendering", { exact: true })).toBeVisible()
   await expect(alice.getByPlaceholder("New source term…")).toBeVisible()

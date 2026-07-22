@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * CommentThread — "Close with reply" resolves the thread with a reply.
@@ -18,16 +12,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * (cell has no open comment indicator OR a resolved indicator is shown).
  */
 test("CommentThread Close with reply posts reply and resolves thread", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `CloseWithReply ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CloseWithReply ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Open cell action menu and add a comment.
   const row = ws.cellRow(0)

@@ -1842,8 +1842,10 @@ export function ProjectWorkspace() {
   // draft (`onCompleteSingle(cell)`) or an explicit regenerate
   // (`onCompleteSingle(cell, { regenerate: true })`) — the latter maps to the
   // hook's third argument so a second iteration samples at a higher temperature.
+  // AQU-618: return the promise — EditorRow awaits it to show the "Saved"
+  // confirmation only after the draft actually commits, not at click time.
   const handleCompleteSingle = useCallback(
-    (cell: CellData, opts?: { regenerate?: boolean }) => { void completeSingle(cell, undefined, opts) },
+    (cell: CellData, opts?: { regenerate?: boolean }) => completeSingle(cell, undefined, opts),
     [completeSingle],
   )
 

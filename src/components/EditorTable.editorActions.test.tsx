@@ -249,6 +249,52 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     // that the change landed (the strand-after-Replace bug this fixes).
     expect(await screen.findByText("Saved")).toBeInTheDocument()
   })
+
+  // AQU-618 regression, dialog path: a NON-empty target routes the sparkle
+  // through GenerateOverwriteDialog. Confirming "Replace" must also end in the
+  // Saved confirmation — the AQU-591 merge rewired the dialog's onConfirm back
+  // to the bare onCompleteSingle and silently dropped it (only the empty-cell
+  // path above was covered, so CI stayed green).
+  it("shows a Saved confirmation after confirming Replace in the overwrite dialog (AQU-618)", async () => {
+    const onCompleteSingle = vi.fn().mockResolvedValue(undefined)
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={makeStore("cell-1")}
+            username="tester"
+            isCompletionConfigured={true}
+            isCompletionAvailable={true}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={onCompleteSingle}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+
+    const sparkle = await screen.findByRole("button", { name: "Translate with AI" })
+    fireEvent.click(sparkle)
+
+    // Non-empty target → the overwrite confirm dialog opens first.
+    expect(onCompleteSingle).not.toHaveBeenCalled()
+    const replace = await screen.findByRole("button", { name: "Replace" })
+    fireEvent.click(replace)
+
+    expect(onCompleteSingle).toHaveBeenCalledTimes(1)
+    expect(onCompleteSingle).toHaveBeenCalledWith(expect.objectContaining({ id: "cell-1" }))
+    expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
   // AQU-590: an in-progress AI translation must be evident ON the cell, even
   // when the cell already has a translation (the sparkle regenerate/replace
   // case). Before the fix the target-column overlay was suppressed once the

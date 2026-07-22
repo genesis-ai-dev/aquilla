@@ -50,72 +50,21 @@ import {
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
 
-function ProjectRowSkeleton() {
-  return (
-    <div className="flex items-center gap-4 p-4">
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <Skeleton className="h-4 w-1/3" />
-        <Skeleton className="h-1.5 w-full rounded-full" />
-        <Skeleton className="h-1.5 w-full rounded-full" />
-      </div>
-      <div className="flex shrink-0 flex-col gap-2 text-right">
-        <Skeleton className="ml-auto h-3 w-16" />
-        <Skeleton className="ml-auto h-3 w-16" />
-      </div>
-    </div>
-  )
-}
-
-function OrgHomeSkeleton({ isAllOrgs }: { isAllOrgs: boolean }) {
+function OrgHomeLoading() {
   return (
     <div
       role="status"
       aria-live="polite"
-      data-testid="org-home-skeleton"
-      className="flex flex-col gap-6"
+      data-testid="org-home-loading"
+      className="flex min-h-[50vh] items-center justify-center"
     >
-      <span className="sr-only">Loading dashboard…</span>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="flex h-[88px] flex-col gap-2 rounded-2xl border bg-card p-4">
-            <Skeleton className="h-6 w-10" />
-            <Skeleton className="h-3 w-16" />
-          </div>
-        ))}
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <Spinner aria-hidden="true" className="size-5" />
+        <span>Loading workspace…</span>
       </div>
-      {isAllOrgs ? (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <section className="rounded-2xl border bg-card">
-            <div className="border-b px-4 py-3">
-              <Skeleton className="h-5 w-28" />
-            </div>
-            <div className="divide-y">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <ProjectRowSkeleton key={i} />
-              ))}
-            </div>
-          </section>
-          <section className="rounded-2xl border bg-card">
-            <div className="border-b px-4 py-3">
-              <Skeleton className="h-5 w-20" />
-            </div>
-            <div className="divide-y">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <ProjectRowSkeleton key={i} />
-              ))}
-            </div>
-          </section>
-        </div>
-      ) : (
-        <div className="rounded-2xl border divide-y">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <ProjectRowSkeleton key={i} />
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -821,7 +770,7 @@ export function OrgHome() {
         <Page size="wide">
           <PageHeader title={workspaceLabel} />
           {isPageLoading ? (
-            <OrgHomeSkeleton isAllOrgs={isAllOrgs} />
+            <OrgHomeLoading />
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (

@@ -292,13 +292,14 @@ describe("OrgHome", () => {
     )
 
     try {
-      await waitFor(() => expect(screen.getByTestId("org-home-skeleton")).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByTestId("org-home-loading")).toBeInTheDocument())
+      expect(screen.getByText("Loading workspace…")).toBeInTheDocument()
       await act(async () => { await Promise.resolve() })
       expect(addedText.join("\n")).not.toContain("Your organization is ready")
       expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()
 
       await act(async () => { resolvePortfolio([]) })
-      await waitFor(() => expect(screen.queryByTestId("org-home-skeleton")).not.toBeInTheDocument())
+      await waitFor(() => expect(screen.queryByTestId("org-home-loading")).not.toBeInTheDocument())
       expect(screen.getByText("Your organization is ready")).toBeInTheDocument()
       expect(within(projectsRollupStat()).getByText("0")).toBeInTheDocument()
     } finally {

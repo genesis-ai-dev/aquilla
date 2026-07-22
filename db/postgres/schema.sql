@@ -170,7 +170,30 @@ CREATE TABLE project_invites (
     used_by    BIGINT,
     used_at    TIMESTAMPTZ,
     email      TEXT,
+    -- AQU-528: optional JSON array of lane (target-language) values to
+    -- auto-grant as kind='lane' project_member_scopes on accept. NULL =
+    -- unscoped invite (grants access across every lane the role allows).
+    scope_lanes TEXT,
     PRIMARY KEY (token, project_id)
+);
+
+-- AQU-626: authenticated per-user deep links + PIN (fresh-browser / diode-zone
+-- flow). A reusable link binds one pre-provisioned account to one project; the
+-- scrypt-hashed PIN is the only credential. See migrations/0036 for the full
+-- security model (indistinguishable failures, attempt-lockout, soft-revoke).
+CREATE TABLE project_access_links (
+    token           TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL,
+    user_id         BIGINT NOT NULL,
+    pin_hash        TEXT NOT NULL,
+    role_level      INTEGER NOT NULL DEFAULT 400,
+    created_by      BIGINT NOT NULL,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    expires_at      TIMESTAMPTZ,
+    revoked_at      TIMESTAMPTZ,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until    TIMESTAMPTZ,
+    last_used_at    TIMESTAMPTZ
 );
 
 -- Email-based organization invitations (see migrations/0043_org_invites.sql).
@@ -665,6 +688,8 @@ CREATE INDEX idx_org_members_user ON org_members(user_id);
 CREATE UNIQUE INDEX idx_organizations_legacy_uuid ON organizations(legacy_uuid);
 CREATE INDEX idx_organizations_owner ON organizations(owner_user_id);
 CREATE INDEX idx_password_reset_tokens_token ON password_reset_tokens(token);
+CREATE INDEX idx_project_access_links_project ON project_access_links(project_id);
+CREATE INDEX idx_project_access_links_user ON project_access_links(user_id);
 CREATE INDEX idx_project_invites_project ON project_invites(project_id);
 CREATE INDEX idx_project_invites_token ON project_invites(token);
 CREATE INDEX idx_project_invites_unused ON project_invites(project_id, used_by) WHERE used_by IS NULL;

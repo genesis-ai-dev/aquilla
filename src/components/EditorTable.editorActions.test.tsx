@@ -122,6 +122,24 @@ function makeStore(cellId: string): CellStore {
   return store
 }
 
+// AQU-618: a cell with an EMPTY target so the AI-generate sparkle skips the
+// overwrite-confirm dialog and calls onCompleteSingle directly.
+function makeEmptyTargetStore(cellId: string): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: project.id,
+    fileId: "file-1",
+    username: "tester",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  const rows = makeRows(cellId)
+  const target = rows.find((r) => r.side === "target")
+  if (target) target.value = ""
+  store.replaceRows(rows, { full: true, maxServerSeq: 1 })
+  return store
+}
+
 function renderTable(
   actions: Partial<EditorActionsContextValue>,
   completing: Map<string, string> = new Map(),
@@ -192,6 +210,45 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     expect(screen.queryByRole("button", { name: "Edit history" })).not.toBeInTheDocument()
   })
 
+  it("shows a Saved confirmation after a single-cell AI generate/Replace resolves (AQU-618)", async () => {
+    const onCompleteSingle = vi.fn().mockResolvedValue(undefined)
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={makeEmptyTargetStore("cell-1")}
+            username="tester"
+            isCompletionConfigured={true}
+            isCompletionAvailable={true}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={onCompleteSingle}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+
+    const sparkle = await screen.findByRole("button", { name: "Translate with AI" })
+    fireEvent.click(sparkle)
+
+    // Empty target → no overwrite dialog; onCompleteSingle runs directly.
+    expect(onCompleteSingle).toHaveBeenCalledTimes(1)
+    expect(onCompleteSingle).toHaveBeenCalledWith(expect.objectContaining({ id: "cell-1" }))
+    // The "Saved" confirmation appears only AFTER the completion promise
+    // resolves — proving the flow returns the user to the cell with a signal
+    // that the change landed (the strand-after-Replace bug this fixes).
+    expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
   // AQU-590: an in-progress AI translation must be evident ON the cell, even
   // when the cell already has a translation (the sparkle regenerate/replace
   // case). Before the fix the target-column overlay was suppressed once the

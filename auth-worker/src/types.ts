@@ -305,6 +305,32 @@ export interface ProjectInviteRow {
   used_at: string | null
   /** Optional recipient the invite was minted for; null for open links. */
   email: string | null
+  /**
+   * AQU-528: optional JSON array of lane (target-language) values to
+   * auto-grant as kind='lane' project_member_scopes when the link is redeemed.
+   * null = unscoped invite (grants access across every lane the role allows).
+   */
+  scope_lanes: string | null
+}
+
+/** Row shape of `project_access_links` (AQU-626: per-user deep link + PIN). */
+export interface ProjectAccessLinkRow {
+  token: string
+  project_id: string
+  /** The pre-provisioned account this link + PIN logs into. */
+  user_id: number
+  /** scrypt hash of the PIN — never the plain PIN. */
+  pin_hash: string
+  role_level: number
+  created_by: number
+  created_at: string
+  expires_at: string | null
+  /** Soft-kill for a leaked link; redemption treats a revoked link as dead. */
+  revoked_at: string | null
+  failed_attempts: number
+  /** Lockout window end; while in the future the link redeems as if dead. */
+  locked_until: string | null
+  last_used_at: string | null
 }
 
 /** Row shape of `project_members`. */

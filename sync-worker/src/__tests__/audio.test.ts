@@ -510,4 +510,34 @@ describe("audio R2 endpoints", () => {
     expect(res.status).toBe(200)
     expect(env.SNAPSHOTS._size()).toBe(0)
   })
+
+  // [Pen test] Input validation & injection attacks — the audioId path
+  // segment used to flow straight into the R2 key with no charset check.
+  // R2 keys aren't filesystem paths (no traversal), but reject anything
+  // outside a plain filename charset as defense-in-depth against a decoded
+  // `../` or control character ending up embedded in a key.
+  it("rejects an audioId containing path-traversal characters", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const res = (await handleAudioRequest(
+      new Request(
+        `https://w/audio/p1/f1/${encodeURIComponent("../../other-project/secret")}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(400)
+  })
+
+  it("rejects an audioId containing whitespace or other unexpected characters", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const res = (await handleAudioRequest(
+      new Request(`https://w/audio/p1/f1/${encodeURIComponent("clip webm")}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(400)
+  })
 })

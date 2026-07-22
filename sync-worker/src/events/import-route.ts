@@ -37,11 +37,27 @@ import {
 import { allocateSeqRange, buildBulkEventInsertStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
+import { MAX_SOURCE_BYTES } from './source-upload-route'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
  *  order of magnitude under it while keeping SQL text small. */
 const BULK_ROWS = 1000
+
+// The client chunks at 1500 cells/request (src/lib/sync/bulk-import.ts
+// CHUNK). This is ~3x headroom for legitimate traffic while stopping a
+// single request from fanning out into an unbounded number of bulk-INSERT
+// statements against the shared single-writer DB.
+const MAX_CELLS_PER_REQUEST = 5000
+// Per-field byte caps — generous for a single verse/segment/sentence-sized
+// cell, but enough to stop one malformed/malicious cell from persisting a
+// multi-MB blob into a row that every reader of the file re-fetches.
+const MAX_CELL_TEXT_BYTES = 256 * 1024
+const MAX_METADATA_BYTES = 64 * 1024
+
+function utf8Bytes(s: string): number {
+  return new TextEncoder().encode(s).length
+}
 
 async function runImportBatch(
   db: AquillaDb,
@@ -166,6 +182,56 @@ export async function handleBulkImportRequest(
       new Response('body must be { projectId, fileId, cells[] }', { status: 400 }),
       request,
     )
+  }
+  if (body.cells.length > MAX_CELLS_PER_REQUEST) {
+    return withCors(
+      Response.json(
+        { error: `too many cells in one request (${body.cells.length} > ${MAX_CELLS_PER_REQUEST})` },
+        { status: 413 },
+      ),
+      request,
+    )
+  }
+  if (body.rawSource !== undefined) {
+    if (typeof body.rawSource !== 'string' || utf8Bytes(body.rawSource) > MAX_SOURCE_BYTES) {
+      return withCors(
+        Response.json({ error: 'rawSource too large or malformed', maxBytes: MAX_SOURCE_BYTES }, { status: 413 }),
+        request,
+      )
+    }
+  }
+  for (const cell of body.cells) {
+    if (cell.value !== undefined && typeof cell.value !== 'string') {
+      return withCors(new Response('cell.value must be a string', { status: 400 }), request)
+    }
+    if (cell.valueHtml !== undefined && typeof cell.valueHtml !== 'string') {
+      return withCors(new Response('cell.valueHtml must be a string', { status: 400 }), request)
+    }
+    if (
+      (typeof cell.value === 'string' && utf8Bytes(cell.value) > MAX_CELL_TEXT_BYTES) ||
+      (typeof cell.valueHtml === 'string' && utf8Bytes(cell.valueHtml) > MAX_CELL_TEXT_BYTES)
+    ) {
+      return withCors(
+        Response.json({ error: 'cell text exceeds size limit', maxBytes: MAX_CELL_TEXT_BYTES }, { status: 413 }),
+        request,
+      )
+    }
+    if (cell.metadata !== undefined) {
+      if (
+        typeof cell.metadata !== 'object' ||
+        cell.metadata === null ||
+        Array.isArray(cell.metadata) ||
+        utf8Bytes(JSON.stringify(cell.metadata)) > MAX_METADATA_BYTES
+      ) {
+        return withCors(
+          Response.json(
+            { error: 'cell.metadata must be a plain object within the size limit', maxBytes: MAX_METADATA_BYTES },
+            { status: 400 },
+          ),
+          request,
+        )
+      }
+    }
   }
 
   // Auth: token must be scoped to this (project, file) and hold a source-write

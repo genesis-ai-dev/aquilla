@@ -479,3 +479,109 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     expect(blobRows[0]).toMatchObject({ file_id: FILE_ID, format: 'usfm', raw_source: rawSource })
   })
 })
+
+// [Pen test] Input validation & injection attacks — bulk import previously
+// accepted an unbounded `cells[]` array and unbounded per-field string/JSON
+// sizes, letting a single authenticated request fan out into an oversized
+// batch write against the shared single-writer DB, or persist arbitrarily
+// large blobs into a `cells` row every collaborator re-fetches.
+describe('POST /import — request-size and field-type limits', () => {
+  it('rejects a cells[] array over the per-request cap', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const cells = Array.from({ length: 5001 }, (_, i) => ({
+      id: `oversize-evt-${i}`,
+      cellId: `oversize-cell-${i}`,
+      value: 'x',
+    }))
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ projectId: PROJECT_ID, fileId: FILE_ID, cells }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(413)
+  })
+
+  it('rejects an oversized rawSource', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-evt-big', name: 'GEN.usfm', fileType: 'usfm' },
+        cells: [],
+        rawSource: 'x'.repeat(51 * 1024 * 1024),
+        rawSourceFormat: 'usfm',
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(413)
+  })
+
+  it('rejects a cell.value that is not a string', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [{ id: 'evt-1', cellId: 'cell-1', value: { not: 'a string' } }],
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(400)
+  })
+
+  it('rejects an oversized cell.value', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [{ id: 'evt-1', cellId: 'cell-1', value: 'x'.repeat(257 * 1024) }],
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(413)
+  })
+
+  it('rejects a non-object cell.metadata', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [{ id: 'evt-1', cellId: 'cell-1', value: 'ok', metadata: ['not', 'an', 'object'] }],
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(400)
+  })
+
+  it('still accepts a well-formed request under all limits', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const req = await makeImportRequest(token, { idPrefix: 'ok', cellCount: 3, includeFile: true })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+    expect(await rows('cells')).toHaveLength(3)
+  })
+})

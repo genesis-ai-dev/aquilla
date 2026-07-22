@@ -68,6 +68,7 @@ export const obsRoute: ResourceRoute = {
       out.push({
         fileId: dcsFileId(repo, path),
         name: frames[0].section ?? base,
+        sourcePath: path,
         cells,
       })
     }

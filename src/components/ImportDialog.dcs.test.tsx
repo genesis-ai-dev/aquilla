@@ -35,6 +35,7 @@ vi.mock("@/lib/import", () => ({
   prepareEBibleTargetImport: vi.fn(),
   applyEBibleTargetImport: vi.fn(),
   parseFile: vi.fn(async () => []),
+  prepareImportFile: vi.fn(async () => ({ fileType: "txt", results: [] })),
 }))
 vi.mock("@/lib/import-sdbh", () => ({ importSdbh: vi.fn() }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))

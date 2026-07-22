@@ -4,8 +4,8 @@
 // CAT formats). Converting to a different format lives in a collapsed
 // "Export to another format" section (format radio + scope + advanced).
 //
-// For non-USFM formats, project scope uses useProjectCells to fan-out over all
-// project files (up to MAX_FILES=40) and buildProjectZip to produce a zip.
+// For non-USFM formats, project scope uses useProjectCells to load every file
+// with bounded concurrency and buildProjectZip to produce a zip.
 //
 // AQU-253 (revised): when org policy forbids export, the dialog renders an
 // explicit permission gate (with a link to the roles & permissions help page)
@@ -79,7 +79,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
   },
   {
     // AQU-233: DOCX export with paragraph/heading structure preserved.
-    // Only shown for files imported as .docx (isDocxFile prop).
+    // Only shown for files imported as .docx.
     id: "docx",
     label: "Word (.docx)",
     ext: ".docx",
@@ -234,6 +234,8 @@ interface ExportDialogProps {
   projectFiles: { id: string; name: string; type: string }[]
   sourceLanguage?: string
   targetLanguage?: string
+  /** Storage lane for the active target. Distinct from its display language. */
+  targetLang?: string
   /** Project TTS settings including cast assignments and voice library.
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
@@ -253,6 +255,7 @@ export function ExportDialog({
   projectFiles,
   sourceLanguage = "und",
   targetLanguage = "und",
+  targetLang = "",
   ttsSettings,
   getToken,
 }: ExportDialogProps) {
@@ -375,12 +378,13 @@ export function ExportDialog({
   // project scope so we don't fan-out N fetches on dialog open.
   const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
 
-  const { files: projectFileCells, isLoading: projectCellsLoading, isTruncated } =
+  const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
       projectId,
       projectFiles,
       getToken,
       enabled: projectScopeEnabled,
+      lane: targetLang,
     })
 
   /**
@@ -434,6 +438,7 @@ export function ExportDialog({
             projectName,
             files: projectFiles,
             getToken,
+            targetLang,
             onProgress: (done, total) =>
               setStatus({ kind: "busy", msg: `Downloading ${done}/${total}…` }),
           })
@@ -446,7 +451,7 @@ export function ExportDialog({
           const stem = buildExportStem(false)
           const downloadName = `${stem}.SFM`
           // AQU-276: read lossy-verse count from response header.
-          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
+          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({
@@ -462,7 +467,7 @@ export function ExportDialog({
         // AQU-233: DOCX round-trip export. Fetch the raw DOCX side-car from the
         // server, then inject translations client-side using JSZip + DOMParser.
         setStatus({ kind: "busy", msg: "Fetching original document…" })
-        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: "Injecting translations…" })
         const { exportDocx } = await import("@/lib/export/exporters/docx")
         const result = await exportDocx(rawBytes, cells)
@@ -485,7 +490,7 @@ export function ExportDialog({
         // the server, then inject translations client-side (JSZip + DOMParser),
         // mirroring the DOCX path above.
         setStatus({ kind: "busy", msg: "Fetching original presentation…" })
-        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: "Injecting translations…" })
         const { exportPptx } = await import("@/lib/export/exporters/pptx")
         const result = await exportPptx(rawBytes, cells)
@@ -536,6 +541,10 @@ export function ExportDialog({
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
           return
         }
+        if (projectCellsError) {
+          setStatus({ kind: "error", msg: `Couldn't load the complete project: ${projectCellsError.message}` })
+          return
+        }
         const byCellId = new Map<string, string>()
         for (const f of projectFileCells) {
           for (const c of f.cells) {
@@ -563,14 +572,17 @@ export function ExportDialog({
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
           return
         }
+        if (projectCellsError) {
+          setStatus({ kind: "error", msg: `Couldn't load the complete project: ${projectCellsError.message}` })
+          return
+        }
         // AQU-441: metadata-csv project scope — flatten all file cells into one sheet.
         if (fmt === "metadata-csv") {
           const allCells = projectFileCells.flatMap((f) => f.cells)
           const csvBlob = exportMetadataCsv(allCells, ttsSettings)
           const safeName = buildExportStem(true)
           downloadBlob(csvBlob, `${safeName}.csv`)
-          const truncNote = isTruncated ? " (first 40 files only)" : ""
-          setStatus({ kind: "ok", msg: `Downloaded ${safeName}.csv (${allCells.length} rows)${truncNote}` })
+          setStatus({ kind: "ok", msg: `Downloaded ${safeName}.csv (${allCells.length} rows)` })
           return
         }
         setStatus({ kind: "busy", msg: `Building zip for ${projectFileCells.length} files…` })
@@ -584,8 +596,7 @@ export function ExportDialog({
         const ext = fmtOption.ext
         downloadBlob(zipBlob, `${safeName}${ext}.zip`)
         setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
-        const truncNote = isTruncated ? " (first 40 files only)" : ""
-        setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files${truncNote}` })
+        setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files` })
       } else {
         // Client-side single-file exporter
         // AQU-439: apply voice filter before passing to any exporter.
@@ -845,14 +856,6 @@ export function ExportDialog({
               <Skeleton className="h-2 w-2 rounded-full shrink-0" />
               <Skeleton className="h-3 w-40" />
             </div>
-          )}
-          {effectiveScope === "project" && format !== "usfm" && isTruncated && (
-            <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400 mt-1">
-              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-              This project has more than 40 files — zip will include the first 40 only.
-              {/* SWARM-TODO(project-export-scale): server batch-export endpoint for
-                  large projects; see src/hooks/useProjectCells.ts for the proposed shape. */}
-            </p>
           )}
         </fieldset>
 

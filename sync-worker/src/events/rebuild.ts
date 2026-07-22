@@ -26,10 +26,10 @@
 import {
   buildEventProjectionStmts,
   CHAIN_MUTATING_KINDS,
-  laneOfEvent,
   type PersistedEvent,
 } from './event-projection'
 import type { EventKind } from './types'
+import { eventQualifiedParentKey } from './chain-claims'
 import { fullProgressRecomputeStmts } from './progress-projection'
 
 const BATCH_LIMIT = 100
@@ -113,22 +113,17 @@ export async function handleRebuildProjectionRequest(
   //    siblings stay in `events` (which we're not rewriting) but don't
   //    contribute to the projection.
   const winningChildAt = new Map<string, string>()
-  // AQU-538 lanes: the slot is lane-qualified for non-default target lanes,
-  // mirroring the live claim (handlers/cell-events.ts) and isWinningChild —
-  // replay must arbitrate exactly like live or the projections diverge.
-  // Default-lane events ('' / absent targetLang, all pre-lane history) keep
-  // the legacy key byte-for-byte.
-  const laneSuffixOf = (row: EventRow): string => {
-    if (!row.kind.startsWith('target.cell.')) return ''
+  // Source and target sides, plus named target lanes, arbitrate independently.
+  // Compute the exact same qualified parent key as the live claim path.
+  const qualifiedParentKeyOf = (row: EventRow): string => {
     try {
-      const lane = laneOfEvent(row.kind, JSON.parse(row.payload))
-      return lane ? `@lane:${lane}` : ''
+      return eventQualifiedParentKey(row.parent_id, row.kind, JSON.parse(row.payload))
     } catch {
-      return ''
+      return eventQualifiedParentKey(row.parent_id, row.kind, null)
     }
   }
   const childKey = (row: EventRow): string =>
-    `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${row.parent_id ?? '<null>'}${laneSuffixOf(row)}`
+    `${row.project_id}\0${row.file_id ?? ''}\0${row.cell_id ?? ''}\0${qualifiedParentKeyOf(row)}`
 
   const stmts: AquillaStatement[] = []
   let eventsRead = 0

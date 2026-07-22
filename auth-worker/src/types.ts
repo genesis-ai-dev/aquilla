@@ -117,9 +117,10 @@ export interface Env {
   PG_CONNECTION_STRING?: string
 
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
-  /** Base URL of the sandbox worker (aquilla-agent-sandbox). Dev default
-   *  http://127.0.0.1:8790. Unset → run_code/load_artifact/read_sandbox_file
-   *  return a clear "sandbox unavailable" tool error (the run still proceeds). */
+  /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may
+   *  inject http://127.0.0.1:8790 or a configured deployed endpoint. Unset →
+   *  run_code/load_artifact/read_sandbox_file return a clear "sandbox
+   *  unavailable" tool error (the run still proceeds). */
   AGENT_SANDBOX_URL?: string
   /** Shared bearer secret for the sandbox worker. Secret (never a plain var);
    *  set locally by the dev-stack. Unset → sandbox tools are unavailable. */

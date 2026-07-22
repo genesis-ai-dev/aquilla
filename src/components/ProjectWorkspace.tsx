@@ -29,7 +29,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, fileTypeHasSections, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -4110,6 +4110,7 @@ export function ProjectWorkspace() {
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   getTokenForFile={getTokenForFile}
+                  targetLang={activeLane}
                   onSelectFile={(fileId, opts) => {
                     // Workbench: the explorer designates the agent's working
                     // area — stay in the takeover, retarget the session, and
@@ -4778,7 +4779,7 @@ export function ProjectWorkspace() {
           <>
             {/* Parallel Bibles (helloao): edge tab → slide-out panel showing the
                 scroll-tracked verse in other bible versions. Scripture files only. */}
-            {centerSurface === "editor" && activeFile && fileTypeHasSections(activeFile.type) && (
+            {centerSurface === "editor" && activeFile && fileHasSections(activeFile) && (
               <ParallelBiblesSidebar
                 key={activeFile.id}
                 trackedRef={trackedCellRef}
@@ -4981,6 +4982,8 @@ export function ProjectWorkspace() {
           username={currentUsername}
           getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
+          targetLang={activeLane}
+          identityToken={frontierSession?.jwt}
           onImported={handleImported}
           sourceCells={importSourceCells}
           ttsSettings={tts.settings}
@@ -5021,6 +5024,7 @@ export function ProjectWorkspace() {
             onOpenChange={setFileImportOpen}
             projectId={project.id}
             username={currentUsername}
+            targetLang={activeLane}
             fileName={activeFile?.name ?? "this file"}
             cells={fileTargetCells}
             getToken={getTokenForFile}
@@ -5072,6 +5076,7 @@ export function ProjectWorkspace() {
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}
+          targetLang={activeLane}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
         />

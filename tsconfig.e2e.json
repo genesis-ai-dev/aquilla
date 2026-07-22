@@ -18,7 +18,13 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* E2E helpers intentionally reuse selected src/ parsers so their seeded
+     * state cannot drift from real imports. Those parsers use the app alias. */
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": ["e2e/**/*.ts"]
 }

@@ -49,6 +49,7 @@
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { htmlToSpans, spansToRunXml } from "./docx-runs"
+import { packageBlockKey, translationsByPackageBlock } from "../import-locators"
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -67,14 +68,15 @@ export interface DocxExportResult {
 /**
  * Takes the raw DOCX bytes (fetched from the server side-car) and a list of
  * source cells with their translations. Injects translations back into
- * word/document.xml by matching paragraphs in document order (POSITIONAL).
+ * word/document.xml by the reversible package-block locator retained at import.
  *
  * Cell ordering: cells are provided in document order. Each unique `group`
  * value corresponds to one source paragraph. Multiple cells with the same
  * `group` are segments of the same paragraph and are joined with a space.
  *
- * Matching: the Nth non-empty `<w:p>` in the XML maps to the Nth unique cell
- * group in document order. (source_location/blockPath was deferred in Task 5.)
+ * Legacy cells without normalized locators retain a positional compatibility
+ * fallback; normalized cells never fall back, preventing a reordered/deleted
+ * cell from shifting translations into the wrong paragraph.
  *
  * A paragraph is "non-empty" iff its inner content contains a `<w:t…>…</w:t>`
  * with non-whitespace text.
@@ -95,11 +97,12 @@ export async function exportDocx(
   const groupToData = new Map<string, { html: string; plain: string }>()
 
   for (const cell of cells) {
-    if (!groupToData.has(cell.group)) {
-      groups.push(cell.group)
-      groupToData.set(cell.group, { html: "", plain: "" })
+    const legacyGroup = cell.group || cell.id
+    if (!groupToData.has(legacyGroup)) {
+      groups.push(legacyGroup)
+      groupToData.set(legacyGroup, { html: "", plain: "" })
     }
-    const data = groupToData.get(cell.group)!
+    const data = groupToData.get(legacyGroup)!
     if (cell.translated?.trim()) {
       const prev = data.plain
       data.plain = prev ? `${prev} ${cell.translated.trim()}` : cell.translated.trim()
@@ -109,6 +112,8 @@ export async function exportDocx(
       data.html = prev ? `${prev} ${cell.translatedHtml.trim()}` : cell.translatedHtml.trim()
     }
   }
+  const locatedTranslations = translationsByPackageBlock(cells)
+  const hasLocatedTranslations = locatedTranslations.size > 0
 
   // Surgical paragraph scan: match both full <w:p …>…</w:p> and self-closing <w:p …/>.
   // We do NOT use DOMParser/XMLSerializer — raw string splice only.
@@ -122,6 +127,7 @@ export async function exportDocx(
   let rebuilt = ""
   let lastIndex = 0
   let nonEmptyIdx = 0
+  let paragraphIndex = 0
   let injected = 0
   let untouched = 0
   const warnings: { segment: string; detail: string }[] = []
@@ -129,6 +135,7 @@ export async function exportDocx(
 
   while ((match = paraRegex.exec(xml)) !== null) {
     const full = match[0]
+    paragraphIndex++
     const matchStart = match.index
 
     // Copy the slice before this match verbatim.
@@ -153,17 +160,21 @@ export async function exportDocx(
       continue
     }
 
-    // Non-empty paragraph: map to the Nth group.
+    // Normalized imports address the exact source paragraph. Only legacy rows
+    // use the positional group fallback.
+    const located = locatedTranslations.get(
+      packageBlockKey("word/document.xml", `w:p[${paragraphIndex}]`),
+    )
     const group = groups[nonEmptyIdx]
     nonEmptyIdx++
 
-    if (!group) {
+    if (!located && (hasLocatedTranslations || !group)) {
       rebuilt += full
       untouched++
       continue
     }
 
-    const data = groupToData.get(group)!
+    const data = located ?? groupToData.get(group as string)!
     // Use html if available, fall back to plain text. Skip if both empty.
     const html = data.html || data.plain
     if (!html) {
@@ -185,7 +196,7 @@ export async function exportDocx(
     // the base. Surface that per-segment so the export UI can flag it.
     if (countDistinctRunFormats(innerAfterPPr) > 1) {
       warnings.push({
-        segment: group,
+        segment: located?.label ?? group ?? "unknown paragraph",
         detail:
           "paragraph had mixed inline formatting; translation keeps only the first run's styling",
       })

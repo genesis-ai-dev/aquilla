@@ -2,8 +2,8 @@
 //
 // The harness (agent.ts) calls the sandbox over HTTP for code execution,
 // artifact loading, and file reads. All routes require
-// `Authorization: Bearer ${AGENT_SANDBOX_KEY}`. Base URL = env.AGENT_SANDBOX_URL,
-// dev default http://127.0.0.1:8790.
+// `Authorization: Bearer ${AGENT_SANDBOX_KEY}`. Base URL = env.AGENT_SANDBOX_URL;
+// local dev may inject :8790 or an explicitly configured deployed endpoint.
 //
 // Every call degrades to a CLEAR "sandbox unavailable" result when the URL or
 // key is unset, or the worker is unreachable — the model sees a tool error it

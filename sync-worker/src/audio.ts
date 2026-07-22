@@ -24,6 +24,7 @@ import { verifyTokenForFile } from "./auth"
 
 export interface AudioEnv {
   SNAPSHOTS: R2Bucket
+  AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
 }
@@ -45,6 +46,7 @@ export function audioObjectKey(
 }
 
 const AUDIO_PATH_RE = /^\/audio\/([^/]+)\/([^/]+)\/([^/]+)$/
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 /** Parsed single byte-range. `suffix` = last-N-bytes form (`bytes=-N`). */
 type ParsedRange = { offset: number; length?: number } | { suffix: number }
@@ -78,7 +80,7 @@ export const MAX_AUDIO_BYTES = 95 * 1024 * 1024
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, Range",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, Range, X-Artifact-Id, X-Artifact-Name",
   "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",
@@ -174,6 +176,25 @@ export async function handleAudioRequest(
   }
 
   if (request.method === "PUT") {
+    const artifactId = request.headers.get("X-Artifact-Id")?.trim()
+    if (artifactId && !UUID_RE.test(artifactId)) {
+      return withAudioCors(new Response("invalid artifact id", { status: 400 }))
+    }
+    if (artifactId && !env.AQUILLA_PG) {
+      return withAudioCors(new Response("AQUILLA_PG binding not configured", { status: 500 }))
+    }
+    let artifactName: string | undefined
+    const encodedArtifactName = request.headers.get("X-Artifact-Name")
+    if (encodedArtifactName) {
+      try {
+        artifactName = decodeURIComponent(encodedArtifactName)
+      } catch {
+        return withAudioCors(new Response("invalid artifact name", { status: 400 }))
+      }
+    }
+    if (artifactName && artifactName.length > 1024) {
+      return withAudioCors(new Response("artifact name is too long", { status: 400 }))
+    }
     // Reject oversize uploads before buffering the whole body when the client
     // advertises the size; the post-buffer check below is the backstop.
     // (Mirrors source-upload-route.ts.)
@@ -189,13 +210,84 @@ export async function handleAudioRequest(
       return tooLarge()
     }
     const body = await request.arrayBuffer()
+    if (body.byteLength === 0) {
+      return withAudioCors(new Response("audio upload is empty", { status: 400 }))
+    }
     if (body.byteLength > MAX_AUDIO_BYTES) {
       return tooLarge()
     }
     const contentType = request.headers.get("Content-Type") || "application/octet-stream"
+    const digest = artifactId ? await crypto.subtle.digest("SHA-256", body) : null
+    const sha256 = digest
+      ? Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("")
+      : null
+    const existing = artifactId
+      ? await env.AQUILLA_PG!.prepare(
+          `SELECT id::text AS id, project_id, file_id, audio_id, sha256
+             FROM artifacts WHERE id::text = ?`,
+        ).bind(artifactId).first<{
+          id: string
+          project_id: string
+          file_id: string | null
+          audio_id: string | null
+          sha256: string
+        }>()
+      : null
+    if (
+      existing
+      && (
+        existing.project_id !== projectId
+        || existing.file_id !== fileId
+        || existing.audio_id !== audioId
+        || existing.sha256 !== sha256
+      )
+    ) {
+      return withAudioCors(new Response("artifact id already belongs to different media", { status: 409 }))
+    }
     await env.SNAPSHOTS.put(key, body, {
       httpMetadata: { contentType },
     })
+    if (artifactId) {
+      const db = env.AQUILLA_PG!
+      try {
+        await db.batch([
+          db.prepare(
+            `INSERT INTO artifacts (
+               id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+               size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+             ) VALUES (?::uuid, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'audio', ?, ?::text::jsonb)
+             ON CONFLICT (id) DO NOTHING`,
+          ).bind(
+            artifactId,
+            projectId,
+            String(verified.claims.userId),
+            artifactName ?? audioId,
+            contentType,
+            body.byteLength,
+            sha256!,
+            key,
+            fileId,
+            audioId,
+            JSON.stringify({ origin: "browser-media-import" }),
+          ),
+          db.prepare(
+            `INSERT INTO artifact_bindings (
+               id, project_id, artifact_id, file_id, binding_role, target_lang,
+               member_path, profile_id, profile_version, fidelity, manifest, recipe
+             ) VALUES (?::uuid, ?, ?::uuid, ?, 'source', '', '', 'builtin:media', '1',
+                       'preserved-only', '{}'::jsonb, NULL)
+             ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
+             DO UPDATE SET updated_at = now()`,
+          ).bind(crypto.randomUUID(), projectId, artifactId, fileId),
+        ])
+      } catch (error) {
+        if (!existing) await env.SNAPSHOTS.delete(key).catch(() => {})
+        return withAudioCors(new Response(
+          `audio artifact metadata write failed: ${error instanceof Error ? error.message : String(error)}`,
+          { status: 500 },
+        ))
+      }
+    }
     return withAudioCors(
       Response.json({ ok: true, key, bytes: body.byteLength }),
     )

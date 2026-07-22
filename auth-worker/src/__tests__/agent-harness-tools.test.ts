@@ -4,8 +4,7 @@
 // WHY: these tools are the agent's new hands. The tests freeze the contracts §2
 // behaviours a UI + safety review depend on: sandbox-unavailable is a CLEAN
 // tool error (not a thrown run), touching artifact bytes LOCKS memory writes for
-// the turn, plan_import refuses to silently chunk oversized files, and every
-// tool emits the exact §4 frame shape.
+// the turn, and every tool emits the exact §4 frame shape.
 import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach, vi } from "vitest"
 import { seedUser } from "./helpers/db"
@@ -15,11 +14,9 @@ import {
   runCode,
   loadArtifact,
   readSandboxFile,
-  planImport,
   proposeMemoryTool,
   readMemoryTool,
   type HarnessToolCtx,
-  PLAN_IMPORT_MAX_CELLS,
 } from "../lib/agent/harness-tools"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
@@ -28,7 +25,6 @@ interface Harness {
   ctx: HarnessToolCtx
   frames: HarnessFrame[]
   guard: { active: boolean; usedThisTurn: boolean }
-  registered: { credentialId: string }[]
 }
 
 function makeHarness(overrides?: {
@@ -37,7 +33,6 @@ function makeHarness(overrides?: {
 }): Harness {
   const frames: HarnessFrame[] = []
   const guard = { active: false, usedThisTurn: false }
-  const registered: { credentialId: string }[] = []
   const memory: MemoryContext = {
     brief: overrides?.memory?.brief ?? "",
     memoryIndex: overrides?.memory?.memoryIndex ?? [],
@@ -47,7 +42,6 @@ function makeHarness(overrides?: {
   const ctx: HarnessToolCtx = {
     env: {
       AQUILLA_PG: env.AQUILLA_PG,
-      SYNC_WORKER_URL: "https://api.aquilla.app/sync",
       AGENT_SANDBOX_URL: sandboxOn ? "http://127.0.0.1:8790" : undefined,
       AGENT_SANDBOX_KEY: sandboxOn ? "dev-sandbox-key" : undefined,
     },
@@ -65,9 +59,8 @@ function makeHarness(overrides?: {
       guard.usedThisTurn = true
     },
     isUntrustedActive: () => guard.active,
-    registerCredential: (c) => registered.push(c),
   }
-  return { ctx, frames, guard, registered }
+  return { ctx, frames, guard }
 }
 
 afterEach(() => vi.restoreAllMocks())
@@ -152,38 +145,6 @@ describe("read_sandbox_file", () => {
     expect(h.guard.active).toBe(false)
     await readSandboxFile({ path: "/workspace/out.txt" }, h.ctx)
     expect(h.guard.active).toBe(true)
-  })
-})
-
-describe("plan_import", () => {
-  it("refuses to silently chunk an oversized file", async () => {
-    const h = makeHarness()
-    const cells = Array.from({ length: PLAN_IMPORT_MAX_CELLS + 1 }, (_, i) => ({ original: `c${i}` }))
-    const text = await planImport({ fileName: "big.usfm", fileType: "usfm", cells }, h.ctx)
-    expect(text).toContain("split this into multiple smaller files")
-  })
-
-  it("stages a changeset, emits changeset.staged, and registers the credential", async () => {
-    await seedUser(1, "alice")
-    const h = makeHarness()
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          changeset: { id: "cs-9" },
-          summary: { sourceCellsAdded: 1, warnings: [] },
-          approvalUrl: "https://aquilla.app/approve/cs-9",
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    )
-    const text = await planImport(
-      { fileName: "genesis.usfm", fileType: "usfm", cells: [{ original: "In the beginning" }] },
-      h.ctx,
-    )
-    expect(text).toContain("cs-9")
-    const frame = h.frames.find((f) => f.type === "changeset.staged")
-    expect(frame).toMatchObject({ type: "changeset.staged", changesetId: "cs-9", cellCount: 1 })
-    expect(h.registered).toHaveLength(1)
   })
 })
 

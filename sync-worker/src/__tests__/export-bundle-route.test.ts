@@ -5,11 +5,16 @@ import { handleExportBundleRequest, type ExportBundleEnv } from "../events/expor
 const SECRET = "bundle-tests-secret"
 
 /** SQL-matching DB stub: blob-list, file-name, and cells queries each get the right shape. */
-function makeStubDb(blobs: { file_id: string; raw_source: string }[], names: Record<string, string> = {}) {
+function makeStubDb(
+  blobs: { file_id: string; raw_source: string | null; r2_key?: string | null }[],
+  names: Record<string, string> = {},
+  cellBinds?: unknown[][],
+) {
   return {
     prepare(sql: string) {
       return {
         bind(...args: unknown[]) {
+          if (sql.includes("FROM cells t")) cellBinds?.push(args)
           return {
             async all() {
               if (sql.includes("file_source_blobs")) return { results: blobs }
@@ -29,6 +34,10 @@ function makeStubDb(blobs: { file_id: string; raw_source: string }[], names: Rec
   } as unknown as ExportBundleEnv["AQUILLA_PG"]
 }
 
+function makeStubBucket(): R2Bucket {
+  return { get: async () => null } as unknown as R2Bucket
+}
+
 async function makeToken(role: number): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   const claims = { userId: 1, projectId: "p1", role, aud: "sync", iat: now, exp: now + 900 }
@@ -43,13 +52,13 @@ function bundleReq(token: string): Request {
 
 describe("GET /export/bundle", () => {
   it("403s a non-maintainer", async () => {
-    const env: ExportBundleEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb([]) }
+    const env: ExportBundleEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb([]), SNAPSHOTS: makeStubBucket() }
     const res = await handleExportBundleRequest(bundleReq(await makeToken(400)), env)
     expect(res?.status).toBe(403)
   })
 
   it("404s a maintainer when there are no exportable files", async () => {
-    const env: ExportBundleEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb([]) }
+    const env: ExportBundleEnv = { SYNC_SECRET_KEY: SECRET, AQUILLA_PG: makeStubDb([]), SNAPSHOTS: makeStubBucket() }
     const res = await handleExportBundleRequest(bundleReq(await makeToken(600)), env)
     expect(res?.status).toBe(404)
   })
@@ -64,6 +73,7 @@ describe("GET /export/bundle", () => {
         ],
         { f1: "GEN.SFM", f2: "EXO.SFM" },
       ),
+      SNAPSHOTS: makeStubBucket(),
     }
     const res = await handleExportBundleRequest(bundleReq(await makeToken(600)), env)
     expect(res?.status).toBe(200)
@@ -74,5 +84,26 @@ describe("GET /export/bundle", () => {
     const txt = new TextDecoder().decode(buf)
     expect(txt).toContain("GEN.SFM")
     expect(txt).toContain("EXO.SFM")
+  })
+
+  it("uses the requested target lane for every file", async () => {
+    const cellBinds: unknown[][] = []
+    const env: ExportBundleEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb(
+        [{ file_id: "f1", raw_source: "\\id GEN\n\\c 1\n\\v 1 In the beginning\n" }],
+        { f1: "GEN.SFM" },
+        cellBinds,
+      ),
+      SNAPSHOTS: makeStubBucket(),
+    }
+    const token = await makeToken(600)
+    const req = new Request("https://w/api/v1/projects/p1/export/bundle?lane=fr-CA", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const res = await handleExportBundleRequest(req, env)
+
+    expect(res?.status).toBe(200)
+    expect(cellBinds).toEqual([["p1", "f1", "fr-CA"]])
   })
 })

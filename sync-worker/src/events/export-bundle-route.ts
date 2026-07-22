@@ -23,6 +23,7 @@ import { makeZip, type ZipEntry } from "../lib/zip"
 export interface ExportBundleEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  SNAPSHOTS: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/export\/bundle$/
@@ -49,6 +50,7 @@ export async function handleExportBundleRequest(
     return withCors(new Response("AQUILLA_PG binding not configured", { status: 500 }), request)
   }
   const projectId = decodeURIComponent(match[1])
+  const lane = url.searchParams.get("lane") ?? ""
   const db = env.AQUILLA_PG
 
   const authHeader = request.headers.get("Authorization") ?? ""
@@ -69,11 +71,11 @@ export async function handleExportBundleRequest(
 
   const blobs = await db
     .prepare(
-      `SELECT file_id, raw_source FROM file_source_blobs
+      `SELECT file_id, raw_source, r2_key FROM file_source_blobs
         WHERE project_id = ? AND format = 'usfm'`,
     )
     .bind(projectId)
-    .all<{ file_id: string; raw_source: string }>()
+    .all<{ file_id: string; raw_source: string | null; r2_key: string | null }>()
   const rows = blobs.results ?? []
   if (rows.length === 0) {
     return withCors(
@@ -84,7 +86,7 @@ export async function handleExportBundleRequest(
 
   const enc = new TextEncoder()
   const entries: ZipEntry[] = []
-  for (const { file_id, raw_source } of rows) {
+  for (const { file_id, raw_source, r2_key } of rows) {
     const meta = await db
       .prepare(`SELECT name FROM files WHERE id = ? AND project_id = ?`)
       .bind(file_id, projectId)
@@ -99,19 +101,39 @@ export async function handleExportBundleRequest(
             AND s.file_id    = t.file_id
             AND s.cell_id    = t.cell_id
             AND s.side       = 'source'
+            AND s.target_lang = ''
           WHERE t.project_id = ?
             AND t.file_id    = ?
             AND t.side       = 'target'
+            AND t.target_lang = ?
             AND s.canonical_ref IS NOT NULL
             AND t.value <> ''`,
       )
-      .bind(projectId, file_id)
+      .bind(projectId, file_id, lane)
       .all<{ canonical_ref: string; value: string }>()
 
     const overrides = new Map<string, string>()
     for (const row of cells.results ?? []) overrides.set(row.canonical_ref, row.value)
 
-    const out = serializeUsfmLossless(parseUsfmLossless(raw_source), overrides)
+    let original = raw_source
+    if (!original && r2_key) {
+      const object = await env.SNAPSHOTS.get(r2_key)
+      if (!object) {
+        return withCors(
+          new Response(`source bytes missing from storage for file ${file_id} — re-import`, { status: 404 }),
+          request,
+        )
+      }
+      original = new TextDecoder().decode(await object.arrayBuffer())
+    }
+    if (!original) {
+      return withCors(
+        new Response(`no source text recorded for file ${file_id} — re-import`, { status: 404 }),
+        request,
+      )
+    }
+
+    const out = serializeUsfmLossless(parseUsfmLossless(original), overrides)
     entries.push({ name: sfmName(meta?.name ?? "", file_id), data: enc.encode(out) })
   }
 

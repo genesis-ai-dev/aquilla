@@ -97,6 +97,8 @@ interface FileProjection {
   name: string
   type: string
   cellCount: number
+  bookCode?: string
+  hasScriptureContent?: boolean
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
@@ -119,7 +121,7 @@ async function loadFilesByProject(
 
   const placeholders = projectIds.map(() => "?").join(",")
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT id, project_id, name, kind, role, cell_count, meta
+    `SELECT id, project_id, name, kind, role, book_code, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
         AND deleted_at IS NULL
@@ -132,6 +134,7 @@ async function loadFilesByProject(
       name: string
       kind: string | null
       role: string | null
+      book_code: string | null
       cell_count: number | null
       meta: string | null
     }>()
@@ -144,6 +147,7 @@ async function loadFilesByProject(
     let targetLanguage: string | undefined
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
+    let hasScriptureContent: boolean | undefined
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
@@ -156,12 +160,14 @@ async function loadFilesByProject(
           target_text_direction?: string
           sourceTextDirection?: string
           targetTextDirection?: string
+          aquillaImport?: { hasScriptureContent?: unknown }
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
         targetLanguage = normalizeLanguage(m.target_language ?? m.targetLanguage)
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
+        if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -172,6 +178,8 @@ async function loadFilesByProject(
       // `file_type` collapsed into role + kind (0012); derive a compatible value.
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
+      ...(f.book_code ? { bookCode: f.book_code } : {}),
+      ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(orderedBy ? { orderedBy } : {}),
       ...(sourceLanguage ? { sourceLanguage } : {}),
       ...(targetLanguage ? { targetLanguage } : {}),

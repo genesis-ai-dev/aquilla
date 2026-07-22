@@ -1,12 +1,15 @@
 import { createApp } from "./app"
 import { resolveSandbox } from "./resolve-sandbox"
 import type { Env } from "./types"
+import { Sandbox as CloudflareSandbox } from "@cloudflare/sandbox"
 
-// The container-backed Durable Object class. wrangler.toml declares a
-// `containers[]` entry with `class_name = "Sandbox"` pointing at ./Dockerfile,
-// and a durable_objects binding named `Sandbox` for the same class. The SDK
-// requires this exact re-export.
-export { Sandbox } from "@cloudflare/sandbox"
+// The container-backed Durable Object class. Internet access defaults ON in
+// Cloudflare Containers, so re-exporting the SDK class directly would let
+// untrusted import code exfiltrate uploaded content. Keep the class name that
+// wrangler.toml binds, but make the documented default-deny policy real.
+export class Sandbox extends CloudflareSandbox<Env> {
+  override enableInternet = false
+}
 
 const app = createApp({ resolveSandbox })
 

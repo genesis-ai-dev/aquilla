@@ -1,12 +1,11 @@
 # Agent import fixtures
 
-Fixtures for the AQU-AGENT sandbox agent e2e journey (`e2e/specs/agent-import.spec.ts`):
-"messy real-world upload → agent inspects/parses it in the sandbox → stages a
-`PlanImport` changeset → human approves." Each file is deliberately messy in a
+Fixtures for the isolated Import-dialog parser journey (`e2e/specs/agent-import.spec.ts`):
+"messy real-world upload → bounded inspection and generated parser code run in
+the sandbox → normalized preview → ordinary ImportService commit." Each file is deliberately messy in a
 way a real translation org's export pipeline actually produces — not
 synthetic edge-case soup — so the fixture doubles as a regression case for the
-harness's `load_artifact` / `run_code` (pandas/openpyxl) tools per
-`docs/swarm/AQU-AGENT-CONTRACTS.md` §1–2.
+container's pandas/openpyxl support and the normalized import contract.
 
 ## `mixed-notes.csv`
 
@@ -40,11 +39,10 @@ edited. Traps, line by line:
   non-ASCII/RTL-adjacent-script handling end to end (encoding, sandbox
   round-trip, changeset preview rendering).
 
-Expected agent behavior: recognize the merged title row and skip it, pick the
+Expected importer behavior: recognize the merged title row and skip it, pick the
 real header row, flag (not silently fix) the delimiter drift and the swapped
-source/target rows, and produce a `PlanImport` changeset whose warnings list
-every row it couldn't confidently resolve (missing source/target) rather than
-dropping them.
+source/target rows, and surface every row it couldn't confidently resolve
+(missing source/target) in preview rather than dropping it.
 
 ## `legacy-export.csv` + `legacy-export.xlsx`
 
@@ -94,14 +92,10 @@ back all 9 rows correctly) at fixture-creation time — see
 `docs/swarm/AQU-AGENT-TRACES.md` for the trace note; CI has no `openpyxl`
 step, so re-verify manually after editing this script.
 
-**Gap**: the sandbox's Tier-2 Python stack per contracts §1
-(`pip install pandas openpyxl ...`) is the intended xlsx reader; this
-generator was not run *through* the actual agent-worker sandbox as part of
-this task (sandbox worker doesn't exist yet — W1A is building it in
-parallel). Once the sandbox is up, add an assertion in
-`agent-import.spec.ts` (or a lower-level agent-worker test) that
-`load_artifact` + a `pandas.read_excel` snippet against this fixture
-round-trips the 9 rows including the merged-cell title and the blank row.
+The container-gated `agent-import.spec.ts` presents these bytes under an
+unknown extension so the normal adapters cannot claim them; the isolated
+parser must still recover meaningful rows before the same preview/commit path
+handles them.
 
 ## `interview-transcript.txt`
 

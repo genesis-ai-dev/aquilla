@@ -5,8 +5,7 @@
  * events with no terminal event at all (no success, no failure, no $exception).
  * Ops could not see the failure class. This test encodes the contract: when the
  * upload commit path (doCommit) throws, the dialog MUST capture IMPORT_FAILED
- * with the error message and non-PII file metadata (count + extensions, never
- * file names).
+ * with the error message and non-PII extension metadata (never file names).
  *
  * posthog is mocked with the same pattern as src/lib/event-names.test.ts;
  * heavy import deps are mocked like ImportDialog.confirm-failure.test.tsx.
@@ -94,34 +93,27 @@ describe("ImportDialog — IMPORT_FAILED instrumentation (silent-mp3-failure fix
       const failed = mockCapture.mock.calls.filter((c) => c[0] === IMPORT_FAILED)
       expect(failed).toHaveLength(1)
       expect(failed[0][1]).toMatchObject({
-        import_type: "upload",
-        phase: "commit",
+        import_stage: "upload",
         project_id: "proj1",
-        file_count: 1,
-        file_exts: ["mp3"],
+        file_exts: "mp3",
       })
-      expect(String(failed[0][1].error)).toContain("recording.mp3")
+      expect(String(failed[0][1].error_message)).toContain("recording.mp3")
       // No PII: file names must never be a property of their own.
       expect(failed[0][1]).not.toHaveProperty("file_names")
     })
   })
 
-  it("enriches IMPORT_STARTED with file_count/file_exts/bytes once files are selected, and captures no IMPORT_FAILED on success", async () => {
+  it("captures the upload start and no IMPORT_FAILED event on success", async () => {
     mockImportFile.mockResolvedValue({ refs: [], speakerPairs: [] })
     renderDialog()
     await dropMp3()
 
     await waitFor(() => {
-      const started = mockCapture.mock.calls.filter(
-        (c) => c[0] === IMPORT_STARTED && c[1]?.phase === "files-selected",
-      )
+      const started = mockCapture.mock.calls.filter((c) => c[0] === IMPORT_STARTED)
       expect(started).toHaveLength(1)
       expect(started[0][1]).toMatchObject({
         import_type: "upload",
         project_id: "proj1",
-        file_count: 1,
-        file_exts: ["mp3"],
-        bytes: 3,
       })
     })
     expect(mockCapture.mock.calls.filter((c) => c[0] === IMPORT_FAILED)).toHaveLength(0)

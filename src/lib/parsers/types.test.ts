@@ -1,5 +1,18 @@
 import { describe, it, expect } from "vitest"
-import { projectHasScriptureFiles, resolveBibleResourcesEnabled, type FileType } from "./types"
+import { detectFileType, fileHasSections, projectHasScriptureFiles, resolveBibleResourcesEnabled, type FileType } from "./types"
+
+describe("detectFileType", () => {
+  it.each([
+    ["page.html", "html"],
+    ["messages.arb", "json"],
+    ["catalog.pot", "po"],
+    ["messages.properties", "properties"],
+    ["captions.sbv", "sbv"],
+    ["workbook.xlsx", "xlsx"],
+  ] as const)("routes %s to the deterministic %s adapter", (name, type) => {
+    expect(detectFileType(name)).toBe(type)
+  })
+})
 
 // AQU-460 derive-on-read: the effective Bible-resources value must never be
 // computed by writing a default on load. These tests encode the trust
@@ -37,6 +50,12 @@ describe("projectHasScriptureFiles", () => {
   it("false when no file is a scripture type", () => {
     const files: { type: FileType }[] = [{ type: "docx" }, { type: "txt" }]
     expect(projectHasScriptureFiles(files)).toBe(false)
+  })
+
+  it("recognizes canonical Scripture content without changing the source format", () => {
+    const mappedSpreadsheet = { type: "xlsx" as const, hasScriptureContent: true }
+    expect(fileHasSections(mappedSpreadsheet)).toBe(true)
+    expect(projectHasScriptureFiles([{ type: "docx" }, mappedSpreadsheet])).toBe(true)
   })
 
   it("false for undefined/empty file lists", () => {

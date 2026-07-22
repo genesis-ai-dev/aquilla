@@ -82,6 +82,8 @@ import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
+import importClassifyRoutes from "./routes/import-classify"
+import importSandboxRoutes from "./routes/import-sandbox"
 import agentMemoryRoutes from "./routes/agent-memory"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 
@@ -98,7 +100,7 @@ const app = new Hono<HonoEnv>()
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
   "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
@@ -181,6 +183,8 @@ app.get("/", (c) =>
       "/api/v2/health",
       "/api/v1/chat/completions",
       "/api/v1/chat/ab-feedback",
+      "/api/v1/import/classify",
+      "/api/v1/import/parse/:projectId",
       "/api/v1/ai/agent/run",
     ],
   }),
@@ -244,6 +248,10 @@ app.route("/api/v2/changesets", changesetApprovalsRoutes)
 // path is kept at /api/v1/chat/completions so the codex-web client doesn't
 // need to change — it just points VITE_CHAT_BASE at api.aquilla.app/chat.
 app.route("/api/v1/chat", chatRoutes)
+// Unknown-text import classification. Deliberately separate from chat: the
+// server owns the prompt and accepts only bounded file metadata + a sample.
+app.route("/api/v1/import", importClassifyRoutes)
+app.route("/api/v1/import", importSandboxRoutes)
 // Translation agent (SSE) — one-tool SQL agent, staged-write proposals.
 // Same auth + AI-guard path as chat; see routes/agent.ts and the 2026-06-12
 // translation-agent design/implementation-plan specs.

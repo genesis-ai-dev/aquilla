@@ -19,7 +19,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  */
 test("hovering health ring in status bar opens DecayBreakdown popover", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Decay ${Date.now()}` })
-  const ws = await openSeededProject(alice, seeded)
+  await openSeededProject(alice, seeded)
 
   // The status bar / footer contains the HealthRing inside a <footer>.
   const footer = alice.locator("footer").last()

@@ -1530,8 +1530,11 @@ describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
       useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
     )
 
-    // Wait for initial mount refresh to complete.
+    // The server-cell fetch and the initial outbox-overlay refresh start
+    // independently. Wait for both so a loaded CI worker cannot attribute the
+    // mount read to the notification burst below.
     await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    await waitFor(() => expect(peekOutboxBatchCallCount).toBeGreaterThanOrEqual(1))
 
     // Reset the counter AFTER mount so we only count subscription-driven calls.
     peekOutboxBatchCallCount = 0

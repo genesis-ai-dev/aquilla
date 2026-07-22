@@ -469,28 +469,26 @@ path.
 
 ## Status addendum (2026-07-21, AQU-AGENT swarm)
 
-This section is additive — nothing above is superseded. The **AQU-AGENT** swarm
-(`docs/swarm/AQU-AGENT-CONTRACTS.md`, `docs/swarm/AQU-AGENT-ORCHESTRATION.md`) is building a new
-**in-app agent harness** (Cloudflare Sandbox containers for code execution + living memory) that
-is a *caller* of this Agent API's command/changeset layer, not a replacement for it.
+This section is additive — nothing above is superseded. The **AQU-AGENT** work added an
+**in-app agent harness** (Cloudflare Sandbox containers for code execution + living memory),
+while file importing remains a separate, purpose-built product workflow.
 
-Concretely: the in-app agent's new `plan_import` tool answers "how does the agent-driven import
-UI in the chat/workbench actually write anything?" by minting an **ephemeral, project-scoped,
-ask-mode** internal `aqk_` credential per run (`agent-run:<runId>`, 2h expiry, via
-`db/shared/api-credentials.ts`'s `mintApiToken()`) and calling this doc's own `PlanImport`
-command through the **existing** `POST /api/v1/external/projects/:projectId/changesets`
-endpoint — the same REST path an external partner integration would use. The credential is
-hardcoded `mode='ask'` regardless of the invoking user's own credential ceiling, so an
-agent-staged import always lands on the **existing** `/approve/:changesetId` page (§3, D5) for a
-one-time human approval assertion before it commits. No new write path, no raw-event
-short-circuit, no agent-specific changeset shape — the in-app agent is simply another authorized
-caller of the command layer this document specifies, subject to every gate in §6 (permission
-parity, provenance envelope, `plan_stale`, etc.).
+The in-app chat does **not** expose `plan_import` and does not mint an internal API credential.
+Users select files in the Import dialog. Deterministic adapters run first; unsupported or malformed
+inputs may be inspected and parsed in an isolated, default-deny sandbox. The sandbox route writes
+no project state: it returns a validated normalized manifest to the ordinary preview, and a human
+confirmation commits through the browser's `ImportService` path. This prevents chat and generated
+parser code from becoming a second, ambiguous import pipeline.
+
+`PlanImport` remains part of this document's external REST/MCP command layer for authorized
+integrations. Those callers still receive the changeset, permission, provenance, `plan_stale`, and
+ask-mode approval guarantees described above. Historical chat timelines may also render an older
+`changeset.staged` frame, but the current chat harness no longer creates one.
 
 What's genuinely new (out of scope for this document, covered in
 [`docs/AGENT-SANDBOX.md`](AGENT-SANDBOX.md)): the sandbox code-execution service
-(`agent-worker/`, no model keys, default-deny egress), the harness tool surface
-(`run_code`/`load_artifact`/`plan_import`/memory tools) that sits in front of the command layer,
-and the living-memory/brief tables and review UI. None of it changes the credential, command,
+(`agent-worker/`, no model keys, default-deny egress), the chat harness tool surface
+(`run_code`/`load_artifact`/memory tools), the dedicated sandbox-assisted import route, and the
+living-memory/brief tables and review UI. None of it changes the external credential, command,
 changeset, or provenance model documented above — read `docs/AGENT-SANDBOX.md` for the sandbox
-architecture and come back here for what a `PlanImport` changeset actually *is* once staged.
+architecture and come back here for what an external `PlanImport` changeset is once staged.

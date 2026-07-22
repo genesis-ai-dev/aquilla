@@ -47,23 +47,22 @@ test("comment submitted via Ctrl+Enter keyboard shortcut", async ({ alice }) => 
   await expect(commentBtn.first()).toBeVisible({ timeout: 5_000 })
   await commentBtn.first().click()
 
-  // CommentsDrawer should open. Match the testid only — an aria-label
-  // fallback like `[aria-label*="Comments" i]` would also match the AQU-599
-  // gutter chip ("1 open comment — open comments") once the comment posts,
-  // and `.or().first()` would then resolve to the chip instead of the drawer.
+  // CommentsDrawer should open.
+  // Keep this locator anchored to the drawer itself. Once the comment is
+  // created, the row also gains an "open comments" button; a broad union can
+  // then start resolving to that earlier DOM node instead of the drawer.
   const drawer = alice.locator('[data-testid="comments-drawer"]')
-  await expect(drawer.first()).toBeVisible({ timeout: 8_000 })
+  await expect(drawer).toBeVisible({ timeout: 8_000 })
 
   // Type a unique comment text.
   const commentText = `kb-submit-${Date.now()}`
-  const textarea = drawer.first().locator("textarea").first()
-    .or(alice.locator('textarea[placeholder*="comment" i]').first())
-  await expect(textarea.first()).toBeVisible({ timeout: 5_000 })
-  await textarea.first().fill(commentText)
+  const textarea = drawer.locator("textarea").first()
+  await expect(textarea).toBeVisible({ timeout: 5_000 })
+  await textarea.fill(commentText)
 
   // Press Ctrl+Enter to submit (instead of clicking the post button).
   await alice.keyboard.press("Control+Enter")
 
   // The comment text should appear in the drawer.
-  await expect(drawer.first()).toContainText(commentText, { timeout: 8_000 })
+  await expect(drawer).toContainText(commentText, { timeout: 8_000 })
 })

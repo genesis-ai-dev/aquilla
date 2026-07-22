@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import {
+  fetchHelloaoComplete,
   flattenHelloaoContent,
   parseHelloaoChapterStrings,
   parseHelloaoComplete,
@@ -11,6 +12,21 @@ import { parseCanonicalRef } from "@/components/ParallelBiblesSidebar"
 function chapter(number: number, content: HelloaoChapter["content"]): HelloaoChapter {
   return { number, content }
 }
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe("fetchHelloaoComplete", () => {
+  it("returns the parsed response while retaining the exact downloaded JSON", async () => {
+    const raw = '{"translation":{"id":"TST"},"books":[]}\n'
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(raw, { status: 200 })))
+    const onRawSource = vi.fn()
+
+    const result = await fetchHelloaoComplete("TST", undefined, undefined, onRawSource)
+
+    expect(result.translation.id).toBe("TST")
+    expect(onRawSource).toHaveBeenCalledWith(raw)
+  })
+})
 
 describe("flattenHelloaoContent", () => {
   it("joins strings and formatted-text objects, dropping notes and breaks", () => {

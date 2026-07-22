@@ -95,6 +95,7 @@ export const tsvQuestionsRoute: ResourceRoute = {
       out.push({
         fileId: dcsFileId(repo, path),
         name: path.split("/").pop() ?? path,
+        sourcePath: path,
         bookCode: book,
         cells,
       })

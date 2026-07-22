@@ -244,15 +244,40 @@ export async function fetchCellsByIds(
   lane?: string,
 ): Promise<CellRow[]> {
   if (cellIds.length === 0) return []
-  const params = new URLSearchParams()
-  params.set("cellIds", cellIds.join(","))
-  if (lane) params.set("lane", lane)
-  const url =
-    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
-    `/files/${encodeURIComponent(fileId)}/cells?${params.toString()}`
-  const res = await fetch(url, fetchInit(jwt))
-  const page = await readJson<CellsPage>(res)
-  return normalizeRowsMetadata(page.cells)
+  // The worker's targeted-read endpoint intentionally accepts at most 100
+  // ids per request. Batch here so bulk review/reconciliation callers never
+  // lose the tail of a file while keeping individual URLs and SQL binds
+  // bounded. Four requests in flight is enough to overlap latency without a
+  // large project's review panel stampeding the worker.
+  const CHUNK_SIZE = 100
+  const CONCURRENCY = 4
+  const chunks: string[][] = []
+  for (let offset = 0; offset < cellIds.length; offset += CHUNK_SIZE) {
+    chunks.push(cellIds.slice(offset, offset + CHUNK_SIZE))
+  }
+  const rowsByChunk = new Array<CellRow[]>(chunks.length)
+  let nextChunk = 0
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextChunk++
+      if (index >= chunks.length) return
+      const params = new URLSearchParams()
+      params.set("cellIds", chunks[index].join(","))
+      if (lane) params.set("lane", lane)
+      const url =
+        `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
+        `/files/${encodeURIComponent(fileId)}/cells?${params.toString()}`
+      const res = await fetch(url, fetchInit(jwt))
+      const page = await readJson<CellsPage>(res)
+      rowsByChunk[index] = normalizeRowsMetadata(page.cells)
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, () => worker()),
+  )
+  return rowsByChunk.flat()
 }
 
 /**

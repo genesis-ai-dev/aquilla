@@ -74,7 +74,9 @@ test("comment stale indicator appears when translation changes after thread was 
   // gutter chip ("1 open comment — open comments") appears — the original
   // "Add comment" label no longer exists. Click the always-visible chip.
   await row.hover()
-  await row.locator('button[aria-label$="open comments"]').click()
+  const openCommentsBtn = row.locator('button[aria-label$="open comments"]')
+  await expect(openCommentsBtn).toBeVisible({ timeout: 5_000 })
+  await openCommentsBtn.click()
   const drawer2 = alice.locator("[data-testid='comments-drawer']").first()
   await expect(drawer2).toBeVisible({ timeout: 5_000 })
   await expect(drawer2).toContainText(commentText, { timeout: 5_000 })

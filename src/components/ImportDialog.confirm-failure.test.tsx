@@ -23,6 +23,7 @@ vi.mock("@/lib/import", () => ({
   importEBible: vi.fn(),
   importParatextProject: vi.fn(),
   importParatextAsTarget: vi.fn(),
+  prepareImportFile: vi.fn(async () => ({ fileType: "txt", results: [] })),
 }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({ filesToProjectEntries: vi.fn(async () => []) }))

@@ -72,4 +72,22 @@ describe("buildCompletionSettings — AQU-408 retrieval-tuning keys", () => {
     const merged = buildCompletionSettings(validatedOnlyBase, { useOnlyValidatedExamples: false })
     expect(merged.useOnlyValidatedExamples).toBe(true)
   })
+
+  // AQU-586: configurable batch sizes must survive the same merge as the other
+  // completion knobs, and stay undefined until a project sets them.
+  it("round-trips completionBatchSize / validationBatchSize and preserves them across unrelated saves", () => {
+    const withSizes = buildCompletionSettings(base, { completionBatchSize: 20, validationBatchSize: 30 })
+    expect(withSizes.completionBatchSize).toBe(20)
+    expect(withSizes.validationBatchSize).toBe(30)
+    // An unrelated later save (e.g. only systemPrompt) must not drop them.
+    const later = buildCompletionSettings(withSizes, { systemPrompt: "x" })
+    expect(later.completionBatchSize).toBe(20)
+    expect(later.validationBatchSize).toBe(30)
+  })
+
+  it("leaves batch sizes undefined when neither base nor overrides set them", () => {
+    const merged = buildCompletionSettings(undefined, {})
+    expect(merged.completionBatchSize).toBeUndefined()
+    expect(merged.validationBatchSize).toBeUndefined()
+  })
 })

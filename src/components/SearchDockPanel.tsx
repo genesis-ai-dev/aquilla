@@ -121,32 +121,40 @@ export function SearchDockPanel({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Toolbar */}
-      <div className="flex items-center gap-1 border-b px-2 py-1.5">
-        <AppTooltip content="Search">
+      {/* Toolbar — labeled mode switcher.
+          AQU-597: the icon-only toggles (esp. the abstract lucide `Replace`
+          glyph) were "hard to see and unclear what they depict, making them
+          hard to explain to others." Each mode now carries a short text label
+          alongside its icon, mirroring the clear labelled tabs the full
+          ParallelPassagesPanel already uses. `flex-wrap` keeps the row from
+          overflowing at the dock's minimum width. */}
+      <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5">
+        <AppTooltip content="Search text">
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="xs"
             aria-label="Search"
             aria-pressed={mode === "search"}
             onClick={() => setMode("search")}
             className={mode === "search" ? "bg-accent text-foreground" : undefined}
           >
             <Search className="h-3 w-3" />
+            Search
           </Button>
         </AppTooltip>
         <AppTooltip content="Find & Replace">
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="xs"
             aria-label="Find & Replace"
             aria-pressed={mode === "replace"}
             onClick={() => setMode("replace")}
             className={mode === "replace" ? "bg-accent text-foreground" : undefined}
           >
             <Replace className="h-3 w-3" />
+            Replace
           </Button>
         </AppTooltip>
         {bibleResourcesEnabled && (
@@ -154,13 +162,14 @@ export function SearchDockPanel({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="xs"
               aria-label="Bible resources"
               aria-pressed={mode === "bible"}
               onClick={() => setMode("bible")}
               className={mode === "bible" ? "bg-accent text-foreground" : undefined}
             >
               <Book className="h-3 w-3" />
+              Bible
             </Button>
           </AppTooltip>
         )}

@@ -2,10 +2,15 @@ import JSZip from "jszip"
 import { v4 as uuid } from "uuid"
 import type { TranslatableString } from "./types"
 import { splitIntoSegments } from "./text-splitter"
+import { assertSafeArchiveInputSize, assertSafeZipArchive } from "./zip-safety"
 
 export async function extractDocxStrings(buffer: ArrayBuffer): Promise<TranslatableString[]> {
+  assertSafeArchiveInputSize(buffer.byteLength, "DOCX file")
   const zip = await JSZip.loadAsync(buffer)
-  const xmlStr = await zip.file("word/document.xml")!.async("string")
+  assertSafeZipArchive(zip, "DOCX file")
+  const documentEntry = zip.file("word/document.xml")
+  if (!documentEntry) throw new Error("DOCX file does not contain word/document.xml")
+  const xmlStr = await documentEntry.async("string")
   const doc = new DOMParser().parseFromString(xmlStr, "application/xml")
   const results: TranslatableString[] = []
   const paragraphs = doc.getElementsByTagName("w:p")
@@ -17,7 +22,9 @@ export async function extractDocxStrings(buffer: ArrayBuffer): Promise<Translata
 
     const style = getParaStyle(p)
     const context = style || "Paragraph"
-    const type = style?.startsWith("Heading") ? ("heading" as const) : ("text" as const)
+    const type = style?.startsWith("Heading") || style === "Title"
+      ? ("heading" as const)
+      : ("text" as const)
     const segments = splitIntoSegments(plain)
     const sourceLocation = {
       file: "word/document.xml",

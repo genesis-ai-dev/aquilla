@@ -13,7 +13,12 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
-import { uploadSourceOriginal } from "./source-upload"
+import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
+import { v7 as uuidv7 } from "uuid"
+import {
+  sourceArtifactDescriptor,
+  type SourceArtifactFormat,
+} from "../../../shared/import-contract"
 
 /** Cells per HTTP request. The worker turns each chunk into bounded multi-row
  *  Postgres inserts, keeping request bodies manageable while still amortizing
@@ -87,6 +92,8 @@ export interface BulkImportFileMeta {
   /** Timeline-segment-model order lens ('time' | 'sequence'). Stored in
    *  files.meta on the server; absent ⇒ client treats as 'sequence'. */
   orderedBy?: string
+  /** Versioned normalized-import summary. Per-unit locators live on cells. */
+  importManifest?: object
 }
 
 export interface BulkUploadArgs {
@@ -97,17 +104,255 @@ export interface BulkUploadArgs {
   /** Raw source text for round-trip-fidelity formats (USFM). Sent with the
    *  first chunk so the worker can stash it in `file_source_blobs`. */
   rawSource?: string
-  rawSourceFormat?: string
+  rawSourceFormat?: SourceArtifactFormat
   /** Raw binary bytes for binary formats (DOCX, PPTX). Uploaded to R2 via
    *  PUT …/files/{fileId}/source after the first chunk lands. Not bundled in
    *  the JSON payload. */
   rawBytes?: ArrayBuffer
+  /** Provenance role for the preserved bytes. Defaults to source. Target-side
+   * Paratext uses target while still selecting its USFM as the export skeleton. */
+  artifactBindingRole?: "source" | "target" | "support"
+  artifactTargetLang?: string
+  updateSourceSidecar?: boolean
+  artifactFidelity?: "native" | "verified-recipe" | "content-only" | "preserved-only"
+  /** Optional bilingual target rows. They are committed in the same staged
+   * publication as their source parents instead of appearing later via the
+   * background outbox. */
+  targets?: TargetCommit[]
+  targetLang?: string
+  /** Keep the imported file hidden after its cells and source artifact land.
+   * Call `publishStagedImport` after any required secondary data (media,
+   * morphology, shared package artifacts) has been persisted. */
+  deferPublication?: boolean
   /** Mints a sync-token scoped to (projectId, fileId). */
   getToken: (fileId: string) => Promise<string | null>
   /** Fired after each chunk lands — drives the progress UI. */
   onProgress?: (uploaded: number, total: number) => void
   signal?: AbortSignal
   fetchImpl?: typeof fetch
+}
+
+export interface StagedAudioAttachment {
+  cellId: string
+  audioId: string
+  url: string
+  slot: "recording" | "generatedVoice"
+  mimeType?: string
+  voiceId?: string
+  referenceAudioId?: string
+  durationMs?: number
+  trimStartMs?: number
+  trimEndMs?: number
+  timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+}
+
+export interface PublishStagedImportArgs {
+  projectId: string
+  fileId: string
+  attachments?: StagedAudioAttachment[]
+  getToken: (fileId: string) => Promise<string | null>
+  signal?: AbortSignal
+  fetchImpl?: typeof fetch
+}
+
+export interface ReconcileImportResult {
+  fileId: string
+  replayed: boolean
+  matched: number
+  added: number
+  changed: number
+  unchanged: number
+  retainedMissing: number
+  importedTargets: number
+}
+
+export interface ReconcileSourceArgs extends Omit<BulkUploadArgs, "fileId"> {
+  /** Existing file whose stable units are being reconciled. */
+  fileId: string
+}
+
+function sourceArtifactInput(args: Pick<BulkUploadArgs, "rawBytes" | "rawSource" | "rawSourceFormat">): {
+  bytes?: ArrayBuffer
+  format?: SourceArtifactFormat
+} {
+  if (args.rawBytes !== undefined && args.rawSource !== undefined) {
+    throw new Error("Import source provenance is ambiguous: provide raw bytes or raw text, not both.")
+  }
+  const bytes = args.rawBytes
+    ?? (args.rawSource !== undefined
+      ? new TextEncoder().encode(args.rawSource).buffer as ArrayBuffer
+      : undefined)
+  const format = args.rawSourceFormat?.trim() ? args.rawSourceFormat : undefined
+  if (bytes !== undefined && format === undefined) {
+    throw new Error("Import source provenance is incomplete: original bytes require a source format.")
+  }
+  if (bytes === undefined && format !== undefined) {
+    throw new Error("Import source provenance is incomplete: a source format requires original bytes.")
+  }
+  if (bytes) assertSourceUploadSize(bytes)
+  return { bytes, format }
+}
+
+/**
+ * Re-import a complete parsed file without replacing its logical cells.
+ *
+ * The exact original is uploaded immutably first, without changing the live
+ * sidecar pointer. The reconcile transaction switches the pointer only after
+ * unit matching and all projections succeed, so a failed parse/upload never
+ * leaves new cells paired with an old source artifact (or vice versa).
+ */
+export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<ReconcileImportResult> {
+  const fetchFn = args.fetchImpl ?? fetch
+  let token = await args.getToken(args.fileId)
+  if (!token) {
+    throw new Error("Couldn't get an upload token — you may be signed out. Sign in and import again.")
+  }
+  if (args.signal?.aborted) throw new Error("Import cancelled")
+
+  const fileEventId = args.file.id
+  const artifactId = uuidv7()
+  const { bytes: sourceBytes, format: sourceFormat } = sourceArtifactInput(args)
+  let uploadedArtifactId: string | undefined
+  if (sourceBytes && sourceFormat) {
+    const uploaded = await uploadSourceOriginal({
+      projectId: args.projectId,
+      fileId: args.fileId,
+      artifactId,
+      bytes: sourceBytes,
+      format: sourceFormat,
+      artifactName: args.file.name,
+      bindingRole: args.artifactBindingRole ?? "source",
+      targetLang: args.artifactTargetLang,
+      profileId: args.file.parserVersion?.split("@")[0],
+      profileVersion: args.file.parserVersion?.split("@")[1],
+      fidelity: args.artifactFidelity,
+      updateSourceSidecar: false,
+      getToken: args.getToken,
+      fetchFn,
+      signal: args.signal,
+    })
+    uploadedArtifactId = uploaded.artifactId
+  }
+
+  const url = `${syncWorkerHttpOrigin()}/import/reconcile`
+  const payload = {
+    projectId: args.projectId,
+    fileId: args.fileId,
+    file: args.file,
+    cells: args.cells,
+    targets: (args.targets ?? []).map((target) => ({
+      ...target,
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    })),
+    ...(uploadedArtifactId && sourceFormat
+      ? { artifactId: uploadedArtifactId, rawSourceFormat: sourceFormat }
+      : {}),
+    clientTs: Date.now(),
+  }
+
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+    if (args.signal?.aborted) throw new Error("Import cancelled")
+    let response: Response | null = null
+    try {
+      response = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+        signal: args.signal,
+      })
+    } catch (error) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      lastError = new Error(`Re-import failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+
+    if (response) {
+      if (response.ok) {
+        args.onProgress?.(args.cells.length, args.cells.length)
+        return await response.json() as ReconcileImportResult
+      }
+      const detail = await response.text().catch(() => "")
+      lastError = new Error(
+        `Re-import failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+      )
+      if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+        const refreshed = await args.getToken(args.fileId)
+        if (refreshed) {
+          token = refreshed
+          continue
+        }
+      }
+      if (!isRetryableImportStatus(response.status)) throw lastError
+    }
+    if (attempt < IMPORT_ATTEMPTS - 1) {
+      await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+    }
+  }
+  // The immutable artifact remains audit-visible but unselected when this
+  // fails; the old live sidecar and every existing cell remain untouched.
+  throw lastError ?? new Error(`Re-import ${fileEventId} failed`)
+}
+
+/**
+ * Reveal an already-staged import. Optional media attachments are written in
+ * the same worker transaction as `file.restore`, so collaborators can never
+ * observe a published media file without its playable clip metadata.
+ */
+export async function publishStagedImport(args: PublishStagedImportArgs): Promise<void> {
+  const fetchFn = args.fetchImpl ?? fetch
+  let token = await args.getToken(args.fileId)
+  if (!token) {
+    throw new Error("Couldn't get an upload token — you may be signed out. Sign in and import again.")
+  }
+  const body = JSON.stringify({
+    projectId: args.projectId,
+    fileId: args.fileId,
+    cells: [],
+    complete: true,
+    publishEventId: uuidv7(),
+    ...(args.attachments?.length ? {
+      attachments: args.attachments.map((attachment) => ({ id: uuidv7(), ...attachment })),
+    } : {}),
+    clientTs: Date.now(),
+  })
+  const url = `${syncWorkerHttpOrigin()}/import`
+  let lastError: Error | null = null
+
+  for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
+    if (args.signal?.aborted) throw new Error("Import cancelled")
+    let response: Response | null = null
+    try {
+      response = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body,
+        signal: args.signal,
+      })
+    } catch (error) {
+      if (args.signal?.aborted) throw new Error("Import cancelled")
+      lastError = error instanceof Error ? error : new Error(String(error))
+    }
+
+    if (response) {
+      if (response.ok) return
+      const detail = await response.text().catch(() => "")
+      lastError = new Error(
+        `Import publication failed (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`,
+      )
+      if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
+        const refreshed = await args.getToken(args.fileId)
+        if (refreshed) {
+          token = refreshed
+          continue
+        }
+      }
+      if (!isRetryableImportStatus(response.status)) throw lastError
+    }
+    if (attempt < IMPORT_ATTEMPTS - 1) {
+      await waitForImportRetry(IMPORT_RETRY_DELAYS_MS[attempt], args.signal)
+    }
+  }
+  throw lastError ?? new Error("Import publication failed")
 }
 
 /**
@@ -117,6 +362,9 @@ export interface BulkUploadArgs {
  */
 export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const fetchFn = args.fetchImpl ?? fetch
+  const { bytes: sourceBytes, format: sourceFormat } = sourceArtifactInput(args)
+  // Fail before file.create/staging so an unsupported artifact cannot leave a
+  // hidden partial file in the database or trash view.
   let token = await args.getToken(args.fileId)
   if (!token) {
     throw new Error(
@@ -127,6 +375,9 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const url = `${syncWorkerHttpOrigin()}/import`
   const total = args.cells.length
   let uploaded = 0
+  const stageEventId = uuidv7()
+  const publishEventId = uuidv7()
+  const artifactId = uuidv7()
 
   // Chunk offsets. `do…while` semantics: at least one request (carrying
   // file.create) even for a zero-cell file.
@@ -144,14 +395,17 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
       cells: chunk,
       clientTs: Date.now(),
     }
+    const sourceEventIds = new Set(chunk.map((cell) => cell.id))
+    const targets = (args.targets ?? [])
+      .filter((target) => sourceEventIds.has(target.parentId))
+      .map((target) => ({ ...target, ...(args.targetLang ? { targetLang: args.targetLang } : {}) }))
+    if (targets.length > 0) payload.targets = targets
     if (isFirst) {
       payload.file = args.file
-      // Side-car raw bytes go alongside the first chunk so they land atomically
-      // with the file.create. Subsequent chunks omit them.
-      if (args.rawSource !== undefined && args.rawSourceFormat) {
-        payload.rawSource = args.rawSource
-        payload.rawSourceFormat = args.rawSourceFormat
-      }
+      payload.stageEventId = stageEventId
+      // Original bytes are preserved through the checksum-verified R2 route
+      // below before publication. Do not duplicate a potentially-large text
+      // artifact inside this JSON request.
     }
 
     let lastError: Error | null = null
@@ -203,7 +457,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
     throw lastError ?? new Error("Upload failed")
   }
 
-  const finalize = async (): Promise<void> => {
+  const finalize = async (publish: boolean): Promise<void> => {
     let lastError: Error | null = null
 
     for (let attempt = 0; attempt < IMPORT_ATTEMPTS; attempt++) {
@@ -218,6 +472,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
             fileId: args.fileId,
             cells: [],
             complete: true,
+            ...(publish ? { publishEventId } : {}),
             clientTs: Date.now(),
           }),
           signal: args.signal,
@@ -258,17 +513,34 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // before the rest so the file row exists. Send it alone.
   await sendChunk(offsets[0], true)
 
-  // After the first chunk lands (file.create projected), upload raw binary
-  // bytes to R2 for DOCX/PPTX round-trip. Runs before subsequent chunks so the
-  // source blob is available as soon as any cell is written.
-  if (args.rawBytes && args.rawSourceFormat) {
-    await uploadSourceOriginal({
-      projectId: args.projectId,
-      fileId: args.fileId,
-      bytes: args.rawBytes,
-      format: args.rawSourceFormat as "docx" | "pptx",
-      getToken: args.getToken,
-    })
+  // After the first chunk lands (file.create projected), preserve immutable
+  // original bytes in R2. This is not limited to Office packages: text-based
+  // formats also need an exact original for audit and future round-trip
+  // serializers. Runs before subsequent chunks so provenance is available as
+  // soon as any cell is written.
+  let uploadFailure: unknown | null = null
+  if (sourceBytes && sourceFormat) {
+    try {
+      await uploadSourceOriginal({
+        projectId: args.projectId,
+        fileId: args.fileId,
+        artifactId,
+        bytes: sourceBytes,
+        format: sourceFormat,
+        artifactName: args.file.name,
+        bindingRole: args.artifactBindingRole ?? "source",
+        targetLang: args.artifactTargetLang,
+        profileId: args.file.parserVersion?.split("@")[0],
+        profileVersion: args.file.parserVersion?.split("@")[1],
+        fidelity: args.artifactFidelity ?? sourceArtifactDescriptor(sourceFormat).defaultFidelity,
+        updateSourceSidecar: args.updateSourceSidecar,
+        getToken: args.getToken,
+        fetchFn,
+        signal: args.signal,
+      })
+    } catch (error) {
+      uploadFailure = error
+    }
   }
 
   // The remaining chunks are independent genesis source.cell.create batches:
@@ -282,7 +554,6 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const rest = offsets.slice(1)
   const POOL = 4
   let cursor = 0
-  let uploadFailure: unknown | null = null
   const worker = async (): Promise<void> => {
     while (uploadFailure === null && cursor < rest.length) {
       const i = cursor++
@@ -304,7 +575,7 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // chunks settle. It also runs after a partial failure so whatever did land
   // remains internally consistent and recoverable.
   try {
-    await finalize()
+    await finalize(uploadFailure === null && !args.deferPublication)
   } catch (finalizeError) {
     if (uploadFailure !== null) {
       const uploadMessage = uploadFailure instanceof Error
@@ -412,11 +683,48 @@ export interface BulkTargetCommitArgs {
   fileId: string
   /** Author stamped on the events (server overrides from the token). */
   author: string
+  /** Target-lane storage key. Empty/absent addresses the default lane. */
+  targetLang?: string
   commits: TargetCommit[]
   getToken: (fileId: string) => Promise<string | null>
   onProgress?: (uploaded: number, total: number) => void
   signal?: AbortSignal
   fetchImpl?: typeof fetch
+}
+
+export interface BulkTargetCommitGroup {
+  fileId: string
+  commits: TargetCommit[]
+}
+
+export interface BulkTargetCommitBatchArgs
+  extends Omit<BulkTargetCommitArgs, "fileId" | "commits"> {
+  groups: BulkTargetCommitGroup[]
+}
+
+/** Enqueue a cross-file target import in one IndexedDB transaction. */
+export async function enqueueTargetCommitBatch(args: BulkTargetCommitBatchArgs): Promise<void> {
+  const total = args.groups.reduce((count, group) => count + group.commits.length, 0)
+  if (total === 0) return
+  const clientTs = Date.now()
+  const events = args.groups.flatMap((group) => group.commits.map((commit) => ({
+    id: commit.id,
+    schemaVersion: 1 as const,
+    kind: "target.cell.commit" as const,
+    projectId: args.projectId,
+    fileId: group.fileId,
+    cellId: commit.cellId,
+    parentId: commit.parentId,
+    author: args.author,
+    payload: {
+      value: commit.value,
+      sourceEventId: commit.parentId,
+      ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    },
+    clientTs,
+  })))
+  await enqueueOutboxEvents(events as unknown as Parameters<typeof enqueueOutboxEvents>[0])
+  args.onProgress?.(total, total)
 }
 
 /**
@@ -435,19 +743,8 @@ export interface BulkTargetCommitArgs {
  * caller compatibility but are unused now — the flusher owns the network.
  */
 export async function enqueueTargetCommits(args: BulkTargetCommitArgs): Promise<void> {
-  if (args.commits.length === 0) return
-  const events = args.commits.map((c) => ({
-    id: c.id,
-    schemaVersion: 1 as const,
-    kind: "target.cell.commit" as const,
-    projectId: args.projectId,
-    fileId: args.fileId,
-    cellId: c.cellId,
-    parentId: c.parentId,
-    author: args.author,
-    payload: { value: c.value, sourceEventId: c.parentId },
-    clientTs: Date.now(),
-  }))
-  await enqueueOutboxEvents(events as unknown as Parameters<typeof enqueueOutboxEvents>[0])
-  args.onProgress?.(args.commits.length, args.commits.length)
+  await enqueueTargetCommitBatch({
+    ...args,
+    groups: [{ fileId: args.fileId, commits: args.commits }],
+  })
 }

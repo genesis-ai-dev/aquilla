@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
 import { formattingBubbleButton, selectEditorContents } from "../../helpers/editor-selection"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * TranslatedEditor BubbleMenu — Inline code toggle button.
@@ -26,16 +20,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 const ACTIVE_CLASS = /(?:^|\s)bg-accent(?:\s|$)/
 
 test("formatting bubble menu Inline code button toggles on and off", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `InlineCode ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `InlineCode ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   const targetCell = await ws.activateTargetCell(0)
 

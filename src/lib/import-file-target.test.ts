@@ -126,9 +126,12 @@ describe("usfmToTargetRows", () => {
     const byRef = new Map(rows.map((r) => [r.ref, r.text]))
     expect(byRef.get("MAT 1:1")).toBe("The book of the genealogy.")
     expect(byRef.get("MAT 1:2")).toBe("Abraham fathered Isaac.")
-    // Headings/titles carry their synthetic refs so they can match heading cells.
+    // In-body section headings carry their synthetic refs so they can match
+    // heading cells.
     const refs = rows.map((r) => r.ref)
-    expect(refs.some((r) => r?.includes("mt1"))).toBe(true)
     expect(refs.some((r) => r?.includes(":s"))).toBe(true)
+    // The book name (\mt1) is front matter — filtered out on both source and
+    // target import (AQU-585) so it is never a row.
+    expect(refs.some((r) => r?.includes("mt1"))).toBe(false)
   })
 })

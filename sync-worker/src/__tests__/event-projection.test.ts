@@ -496,12 +496,21 @@ describe('buildEventProjectionStmts — file.create', () => {
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
       db,
-      makeEvent('file.create', { name: 'Genesis', fileType: 'codex', sourceLanguage: 'en' }, { cellId: null }),
+      makeEvent('file.create', {
+        name: 'Genesis',
+        fileType: 'codex',
+        sourceLanguage: 'en',
+        importManifest: { version: 1, profileId: 'builtin:usfm-lossless' },
+      }, { cellId: null }),
       stmts,
     )
     expect(recorded[0].sql).toContain('INSERT INTO files')
     expect(recorded[0].args[0]).toBe('file-a')
     expect(recorded[0].args[2]).toBe('Genesis')
+    expect(JSON.parse(recorded[0].args.at(-1) as string)).toEqual({
+      sourceLanguage: 'en',
+      aquillaImport: { version: 1, profileId: 'builtin:usfm-lossless' },
+    })
   })
 })
 

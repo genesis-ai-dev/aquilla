@@ -93,11 +93,25 @@ export interface UploadCellAudioArgs {
   audioId: string
   ext: string
   blob: Blob
+  /** Optional immutable provenance record for imported media. Ordinary editor
+   * recordings omit this and keep the existing lightweight R2-only path. */
+  artifactId?: string
+  artifactName?: string
   getSyncToken: SyncTokenForFile
+  signal?: AbortSignal
+  fetchFn?: typeof fetch
+  retryDelaysMs?: readonly number[]
+}
+
+const AUDIO_UPLOAD_ATTEMPTS = 3
+const AUDIO_UPLOAD_RETRY_DELAYS_MS = [200, 800] as const
+
+function isRetryableAudioUploadStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500
 }
 
 export async function uploadCellAudio(args: UploadCellAudioArgs): Promise<AudioUploadResult> {
-  const { projectId, fileId, audioId, ext, blob, getSyncToken } = args
+  const { projectId, fileId, audioId, ext, blob, artifactId, artifactName, getSyncToken } = args
   if (blob.size > MAX_AUDIO_UPLOAD_BYTES) {
     const mb = (n: number) => Math.round(n / (1024 * 1024))
     throw new Error(
@@ -106,27 +120,56 @@ export async function uploadCellAudio(args: UploadCellAudioArgs): Promise<AudioU
         `or split the file.`,
     )
   }
-  const token = await getSyncToken(projectId, fileId)
+  let token = await getSyncToken(projectId, fileId)
   if (!token) throw new Error("audio upload: no sync token (not signed in or no project access)")
 
-  const res = await fetch(audioEndpoint(projectId, fileId, audioId, ext), {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": blob.type || "application/octet-stream",
-    },
-    body: blob,
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw new Error(`audio upload failed (${res.status}): ${text || res.statusText}`)
+  const fetchFn = args.fetchFn ?? fetch
+  const delays = args.retryDelaysMs ?? AUDIO_UPLOAD_RETRY_DELAYS_MS
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt < AUDIO_UPLOAD_ATTEMPTS; attempt++) {
+    if (args.signal?.aborted) throw new Error("audio upload cancelled")
+    let res: Response | null = null
+    try {
+      res = await fetchFn(audioEndpoint(projectId, fileId, audioId, ext), {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": blob.type || "application/octet-stream",
+          ...(artifactId ? { "X-Artifact-Id": artifactId } : {}),
+          ...(artifactName ? { "X-Artifact-Name": encodeURIComponent(artifactName) } : {}),
+        },
+        body: blob,
+        signal: args.signal,
+      })
+    } catch (error) {
+      if (args.signal?.aborted) throw new Error("audio upload cancelled")
+      lastError = error instanceof Error ? error : new Error(String(error))
+    }
+    if (res) {
+      if (res.ok) {
+        return {
+          audioId,
+          ext,
+          url: buildFrontierAudioUrl(audioId, ext),
+          sizeBytes: blob.size,
+        }
+      }
+      const text = await res.text().catch(() => "")
+      lastError = new Error(`audio upload failed (${res.status}): ${text || res.statusText}`)
+      if (res.status === 401 && attempt < AUDIO_UPLOAD_ATTEMPTS - 1) {
+        const refreshed = await getSyncToken(projectId, fileId)
+        if (refreshed) {
+          token = refreshed
+          continue
+        }
+      }
+      if (!isRetryableAudioUploadStatus(res.status)) throw lastError
+    }
+    if (attempt < AUDIO_UPLOAD_ATTEMPTS - 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt] ?? 0))
+    }
   }
-  return {
-    audioId,
-    ext,
-    url: buildFrontierAudioUrl(audioId, ext),
-    sizeBytes: blob.size,
-  }
+  throw lastError ?? new Error("audio upload failed")
 }
 
 export interface FetchCellAudioArgs {

@@ -348,17 +348,23 @@ export interface ValidatedNeighbor {
  * choke-point); scoring is the caller's pure function. Returns [] when the
  * query sanitizes away.
  */
+/**
+ * Any-term OR tsquery (`t1 | t2 | …`) from the same Unicode tokenization the
+ * confidence scorer uses. Null when nothing tokenizable survives.
+ */
+function neighborTsquery(queryText: string): string | null {
+  const tokens = [...new Set(queryText.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [])].slice(0, 40)
+  return tokens.length > 0 ? tokens.join(" | ") : null
+}
+
 export async function querySourceNeighbors(
   db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   queryText: string,
   opts: { topK?: number; excludeCellId?: string; validatedOnly?: boolean },
 ): Promise<ValidatedNeighbor[]> {
-  // Any-term OR retrieval over Postgres FTS: build a `t1 | t2 | …` tsquery from
-  // the same Unicode tokenization the confidence scorer uses.
-  const tokens = [...new Set(queryText.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [])].slice(0, 40)
-  if (tokens.length === 0) return []
-  const tsq = tokens.join(" | ")
+  const tsq = neighborTsquery(queryText)
+  if (tsq === null) return []
 
   const limit = clampLimit(opts.topK)
 
@@ -497,4 +503,81 @@ export async function queryFileSourceNeighbors(
     else byAsker.set(row.asker_id, [neighbor])
   }
   return byAsker
+}
+
+// Chunk size for the batched neighbor lookup: 2 bind params per query cell
+// plus 2 trailing binds, comfortably under Postgres' 65535-param ceiling while
+// keeping each statement's LATERAL fan-out bounded.
+const NEIGHBOR_BATCH_CHUNK = 200
+
+/**
+ * AQU-641: batched form of `querySourceNeighbors` — one LATERAL query per
+ * chunk of query cells instead of one FTS query per cell. Same semantics per
+ * cell (self excluded, translated neighbors only, project-wide retrieval,
+ * ranked by ts_rank, top-k). Cells whose text tokenizes to nothing are
+ * omitted from the result map.
+ */
+export async function querySourceNeighborsBatch(
+  db: AquillaDb,
+  verifiedProjectId: VerifiedProjectId,
+  queries: ReadonlyArray<{ cellId: string; text: string }>,
+  opts: { topK?: number; validatedOnly?: boolean },
+): Promise<Map<string, ValidatedNeighbor[]>> {
+  const limit = clampLimit(opts.topK)
+  const usable: Array<{ cellId: string; tsq: string }> = []
+  for (const q of queries) {
+    const tsq = neighborTsquery(q.text)
+    if (tsq !== null) usable.push({ cellId: q.cellId, tsq })
+  }
+
+  const out = new Map<string, ValidatedNeighbor[]>()
+  for (let i = 0; i < usable.length; i += NEIGHBOR_BATCH_CHUNK) {
+    const chunk = usable.slice(i, i + NEIGHBOR_BATCH_CHUNK)
+    const valuesSql = chunk.map(() => "(?::text, ?::text)").join(", ")
+    const binds: unknown[] = []
+    for (const q of chunk) binds.push(q.cellId, q.tsq)
+    const sql =
+      "SELECT q.query_cell_id AS query_cell_id, n.cell_id AS cell_id, " +
+      "n.value AS value, n.target_value AS target_value, n.rank AS rank " +
+      `FROM (VALUES ${valuesSql}) AS q(query_cell_id, tsq) ` +
+      "JOIN LATERAL (" +
+      "SELECT c.cell_id AS cell_id, c.value AS value, t.value AS target_value, " +
+      "ts_rank(c.value_tsv, to_tsquery('simple', q.tsq)) AS rank " +
+      "FROM cells c " +
+      "JOIN cells t " +
+      "  ON  t.project_id = c.project_id " +
+      "  AND t.file_id    = c.file_id " +
+      "  AND t.cell_id    = c.cell_id " +
+      "  AND t.side       = 'target' " +
+      "  AND t.value     != '' " +
+      "WHERE c.value_tsv @@ to_tsquery('simple', q.tsq) " +
+      "AND c.project_id = ? " +
+      "AND c.side = 'source' " +
+      "AND c.cell_id != q.query_cell_id " +
+      (opts.validatedOnly ? "AND t.validated = 1 " : "") +
+      "ORDER BY rank DESC " +
+      "LIMIT ?" +
+      ") n ON TRUE"
+    binds.push(verifiedProjectId, limit)
+
+    const result = await db.prepare(sql).bind(...binds).all<{
+      query_cell_id: string
+      cell_id: string
+      value: string
+      target_value: string
+      rank: number
+    }>()
+    for (const row of result.results) {
+      const list = out.get(row.query_cell_id)
+      const neighbor: ValidatedNeighbor = {
+        cellId: row.cell_id,
+        value: row.value,
+        targetValue: row.target_value,
+        rank: row.rank,
+      }
+      if (list) list.push(neighbor)
+      else out.set(row.query_cell_id, [neighbor])
+    }
+  }
+  return out
 }

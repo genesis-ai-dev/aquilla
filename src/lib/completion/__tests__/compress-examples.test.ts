@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "../compress-examples"
+import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates, dropValidatedPairDuplicates } from "../compress-examples"
 
 describe("compressExampleSource", () => {
   it("returns short source unchanged (no truncation needed)", () => {
@@ -82,5 +82,35 @@ describe("dropPrecedingContextDuplicates", () => {
   it("returns examples unchanged when preceding context is empty", () => {
     const examples = [{ source: "alpha", target: "A" }]
     expect(dropPrecedingContextDuplicates(examples, [])).toEqual(examples)
+  })
+})
+
+describe("dropValidatedPairDuplicates", () => {
+  it("removes a retrieved example whose source also appears in the validated pairs", () => {
+    // Server branching-search (validated-only) and collectValidatedPairs both
+    // rank against the same query, so the top hit is frequently the same cell.
+    // buildPrompt renders validated pairs first, so the retrieved copy would be
+    // a second, redundant render of the same source→target pair. (AQU-617)
+    const out = dropValidatedPairDuplicates(
+      [
+        { source: "the LORD said", target: "RETRIEVED" },
+        { source: "and it was so", target: "KEEP" },
+      ],
+      [{ source: "the  LORD   said", target: "VALIDATED" }], // whitespace-normalized match
+    )
+    expect(out.map((e) => e.target)).toEqual(["KEEP"])
+  })
+
+  it("keeps all examples when none match the validated pairs", () => {
+    const examples = [
+      { source: "alpha", target: "A" },
+      { source: "bravo", target: "B" },
+    ]
+    expect(dropValidatedPairDuplicates(examples, [{ source: "charlie", target: "C" }])).toEqual(examples)
+  })
+
+  it("returns examples unchanged when there are no validated pairs", () => {
+    const examples = [{ source: "alpha", target: "A" }]
+    expect(dropValidatedPairDuplicates(examples, [])).toEqual(examples)
   })
 })

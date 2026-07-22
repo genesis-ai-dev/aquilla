@@ -380,8 +380,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       attributes: {
         // AQU-297: expose explicit textbox role + accessible label so screen
         // readers announce "GEN 1:1 — validated, editing" instead of the
-        // generic ProseMirror contenteditable. aria-multiline signals that
-        // Enter creates a new line, not submits (consistent with TipTap usage).
+        // generic ProseMirror contenteditable. The cell still holds multi-line
+        // content (imported cells, deliberate Shift+Enter hard breaks), so
+        // aria-multiline stays true even though plain Enter now confirms the
+        // edit rather than inserting a newline (AQU-584).
         role: "textbox",
         "aria-multiline": "true",
         ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
@@ -477,6 +479,19 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           return true
         }
         const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
+        // AQU-584: plain Enter confirms the edit. Left to StarterKit's default,
+        // Enter split the paragraph and left a trailing newline inside the cell
+        // (the caret stayed put), which serialized to plain text with an extra
+        // "\n" and tripped the "extra white space" QA rule. Intercept it to
+        // commit-and-exit to the grid — the same path as Escape (blur flushes
+        // the pending idle commit; the parent returns focus to the row). A
+        // deliberate line break is still available via Shift+Enter (hard break).
+        if (plain && event.key === "Enter") {
+          event.preventDefault()
+          view.dom.blur()
+          onEscapeToGridRef.current?.()
+          return true
+        }
         if (plain && (event.key === "Backspace" || event.key === "Delete")) {
           const target = findFootnoteDeleteTarget(view, event.key, footnoteNumberOffsetRef.current)
           if (target) {

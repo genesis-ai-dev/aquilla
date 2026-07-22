@@ -19,7 +19,7 @@
 // incremental k-NN graph. Auth: sync-token JWT scoped to `projectId`.
 
 import { verifyTokenForProject } from "../auth"
-import { makeVerifiedProjectId, queryFileSourceNeighbors } from "./scoped-search"
+import { makeVerifiedProjectId, querySourceNeighborsBatch } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
 import {
   propagateHealth,
@@ -159,22 +159,19 @@ export async function handleCellConfidenceRequest(
   // Edges: for each unvalidated node, its top-k source-similar example cells
   // (validated or not — health flows from any neighbor). r = source similarity
   // (weights the mean), a = target consistency (gates the transfer).
-  //
-  // AQU-641: retrieval is one batched query per file (JOIN LATERAL), not one
-  // FTS query per unvalidated cell — the N+1 that forced this route off by
-  // default. The r/a weights stay pure-JS below.
-  const neighborsByAsker = await queryFileSourceNeighbors(
-    env.AQUILLA_PG!,
+  // AQU-641: one batched LATERAL query per chunk instead of one FTS query per cell.
+  const unvalidated = nodes.filter((n) => !n.validated) // validated cells are anchors; no inbound need
+  const neighborMap = await querySourceNeighborsBatch(
+    env.AQUILLA_PG,
     verifiedProjectId,
-    fileId,
-    { topK, maxAskers: MAX_FILE_CELLS },
+    unvalidated.map((n) => ({ cellId: n.id, text: byId.get(n.id)!.sourceText })),
+    { topK, validatedOnly: false },
   )
   const edges: PropEdges = new Map()
-  for (const node of nodes) {
-    if (node.validated) continue // validated cells are anchors; no inbound need
+  for (const node of unvalidated) {
     const cell = byId.get(node.id)!
     const cellEdges: PropEdge[] = []
-    for (const n of neighborsByAsker.get(node.id) ?? []) {
+    for (const n of neighborMap.get(node.id) ?? []) {
       if (!nodeIds.has(n.cellId)) continue // keep the graph within the file
       const r = lexicalConfidence(cell.sourceText, [n.value])
       const a = lexicalConfidence(cell.targetText, [n.targetValue])

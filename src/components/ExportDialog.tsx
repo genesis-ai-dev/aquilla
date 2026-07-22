@@ -1,13 +1,16 @@
-// ExportDialog: pick format + scope, then trigger the appropriate exporter or
-// server-side USFM download. Project scope zips each file's cells client-side
-// (except USFM, which uses the server side-car route).
+// ExportDialog: the headline action is "download your file back" — the active
+// file's ORIGINAL format with current translations injected (USFM/DOCX/PPTX
+// via the server side-car, structured re-serialization for md/txt/subtitles/
+// CAT formats). Converting to a different format lives in a collapsed
+// "Export to another format" section (format radio + scope + advanced).
 //
-// For non-USFM formats, project scope uses useProjectCells to fan-out over all
-// project files (up to MAX_FILES=40) and buildProjectZip to produce a zip.
+// For non-USFM formats, project scope uses useProjectCells to load every file
+// with bounded concurrency and buildProjectZip to produce a zip.
 //
-// AQU-253 (b fix): auto-closes when canExport flips false after settings load,
-// so a settings change mid-session doesn't leave the dialog open for a user who
-// lost access.
+// AQU-253 (revised): when org policy forbids export, the dialog renders an
+// explicit permission gate (with a link to the roles & permissions help page)
+// instead of silently closing/hiding — users must be able to see WHY they
+// can't export.
 //
 // AQU-437: Filename control — editable base name with optional timestamp/lang
 // tag appended at export time. The chosen name drives the downloaded filename
@@ -55,7 +58,7 @@ import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "pptx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -76,11 +79,20 @@ const FORMAT_OPTIONS: FormatOption[] = [
   },
   {
     // AQU-233: DOCX export with paragraph/heading structure preserved.
-    // Only shown for files imported as .docx (isDocxFile prop).
+    // Only shown for files imported as .docx.
     id: "docx",
     label: "Word (.docx)",
     ext: ".docx",
     description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip export support was added — files imported before then may lack a stored original (re-import to enable).",
+    lossy: false,
+  },
+  {
+    // AQU-152a: PPTX export with slide/shape/paragraph structure preserved.
+    // Only shown for files imported as .pptx (activeFileType).
+    id: "pptx",
+    label: "PowerPoint (.pptx)",
+    ext: ".pptx",
+    description: "Translations injected back into the original slide deck. Slide/shape/paragraph structure is preserved; mixed per-run formatting inside a translated paragraph keeps the first run's styling. Requires the original file to have been imported after round-trip export support was added — re-import older files to enable.",
     lossy: false,
   },
   {
@@ -173,6 +185,26 @@ const FORMAT_OPTIONS: FormatOption[] = [
   },
 ]
 
+/**
+ * FileType → the ExportFormat that reproduces the file in its own format.
+ * usfm/docx/pptx round-trip through the original bytes (server side-car);
+ * the rest re-serialize from structure. Types absent here (ebible, helloao,
+ * obs, sdbh, audio, video) have no single-file native download.
+ */
+const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
+  usfm: "usfm",
+  docx: "docx",
+  pptx: "pptx",
+  md: "md",
+  txt: "txt",
+  vtt: "vtt",
+  srt: "srt",
+  xliff: "xlf",
+  tmx: "tmx",
+  csv: "csv",
+  tsv: "tsv",
+}
+
 interface ExportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -191,17 +223,19 @@ interface ExportDialogProps {
   activeFileId: string | null
   /** The active file's display name. */
   activeFileName: string | null
-  /** Whether the active file is a USFM file — enables USFM option. */
-  isUsfmFile: boolean
   /**
-   * AQU-233: Whether the active file was imported as a .docx — enables the
-   * Word (.docx) round-trip export option when a side-car blob exists.
+   * The active file's import type (FileType: "usfm" | "docx" | "pptx" | "md" |
+   * "txt" | …). Drives the primary "Download <file>" action — the file's own
+   * format is the default export. `null`/unknown types get no primary download
+   * and open the format list instead.
    */
-  isDocxFile?: boolean
+  activeFileType?: string | null
   /** All project files — used only for project-scope USFM zip. */
   projectFiles: { id: string; name: string; type: string }[]
   sourceLanguage?: string
   targetLanguage?: string
+  /** Storage lane for the active target. Distinct from its display language. */
+  targetLang?: string
   /** Project TTS settings including cast assignments and voice library.
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
@@ -217,28 +251,36 @@ export function ExportDialog({
   projectName,
   activeFileId,
   activeFileName,
-  isUsfmFile,
-  isDocxFile = false,
+  activeFileType = null,
   projectFiles,
   sourceLanguage = "und",
   targetLanguage = "und",
+  targetLang = "",
   ttsSettings,
   getToken,
 }: ExportDialogProps) {
-  // AQU-253 (b fix): close the dialog if canExport flips to false after it opened.
-  // Track the previous open state to detect the transition.
-  const prevCanExportRef = useRef(canExport)
-  useEffect(() => {
-    if (open && prevCanExportRef.current && !canExport) {
-      // canExport just flipped false while the dialog was open — close it.
-      onOpenChange(false)
-    }
-    prevCanExportRef.current = canExport
-  }, [open, canExport, onOpenChange])
+  // The file's own format is the default export — "give me my file back".
+  // Types without a 1:1 native exporter (ebible, obs, audio, video, sdbh, …)
+  // have no primary download; the format list opens instead.
+  const nativeFormatId = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
+  const nativeOption = nativeFormatId ? FORMAT_OPTIONS.find((f) => f.id === nativeFormatId)! : null
 
-  const [format, setFormat] = useState<ExportFormat>(isUsfmFile ? "usfm" : isDocxFile ? "docx" : "tsv")
+  const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  // "Export to another format" section — collapsed when the primary download
+  // covers the common case, open when there is no native format to offer.
+  const [formatsOpen, setFormatsOpen] = useState(nativeFormatId == null)
+
+  // Re-derive defaults when the dialog opens on a (possibly different) file.
+  const prevOpenRef = useRef(open)
+  useEffect(() => {
+    if (open && !prevOpenRef.current) {
+      setFormat(nativeFormatId ?? "tsv")
+      setFormatsOpen(nativeFormatId == null)
+    }
+    prevOpenRef.current = open
+  }, [open, nativeFormatId])
   const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
 
   // AQU-437: Filename control state. Default changes with scope/format.
@@ -259,11 +301,11 @@ export function ExportDialog({
   // list (nothing appears selected) yet still drives handleExport down the
   // wrong side-car path for the new file.
   useEffect(() => {
-    setFormat(isUsfmFile ? "usfm" : isDocxFile ? "docx" : "tsv")
-  }, [activeFileId, isUsfmFile, isDocxFile])
+    setFormat(nativeFormatId ?? "tsv")
+  }, [activeFileId, nativeFormatId])
 
-  // audio-by-character, vtt, docx, and plain-text-dump only support file scope.
-  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "plain-text-dump"] as const
+  // audio-by-character, vtt, docx, pptx, and plain-text-dump only support file scope.
+  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "pptx", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   const isProjectOnlyFormat = format === "sdbh-xml"
@@ -334,14 +376,15 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
 
-  const { files: projectFileCells, isLoading: projectCellsLoading, isTruncated } =
+  const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
       projectId,
       projectFiles,
       getToken,
       enabled: projectScopeEnabled,
+      lane: targetLang,
     })
 
   /**
@@ -371,18 +414,31 @@ export function ExportDialog({
     return stem
   }
 
-  async function handleExport() {
+  async function handleExport(overrideFormat?: ExportFormat) {
     if (!activeFileId) return
+    // The primary "Download <file>" button passes the native format explicitly
+    // and always targets the current file; the footer Export button uses the
+    // selected radio format + scope.
+    const fmt = overrideFormat ?? format
+    const fmtOption = FORMAT_OPTIONS.find((f) => f.id === fmt)!
+    const runScope: ExportScope = overrideFormat
+      ? "file"
+      : fmt === "sdbh-xml"
+        ? "project"
+        : (fileOnlyFormats as readonly string[]).includes(fmt)
+          ? "file"
+          : scope
     setStatus({ kind: "busy", msg: "Exporting…" })
     setFidelityWarnings([])
     try {
-      if (format === "usfm") {
-        if (effectiveScope === "project") {
+      if (fmt === "usfm") {
+        if (runScope === "project") {
           const result = await downloadProjectZip({
             projectId,
             projectName,
             files: projectFiles,
             getToken,
+            targetLang,
             onProgress: (done, total) =>
               setStatus({ kind: "busy", msg: `Downloading ${done}/${total}…` }),
           })
@@ -395,7 +451,7 @@ export function ExportDialog({
           const stem = buildExportStem(false)
           const downloadName = `${stem}.SFM`
           // AQU-276: read lossy-verse count from response header.
-          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken })
+          const result = await downloadSourceFile({ projectId, fileId: activeFileId, downloadName, getToken, targetLang })
           const lossyCount = result.lossyVerseCount
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({
@@ -407,11 +463,11 @@ export function ExportDialog({
             setStatus({ kind: "ok", msg: `Exported ${downloadName}` })
           }
         }
-      } else if (format === "docx") {
+      } else if (fmt === "docx") {
         // AQU-233: DOCX round-trip export. Fetch the raw DOCX side-car from the
         // server, then inject translations client-side using JSZip + DOMParser.
         setStatus({ kind: "busy", msg: "Fetching original document…" })
-        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: "Injecting translations…" })
         const { exportDocx } = await import("@/lib/export/exporters/docx")
         const result = await exportDocx(rawBytes, cells)
@@ -429,7 +485,30 @@ export function ExportDialog({
           ...collectInlineStyleWarnings(cells),
         ])
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.docx${note}` })
-      } else if (format === "audio-by-character") {
+      } else if (fmt === "pptx") {
+        // AQU-152a: PPTX round-trip export. Fetch the raw PPTX side-car from
+        // the server, then inject translations client-side (JSZip + DOMParser),
+        // mirroring the DOCX path above.
+        setStatus({ kind: "busy", msg: "Fetching original presentation…" })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
+        setStatus({ kind: "busy", msg: "Injecting translations…" })
+        const { exportPptx } = await import("@/lib/export/exporters/pptx")
+        const result = await exportPptx(rawBytes, cells)
+        const baseName = buildExportStem(false)
+        downloadBlob(result.blob, `${baseName}.pptx`)
+        const note = result.injected === 0
+          ? " (no translations to inject — download original structure)"
+          : ` (${result.injected} paragraph${result.injected === 1 ? "" : "s"} translated)`
+        setFidelityWarnings([
+          ...result.warnings.map((w) => ({
+            kind: "inline-style-simplified" as const,
+            segment: w.segment,
+            detail: w.detail,
+          })),
+          ...collectInlineStyleWarnings(cells),
+        ])
+        setStatus({ kind: "ok", msg: `Downloaded ${baseName}.pptx${note}` })
+      } else if (fmt === "audio-by-character") {
         setStatus({ kind: "busy", msg: "Decoding audio…" })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
         const { decodeToMono48k } = await import("@/lib/audio/decode-mono")
@@ -451,7 +530,7 @@ export function ExportDialog({
         downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
         const skippedNote = result.skipped > 0 ? ` (${result.skipped} clip${result.skipped === 1 ? "" : "s"} skipped)` : ""
         setStatus({ kind: "ok", msg: `Exported audio by character${skippedNote}` })
-      } else if (format === "sdbh-xml") {
+      } else if (fmt === "sdbh-xml") {
         // SDBH round-trip: reinject every translated lexicon cell into the
         // user-supplied MARBLE XML skeleton, keyed by LEXID-derived cell ids.
         if (!sdbhSkeleton) {
@@ -460,6 +539,10 @@ export function ExportDialog({
         }
         if (projectCellsLoading) {
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
+          return
+        }
+        if (projectCellsError) {
+          setStatus({ kind: "error", msg: `Couldn't load the complete project: ${projectCellsError.message}` })
           return
         }
         const byCellId = new Map<string, string>()
@@ -483,43 +566,45 @@ export function ExportDialog({
         downloadBlob(new Blob([xml], { type: "application/xml" }), `${stem}.XML`)
         const warnNote = warnings.length ? ` — ${warnings.length} gloss warning(s), check semicolons` : ""
         setStatus({ kind: "ok", msg: `Reinjected ${byCellId.size.toLocaleString()} translations into ${sensesInjected.toLocaleString()} senses${warnNote}` })
-      } else if (effectiveScope === "project") {
+      } else if (runScope === "project") {
         // Client-side project-scope zip: use already-loaded per-file cells.
         if (projectCellsLoading) {
           setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
           return
         }
+        if (projectCellsError) {
+          setStatus({ kind: "error", msg: `Couldn't load the complete project: ${projectCellsError.message}` })
+          return
+        }
         // AQU-441: metadata-csv project scope — flatten all file cells into one sheet.
-        if (format === "metadata-csv") {
+        if (fmt === "metadata-csv") {
           const allCells = projectFileCells.flatMap((f) => f.cells)
           const csvBlob = exportMetadataCsv(allCells, ttsSettings)
           const safeName = buildExportStem(true)
           downloadBlob(csvBlob, `${safeName}.csv`)
-          const truncNote = isTruncated ? " (first 40 files only)" : ""
-          setStatus({ kind: "ok", msg: `Downloaded ${safeName}.csv (${allCells.length} rows)${truncNote}` })
+          setStatus({ kind: "ok", msg: `Downloaded ${safeName}.csv (${allCells.length} rows)` })
           return
         }
         setStatus({ kind: "busy", msg: `Building zip for ${projectFileCells.length} files…` })
         const zipBlob = await buildProjectZip({
           files: projectFileCells,
-          format: format as TextExportFormat,
+          format: fmt as TextExportFormat,
           sourceLanguage,
           targetLanguage,
         })
         const safeName = buildExportStem(true) // AQU-437: project scope uses project name + suffixes
-        const ext = selectedFormat.ext
+        const ext = fmtOption.ext
         downloadBlob(zipBlob, `${safeName}${ext}.zip`)
         setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
-        const truncNote = isTruncated ? " (first 40 files only)" : ""
-        setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files${truncNote}` })
+        setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files` })
       } else {
         // Client-side single-file exporter
         // AQU-439: apply voice filter before passing to any exporter.
         const filteredCells = applyVoiceFilter(cells)
         let blob: Blob
         const baseName = buildExportStem(false) // AQU-437: user-chosen stem
-        const ext = selectedFormat.ext
-        switch (format) {
+        const ext = fmtOption.ext
+        switch (fmt) {
           case "txt":
             blob = exportPlainTextStructured(filteredCells)
             break
@@ -556,7 +641,7 @@ export function ExportDialog({
             blob = exportMetadataCsv(filteredCells, ttsSettings)
             break
           default:
-            throw new Error(`Unknown format: ${format}`)
+            throw new Error(`Unknown format: ${fmt}`)
         }
         downloadBlob(blob, `${baseName}${ext}`)
         setFidelityWarnings(collectInlineStyleWarnings(filteredCells))
@@ -598,6 +683,78 @@ export function ExportDialog({
             overflow-hidden + max-h-[85dvh] on short/tablet viewports, making
             the lower format options unreachable. */}
         <DialogBody className="flex flex-col gap-4">
+        {!canExport ? (
+          /* Permission gate (AQU-253 revised): explain the block instead of
+             hiding it, and point at the roles & permissions docs. */
+          <div
+            role="note"
+            aria-label="Export permission required"
+            className="flex flex-col gap-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 px-3 py-3 text-sm text-amber-700 dark:text-amber-300"
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              You don't have export permission
+            </span>
+            <p className="text-xs leading-relaxed">
+              An organization owner has restricted exporting to higher roles.
+              Ask an owner to raise your role, or read how roles and permissions
+              work.
+            </p>
+            <a
+              href="https://help.aquilla.app/permissions"
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium underline underline-offset-2 hover:opacity-80"
+            >
+              Roles &amp; permissions — help.aquilla.app
+            </a>
+          </div>
+        ) : (
+        <>
+        {/* Primary action: download the file back in its own format. */}
+        {nativeOption && (
+          <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-accent/30 px-3 py-3">
+            <Button
+              size="lg"
+              className="w-full justify-center"
+              onClick={() => handleExport(nativeOption.id)}
+              disabled={!activeFileId || isBusy}
+              aria-busy={isBusy}
+            >
+              {isBusy ? (
+                <Spinner aria-hidden="true" />
+              ) : (
+                <Download className="h-4 w-4" aria-hidden="true" />
+              )}
+              Download {buildExportStem(false)}{nativeOption.ext}
+            </Button>
+            <p className="text-xs text-muted-foreground text-center leading-relaxed">
+              {nativeOption.label} — your file in its original format, with
+              current translations.
+              {nativeOption.lossy && " Some inline formatting may not carry over."}
+            </p>
+          </div>
+        )}
+
+        {/* Everything else is a conversion — tucked behind a collapse. */}
+        <details
+          open={formatsOpen}
+          onToggle={(e) => setFormatsOpen((e.currentTarget as HTMLDetailsElement).open)}
+          className="group"
+        >
+          <summary className="cursor-pointer text-xs font-medium text-muted-foreground uppercase tracking-wide select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
+            <span
+              className={
+                "inline-block transition-transform " +
+                (formatsOpen ? "rotate-90" : "rotate-0")
+              }
+              aria-hidden="true"
+            >
+              ›
+            </span>
+            Export to another format
+          </summary>
+          <div className="mt-2.5 flex flex-col gap-4">
         {/* Format selector */}
         <fieldset className="flex flex-col gap-1.5 min-w-0">
           <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
@@ -610,8 +767,9 @@ export function ExportDialog({
             aria-label="Export format"
           >
             {FORMAT_OPTIONS.filter((f) => {
-              if (f.id === "usfm") return isUsfmFile
-              if (f.id === "docx") return isDocxFile // AQU-233: only for docx imports
+              if (f.id === "usfm") return activeFileType === "usfm"
+              if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
+              if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
               if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
               if (f.id === "plain-text-dump") return false // shown in Advanced section only
               return true
@@ -698,14 +856,6 @@ export function ExportDialog({
               <Skeleton className="h-2 w-2 rounded-full shrink-0" />
               <Skeleton className="h-3 w-40" />
             </div>
-          )}
-          {effectiveScope === "project" && format !== "usfm" && isTruncated && (
-            <p className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400 mt-1">
-              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-              This project has more than 40 files — zip will include the first 40 only.
-              {/* SWARM-TODO(project-export-scale): server batch-export endpoint for
-                  large projects; see src/hooks/useProjectCells.ts for the proposed shape. */}
-            </p>
           )}
         </fieldset>
 
@@ -916,6 +1066,8 @@ export function ExportDialog({
             </RadioGroup>
           </div>
         </details>
+          </div>
+        </details>
 
         {/* Status feedback */}
         {status.kind !== "idle" && (
@@ -976,29 +1128,39 @@ export function ExportDialog({
             </ul>
           </div>
         )}
+        </>
+        )}
         </DialogBody>
 
         <DialogFooter>
-          <Button
-            variant={isDone ? "default" : "outline"}
-            onClick={() => handleOpenChange(false)}
-            disabled={isBusy}
-          >
-            {isDone ? "Done" : "Cancel"}
-          </Button>
-          <Button
-            onClick={handleExport}
-            disabled={!activeFileId || isBusy}
-            aria-busy={isBusy}
-            variant={isDone ? "outline" : "default"}
-          >
-            {isBusy ? (
-              <Spinner aria-hidden="true" />
-            ) : (
-              <Download className="h-4 w-4" aria-hidden="true" />
-            )}
-            {isBusy ? "Exporting…" : isDone ? "Export again" : "Export"}
-          </Button>
+          {!canExport ? (
+            <Button variant="outline" onClick={() => handleOpenChange(false)}>
+              Close
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant={isDone ? "default" : "outline"}
+                onClick={() => handleOpenChange(false)}
+                disabled={isBusy}
+              >
+                {isDone ? "Done" : "Cancel"}
+              </Button>
+              <Button
+                onClick={() => handleExport()}
+                disabled={!activeFileId || isBusy}
+                aria-busy={isBusy}
+                variant={isDone ? "outline" : "default"}
+              >
+                {isBusy ? (
+                  <Spinner aria-hidden="true" />
+                ) : (
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                )}
+                {isBusy ? "Exporting…" : isDone ? "Export again" : "Export"}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

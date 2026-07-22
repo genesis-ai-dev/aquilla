@@ -16,6 +16,8 @@
 import { useCallback, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { applyEBibleTargetImport } from "@/lib/import"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
@@ -35,6 +37,8 @@ import { ColumnMappingPanel } from "./ColumnMappingPanel"
 export interface FileTargetImportPanelProps {
   projectId: string
   username: string
+  /** Target-lane storage key. Empty/absent means the project's default lane. */
+  targetLang?: string
   /** Display name of the open file — shown so the user knows the import scope. */
   fileName: string
   /** The open file's cells, in display order. */
@@ -42,6 +46,8 @@ export interface FileTargetImportPanelProps {
   getToken: (fileId: string) => Promise<string | null>
   onImported: (committedCount: number) => void
   onCancel: () => void
+  /** Surfaced alongside the inline error so the host can instrument failures. */
+  onError?: (message: string, phase: "parse" | "apply") => void
   /** Optimistically patch many cells at once so the editor reflects the
    *  imported translations before the outbox finishes flushing. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
@@ -50,22 +56,25 @@ export interface FileTargetImportPanelProps {
 type PanelStep = "file" | "sheet" | "mapping" | "review"
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
-const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx", "xls"])
+const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
 
 export function FileTargetImportPanel({
   projectId,
   username,
+  targetLang,
   fileName,
   cells,
   getToken,
   onImported,
   onCancel,
+  onError,
   applyOptimisticTargetEdits,
 }: FileTargetImportPanelProps) {
   const [step, setStep] = useState<PanelStep>("file")
   const [error, setError] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
   const [selectedSheet, setSelectedSheet] = useState<SpreadsheetSheet | null>(null)
+  const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [matchResult, setMatchResult] = useState<FileTargetMatchResult | null>(null)
   const [matchedByOrder, setMatchedByOrder] = useState(false)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
@@ -82,16 +91,21 @@ export function FileTargetImportPanel({
 
   const handleFile = useCallback(async (file: File) => {
     setError(null)
+    setSourceFile(file)
     const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
     try {
+      assertSourceUploadByteLength(file.size)
       if (USFM_EXTENSIONS.has(ext)) {
-        const rows = usfmToTargetRows(await file.text())
+        const rows = usfmToTargetRows(decodeImportText(await file.arrayBuffer(), file.name))
         if (rows.length === 0) {
           setError("No verses found in this USFM file.")
           return
         }
         showReview(matchTargetRowsByRef(rows, cells), false)
-      } else if (ext === "xlsx" || ext === "xls") {
+      } else if (ext === "xls") {
+        setError("Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV and try again.")
+        return
+      } else if (ext === "xlsx") {
         const parsed = await parseXlsxToSheets(await file.arrayBuffer())
         if (parsed.length === 0) {
           setError("No sheets found in XLSX file.")
@@ -105,7 +119,7 @@ export function FileTargetImportPanel({
           setStep("sheet")
         }
       } else if (SHEET_EXTENSIONS.has(ext)) {
-        const sheet = parseCsvToSheet(await file.text(), file.name)
+        const sheet = parseCsvToSheet(decodeImportText(await file.arrayBuffer(), file.name), file.name)
         setSheets([sheet])
         setSelectedSheet(sheet)
         setStep("mapping")
@@ -113,9 +127,11 @@ export function FileTargetImportPanel({
         setError("Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet (.csv/.tsv/.xlsx).")
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to parse file")
+      const message = err instanceof Error ? err.message : "Failed to parse file"
+      setError(message)
+      onError?.(message, "parse")
     }
-  }, [cells, showReview])
+  }, [cells, showReview, onError])
 
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
@@ -135,7 +151,7 @@ export function FileTargetImportPanel({
   async function handleApply() {
     // Guard against double-submit: a second click while the enqueue is in
     // flight would re-optimistic-patch and re-enqueue the same cells.
-    if (!matchResult || applying) return
+    if (!matchResult || !sourceFile || applying) return
     setApplying(true)
     setError(null)
     const selected = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
@@ -148,7 +164,23 @@ export function FileTargetImportPanel({
       const { committedCount } = await applyEBibleTargetImport(
         matchResult,
         selectedCellIds,
-        { projectId, author: username, getToken },
+        {
+          projectId,
+          author: username,
+          getToken,
+          targetLang,
+          sourceArtifact: {
+            name: sourceFile.name,
+            bytes: await sourceFile.arrayBuffer(),
+            format: USFM_EXTENSIONS.has(sourceFile.name.split(".").pop()?.toLowerCase() ?? "")
+              ? "usfm"
+              : sourceFile.name.toLowerCase().endsWith(".xlsx")
+                ? "xlsx"
+                : sourceFile.name.toLowerCase().endsWith(".tsv")
+                  ? "tsv"
+                  : "csv",
+          },
+        },
       )
       onImported(committedCount) // closes the dialog — content is already visible + queued
     } catch (err) {
@@ -157,7 +189,9 @@ export function FileTargetImportPanel({
       // revalidate. Restore each cell's pre-import value (empty for fresh cells,
       // the prior translation for conflicts).
       applyOptimisticTargetEdits(selected.map((m) => ({ cellId: m.cellId, value: m.currentText })))
-      setError(err instanceof Error ? err.message : "Import failed")
+      const message = err instanceof Error ? err.message : "Import failed"
+      setError(message)
+      onError?.(message, "apply")
       setApplying(false)
     }
   }
@@ -167,7 +201,7 @@ export function FileTargetImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Import translations into "{fileName}"</p>
+          <p className="text-sm font-medium">Import target translations into "{fileName}"</p>
           <p className="text-xs text-muted-foreground">
             Fills this file's target column from a USFM file or spreadsheet.
             Source text is never changed. You'll review every match before anything is saved.
@@ -189,7 +223,7 @@ export function FileTargetImportPanel({
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.xls"
+              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx"
               className="sr-only"
               onChange={(e) => {
                 const file = e.target.files?.[0]

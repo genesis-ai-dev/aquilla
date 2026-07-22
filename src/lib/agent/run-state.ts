@@ -59,9 +59,78 @@ export interface AquiferProposalItem {
   proposal: AquiferPublishProposal
 }
 
-export type TimelineItem = TextItem | ToolItem | ProposalItem | AquiferProposalItem
+/**
+ * One `run_code` sandbox call (AQU-AGENT §2/§4). `tool.code.start`/
+ * `tool.code.output` carry no step counter (unlike code_start/code_result),
+ * so `stdout`/`stderr`/`durationMs` are undefined until the matching output
+ * frame arrives and reduceRunFrame pairs it with the most recently opened,
+ * still-unpaired code item (see the reducer below).
+ */
+export interface CodeActivityItem {
+  id: string
+  kind: "code"
+  language: string
+  /** code_start's codePreview: first 400 chars. */
+  codePreview: string
+  stdout?: string
+  stderr?: string
+  truncated?: boolean
+  durationMs?: number
+}
+
+/** A legacy persisted PlanImport changeset awaiting human approval. */
+export interface ChangesetItem {
+  id: string
+  kind: "changeset"
+  changesetId: string
+  approvalUrl: string
+  summary: string
+  cellCount: number
+}
+
+/** A proposed project memory (agent_memories row), pending review. */
+export interface MemoryProposedItem {
+  id: string
+  kind: "memory-proposed"
+  memoryId: string
+  path: string
+  preview: string
+  /** Flipped to "reviewed" via markMemoryReviewed once the Memory tab acts on
+   *  it (mem-M5). Undefined is treated the same as "pending". */
+  status?: "pending" | "reviewed"
+}
+
+/** A proposed project-brief update, pending review. */
+export interface BriefProposedItem {
+  id: string
+  kind: "brief-proposed"
+  proposalId: string
+  preview: string
+  /** Flipped to "reviewed" via markBriefReviewed once the Memory tab acts on
+   *  it (mem-M5). Undefined is treated the same as "pending". */
+  status?: "pending" | "reviewed"
+}
+
+export type TimelineItem =
+  | TextItem
+  | ToolItem
+  | ProposalItem
+  | AquiferProposalItem
+  | CodeActivityItem
+  | ChangesetItem
+  | MemoryProposedItem
+  | BriefProposedItem
 
 export type AgentRunStatus = "running" | "ok" | "capped" | "error"
+
+/** Cost-cap meter (AQU-AGENT §2 AGENT_RUN_COST_CAP_CENTS). Values are
+ *  org-facing CREDITS (server applies agent-rail markup), never raw $. */
+export interface AgentBudget {
+  spentCredits: number
+  capCredits: number
+  /** Set once a `budget.exhausted` frame lands — the run halted at its cap. */
+  exhausted: boolean
+}
 
 export interface AgentProgress {
   label: string
@@ -83,7 +152,9 @@ export interface AgentRunUi {
   items: TimelineItem[]
   /** Live bulk-job progress (progress frames); cleared when the run settles. */
   progress?: AgentProgress
-  usage?: { promptTokens: number; completionTokens: number; costCents: number }
+  usage?: { promptTokens: number; completionTokens: number; costCredits: number }
+  /** Latest budget/budget.exhausted frame; undefined until the run reports one. */
+  budget?: AgentBudget
   status: AgentRunStatus
   errorMessage?: string
 }
@@ -162,6 +233,62 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
       return appendItem(run, { id: nextId(run), kind: "proposal", proposal: frame.proposal })
     case "aquifer_proposal":
       return appendItem(run, { id: nextId(run), kind: "aquifer", proposal: frame.proposal })
+    case "tool.code.start":
+      return appendItem(run, {
+        id: nextId(run),
+        kind: "code",
+        language: frame.language,
+        codePreview: frame.codePreview,
+      })
+    case "tool.code.output": {
+      // No step counter on these frames (contract §4) — pair with the most
+      // recently opened code item that hasn't received output yet, scanning
+      // from the end (same honest-contract posture as code_result above).
+      for (let i = run.items.length - 1; i >= 0; i--) {
+        const item = run.items[i]
+        if (item.kind === "code" && item.durationMs === undefined) {
+          const updated: CodeActivityItem = {
+            ...item,
+            stdout: frame.stdout,
+            stderr: frame.stderr,
+            truncated: frame.truncated,
+            durationMs: frame.durationMs,
+          }
+          return { ...run, items: [...run.items.slice(0, i), updated, ...run.items.slice(i + 1)] }
+        }
+      }
+      return run
+    }
+    case "changeset.staged":
+      return appendItem(run, {
+        id: nextId(run),
+        kind: "changeset",
+        changesetId: frame.changesetId,
+        approvalUrl: frame.approvalUrl,
+        summary: frame.summary,
+        cellCount: frame.cellCount,
+      })
+    case "memory.proposed":
+      return appendItem(run, {
+        id: nextId(run),
+        kind: "memory-proposed",
+        memoryId: frame.memoryId,
+        path: frame.path,
+        preview: frame.preview,
+        status: "pending",
+      })
+    case "brief.proposed":
+      return appendItem(run, {
+        id: nextId(run),
+        kind: "brief-proposed",
+        proposalId: frame.proposalId,
+        preview: frame.preview,
+        status: "pending",
+      })
+    case "budget":
+      return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: false } }
+    case "budget.exhausted":
+      return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: true } }
     case "progress":
       return { ...run, progress: { label: frame.label, done: frame.done, total: frame.total } }
     case "usage":
@@ -170,7 +297,7 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
         usage: {
           promptTokens: frame.promptTokens,
           completionTokens: frame.completionTokens,
-          costCents: frame.costCents,
+          costCredits: frame.costCredits,
         },
       }
     case "done":
@@ -192,4 +319,25 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
 export function failRun(run: AgentRunUi, message: string): AgentRunUi {
   if (run.status === "error") return run
   return { ...run, status: "error", errorMessage: message, progress: undefined }
+}
+
+/** Flip a memory.proposed notice to "reviewed" after the Memory tab acts on
+ * it (mem-M5) — a no-op if this run has no item for that memoryId. */
+export function markMemoryReviewed(run: AgentRunUi, memoryId: string): AgentRunUi {
+  return {
+    ...run,
+    items: run.items.map((item) =>
+      item.kind === "memory-proposed" && item.memoryId === memoryId ? { ...item, status: "reviewed" } : item,
+    ),
+  }
+}
+
+/** Same as markMemoryReviewed, for brief.proposed notices. */
+export function markBriefReviewed(run: AgentRunUi, proposalId: string): AgentRunUi {
+  return {
+    ...run,
+    items: run.items.map((item) =>
+      item.kind === "brief-proposed" && item.proposalId === proposalId ? { ...item, status: "reviewed" } : item,
+    ),
+  }
 }

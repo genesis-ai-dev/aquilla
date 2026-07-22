@@ -23,6 +23,8 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { SourceCellRef } from "@/lib/import"
 import { applyEBibleTargetImport } from "@/lib/import"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import {
   parseCsvToSheet,
   parseXlsxToSheets,
@@ -37,6 +39,8 @@ import { ColumnMappingPanel } from "./ColumnMappingPanel"
 export interface PairedImportPanelProps {
   projectId: string
   username: string
+  /** Target-lane storage key. Empty/absent means the project's default lane. */
+  targetLang?: string
   sourceCells: SourceCellRef[]
   getToken: (fileId: string) => Promise<string | null>
   onImported: (committedCount: number) => void
@@ -48,6 +52,7 @@ type PanelStep = "file" | "sheet" | "mapping" | "review" | "importing"
 export function PairedImportPanel({
   projectId,
   username,
+  targetLang,
   sourceCells,
   getToken,
   onImported,
@@ -57,14 +62,21 @@ export function PairedImportPanel({
   const [error, setError] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
   const [selectedSheet, setSelectedSheet] = useState<SpreadsheetSheet | null>(null)
+  const [sourceFile, setSourceFile] = useState<File | null>(null)
   const [matchResult, setMatchResult] = useState<PairedMatchResult | null>(null)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
 
   const handleFile = useCallback(async (file: File) => {
     setError(null)
+    setSourceFile(file)
     const ext = file.name.split(".").pop()?.toLowerCase()
     try {
-      if (ext === "xlsx" || ext === "xls") {
+      assertSourceUploadByteLength(file.size)
+      if (ext === "xls") {
+        setError("Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV and try again.")
+        return
+      }
+      if (ext === "xlsx") {
         const buf = await file.arrayBuffer()
         const parsed = await parseXlsxToSheets(buf)
         if (parsed.length === 0) {
@@ -80,7 +92,7 @@ export function PairedImportPanel({
         }
       } else {
         // CSV/TSV
-        const text = await file.text()
+        const text = decodeImportText(await file.arrayBuffer(), file.name)
         const sheet = parseCsvToSheet(text, file.name)
         setSheets([sheet])
         setSelectedSheet(sheet)
@@ -105,7 +117,7 @@ export function PairedImportPanel({
   }
 
   async function handleApply() {
-    if (!matchResult) return
+    if (!matchResult || !sourceFile) return
     setStep("importing")
     setError(null)
     try {
@@ -113,7 +125,21 @@ export function PairedImportPanel({
       const { committedCount } = await applyEBibleTargetImport(
         matchResult as Parameters<typeof applyEBibleTargetImport>[0],
         selectedCellIds,
-        { projectId, author: username, getToken },
+        {
+          projectId,
+          author: username,
+          getToken,
+          targetLang,
+          sourceArtifact: {
+            name: sourceFile.name,
+            bytes: await sourceFile.arrayBuffer(),
+            format: sourceFile.name.toLowerCase().endsWith(".xlsx")
+              ? "xlsx"
+              : sourceFile.name.toLowerCase().endsWith(".tsv")
+                ? "tsv"
+                : "csv",
+          },
+        },
       )
       onImported(committedCount)
     } catch (err) {
@@ -149,7 +175,7 @@ export function PairedImportPanel({
             </span>
             <input
               type="file"
-              accept=".csv,.tsv,.xlsx,.xls"
+              accept=".csv,.tsv,.xlsx"
               className="sr-only"
               onChange={(e) => {
                 const file = e.target.files?.[0]

@@ -54,7 +54,7 @@ export function RulesPage() {
 
   const { patch: patchShared, settings: projectWideSettings } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
   const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh, patchShared)
-  const { cells: validatedCells } = useLivingMemory({ projectId: id ?? "" })
+  const { cells: validatedCells, error: projectCellsError } = useLivingMemory({ projectId: id ?? "" })
 
   // AQU-291: pending delete confirmation state.
   const [pendingDeleteRuleId, setPendingDeleteRuleId] = useState<string | null>(null)
@@ -123,11 +123,11 @@ export function RulesPage() {
   }
 
   // AQU-186: derive per-cell infractions for builtin checks over the project
-  // scope (all validated cells from useLivingMemory, up to MAX_FILES=40 files).
+  // scope (all validated cells from useLivingMemory).
   // Scope rationale: FixReviewPanel's multi-cell harmonize sweep targets the
   // whole project, so infraction counts must be project-wide.
-  // Performance: O(cells × builtinRules). builtinRules is ≤9; validatedCells
-  // is bounded to the first 40 files. checkRulesForCell is pure and fast
+  // Performance: O(cells × builtinRules). builtinRules is ≤9 and
+  // checkRulesForCell is pure and fast
   // (regex cache prevents recompilation). The memo only re-runs when cells or
   // rules change — not on every render.
   const enabledBuiltinRules = useMemo(
@@ -201,6 +201,14 @@ export function RulesPage() {
       </header>
 
       <main className="mx-auto max-w-2xl space-y-6 p-6">
+        {projectCellsError && (
+          <div
+            role="alert"
+            className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+          >
+            Couldn&apos;t load the complete project corpus: {projectCellsError.message}
+          </div>
+        )}
         {usageSummary && (
           <AppTooltip content="LLM usage on this project">
             <p className="text-xs text-muted-foreground">{usageSummary}</p>

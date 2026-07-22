@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * CellExpansion tabs — ArrowLeft / ArrowRight keyboard navigation.
@@ -27,16 +21,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   5. Presses End → last tab should be selected.
  */
 test("CellExpansion tabs respond to ArrowRight / Home / End keyboard nav", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `TabArrow ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `TabArrow ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Open the CellExpansion panel (aria-label="Open cell details").
   const row = ws.cellRow(0)

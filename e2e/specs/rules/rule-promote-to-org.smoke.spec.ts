@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RulesSurface — Promote a project rule to org scope.
@@ -13,17 +13,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * clicks "Promote to org" → dialog opens → Cancel closes it.
  */
 test("Promote to org button opens confirmation dialog", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `PromoteOrg ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `PromoteOrg ${Date.now()}` })
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // Create a rule so the "Promote to org" button appears.

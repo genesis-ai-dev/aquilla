@@ -20,6 +20,7 @@ import { PLAN_IMPORT_MAX_CELLS } from './commands'
 import { MAX_ARTIFACT_BYTES } from './artifacts-route'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
+import { listProjectsForCredential } from './projects-list'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type { ExternalEnv } from './types'
@@ -93,6 +94,15 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
   return ok({
     apiVersion: 'v1',
     credentialMode: cred.mode,
+    // The numbered golden path, so a weak agent doesn't have to reconstruct
+    // the workflow from per-tool descriptions.
+    quickstart: [
+      '1. get_identity_and_scope — confirm who you are, your mode (ask|act), and your org/project scope.',
+      '2. list_projects — find a projectId.',
+      '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search.',
+      '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
+      '5. confirm_changeset with that changesetId + digest. act mode: applies immediately. ask mode: first show the approvalUrl to a human and wait for them to approve in their browser, then call confirm_changeset — until then it returns confirmation_required and applies nothing.',
+    ],
     // All five domain command kinds now ship (Agent API v1.1). PlanImport is
     // the one holdout with no MCP staging tool (prepare_translations's
     // `commands` argument does not accept it) — it stays REST-only (POST
@@ -163,48 +173,11 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
   })
 }
 
-interface ProjectListRow {
-  id: string
-  name: string
-  org_id: number | string | bigint | null
-  role_source: string
-}
-
 async function listProjects(env: ExternalEnv, cred: ApiCredentialContext): Promise<McpToolResult> {
   if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
-  const uid = String(cred.userId)
-  const binds: unknown[] = [uid, uid, uid, uid, uid]
-  let sql =
-    `SELECT p.id, p.name, p.org_id,
-       CASE
-         WHEN p.created_by::text = ? THEN 'creator'
-         WHEN EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id::text = ?) THEN 'member'
-         ELSE 'org'
-       END AS role_source
-     FROM projects p
-     WHERE p.archived_at IS NULL
-       AND (
-         p.created_by::text = ?
-         OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id::text = ?)
-         OR (p.org_id IS NOT NULL AND EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = p.org_id AND om.user_id::text = ?))
-       )`
-  if (cred.projectId !== null) {
-    sql += ` AND p.id = ?`
-    binds.push(cred.projectId)
-  }
-  if (cred.orgId !== null) {
-    sql += ` AND p.org_id::text = ?`
-    binds.push(cred.orgId)
-  }
-  sql += ` ORDER BY p.name LIMIT 100`
-
-  const result = await env.AQUILLA_PG.prepare(sql).bind(...binds).all<ProjectListRow>()
-  const projects = result.results.map((r) => ({
-    id: r.id,
-    name: r.name,
-    org_id: r.org_id == null ? null : String(r.org_id),
-    role_source: r.role_source,
-  }))
+  // Shared with REST GET /api/v1/external/projects (projects-list.ts) so the
+  // two adapters can never drift.
+  const projects = await listProjectsForCredential(env.AQUILLA_PG, cred)
   return ok({ projects })
 }
 

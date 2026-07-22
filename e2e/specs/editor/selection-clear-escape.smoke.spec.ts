@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * SelectionBar — Escape key clears selection when no editable is focused.
@@ -24,16 +18,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * button click tested in selection-bar.smoke.spec.ts.
  */
 test("Escape key clears selection when no editable is focused", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `SelectEsc ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `SelectEsc ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Hover first row to reveal the selection checkbox.
   const row = ws.cellRow(0)

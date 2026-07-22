@@ -43,7 +43,7 @@ import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
-import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "@/lib/completion/compress-examples"
+import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates, dropValidatedPairDuplicates } from "@/lib/completion/compress-examples"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
@@ -56,6 +56,14 @@ import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 // review unit; larger files still run, but are split into independently
 // reviewable chunks.
 const MAX_CELLS_PER_CALL = 10
+
+// AQU-620: a "regenerate" request re-drafts a cell that already has a
+// prediction. The project's configured temperature is tuned low for a stable
+// first draft, so repeating generation yields effectively the same text. When
+// the user explicitly asks for another iteration we raise the sampling
+// temperature (unless the project is already hotter) so the new candidate
+// differs. Scoped to regenerate only — first-draft generation is unchanged.
+const REGENERATE_TEMPERATURE = 0.8
 
 // Default settings for projects that haven't customized anything yet.
 // Frontier provider + default system prompt, no custom endpoint.
@@ -186,8 +194,17 @@ export function useCompletion(
     },
   }), [effectiveSettings.systemPrompt, modelName, provider, sourceLanguage, targetLanguage])
 
-  const completeSingle = useCallback(async (cell: CellData, signal?: AbortSignal) => {
+  const completeSingle = useCallback(async (
+    cell: CellData,
+    signal?: AbortSignal,
+    opts?: { regenerate?: boolean },
+  ) => {
     if (!isConfigured || !isAvailable) return
+    // AQU-620: raise the temperature for an explicit regenerate so the second
+    // request varies; leave first-draft generation on the configured value.
+    const generationSettings: CompletionSettings = opts?.regenerate
+      ? { ...effectiveSettings, temperature: Math.max(effectiveSettings.temperature ?? 0, REGENERATE_TEMPERATURE) }
+      : effectiveSettings
 
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
     // top_k controls how many approved examples are requested. The injected
@@ -220,12 +237,17 @@ export function useCompletion(
       // Compress the retrieved examples (deterministic source-span truncation using the
       // matched-token provenance the search already returns) and drop near-duplicates,
       // so the freed budget can hold the discourse window below. (D6)
-      // Examples that duplicate a preceding-context cell are dropped first (on the
-      // FULL source, before compression, so the match is exact cell identity):
-      // preceding-context is the stronger, exact signal, so we keep it and avoid
-      // rendering the same cell twice.
+      // Examples that duplicate a preceding-context cell OR a validated pair are dropped
+      // first (on the FULL source, before compression, so the match is exact cell
+      // identity): preceding-context and validated pairs are the stronger, exact signals
+      // and both render ahead of retrieved examples in the prompt, so we keep them and
+      // avoid rendering the same cell twice (which only bloats the prompt / prefill —
+      // AQU-617).
       const compressedExamples = dedupeExamples(
-        dropPrecedingContextDuplicates(found, precedingContext).map((e) => ({
+        dropValidatedPairDuplicates(
+          dropPrecedingContextDuplicates(found, precedingContext),
+          validatedPairs,
+        ).map((e) => ({
           source: compressExampleSource(e.source, { matchedTokens: e.matchedTokens }),
           target: e.target,
         })),
@@ -243,7 +265,7 @@ export function useCompletion(
         precedingContext,
       })
       const result = await complete({
-        settings: effectiveSettings, session,
+        settings: generationSettings, session,
         messages,
         stream: true,
         onChunk: (text) => {
@@ -262,6 +284,7 @@ export function useCompletion(
         example_count: found.length,
         validated_pair_count: validatedPairs.length,
         rule_count: (rules ?? []).filter((r) => r.enabled).length,
+        regenerate: Boolean(opts?.regenerate),
       })
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.

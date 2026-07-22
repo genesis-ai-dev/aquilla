@@ -48,20 +48,23 @@ describe("handleCorsPreflight", () => {
     expect(res!.headers.get("Access-Control-Allow-Headers")).toContain("Authorization")
   })
 
-  it("allows X-Source-Format so the DOCX/PPTX source PUT survives preflight", () => {
+  it("allows every immutable-artifact header so source PUTs survive preflight", () => {
     // Regression: the client sends X-Source-Format on
     // PUT /api/v1/projects/:id/files/:id/source. When Allow-Headers omitted it,
     // the browser blocked the PUT and no original DOCX ever reached R2.
     const res = handleCorsPreflight(
       req("OPTIONS", "/api/v1/projects/p1/files/f1/source", {
         "Access-Control-Request-Method": "PUT",
-        "Access-Control-Request-Headers": "authorization,x-source-format",
+        "Access-Control-Request-Headers": "authorization,x-source-format,x-source-size,x-source-sha256,x-artifact-id,x-artifact-name,x-artifact-binding-role,x-artifact-member-path,x-artifact-profile-id,x-artifact-profile-version,x-artifact-fidelity,x-update-source-sidecar",
       }),
     )
     expect(res?.status).toBe(204)
-    expect(res!.headers.get("Access-Control-Allow-Headers")!.toLowerCase()).toContain(
-      "x-source-format",
-    )
+    const allowed = res!.headers.get("Access-Control-Allow-Headers")!.toLowerCase()
+    for (const header of [
+      "x-source-format", "x-source-size", "x-source-sha256", "x-artifact-id", "x-artifact-name", "x-artifact-binding-role",
+      "x-artifact-member-path", "x-artifact-profile-id", "x-artifact-profile-version",
+      "x-artifact-fidelity", "x-update-source-sidecar",
+    ]) expect(allowed).toContain(header)
   })
 
   it("returns 204 for OPTIONS on /cells/audit-stats", () => {

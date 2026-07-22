@@ -21,6 +21,9 @@
 | Orgs        | Remove member, change role                           | `e2e/specs/orgs/remove-member-dialog.smoke.spec.ts` + `projects/share-panel-role-change.smoke.spec.ts` | ✅ |
 | Orgs        | Send & accept invite                                 | `e2e/specs/orgs/invite-to-projects.smoke.spec.ts` + `pending-invite-revoke.smoke.spec.ts` | ✅ |
 | Editor      | Import markdown, edit cell, persists across reload   | `e2e/specs/editor/import-and-edit.smoke.spec.ts`              |   ✅   |
+| Editor      | Re-import updates stable source units while preserving target content | `e2e/specs/editor/reimport-preserves-target.smoke.spec.ts` | ✅ |
+| Editor      | AI-classify unknown text, review recipe, import source + target lane | `e2e/specs/editor/import-ai-recipe.smoke.spec.ts` | ✅ |
+| Editor      | Upload spreadsheet auto-routes to column mapping; headings stay structural and canonical verse refs survive preview/commit | `e2e/specs/editor/import-spreadsheet-mapping.smoke.spec.ts` | ✅ |
 | Editor      | Scripture verse labels match canonical refs; chapter picker and previous/next navigation | `e2e/specs/editor/chapter-navigation.smoke.spec.ts` | ✅ |
 | Editor      | Commit survives a stale in-flight refetch (no vanish-until-refresh, AQU-247) | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+K search                                         | `e2e/specs/editor/search.smoke.spec.ts` (toolbar) + `search-keyboard-shortcut.smoke.spec.ts` (Ctrl+K) | ✅ |
@@ -32,6 +35,7 @@
 | Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
 | AI          | Sparkle button fills cell and marks it for individual human review | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings) | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
+| Editor      | Import dialog escalates an unsupported container to the isolated parser, previews normalized source/target units, then commits through ImportService | `e2e/specs/agent-import.spec.ts` (container-gated with `AGENT_SANDBOX_E2E=1`) | |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
 | Collab      | Conflict resolution on same cell                     | _gap — Plan 2_                                                |        |
@@ -45,7 +49,7 @@
 | Sharing     | Toggle invite mode between @user and email           | `e2e/specs/projects/share-invite-mode-toggle.smoke.spec.ts`   |   ✅   |
 | Sharing     | Invite landing pages name inviter + workspace (AQU-471) | `e2e/specs/projects/join-page.smoke.spec.ts` (test 2) + `e2e/specs/orgs/join-org-context.smoke.spec.ts` | ✅ |
 | Sharing     | Email invites to multiple projects from the org view (AQU-471) | `e2e/specs/orgs/multi-project-invite-submit.smoke.spec.ts` (test 2) | ✅ |
-| Audio/Video | Import audio file                                    | _gap — Plan 2_                                                |        |
+| Audio/Video | Import mp3 → silence-split clips → Play all          | `e2e/specs/editor/audio-import-playback.smoke.spec.ts`        |   ✅   |
 | Audio/Video | Subtitles flow                                       | _gap — Plan 2_                                                |        |
 | Settings    | Settings sync between two browsers                   | _gap — Plan 2_                                                |        |
 | Settings    | Settings persist across reload                       | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts`    |   ✅   |
@@ -58,7 +62,7 @@
 | Editor      | File actions hover menu (rename/delete)               | `e2e/specs/editor/file-actions-button.smoke.spec.ts`          |   ✅   |
 | Editor      | Corpus rename inline edit                             | `e2e/specs/editor/sidebar-corpus-rename.smoke.spec.ts`        |   ✅   |
 | Editor      | Video attachment dialog fill + Save URL               | `e2e/specs/editor/video-attachment-save-url.smoke.spec.ts`    |   ✅   |
-| Editor      | Import coming-soon items are disabled                 | `e2e/specs/editor/import-coming-soon-disabled.smoke.spec.ts`  |   ✅   |
+| Editor      | Specialized import routes enable TMX, Macula, and Translation Notes | `e2e/specs/editor/import-specialized-options.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist coming-soon items visible             | `e2e/specs/editor/setup-checklist-coming-soon-items.smoke.spec.ts` | ✅ |
 | Validation  | Remove validation (unvalidate cell)                   | `e2e/specs/validation/cell-unvalidate.smoke.spec.ts`          |   ✅   |
 | Rules       | Org rule inline edit (pencil button expands editor)   | `e2e/specs/rules/org-rule-edit.smoke.spec.ts`                 |   ✅   |

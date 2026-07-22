@@ -21,6 +21,7 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import type { EventKind, EventPayloads, CommentScope } from './types'
 import type { ChainSlot } from './chain-claims'
+import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
@@ -65,6 +66,69 @@ function countWords(text: string): number {
   const trimmed = text.trim()
   if (!trimmed) return 0
   return trimmed.split(/\s+/).length
+}
+
+/** Set-based projection for bilingual genesis imports. These events are
+ * created alongside their source parents by POST /import, so no pre-existing
+ * target branch can exist. The event log still retains the parent/source pin;
+ * this helper only avoids thousands of one-row projection statements. */
+export function buildBulkTargetCellCommitStmt(
+  db: AquillaDb,
+  events: PersistedEvent<'target.cell.commit'>[],
+): AquillaStatement {
+  if (events.length === 0) throw new Error('buildBulkTargetCellCommitStmt: empty events')
+  const byCellLane = new Map<string, PersistedEvent<'target.cell.commit'>>()
+  for (const event of events) {
+    if (!event.fileId || !event.cellId) {
+      throw new Error(`target.cell.commit event ${event.id} is missing fileId or cellId`)
+    }
+    const payload = event.payload as EventPayloads['target.cell.commit']
+    byCellLane.set(`${event.cellId}\u0000${laneOfEvent(event.kind, payload)}`, event)
+  }
+
+  const rows = [...byCellLane.values()]
+  const binds: unknown[] = []
+  for (const event of rows) {
+    const payload = event.payload as EventPayloads['target.cell.commit']
+    const value = payload.value ?? ''
+    binds.push(
+      event.projectId,
+      event.fileId,
+      event.cellId,
+      laneOfEvent(event.kind, payload),
+      value,
+      payload.valueHtml ?? null,
+      event.id,
+      payload.sourceEventId ?? null,
+      event.author,
+      event.serverTs,
+      countWords(value),
+      contentHash(value),
+      payload.ai_suggestion ? 1 : 0,
+    )
+  }
+  const placeholders = Array(rows.length)
+    .fill("(?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?)")
+    .join(',\n')
+  return db.prepare(
+    `INSERT INTO cells (
+      project_id, file_id, cell_id, side, target_lang, value, value_html, type,
+      canonical_ref, anchor_cell_id, event_id, source_event_id,
+      last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted
+    ) VALUES ${placeholders}
+    ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
+      value = excluded.value,
+      value_html = excluded.value_html,
+      event_id = excluded.event_id,
+      source_event_id = excluded.source_event_id,
+      last_editor = excluded.last_editor,
+      last_edit_at = excluded.last_edit_at,
+      word_count = excluded.word_count,
+      content_hash = excluded.content_hash,
+      validated = 0,
+      endorsement_count = 0,
+      ai_drafted = excluded.ai_drafted`,
+  ).bind(...binds)
 }
 
 /**
@@ -205,7 +269,7 @@ export function buildBulkSourceCellCreateStmt(
   // AQU-538: bulk import is source-only; source rows always live on the
   // default lane (target_lang = '', a literal — no bind).
   const placeholders = Array(rows.length)
-    .fill("(?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .fill("(?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb)")
     .join(',\n')
   return db
     .prepare(
@@ -347,7 +411,7 @@ export function buildEventProjectionStmts(
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms,
               medium, sequence_index, transcription, camera_state, metadata
-            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?${gateWhere}
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb${gateWhere}
             ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
@@ -967,7 +1031,9 @@ case 'cell.audio.attach': {
       // cell commit projections maintain those. Post-0012 schema: file_type
       // collapsed into role/kind; languages live in meta (JSON); event_id is
       // this file.create's id (NOT NULL AD-2 chain head).
-      const langMeta: Record<string, string> = {}
+      const langMeta: Record<string, unknown> = p.projectionMeta
+        ? { ...p.projectionMeta }
+        : {}
       if (p.sourceLanguage) langMeta.sourceLanguage = p.sourceLanguage
       if (p.targetLanguage) langMeta.targetLanguage = p.targetLanguage
       if (p.sourceTextDirection) langMeta.sourceTextDirection = p.sourceTextDirection
@@ -975,6 +1041,10 @@ case 'cell.audio.attach': {
       // Timeline-segment-model: the file's order lens lives in meta (JSON),
       // alongside languages — no files-table column needed.
       if (p.orderedBy) langMeta.orderedBy = p.orderedBy
+      if (p.importManifest) langMeta.aquillaImport = p.importManifest
+      if (p.r2Key) langMeta.r2Key = p.r2Key
+      if (p.importFormat) langMeta.importFormat = p.importFormat
+      if (p.parserVersion) langMeta.parserVersion = p.parserVersion
       stmts.push(
         db
           .prepare(
@@ -987,7 +1057,7 @@ case 'cell.audio.attach': {
               meta
             ) VALUES (
               ?, ?, ?,
-              NULL, ?, NULL, NULL, NULL,
+              ?, ?, ?, ?, ?,
               ?,
               0, 0, 0, NULL,
               ?, (extract(epoch from now()) * 1000)::bigint, (extract(epoch from now()) * 1000)::bigint,
@@ -995,7 +1065,11 @@ case 'cell.audio.attach': {
             )
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
+              role = excluded.role,
               kind = excluded.kind,
+              book_code = excluded.book_code,
+              source_file_id = excluded.source_file_id,
+              anchor_file_id = excluded.anchor_file_id,
               event_id = excluded.event_id,
               meta = excluded.meta,
               updated_at = (extract(epoch from now()) * 1000)::bigint`,
@@ -1004,7 +1078,11 @@ case 'cell.audio.attach': {
             event.fileId,
             event.projectId,
             p.name,
-            p.fileType ?? null,
+            p.role ?? null,
+            p.kind ?? p.fileType ?? null,
+            p.bookCode ?? null,
+            p.sourceFileId ?? null,
+            p.anchorFileId ?? null,
             event.id,
             event.author,
             JSON.stringify(langMeta),
@@ -1676,14 +1754,12 @@ export async function isWinningChild(
   // to chain-mutating kinds so a sibling validation event doesn't block a
   // legitimate commit from advancing the projection.
   //
-  // AQU-538 lanes: siblings only compete WITHIN a lane — two lanes' first
-  // commits share the same parent (the source head) but must both project.
-  // `payload` is TEXT, so the lane filter runs in JS (dialect-portable; no
-  // jsonb cast): scan the earliest siblings in seq order and arbitrate
-  // against the first one on the candidate's lane. The LIMIT bounds the
-  // scan; a truncated scan can only produce a false "winner", which is safe
-  // — the atomic chain_claims gate (lane-qualified, see chain-claims.ts)
-  // remains authoritative for in-flight races.
+  // Siblings only compete within the same side/lane namespace: source edits,
+  // the default target lane, and every named target lane advance separately.
+  // `payload` is TEXT, so qualification runs in JS (dialect-portable; no
+  // jsonb cast). The LIMIT bounds the scan; a truncated scan can only produce
+  // a false "winner", while the atomic chain_claims gate remains authoritative
+  // for in-flight races.
   const parentIsNull = candidate.parentId === null || candidate.parentId === undefined
   const kindList = [...CHAIN_MUTATING_KINDS].map((k) => `'${k}'`).join(', ')
   const sql = parentIsNull
@@ -1705,23 +1781,27 @@ export async function isWinningChild(
 
   const { results } = await stmt.all<{ id: string; server_seq: number; kind: string; payload: string }>()
 
-  const candidateLane = laneOfEvent(candidate.kind, candidate.payload)
+  const candidateParentKey = eventQualifiedParentKey(
+    candidate.parentId,
+    candidate.kind,
+    candidate.payload,
+  )
   for (const row of results ?? []) {
-    let rowLane = ''
-    if (row.kind.startsWith('target.cell.')) {
-      try {
-        rowLane = laneOfEvent(row.kind, JSON.parse(row.payload))
-      } catch {
-        rowLane = ''
-      }
+    let rowPayload: unknown = null
+    try {
+      rowPayload = JSON.parse(row.payload)
+    } catch {
+      // Invalid historical payloads cannot qualify a named target lane, but
+      // still arbitrate deterministically in their side/default namespace.
     }
-    if (rowLane !== candidateLane) continue
+    const rowParentKey = eventQualifiedParentKey(candidate.parentId, row.kind, rowPayload)
+    if (rowParentKey !== candidateParentKey) continue
 
-    // The earliest same-lane sibling is this candidate → first child (or an
+    // The earliest same-namespace sibling is this candidate → first child (or an
     // idempotent replay of the winner); anything else beat us to the slot.
     return row.id === candidate.id
   }
 
-  // No same-lane sibling yet → this one is the first child, wins.
+  // No same-namespace sibling yet → this one is the first child, wins.
   return true
 }

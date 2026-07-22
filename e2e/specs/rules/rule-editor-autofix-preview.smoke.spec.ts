@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RuleEditor — autofix "Preview on sample text" input shows before/after.
@@ -18,17 +18,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * type sample text → verify the transformed "after" text appears.
  */
 test("rule editor autofix preview shows before/after transform", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const projName = `AFPreview ${Date.now()}`
-  await dash.createProject({ name: projName })
-  await dash.openProject(projName)
-
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AFPreview ${Date.now()}` })
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   await alice.waitForLoadState("networkidle")
 
   // Open the inline RuleEditor via "+ Add Rule".

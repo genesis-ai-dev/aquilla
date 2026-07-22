@@ -119,6 +119,50 @@ export async function marketingLogin(): Promise<FrontierSession | null> {
   return finalizeSession(data.username, data);
 }
 
+export interface AccessLinkResult {
+  session: FrontierSession;
+  /** The project the bound account should land in. */
+  projectId: string;
+}
+
+/**
+ * AQU-626: redeem a per-user deep link + PIN (fresh-browser / diode-zone flow).
+ *
+ * On success a session for the bound account is persisted (via finalizeSession,
+ * like a normal login) and the target project id is returned so the caller can
+ * land the fresh browser straight in the workspace, skipping onboarding.
+ *
+ * Any failure — unknown/expired/revoked/locked link, or a wrong PIN — surfaces
+ * as one indistinguishable error. The link + PIN together ARE the credential,
+ * so the client never reveals which half was wrong (mirrors the server, which
+ * returns the same 401 for every failure path).
+ */
+export async function redeemAccessLink(token: string, pin: string): Promise<AccessLinkResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${AUTH_BASE}/api/v2/access-links/${encodeURIComponent(token)}/redeem`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+  } catch {
+    throw new FrontierAuthError("Couldn't reach the server. Check your connection and try again.", 0);
+  }
+  if (!res.ok) {
+    let message = "This link is invalid or has expired.";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // keep generic
+    }
+    throw new FrontierAuthError(message, res.status);
+  }
+  const data = (await res.json()) as AuthResponse & { username: string; project_id: string };
+  const session = await finalizeSession(data.username, data);
+  return { session, projectId: data.project_id };
+}
+
 export async function requestPasswordReset(email: string): Promise<void> {
   const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",

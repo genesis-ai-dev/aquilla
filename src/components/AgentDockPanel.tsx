@@ -11,6 +11,7 @@ import { Bot, Maximize2 } from "lucide-react"
 import type { CellContext } from "@/lib/cell-context"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
+import { CreditsDial, type CreditsDialProps } from "./agent/CreditsDial"
 import type { SuggestedAction } from "./chat/ChatComposer"
 import { bookSummaryPrompt, chapterSummaryPrompt } from "@/lib/summary-prompts"
 
@@ -38,6 +39,8 @@ export interface AgentDockPanelProps {
   pendingChip?: ContextChip | null
   /** Called once the pending chip has been inserted. */
   onPendingChipConsumed?: () => void
+  /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
+  credits?: CreditsDialProps | null
   /** Opens the full-screen workbench (same session — nothing is lost). */
   onExpand?: () => void
   /** True while the workbench route is showing the same session in the center.
@@ -46,7 +49,7 @@ export interface AgentDockPanelProps {
 }
 
 export function AgentDockPanel({
-  currentCell, agent, bibleSummary, pendingChip, onPendingChipConsumed, onExpand, expanded,
+  currentCell, agent, bibleSummary, pendingChip, onPendingChipConsumed, credits, onExpand, expanded,
 }: AgentDockPanelProps) {
   // A summary prompt queued by a button tap; AgentDockView runs it once.
   const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
@@ -81,11 +84,14 @@ export function AgentDockPanel({
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">AI Agent</span>
+        <span className="ml-auto flex items-center gap-1">
+          {credits && <CreditsDial {...credits} />}
+        </span>
         {onExpand && !expanded && (
           <button
             type="button"
             onClick={onExpand}
-            className="ml-auto rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             title="Open full-screen workbench"
             aria-label="Open full-screen workbench"
           >

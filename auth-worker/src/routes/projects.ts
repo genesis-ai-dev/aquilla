@@ -57,6 +57,13 @@ import {
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { sendProjectInviteEmail } from "../services/email"
+import {
+  applyInviteLaneScopes,
+  MAX_INVITE_SCOPE_LANES,
+  MAX_LANE_VALUE_LENGTH,
+  parseScopeLanes,
+  serializeScopeLanes,
+} from "../services/invite-scopes"
 import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
 import { createProjectShared } from "../../../db/shared/projects"
 
@@ -90,6 +97,8 @@ interface FileProjection {
   name: string
   type: string
   cellCount: number
+  bookCode?: string
+  hasScriptureContent?: boolean
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
@@ -112,7 +121,7 @@ async function loadFilesByProject(
 
   const placeholders = projectIds.map(() => "?").join(",")
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT id, project_id, name, kind, role, cell_count, meta
+    `SELECT id, project_id, name, kind, role, book_code, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
         AND deleted_at IS NULL
@@ -125,6 +134,7 @@ async function loadFilesByProject(
       name: string
       kind: string | null
       role: string | null
+      book_code: string | null
       cell_count: number | null
       meta: string | null
     }>()
@@ -137,6 +147,7 @@ async function loadFilesByProject(
     let targetLanguage: string | undefined
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
+    let hasScriptureContent: boolean | undefined
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
@@ -149,12 +160,14 @@ async function loadFilesByProject(
           target_text_direction?: string
           sourceTextDirection?: string
           targetTextDirection?: string
+          aquillaImport?: { hasScriptureContent?: unknown }
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
         targetLanguage = normalizeLanguage(m.target_language ?? m.targetLanguage)
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
+        if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -165,6 +178,8 @@ async function loadFilesByProject(
       // `file_type` collapsed into role + kind (0012); derive a compatible value.
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
+      ...(f.book_code ? { bookCode: f.book_code } : {}),
+      ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(orderedBy ? { orderedBy } : {}),
       ...(sourceLanguage ? { sourceLanguage } : {}),
       ...(targetLanguage ? { targetLanguage } : {}),
@@ -936,6 +951,15 @@ const createInviteSchema = z.object({
   email: z.string().email().optional(),
   /** Client-requested TTL in days. Null = no expiry. Omit = server default (30 days). */
   expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
+  /**
+   * AQU-528: optional lane (target-language) scopes to auto-grant on join.
+   * Omitted/empty = unscoped invite (today's behavior). A lane value is a
+   * target-language code; '' is the default lane.
+   */
+  scopeLanes: z
+    .array(z.string().max(MAX_LANE_VALUE_LENGTH))
+    .max(MAX_INVITE_SCOPE_LANES)
+    .optional(),
 })
 
 const acceptInviteSchema = z.object({
@@ -950,7 +974,7 @@ projects.post(
   async (c) => {
     const user = c.get("user")
     const projectId = c.req.param("projectId") as string
-    const { role, email, expires_in_days } = c.req.valid("json")
+    const { role, email, expires_in_days, scopeLanes } = c.req.valid("json")
 
     const resolved = await resolveProjectRole(c.env, user, projectId)
     if (!resolved) {
@@ -982,13 +1006,17 @@ projects.post(
             Date.now() + (expires_in_days !== undefined ? expires_in_days : 30) * 24 * 60 * 60 * 1000
           ).toISOString()
 
+    // AQU-528: persist lane scopes so accept can auto-grant them. null when
+    // the invite is unscoped (omitted/empty scopeLanes).
+    const scopeLanesJson = serializeScopeLanes(scopeLanes)
+
     try {
       await c.env.AQUILLA_PG.prepare(
         `INSERT INTO project_invites
-           (token, project_id, role_level, created_by, expires_at, email)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+           (token, project_id, role_level, created_by, expires_at, email, scope_lanes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-        .bind(token, projectId, grantedRole, user.id, expiresAt, email ?? null)
+        .bind(token, projectId, grantedRole, user.id, expiresAt, email ?? null, scopeLanesJson)
         .run()
     } catch (err) {
       console.error("[invites] create failed:", err)
@@ -1033,6 +1061,7 @@ projects.post(
       role: grantedRole,
       expiresAt,
       ...(email ? { email } : {}),
+      ...(scopeLanesJson ? { scopeLanes: parseScopeLanes(scopeLanesJson) } : {}),
     })
   },
 )
@@ -1049,7 +1078,7 @@ projects.get("/:projectId/invites", authMiddleware, async (c) => {
   }
 
   const rows = await c.env.AQUILLA_PG.prepare(
-    `SELECT token, role_level, created_at, expires_at, email
+    `SELECT token, role_level, created_at, expires_at, email, scope_lanes
      FROM project_invites
      WHERE project_id = ?
        AND used_at IS NULL
@@ -1063,6 +1092,7 @@ projects.get("/:projectId/invites", authMiddleware, async (c) => {
       created_at: string
       expires_at: string | null
       email: string | null
+      scope_lanes: string | null
     }>()
 
   return c.json({
@@ -1072,6 +1102,8 @@ projects.get("/:projectId/invites", authMiddleware, async (c) => {
       createdAt: r.created_at,
       expiresAt: r.expires_at,
       email: r.email ?? null,
+      // AQU-528: lanes this link auto-grants; empty = unscoped.
+      scopeLanes: parseScopeLanes(r.scope_lanes),
     })),
   })
 })
@@ -1085,7 +1117,7 @@ projects.get("/invite-preview/:token", async (c) => {
 
   const invite = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
-            expires_at, used_by, used_at, email
+            expires_at, used_by, used_at, email, scope_lanes
      FROM project_invites WHERE token = ?`,
   )
     .bind(token)
@@ -1158,6 +1190,9 @@ projects.get("/invite-preview/:token", async (c) => {
     },
     expiresAt: invite.expires_at,
     email: invite.email ?? null,
+    // AQU-528: lane (target-language) scopes the joiner will be auto-granted;
+    // empty = unscoped invite. Lets JoinPage say "you'll be translating: es".
+    scopeLanes: parseScopeLanes(invite.scope_lanes),
   })
 })
 
@@ -1172,7 +1207,7 @@ projects.post(
 
     const invite = await c.env.AQUILLA_PG.prepare(
       `SELECT token, project_id, role_level, created_by, created_at,
-              expires_at, used_by, used_at, email
+              expires_at, used_by, used_at, email, scope_lanes
        FROM project_invites WHERE token = ?`,
     )
       .bind(token)
@@ -1254,6 +1289,17 @@ projects.post(
         )
           .bind(invite.project_id, user.id, finalRole, invite.created_by)
           .run()
+        // AQU-528: a lane-scoped invite auto-grants its lane(s) to the NEW
+        // member on join. Only for a fresh membership — applying to an existing
+        // (possibly unscoped, broader) member would silently narrow their access.
+        await applyInviteLaneScopes(
+          c.env,
+          invite.project_id,
+          user.id,
+          parseScopeLanes(invite.scope_lanes),
+          invite.created_by,
+          finalRole,
+        )
       }
       // Atomic stamp: only the first concurrent redeemer wins; subsequent
       // concurrent calls lose the WHERE race and are treated as same-user re-redeem.

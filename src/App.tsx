@@ -8,6 +8,7 @@ import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
 import { JoinPage } from "@/components/JoinPage"
+import { AccessLinkPage } from "@/components/AccessLinkPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
 import { VerifyEmailPage } from "@/components/VerifyEmailPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
@@ -182,6 +183,9 @@ function AppRoutes() {
         <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
+        {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
+            diode-zone flow lands here with no session and no onboarding). */}
+        <Route path="/link/:token" element={<AccessLinkPage />} />
         {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
         <Route path="/approve/:changesetId" element={<ApproveChangeset />} />
         <Route path="/join-org/:token" element={<JoinOrgPage />} />

@@ -1,5 +1,11 @@
 import { type Page, type Locator, expect } from "@playwright/test"
 
+interface FilePayload {
+  name: string
+  mimeType: string
+  buffer: Buffer
+}
+
 /** Page object for the project workspace route ("/project/:id"). */
 export class Workspace {
   private readonly page: Page
@@ -8,7 +14,56 @@ export class Workspace {
     this.page = page
   }
 
+  /** Select a file and stop at the human-review preview boundary. */
+  async previewImportFile(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Select an in-memory payload. Useful when the bytes are a real fixture but
+   * its supplied filename intentionally has an unknown legacy extension. */
+  async previewImportPayload(payload: FilePayload): Promise<void> {
+    await this.chooseImportFiles(payload)
+    await expect(this.page.getByRole("button", { name: /Confirm import/i }))
+      .toBeVisible({ timeout: 180_000 })
+  }
+
+  /** Commit the currently visible import preview and await publication. */
+  async confirmImportPreview(): Promise<void> {
+    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+    await confirmBtn.click()
+    await this.waitForImportSettled()
+  }
+
   async importFile(filePath: string): Promise<void> {
+    await this.previewImportFile(filePath)
+    await this.confirmImportPreview()
+  }
+
+  /** Select a spreadsheet through the normal Upload files card, accept the
+   * auto-detected column mapping, and stop at the shared human-review preview. */
+  async previewMappedSpreadsheet(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    const mapColumns = this.page.getByRole("button", { name: /^Map columns$/i })
+    await expect(mapColumns).toBeVisible({ timeout: 10_000 })
+    await mapColumns.click()
+    await expect(this.page.getByRole("button", { name: /Confirm import/i }))
+      .toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Import an audio/video file. Media files bypass the AQU-310 preview panel
+   * (they have no text cells to show) and upload immediately on selection, so
+   * there is no "Confirm import" step — see ImportDialog.doImportFiles. */
+  async importMediaFile(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    await this.waitForImportSettled()
+  }
+
+  /** Shared import prologue: dismiss the setup checklist, open the
+   * ImportDialog's Upload Files panel, and select `filePath`. */
+  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
     // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.
@@ -38,12 +93,9 @@ export class Workspace {
     const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
     await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
     await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
-    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
-    // counts) instead of starting the upload immediately. Confirm it to kick
-    // off the actual bulk upload.
-    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
-    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
-    await confirmBtn.click()
+  }
+
+  private async waitForImportSettled(): Promise<void> {
     // A hidden confirm button is only the transient "Uploading…" state, not a
     // success signal. Wait for the authoritative sidebar row, while surfacing
     // any import error immediately instead of timing out on an unrelated row.
@@ -65,6 +117,33 @@ export class Workspace {
       return "pending"
     }, { timeout: 30_000 }).toBe("settled")
     if (outcome.startsWith("error:")) throw new Error(outcome.slice("error:".length))
+  }
+
+  /** Re-import a colliding file through the safe identity-based update path. */
+  async reimportFile(filePath: string): Promise<void> {
+    await this.openImportDialog()
+    await this.uploadFilesCard().click()
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    await expect(this.page.getByText(/re-import detected/i)).toBeVisible({ timeout: 10_000 })
+    const update = this.page.getByRole("button", { name: "Update existing" }).first()
+    await expect(update).toBeVisible()
+    await update.click()
+    await this.page.getByRole("button", { name: /^Continue$/i }).click()
+
+    const confirm = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirm).toBeVisible({ timeout: 10_000 })
+    const reconciled = this.page.waitForResponse(
+      (response) => response.url().endsWith("/import/reconcile") && response.request().method() === "POST",
+      { timeout: 30_000 },
+    )
+    await confirm.click()
+    const response = await reconciled
+    if (!response.ok()) {
+      throw new Error(`Re-import failed (${response.status()}): ${await response.text()}`)
+    }
   }
 
   private uploadFilesCard(): Locator {
@@ -277,6 +356,22 @@ export class Workspace {
     await expect(moreActionsBtn).toBeVisible({ timeout: 10_000 })
     await moreActionsBtn.click()
     await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
+  }
+
+  /**
+   * Expand the ExportDialog's "Export to another format" section (collapsed
+   * by default when the file has a native round-trip download). No-op when
+   * already open (e.g. file types without a native format).
+   */
+  async openExportFormatsSection(): Promise<void> {
+    const dialog = this.page.getByRole("dialog")
+    const details = dialog
+      .locator("details", { has: this.page.getByText("Export to another format") })
+      .first()
+    await expect(details).toBeVisible({ timeout: 5_000 })
+    if ((await details.getAttribute("open")) == null) {
+      await details.locator("summary").first().click()
+    }
   }
 
   /** AQU-331: next unfinished lives in the header overflow menu. */

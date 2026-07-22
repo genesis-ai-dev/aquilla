@@ -24,6 +24,19 @@ export interface ProjectEntry {
   name: string
   /** Read the entry as UTF-8 text. */
   text(): Promise<string>
+  /** Exact member bytes when the browser adapter can provide them. */
+  bytes?(): Promise<ArrayBuffer>
+}
+
+export interface ProjectSourceArtifact {
+  name: string
+  format: "paratext-project"
+  /** Exact selected ZIP, or a deterministic ZIP of every selected folder member. */
+  bytes(): Promise<ArrayBuffer>
+}
+
+export type ProjectEntryCollection = ProjectEntry[] & {
+  sourceArtifact?: ProjectSourceArtifact
 }
 
 export interface ParatextBook {

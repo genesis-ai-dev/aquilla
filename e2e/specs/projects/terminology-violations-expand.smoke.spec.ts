@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Glossary } from "../../helpers/page-objects/Glossary"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * TerminologyViolationsInbox — expand a concept row and see violation cells.
@@ -32,16 +26,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   6. Expands the row → cell violation items become visible.
  */
 test("terminology violations inbox expands concept row to show cell violations", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `TermViolExpand ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  // Import sample.md so cells exist.
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `TermViolExpand ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // The rule engine skips untranslated cells, so give the cell whose source
   // contains "sample" a translation that LACKS the approved rendering.
@@ -58,10 +44,7 @@ test("terminology violations inbox expands concept row to show cell violations",
   expect(sampleIdx).toBeGreaterThanOrEqual(0)
   await ws.editCell(sampleIdx, "Ceci est un fichier de test.")
 
-  // No trailing $ — after import/open the URL can carry a file segment or
-  // query params beyond the project id.
-  const projectId = alice.url().match(/\/project\/([^/?#]+)/)?.[1]
-  expect(projectId).toBeTruthy()
+  const projectId = seeded.projectId
 
   const glossary = new Glossary(alice)
   await glossary.goto(projectId!)

@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
 import { Glossary } from "../../helpers/page-objects/Glossary"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Inflectional wildcard matching — editor chip appears for wildcard concept.
@@ -34,24 +28,16 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *      (span.term-chip / span[data-source-term]).
  */
 test("wildcard source term creates chip matches in the editor", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Wildcard ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Wildcard ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Navigate to Terminology page.
-  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
-  expect(projectId).toBeTruthy()
   const glossary = new Glossary(alice)
-  await glossary.goto(projectId!)
+  await glossary.goto(seeded.projectId)
   await glossary.addTerm("samp*", "échantillon")
 
   // Navigate back to the editor / file.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${seeded.projectId}`)
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 

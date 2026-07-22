@@ -79,13 +79,14 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   const validatedBar = gen1.locator("span.bg-emerald-500")
   await gen1.click()
   await ws.waitForEditor()
-  // The first two USFM rows are book/chapter headings; row 2 is GEN 1:1.
-  await ws.editCell(2, "Bonjour")
+  // AQU-585 filters book-name/title front matter from editor cells, so the
+  // first row in the selected chapter is GEN 1:1.
+  await ws.editCell(0, "Bonjour")
   await expect.poll(async () => Number.parseFloat((await translatedBar.getAttribute("style"))?.match(/[\d.]+/)?.[0] ?? "0"), {
     timeout: 10_000,
   }).toBeGreaterThan(0)
 
-  await ws.validateCell(2)
+  await ws.validateCell(0)
   await expect.poll(async () => Number.parseFloat((await validatedBar.getAttribute("style"))?.match(/[\d.]+/)?.[0] ?? "0"), {
     timeout: 10_000,
   }).toBeGreaterThan(0)

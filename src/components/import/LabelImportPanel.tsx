@@ -44,6 +44,7 @@ import {
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import { generateLabelTemplate, parseCsvRows, splitCastName } from "@/lib/parsers/spreadsheet"
 import { emitCastAssign } from "@/lib/sync/events-emit"
+import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
 
 /** Outcome of an apply run, surfaced by the host as a result notice after the
  *  dialog closes (the panel itself unmounts on completion). */
@@ -163,7 +164,9 @@ export function LabelImportPanel({
     setPreview(null)
     setPendingFile(file)
     try {
-      const text = await file.text()
+      if (file.size === 0) throw new Error("The label CSV is empty.")
+      if (file.size > MAX_UNKNOWN_TEXT_BYTES) throw new Error("The label CSV exceeds the 10 MB safety limit.")
+      const text = decodeImportText(await file.arrayBuffer(), file.name)
       const rows = parseCsvRows(text)
       if (rows.length === 0) {
         setError("No rows found in file.")

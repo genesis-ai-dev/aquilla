@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   cellNumberLabel,
   chapterLabelFromCanonical,
+  importDisplayLabel,
   parseScriptureReference,
   verseLabelFromCanonical,
 } from "./scripture-reference"
@@ -45,6 +46,18 @@ describe("scripture references", () => {
     }))).toEqual([null, "1", "2", "13"])
   })
 
+  it("keeps a chapter-scoped heading unnumbered even when it carries a nearby verse ref", () => {
+    expect(cellNumberLabel({
+      lineNumbersEnabled: true,
+      cellType: "heading",
+      canonicalRef: "GEN 1:1",
+      sourceCanonicalRef: "GEN 1:1",
+      scriptureNumbering: true,
+      rowIndex: 0,
+      displayLabel: null,
+    })).toBeNull()
+  })
+
   it("uses the source verse reference for a paired target row", () => {
     expect(cellNumberLabel({
       lineNumbersEnabled: true,
@@ -66,14 +79,40 @@ describe("scripture references", () => {
     })).toBe("9")
   })
 
-  it("retains ordinal labels for headings in ordinary non-scripture files", () => {
+  it("keeps headings unnumbered in ordinary non-scripture files", () => {
     expect(cellNumberLabel({
       lineNumbersEnabled: true,
       cellType: "heading",
       canonicalRef: null,
       scriptureNumbering: false,
       rowIndex: 0,
-    })).toBe("1")
+    })).toBeNull()
+  })
+
+  it("honors normalized display labels independently from storage order", () => {
+    expect(cellNumberLabel({
+      lineNumbersEnabled: true,
+      cellType: "cue",
+      canonicalRef: null,
+      scriptureNumbering: false,
+      rowIndex: 98,
+      displayLabel: "13",
+    })).toBe("13")
+    expect(cellNumberLabel({
+      lineNumbersEnabled: true,
+      cellType: "text",
+      canonicalRef: null,
+      scriptureNumbering: false,
+      rowIndex: 4,
+      displayLabel: null,
+    })).toBeNull()
+  })
+
+  it("reads only a valid normalized display label envelope", () => {
+    expect(importDisplayLabel({ aquillaImport: { displayLabel: null } })).toBeNull()
+    expect(importDisplayLabel({ aquillaImport: { displayLabel: "31" } })).toBe("31")
+    expect(importDisplayLabel({ aquillaImport: { displayLabel: 31 } })).toBeUndefined()
+    expect(importDisplayLabel({ unrelated: true })).toBeUndefined()
   })
 
   it("prefers contentNumber over the raw row index for sequential numbering (AQU-610)", () => {
@@ -95,7 +134,7 @@ describe("scripture references", () => {
     const rows = [
       { cellType: "paratext", canonicalRef: null }, // USFM front matter
       { cellType: "paratext", canonicalRef: null }, // introduction
-      { cellType: "heading", canonicalRef: null },  // section heading (still numbered, AQU-577)
+      { cellType: "heading", canonicalRef: null },  // structural section heading
       { cellType: "text", canonicalRef: null },     // first real content
       { cellType: "paratext", canonicalRef: null }, // interspersed paratext
       { cellType: "text", canonicalRef: null },
@@ -106,11 +145,11 @@ describe("scripture references", () => {
       lineNumbersEnabled: true,
       scriptureNumbering: false,
       rowIndex,
-      contentNumber: row.cellType === "paratext" ? undefined : ++ordinal,
+      contentNumber: row.cellType === "paratext" || row.cellType === "heading" ? undefined : ++ordinal,
       ...row,
     }))
 
     // Front matter/paratext stay unnumbered; content is gap-free from 1.
-    expect(labels).toEqual([null, null, "1", "2", null, "3"])
+    expect(labels).toEqual([null, null, null, "1", null, "2"])
   })
 })

@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * CommentsPage — "Go to cell" button navigates to the cell in editor.
@@ -21,16 +15,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   4. Click it and verify the URL changes to /project/:id/file/:fileId.
  */
 test("comments page Go to cell navigates to the cell in editor", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `GoToCell ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `GoToCell ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Post a comment on cell 0.
   const row = ws.cellRow(0)

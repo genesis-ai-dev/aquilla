@@ -142,6 +142,30 @@ describe("AQU-538: lane query param", () => {
     expect(fetchMock.mock.calls[1][0] as string).toContain("lane=fr")
   })
 
+  it("fetchCellsByIds batches more than 100 ids without losing or reordering rows", async () => {
+    let active = 0
+    let maxActive = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      const ids = new URL(String(input)).searchParams.get("cellIds")!.split(",")
+      await Promise.resolve()
+      active -= 1
+      return pageResponse({ cells: ids.map(makeRow), nextCursor: null, total: ids.length })
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const ids = Array.from({ length: 251 }, (_, index) => `c${index}`)
+    const rows = await fetchCellsByIds("proj", "file", ids, "jwt")
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(maxActive).toBeLessThanOrEqual(4)
+    expect(rows.map((row) => row.cellId)).toEqual(ids)
+    expect(fetchMock.mock.calls.map((call) =>
+      new URL(String(call[0])).searchParams.get("cellIds")!.split(",").length,
+    )).toEqual([100, 100, 51])
+  })
+
   it("streamFileCells / fetchAllFileCells thread the lane through every page", async () => {
     const fetchMock = vi
       .fn()

@@ -1,0 +1,139 @@
+name = "aquilla-agent-sandbox"
+main = "src/index.ts"
+compatibility_date = "2025-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# =============================================================================
+# agent-worker — the sandbox execution service (AQU-AGENT §1, §6).
+#
+# This worker runs untrusted agent code inside a Cloudflare Sandbox container
+# (one container Durable Object instance per agent session). It holds NO model
+# keys and NO business logic — just exec / file / fetch-artifact / destroy.
+#
+# NO top-level `routes` and NO per-env `routes` here: the harness (auth-worker)
+# reaches this worker server-side via AGENT_SANDBOX_URL, never from the browser,
+# so no zone route is required for v1. Deploy + eventual zone routes under
+# aquilla.app/api/agent/* are an out-of-band task (see ORCHESTRATION "OUT of v1"),
+# mirroring the sync-worker convention (CI's token lacks zone-route perms).
+#
+# Secret (all envs): AGENT_SANDBOX_KEY — shared bearer secret checked on every
+# route except /health. Provision with `wrangler secret put AGENT_SANDBOX_KEY`.
+# Local dev passes it via `--var AGENT_SANDBOX_KEY:dev-sandbox-key` (dev-stack.ts).
+# =============================================================================
+
+# Same CF account as sync-worker / aquilla-db (Frontier R&D). Pinned so
+# `wrangler deploy` can't land on the wrong account interactively.
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+[observability]
+enabled = true
+
+# The container-backed Durable Object. `image = "./Dockerfile"` builds the
+# sandbox image; `instance_type` sizes each container (contract §6).
+[[containers]]
+class_name = "Sandbox"
+image = "./Dockerfile"
+instance_type = "standard-1"
+max_instances = 20
+
+[[durable_objects.bindings]]
+name = "Sandbox"
+class_name = "Sandbox"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sandbox"]
+
+# Agent artifacts / media blobs (same bucket the sync-worker binds). The
+# fetch-artifact route reads objects from here and writes them into /workspace.
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots"
+
+# ---------------------------------------------------------------------------
+# Development — mirrors sync-worker's -dev R2 naming. Each named env must
+# re-declare every binding (they are NOT inherited from the top level).
+# Deploy: `wrangler deploy --env development`.
+# ---------------------------------------------------------------------------
+[env.development]
+name = "aquilla-agent-sandbox-dev"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+[env.development.observability]
+enabled = true
+
+[[env.development.containers]]
+class_name = "Sandbox"
+image = "./Dockerfile"
+instance_type = "standard-1"
+max_instances = 5
+
+[[env.development.durable_objects.bindings]]
+name = "Sandbox"
+class_name = "Sandbox"
+
+[[env.development.migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sandbox"]
+
+[[env.development.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots-dev"
+
+# ---------------------------------------------------------------------------
+# Staging — mirrors sync-worker's -staging R2 naming.
+# Deploy: `wrangler deploy --env staging`.
+# ---------------------------------------------------------------------------
+[env.staging]
+name = "aquilla-agent-sandbox-staging"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+[env.staging.observability]
+enabled = true
+
+[[env.staging.containers]]
+class_name = "Sandbox"
+image = "./Dockerfile"
+instance_type = "standard-1"
+max_instances = 5
+
+[[env.staging.durable_objects.bindings]]
+name = "Sandbox"
+class_name = "Sandbox"
+
+[[env.staging.migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sandbox"]
+
+[[env.staging.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots-staging"
+
+# ---------------------------------------------------------------------------
+# Production — apex bucket (aquilla-snapshots).
+# Deploy: `wrangler deploy --env production`.
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-agent-sandbox"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+[env.production.observability]
+enabled = true
+
+[[env.production.containers]]
+class_name = "Sandbox"
+image = "./Dockerfile"
+instance_type = "standard-1"
+max_instances = 20
+
+[[env.production.durable_objects.bindings]]
+name = "Sandbox"
+class_name = "Sandbox"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sandbox"]
+
+[[env.production.r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "aquilla-snapshots"

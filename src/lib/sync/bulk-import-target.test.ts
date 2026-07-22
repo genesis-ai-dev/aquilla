@@ -68,6 +68,41 @@ describe("enqueueTargetCommits", () => {
     expect(rows.filter((r) => r.id.startsWith("t"))).toHaveLength(450)
   })
 
+  it("addresses an explicit target lane without changing default-lane payloads", async () => {
+    await enqueueTargetCommits({
+      projectId: "p",
+      fileId: "f",
+      author: "dev",
+      targetLang: "fr-CA",
+      commits: [commits[0]],
+      getToken: async () => "tok",
+    })
+    const explicit = (await peekOutboxBatch(100)).find((row) => row.id === "ev-t1")!
+    expect(explicit.event.payload).toMatchObject({
+      value: "target one",
+      sourceEventId: "ev-s1",
+      targetLang: "fr-CA",
+    })
+
+    await resetOutboxConnectionForTests()
+    await new Promise<void>((resolve, reject) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onblocked = () => resolve()
+      d.onsuccess = () => resolve()
+      d.onerror = () => reject(d.error)
+    })
+    await enqueueTargetCommits({
+      projectId: "p",
+      fileId: "f",
+      author: "dev",
+      targetLang: "",
+      commits: [commits[0]],
+      getToken: async () => "tok",
+    })
+    const defaultLane = (await peekOutboxBatch(100)).find((row) => row.id === "ev-t1")!
+    expect(defaultLane.event.payload).not.toHaveProperty("targetLang")
+  })
+
   it("is a no-op with zero commits (no outbox writes)", async () => {
     await enqueueTargetCommits({
       projectId: "p", fileId: "f", author: "dev", commits: [],

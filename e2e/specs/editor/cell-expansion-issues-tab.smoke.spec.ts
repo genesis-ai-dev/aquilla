@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Cell expansion — "Issues" tab shows rule infractions.
@@ -25,15 +19,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * rule that matches "sample" in the target text.
  */
 test("cell expansion Issues tab shows rule infractions", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `IssuesTab ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  // Get project id from URL.
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `IssuesTab ${Date.now()}` })
+  const projectId = seeded.projectId
 
   // Create a rule that fires on "PROHIBITED" in the target.
   await alice.goto(`/project/${projectId}/rules`)
@@ -59,13 +46,8 @@ test("cell expansion Issues tab shows rule infractions", async ({ alice }) => {
   await saveBtn.click()
   await expect(patInput).not.toBeVisible({ timeout: 5_000 })
 
-  // Import file and open editor.
-  await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  // Open the seeded file's editor.
+  const ws = await openSeededProject(alice, seeded)
 
   // Type "PROHIBITED_WORD" into cell 0 target to trigger the infraction.
   await ws.editCell(0, "PROHIBITED_WORD translation")

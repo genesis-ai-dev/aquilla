@@ -50,6 +50,19 @@ describe("extractPptxStrings", () => {
     expect(result[1].context).toBe("Slide 2")
   })
 
+  it("classifies title placeholders as structural headings", async () => {
+    const buffer = await makePptx({
+      "slide1.xml": `
+        <p:sp>
+          <p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+          <p:txBody><a:p><a:r><a:t>Presentation title</a:t></a:r></a:p></p:txBody>
+        </p:sp>
+      `,
+    })
+    const result = await extractPptxStrings(buffer)
+    expect(result[0].type).toBe("heading")
+  })
+
   it("extracts bold formatting", async () => {
     const buffer = await makePptx({
       "slide1.xml": `

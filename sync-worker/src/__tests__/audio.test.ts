@@ -7,6 +7,7 @@ import { sign } from "hono/jwt"
 import { handleAudioRequest, audioObjectKey, MAX_AUDIO_BYTES } from "../audio"
 import { handleAdminRequest } from "../admin"
 import type { SyncTokenClaims } from "../auth"
+import { makeTestDb } from "./helpers/pg-test-db"
 
 const SECRET = "audio-tests-secret"
 
@@ -199,6 +200,88 @@ describe("audio R2 endpoints", () => {
     expect(get.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable")
     const out = new Uint8Array(await get.arrayBuffer())
     expect(Array.from(out)).toEqual([7, 7, 7, 7, 7])
+  })
+
+  it("records imported media as an immutable audio artifact and binding", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "Interview", event_id: "ev1" }],
+    })
+    const env = { ...makeEnv(), AQUILLA_PG: db }
+    const token = await makeToken({ role: 500 })
+    const artifactId = "01900000-0000-7000-8000-000000000001"
+    const response = await handleAudioRequest(new Request(
+      "https://w/audio/p1/f1/clip.wav",
+      {
+        method: "PUT",
+        body: new Uint8Array([7, 8, 9]),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "audio/wav",
+          "X-Artifact-Id": artifactId,
+          "X-Artifact-Name": "Interview%201.wav",
+        },
+      },
+    ), env as unknown as Parameters<typeof handleAudioRequest>[1])
+
+    expect(response?.status).toBe(200)
+    const artifact = await db.prepare(
+      `SELECT name, file_id, kind, audio_id, sha256 FROM artifacts WHERE id::text = ?`,
+    ).bind(artifactId).first<{
+      name: string
+      file_id: string
+      kind: string
+      audio_id: string
+      sha256: string
+    }>()
+    expect(artifact).toMatchObject({
+      name: "Interview 1.wav",
+      file_id: "f1",
+      kind: "audio",
+      audio_id: "clip.wav",
+    })
+    expect(artifact?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    const binding = await db.prepare(
+      `SELECT binding_role, profile_id, fidelity FROM artifact_bindings WHERE artifact_id::text = ?`,
+    ).bind(artifactId).first<{ binding_role: string; profile_id: string; fidelity: string }>()
+    expect(binding).toEqual({
+      binding_role: "source",
+      profile_id: "builtin:media",
+      fidelity: "preserved-only",
+    })
+  })
+
+  it("rejects an imported-media artifact id owned by another project", async () => {
+    const artifactId = "01900000-0000-7000-8000-000000000001"
+    const { db } = await makeTestDb({
+      projects: [
+        { id: "p1", name: "First", created_by: 1 },
+        { id: "p2", name: "Second", created_by: 1 },
+      ],
+      files: [
+        { id: "f1", project_id: "p1", name: "Interview", event_id: "ev1" },
+        { id: "f2", project_id: "p2", name: "Other", event_id: "ev2" },
+      ],
+    })
+    await db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+       ) VALUES (?::uuid, 'p2', '1', NULL, 'other.wav', 'audio/wav', 3, ?, 'other-key', 'f2', 'audio', 'other.wav', '{}'::jsonb)`,
+    ).bind(artifactId, "a".repeat(64)).run()
+    const env = { ...makeEnv(), AQUILLA_PG: db }
+    const response = await handleAudioRequest(new Request("https://w/audio/p1/f1/clip.wav", {
+      method: "PUT",
+      body: new Uint8Array([7, 8, 9]),
+      headers: {
+        Authorization: `Bearer ${await makeToken({ role: 500 })}`,
+        "Content-Type": "audio/wav",
+        "X-Artifact-Id": artifactId,
+      },
+    }), env as unknown as Parameters<typeof handleAudioRequest>[1])
+
+    expect(response?.status).toBe(409)
+    expect(env.SNAPSHOTS._size()).toBe(0)
   })
 
   // Progressive playback (AQU: time-to-first-audio): media elements can't send

@@ -64,7 +64,8 @@ const BASE_PROPS = {
   projectName: "SDBH es",
   activeFileId: "f-zayin",
   activeFileName: "SDBH ז",
-  isUsfmFile: false,
+  // sdbh has no native single-file download — formats section opens by default.
+  activeFileType: "sdbh",
   projectFiles: [{ id: "f-zayin", name: "SDBH ז", type: "sdbh" }],
   targetLanguage: "es",
   getToken: async () => null,

@@ -22,7 +22,7 @@
 // Auth: sync-token JWT scoped to projectId.
 
 import { verifyTokenForProject } from "../auth"
-import { makeVerifiedProjectId, queryFileSourceNeighbors } from "./scoped-search"
+import { makeVerifiedProjectId, querySourceNeighborsBatch } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
 import { propagateHealth, type PropNode, type PropEdges, type PropEdge } from "../lib/confidence/propagate-health"
 
@@ -111,18 +111,20 @@ async function computeFileHealth(
   const nodeIds = new Set(nodes.map((n) => n.id))
   const byId = new Map(cells.map((c) => [c.cell_id, c]))
 
-  // Build edges: for each unvalidated node, fetch top-k source-similar neighbors.
-  // AQU-641: one batched query per file (JOIN LATERAL), not one FTS query per cell.
-  const neighborsByAsker = await queryFileSourceNeighbors(db, verifiedProjectId, fileId, {
-    topK: opts.topK,
-    maxAskers: MAX_FILE_CELLS,
-  })
+  // Build edges: for each unvalidated node, its top-k source-similar neighbors.
+  // AQU-641: one batched LATERAL query per chunk instead of one FTS query per cell.
+  const unvalidated = nodes.filter((n) => !n.validated)
+  const neighborMap = await querySourceNeighborsBatch(
+    db,
+    verifiedProjectId,
+    unvalidated.map((n) => ({ cellId: n.id, text: byId.get(n.id)!.source_text })),
+    { topK: opts.topK, validatedOnly: false },
+  )
   const edges: PropEdges = new Map()
-  for (const node of nodes) {
-    if (node.validated) continue
+  for (const node of unvalidated) {
     const cell = byId.get(node.id)!
     const cellEdges: PropEdge[] = []
-    for (const n of neighborsByAsker.get(node.id) ?? []) {
+    for (const n of neighborMap.get(node.id) ?? []) {
       if (!nodeIds.has(n.cellId)) continue
       const r = lexicalConfidence(cell.source_text, [n.value])
       const a = lexicalConfidence(cell.target_text, [n.targetValue])

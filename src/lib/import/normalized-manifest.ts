@@ -153,10 +153,11 @@ function canonicalRef(value: TranslatableString, kind: ImportUnitKind): string |
     return explicit
   }
 
-  // USFM headings and structural markers intentionally carry their canonical
-  // locator in `group`, while general-purpose parsers often put a freshly
-  // generated UUID there. Only accept group values that are recognizable
-  // Scripture addresses; random parser grouping must never become identity.
+  // Scripture headings and structural markers intentionally carry their
+  // canonical locator in `group`, while general-purpose parsers often put a
+  // freshly generated UUID there. Only accept group values that are
+  // recognizable Scripture addresses; random grouping must never become
+  // identity.
   const grouped = nonEmptyString(value.group)
   if (!grouped) return undefined
   if (kind === "heading" || kind === "paratext") {
@@ -199,7 +200,7 @@ function addressAndLocator(
         chapter: Number(verse[2]),
         verse: verse[3],
       },
-      sourceLocator: { kind: "usfm", ref: normalizedRef, marker: "v" },
+      sourceLocator: recipeLocator ?? { kind: "usfm", ref: normalizedRef, marker: "v" },
       keyBase: `scripture:${normalizedRef}`,
       displayLabel: kind === "verse" ? verse[3] : null,
     }
@@ -477,6 +478,11 @@ export function summarizeNormalizedImport(
     fidelity: file.fidelity,
     unitCount: file.units.length,
     warningCounts,
+    ...(file.units.some((unit) => (
+      unit.address?.scheme === "scripture" || unit.address?.scheme === "scripture-structure"
+    ))
+      ? { hasScriptureContent: true as const }
+      : {}),
     ...(file.recipe ? { recipe: file.recipe } : {}),
   }
 }

@@ -29,6 +29,12 @@ async function seedFile(projectId: string, fileId: string, kind: string | null):
     .run()
 }
 
+async function markScriptureContent(fileId: string): Promise<void> {
+  await env.AQUILLA_PG.prepare(`UPDATE files SET meta = ? WHERE id = ?`)
+    .bind(JSON.stringify({ aquillaImport: { hasScriptureContent: true } }), fileId)
+    .run()
+}
+
 async function seedExplicitSetting(projectId: string, value: boolean): Promise<void> {
   await env.AQUILLA_PG.prepare(
     `INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)`,
@@ -70,6 +76,14 @@ describe("isBibleResourcesEnabled — AQU-460 derive-on-read matrix", () => {
     await seedProject(p)
     await seedFile(p, "f1", "docx")
     expect(await isBibleResourcesEnabled(env, p)).toBe(false)
+  })
+
+  it("unset + Scripture-shaped spreadsheet -> true without changing its file kind", async () => {
+    const p = freshProjectId()
+    await seedProject(p)
+    await seedFile(p, "f1", "xlsx")
+    await markScriptureContent("f1")
+    expect(await isBibleResourcesEnabled(env, p)).toBe(true)
   })
 
   it("unset + no files at all -> false", async () => {

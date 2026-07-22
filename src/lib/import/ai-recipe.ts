@@ -22,6 +22,13 @@ export interface AiRecipeConfig extends Record<string, unknown> {
   sourceField?: FieldRef
   targetField?: FieldRef
   referenceField?: FieldRef
+  /** Optional Scripture address components for tables that split references
+   * across columns (or omit a repeated book/chapter column). */
+  bookField?: FieldRef
+  chapterField?: FieldRef
+  verseField?: FieldRef
+  book?: string
+  chapter?: number
   typeField?: FieldRef
   speakerField?: FieldRef
   startField?: FieldRef
@@ -181,6 +188,17 @@ function validatedClassification(value: unknown): Omit<AiImportClassification, "
     ...(fieldRef(value.recipe.config.sourceField) !== undefined ? { sourceField: fieldRef(value.recipe.config.sourceField) } : {}),
     ...(fieldRef(value.recipe.config.targetField) !== undefined ? { targetField: fieldRef(value.recipe.config.targetField) } : {}),
     ...(fieldRef(value.recipe.config.referenceField) !== undefined ? { referenceField: fieldRef(value.recipe.config.referenceField) } : {}),
+    ...(fieldRef(value.recipe.config.bookField) !== undefined ? { bookField: fieldRef(value.recipe.config.bookField) } : {}),
+    ...(fieldRef(value.recipe.config.chapterField) !== undefined ? { chapterField: fieldRef(value.recipe.config.chapterField) } : {}),
+    ...(fieldRef(value.recipe.config.verseField) !== undefined ? { verseField: fieldRef(value.recipe.config.verseField) } : {}),
+    ...(typeof value.recipe.config.book === "string" && /^[1-3]?[A-Za-z]{2,3}$/.test(value.recipe.config.book.trim())
+      ? { book: value.recipe.config.book.trim().toUpperCase() }
+      : {}),
+    ...(typeof value.recipe.config.chapter === "number"
+      && Number.isInteger(value.recipe.config.chapter)
+      && value.recipe.config.chapter > 0
+      ? { chapter: value.recipe.config.chapter }
+      : {}),
     ...(fieldRef(value.recipe.config.typeField) !== undefined ? { typeField: fieldRef(value.recipe.config.typeField) } : {}),
     ...(fieldRef(value.recipe.config.speakerField) !== undefined ? { speakerField: fieldRef(value.recipe.config.speakerField) } : {}),
     ...(fieldRef(value.recipe.config.startField) !== undefined ? { startField: fieldRef(value.recipe.config.startField) } : {}),
@@ -297,6 +315,52 @@ function cellType(value: string | undefined, reference: string | undefined, cate
   return "text"
 }
 
+const SCRIPTURE_REFERENCE_RE = /^([1-3]?[A-Z]{2,3})\s+(\d+):(\d+[a-z]?(?:-\d+[a-z]?)?)$/i
+
+function canonicalScriptureReference(value: string | undefined): string | undefined {
+  const match = value?.trim().match(SCRIPTURE_REFERENCE_RE)
+  return match ? `${match[1].toUpperCase()} ${Number(match[2])}:${match[3]}` : undefined
+}
+
+function composedReference(
+  record: RecordValue,
+  headers: string[] | undefined,
+  config: AiRecipeConfig,
+): { context?: string; canonical?: string; scriptureScope?: string } {
+  const direct = readField(record, config.referenceField, headers)?.trim()
+  const directCanonical = canonicalScriptureReference(direct)
+  if (directCanonical) {
+    return {
+      context: direct,
+      canonical: directCanonical,
+      scriptureScope: directCanonical.slice(0, directCanonical.indexOf(":")),
+    }
+  }
+
+  const directScope = direct?.match(/^([1-3]?[A-Z]{2,3})\s+(\d+)$/i)
+  if (directScope) {
+    const scriptureScope = `${directScope[1].toUpperCase()} ${Number(directScope[2])}`
+    return { context: direct, scriptureScope }
+  }
+
+  const book = (readField(record, config.bookField, headers) ?? config.book)?.trim().toUpperCase()
+  const chapterRaw = readField(record, config.chapterField, headers) ?? (
+    config.chapter === undefined ? undefined : String(config.chapter)
+  )
+  const verse = readField(record, config.verseField, headers)?.trim()
+  const chapter = chapterRaw?.trim()
+  const scriptureScope = book && chapter && /^\d+$/.test(chapter) && Number(chapter) > 0
+    ? `${book} ${Number(chapter)}`
+    : undefined
+  const composed = book && chapter && verse ? `${book} ${chapter}:${verse}` : undefined
+  const canonical = canonicalScriptureReference(composed)
+  return {
+    ...(direct ? { context: direct } : composed ? { context: composed } : scriptureScope ? { context: scriptureScope } : {}),
+    ...(canonical ? { canonical } : {}),
+    ...(scriptureScope ? { scriptureScope } : {}),
+  }
+}
+
 function seconds(value: string | undefined, unit: AiRecipeConfig["timeUnit"]): number | undefined {
   if (!value) return undefined
   if (unit === "timestamp") {
@@ -321,19 +385,28 @@ export function applyDeclarativeRecipe(
     const source = readField(record, config.sourceField, headers, true)?.trim()
     if (!source) return
     const target = readField(record, config.targetField, headers) ?? ""
-    const reference = readField(record, config.referenceField, headers)
-    const kind = cellType(readField(record, config.typeField, headers), reference, classification.category)
+    const reference = composedReference(record, headers, config)
+    const kind = cellType(readField(record, config.typeField, headers), reference.canonical ?? reference.context, classification.category)
     const speaker = readField(record, config.speakerField, headers)
     const start = seconds(readField(record, config.startField, headers), config.timeUnit)
     const end = seconds(readField(record, config.endField, headers), config.timeUnit)
     const recordNumber = index + 1
+    const structuralReference = reference.scriptureScope && (kind === "heading" || kind === "paratext")
+      ? `${reference.scriptureScope}:${kind === "heading" ? "h" : "p"}:${recordNumber}`
+      : undefined
+    const identityReference = structuralReference ?? reference.canonical
     strings.push({
       id: uuidv7(),
       original: source,
       translated: target,
-      context: reference ?? `${classification.recipe.name} ${recordNumber}`,
-      group: reference ?? `${classification.recipe.id}:${recordNumber}`,
-      ...(reference ? { globalReferences: [reference] } : {}),
+      context: reference.context ?? `${classification.recipe.name} ${recordNumber}`,
+      group: identityReference ?? reference.context ?? `${classification.recipe.id}:${recordNumber}`,
+      ...(identityReference
+        ? {
+            globalReferences: [identityReference],
+            ...(reference.scriptureScope ? { section: reference.scriptureScope } : {}),
+          }
+        : {}),
       type: kind,
       ...(speaker ? { speaker } : {}),
       ...(start !== undefined ? { start } : {}),
@@ -345,8 +418,26 @@ export function applyDeclarativeRecipe(
           record: recordNumber,
           ...(config.sourceField !== undefined ? { field: String(config.sourceField) } : {}),
         },
+        ...(reference.context && !reference.canonical ? { importReferenceLabel: reference.context } : {}),
       },
     })
+  })
+  // A structural row often omits its own reference and simply precedes the
+  // first verse it introduces. Scope it to the nearest Scripture chapter
+  // (prefer the following row at chapter boundaries) using a structural
+  // identity, never the verse identity itself.
+  strings.forEach((string, index) => {
+    if ((string.type !== "heading" && string.type !== "paratext") || string.section) return
+    const nextScope = strings.slice(index + 1).find((candidate) => candidate.section)?.section
+    const previousScope = strings.slice(0, index).reverse().find((candidate) => candidate.section)?.section
+    const scriptureScope = nextScope ?? previousScope
+    if (!scriptureScope || !/^[1-3]?[A-Z]{2,3}\s+\d+$/i.test(scriptureScope)) return
+    const record = (string.metadata?.aquillaRecipe as { record?: unknown } | undefined)?.record
+    const occurrence = typeof record === "number" && Number.isInteger(record) ? record : index + 1
+    const structuralReference = `${scriptureScope}:${string.type === "heading" ? "h" : "p"}:${occurrence}`
+    string.section = scriptureScope
+    string.group = structuralReference
+    string.globalReferences = [structuralReference]
   })
   if (strings.length === 0) throw new Error("The proposed import recipe did not produce any source cells")
   return strings
@@ -373,6 +464,55 @@ export function sniffKnownTextFile(text: string): FileType | null {
   }
   if (/^(?:#.*\n)*msgid\s+"/m.test(text) && /^msgstr(?:\[\d+\])?\s+"/m.test(text)) return "po"
   return null
+}
+
+const STRUCTURAL_HEADER_NAMES = new Set([
+  "ref", "reference", "canonical_ref", "book", "chapter", "verse", "type", "kind",
+  "speaker", "character", "cast", "start", "start_time", "end", "end_time",
+])
+
+function hasStructuralHeader(row: string[]): boolean {
+  return row.some((value) => STRUCTURAL_HEADER_NAMES.has(value.trim().toLowerCase()))
+}
+
+function consistentDelimitedRecords(text: string, delimiter: "\t" | ";" | "|"): boolean {
+  const rows = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 25)
+  if (rows.length < 3) return false
+  const widths = rows.map((row) => parseDelimited(row, delimiter)[0]?.length ?? 0)
+  return widths[0] >= 2 && widths.filter((width) => width === widths[0]).length / widths.length >= 0.8
+}
+
+/**
+ * Known extensions still need structural review when the extension describes a
+ * container rather than a record profile. This is deliberately conservative:
+ * ordinary prose/i18n resources stay deterministic and free of model calls.
+ */
+export function shouldUseAiForKnownText(fileType: FileType, text: string): boolean {
+  if (fileType === "md" && /^\s*\|.+\|\s*\r?\n\s*\|?\s*:?-{3,}/m.test(text)) return true
+  if (fileType === "txt") {
+    return consistentDelimitedRecords(text, "\t")
+      || consistentDelimitedRecords(text, "|")
+      || consistentDelimitedRecords(text, ";")
+  }
+  if (fileType === "csv" || fileType === "tsv") {
+    const rows = parseDelimited(text, fileType === "tsv" ? "\t" : ",")
+    return rows.length > 1 && hasStructuralHeader(rows[0] ?? [])
+  }
+  if (fileType === "json") {
+    try {
+      const value = JSON.parse(text)
+      const records = Array.isArray(value)
+        ? value
+        : isObject(value)
+          ? Object.values(value).find((candidate) => Array.isArray(candidate))
+          : undefined
+      return Array.isArray(records)
+        && records.some((record) => isObject(record) && Object.values(record).filter((entry) => typeof entry === "string").length >= 2)
+    } catch {
+      return false
+    }
+  }
+  return false
 }
 
 export async function classifyAndParseUnknownText(

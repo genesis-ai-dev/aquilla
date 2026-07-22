@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Search as SearchIcon, X, ChevronDown, Pencil, BookOpen } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileTypeHasSections } from "@/lib/parsers/types"
+import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
 import { FileActionMenu } from "./FileActionMenu"
@@ -206,7 +206,7 @@ export function ExpandableFileList({
                 {!isCollapsed && (
                   <div className="space-y-0.5">
                     {group.files.map((file) => {
-                      const canExpand = fileTypeHasSections(file.type)
+                      const canExpand = fileHasSections(file)
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (

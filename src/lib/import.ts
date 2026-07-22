@@ -73,10 +73,11 @@ import {
   type NormalizedImportFile,
 } from "./import/normalized-manifest"
 import { ImportService } from "./import/import-service"
-import type { PreparedImportFile } from "./import/import-service"
+import type { ImportPreviewNotice, PreparedImportFile } from "./import/import-service"
 import {
   classifyAndParseUnknownText,
   readUnknownTextFile,
+  shouldUseAiForKnownText,
   sniffKnownTextFile,
   decodeImportText,
   type AiImportClassification,
@@ -422,6 +423,7 @@ export interface ImportResult {
   /** AI-assisted unknown-format recipe, shown in preview and persisted. */
   importRecipe?: DeclarativeImportRecipe
   importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
+  importNotices?: ImportPreviewNotice[]
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -646,7 +648,50 @@ export async function prepareImportFile(
       const text = decodeImportText(bytes, file.name)
       const sniffedType = sniffKnownTextFile(text)
       const fileType = sniffedType ?? extensionType
-      return preparedParsedFile(file, fileType, await parseFile(file, fileType))
+      let analysisError: unknown
+      if (
+        ctx.identityToken
+        && sniffedType === null
+        && shouldUseAiForKnownText(fileType, text)
+      ) {
+        try {
+          const assisted = await classifyAndParseUnknownText(file, {
+            identityToken: ctx.identityToken,
+            projectId: ctx.projectId,
+            sourceLanguage: ctx.sourceLanguage,
+            targetLanguage: ctx.targetLanguage,
+            signal: ctx.signal,
+          }, { text, bytes })
+          return {
+            fileType: "custom",
+            results: [{
+              name: file.name,
+              strings: assisted.strings,
+              rawBytes: bytes,
+              rawSourceFormat: "custom-original",
+              importRecipe: assisted.classification.recipe,
+              importClassification: assisted.classification,
+            }],
+          }
+        } catch (error) {
+          // A well-defined built-in parser is still a safe fallback when model
+          // infrastructure is unavailable. Make that downgrade explicit in the
+          // mandatory preview instead of failing or silently flattening data.
+          analysisError = error
+        }
+      }
+      const prepared = preparedParsedFile(file, fileType, await parseFile(file, fileType))
+      if (analysisError) {
+        prepared.results = prepared.results.map((result) => ({
+          ...result,
+          importNotices: [{
+            code: "basic-parser-fallback",
+            severity: "warning",
+            message: "Aquilla could not verify this structured layout with AI, so it used the basic parser. Check the preview carefully before importing.",
+          }],
+        }))
+      }
+      return prepared
     } catch (error) {
       if (!ctx.identityToken) throw error
       return prepareSandboxImport(file, { ...ctx, identityToken: ctx.identityToken }, error)
@@ -1301,6 +1346,11 @@ export async function emitParsedFile(
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
       orderedBy,
+      ...(normalized.units.some((unit) => (
+        unit.address?.scheme === "scripture" || unit.address?.scheme === "scripture-structure"
+      ))
+        ? { hasScriptureContent: true }
+        : {}),
       ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
       ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
       ...(ctx.sourceTextDirection ? { sourceTextDirection: ctx.sourceTextDirection } : {}),

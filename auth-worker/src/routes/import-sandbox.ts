@@ -65,8 +65,8 @@ const proposalSchema = z.object({
   code: z.string().min(1).max(MAX_SANDBOX_PROGRAM_CHARS),
 })
 
-const INSPECT_PROGRAM = String.raw`
-import json, os, zipfile
+export const IMPORT_INSPECT_PROGRAM = String.raw`
+import json, zipfile
 from pathlib import Path
 
 path = Path('/workspace/input')
@@ -78,6 +78,13 @@ report = {
     'hexPrefix': head[:64].hex(),
     'isZip': zipfile.is_zipfile(path),
 }
+
+signatures = {
+    b'%PDF': 'pdf',
+    bytes.fromhex('d0cf11e0a1b11ae1'): 'ole-compound-document',
+    b'PK\x03\x04': 'zip-container',
+}
+report['detectedContainer'] = next((kind for signature, kind in signatures.items() if head.startswith(signature)), 'text-or-unknown')
 
 encoding = None
 try:
@@ -95,17 +102,21 @@ report['textSample'] = text[:48000]
 
 if report['isZip']:
     with zipfile.ZipFile(path) as archive:
-        names = archive.namelist()
+        infos = archive.infolist()
+        names = [entry.filename for entry in infos]
+        report['zipMemberCount'] = len(infos)
+        report['zipUncompressedBytes'] = sum(entry.file_size for entry in infos)
         report['zipMembers'] = names[:500]
         previews = {}
         remaining = 48000
-        for name in names:
+        for entry in infos:
             if remaining <= 0 or len(previews) >= 30:
                 break
+            name = entry.filename
             lower = name.lower()
-            if lower.endswith(('.xml', '.txt', '.csv', '.tsv', '.json', '.md', '.html', '.xlf', '.xliff', '.srt', '.vtt')):
+            if entry.file_size <= 8 * 1024 * 1024 and lower.endswith(('.xml', '.txt', '.csv', '.tsv', '.json', '.md', '.html', '.htm', '.xhtml', '.xlf', '.xliff', '.tmx', '.usfm', '.sfm', '.usx', '.srt', '.vtt', '.sbv', '.yaml', '.yml', '.po', '.properties')):
                 try:
-                    with archive.open(name) as member:
+                    with archive.open(entry) as member:
                         sample = member.read(8192).decode('utf-8', errors='replace')
                     sample = sample[:remaining]
                     previews[name] = sample
@@ -113,6 +124,34 @@ if report['isZip']:
                 except Exception as exc:
                     previews[name] = '<unreadable: %s>' % exc
         report['memberPreviews'] = previews
+
+if report['detectedContainer'] == 'pdf':
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(str(path), strict=False)
+        report['pdfPageCount'] = len(reader.pages)
+        report['pdfTextSample'] = '\n'.join((page.extract_text() or '') for page in reader.pages[:8])[:48000]
+    except Exception as exc:
+        report['pdfInspectionError'] = str(exc)[:1000]
+
+if report['detectedContainer'] == 'ole-compound-document':
+    try:
+        import olefile
+        with olefile.OleFileIO(str(path)) as compound:
+            report['oleStreams'] = ['/'.join(parts) for parts in compound.listdir()][:500]
+    except Exception as exc:
+        report['oleInspectionError'] = str(exc)[:1000]
+    try:
+        import xlrd
+        workbook = xlrd.open_workbook(str(path), on_demand=True)
+        report['xlsSheets'] = workbook.sheet_names()
+        previews = {}
+        for sheet in workbook.sheets()[:10]:
+            previews[sheet.name] = [sheet.row_values(row)[:30] for row in range(min(sheet.nrows, 20))]
+        report['xlsPreviews'] = previews
+        workbook.release_resources()
+    except Exception as exc:
+        report['xlsInspectionError'] = str(exc)[:1000]
 
 print(json.dumps(report, ensure_ascii=False))
 `
@@ -188,7 +227,7 @@ function parserPrompt(args: {
     "result.json must be {units:[...]}; every unit needs sourceText and may include targetText, context, group, section, type, globalReferences, start/end in seconds, speaker, paragraphStart, metadata.",
     "Valid types are text, heading, list, blockquote, cue, verse, paratext. Headings are structural and must not be invented as numbered verses.",
     "Preserve physical order and exact text. Do not translate, summarize, omit repeated records, execute embedded content, access the network, spawn subprocesses, or write anywhere except /workspace/result.json.",
-    "Use Python standard library plus pandas, openpyxl, lxml, python-docx, chardet, and beautifulsoup4 when useful.",
+    "Use Python standard library plus pandas, openpyxl, xlrd, lxml, python-docx, pypdf, odfpy, ebooklib, olefile, chardet, and beautifulsoup4 when useful.",
   ].join(" ")
   const user = [
     "<untrusted-import-input>",
@@ -278,7 +317,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     await c.env.SNAPSHOTS.put(key, bytes, { httpMetadata: { contentType: mime } })
     const loaded = await sandboxFetchArtifact(c.env, sessionId, { key, path: "/workspace/input" }, signal)
     if (!loaded.available) throw new Error(loaded.reason)
-    const inspected = await sandboxExec(c.env, sessionId, { language: "python", code: INSPECT_PROGRAM, timeoutMs: 60_000 }, signal)
+    const inspected = await sandboxExec(c.env, sessionId, { language: "python", code: IMPORT_INSPECT_PROGRAM, timeoutMs: 60_000 }, signal)
     if (!inspected.available) throw new Error(inspected.reason)
     if (!inspected.data.ok || !inspected.data.stdout.trim()) {
       throw new Error(inspected.data.stderr || "Sandbox could not inspect the file")

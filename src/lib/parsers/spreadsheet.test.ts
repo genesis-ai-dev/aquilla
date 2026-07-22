@@ -127,19 +127,21 @@ describe("parseXlsxToSheets", () => {
 
 describe("applyColumnMapping", () => {
   const rows = [
-    ["ref", "source", "target", "cast"],
-    ["GEN 1:1", "In the beginning", "Au commencement", "Narrator"],
-    ["GEN 1:2", "The earth was formless", "La terre était informe", ""],
+    ["ref", "source", "target", "cast", "type"],
+    ["GEN 1:1", "In the beginning", "Au commencement", "Narrator", "verse"],
+    ["GEN 1:2", "The earth was formless", "La terre était informe", "", "verse"],
   ]
 
   it("maps columns correctly with header", () => {
-    const mapping = { sourceCol: 1, targetCol: 2, labelCol: 0, castCol: 3, startCol: null, endCol: null }
+    const mapping = { sourceCol: 1, targetCol: 2, labelCol: 0, typeCol: 4, castCol: 3, startCol: null, endCol: null }
     const result = applyColumnMapping(rows, mapping, true)
     expect(result).toHaveLength(2)
     expect(result[0].original).toBe("In the beginning")
     expect(result[0].translated).toBe("Au commencement")
     expect(result[0].ref).toBe("GEN 1:1")
     expect(result[0].castName).toBe("Narrator")
+    expect(result[0].type).toBe("verse")
+    expect(result[0].sourceRow).toBe(2)
     expect(result[1].castName).toBeUndefined()
   })
 
@@ -185,6 +187,9 @@ describe("mappedRowsToStrings", () => {
     expect(strings[0].original).toBe("Hello")
     expect(strings[0].translated).toBe("Hola")
     expect(strings[0].group).toBe("GEN 1:1")
+    expect(strings[0].type).toBe("verse")
+    expect(strings[0].globalReferences).toEqual(["GEN 1:1"])
+    expect(strings[0].section).toBe("GEN 1")
     expect(strings[0].speaker).toBe("Narrator")
   })
 
@@ -194,6 +199,90 @@ describe("mappedRowsToStrings", () => {
     ]
     const strings = mappedRowsToStrings(rows)
     expect(strings[0].group).toBe("row-1")
+  })
+
+  it("keeps headings structural even when their label looks like a Scripture reference", () => {
+    const [heading] = mappedRowsToStrings([{
+      id: "heading",
+      original: "Creation",
+      translated: "",
+      ref: "GEN 1:1",
+      type: "heading",
+      castName: undefined,
+      start: undefined,
+      end: undefined,
+    }])
+
+    expect(heading.type).toBe("heading")
+    expect(heading.globalReferences).toEqual(["GEN 1:h:1"])
+    expect(heading.section).toBe("GEN 1")
+  })
+
+  it("scopes an unreferenced heading to the following verse without numbering it as that verse", () => {
+    const strings = mappedRowsToStrings([
+      {
+        id: "heading",
+        original: "Creation",
+        translated: "",
+        ref: "",
+        type: "heading",
+        sourceRow: 2,
+        castName: undefined,
+        start: undefined,
+        end: undefined,
+      },
+      {
+        id: "verse",
+        original: "In the beginning",
+        translated: "",
+        ref: "GEN 1:1",
+        type: "verse",
+        sourceRow: 3,
+        castName: undefined,
+        start: undefined,
+        end: undefined,
+      },
+    ])
+
+    expect(strings[0]).toMatchObject({
+      type: "heading",
+      group: "GEN 1:h:2",
+      section: "GEN 1",
+      globalReferences: ["GEN 1:h:2"],
+    })
+  })
+
+  it("preserves non-Scripture labels as metadata instead of canonical references", () => {
+    const [record] = mappedRowsToStrings([{
+      id: "record",
+      original: "Opening",
+      translated: "",
+      ref: "episode-13",
+      castName: undefined,
+      start: undefined,
+      end: undefined,
+    }])
+
+    expect(record.type).toBe("text")
+    expect(record.globalReferences).toBeUndefined()
+    expect(record.metadata).toEqual({
+      aquillaRecipe: { recipeId: "builtin:spreadsheet-mapping", record: 1, field: "source" },
+      spreadsheetLabel: "episode-13",
+    })
+  })
+
+  it("uses mapped timestamps to identify subtitle cues", () => {
+    const [cue] = mappedRowsToStrings([{
+      id: "cue",
+      original: "Hello",
+      translated: "",
+      ref: "",
+      castName: "Narrator",
+      start: 1.5,
+      end: 3,
+    }])
+
+    expect(cue).toMatchObject({ type: "cue", start: 1.5, end: 3, speaker: "Narrator" })
   })
 })
 

@@ -32,6 +32,11 @@ function validClassification(): Record<string, unknown> {
         hasHeader: true,
         sourceField: "source",
         referenceField: "ref",
+        bookField: "book",
+        chapterField: "chapter",
+        verseField: "verse",
+        book: "GEN",
+        chapter: 1,
         typeField: "kind",
       },
     },
@@ -106,6 +111,17 @@ describe("POST /api/v1/import/classify", () => {
     expect(response.status).toBe(200)
     const result = await response.json() as { classification: Record<string, unknown> }
     expect(result.classification).toMatchObject({ category: "scripture", confidence: 0.97 })
+    expect(result.classification).toMatchObject({
+      recipe: {
+        config: {
+          bookField: "book",
+          chapterField: "chapter",
+          verseField: "verse",
+          book: "GEN",
+          chapter: 1,
+        },
+      },
+    })
     expect(result.classification).not.toHaveProperty("ignored")
 
     const [url, init] = upstream.mock.calls[0]

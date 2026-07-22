@@ -233,6 +233,8 @@ export interface ColumnMapping {
   targetCol: number | null
   /** Cell label / ref column (e.g. "GEN 1:1"). */
   labelCol: number | null
+  /** Optional semantic unit type (verse, heading, cue, paragraph, etc.). */
+  typeCol?: number | null
   /** Cast / character name column. */
   castCol: number | null
   /** Start timestamp column (numeric seconds or HH:MM:SS). */
@@ -254,6 +256,9 @@ export interface MappedRow {
   translated: string
   /** Canonical ref / cell label (e.g. "GEN 1:1") */
   ref: string
+  type?: string
+  /** One-based row in the source sheet (including its header, when present). */
+  sourceRow?: number
   castName: string | undefined
   start: number | undefined
   end: number | undefined
@@ -294,17 +299,30 @@ export function applyColumnMapping(
   const dataRows = hasHeader ? rows.slice(1) : rows
   const results: MappedRow[] = []
 
-  for (const row of dataRows) {
+  for (const [rowIndex, row] of dataRows.entries()) {
     const original = mapping.sourceCol !== null ? (row[mapping.sourceCol] ?? "").trim() : ""
     if (!original) continue
 
     const translated = mapping.targetCol !== null ? (row[mapping.targetCol] ?? "").trim() : ""
     const ref = mapping.labelCol !== null ? (row[mapping.labelCol] ?? "").trim() : ""
+    const type = mapping.typeCol !== null && mapping.typeCol !== undefined
+      ? (row[mapping.typeCol] ?? "").trim() || undefined
+      : undefined
     const castName = mapping.castCol !== null ? (row[mapping.castCol] ?? "").trim() || undefined : undefined
     const start = mapping.startCol !== null ? parseTimestamp(row[mapping.startCol] ?? "") : undefined
     const end = mapping.endCol !== null ? parseTimestamp(row[mapping.endCol] ?? "") : undefined
 
-    results.push({ id: uuid(), original, translated, ref, castName, start, end })
+    results.push({
+      id: uuid(),
+      original,
+      translated,
+      ref,
+      type,
+      sourceRow: rowIndex + (hasHeader ? 2 : 1),
+      castName,
+      start,
+      end,
+    })
   }
 
   return results
@@ -315,16 +333,70 @@ export function applyColumnMapping(
  * bulkUploadSource pipeline).
  */
 export function mappedRowsToStrings(rows: MappedRow[]): TranslatableString[] {
-  return rows.map((r, i) => ({
-    id: r.id,
-    original: r.original,
-    translated: r.translated,
-    context: r.ref || `Row ${i + 1}`,
-    group: r.ref || `row-${i + 1}`,
-    ...(r.start !== undefined && r.end !== undefined ? { start: r.start, end: r.end } : {}),
-    ...(r.castName ? { speaker: r.castName } : {}),
-    type: "text" as const,
-  }))
+  const strings = rows.map((r, i) => {
+    const explicitType = r.type?.trim().toLowerCase()
+    const scriptureRef = /^([1-3]?[A-Z]{2,3})\s+(\d+):(\d+[a-z]?(?:-\d+[a-z]?)?)$/i.exec(r.ref)
+    const canonicalRef = scriptureRef
+      ? `${scriptureRef[1].toUpperCase()} ${Number(scriptureRef[2])}:${scriptureRef[3]}`
+      : undefined
+    const type: TranslatableString["type"] = /^(heading|header|title|section|chapter)$/.test(explicitType ?? "")
+      ? "heading"
+      : explicitType === "verse" || (!explicitType && canonicalRef)
+        ? "verse"
+        : explicitType === "list"
+          ? "list"
+          : /^(blockquote|quote)$/.test(explicitType ?? "")
+            ? "blockquote"
+            : explicitType === "paratext"
+              ? "paratext"
+              : explicitType === "cue" || (!explicitType && r.start !== undefined && r.end !== undefined)
+                ? "cue"
+                : "text"
+    const scriptureScope = canonicalRef?.slice(0, canonicalRef.indexOf(":"))
+    const structuralReference = scriptureScope && (type === "heading" || type === "paratext")
+      ? `${scriptureScope}:${type === "heading" ? "h" : "p"}:${r.sourceRow ?? i + 1}`
+      : undefined
+    const identityReference = structuralReference ?? (type === "verse" ? canonicalRef : undefined)
+
+    return {
+      id: r.id,
+      original: r.original,
+      translated: r.translated,
+      context: r.ref || `Row ${i + 1}`,
+      group: identityReference ?? (r.ref || `row-${i + 1}`),
+      ...(identityReference
+        ? { globalReferences: [identityReference], ...(scriptureScope ? { section: scriptureScope } : {}) }
+        : {}),
+      ...(r.start !== undefined && r.end !== undefined ? { start: r.start, end: r.end } : {}),
+      ...(r.castName ? { speaker: r.castName } : {}),
+      type,
+      ...(type === "text" ? { paragraphStart: true } : {}),
+      metadata: {
+        aquillaRecipe: {
+          recipeId: "builtin:spreadsheet-mapping",
+          record: r.sourceRow ?? i + 1,
+          field: "source",
+        },
+        ...(r.ref && !canonicalRef ? { spreadsheetLabel: r.ref } : {}),
+      },
+    }
+  })
+
+  return strings.map((string, index) => {
+    if ((string.type !== "heading" && string.type !== "paratext") || string.section) return string
+    const nextScope = strings.slice(index + 1).find((candidate) => candidate.section)?.section
+    const previousScope = strings.slice(0, index).reverse().find((candidate) => candidate.section)?.section
+    const scriptureScope = nextScope ?? previousScope
+    if (!scriptureScope || !/^[1-3]?[A-Z]{2,3}\s+\d+$/i.test(scriptureScope)) return string
+    const occurrence = rows[index]?.sourceRow ?? index + 1
+    const structuralReference = `${scriptureScope}:${string.type === "heading" ? "h" : "p"}:${occurrence}`
+    return {
+      ...string,
+      section: scriptureScope,
+      group: structuralReference,
+      globalReferences: [structuralReference],
+    }
+  })
 }
 
 // ─── AQU-439: Cast-name / camera-angle splitter ──────────────────────────────

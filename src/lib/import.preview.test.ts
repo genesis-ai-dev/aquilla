@@ -16,7 +16,7 @@ const PASS_PROGRAM_DIGEST = "d74ff0ee8da3b9806b18c877dbf29bbde50b5bd8e4dad7a3a72
 interface CapturedBody {
   projectId: string
   fileId: string
-  file?: { kind?: string; fileType?: string }
+  file?: { kind?: string; fileType?: string; importManifest?: { hasScriptureContent?: boolean } }
   cells: Array<{ id: string; cellId: string; anchorCellId: string | null; value: string }>
 }
 let captured: CapturedBody[]
@@ -130,6 +130,55 @@ describe("parseFile — parse phase only (no upload)", () => {
     const prepared = await prepareImportFile(file, { projectId: "p1" })
     expect(prepared.fileType).toBe("usfm")
     expect(prepared.results[0].strings[0].type).toBe("verse")
+  })
+
+  it("uses AI structural review for a recognized text container with record-shaped content", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      classification: {
+        category: "subtitles",
+        confidence: 0.93,
+        explanation: "Pipe-delimited speaker cues",
+        recipe: {
+          name: "Speaker cues",
+          inputFormat: "pipe-records",
+          config: {
+            recordMode: "delimited",
+            delimiter: "pipe",
+            hasHeader: true,
+            sourceField: "text",
+            speakerField: "speaker",
+          },
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const prepared = await prepareImportFile(
+      makeFile("episode.txt", "speaker|text\nAlice|Hello\nBob|Goodbye"),
+      { projectId: "p1", identityToken: "identity-token" },
+    )
+
+    expect(prepared.fileType).toBe("custom")
+    expect(prepared.results[0].strings.map((cell) => [cell.original, cell.speaker, cell.type])).toEqual([
+      ["Hello", "Alice", "cue"],
+      ["Goodbye", "Bob", "cue"],
+    ])
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it("falls back visibly to the built-in parser when structural review is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("temporarily unavailable", { status: 503 })))
+
+    const prepared = await prepareImportFile(
+      makeFile("episode.txt", "speaker|text\nAlice|Hello\nBob|Goodbye"),
+      { projectId: "p1", identityToken: "identity-token" },
+    )
+
+    expect(prepared.fileType).toBe("txt")
+    expect(prepared.results[0].importNotices).toEqual([
+      expect.objectContaining({ code: "basic-parser-fallback", severity: "warning" }),
+    ])
+    expect(prepared.results[0].strings.length).toBeGreaterThan(0)
   })
 
   it("strictly decodes UTF-16 known text instead of importing NUL-corrupted content", async () => {
@@ -265,6 +314,35 @@ describe("emitParsedFile — commit phase calls bulk upload", () => {
     // FileReference has the expected shape.
     expect(result.ref.name).toBe("test.txt")
     expect(result.ref.cellCount).toBe(2)
+  })
+
+  it("marks format-neutral imports with canonical Scripture content", async () => {
+    const result = await emitParsedFile(
+      {
+        name: "mapped.csv",
+        strings: [{
+          id: "GEN 1:1",
+          original: "In the beginning",
+          translated: "",
+          context: "GEN 1:1",
+          group: "GEN 1",
+          section: "GEN 1",
+          globalReferences: ["GEN 1:1"],
+          type: "verse",
+        }],
+      },
+      "csv",
+      {
+        projectId: "proj-1",
+        author: "tester",
+        sourceLanguage: "en",
+        targetLanguage: "fr",
+        getToken: async () => "tok",
+      },
+    )
+
+    expect(result.ref).toMatchObject({ type: "csv", hasScriptureContent: true })
+    expect(captured[0]?.file?.importManifest).toMatchObject({ hasScriptureContent: true })
   })
 
   it("stores TMX as translation-memory while retaining the TMX parser type", async () => {

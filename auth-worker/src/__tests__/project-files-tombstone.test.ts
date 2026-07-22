@@ -16,10 +16,11 @@ async function seedWorld() {
   ).run()
   await env.AQUILLA_PG.prepare(
     `INSERT INTO files
-       (id, project_id, name, event_id, cell_count, approved_count, word_count, last_edit_at, deleted_at)
+       (id, project_id, name, kind, event_id, cell_count, approved_count, word_count, last_edit_at, deleted_at, meta)
      VALUES
-       ('active-file', 'proj1', 'GEN', 'evt-active', 10, 2, 100, 1000, NULL),
-       ('deleted-file', 'proj1', 'EXO', 'evt-deleted', 8, 1, 80, 900, 1234)`,
+       ('active-file', 'proj1', 'mapped.csv', 'csv', 'evt-active', 10, 2, 100, 1000, NULL,
+        '{"aquillaImport":{"hasScriptureContent":true}}'),
+       ('deleted-file', 'proj1', 'EXO', 'usfm', 'evt-deleted', 8, 1, 80, 900, 1234, '{}')`,
   ).run()
 }
 
@@ -40,6 +41,23 @@ describe("GET /api/v2/projects file list tombstones", () => {
     }
     expect(body.projects.find((project) => project.id === "proj1")?.files.map((file) => file.id))
       .toEqual(["active-file"])
+  })
+
+  it("surfaces the content-derived Scripture capability without changing file type", async () => {
+    const res = await app.request(
+      "/api/v2/projects?orgId=1",
+      { headers: authHeader(await jwtFor("owner")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; files: Array<{ id: string; type: string; hasScriptureContent?: boolean }> }>
+    }
+    expect(body.projects.find((project) => project.id === "proj1")?.files[0]).toMatchObject({
+      id: "active-file",
+      type: "csv",
+      hasScriptureContent: true,
+    })
   })
 
   it("excludes soft-deleted files from the single-project endpoint", async () => {

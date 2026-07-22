@@ -29,7 +29,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, fileTypeHasSections, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -4773,7 +4773,7 @@ export function ProjectWorkspace() {
           <>
             {/* Parallel Bibles (helloao): edge tab → slide-out panel showing the
                 scroll-tracked verse in other bible versions. Scripture files only. */}
-            {centerSurface === "editor" && activeFile && fileTypeHasSections(activeFile.type) && (
+            {centerSurface === "editor" && activeFile && fileHasSections(activeFile) && (
               <ParallelBiblesSidebar
                 key={activeFile.id}
                 trackedRef={trackedCellRef}

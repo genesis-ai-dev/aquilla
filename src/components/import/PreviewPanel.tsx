@@ -14,6 +14,7 @@
  */
 
 import { useState } from "react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { ImportResult } from "@/lib/import"
 import { formatBytesProgress } from "@/lib/format-bytes"
@@ -145,17 +146,33 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                 <div className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="ai-import-classification">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">AI-assisted structure</span>
-                    <span className="rounded-full bg-background px-2 py-0.5 text-muted-foreground">
+                    <Badge variant="outline">
                       {r.importClassification.category}
-                    </span>
+                    </Badge>
                     <span className="text-muted-foreground">
                       {Math.round(r.importClassification.confidence * 100)}% confidence
                     </span>
+                    {r.importClassification.confidence < 0.7 ? (
+                      <Badge variant="destructive">Needs careful review</Badge>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-muted-foreground">{r.importClassification.explanation}</p>
                   <p className="mt-1 text-muted-foreground">
                     Recipe: {r.importClassification.recipe.name}. The original is preserved; translated round-trip is not yet verified.
                   </p>
+                </div>
+              ) : null}
+              {r.importNotices?.length ? (
+                <div className="mb-3 flex flex-col gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="import-preview-notices">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">Review before importing</span>
+                    <Badge variant="outline">{r.importNotices.length}</Badge>
+                  </div>
+                  <ul className="flex list-disc flex-col gap-1 pl-4 text-muted-foreground">
+                    {r.importNotices.map((notice, index) => (
+                      <li key={`${notice.code}-${index}`}>{notice.message}</li>
+                    ))}
+                  </ul>
                 </div>
               ) : null}
               <ul className="space-y-1">

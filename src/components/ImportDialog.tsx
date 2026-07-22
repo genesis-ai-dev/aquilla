@@ -208,6 +208,7 @@ export function ImportDialog({
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }
     skipped: { book: string; reason: string }[]
   } | null>(null)
+  const [importResultError, setImportResultError] = useState<string | null>(null)
   const [directionSource, setDirectionSource] = useState("")
   const [directionTarget, setDirectionTarget] = useState("")
   // Guard against double-clicks on "Set direction".
@@ -225,7 +226,11 @@ export function ImportDialog({
     results: ImportResult[]
     /** Commits the parsed results to the server once user confirms. */
     commit: () => void | Promise<void>
+    /** Surface to restore if the user cancels the preview. */
+    returnScreen: "upload" | "spreadsheet"
   } | null>(null)
+  const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
+  const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
   // PreviewPanel can render an in-flight indicator).
@@ -246,41 +251,61 @@ export function ImportDialog({
       setScreen("landing")
       setPendingImport(null)
       setImportResult(null)
+      setImportResultError(null)
       setCollisionState(null)
       setPreviewState(null)
       setPreviewUploadPhase("")
       setPreviewUploadProgress(null)
+      setSpreadsheetSeedFile(null)
+      setSpreadsheetReturnScreen("landing")
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
     }
   }, [open])
 
-  // BLOCKER 2: intercept dialog close — if we're on the direction screen with a
-  // pending import, flush it via the skip path before propagating the close so
-  // the imported files are never silently dropped.
+  const finishPendingImport = useCallback(async (
+    captured: NonNullable<typeof pendingImport>,
+    rememberSkip: boolean,
+  ) => {
+    if (flushingRef.current) return
+    flushingRef.current = true
+    setConfirming(true)
+    setConfirmError(null)
+    try {
+      await onImported(captured.refs, captured.inferredLanguages)
+      if (rememberSkip) {
+        try {
+          localStorage.setItem(skipStorageKey(projectId), "true")
+        } catch {
+          // localStorage may be unavailable; the import itself still succeeded.
+        }
+      }
+      setPendingImport(null)
+      onOpenChange(false)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setPendingImport(captured)
+      setConfirmError(`Couldn't finish saving your import — please try again. (${message})`)
+    } finally {
+      flushingRef.current = false
+      setConfirming(false)
+    }
+  }, [onImported, onOpenChange, projectId])
+
+  // Intercept dialog close while an imported file still needs its final project
+  // handoff. Keep the dialog visible until that async write succeeds; on failure
+  // the same direction screen shows a retryable error instead of closing and
+  // leaving a console-only warning.
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (!nextOpen && pendingImport !== null) {
-        // Fix 3: bail if we already started a flush this macrotask.
-        if (flushingRef.current) {
-          onOpenChange(nextOpen)
-          return
-        }
-        flushingRef.current = true
-        // Flush the pending import without language overrides (skip semantics).
-        // SWARM-TODO(AQU-274): surface this as a user-visible banner ("Import
-        // couldn't be saved — copy your files and try again") once the
-        // ImportDialog report-flow agent lands (wave collisions risk). For now
-        // the error stays console-only to avoid conflicting with that refactor.
-        void Promise.resolve(onImported(pendingImport.refs, pendingImport.inferredLanguages)).catch((err: unknown) => {
-          console.warn("[ImportDialog] flush-on-close failed:", err)
-        })
-        setPendingImport(null)
+        void finishPendingImport(pendingImport, false)
+        return
       }
       onOpenChange(nextOpen)
     },
-    [pendingImport, onImported, onOpenChange],
+    [finishPendingImport, pendingImport, onOpenChange],
   )
 
   // Called by child panels when they finish importing. If the language
@@ -303,6 +328,7 @@ export function ImportDialog({
           project_id: projectId,
         })
         setImportResult({ refs, inferredLanguages, skipped: skippedBooks })
+        setImportResultError(null)
         setScreen("result")
         // Persist per-project so a re-show is possible (bonus scope).
         try {
@@ -358,18 +384,26 @@ export function ImportDialog({
   const handleResultDismiss = useCallback(async () => {
     if (!importResult) return
     const { refs, inferredLanguages } = importResult
-    setImportResult(null)
-    // Run through the normal post-import flow (direction prompt if needed).
-    await handleChildImported(refs, inferredLanguages)
+    setImportResultError(null)
+    try {
+      // Run through the normal post-import flow (direction prompt if needed).
+      // Retain the report until the handoff succeeds so Close is safely retryable.
+      await handleChildImported(refs, inferredLanguages)
+      setImportResult(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setImportResultError(`Couldn't finish saving your import — please try again. (${message})`)
+    }
   }, [importResult, handleChildImported])
 
   // BLOCKER 1 fix: values confirmed via DirectionPanel are EXPLICIT — they
   // replace current values, not merely fill empty slots.
   async function handleDirectionConfirm() {
-    if (!pendingImport || confirming) return
+    if (!pendingImport || confirming || flushingRef.current) return
     // AQU-249 fix: clear inline error from any previous attempt.
     setConfirmError(null)
     setConfirming(true)
+    flushingRef.current = true
     const captured = pendingImport
     // Null out synchronously as a double-click guard.
     setPendingImport(null)
@@ -391,26 +425,14 @@ export function ImportDialog({
       const message = err instanceof Error ? err.message : String(err)
       setConfirmError(`Couldn't save your import — please try again. (${message})`)
     } finally {
+      flushingRef.current = false
       setConfirming(false)
     }
   }
 
   function handleDirectionSkip() {
-    if (!pendingImport) return
-    // Persist the skip so re-imports don't re-prompt this project.
-    try {
-      localStorage.setItem(skipStorageKey(projectId), "true")
-    } catch {
-      // localStorage may be unavailable in some environments — ignore silently.
-    }
-    const captured = pendingImport
-    setPendingImport(null)
-    // SWARM-TODO(AQU-274): surface this as a user-visible banner once the
-    // ImportDialog report-flow agent lands — same wave-collision concern as above.
-    void Promise.resolve(onImported(captured.refs, captured.inferredLanguages)).catch((err: unknown) => {
-      console.warn("[ImportDialog] skip flush failed:", err)
-    })
-    onOpenChange(false)
+    if (!pendingImport || confirming) return
+    void finishPendingImport(pendingImport, true)
   }
 
   return (
@@ -429,7 +451,12 @@ export function ImportDialog({
             ) : screen === "preview" ? (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton
-                  onClick={() => { setPreviewState(null); setScreen("upload") }}
+                  onClick={() => {
+                    const returnScreen = previewState?.returnScreen ?? "upload"
+                    setPreviewState(null)
+                    setPreviewCommitError(null)
+                    setScreen(returnScreen)
+                  }}
                   label="Back to file selection"
                 />
                 Preview
@@ -463,6 +490,10 @@ export function ImportDialog({
             allowDcs={patchDcsCursor !== undefined}
             onSelect={(s) => {
               posthog.capture(IMPORT_STARTED, { import_type: s, project_id: projectId })
+              if (s === "spreadsheet") {
+                setSpreadsheetSeedFile(null)
+                setSpreadsheetReturnScreen("landing")
+              }
               setScreen(s)
             }}
           />
@@ -492,8 +523,13 @@ export function ImportDialog({
               setPreviewUploadPhase("")
               setPreviewUploadProgress(null)
               setPreviewCommitError(null)
-              setPreviewState({ results, commit })
+              setPreviewState({ results, commit, returnScreen: "upload" })
               setScreen("preview")
+            }}
+            onSpreadsheetFile={(file) => {
+              setSpreadsheetSeedFile(file)
+              setSpreadsheetReturnScreen("upload")
+              setScreen("spreadsheet")
             }}
             onCommitPhase={setPreviewUploadPhase}
             onCommitProgress={setPreviewUploadProgress}
@@ -606,13 +642,21 @@ export function ImportDialog({
             ttsSettings={ttsSettings}
             onCastUpdated={onCastUpdated}
             onPreview={(results, commit) => {
-              setPreviewState({ results, commit })
+              setPreviewUploadPhase("")
+              setPreviewUploadProgress(null)
+              setPreviewCommitError(null)
+              setPreviewState({ results, commit, returnScreen: "spreadsheet" })
               setScreen("preview")
             }}
+            onCommitError={setPreviewCommitError}
             onImported={async (refs) => {
               await handleChildImported(refs)
             }}
-            onCancel={() => setScreen("landing")}
+            initialFile={spreadsheetSeedFile}
+            onCancel={() => {
+              setSpreadsheetSeedFile(null)
+              setScreen(spreadsheetReturnScreen)
+            }}
           />
         )}
 
@@ -677,6 +721,7 @@ export function ImportDialog({
             importedCount={importResult.refs.length}
             skipped={importResult.skipped}
             onDismiss={handleResultDismiss}
+            error={importResultError}
           />
         )}
 
@@ -690,9 +735,10 @@ export function ImportDialog({
               await previewState.commit()
             }}
             onCancel={() => {
+              const returnScreen = previewState.returnScreen
               setPreviewState(null)
               setPreviewCommitError(null)
-              setScreen("upload")
+              setScreen(returnScreen)
             }}
             uploadPhase={previewUploadPhase}
             uploadProgress={previewUploadProgress}
@@ -961,6 +1007,10 @@ interface UploadPanelProps {
   /** AQU-430 (fix): surface a commit failure to the parent so the unmounted
    *  UploadPanel's local error is still shown on the preview screen. */
   onCommitError?: (message: string | null) => void
+  /** Spreadsheet-shaped files need explicit column mapping before preview.
+   * Keep this handoff inside the unified Upload files entry point so users do
+   * not have to know which specialized importer to choose. */
+  onSpreadsheetFile: (file: File) => void
 }
 
 /** Sorted, deduped extension list ("mp3,usfm") for import telemetry breakdowns. */
@@ -968,13 +1018,18 @@ function fileExts(list: File[]): string {
   return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
   const parseAbortRef = useRef<AbortController | null>(null)
+  const finalizationCheckpointRef = useRef<{
+    files: File[]
+    refs: FileReference[]
+    skipped?: { book: string; reason: string }[]
+  } | null>(null)
   useEffect(() => () => parseAbortRef.current?.abort(), [])
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
@@ -1025,6 +1080,16 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
    */
   const doImportFiles = useCallback(
     async (list: File[], reimportFileIds?: ReadonlyMap<string, string>) => {
+      const spreadsheets = list.filter((file) => /\.(?:csv|tsv|xlsx)$/i.test(file.name))
+      if (spreadsheets.length > 0) {
+        if (list.length !== 1) {
+          setError("Import one spreadsheet at a time so its columns can be mapped safely.")
+          return
+        }
+        onSpreadsheetFile(spreadsheets[0])
+        return
+      }
+
       setImporting(true)
       setProgress(null)
       setError(null)
@@ -1094,7 +1159,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -1109,6 +1174,27 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       setPhase("")
       onCommitProgress?.(null)
       onCommitError?.(null)
+      const checkpoint = finalizationCheckpointRef.current
+      if (checkpoint?.files === list) {
+        const finishPhase = "Finishing up…"
+        setPhase(finishPhase)
+        onCommitPhase?.(finishPhase)
+        try {
+          await onImported(checkpoint.refs, undefined, checkpoint.skipped)
+          finalizationCheckpointRef.current = null
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Import finalization failed"
+          setError(message)
+          onCommitError?.(message)
+        } finally {
+          setImporting(false)
+          setProgress(null)
+          onCommitProgress?.(null)
+          setPhase("")
+          onCommitPhase?.("")
+        }
+        return
+      }
       const allRefs: FileReference[] = []
       const allSkipped: { book: string; reason: string }[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
@@ -1177,7 +1263,10 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         setPhase(finishPhase)
         onCommitPhase?.(finishPhase)
         handoffAttempted = true
-        await onImported(allRefs, undefined, allSkipped.length ? allSkipped : undefined)
+        const skipped = allSkipped.length ? allSkipped : undefined
+        finalizationCheckpointRef.current = { files: list, refs: allRefs, skipped }
+        await onImported(allRefs, undefined, skipped)
+        finalizationCheckpointRef.current = null
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed"
         posthog.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
@@ -1212,8 +1301,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             failedAndUnattempted.push({ book: "Import finalization", reason: message })
           }
           handoffAttempted = true
+          finalizationCheckpointRef.current = {
+            files: list,
+            refs: allRefs,
+            skipped: failedAndUnattempted,
+          }
           try {
             await onImported(allRefs, undefined, failedAndUnattempted)
+            finalizationCheckpointRef.current = null
           } catch (handoffError) {
             const handoffMessage = handoffError instanceof Error ? handoffError.message : "Import finalization failed"
             setError(handoffMessage)
@@ -2451,9 +2546,10 @@ interface ImportResultPanelProps {
   importedCount: number
   skipped: { book: string; reason: string }[]
   onDismiss: () => void | Promise<void>
+  error?: string | null
 }
 
-function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPanelProps) {
+function ImportResultPanel({ importedCount, skipped, onDismiss, error }: ImportResultPanelProps) {
   const [copied, setCopied] = useState(false)
   const [dismissing, setDismissing] = useState(false)
 
@@ -2501,6 +2597,7 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
           ))}
         </ul>
       </ScrollArea>
+      {error ? <FieldError role="alert">{error}</FieldError> : null}
       <div className="flex justify-between gap-2">
         <Button variant="outline" size="sm" onClick={handleCopy} disabled={dismissing}>
           {copied ? "Copied!" : "Copy report"}

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import app from "../index"
+import { IMPORT_INSPECT_PROGRAM } from "../routes/import-sandbox"
 import { jwtFor, seedUser } from "./helpers/db"
 
 const PROJECT_ID = "sandbox-import-project"
@@ -49,6 +50,14 @@ function proposal() {
 afterEach(() => vi.restoreAllMocks())
 
 describe("POST /api/v1/import/parse/:projectId", () => {
+  it("inspects long-tail document containers without executing imported content", () => {
+    expect(IMPORT_INSPECT_PROGRAM).toContain("from pypdf import PdfReader")
+    expect(IMPORT_INSPECT_PROGRAM).toContain("import xlrd")
+    expect(IMPORT_INSPECT_PROGRAM).toContain("import olefile")
+    expect(IMPORT_INSPECT_PROGRAM).toContain(".xhtml")
+    expect(IMPORT_INSPECT_PROGRAM).toContain("entry.file_size <= 8 * 1024 * 1024")
+  })
+
   it("runs generated parsing only in the sandbox, validates units, and cleans temporary state", async () => {
     const jwt = await seedOwner()
     const bucket = new FakeBucket()

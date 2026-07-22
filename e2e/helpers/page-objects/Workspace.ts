@@ -42,6 +42,17 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  /** Select a spreadsheet through the normal Upload files card, accept the
+   * auto-detected column mapping, and stop at the shared human-review preview. */
+  async previewMappedSpreadsheet(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    const mapColumns = this.page.getByRole("button", { name: /^Map columns$/i })
+    await expect(mapColumns).toBeVisible({ timeout: 10_000 })
+    await mapColumns.click()
+    await expect(this.page.getByRole("button", { name: /Confirm import/i }))
+      .toBeVisible({ timeout: 10_000 })
+  }
+
   /** Import an audio/video file. Media files bypass the AQU-310 preview panel
    * (they have no text cells to show) and upload immediately on selection, so
    * there is no "Confirm import" step — see ImportDialog.doImportFiles. */

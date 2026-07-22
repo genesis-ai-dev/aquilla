@@ -7,6 +7,12 @@ import {
 import type { AiImportClassification } from "./ai-recipe"
 import type { RoundTripFidelity } from "../../../shared/import-contract"
 
+export interface ImportPreviewNotice {
+  code: "basic-parser-fallback"
+  severity: "warning"
+  message: string
+}
+
 export interface ParsedImportResult {
   name: string
   strings: TranslatableString[]
@@ -18,6 +24,9 @@ export interface ParsedImportResult {
   originalName?: string
   importRecipe?: DeclarativeImportRecipe
   importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
+  /** Review-only diagnostics produced while choosing a parser. These are shown
+   * before commit and never replace the durable normalized-manifest warnings. */
+  importNotices?: ImportPreviewNotice[]
   roundTripFidelity?: RoundTripFidelity
   /** Exact multi-member container retained once and bound to every emitted file. */
   sharedSourceArtifact?: { name: string; bytes: ArrayBuffer; format: string }

@@ -154,5 +154,10 @@ export interface NormalizedImportSummary {
   fidelity: RoundTripFidelity
   unitCount: number
   warningCounts: Partial<Record<string, number>>
+  /** True when at least one imported unit has a canonical Scripture address.
+   *  This describes the content without changing the source file format, so
+   *  CSV/XLSX/custom imports can receive Scripture navigation while retaining
+   *  their original round-trip/export path. Absent on older manifests. */
+  hasScriptureContent?: true
   recipe?: DeclarativeImportRecipe
 }

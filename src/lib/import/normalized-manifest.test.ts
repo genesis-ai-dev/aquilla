@@ -226,6 +226,7 @@ describe("normalized import manifest", () => {
       fidelity: "native",
       unitCount: 1,
       warningCounts: {},
+      hasScriptureContent: true,
     })
   })
 
@@ -297,6 +298,7 @@ describe("normalized import manifest", () => {
       },
       sourceLocator: { kind: "recipe", recipeId: "sandbox-parser", record: 1 },
     })
+    expect(summarizeNormalizedImport(manifest)).toMatchObject({ hasScriptureContent: true })
   })
 
   it("keeps sequence identities stable when a parser regenerates group ids", () => {

@@ -4,6 +4,7 @@ import {
   classifyAndParseUnknownText,
   MAX_UNKNOWN_TEXT_BYTES,
   readUnknownTextFile,
+  shouldUseAiForKnownText,
   sniffKnownTextFile,
   type AiImportClassification,
   type AiRecipeConfig,
@@ -52,8 +53,10 @@ describe("AI-assisted declarative import recipes", () => {
       original: "Creation",
       translated: "La création",
       type: "heading",
+      group: "GEN 1:h:1",
+      section: "GEN 1",
+      globalReferences: ["GEN 1:h:1"],
     })
-    expect(result[0].globalReferences).toBeUndefined()
     expect(result[1]).toMatchObject({
       original: "In the beginning",
       translated: "Au commencement",
@@ -87,6 +90,56 @@ describe("AI-assisted declarative import recipes", () => {
       start: 1.25,
       end: 3,
     })
+  })
+
+  it("composes canonical Scripture references from split book, chapter, and verse fields", () => {
+    const result = applyDeclarativeRecipe([
+      "book,chapter,verse,kind,source",
+      "GEN,1,,heading,Creation",
+      "GEN,1,1,verse,In the beginning",
+    ].join("\n"), classification({
+      recordMode: "delimited",
+      delimiter: ",",
+      hasHeader: true,
+      sourceField: "source",
+      bookField: "book",
+      chapterField: "chapter",
+      verseField: "verse",
+      typeField: "kind",
+    }, "scripture"))
+
+    expect(result[0]).toMatchObject({
+      original: "Creation",
+      context: "GEN 1",
+      group: "GEN 1:h:1",
+      type: "heading",
+      globalReferences: ["GEN 1:h:1"],
+      section: "GEN 1",
+    })
+    expect(result[1]).toMatchObject({
+      original: "In the beginning",
+      context: "GEN 1:1",
+      type: "verse",
+      globalReferences: ["GEN 1:1"],
+      section: "GEN 1",
+    })
+  })
+
+  it("preserves arbitrary record labels without treating them as Bible references", () => {
+    const [result] = applyDeclarativeRecipe(
+      "episode_id|text\nepisode-13|Opening narration",
+      classification({
+        recordMode: "delimited",
+        delimiter: "|",
+        hasHeader: true,
+        sourceField: "text",
+        referenceField: "episode_id",
+      }, "subtitles"),
+    )
+
+    expect(result.context).toBe("episode-13")
+    expect(result.globalReferences).toBeUndefined()
+    expect(result.metadata).toMatchObject({ importReferenceLabel: "episode-13" })
   })
 
   it("accepts named delimiters from the model and applies the recipe to the whole file", async () => {
@@ -222,5 +275,19 @@ describe("deterministic content sniffing", () => {
     ["mystery.data", "<tmx version=\"1.4\"></tmx>", "tmx"],
   ])("recognizes known content before asking AI (%s)", (_name, contents, expected) => {
     expect(sniffKnownTextFile(contents)).toBe(expected)
+  })
+
+  it.each([
+    ["txt", "speaker|start|end|text\nAlice|0|1|Hello\nBob|1|2|World"],
+    ["md", "| ref | source |\n| --- | --- |\n| GEN 1:1 | Text |"],
+    ["json", JSON.stringify([{ ref: "GEN 1:1", source: "Text" }])],
+    ["csv", "reference,source\nGEN 1:1,Text"],
+  ] as const)("requests structural review for ambiguous %s content", (fileType, text) => {
+    expect(shouldUseAiForKnownText(fileType, text)).toBe(true)
+  })
+
+  it("keeps ordinary prose and flat localization dictionaries deterministic", () => {
+    expect(shouldUseAiForKnownText("txt", "One paragraph.\n\nAnother paragraph.")).toBe(false)
+    expect(shouldUseAiForKnownText("json", JSON.stringify({ greeting: "Hello", farewell: "Goodbye" }))).toBe(false)
   })
 })

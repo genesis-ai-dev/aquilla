@@ -153,4 +153,53 @@ describe("PreviewPanel — AI-assisted imports (AQU-635)", () => {
     expect(screen.getByTestId("ai-import-classification")).toHaveTextContent("translated round-trip is not yet verified")
     expect(screen.getByLabelText("Structural content")).toHaveTextContent("—")
   })
+
+  it("marks a low-confidence classification for careful review", () => {
+    render(
+      <PreviewPanel
+        results={[{
+          name: "uncertain.data",
+          strings: [{ id: "one", original: "Text", translated: "", context: "1", group: "1", type: "text" }],
+          importClassification: {
+            category: "other",
+            confidence: 0.52,
+            explanation: "The record boundaries are ambiguous.",
+            recipe: {
+              version: 1,
+              id: "ai-recipe-low",
+              name: "Tentative lines",
+              inputFormat: "unknown",
+              strategy: "records",
+              config: { recordMode: "line" },
+              proposedBy: "ai",
+            },
+          },
+        }]}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("Needs careful review")).toBeInTheDocument()
+  })
+
+  it("shows a parser downgrade notice before the user can confirm", () => {
+    render(
+      <PreviewPanel
+        results={[{
+          ...RESULTS[0],
+          importNotices: [{
+            code: "basic-parser-fallback",
+            severity: "warning",
+            message: "AI review was unavailable, so the basic parser was used.",
+          }],
+        }]}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId("import-preview-notices")).toHaveTextContent("Review before importing")
+    expect(screen.getByTestId("import-preview-notices")).toHaveTextContent("AI review was unavailable")
+  })
 })

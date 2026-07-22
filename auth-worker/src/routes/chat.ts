@@ -32,7 +32,13 @@ import {
 
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+// OPENROUTER_BASE_URL override mirrors routes/agent.ts:70 — the dev stack
+// points it at the scripted mock (scripts/mock-openrouter.ts) when no real
+// key exists. Absent the override, production OpenRouter is used.
+const openRouterUrl = (env: Env): string =>
+  env.OPENROUTER_BASE_URL
+    ? `${env.OPENROUTER_BASE_URL.replace(/\/$/, "")}/chat/completions`
+    : "https://openrouter.ai/api/v1/chat/completions"
 
 const messageSchema = z.object({
   role: z.string(),
@@ -159,7 +165,7 @@ chat.post(
 
     try {
       const startedAt = Date.now()
-      const upstream = await fetch(OPENROUTER_URL, {
+      const upstream = await fetch(openRouterUrl(c.env), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,

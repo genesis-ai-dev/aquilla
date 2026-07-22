@@ -58,6 +58,10 @@ test("comments page search box filters threads and clear filters resets", async 
     await expect(alice.getByText(uniqueText)).toBeVisible({ timeout: 1_000 })
   }).toPass({ timeout: 15_000 })
 
+  // With no filter active, the header count badge shows the total (1 here).
+  const countBadge = alice.getByTestId("comments-count-badge")
+  await expect(countBadge).toHaveText("1", { timeout: 3_000 })
+
   // Search for matching text.
   const searchInput = alice.locator('input[placeholder="Search comments…"]')
   await expect(searchInput).toBeVisible({ timeout: 5_000 })
@@ -66,12 +70,18 @@ test("comments page search box filters threads and clear filters resets", async 
   // Comment is still visible, and filter badge appears.
   await expect(alice.getByText(uniqueText)).toBeVisible({ timeout: 3_000 })
   await expect(alice.getByText(/1 filter/i)).toBeVisible({ timeout: 3_000 })
+  // AQU-650: with a filter active that leaves 1 visible thread, the count
+  // badge reflects the filtered thread count (still 1 here).
+  await expect(countBadge).toHaveText("1", { timeout: 3_000 })
 
   // Type a non-matching query.
   await searchInput.fill("zzz-no-match-zzz")
 
   // "No threads match your filters" and "Clear filters" button appear.
   await expect(alice.getByText(/No threads match your filters/i)).toBeVisible({ timeout: 5_000 })
+  // AQU-650: the count badge shows 0 when filters match nothing — it must not
+  // fall back to the project total (which was the pre-fix bug: it showed 1).
+  await expect(countBadge).toHaveText("0", { timeout: 3_000 })
   const clearBtn = alice.getByRole("button", { name: /Clear filters/i })
   await expect(clearBtn).toBeVisible({ timeout: 2_000 })
 
@@ -79,4 +89,6 @@ test("comments page search box filters threads and clear filters resets", async 
   await clearBtn.click()
   await expect(searchInput).toHaveValue("", { timeout: 3_000 })
   await expect(alice.getByText(uniqueText)).toBeVisible({ timeout: 3_000 })
+  // AQU-650: clearing filters returns the badge to the total.
+  await expect(countBadge).toHaveText("1", { timeout: 3_000 })
 })

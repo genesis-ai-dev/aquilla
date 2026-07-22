@@ -36,6 +36,7 @@ import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
 import {
   enqueueTargetCommitBatch,
+  enqueueTargetCommits,
   bulkUploadMorphRows,
   publishStagedImport,
   reconcileSourceImport,

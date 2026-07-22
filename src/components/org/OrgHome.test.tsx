@@ -293,7 +293,7 @@ describe("OrgHome", () => {
 
     try {
       await waitFor(() => expect(screen.getByTestId("org-home-loading")).toBeInTheDocument())
-      expect(screen.getByText("Loading workspace…")).toBeInTheDocument()
+      expect(screen.getByText("Loading dashboard…")).toBeInTheDocument()
       await act(async () => { await Promise.resolve() })
       expect(addedText.join("\n")).not.toContain("Your organization is ready")
       expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()

@@ -63,7 +63,7 @@ function OrgHomeLoading() {
     >
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
         <Spinner aria-hidden="true" className="size-5" />
-        <span>Loading workspace…</span>
+        <span>Loading dashboard…</span>
       </div>
     </div>
   )

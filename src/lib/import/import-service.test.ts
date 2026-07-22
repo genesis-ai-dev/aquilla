@@ -58,7 +58,7 @@ describe("ImportService", () => {
     const { instance } = service({
       parseFile: vi.fn(async () => [{
         name: "Genesis.usx",
-        rawSourceFormat: "usx",
+        rawSourceFormat: "usx" as const,
         rawBytes: new ArrayBuffer(8),
         strings: [{
           id: "source-cell",
@@ -129,9 +129,23 @@ describe("ImportService", () => {
     expect(dependencies.emitParsedFile).not.toHaveBeenCalled()
   })
 
-  it("rejects an empty member in a multi-result parse before committing it", async () => {
+  it("validates every member in a multi-result parse before committing the first", async () => {
     const { instance, dependencies } = service({
-      parseFile: vi.fn(async () => [{ name: "Empty book", strings: [] }]),
+      parseFile: vi.fn(async () => [
+        {
+          name: "Genesis",
+          strings: [{
+            id: "gen-1-1",
+            original: "In the beginning",
+            translated: "",
+            context: "GEN 1:1",
+            group: "GEN 1:1",
+            globalReferences: ["GEN 1:1"],
+            type: "verse" as const,
+          }],
+        },
+        { name: "Empty book", strings: [] },
+      ]),
     })
 
     await expect(instance.importFile(new File(["x"], "bundle.usfm"), {}))

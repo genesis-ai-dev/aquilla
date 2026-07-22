@@ -88,6 +88,22 @@ describe("uploadSourceOriginal", () => {
     expect(fetchFn).toHaveBeenCalledOnce()
   })
 
+  it("cancels an active source upload without retrying it", async () => {
+    const controller = new AbortController()
+    const fetchFn = vi.fn(async (_url: string, init: RequestInit) => {
+      controller.abort()
+      throw init.signal?.reason ?? new DOMException("Aborted", "AbortError")
+    })
+    await expect(uploadSourceOriginal({
+      projectId: "p1", fileId: "f1", artifactId: "01900000-0000-7000-8000-000000000005",
+      bytes: new ArrayBuffer(3), format: "tmx",
+      getToken: async () => "tok", fetchFn: fetchFn as typeof fetch,
+      baseUrl: "https://sync.test", signal: controller.signal,
+      retryDelaysMs: [0, 0],
+    })).rejects.toThrow("Import cancelled")
+    expect(fetchFn).toHaveBeenCalledOnce()
+  })
+
   it("sends package preservation metadata without replacing the source sidecar", async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
     await uploadSourceOriginal({
@@ -214,6 +230,49 @@ describe("bindSourceArtifact", () => {
       fetchFn: vi.fn().mockResolvedValue(new Response("missing", { status: 404 })),
       baseUrl: "https://sync.test",
     })).rejects.toThrow(/404.*missing/)
+  })
+
+  it("retries an idempotent shared-artifact binding after a transient failure", async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response("temporary", { status: 503 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+    await bindSourceArtifact({
+      projectId: "p1",
+      fileId: "f2",
+      artifactId: "01900000-0000-7000-8000-000000000006",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      getToken: async () => "tok",
+      fetchFn,
+      baseUrl: "https://sync.test",
+      retryDelaysMs: [0, 0],
+    })
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(fetchFn.mock.calls[0][1].body).toBe(fetchFn.mock.calls[1][1].body)
+  })
+
+  it("refreshes an expired file token before retrying a shared binding", async () => {
+    const getToken = vi.fn()
+      .mockResolvedValueOnce("expired")
+      .mockResolvedValueOnce("fresh")
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(new Response("expired", { status: 401 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+    await bindSourceArtifact({
+      projectId: "p1",
+      fileId: "f2",
+      artifactId: "01900000-0000-7000-8000-000000000006",
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      getToken,
+      fetchFn,
+      baseUrl: "https://sync.test",
+      retryDelaysMs: [0, 0],
+    })
+    expect(getToken).toHaveBeenCalledTimes(2)
+    expect(fetchFn.mock.calls[1][1].headers.Authorization).toBe("Bearer fresh")
   })
 
   it("binds a shared target artifact to the selected lane", async () => {

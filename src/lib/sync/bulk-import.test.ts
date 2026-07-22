@@ -46,6 +46,26 @@ describe("bulkUploadSource", () => {
     ).rejects.toThrow(/signed out/)
   })
 
+  it.each([
+    [{ rawBytes: new ArrayBuffer(4) }, /original bytes require a source format/i],
+    [{ rawSourceFormat: "docx" }, /source format requires original bytes/i],
+    [{ rawBytes: new ArrayBuffer(4), rawSource: "duplicate", rawSourceFormat: "docx" }, /raw bytes or raw text, not both/i],
+  ] as const)("rejects incomplete or ambiguous provenance before creating server state", async (provenance, message) => {
+    const getToken = vi.fn(async () => "tok")
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    await expect(bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.docx" },
+      cells: [makeCell(0)],
+      ...provenance,
+      getToken,
+      fetchImpl: fetchMock,
+    })).rejects.toThrow(message)
+    expect(getToken).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("sends one request for a small batch (< 1500 cells)", async () => {
     const bodies: unknown[] = []
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -353,6 +373,32 @@ describe("bulkUploadSource", () => {
       artifactName: "test.docx",
       bindingRole: "source",
       fidelity: "native",
+    }))
+  })
+
+  it.each([
+    ["usx", "content-only"],
+    ["vtt", "content-only"],
+    ["paratext-project", "preserved-only"],
+  ] as const)("uses the shared %s artifact fidelity instead of guessing in the client", async (format, fidelity) => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 }),
+    ) as typeof fetch
+
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: `source.${format}` },
+      cells: [makeCell(0)],
+      rawBytes: new ArrayBuffer(4),
+      rawSourceFormat: format,
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).toHaveBeenCalledWith(expect.objectContaining({
+      format,
+      fidelity,
     }))
   })
 

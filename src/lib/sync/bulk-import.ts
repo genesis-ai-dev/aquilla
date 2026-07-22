@@ -15,6 +15,10 @@ import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
 import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
 import { v7 as uuidv7 } from "uuid"
+import {
+  sourceArtifactDescriptor,
+  type SourceArtifactFormat,
+} from "../../../shared/import-contract"
 
 /** Cells per HTTP request. The worker turns each chunk into bounded multi-row
  *  Postgres inserts, keeping request bodies manageable while still amortizing
@@ -100,7 +104,7 @@ export interface BulkUploadArgs {
   /** Raw source text for round-trip-fidelity formats (USFM). Sent with the
    *  first chunk so the worker can stash it in `file_source_blobs`. */
   rawSource?: string
-  rawSourceFormat?: string
+  rawSourceFormat?: SourceArtifactFormat
   /** Raw binary bytes for binary formats (DOCX, PPTX). Uploaded to R2 via
    *  PUT …/files/{fileId}/source after the first chunk lands. Not bundled in
    *  the JSON payload. */
@@ -167,6 +171,28 @@ export interface ReconcileSourceArgs extends Omit<BulkUploadArgs, "fileId"> {
   fileId: string
 }
 
+function sourceArtifactInput(args: Pick<BulkUploadArgs, "rawBytes" | "rawSource" | "rawSourceFormat">): {
+  bytes?: ArrayBuffer
+  format?: SourceArtifactFormat
+} {
+  if (args.rawBytes !== undefined && args.rawSource !== undefined) {
+    throw new Error("Import source provenance is ambiguous: provide raw bytes or raw text, not both.")
+  }
+  const bytes = args.rawBytes
+    ?? (args.rawSource !== undefined
+      ? new TextEncoder().encode(args.rawSource).buffer as ArrayBuffer
+      : undefined)
+  const format = args.rawSourceFormat?.trim() ? args.rawSourceFormat : undefined
+  if (bytes !== undefined && format === undefined) {
+    throw new Error("Import source provenance is incomplete: original bytes require a source format.")
+  }
+  if (bytes === undefined && format !== undefined) {
+    throw new Error("Import source provenance is incomplete: a source format requires original bytes.")
+  }
+  if (bytes) assertSourceUploadSize(bytes)
+  return { bytes, format }
+}
+
 /**
  * Re-import a complete parsed file without replacing its logical cells.
  *
@@ -185,18 +211,15 @@ export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<
 
   const fileEventId = args.file.id
   const artifactId = uuidv7()
-  const sourceBytes = args.rawBytes
-    ?? (args.rawSource !== undefined
-      ? new TextEncoder().encode(args.rawSource).buffer as ArrayBuffer
-      : undefined)
+  const { bytes: sourceBytes, format: sourceFormat } = sourceArtifactInput(args)
   let uploadedArtifactId: string | undefined
-  if (sourceBytes && args.rawSourceFormat) {
+  if (sourceBytes && sourceFormat) {
     const uploaded = await uploadSourceOriginal({
       projectId: args.projectId,
       fileId: args.fileId,
       artifactId,
       bytes: sourceBytes,
-      format: args.rawSourceFormat,
+      format: sourceFormat,
       artifactName: args.file.name,
       bindingRole: args.artifactBindingRole ?? "source",
       targetLang: args.artifactTargetLang,
@@ -206,6 +229,7 @@ export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<
       updateSourceSidecar: false,
       getToken: args.getToken,
       fetchFn,
+      signal: args.signal,
     })
     uploadedArtifactId = uploaded.artifactId
   }
@@ -220,8 +244,8 @@ export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<
       ...target,
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
     })),
-    ...(uploadedArtifactId && args.rawSourceFormat
-      ? { artifactId: uploadedArtifactId, rawSourceFormat: args.rawSourceFormat }
+    ...(uploadedArtifactId && sourceFormat
+      ? { artifactId: uploadedArtifactId, rawSourceFormat: sourceFormat }
       : {}),
     clientTs: Date.now(),
   }
@@ -338,11 +362,9 @@ export async function publishStagedImport(args: PublishStagedImportArgs): Promis
  */
 export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   const fetchFn = args.fetchImpl ?? fetch
-  const sourceBytes = args.rawBytes
-    ?? (args.rawSource !== undefined ? new TextEncoder().encode(args.rawSource).buffer as ArrayBuffer : undefined)
+  const { bytes: sourceBytes, format: sourceFormat } = sourceArtifactInput(args)
   // Fail before file.create/staging so an unsupported artifact cannot leave a
   // hidden partial file in the database or trash view.
-  if (sourceBytes && args.rawSourceFormat) assertSourceUploadSize(sourceBytes)
   let token = await args.getToken(args.fileId)
   if (!token) {
     throw new Error(
@@ -497,25 +519,24 @@ export async function bulkUploadSource(args: BulkUploadArgs): Promise<void> {
   // serializers. Runs before subsequent chunks so provenance is available as
   // soon as any cell is written.
   let uploadFailure: unknown | null = null
-  if (sourceBytes && args.rawSourceFormat) {
+  if (sourceBytes && sourceFormat) {
     try {
       await uploadSourceOriginal({
         projectId: args.projectId,
         fileId: args.fileId,
         artifactId,
         bytes: sourceBytes,
-        format: args.rawSourceFormat,
+        format: sourceFormat,
         artifactName: args.file.name,
         bindingRole: args.artifactBindingRole ?? "source",
         targetLang: args.artifactTargetLang,
         profileId: args.file.parserVersion?.split("@")[0],
         profileVersion: args.file.parserVersion?.split("@")[1],
-        fidelity: args.artifactFidelity ?? (["usfm", "usx", "docx", "pptx"].includes(args.rawSourceFormat)
-          ? "native"
-          : "content-only"),
+        fidelity: args.artifactFidelity ?? sourceArtifactDescriptor(sourceFormat).defaultFidelity,
         updateSourceSidecar: args.updateSourceSidecar,
         getToken: args.getToken,
         fetchFn,
+        signal: args.signal,
       })
     } catch (error) {
       uploadFailure = error

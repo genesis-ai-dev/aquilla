@@ -27,6 +27,67 @@ export const ROUND_TRIP_FIDELITIES = [
 
 export type RoundTripFidelity = (typeof ROUND_TRIP_FIDELITIES)[number]
 
+/**
+ * Source-artifact formats retained by importers. This is deliberately shared
+ * by the browser and sync worker so adding an importer cannot silently fall
+ * back to a `.bin` R2 object, the wrong content type, or an overstated
+ * round-trip guarantee on one side of the upload boundary.
+ *
+ * Unknown agent-assisted originals remain accepted; callers use the explicit
+ * `custom-original` format for those bytes and retain the real filename in
+ * artifact metadata.
+ */
+export const SOURCE_ARTIFACT_FORMATS = {
+  docx: { extension: "docx", contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", defaultFidelity: "native" },
+  pptx: { extension: "pptx", contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", defaultFidelity: "native" },
+  xlsx: { extension: "xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", defaultFidelity: "content-only" },
+  usfm: { extension: "usfm", contentType: "text/plain; charset=utf-8", defaultFidelity: "native" },
+  usx: { extension: "usx", contentType: "application/xml; charset=utf-8", defaultFidelity: "content-only" },
+  md: { extension: "md", contentType: "text/markdown; charset=utf-8", defaultFidelity: "content-only" },
+  txt: { extension: "txt", contentType: "text/plain; charset=utf-8", defaultFidelity: "content-only" },
+  html: { extension: "html", contentType: "text/html; charset=utf-8", defaultFidelity: "content-only" },
+  json: { extension: "json", contentType: "application/json; charset=utf-8", defaultFidelity: "content-only" },
+  po: { extension: "po", contentType: "text/x-gettext-translation; charset=utf-8", defaultFidelity: "content-only" },
+  properties: { extension: "properties", contentType: "text/plain; charset=utf-8", defaultFidelity: "content-only" },
+  vtt: { extension: "vtt", contentType: "text/vtt; charset=utf-8", defaultFidelity: "content-only" },
+  srt: { extension: "srt", contentType: "application/x-subrip; charset=utf-8", defaultFidelity: "content-only" },
+  sbv: { extension: "sbv", contentType: "text/plain; charset=utf-8", defaultFidelity: "content-only" },
+  xliff: { extension: "xlf", contentType: "application/xliff+xml", defaultFidelity: "content-only" },
+  tmx: { extension: "tmx", contentType: "application/xml", defaultFidelity: "content-only" },
+  csv: { extension: "csv", contentType: "text/csv; charset=utf-8", defaultFidelity: "content-only" },
+  tsv: { extension: "tsv", contentType: "text/tab-separated-values; charset=utf-8", defaultFidelity: "content-only" },
+  obs: { extension: "md", contentType: "text/markdown; charset=utf-8", defaultFidelity: "content-only" },
+  "paratext-project": { extension: "zip", contentType: "application/zip", defaultFidelity: "preserved-only" },
+  "custom-original": { extension: "bin", contentType: "application/octet-stream", defaultFidelity: "content-only" },
+  "macula-tsv": { extension: "tsv", contentType: "text/tab-separated-values; charset=utf-8", defaultFidelity: "content-only" },
+  "tn-tsv": { extension: "tsv", contentType: "text/tab-separated-values; charset=utf-8", defaultFidelity: "content-only" },
+  ebible: { extension: "txt", contentType: "text/plain; charset=utf-8", defaultFidelity: "content-only" },
+  helloao: { extension: "json", contentType: "application/json; charset=utf-8", defaultFidelity: "content-only" },
+  "obs-package": { extension: "json", contentType: "application/json; charset=utf-8", defaultFidelity: "content-only" },
+  "sdbh-master": { extension: "json", contentType: "application/json; charset=utf-8", defaultFidelity: "preserved-only" },
+  "sdbh-localized": { extension: "json", contentType: "application/json; charset=utf-8", defaultFidelity: "preserved-only" },
+} as const satisfies Record<string, {
+  extension: string
+  contentType: string
+  defaultFidelity: RoundTripFidelity
+}>
+
+export type SourceArtifactFormat = keyof typeof SOURCE_ARTIFACT_FORMATS
+
+export function sourceArtifactDescriptor(format: string): {
+  extension: string
+  contentType: string
+  defaultFidelity: RoundTripFidelity
+} {
+  return format in SOURCE_ARTIFACT_FORMATS
+    ? SOURCE_ARTIFACT_FORMATS[format as SourceArtifactFormat]
+    : {
+        extension: "bin",
+        contentType: "application/octet-stream",
+        defaultFidelity: "content-only",
+      }
+}
+
 export const IMPORT_UNIT_KINDS = [
   "verse",
   "heading",

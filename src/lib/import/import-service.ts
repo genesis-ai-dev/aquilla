@@ -5,7 +5,10 @@ import {
   type NormalizedImportFile,
 } from "./normalized-manifest"
 import type { AiImportClassification } from "./ai-recipe"
-import type { RoundTripFidelity } from "../../../shared/import-contract"
+import type {
+  RoundTripFidelity,
+  SourceArtifactFormat,
+} from "../../../shared/import-contract"
 
 export interface ImportPreviewNotice {
   code: "basic-parser-fallback"
@@ -17,7 +20,7 @@ export interface ParsedImportResult {
   name: string
   strings: TranslatableString[]
   rawSource?: string
-  rawSourceFormat?: string
+  rawSourceFormat?: SourceArtifactFormat
   rawBytes?: ArrayBuffer
   bookCode?: string
   corpusMarker?: "OT" | "NT"
@@ -29,7 +32,7 @@ export interface ParsedImportResult {
   importNotices?: ImportPreviewNotice[]
   roundTripFidelity?: RoundTripFidelity
   /** Exact multi-member container retained once and bound to every emitted file. */
-  sharedSourceArtifact?: { name: string; bytes: ArrayBuffer; format: string }
+  sharedSourceArtifact?: { name: string; bytes: ArrayBuffer; format: SourceArtifactFormat }
 }
 
 export interface PreparedImportFile {
@@ -126,19 +129,24 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
     const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
     const manifests: NormalizedImportFile[] = []
 
-    for (const result of results) {
+    // Validate the complete parser output before emitting the first file. A
+    // multi-member container with one malformed/empty member must fail during
+    // planning, not after earlier members have already created staged rows.
+    const selectedResults = results.filter((result) => {
       const resultNameKey = result.name.trim().toLowerCase()
       const resultCodeKey = result.bookCode?.toUpperCase()
-      if (
+      return !(
         context.skipKeys?.has(resultNameKey)
         || (resultCodeKey && context.skipKeys?.has(resultCodeKey))
-      ) {
-        continue
-      }
+      )
+    })
+    for (const result of selectedResults) {
       if (result.strings.length === 0) {
         throw new Error(`${result.name} did not contain any importable content.`)
       }
+    }
 
+    for (const result of selectedResults) {
       const manifest = normalizeTranslatableStrings(result.strings, {
         fileName: result.name,
         fileType,

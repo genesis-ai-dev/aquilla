@@ -14,7 +14,10 @@ import { withCors } from "../cors"
 import { r2KeyPrefix, type AudioEnv } from "../audio"
 import { verifyTokenForDoc } from "../auth"
 import { ROLE } from "./role-policy"
-import { MAX_SOURCE_ARTIFACT_BYTES } from "../../../shared/import-contract"
+import {
+  MAX_SOURCE_ARTIFACT_BYTES,
+  sourceArtifactDescriptor,
+} from "../../../shared/import-contract"
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
 const BINDING_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source-bindings$/
@@ -36,37 +39,7 @@ export function sourceObjectKey(
   format: string,
   artifactId?: string,
 ): string {
-  const knownExtensions: Record<string, string> = {
-    docx: "docx",
-    pptx: "pptx",
-    xlsx: "xlsx",
-    usfm: "usfm",
-    usx: "usx",
-    md: "md",
-    txt: "txt",
-    html: "html",
-    json: "json",
-    po: "po",
-    properties: "properties",
-    vtt: "vtt",
-    srt: "srt",
-    sbv: "sbv",
-    xliff: "xlf",
-    tmx: "tmx",
-    csv: "csv",
-    tsv: "tsv",
-    obs: "md",
-    "paratext-project": "zip",
-    "custom-original": "bin",
-    "macula-tsv": "tsv",
-    "tn-tsv": "tsv",
-    ebible: "txt",
-    helloao: "json",
-    "obs-package": "json",
-    "sdbh-master": "json",
-    "sdbh-localized": "json",
-  }
-  const ext = knownExtensions[format] ?? "bin"
+  const ext = sourceArtifactDescriptor(format).extension
   if (artifactId) {
     return `${r2KeyPrefix(env)}artifacts/${projectId}/${artifactId}/original.${ext}`
   }
@@ -316,36 +289,7 @@ export async function handleSourceUploadRequest(
 
   const artifactId = requestedArtifactId ?? crypto.randomUUID()
   const key = sourceObjectKey(env, projectId, fileId, format, artifactId)
-  const contentTypes: Record<string, string> = {
-    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    usfm: "text/plain; charset=utf-8",
-    usx: "application/xml; charset=utf-8",
-    md: "text/markdown; charset=utf-8",
-    txt: "text/plain; charset=utf-8",
-    html: "text/html; charset=utf-8",
-    json: "application/json; charset=utf-8",
-    po: "text/x-gettext-translation; charset=utf-8",
-    properties: "text/plain; charset=utf-8",
-    vtt: "text/vtt; charset=utf-8",
-    srt: "application/x-subrip; charset=utf-8",
-    sbv: "text/plain; charset=utf-8",
-    xliff: "application/xliff+xml",
-    tmx: "application/xml",
-    csv: "text/csv; charset=utf-8",
-    tsv: "text/tab-separated-values; charset=utf-8",
-    obs: "text/markdown; charset=utf-8",
-    "paratext-project": "application/zip",
-    "macula-tsv": "text/tab-separated-values; charset=utf-8",
-    "tn-tsv": "text/tab-separated-values; charset=utf-8",
-    ebible: "text/plain; charset=utf-8",
-    helloao: "application/json; charset=utf-8",
-    "obs-package": "application/json; charset=utf-8",
-    "sdbh-master": "application/json; charset=utf-8",
-    "sdbh-localized": "application/json; charset=utf-8",
-  }
-  const contentType = contentTypes[format] ?? "application/octet-stream"
+  const contentType = sourceArtifactDescriptor(format).contentType
   const bindingRoleHeader = request.headers.get('X-Artifact-Binding-Role')?.trim()
   if (bindingRoleHeader && !['source', 'target', 'support'].includes(bindingRoleHeader)) {
     return withCors(new Response('invalid artifact binding role', { status: 400 }), request)

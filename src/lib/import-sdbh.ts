@@ -169,6 +169,7 @@ export async function importSdbh(
       fidelity: "preserved-only",
       updateSourceSidecar: false,
       getToken: ctx.getToken,
+      signal: ctx.signal,
     })
     for (const binding of staged.slice(1)) {
       await bindSourceArtifact({
@@ -180,6 +181,7 @@ export async function importSdbh(
         profileVersion: "1",
         fidelity: "preserved-only",
         getToken: ctx.getToken,
+        signal: ctx.signal,
       })
     }
   }

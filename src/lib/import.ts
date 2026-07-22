@@ -83,7 +83,10 @@ import {
   type AiImportClassification,
 } from "./import/ai-recipe"
 import type { DeclarativeImportRecipe } from "./import/normalized-manifest"
-import type { RoundTripFidelity } from "../../shared/import-contract"
+import type {
+  RoundTripFidelity,
+  SourceArtifactFormat,
+} from "../../shared/import-contract"
 import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
@@ -164,7 +167,7 @@ export interface EBibleTargetProgress {
 export interface TargetImportArtifact {
   name: string
   bytes: ArrayBuffer
-  format: string
+  format: SourceArtifactFormat
 }
 
 /**
@@ -331,6 +334,7 @@ export async function applyEBibleTargetImport(
       fidelity: "preserved-only",
       updateSourceSidecar: false,
       getToken: ctx.getToken,
+      signal: ctx.signal,
     })
     for (const fileId of otherFileIds) {
       await bindSourceArtifact({
@@ -344,6 +348,7 @@ export async function applyEBibleTargetImport(
         bindingRole: "target",
         targetLang: ctx.targetLang,
         getToken: ctx.getToken,
+        signal: ctx.signal,
       })
     }
   }
@@ -407,7 +412,7 @@ export interface ImportResult {
    *  side-car so export can reconstruct the original markup with current
    *  translations substituted. */
   rawSource?: string
-  rawSourceFormat?: string
+  rawSourceFormat?: SourceArtifactFormat
   /** Raw binary bytes for binary formats (DOCX, PPTX). Uploaded directly to R2
    *  via PUT …/files/{fileId}/source instead of being base64-encoded in the
    *  import event payload. Not subject to the old 512 KB cap. */
@@ -580,6 +585,7 @@ export async function importFile(
       fidelity: "preserved-only",
       updateSourceSidecar: false,
       getToken: ctx.getToken,
+      signal: ctx.signal,
     })
     for (const ref of imported.refs.slice(1)) {
       await bindSourceArtifact({
@@ -591,6 +597,7 @@ export async function importFile(
         profileVersion: "1",
         fidelity: "preserved-only",
         getToken: ctx.getToken,
+        signal: ctx.signal,
       })
     }
   }
@@ -1630,7 +1637,7 @@ export async function prepareParatextProject(entries: ProjectEntryCollection): P
 async function preserveParatextPackage(
   plan: ParatextPlan,
   bindings: Array<{ fileId: string; memberPath: string }>,
-  ctx: Pick<ImportContext, "projectId" | "getToken">,
+  ctx: Pick<ImportContext, "projectId" | "getToken" | "signal">,
   options: { bindingRole?: "support" | "target"; targetLang?: string } = {},
 ): Promise<void> {
   if (!plan.sourceArtifact || bindings.length === 0) return
@@ -1651,6 +1658,7 @@ async function preserveParatextPackage(
     fidelity: "preserved-only",
     updateSourceSidecar: false,
     getToken: ctx.getToken,
+    signal: ctx.signal,
   })
   for (const binding of bindings.slice(1)) {
     await bindSourceArtifact({
@@ -1664,6 +1672,7 @@ async function preserveParatextPackage(
       bindingRole: options.bindingRole,
       targetLang: options.targetLang,
       getToken: ctx.getToken,
+      signal: ctx.signal,
     })
   }
 }
@@ -1777,18 +1786,30 @@ export async function commitParatextProject(
     onProgress?.({ phase: "save", book: book.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
   }
 
+  let packagePreservationError: string | null = null
   try {
     await preserveParatextPackage(plan, packageBindings, baseCtx)
   } catch (error) {
-    skipped.push({
-      book: plan.sourceArtifact?.name ?? "Paratext package",
-      reason: `package preservation failed: ${error instanceof Error ? error.message : String(error)}`,
-    })
+    packagePreservationError = error instanceof Error ? error.message : String(error)
   }
   const visibleRefs: FileReference[] = []
+  const freshRefs = refs.filter((ref) => !existingFileIds.has(ref.id))
+  if (packagePreservationError && freshRefs.length === 0) {
+    skipped.push({
+      book: plan.sourceArtifact?.name ?? "Paratext package",
+      reason: `package preservation failed: ${packagePreservationError}`,
+    })
+  }
   for (const ref of refs) {
     if (existingFileIds.has(ref.id)) {
       visibleRefs.push(ref)
+      continue
+    }
+    if (packagePreservationError) {
+      skipped.push({
+        book: ref.name,
+        reason: `not published because package preservation failed: ${packagePreservationError}`,
+      })
       continue
     }
     try {
@@ -1950,22 +1971,34 @@ export async function importParatextAsTarget(
     onProgress?.({ phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
   }
 
+  let packagePreservationError: string | null = null
   try {
     await preserveParatextPackage(plan, packageBindings, ctx, {
       bindingRole: "target",
       targetLang: ctx.targetLang,
     })
   } catch (error) {
-    skipped.push({
-      book: plan.sourceArtifact?.name ?? "Paratext package",
-      reason: `package preservation failed: ${error instanceof Error ? error.message : String(error)}`,
-    })
+    packagePreservationError = error instanceof Error ? error.message : String(error)
   }
 
   const visibleRefs: FileReference[] = []
+  const freshRefs = refs.filter((ref) => !existingFileIds.has(ref.id))
+  if (packagePreservationError && freshRefs.length === 0) {
+    skipped.push({
+      book: plan.sourceArtifact?.name ?? "Paratext package",
+      reason: `package preservation failed: ${packagePreservationError}`,
+    })
+  }
   for (const ref of refs) {
     if (existingFileIds.has(ref.id)) {
       visibleRefs.push(ref)
+      continue
+    }
+    if (packagePreservationError) {
+      skipped.push({
+        book: ref.name,
+        reason: `not published because package preservation failed: ${packagePreservationError}`,
+      })
       continue
     }
     try {

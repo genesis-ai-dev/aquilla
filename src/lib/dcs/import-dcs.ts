@@ -6,7 +6,8 @@
 // The BulkImportCell.id is the DETERMINISTIC EVENT id `uuidv5(repo|sha|cellId)`,
 // so re-running the same import dedupes through the server's idempotent /import.
 
-import type { FileReference, FileType } from "@/lib/parsers/types"
+import type { FileReference } from "@/lib/parsers/types"
+import type { SourceArtifactFormat } from "../../../shared/import-contract"
 import type { DcsCatalogEntry, DcsCursor, DcsTrackMode, DcsFile } from "./types"
 import type { DcsClient, RefKind } from "./catalog"
 import type { BulkUploadArgs, BulkImportCell, BulkImportFileMeta } from "@/lib/sync/bulk-import"
@@ -56,7 +57,9 @@ function routeOwnsPath(routeId: string, path: string): boolean {
 }
 
 /** Map a route id to the FileType the server projection groups by. */
-function fileTypeForRoute(routeId: string): FileType {
+type DcsFileType = Extract<SourceArtifactFormat, "usfm" | "obs" | "tsv">
+
+function fileTypeForRoute(routeId: string): DcsFileType {
   if (routeId === "usfm") return "usfm"
   if (routeId === "obs") return "obs"
   if (routeId === "tsv-notes" || routeId === "tsv-questions") return "tsv"

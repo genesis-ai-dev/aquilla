@@ -115,12 +115,21 @@ See `e2e/JOURNEYS.md` for the canonical journey map and conventions.
 
 ### Deterministic waits
 
+- Every standard E2E command first runs `pnpm test:e2e:guard`; a policy
+  violation fails immediately, before the local stacks are built.
 - Let `goto`, actions, and web-first assertions wait for browser mechanics.
 - For product readiness, wait for the responsible response, URL, accessible UI
   state, or poll the authoritative API. Do not use `waitForTimeout` or
   `networkidle` as a proxy for readiness.
 - Do not make required behavior optional with a caught timeout or early return.
   If the fixture should create the state, assert that it did.
+- Required asynchronous assertions use the shared 10-second timeout or a
+  justified longer timeout. Do not shorten them to make a test fail faster;
+  that makes the result depend on machine speed. A synchronous `isVisible()`
+  probe is only for choosing between real UI branches, never for deciding
+  whether required behavior should be tested.
+- Never skip, fixme, or return early because a machine is slow. `skip` and
+  `fixme` are reserved for documented product gaps and must cite the issue.
 
 The default runner prints the active test every 15 seconds. A test is bounded to
 60 seconds and a shard to 30 minutes, with no retries that can turn an

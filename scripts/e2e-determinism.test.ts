@@ -14,6 +14,29 @@ function sourceFiles(root: string): string[] {
 }
 
 describe("E2E determinism guardrails", () => {
+  it("runs before every standard E2E entrypoint", () => {
+    const packageJson = JSON.parse(
+      readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"),
+    ) as { scripts?: Record<string, string> }
+    const scripts = packageJson.scripts ?? {}
+
+    expect(scripts["test:e2e:guard"]).toBe(
+      "vitest run scripts/e2e-determinism.test.ts",
+    )
+
+    for (const scriptName of [
+      "test:e2e:smoke",
+      "test:e2e",
+      "test:e2e:shard",
+      "test:e2e:ui",
+      "test:e2e:debug",
+    ]) {
+      expect(scripts[scriptName], `${scriptName} must run the policy guard`).toMatch(
+        /^pnpm run test:e2e:guard && /,
+      )
+    }
+  })
+
   it("keeps UI waits tied to observable state", () => {
     const files = [
       ...sourceFiles(path.join(REPO_ROOT, "e2e/specs")),

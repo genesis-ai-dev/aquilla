@@ -12,6 +12,7 @@ import {
   ArrowRight, Activity, NotebookPen, Info, Pencil, Lock, ChevronRight, ChevronDown, Music, Braces,
   Languages,
   Archive,
+  Lock,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -4621,11 +4622,53 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
+        {/* Multi-select control — anchored to the FAR LEFT edge of the row
+            (inside the row's horizontal padding, before the number gutter) so
+            the only affordance between the source and target columns is the
+            validation button. */}
+        {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
+            no visual feedback and the action bar never appears. Root cause:
+            the drag-selection affordance (onPointerDown) uses setSelection()
+            via handleSelectionPointerDown in ProjectWorkspace but the
+            SelectionBar's useSelectedIds() doesn't react — likely because
+            the pointerdown handler only fires on drag (not click) and a
+            single tap does not call toggleSelected. Investigate:
+              1. Does a pointer-drag across two cells actually call setSelection?
+              2. Does SelectionBar mount when activeFileId is set but the bar
+                 doesn't appear because selected.size stays 0?
+              3. Consider adding a click handler that calls toggleSelected so
+                 single-cell selection gives immediate visual feedback, then
+                 the SelectionBar ("X selected" pill) appears for discoverability.
+            See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
+        <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={isMultiSelected}
+            aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
+            onPointerDown={onSelectionPointerDown}
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              "absolute left-1 top-10 z-20 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full border",
+              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+              isMultiSelected
+                ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
+            )}
+          >
+            {isMultiSelected ? (
+              <Check className="h-3 w-3" strokeWidth={3} />
+            ) : (
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+            )}
+          </button>
+        </AppTooltip>
         {/* Left gutter — a subtle line number sits to the LEFT of the
             validation circle, both anchored to the top of the card. The number
             is the single issue surface (severity tint + title); no
-            stripe/dot/warning. Selection lives on the source/target divider so
-            range selection follows the text. */}
+            stripe/dot/warning. Multi-select lives at the far-left row edge so
+            only the validation button sits between source and target. */}
         <div className="flex h-full w-full flex-wrap items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* The validation circle moved next to the TARGET editing cell
@@ -4823,44 +4866,6 @@ function EditorRow({
           dir="ltr"
           style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
         >
-          {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
-              no visual feedback and the action bar never appears. Root cause:
-              the drag-selection affordance (onPointerDown) uses setSelection()
-              via handleSelectionPointerDown in ProjectWorkspace but the
-              SelectionBar's useSelectedIds() doesn't react — likely because
-              the pointerdown handler only fires on drag (not click) and a
-              single tap does not call toggleSelected. Investigate:
-                1. Does a pointer-drag across two cells actually call setSelection?
-                2. Does SelectionBar mount when activeFileId is set but the bar
-                   doesn't appear because selected.size stays 0?
-                3. Consider adding a click handler that calls toggleSelected so
-                   single-cell selection gives immediate visual feedback, then
-                   the SelectionBar ("X selected" pill) appears for discoverability.
-              See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
-          <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={isMultiSelected}
-              aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
-              onPointerDown={onSelectionPointerDown}
-              onClick={(e) => e.stopPropagation()}
-              className={cn(
-                "absolute left-0 top-8 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border",
-                "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
-                "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
-                isMultiSelected
-                  ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                  : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
-              )}
-            >
-              {isMultiSelected ? (
-                <Check className="h-3 w-3" strokeWidth={3} />
-              ) : (
-                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-              )}
-            </button>
-          </AppTooltip>
           {/* Header lane — mirrors the source column's context line so the
               target's first text line aligns with the source text, and gives
               the floating action rail a lane of its own instead of letting it

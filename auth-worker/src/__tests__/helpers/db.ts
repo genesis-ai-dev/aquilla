@@ -9,8 +9,8 @@ export async function seedUser(id: number, username: string): Promise<void> {
     .run()
 }
 
-export async function jwtFor(username: string): Promise<string> {
-  const now = Math.floor(Date.now() / 1000)
+export async function jwtFor(username: string, iatOverride?: number): Promise<string> {
+  const now = iatOverride ?? Math.floor(Date.now() / 1000)
   return sign({ sub: username, iat: now, exp: now + 3600 }, env.SECRET_KEY, "HS256")
 }
 

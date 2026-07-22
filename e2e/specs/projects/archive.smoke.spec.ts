@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Project archive / restore lifecycle.
@@ -18,13 +18,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *  6. Navigate to /projects — the project is back in the active list.
  */
 test("archive a project and restore it", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
   const name = `Archive ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  // After createProject the router navigates to /projects/:id (overview).
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
+  await alice.goto(`/projects/${seeded.projectId}`)
 
   // 1. Open the overflow menu and click "Archive".
   const moreBtn = alice.locator('button[aria-label="More actions"]')

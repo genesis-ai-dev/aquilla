@@ -123,10 +123,11 @@ export type TimelineItem =
 
 export type AgentRunStatus = "running" | "ok" | "capped" | "error"
 
-/** Cost-cap meter (AQU-AGENT §2 AGENT_RUN_COST_CAP_CENTS). */
+/** Cost-cap meter (AQU-AGENT §2 AGENT_RUN_COST_CAP_CENTS). Values are
+ *  org-facing CREDITS (server applies agent-rail markup), never raw $. */
 export interface AgentBudget {
-  spentCents: number
-  capCents: number
+  spentCredits: number
+  capCredits: number
   /** Set once a `budget.exhausted` frame lands — the run halted at its cap. */
   exhausted: boolean
 }
@@ -151,7 +152,7 @@ export interface AgentRunUi {
   items: TimelineItem[]
   /** Live bulk-job progress (progress frames); cleared when the run settles. */
   progress?: AgentProgress
-  usage?: { promptTokens: number; completionTokens: number; costCents: number }
+  usage?: { promptTokens: number; completionTokens: number; costCredits: number }
   /** Latest budget/budget.exhausted frame; undefined until the run reports one. */
   budget?: AgentBudget
   status: AgentRunStatus
@@ -285,9 +286,9 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
         status: "pending",
       })
     case "budget":
-      return { ...run, budget: { spentCents: frame.spentCents, capCents: frame.capCents, exhausted: false } }
+      return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: false } }
     case "budget.exhausted":
-      return { ...run, budget: { spentCents: frame.spentCents, capCents: frame.capCents, exhausted: true } }
+      return { ...run, budget: { spentCredits: frame.spentCredits, capCredits: frame.capCredits, exhausted: true } }
     case "progress":
       return { ...run, progress: { label: frame.label, done: frame.done, total: frame.total } }
     case "usage":
@@ -296,7 +297,7 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
         usage: {
           promptTokens: frame.promptTokens,
           completionTokens: frame.completionTokens,
-          costCents: frame.costCents,
+          costCredits: frame.costCredits,
         },
       }
     case "done":

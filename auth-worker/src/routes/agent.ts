@@ -16,7 +16,7 @@ import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
-import { creditGuard, recordCredit } from "../lib/credits"
+import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
@@ -114,7 +114,7 @@ type AgentFrame =
   | { type: "proposal"; proposal: AgentProposal }
   | { type: "aquifer_proposal"; proposal: AquiferPublishProposal }
   | { type: "progress"; label: string; done: number; total: number }
-  | { type: "usage"; promptTokens: number; completionTokens: number; costCents: number }
+  | { type: "usage"; promptTokens: number; completionTokens: number; costCredits: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
   // AQU-AGENT §4 — harness frames (tool.code.*, memory.proposed,
@@ -730,6 +730,11 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
   // container id.
   const costCapCents = resolveRunCostCapCents(env.AGENT_RUN_COST_CAP_CENTS)
+  // Budget/usage frames are org-facing: convert raw provider cents → CREDITS
+  // (agent-rail markup) so the client only ever sees credits, consistent with
+  // the org credits panel. resolveCreditConfig never throws.
+  const creditCfg = await resolveCreditConfig(env, env.AQUILLA_PG, orgId)
+  const toCredits = (cents: number) => creditsFor(cents, "agent", creditCfg)
   // `active` seeds from the session's carried-over bit so a run that inherits
   // untrusted content starts locked; `usedThisTurn` gates the within-run clear;
   // `runHad` records whether ANY turn in this run used an untrusted tool, which
@@ -784,7 +789,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       // once the accumulated OpenRouter cost reaches the ceiling.
       if (costCents >= costCapCents) {
         status = "capped"
-        send({ type: "budget.exhausted", runId, spentCents: Math.round(costCents), capCents: costCapCents })
+        send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
         break
       }
 
@@ -834,7 +839,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       }
 
       // AQU-AGENT §4 — cost meter after each turn's usage lands.
-      send({ type: "budget", runId, spentCents: Math.round(costCents), capCents: costCapCents })
+      send({ type: "budget", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
 
       convo.push({ ...message, role: "assistant" })
 
@@ -858,7 +863,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           (costCents >= costCapCents || promptTokens + completionTokens > TOKEN_CEILING)
         ) {
           status = "capped"
-          send({ type: "budget.exhausted", runId, spentCents: Math.round(costCents), capCents: costCapCents })
+          send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
           // Answer every not-yet-run tool_call so the stored transcript stays
           // valid for a follow-up run (each tool_call needs a tool message).
           for (let cj = ci; cj < toolCalls.length; cj++) {
@@ -924,7 +929,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     await sandboxDestroy(env, sandboxSessionId)
   }
 
-  send({ type: "usage", promptTokens, completionTokens, costCents })
+  send({ type: "usage", promptTokens, completionTokens, costCredits: toCredits(costCents) })
   send({ type: "done", runId, status })
 
   try {

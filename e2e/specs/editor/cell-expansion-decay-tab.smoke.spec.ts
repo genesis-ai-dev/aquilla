@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * CellExpansion — "Retrieval support" tab shows endorsement count and support %.
@@ -22,16 +16,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * is visible.
  */
 test("cell expansion support tab shows evidence without certifying quality", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `CellDecay ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CellDecay ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Open cell expansion via the "Open cell details" chevron on the first row.
   const row = ws.cellRow(0)

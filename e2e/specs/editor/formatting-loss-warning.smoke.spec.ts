@@ -1,13 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-// sample.md contains "This is a **sample** markdown file…"
-// so the source HTML will have <strong>sample</strong>
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * EditorTable — formatting loss warning icon.
@@ -28,16 +20,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   4. Verify the formatting loss warning icon appears
  */
 test("formatting loss warning appears when target drops source formatting", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `FormatLoss ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `FormatLoss ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Find a row whose SOURCE cell contains bold text (strong/b tags).
   // We'll look for the row where source text contains "sample" (the bold word).

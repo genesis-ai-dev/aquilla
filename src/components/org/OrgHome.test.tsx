@@ -167,7 +167,12 @@ describe("ProjectTable", () => {
     mockProjectNameOverflow(true)
     render(
       <MemoryRouter>
-        <ProjectTable projects={[project]} now={Date.now()} showOrg />
+        <ProjectTable
+          projects={[project]}
+          now={Date.now()}
+          showOrg
+          defaultLaneLabelByProjectId={new Map([[project.id, "conversational Spanish"]])}
+        />
       </MemoryRouter>,
     )
 
@@ -211,6 +216,18 @@ describe("ProjectTable", () => {
     expect(organization).not.toContainElement(deadlineStatus)
     expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
     expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
+    const languages = screen.getByTestId("project-table-languages")
+    const languageChip = screen.getByTestId(`lane-chip-${project.id}-`)
+    expect(languages).toHaveClass("min-w-0", "overflow-hidden")
+    expect(languageChip.parentElement).toHaveClass("w-full", "min-w-0", "max-w-full")
+    expect(languageChip).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
+    expect(within(languageChip).getByText("conversational Spanish")).toHaveClass(
+      "min-w-0",
+      "flex-1",
+      "truncate",
+    )
+    expect(languageChip).toHaveAccessibleName("conversational Spanish: 40% translated")
+    expect(languageChip).toHaveAttribute("title", "conversational Spanish — 40% translated")
     expect(screen.getByText("Language")).toBeInTheDocument()
     expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
     expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")

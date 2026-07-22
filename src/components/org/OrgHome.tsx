@@ -460,13 +460,14 @@ export function ProjectTable({
 
                 <span
                   data-testid="project-table-languages"
-                  className="hidden min-w-0 items-center @md/project-table:flex"
+                  className="hidden min-w-0 items-center overflow-hidden @md/project-table:flex"
                 >
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
                     defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
                     maxVisible={2}
+                    className="w-full"
                   />
                 </span>
 

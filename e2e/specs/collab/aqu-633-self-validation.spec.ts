@@ -12,13 +12,13 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 /**
  * AQU-633 (part C fix) — the rose "reason" banner surfaces a validate 403.
  *
- * With allowSelfValidation=false, a contributor validating a cell they
- * translated gets a server 403 ("self-validation is not allowed on this
- * project"). The client does NOT gate self-validation, so the event reaches the
- * server and is quarantined. BEFORE the fix this silently reverted behind a
- * bare "N failed" pill; AFTER the fix, the onForbidden flush callback surfaces
- * the reason in the rose banner (forbidden-copy.ts). This spec verifies both the
- * wire-level 403 and that the banner now explains WHY.
+ * With allowSelfValidation=false, editing must not auto-validate the
+ * contributor's own work. If they then explicitly try to validate that work,
+ * the server returns a 403 ("self-validation is not allowed on this project")
+ * and the client quarantines the event. BEFORE the fix this silently reverted
+ * behind a bare "N failed" pill; AFTER the fix, the records-derived banner
+ * explains WHY. This spec verifies the auto-validation gate, wire-level 403,
+ * reverted UI state, and explanatory banner.
  */
 test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent revert)", async ({
   alice,
@@ -38,7 +38,6 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   // Alice imports the file (skip the "Set translation direction" gate for
   // server-created projects, per the cross-user-validate spec).
   await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
   await alice.evaluate(
     (id) => localStorage.setItem(`codex.importDirectionSkipped.${id}`, "true"),
     projectId,
@@ -47,27 +46,11 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   await aliceWs.importFile(SAMPLE_MD)
   await aliceWs.openFileBySubstring("sample")
   await aliceWs.waitForEditor()
+  const fileId = alice.url().match(/\/file\/([^/?#]+)/)?.[1]
+  expect(fileId, "imported file id should be present in the editor URL").toBeTruthy()
 
-  // ── 2. Bob (contributor) translates cell 0 → bob is the cell's last_editor ──
-  await bob.goto(`/project/${projectId}`)
-  await bob.waitForLoadState("networkidle")
-  const bobWs = new Workspace(bob)
-  await bobWs.openFileBySubstring("sample")
-  await bobWs.waitForEditor()
-  await bobWs.editCell(0, "Bob's translation of cell zero")
-  await bob.waitForTimeout(1_500) // let target commit + any auto-validate settle
-
-  // A human edit auto-validates while allowSelfValidation is still TRUE — undo
-  // it so the explicit validate below is a genuine (re)validate hitting the server.
-  const bobToggle = bobWs.validationToggle(0)
-  await bobWs.cellRow(0).hover()
-  if ((await bobToggle.getAttribute("aria-pressed").catch(() => null)) === "true") {
-    await bobWs.unvalidateCell(0)
-  }
-
-  // ── 3. Alice (owner) turns OFF allow-self-validation and saves ──────────────
+  // ── 2. Alice (owner) turns OFF allow-self-validation and saves ──────────────
   await alice.goto(`/project/${projectId}/settings?section=validation`)
-  await alice.waitForLoadState("networkidle")
   // Base UI Switch: #allow-self-validation is the hidden <input>; the visible,
   // clickable control is the sibling role="switch" carrying aria-checked.
   const selfSwitch = alice.getByRole("switch").first()
@@ -86,6 +69,21 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   await alice.getByRole("button", { name: /Save changes/i }).click()
   const patchResp = await savePatch
   expect(patchResp.status(), "settings PATCH should persist").toBeLessThan(300)
+
+  // ── 3. Bob edits while self-validation is disabled ─────────────────────────
+  // Navigate directly to the imported file and let Workspace's editor and
+  // target-commit response waits provide the readiness boundaries. This avoids
+  // `networkidle` and elapsed-time guesses on slower machines.
+  await bob.goto(`/project/${projectId}/file/${fileId}`)
+  const bobWs = new Workspace(bob)
+  await bobWs.waitForEditor()
+  await bobWs.editCell(0, "Bob's translation of cell zero")
+
+  // The edit itself must remain unvalidated. The focused unit test covers the
+  // negative emit decision; this assertion verifies the corresponding UI state.
+  const bobToggle = bobWs.validationToggle(0)
+  await bobWs.cellRow(0).hover()
+  await expect(bobToggle).toHaveAttribute("aria-pressed", "false")
 
   // ── 4. Bob explicitly validates his own cell → expect server 403 ────────────
   await bobWs.cellRow(0).hover()

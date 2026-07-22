@@ -32,6 +32,7 @@
 | Rules       | Define custom rule                                   | `e2e/specs/rules/create-rule.smoke.spec.ts`                   |   ✅   |
 | Rules       | Auto-correct a violation                             | _gap — Plan 2_                                                |        |
 | Validation  | Editing a cell auto-validates it (indicator turns emerald) | `e2e/specs/validation/validate.smoke.spec.ts`           |   ✅   |
+| Validation  | Disabled self-validation prevents auto-validation and explains an explicit 403 rejection | `e2e/specs/collab/aqu-633-self-validation.spec.ts` | |
 | Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
 | AI          | Sparkle button fills cell and marks it for individual human review | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings) | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |

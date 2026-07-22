@@ -35,6 +35,7 @@ import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsS
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
+import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
@@ -3597,12 +3598,12 @@ function EditorRow({
       // server's self-check reads cells.last_editor, which isn't committed yet
       // for this same-action commit+validate, so it can't catch this; the gate
       // has to be here. Default/undefined = allowed, preserving codex behavior.
-      if (
-        value.trim() &&
-        canValidate &&
-        project.allowSelfValidation !== false &&
-        canPerform("cell.validate", project.syncRole?.level ?? null)
-      ) {
+      if (shouldAutoValidateHumanEdit({
+        value,
+        canValidate,
+        allowSelfValidation: project.allowSelfValidation,
+        roleLevel: project.syncRole?.level ?? null,
+      })) {
         void emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,

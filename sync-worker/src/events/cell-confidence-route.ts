@@ -19,7 +19,7 @@
 // incremental k-NN graph. Auth: sync-token JWT scoped to `projectId`.
 
 import { verifyTokenForProject } from "../auth"
-import { makeVerifiedProjectId, querySourceNeighbors } from "./scoped-search"
+import { makeVerifiedProjectId, querySourceNeighborsBatch } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
 import {
   propagateHealth,
@@ -159,27 +159,26 @@ export async function handleCellConfidenceRequest(
   // Edges: for each unvalidated node, its top-k source-similar example cells
   // (validated or not — health flows from any neighbor). r = source similarity
   // (weights the mean), a = target consistency (gates the transfer).
-  const edges: PropEdges = new Map()
-  await Promise.all(
-    nodes.map(async (node) => {
-      if (node.validated) return // validated cells are anchors; no inbound need
-      const cell = byId.get(node.id)!
-      const neighbors = await querySourceNeighbors(
-        env.AQUILLA_PG!,
-        verifiedProjectId,
-        cell.sourceText,
-        { topK, excludeCellId: cell.cellId, validatedOnly: false },
-      )
-      const cellEdges: PropEdge[] = []
-      for (const n of neighbors) {
-        if (!nodeIds.has(n.cellId)) continue // keep the graph within the file
-        const r = lexicalConfidence(cell.sourceText, [n.value])
-        const a = lexicalConfidence(cell.targetText, [n.targetValue])
-        cellEdges.push({ to: n.cellId, r, a })
-      }
-      if (cellEdges.length > 0) edges.set(node.id, cellEdges)
-    }),
+  // AQU-641: one batched LATERAL query per chunk instead of one FTS query per cell.
+  const unvalidated = nodes.filter((n) => !n.validated) // validated cells are anchors; no inbound need
+  const neighborMap = await querySourceNeighborsBatch(
+    env.AQUILLA_PG,
+    verifiedProjectId,
+    unvalidated.map((n) => ({ cellId: n.id, text: byId.get(n.id)!.sourceText })),
+    { topK, validatedOnly: false },
   )
+  const edges: PropEdges = new Map()
+  for (const node of unvalidated) {
+    const cell = byId.get(node.id)!
+    const cellEdges: PropEdge[] = []
+    for (const n of neighborMap.get(node.id) ?? []) {
+      if (!nodeIds.has(n.cellId)) continue // keep the graph within the file
+      const r = lexicalConfidence(cell.sourceText, [n.value])
+      const a = lexicalConfidence(cell.targetText, [n.targetValue])
+      cellEdges.push({ to: n.cellId, r, a })
+    }
+    if (cellEdges.length > 0) edges.set(node.id, cellEdges)
+  }
 
   const health = propagateHealth(nodes, edges, { perHopDecay, maxHops })
 

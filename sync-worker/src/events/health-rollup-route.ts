@@ -22,7 +22,7 @@
 // Auth: sync-token JWT scoped to projectId.
 
 import { verifyTokenForProject } from "../auth"
-import { makeVerifiedProjectId, querySourceNeighbors } from "./scoped-search"
+import { makeVerifiedProjectId, querySourceNeighborsBatch } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
 import { propagateHealth, type PropNode, type PropEdges, type PropEdge } from "../lib/confidence/propagate-health"
 
@@ -111,27 +111,27 @@ async function computeFileHealth(
   const nodeIds = new Set(nodes.map((n) => n.id))
   const byId = new Map(cells.map((c) => [c.cell_id, c]))
 
-  // Build edges: for each unvalidated node, fetch top-k source-similar neighbors.
-  const edges: PropEdges = new Map()
-  await Promise.all(
-    nodes.map(async (node) => {
-      if (node.validated) return
-      const cell = byId.get(node.id)!
-      const neighbors = await querySourceNeighbors(db, verifiedProjectId, cell.source_text, {
-        topK: opts.topK,
-        excludeCellId: cell.cell_id,
-        validatedOnly: false,
-      })
-      const cellEdges: PropEdge[] = []
-      for (const n of neighbors) {
-        if (!nodeIds.has(n.cellId)) continue
-        const r = lexicalConfidence(cell.source_text, [n.value])
-        const a = lexicalConfidence(cell.target_text, [n.targetValue])
-        cellEdges.push({ to: n.cellId, r, a })
-      }
-      if (cellEdges.length > 0) edges.set(node.id, cellEdges)
-    }),
+  // Build edges: for each unvalidated node, its top-k source-similar neighbors.
+  // AQU-641: one batched LATERAL query per chunk instead of one FTS query per cell.
+  const unvalidated = nodes.filter((n) => !n.validated)
+  const neighborMap = await querySourceNeighborsBatch(
+    db,
+    verifiedProjectId,
+    unvalidated.map((n) => ({ cellId: n.id, text: byId.get(n.id)!.source_text })),
+    { topK: opts.topK, validatedOnly: false },
   )
+  const edges: PropEdges = new Map()
+  for (const node of unvalidated) {
+    const cell = byId.get(node.id)!
+    const cellEdges: PropEdge[] = []
+    for (const n of neighborMap.get(node.id) ?? []) {
+      if (!nodeIds.has(n.cellId)) continue
+      const r = lexicalConfidence(cell.source_text, [n.value])
+      const a = lexicalConfidence(cell.target_text, [n.targetValue])
+      cellEdges.push({ to: n.cellId, r, a })
+    }
+    if (cellEdges.length > 0) edges.set(node.id, cellEdges)
+  }
 
   const health = propagateHealth(nodes, edges, { perHopDecay: opts.perHopDecay, maxHops: opts.maxHops })
 

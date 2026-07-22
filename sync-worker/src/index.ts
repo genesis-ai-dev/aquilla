@@ -60,6 +60,7 @@ import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
+import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -332,6 +333,13 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // Agent API discovery root + JSON 404 fallback. MUST stay after every
+    // other /api/v1/external/* handler — it claims the root and anything the
+    // real handlers didn't match, so a cold-start agent always gets a
+    // self-describing JSON response instead of a bare "not found".
+    const externalDiscoveryResponse = handleExternalDiscoveryRequest(request)
+    if (externalDiscoveryResponse) return withCors(externalDiscoveryResponse, request)
 
     const projectSyncResponse = routeProjectSync(request, env)
     if (projectSyncResponse) return projectSyncResponse

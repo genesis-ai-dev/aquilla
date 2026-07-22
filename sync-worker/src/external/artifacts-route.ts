@@ -16,6 +16,7 @@
 // proxies through the worker like /audio does).
 
 import { errorResponse, toErrorResponse } from './errors'
+import { AUTH_HINT } from './discovery-route'
 import { assertCredentialScope } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { r2KeyPrefix, audioObjectKey } from '../audio'
@@ -75,7 +76,7 @@ async function authArtifact(
   if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
 
   const cred = await validateApiCredential(db, bearer(request) ?? '')
-  if (!cred) return { ok: false, response: errorResponse('permission_denied', 'invalid or missing API credential') }
+  if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
 
   try {
     await assertCredentialScope(db, cred, projectId)

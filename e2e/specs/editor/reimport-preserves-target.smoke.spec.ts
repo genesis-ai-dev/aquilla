@@ -25,7 +25,6 @@ test("re-import updates stable source units without replacing their targets", as
   await workspace.reimportFile(UPDATED)
 
   await alice.reload()
-  await alice.waitForLoadState("networkidle")
   await workspace.openFileBySubstring("reimport")
   await workspace.waitForEditor()
   await expect(workspace.cellRow(1).locator('[data-cell-type="source"]'))

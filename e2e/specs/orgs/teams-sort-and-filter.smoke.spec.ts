@@ -16,8 +16,6 @@ import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 test("teams list filter and sort controls work", async ({ alice }) => {
   // Create a team so the search/sort controls appear.
   await alice.goto("/teams")
-  await alice.waitForLoadState("networkidle")
-
   const createBtn = alice.getByRole("button", { name: /New team|Create team/i })
   await expect(createBtn).toBeVisible({ timeout: 10_000 })
   await createBtn.click()
@@ -32,8 +30,6 @@ test("teams list filter and sort controls work", async ({ alice }) => {
   // return to the list where the search/sort controls live.
   await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
   await alice.goto("/teams")
-  await alice.waitForLoadState("networkidle")
-
   // Team appears in the list.
   await expect(alice.getByText(teamName)).toBeVisible({ timeout: 8_000 })
 

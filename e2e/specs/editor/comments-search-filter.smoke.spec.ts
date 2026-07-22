@@ -48,8 +48,6 @@ test("comments page search box filters threads and clear filters resets", async 
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // The posted comment should be visible. The page fetches the server
   // projection once on mount, and the drawer write flushes via the client
   // outbox which may land after page load — poll via the Refresh button.

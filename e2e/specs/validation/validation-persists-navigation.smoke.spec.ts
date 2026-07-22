@@ -29,15 +29,12 @@ test("validated cell stays validated after navigating away and back", async ({ a
   // OrgBreadcrumb renders plain spans) — assert arrival via the New Project
   // button instead.
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
   await expect(alice.getByRole("button", { name: /new project/i })).toBeVisible({
     timeout: 5_000,
   })
 
   // Navigate back to the project workspace.
   await alice.goto(`/project/${seeded.projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   const ws2 = new Workspace(alice)
   await ws2.openFileBySubstring("sample")
   await ws2.waitForEditor()

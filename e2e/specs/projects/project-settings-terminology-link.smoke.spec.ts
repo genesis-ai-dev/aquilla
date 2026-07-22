@@ -14,8 +14,6 @@ test("project settings Terminology Library button navigates to terminology page"
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `TermLink ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings?section=ai`)
-  await alice.waitForLoadState("networkidle")
-
   // Scroll to the Terminology Library card.
   const termCard = alice.getByText(/Terminology Library/i).first()
   await expect(termCard).toBeVisible({ timeout: 10_000 })

@@ -39,8 +39,6 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
 
   // Navigate to the org home.
   await alice.goto("/")
-  await alice.waitForLoadState("networkidle")
-
   // 1. Org name heading (h1) renders.
   await expect(alice.locator("h1").first()).toBeVisible({ timeout: 10_000 })
 
@@ -68,8 +66,6 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   const aliceSession = await ensureAuthState("alice")
   await createOrg(aliceSession.jwt, `A second organization with a long name ${Date.now()}`)
   await alice.goto("/?org=all")
-  await alice.waitForLoadState("networkidle")
-
   const projectRow = alice.locator(`[data-project-id]`).filter({ hasText: name }).first()
   await expect(projectRow).toBeVisible({ timeout: 10_000 })
   const projectName = projectRow.getByTestId("project-table-name")

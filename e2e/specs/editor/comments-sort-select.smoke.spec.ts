@@ -21,27 +21,18 @@ test("comments page sort select changes sort order", async ({ alice }) => {
   // Post a comment so the comments page has content.
   const row = ws.cellRow(0)
   await row.hover()
-  const commentBtn = row.locator('[aria-label*="comment" i]').first()
-  if (await commentBtn.isVisible()) {
-    await commentBtn.click()
-  } else {
-    // Try opening via cell action popover.
-    const actionBtn = row.locator('[aria-label="Cell actions"]')
-    if (await actionBtn.isVisible()) {
-      await actionBtn.click()
-      await alice.getByRole("button", { name: /Comment/i }).first().click()
-    }
-  }
+  const commentBtn = row.getByRole("button", { name: /Add comment/i }).first()
+  await expect(commentBtn).toBeVisible({ timeout: 10_000 })
+  await commentBtn.click()
 
   // Post via the CommentsDrawer.
   const drawer = alice.locator('[data-testid="comments-drawer"]')
-  if (await drawer.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    const textarea = drawer.locator('textarea[placeholder*="comment" i], textarea[placeholder*="Comment" i]').first()
-    if (await textarea.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await textarea.fill("sort-test-comment")
-      await drawer.locator('button[type="submit"], button:has-text("Post")').first().click()
-    }
-  }
+  await expect(drawer).toBeVisible({ timeout: 10_000 })
+  const textarea = drawer.locator('textarea[placeholder*="comment" i], textarea[placeholder*="Comment" i]').first()
+  await expect(textarea).toBeVisible()
+  await textarea.fill("sort-test-comment")
+  await drawer.locator('button[type="submit"], button:has-text("Post")').first().click()
+  await expect(drawer.getByText("sort-test-comment")).toBeVisible({ timeout: 10_000 })
 
   // Navigate to /comments page for the project.
   await alice.waitForURL(/\/project\/([^/]+)\//, { timeout: 5_000 })
@@ -49,8 +40,6 @@ test("comments page sort select changes sort order", async ({ alice }) => {
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // The Sort control lives inside the collapsed "Filters" panel — expand it.
   const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
   await expect(filtersBtn).toBeVisible({ timeout: 10_000 })

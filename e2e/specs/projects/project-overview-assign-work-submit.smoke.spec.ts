@@ -43,14 +43,11 @@ test("assign work form with seeded member enables Assign button", async ({ alice
 
   // Import a file so the Book select has options.
   await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
 
   // Navigate to the project overview.
   await alice.goto(`/projects/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // Open the Assign form.
   const assignBtn = alice.getByRole("button", { name: /^Assign…$/i })
   await expect(assignBtn).toBeVisible({ timeout: 10_000 })

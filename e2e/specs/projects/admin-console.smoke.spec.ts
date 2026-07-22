@@ -13,8 +13,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("admin console loads overview and Orgs tab", async ({ alice }) => {
   await alice.goto("/admin")
-  await alice.waitForLoadState("networkidle")
-
   // Overview stats should load — look for any of the stat labels.
   await expect(
     alice.getByText(/Orgs|Users|Active projects/i).first()

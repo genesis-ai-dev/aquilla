@@ -20,8 +20,6 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("rule editor autofix preview shows before/after transform", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AFPreview ${Date.now()}` })
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Open the inline RuleEditor via "+ Add Rule".
   const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })

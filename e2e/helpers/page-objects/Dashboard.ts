@@ -21,7 +21,6 @@ export class Dashboard {
     // "/" now renders the org Overview (OrgHome); the projects list + the
     // "+ New Project" dialog live at /projects (ProjectsList).
     await this.page.goto("/projects")
-    await this.page.waitForLoadState("networkidle")
   }
 
   async createProject(opts: CreateProjectOpts = {}): Promise<string> {

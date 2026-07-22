@@ -16,8 +16,6 @@ test("project overview shows per-file stats row after import", async ({ alice })
 
   // Navigate to the project overview.
   await alice.goto(`/projects/${seeded.projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // The Progress section should show a per-file stats row.
   const fileRow = alice.getByTestId("file-row").filter({ hasText: /sample/i }).first()
   await expect(fileRow).toBeVisible({ timeout: 15_000 })

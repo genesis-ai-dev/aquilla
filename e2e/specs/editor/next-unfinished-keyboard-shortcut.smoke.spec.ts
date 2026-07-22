@@ -26,7 +26,6 @@ test("Cmd+. jumps to the next unfinished cell", async ({ alice }) => {
   // On macOS Cmd+period; on Linux/Windows Ctrl+period.
   const isMac = process.platform === "darwin"
   await alice.keyboard.press(isMac ? "Meta+Period" : "Control+Period")
-  await alice.waitForTimeout(500)
 
   // After shortcut, a cell should have focus — the first unfinished row
   // should have expanded its editor (TranslatedEditor mounts a contenteditable).

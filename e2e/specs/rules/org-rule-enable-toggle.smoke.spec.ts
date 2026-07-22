@@ -20,8 +20,6 @@ test("org rule enable toggle disables and re-enables an org rule", async ({ alic
   })
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Create an org rule. "+ Add Org Rule" opens an INLINE RuleEditor inside
   // the Org Rules card (no dialog — rules refactor 0f70ff11f).
   const addOrgRuleBtn = alice.getByRole("button", { name: /Add Org Rule/i }).first()

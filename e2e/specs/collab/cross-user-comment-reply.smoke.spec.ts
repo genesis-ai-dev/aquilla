@@ -55,14 +55,9 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   await row.hover()
 
   // Open cell action menu to find Add Comment.
-  const commentBtn = row.locator("button[aria-label*='comment' i]").first()
-  if (await commentBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await commentBtn.click()
-  } else {
-    const moreBtn = row.locator("button[aria-label*='More' i], button[aria-label*='actions' i]").first()
-    await moreBtn.click()
-    await alice.getByRole("menuitem", { name: /comment/i }).first().click()
-  }
+  const commentBtn = row.getByRole("button", { name: /Add comment/i }).first()
+  await expect(commentBtn).toBeVisible({ timeout: 10_000 })
+  await commentBtn.click()
 
   // Type alice's comment and submit.
   const commentDrawer = alice.locator('[data-testid="comments-drawer"]')
@@ -77,8 +72,6 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
 
   // Now bob opens the same project's comments page.
   await bob.goto(`/project/${projectId}/comments`)
-  await bob.waitForLoadState("networkidle")
-
   // Bob sees alice's comment. The comments page fetches once on mount with no
   // live subscription (useComments loads on mount only), while alice's
   // comment.create drains via the 5s outbox interval — so bob's first fetch can
@@ -95,7 +88,6 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   // composer says "Replies from this view are not yet wired — open the cell in
   // the editor to reply"), so bob replies from the cell's comments drawer.
   await bob.goto(`/project/${projectId}`)
-  await bob.waitForLoadState("networkidle")
   const bobWs = new Workspace(bob)
   await bobWs.openFileBySubstring("sample")
   await bobWs.waitForEditor()

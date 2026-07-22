@@ -10,8 +10,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("debug view renders pre block with project data", async ({ alice }) => {
   await alice.goto("/debug")
-  await alice.waitForLoadState("networkidle")
-
   const pre = alice.locator("pre")
   await expect(pre).toBeVisible({ timeout: 10_000 })
 

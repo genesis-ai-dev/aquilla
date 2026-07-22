@@ -11,8 +11,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("admin console Users tab shows Username column", async ({ alice }) => {
   await alice.goto("/admin")
-  await alice.waitForLoadState("networkidle")
-
   const peopleTab = alice.getByRole("tab", { name: /^People$/i })
   await expect(peopleTab).toBeVisible({ timeout: 10_000 })
   await peopleTab.click()

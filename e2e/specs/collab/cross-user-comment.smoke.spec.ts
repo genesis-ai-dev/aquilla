@@ -64,8 +64,6 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
 
   // Bob navigates to the comments page for the same project.
   await bob.goto(`/project/${projectId}/comments`)
-  await bob.waitForLoadState("networkidle")
-
   // Bob sees alice's comment. The comments page fetches once on mount with no
   // live subscription (useComments loads on mount only), while alice's
   // comment.create drains via the 5s outbox interval — so bob's first fetch can

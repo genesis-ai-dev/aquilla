@@ -28,8 +28,6 @@ test("/project/:id/voice deep-link activates audio lens on load", async ({ alice
 
   // Navigate directly to the /voice deep-link URL.
   await alice.goto(`/project/${projectId}/voice`)
-  await alice.waitForLoadState("networkidle")
-
   // The workspace should render (not a 404 blank page) with the audio lens
   // active. The deep-link surfaces the Voices dock tab, so the Voices panel
   // (its "Search voices…" box) is the reliable "audio lens active" signal —

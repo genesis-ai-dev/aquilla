@@ -24,8 +24,6 @@ test("CommentsPage Refresh button triggers reload and returns to normal", async 
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // "Refresh" button is visible.
   const refreshBtn = alice.getByRole("button", { name: /^Refresh$/i })
   await expect(refreshBtn).toBeVisible({ timeout: 10_000 })

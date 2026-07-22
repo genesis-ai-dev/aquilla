@@ -11,8 +11,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("assigned-to-me page renders heading and empty state", async ({ alice }) => {
   await alice.goto("/assigned")
-  await alice.waitForLoadState("networkidle")
-
   await expect(alice.getByRole("heading", { name: /Assigned to me/i })).toBeVisible({ timeout: 10_000 })
 
   // Empty state message (alice has no assignments).

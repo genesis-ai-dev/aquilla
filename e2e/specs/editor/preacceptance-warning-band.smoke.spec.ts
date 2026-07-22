@@ -48,8 +48,6 @@ test("pre-acceptance warning band appears when forbidden rendering is typed", as
 
   // Import sample.md and open the editor.
   await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")

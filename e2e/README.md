@@ -113,6 +113,29 @@ Stick with `resetBackend()` + the multi-user fixture for anything checked in.
 
 See `e2e/JOURNEYS.md` for the canonical journey map and conventions.
 
+### Deterministic waits
+
+- Let `goto`, actions, and web-first assertions wait for browser mechanics.
+- For product readiness, wait for the responsible response, URL, accessible UI
+  state, or poll the authoritative API. Do not use `waitForTimeout` or
+  `networkidle` as a proxy for readiness.
+- Do not make required behavior optional with a caught timeout or early return.
+  If the fixture should create the state, assert that it did.
+
+The default runner prints the active test every 15 seconds. A test is bounded to
+60 seconds and a shard to 30 minutes, with no retries that can turn an
+intermittent failure green. Useful overrides for constrained hosts:
+
+```bash
+E2E_HEARTBEAT_MS=10000 E2E_TEST_TIMEOUT_MS=90000 pnpm test:e2e:smoke
+E2E_GLOBAL_TIMEOUT_MS=2400000 E2E_STALL_TIMEOUT_MS=180000 pnpm test:e2e:smoke
+```
+
+If a shard produces no output for 30 seconds, the parent prints its PID and last
+line. After `E2E_STALL_TIMEOUT_MS` (two minutes by default), it terminates the
+stalled stack instead of leaving pre-push blocked indefinitely. Failure traces,
+screenshots, video, and service logs are retained.
+
 ## Troubleshooting
 
 - **`wrangler dev` won't start** → confirm `pnpm install` was run inside `auth-worker/`

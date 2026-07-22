@@ -24,8 +24,6 @@ test("project overview renders name, overview cards, and Open project button", a
 
   // createProject navigates to /projects/:id.
   await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  await alice.waitForLoadState("networkidle")
-
   // h1 — project name.
   await expect(
     alice.locator("h1").filter({ hasText: name })

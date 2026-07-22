@@ -258,11 +258,21 @@ export class Workspace {
   async editCell(index: number, text: string): Promise<void> {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
+    // Blurring commits immediately. Wait for the authoritative event flush,
+    // rather than sleeping and assuming IDB + outbox + projection complete at
+    // a particular machine speed. This also guarantees a following validation
+    // has the committed editEventId available.
+    const committed = this.page.waitForResponse((response) => {
+      if (response.request().method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/events")
+      } catch {
+        return false
+      }
+    }, { timeout: 20_000 })
     await this.page.locator("aside").click() // blur outside editor
-    // Wait for the async IDB commit pipeline to complete (emitTargetCellCommit
-    // sets pendingTargetEventIdRef.current in a .then(), so validateCell can
-    // immediately follow without a race on the editEventId being null).
-    await this.page.waitForTimeout(800)
+    await committed
+    await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
   }
 
   async readCell(index: number): Promise<string> {

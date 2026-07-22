@@ -15,8 +15,6 @@ test("builtin rule enabled switch toggles the rule on and off", async ({ alice }
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `BuiltinToggle ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Find the "Extra whitespace enabled" switch.
   const enabledSwitch = alice.getByRole("switch", { name: "Extra whitespace enabled" })
   await expect(enabledSwitch).toBeVisible({ timeout: 10_000 })

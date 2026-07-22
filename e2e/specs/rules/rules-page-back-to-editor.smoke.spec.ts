@@ -19,8 +19,6 @@ test("rules surface returns to editor via sidebar file selection", async ({ alic
   const ws = await openSeededProject(alice, seeded)
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // The rules surface rendered inside the shell ("Built-in checks" card).
   await expect(alice.getByText("Built-in checks")).toBeVisible({ timeout: 10_000 })
 

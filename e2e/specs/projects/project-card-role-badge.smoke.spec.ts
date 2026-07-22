@@ -23,8 +23,6 @@ test("project card shows Your role on this project badge for project owner", asy
 
   // After project creation, navigate back to the projects list.
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
-
   // The project's row shows the role label for the signed-in user.
   const row = alice.getByRole("row").filter({ hasText: name })
   await expect(row).toBeVisible({ timeout: 10_000 })

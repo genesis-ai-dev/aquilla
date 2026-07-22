@@ -16,35 +16,58 @@ test("a commit made while a slow stale refetch is in flight never blanks or lose
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Stale refetch ${Date.now()}` })
   const ws = await openSeededProject(alice, seeded)
 
-  // Delay every FULL-file cells stream (side=…) by 4s — response is fetched
-  // (snapshotted) immediately, delivered late. Targeted cellIds= fetches
-  // pass through untouched.
+  // Hold every FULL-file cells stream (side=…) behind an explicit release
+  // gate. The response is snapshotted before the edit, then delivered exactly
+  // when the test asks; targeted cellIds= fetches pass through untouched.
+  let releaseStaleResponse!: () => void
+  const staleResponseReleased = new Promise<void>((resolve) => {
+    releaseStaleResponse = resolve
+  })
+  let staleResponseCaptured = false
+  let staleResponseDelivered = false
+
+  // Warm files normally revalidate through the cheap `?since=` delta path.
+  // Force that request to take its documented resync fallback so this test
+  // deterministically reaches the full-stream race it is meant to cover.
+  await alice.route(/\/cells\?since=\d+(?:&.*)?$/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ resync: true }),
+    })
+  })
   await alice.route(/\/cells\?(?=.*side=)(?!.*cellIds=).*/, async (route) => {
     const response = await route.fetch()
     const body = await response.body()
-    await new Promise((r) => setTimeout(r, 4_000))
+    staleResponseCaptured = true
+    await staleResponseReleased
     await route.fulfill({ response, body })
+    staleResponseDelivered = true
   })
 
   // Kick a soft refetch (focus handler) so a stale stream is in flight…
   await alice.evaluate(() => window.dispatchEvent(new Event("focus")))
-  await alice.waitForTimeout(300)
+  await expect.poll(() => staleResponseCaptured, {
+    message: "full-file stale response should be captured before the edit",
+    timeout: 10_000,
+  }).toBe(true)
 
   // …then commit an edit while it is.
   const text = `Survives stale swap ${Date.now()}`
   await ws.editCell(0, text)
 
-  // The edit must stay continuously visible through the stale stream's
-  // delivery (+ swap). Poll past the 4s delay with margin.
-  for (let i = 0; i < 7; i++) {
-    await alice.waitForTimeout(1_000)
-    await expect(ws.cellRow(0)).toContainText(text)
-  }
+  // Deliver the stale snapshot and assert it cannot replace the newer edit.
+  releaseStaleResponse()
+  await expect.poll(() => staleResponseDelivered, {
+    message: "held stale response should be delivered",
+    timeout: 10_000,
+  }).toBe(true)
+  await expect(ws.cellRow(0)).toContainText(text)
 
   // And survive a real reload (server projection has it).
+  await alice.unroute(/\/cells\?since=\d+(?:&.*)?$/)
   await alice.unroute(/\/cells\?(?=.*side=)(?!.*cellIds=).*/)
   await alice.reload()
-  await alice.waitForLoadState("networkidle")
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText(text, { timeout: 5_000 })

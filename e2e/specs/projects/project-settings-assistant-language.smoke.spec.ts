@@ -15,8 +15,6 @@ test("project settings assistant language input marks form dirty", async ({ alic
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AssistLang ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings?section=ai`)
-  await alice.waitForLoadState("networkidle")
-
   // #main-chat-language input is visible.
   const langInput = alice.locator("#main-chat-language")
   await expect(langInput).toBeVisible({ timeout: 10_000 })

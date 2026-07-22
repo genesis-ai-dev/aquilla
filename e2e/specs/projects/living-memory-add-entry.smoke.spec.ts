@@ -16,8 +16,6 @@ test("living memory add entry form appears and Cancel closes it", async ({ alice
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
 
   await alice.goto(`/project/${seeded.projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
   // The Instructions section has an "Add" button.
   const instructionsSection = alice.locator('section[aria-label="Instructions"]')
   await expect(instructionsSection).toBeVisible({ timeout: 10_000 })
@@ -51,8 +49,6 @@ test("living memory add entry saves and appears in section", async ({ alice }) =
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
 
   await alice.goto(`/project/${seeded.projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
   const instructionsSection = alice.locator('section[aria-label="Instructions"]')
   const addBtn = instructionsSection.getByRole("button", { name: /Add/i })
   await addBtn.click()

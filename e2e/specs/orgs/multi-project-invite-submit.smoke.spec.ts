@@ -32,8 +32,6 @@ test("multi-project invite submits and closes the dialog", async ({ alice }) => 
 
   // Navigate to members page.
   await alice.goto("/members")
-  await alice.waitForLoadState("networkidle")
-
   // Open MultiProjectInviteDialog.
   const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })
   await expect(inviteBtn).toBeEnabled({ timeout: 10_000 })
@@ -89,8 +87,6 @@ test("email mode sends per-project invites from the org view", async ({ alice })
   })
 
   await alice.goto("/members")
-  await alice.waitForLoadState("networkidle")
-
   const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })
   await expect(inviteBtn).toBeEnabled({ timeout: 10_000 })
   await inviteBtn.click()

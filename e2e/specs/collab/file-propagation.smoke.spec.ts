@@ -40,8 +40,6 @@ test("alice imports a file; bob (added via API) sees it in his workspace", async
   //    useProject reads from the server (thin client), so direct navigation
   //    works even though the project was registered server-side, not via the UI.
   await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // Server-side-created projects have no source/target language, so the import
   // flow opens a blocking "Set translation direction" screen after the preview
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
@@ -59,25 +57,20 @@ test("alice imports a file; bob (added via API) sees it in his workspace", async
   //    projects the file row into D1 synchronously. Poll the auth-worker API
   //    as bob to confirm the file is visible (no IDB state needed).
   const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
-  let fileVisible = false
-  for (let i = 0; i < 20; i++) {
+  await expect.poll(async () => {
     const r = await fetch(`${FRONTIER_BASE}/api/v2/projects/${projectId}`, {
       headers: { Authorization: `Bearer ${bobSession.jwt}` },
     })
-    if (r.ok) {
-      const data = (await r.json()) as { files?: Array<{ id: string; name: string }> }
-      if ((data.files ?? []).some((f) => f.name.includes("sample"))) {
-        fileVisible = true
-        break
-      }
-    }
-    await new Promise((r) => setTimeout(r, 500))
-  }
-  expect(fileVisible, "file should appear in bob's project API response within 10s").toBe(true)
+    if (!r.ok) return false
+    const data = (await r.json()) as { files?: Array<{ id: string; name: string }> }
+    return (data.files ?? []).some((f) => f.name.includes("sample"))
+  }, {
+    message: "file should appear in bob's project API response",
+    timeout: 15_000,
+  }).toBe(true)
 
   // 4. UI: bob navigates to the project; sidebar should list the file.
   await bob.goto(`/project/${projectId}`)
-  await bob.waitForLoadState("networkidle")
   await expect(
     bob.locator("aside").locator("div").filter({ hasText: /sample/i }).first(),
   ).toBeVisible({ timeout: 15_000 })

@@ -24,8 +24,6 @@ test("cell expansion Issues tab shows rule infractions", async ({ alice }) => {
 
   // Create a rule that fires on "PROHIBITED" in the target.
   await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Open the rule editor. It renders INLINE on the rules surface now (the
   // dialog flow is gone; rule actions live in the workspace header).
   const addRuleBtn = alice.getByRole("button", { name: /Add rule|New rule/i }).first()
@@ -52,9 +50,6 @@ test("cell expansion Issues tab shows rule infractions", async ({ alice }) => {
   // Type "PROHIBITED_WORD" into cell 0 target to trigger the infraction.
   await ws.editCell(0, "PROHIBITED_WORD translation")
 
-  // Wait a moment for rule evaluation.
-  await alice.waitForTimeout(2_000)
-
   // Open cell details.
   const row = ws.cellRow(0)
   await row.hover()
@@ -72,5 +67,5 @@ test("cell expansion Issues tab shows rule infractions", async ({ alice }) => {
   // We expect at least one infraction button is visible.
   const infraction = alice.locator('[type="button"]').filter({ hasText: /PROHIBITED_WORD/ }).first()
     .or(alice.getByText(/PROHIBITED_WORD/i).first())
-  await expect(infraction).toBeVisible({ timeout: 8_000 })
+  await expect(infraction).toBeVisible({ timeout: 15_000 })
 })

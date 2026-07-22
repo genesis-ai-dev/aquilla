@@ -83,12 +83,7 @@ test("share panel members tab role select changes member's role", async ({ alice
   const listbox = alice.getByRole("listbox")
   await expect(listbox).toBeVisible({ timeout: 3_000 })
   const otherOption = alice.getByRole("option").filter({ hasNotText: currentRole }).first()
-  if (!(await otherOption.isVisible({ timeout: 1_000 }).catch(() => false))) {
-    // If there's only one grantable role, just verify the select exists.
-    await alice.keyboard.press("Escape")
-    await expect(roleSelect).toBeVisible()
-    return
-  }
+  await expect(otherOption).toBeVisible({ timeout: 10_000 })
   const newRole = (await otherOption.textContent())?.trim() ?? ""
   await otherOption.click()
   await expect(listbox).toBeHidden({ timeout: 3_000 })

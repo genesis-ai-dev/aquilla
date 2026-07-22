@@ -24,8 +24,6 @@ test("living memory standards section add entry shows text and cancel works", as
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
   const standardsSection = alice.locator('section[aria-label="Standards"]')
   await expect(standardsSection).toBeVisible({ timeout: 10_000 })
 

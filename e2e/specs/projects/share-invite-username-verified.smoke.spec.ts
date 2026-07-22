@@ -48,7 +48,7 @@ test("share panel username typeahead shows Verified Aquilla user badge", async (
 
   // Ensure we're on Members tab.
   const membersTab = dialog.getByRole("button", { name: /^Members$/i })
-  if (await membersTab.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  if (await membersTab.isVisible()) {
     await membersTab.click()
   }
 

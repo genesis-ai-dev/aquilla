@@ -46,8 +46,6 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   // cell load is expected. Start measuring only after that independent work
   // has settled; requests observed below are attributable to expansion.
   await ws.waitForEditor()
-  await alice.waitForLoadState("networkidle")
-
   const cellPageReads: string[] = []
   const trackCellReads = (request: Request) => {
     const url = new URL(request.url())

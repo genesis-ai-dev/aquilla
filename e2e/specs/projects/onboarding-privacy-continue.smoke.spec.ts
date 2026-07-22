@@ -13,8 +13,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("onboarding wizard PrivacyStep Continue advances to step 3", async ({ alice }) => {
   await alice.goto("/onboarding")
-  await alice.waitForLoadState("networkidle")
-
   // Step 1: WelcomeStep — click "Get started".
   const getStartedBtn = alice.getByRole("button", { name: /Get started/i })
   await expect(getStartedBtn).toBeVisible({ timeout: 10_000 })

@@ -21,8 +21,6 @@ test("CommentsPage Back to project navigates to workspace", async ({ alice }) =>
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // "Back to project" button is visible.
   const backBtn = alice.getByRole("button", { name: /Back to project/i })
   await expect(backBtn).toBeVisible({ timeout: 10_000 })

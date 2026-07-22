@@ -28,8 +28,6 @@ test("AssignWork form submits and collapses after success", async ({ alice }) =>
 
   // Navigate to the org project overview (ProjectOverview.tsx).
   await alice.goto(`/projects/${seeded.projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // The "Assign…" button should be visible for the project owner.
   const assignBtn = alice.getByRole("button", { name: /^Assign…$/i })
   await expect(assignBtn).toBeVisible({ timeout: 10_000 })
@@ -42,9 +40,6 @@ test("AssignWork form submits and collapses after success", async ({ alice }) =>
   // Select assignee — alice is in the org so her option should appear.
   const assigneeSelect = panel.getByRole("combobox", { name: "Assignee" })
   await expect(assigneeSelect).toBeVisible({ timeout: 5_000 })
-
-  // Wait for org members to load (API call on panel open).
-  await alice.waitForTimeout(1_500)
 
   // Select alice as the assignee (she's the project owner, so she's in the org).
   await assigneeSelect.click()

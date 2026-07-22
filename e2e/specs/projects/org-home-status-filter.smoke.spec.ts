@@ -23,8 +23,6 @@ test("org home status filter pills toggle active state", async ({ alice }) => {
   await dash.createProject({ name: `StatusFilter ${Date.now()}` })
 
   await alice.goto("/")
-  await alice.waitForLoadState("networkidle")
-
   // "All" filter is pressed by default.
   const allBtn = alice.getByRole("button", { name: /^All$/i })
   await expect(allBtn).toBeVisible({ timeout: 10_000 })

@@ -15,8 +15,6 @@ import { ensureAuthState, injectSessions } from "../../helpers/auth"
  */
 test("account switcher dropdown opens with session info", async ({ alice }) => {
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
-
   // The AccountSwitcher renders as a button showing the username.
   // Alice is seeded as "alice".
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })

@@ -43,7 +43,6 @@ test("alice enables 'Extra whitespace' rule and sees a violation surfaced in edi
   // infraction introduced by this test is the minor whitespace rule.
   await alice.keyboard.insertText("this  has  double  spaces in e2e.") // intentional doubles
   await alice.locator("aside").click() // blur
-  await alice.waitForTimeout(2_000)
 
   // The cell number is the issue surface and tints amber for minor infractions.
   const linePill = contentRow.locator('[aria-label="Line 1"] span').first()

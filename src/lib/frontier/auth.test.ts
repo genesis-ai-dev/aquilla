@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
-import { login, FrontierAuthError, AUTH_BASE } from "./auth";
+import { login, redeemAccessLink, FrontierAuthError, AUTH_BASE } from "./auth";
 import { clearSession, loadSession } from "./session-store";
 
 describe("login", () => {
@@ -27,6 +27,45 @@ describe("login", () => {
       new Response(JSON.stringify({ detail: "bad creds" }), { status: 401 })
     );
     await expect(login({ username: "x", password: "y" })).rejects.toBeInstanceOf(FrontierAuthError);
+  });
+});
+
+describe("redeemAccessLink (AQU-626)", () => {
+  beforeEach(async () => { await clearSession(); vi.restoreAllMocks(); });
+
+  it("redeems a link+PIN, persists the bound session, and returns the project id", async () => {
+    // payload: { sub: "translator", iat: 0, exp: 9999999999 }
+    const payload = btoa(JSON.stringify({ sub: "translator", iat: 0, exp: 9999999999 }));
+    const jwt = `h.${payload}.s`;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: jwt,
+        token_type: "bearer",
+        username: "translator",
+        project_id: "proj-9",
+      }), { status: 200 })
+    );
+    const { session, projectId } = await redeemAccessLink("tok123", "4821");
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `${AUTH_BASE}/api/v2/access-links/tok123/redeem`,
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(projectId).toBe("proj-9");
+    expect(session.username).toBe("translator");
+    // Session for the bound account is persisted, like a normal login.
+    expect((await loadSession())?.jwt).toBe(jwt);
+  });
+
+  it("throws FrontierAuthError with the generic dead-link message on 401", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "This link is invalid or has expired." }), { status: 401 })
+    );
+    await expect(redeemAccessLink("tok", "0000")).rejects.toMatchObject({
+      status: 401,
+      message: "This link is invalid or has expired.",
+    });
+    // No session written on failure.
+    expect(await loadSession()).toBeNull();
   });
 });
 

@@ -1,0 +1,19 @@
+-- 0066_invite_scope_lanes.sql — AQU-528: language-scoped invite links
+-- (Crowdin-style auto-grant-on-join).
+--
+-- Adds an optional lane scope to a share-link invite. When set, redeeming the
+-- link both grants the baked-in project role AND auto-applies the listed
+-- lane (target-language) scopes to the joiner — inserting kind='lane' rows into
+-- project_member_scopes (see 0059) so the new member can only translate those
+-- languages. This is the Crowdin pattern: "sign up with this link → get these
+-- permissions for that language."
+--
+-- Format: a JSON array of lane values (target-language codes; the default lane
+-- is the literal empty string ''), stored as TEXT. NULL = today's behavior:
+-- an unscoped invite that grants access across every lane the role allows.
+--
+-- Lane scopes are only meaningful for contributor/reviewer joiners; invite
+-- links are already role-capped below project_lead (LINK_ROLE_ALLOWED), which
+-- keeps lane-scoped invites consistent with the "leads stay unscoped" invariant
+-- enforced by the project_member_scopes CRUD.
+ALTER TABLE project_invites ADD COLUMN IF NOT EXISTS scope_lanes TEXT;

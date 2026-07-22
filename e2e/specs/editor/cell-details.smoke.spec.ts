@@ -54,10 +54,10 @@ test("cell details panel expands and shows its tabs", async ({ alice }) => {
   }
 
   // 4. Close the panel with the chevron (now aria-label "Close cell details").
+  //    AQU-588 added a second "Close cell details" button (the in-panel X,
+  //    data-cell-detail-close), so scope to the action rail to stay unambiguous.
   await row.hover()
-  // CellExpansion also has its own accessible close control now; select the
-  // panel control explicitly instead of matching both it and the action rail.
-  const closeChevron = row.locator("[data-cell-detail-close]")
+  const closeChevron = row.locator('[data-slot="cell-action-rail"] button[aria-label="Close cell details"]')
   await expect(closeChevron).toBeVisible({ timeout: 3_000 })
   await closeChevron.click()
   await expect(panel).not.toBeVisible({ timeout: 3_000 })

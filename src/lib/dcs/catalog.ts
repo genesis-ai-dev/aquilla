@@ -4,12 +4,18 @@
 // proxy. Every method takes an injectable `fetchImpl` (default global fetch) so
 // tests mock the network entirely.
 
+import { proxyOrigin } from "@/lib/net/resource-proxy"
 import type { DcsCatalogEntry, DcsCompareResult } from "./types"
 
+// Route DCS traffic through the same-origin resource proxy when configured
+// (AQU-627); `proxyOrigin` is a transparent no-op when VITE_RESOURCES_BASE is
+// unset, so the defaults stay `git.door43.org` for tests + today's build.
+const DCS_ORIGIN = proxyOrigin("https://git.door43.org")
+
 /** Catalog + Gitea API base (JSON endpoints). */
-export const DEFAULT_DCS_BASE = "https://git.door43.org/api/v1"
+export const DEFAULT_DCS_BASE = `${DCS_ORIGIN}/api/v1`
 /** Raw file host (blob bytes). Distinct from the API base — no `/api/v1`. */
-export const DEFAULT_DCS_RAW_BASE = "https://git.door43.org"
+export const DEFAULT_DCS_RAW_BASE = DCS_ORIGIN
 
 /** Ref kind for raw-file URLs: tags resolve under raw/tag/, branches under raw/branch/. */
 export type RefKind = "tag" | "branch"

@@ -16,6 +16,7 @@
 // source blobs in R2; the future re-parse path fetches from R2.
 
 import { v7 as uuidv7 } from "uuid"
+import { proxyOrigin } from "./net/resource-proxy"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
@@ -804,7 +805,8 @@ export async function importEBible(
 /** door43 (Gitea) repo coordinates for the English OBS source, mirroring the
  *  codex-editor extension's downloadObsRepository. */
 const OBS_REPO = {
-  baseUrl: "https://git.door43.org",
+  // Same-origin resource proxy when configured (AQU-627); no-op when unset.
+  baseUrl: proxyOrigin("https://git.door43.org"),
   owner: "unfoldingWord",
   repo: "en_obs",
   branch: "master",

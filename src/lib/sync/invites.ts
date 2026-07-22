@@ -97,6 +97,9 @@ export interface ServerInviteCreated {
   /** Echoed back when the invite was bound to a specific email. Null/absent
    * for "anyone with the link" invites. */
   email?: string
+  /** AQU-528: lane (target-language) scopes the link auto-grants on join.
+   * Absent for unscoped invites. */
+  scopeLanes?: string[]
 }
 
 export interface ServerInviteAccepted {
@@ -119,6 +122,10 @@ export interface ServerInvitePreview {
    * the JoinPage to prefill the sign-up form. Null for "anyone with the
    * link" invites. */
   email: string | null
+  /** AQU-528: lane (target-language) scopes the joiner will be auto-granted;
+   * empty/absent for unscoped invites. Lets the JoinPage tell the recipient
+   * which languages they'll be able to work on. */
+  scopeLanes?: string[]
 }
 
 /**
@@ -142,13 +149,17 @@ export async function createServerInvite(
   apiUrl: string = AUTH_API_URL,
   email?: string,
   /** Expiry in days. Pass null for no expiry. If undefined, server default applies. */
-  expiresInDays?: number | null
+  expiresInDays?: number | null,
+  /** AQU-528: lane (target-language) scopes to auto-grant on join. Omit/empty
+   * for an unscoped invite (grants access across every lane the role allows). */
+  scopeLanes?: string[]
 ): Promise<ServerInviteCreated | null> {
   try {
     const body: Record<string, unknown> = { role }
     if (email && email.trim().length > 0) body.email = email.trim()
     // Pass expires_in_days to server (null = no expiry; omit = server default 30 days).
     if (expiresInDays !== undefined) body.expires_in_days = expiresInDays
+    if (scopeLanes && scopeLanes.length > 0) body.scopeLanes = scopeLanes
     const res = await fetch(
       `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/invites`,
       {
@@ -258,6 +269,10 @@ export interface ActiveProjectInvite {
   expiresAt: string | null
   /** Non-null when the invite was minted for a specific email. */
   email: string | null
+  /** AQU-528: lane (target-language) scopes this link auto-grants; empty/absent
+   * for unscoped invites. Lets the Share panel badge which links are
+   * language-scoped. */
+  scopeLanes?: string[]
 }
 
 /**

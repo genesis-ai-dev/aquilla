@@ -69,9 +69,12 @@ test("comment stale indicator appears when translation changes after thread was 
   // Step 3: Edit cell 0 to add a translation (now currentTranslated ≠ "").
   await ws.editCell(0, "traduction de test pour indicateur stale")
 
-  // Step 4: Re-open the CommentsDrawer for cell 0.
+  // Step 4: Re-open the CommentsDrawer for cell 0. Once the cell carries a
+  // comment, the rail button is relabelled "1 open comment" and the AQU-599
+  // gutter chip ("1 open comment — open comments") appears — the original
+  // "Add comment" label no longer exists. Click the always-visible chip.
   await row.hover()
-  const openCommentsBtn = row.locator('button[aria-label*="open comment" i]').first()
+  const openCommentsBtn = row.locator('button[aria-label$="open comments"]')
   await expect(openCommentsBtn).toBeVisible({ timeout: 5_000 })
   await openCommentsBtn.click()
   const drawer2 = alice.locator("[data-testid='comments-drawer']").first()

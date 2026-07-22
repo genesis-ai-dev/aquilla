@@ -715,7 +715,12 @@ export function ProjectWorkspace() {
       // default (the Agent tab itself stays unreachable during the takeover).
       setDockTab("files")
     } else if (centerSurface !== "agent" && prev === "agent") {
-      setDockTab((cur) => cur ?? dockTabBeforeAgentRef.current)
+      // Entry forces the scope picker ("files"), so treat that forced default
+      // (or a collapsed rail) as "no manual choice" and restore the saved tab.
+      // Any other tab was picked manually mid-takeover — keep it.
+      setDockTab((cur) =>
+        cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur,
+      )
     } else if (centerSurface === "agent" && dockTab === "agent") {
       // Restore/route paths can re-land the agent tab mid-takeover; collapse.
       setDockTab(null)

@@ -28,6 +28,7 @@ import {
 } from "@/lib/agent/working-set"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
+import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
 import { lintCellFor } from "./ProposalCard"
 import { ProposalReceipt } from "./ProposalReceipt"
 import { WorkingSetPanel, type WorkingSetPanelHandle } from "./WorkingSetPanel"
@@ -43,13 +44,15 @@ type WorkbenchTab = "sessions" | "memory"
 export interface AgentWorkbenchProps {
   /** Same wiring the dock panel gets — one source of truth in ProjectWorkspace. */
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed">
+  /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
+  credits?: CreditsDialProps | null
   /** Leave the workbench (back to the editor). */
   onClose: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
 }
 
-export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchProps) {
+export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentWorkbenchProps) {
   const { state, stop, reset, decide } = useAgentSession(agent.projectId)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
   // store, not here — closing/reopening the workbench must not forget what
@@ -234,6 +237,7 @@ export function AgentWorkbench({ agent, onClose, onJumpToCell }: AgentWorkbenchP
           <span className="text-[11px] text-muted-foreground">{state.queued.length} queued</span>
         )}
         <span className="ml-auto flex items-center gap-1">
+          {credits && <CreditsDial {...credits} />}
           {state.isStreaming && (
             <Button type="button" variant="outline" size="sm" className="h-6 text-[11px]" onClick={stop}>
               <Square data-icon="inline-start" />

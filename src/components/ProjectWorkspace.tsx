@@ -4201,6 +4201,7 @@ export function ProjectWorkspace() {
                 bibleSummary={bibleSummary}
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
+                credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
                 onExpand={() => navigate(`/project/${projectId}/agent`)}
                 expanded={centerSurface === "agent"}
               />
@@ -4636,6 +4637,7 @@ export function ProjectWorkspace() {
               resolveCell: resolveCellById,
               onApplied: handleAgentApplied,
             }}
+            credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
             onClose={() => navigate(`/project/${projectId}`)}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)

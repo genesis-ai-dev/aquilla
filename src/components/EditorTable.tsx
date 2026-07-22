@@ -595,7 +595,7 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   onCompleteBatch: (cells: CellData[]) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
@@ -1978,7 +1978,7 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2301,7 +2301,7 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -5247,7 +5247,7 @@ function EditorRow({
                     if (visibleTranslated.trim()) {
                       const isValidated = cell.status === "validated"
                       if (!isValidated && getSkipReplaceConfirm()) {
-                        onCompleteSingle(cell)
+                        void completeSingleAndReturn()
                       } else {
                         setShowGenerateConfirm(true)
                       }
@@ -6107,7 +6107,7 @@ function EditorRow({
         onConfirm={(dontAskAgain) => {
           setShowGenerateConfirm(false)
           if (dontAskAgain) setSkipReplaceConfirm(true)
-          onCompleteSingle(cell)
+          void completeSingleAndReturn()
         }}
         onCancel={() => setShowGenerateConfirm(false)}
       />

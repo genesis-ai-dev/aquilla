@@ -141,6 +141,7 @@ export function OrgSwitcher() {
           render={
             <button
               type="button"
+              aria-label={`Organization switcher: ${title}`}
               className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-accent"
             />
           }

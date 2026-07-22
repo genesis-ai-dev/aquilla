@@ -23,8 +23,8 @@ test("a commit made while a slow stale refetch is in flight never blanks or lose
   const staleResponseReleased = new Promise<void>((resolve) => {
     releaseStaleResponse = resolve
   })
-  let staleResponseCaptured = false
-  let staleResponseDelivered = false
+  let staleTargetResponseCaptured = false
+  const deliveredSides = new Set<string>()
 
   // Warm files normally revalidate through the cheap `?since=` delta path.
   // Force that request to take its documented resync fallback so this test
@@ -37,18 +37,19 @@ test("a commit made while a slow stale refetch is in flight never blanks or lose
     })
   })
   await alice.route(/\/cells\?(?=.*side=)(?!.*cellIds=).*/, async (route) => {
+    const side = new URL(route.request().url()).searchParams.get("side")
     const response = await route.fetch()
     const body = await response.body()
-    staleResponseCaptured = true
+    if (side === "target") staleTargetResponseCaptured = true
     await staleResponseReleased
     await route.fulfill({ response, body })
-    staleResponseDelivered = true
+    if (side) deliveredSides.add(side)
   })
 
   // Kick a soft refetch (focus handler) so a stale stream is in flight…
   await alice.evaluate(() => window.dispatchEvent(new Event("focus")))
-  await expect.poll(() => staleResponseCaptured, {
-    message: "full-file stale response should be captured before the edit",
+  await expect.poll(() => staleTargetResponseCaptured, {
+    message: "target-side stale response should be captured before the edit",
     timeout: 10_000,
   }).toBe(true)
 
@@ -56,12 +57,16 @@ test("a commit made while a slow stale refetch is in flight never blanks or lose
   const text = `Survives stale swap ${Date.now()}`
   await ws.editCell(0, text)
 
-  // Deliver the stale snapshot and assert it cannot replace the newer edit.
+  // Deliver the stale target snapshot, then wait for BOTH sequential sides of
+  // the full stream to finish. Waiting only for target let teardown reload the
+  // page while the source route was still being fulfilled, which produced a
+  // spurious "Route is already handled" failure and, more importantly, made
+  // the assertion run before useCells performed its atomic buffer swap.
   releaseStaleResponse()
-  await expect.poll(() => staleResponseDelivered, {
-    message: "held stale response should be delivered",
+  await expect.poll(() => [...deliveredSides].sort(), {
+    message: "both sides of the held full-file stream should be delivered",
     timeout: 10_000,
-  }).toBe(true)
+  }).toEqual(["source", "target"])
   await expect(ws.cellRow(0)).toContainText(text)
 
   // And survive a real reload (server projection has it).

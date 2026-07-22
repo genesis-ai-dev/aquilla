@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
 import { createProjectServerSide } from "./frontier-api"
+import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -115,18 +116,18 @@ export async function seedProjectWithFile(
     importFormat: "md",
     parserVersion: "workspace-import-v1",
   }
-  const r = await fetch(`${SYNC_BASE}/import`, {
-    method: "POST",
+  await postIdempotentJson({
+    url: `${SYNC_BASE}/import`,
     headers: importHeaders,
-    body: JSON.stringify({ projectId, fileId, file, cells, clientTs: Date.now() }),
+    body: { projectId, fileId, file, cells, clientTs: Date.now() },
+    operation: "bulk import",
   })
-  if (!r.ok) throw new Error(`bulk import failed: HTTP ${r.status} — ${await r.text()}`)
-  const done = await fetch(`${SYNC_BASE}/import`, {
-    method: "POST",
+  await postIdempotentJson({
+    url: `${SYNC_BASE}/import`,
     headers: importHeaders,
-    body: JSON.stringify({ projectId, fileId, cells: [], complete: true }),
+    body: { projectId, fileId, cells: [], complete: true },
+    operation: "import finalize",
   })
-  if (!done.ok) throw new Error(`import finalize failed: HTTP ${done.status} — ${await done.text()}`)
 
   return { projectId, projectName, fileId, fileName, cellIds: strings.map((s) => s.id) }
 }

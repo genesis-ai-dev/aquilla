@@ -55,9 +55,10 @@ const BATCH_LIMIT = 100
 // Max events accepted in a single request. The outbox flusher caps its own
 // batches at 100 (src/lib/sync/outbox-flush.ts MAX_BATCH) — this is 5x
 // headroom for legitimate traffic while stopping an oversized/malicious body
-// from fanning out into an unbounded number of prefetch reads and D1/Postgres
-// batch() calls within one request (single-writer D1 — see d1-performance
-// guidance on O(N²) blowups from unbounded batch sizes).
+// from fanning out into an unbounded number of prefetch reads and Postgres
+// batch() calls within one request/transaction against the shared Neon
+// primary (via Hyperdrive) — long-running or connection-pool-exhausting
+// transactions degrade every other project sharing it, not just this one.
 const MAX_EVENTS_PER_REQUEST = 500
 
 // ── FRO-479 push accelerator: notify live downstreams of upstream commits ──

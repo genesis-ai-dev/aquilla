@@ -47,7 +47,8 @@ const BULK_ROWS = 1000
 // The client chunks at 1500 cells/request (src/lib/sync/bulk-import.ts
 // CHUNK). This is ~3x headroom for legitimate traffic while stopping a
 // single request from fanning out into an unbounded number of bulk-INSERT
-// statements against the shared single-writer DB.
+// statements against the shared Postgres (Neon) backend every project reads
+// and writes through.
 const MAX_CELLS_PER_REQUEST = 5000
 // Per-field byte caps — generous for a single verse/segment/sentence-sized
 // cell, but enough to stop one malformed/malicious cell from persisting a

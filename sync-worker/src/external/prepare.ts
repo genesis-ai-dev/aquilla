@@ -6,6 +6,7 @@
 // client-supplied UUIDv7 id). Nothing is applied here — ask/act commit does that.
 
 import { errorResponse, toErrorResponse } from './errors'
+import { AUTH_HINT } from './discovery-route'
 import {
   validateCommands,
   cellKey,
@@ -47,7 +48,7 @@ export async function handlePrepare(
   const db = env.AQUILLA_PG
 
   const cred = await validateApiCredential(db, bearer(request) ?? "")
-  if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
+  if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
   // Parse + validate the batch BEFORE the project-existence scope check: a
   // receipt-only CreateProject (W2-A) files its changeset under a

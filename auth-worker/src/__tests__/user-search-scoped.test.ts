@@ -1,6 +1,9 @@
-// AQU-321: scoped user search — /api/v2/users/search?scoped=1 must only
-// return users that share an org or a maintainer-accessible project with the
-// caller. This prevents global user enumeration via the invite picker.
+// AQU-321: scoped user search — /api/v2/users/search must only return users
+// that share an org or a maintainer-accessible project with the caller, for
+// every non-admin caller regardless of whether they pass ?scoped=1. This
+// prevents global user enumeration via the invite picker (or via a direct
+// API call omitting the flag — see the pen-test regression test below).
+// Platform admins keep an explicit unscoped opt-in for support lookups.
 
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
@@ -72,12 +75,12 @@ describe("GET /api/v2/users/search?scoped=1 (AQU-321)", () => {
     expect(body.users.map((u) => u.username)).not.toContain("unrelated-user")
   })
 
-  it("unscoped search still returns global results (backward compat)", async () => {
+  it("pen-test regression: omitting ?scoped=1 no longer leaks cross-org users", async () => {
     await seedUser(220, "global-alice")
     await seedUser(221, "global-bob")
-    // No shared org or project
-
-    // Without scoped=1, global-alice can find global-bob
+    // No shared org or project, and the caller doesn't pass scoped=1 at all —
+    // this used to be the (unscoped, global) default. It must now behave
+    // identically to the scoped path for an ordinary, non-admin caller.
     const res = await app.request(
       "/api/v2/users/search?prefix=global-b",
       { method: "GET", headers: authHeader(await jwtFor("global-alice")) },
@@ -85,7 +88,24 @@ describe("GET /api/v2/users/search?scoped=1 (AQU-321)", () => {
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as { users: Array<{ username: string }> }
-    expect(body.users.map((u) => u.username)).toContain("global-bob")
+    expect(body.users.map((u) => u.username)).not.toContain("global-bob")
+  })
+
+  it("platform admin may still opt into unscoped search for cross-tenant support", async () => {
+    // ADMIN_EMAILS is pinned to "root@example.com" in the test env (see
+    // admin-routes.test.ts) — seedUser derives that email from the username.
+    await seedUser(222, "root")
+    await seedUser(223, "global-carol")
+    // No shared org or project between root and global-carol.
+
+    const res = await app.request(
+      "/api/v2/users/search?prefix=global-c",
+      { method: "GET", headers: authHeader(await jwtFor("root")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { users: Array<{ username: string }> }
+    expect(body.users.map((u) => u.username)).toContain("global-carol")
   })
 
   it("scoped search excludes the caller themselves", async () => {

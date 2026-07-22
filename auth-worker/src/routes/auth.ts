@@ -21,6 +21,41 @@ import {
   hashPasswordWerkzeugScrypt,
   verifyPassword,
 } from "../utils/password"
+import {
+  countRecentEvents,
+  ipIdentifier,
+  loginIdentifier,
+  LOGIN_MAX_FAILURES_PER_IDENTIFIER,
+  LOGIN_MAX_FAILURES_PER_IP,
+  recordAuthEvent,
+  RESET_REQUEST_MAX_PER_IDENTIFIER,
+} from "../utils/rate-limit"
+
+/** Append to activity_logs. Best-effort: a logging failure is swallowed so it
+ *  never fails the caller's request; awaited (not fire-and-forget) so the
+ *  audit trail is durable rather than racing an early Worker termination. */
+async function logActivity(
+  db: AquillaDb,
+  userId: number,
+  activityType: string,
+  description: string,
+): Promise<void> {
+  try {
+    await db
+      .prepare(
+        "INSERT INTO activity_logs (user_id, activity_type, description) VALUES (?, ?, ?)",
+      )
+      .bind(userId, activityType, description)
+      .run()
+  } catch (err) {
+    console.warn("[activity-log] insert failed (non-fatal):", err)
+  }
+}
+
+/** CF-Connecting-IP is set by Cloudflare at the edge and not client-settable. */
+function clientIp(c: { req: { header(name: string): string | undefined } }): string {
+  return c.req.header("CF-Connecting-IP") || "unknown"
+}
 
 const auth = new Hono<AuthHonoEnv>()
 
@@ -126,6 +161,7 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
           .run()
         const baseUrl = c.env.BASE_URL || "https://aquilla.app"
         verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`
+        await logActivity(c.env.AQUILLA_PG, created.id, "register", "Account created")
       }
     } catch (err) {
       console.warn("[verify] failed to mint verification token:", err)
@@ -206,6 +242,8 @@ auth.post("/token", async (c) => {
     return c.json({ error: "Invalid request body" }, 400)
   }
   const { username, password } = validated.data
+  const identifier = loginIdentifier(username)
+  const ipIdent = ipIdentifier(clientIp(c))
 
   try {
     if (!c.env.SECRET_KEY || !c.env.ALGORITHM) {
@@ -218,12 +256,35 @@ auth.post("/token", async (c) => {
       )
     }
 
+    // [Pen test] Auth & session mgmt (2026-07-20): neither this endpoint nor
+    // /register nor /password-reset/request had any attempt limiting —
+    // credential stuffing / password guessing could run unthrottled. Check
+    // BEFORE touching the DB for the user lookup so a locked-out caller can't
+    // still use this endpoint as a username-enumeration oracle via timing.
+    const [identifierFailures, ipFailures] = await Promise.all([
+      countRecentEvents(c.env.AQUILLA_PG, "login", identifier, { onlyFailures: true }),
+      countRecentEvents(c.env.AQUILLA_PG, "login", ipIdent, { onlyFailures: true }),
+    ])
+    if (
+      identifierFailures >= LOGIN_MAX_FAILURES_PER_IDENTIFIER ||
+      ipFailures >= LOGIN_MAX_FAILURES_PER_IP
+    ) {
+      return c.json(
+        { error: "Too many login attempts. Please try again later." },
+        429,
+      )
+    }
+
     const jwtService = new JWTService(c.env)
     let user = await jwtService.getUserByUsername(username)
     if (!user) {
       user = await jwtService.getUserByEmail(username)
     }
     if (!user) {
+      await Promise.all([
+        recordAuthEvent(c.env.AQUILLA_PG, "login", identifier, false),
+        recordAuthEvent(c.env.AQUILLA_PG, "login", ipIdent, false),
+      ])
       return c.json({ error: "Incorrect username/email or password" }, 401)
     }
 
@@ -249,8 +310,19 @@ auth.post("/token", async (c) => {
       isValidPassword = false
     }
     if (!isValidPassword) {
+      await Promise.all([
+        recordAuthEvent(c.env.AQUILLA_PG, "login", identifier, false),
+        recordAuthEvent(c.env.AQUILLA_PG, "login", ipIdent, false),
+        logActivity(c.env.AQUILLA_PG, user.id, "login_failed", "Incorrect password"),
+      ])
       return c.json({ error: "Incorrect username/email or password" }, 401)
     }
+
+    await Promise.all([
+      recordAuthEvent(c.env.AQUILLA_PG, "login", identifier, true),
+      recordAuthEvent(c.env.AQUILLA_PG, "login", ipIdent, true),
+      logActivity(c.env.AQUILLA_PG, user.id, "login", "Signed in"),
+    ])
 
     const accessToken = await jwtService.createAccessToken(user.username)
     return c.json({
@@ -469,13 +541,31 @@ auth.post(
   async (c) => {
     const { email } = c.req.valid("json")
     try {
+      // [Pen test] Auth & session mgmt (2026-07-20): this endpoint had no
+      // limit on how many reset emails could be triggered for one address —
+      // an easy way to spam a victim's inbox. Check + record BEFORE the user
+      // lookup and always record the same way regardless of whether the
+      // address is registered, so a prober can't distinguish "throttled" from
+      // "not registered" from timing/behavior — the response is identical
+      // either way (see the two `!user || throttled` branches below).
+      const identifier = loginIdentifier(email)
+      const recentRequests = await countRecentEvents(
+        c.env.AQUILLA_PG,
+        "password_reset_request",
+        identifier,
+        { onlyFailures: false },
+      )
+      const throttled = recentRequests >= RESET_REQUEST_MAX_PER_IDENTIFIER
+      await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_request", identifier, true)
+
       const user = await c.env.AQUILLA_PG.prepare(
         "SELECT id, username FROM users WHERE email = ?",
       )
         .bind(email)
         .first<{ id: number; username: string }>()
-      if (!user) {
-        // Don't disclose whether the email is registered.
+      if (!user || throttled) {
+        // Don't disclose whether the email is registered, and don't disclose
+        // that the request was throttled either — same message either way.
         return c.json({ message: "Password reset link sent to your email" })
       }
 
@@ -492,7 +582,19 @@ auth.post(
       const encodedUsername = encodeURIComponent(user.username)
       const baseUrl = c.env.BASE_URL || "https://aquilla.app"
       const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
-      await sendPasswordResetEmail(c.env, email, resetUrl)
+      // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
+      // used to fall through to the catch below and return a 500 with an
+      // error message — distinguishable from the generic 200 an unregistered
+      // address gets, i.e. a secondary user-enumeration oracle (observable
+      // whenever the email provider hiccups). The token is already minted and
+      // usable via the emailed link regardless of whether the SEND itself
+      // succeeds, so a delivery failure shouldn't change the response.
+      try {
+        await sendPasswordResetEmail(c.env, email, resetUrl)
+      } catch (err) {
+        console.warn("[password-reset] email send failed (non-fatal):", err)
+      }
+      await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_requested", "Password reset email sent")
 
       return c.json({ message: "Password reset link sent to your email" })
     } catch (error) {
@@ -584,8 +686,13 @@ auth.post(
       }
 
       const passwordHash = await hashPasswordWerkzeugScrypt(new_password)
+      // [Pen test] Auth & session mgmt (2026-07-20): stamp password_changed_at
+      // alongside the hash. authMiddleware rejects any access token whose
+      // `iat` predates this timestamp, so every access token issued before
+      // this reset — including one an attacker stole — stops working
+      // immediately instead of remaining valid for up to 30 more days.
       await c.env.AQUILLA_PG.prepare(
-        "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP, password_changed_at = CURRENT_TIMESTAMP WHERE id = ?",
       )
         .bind(passwordHash, user.id)
         .run()
@@ -594,6 +701,7 @@ auth.post(
       )
         .bind(user.id)
         .run()
+      await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_completed", "Password changed via reset link")
 
       return c.json({ message: "Password reset successful" })
     } catch (error) {

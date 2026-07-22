@@ -38,7 +38,7 @@ import {
 import { allocateSeqRange, buildBulkEventInsertStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
-import { MAX_SOURCE_BYTES } from './source-upload-route'
+import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES } from '../../../shared/import-contract'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
@@ -258,9 +258,18 @@ export async function handleBulkImportRequest(
     )
   }
   if (body.rawSource !== undefined) {
-    if (typeof body.rawSource !== 'string' || utf8Bytes(body.rawSource) > MAX_SOURCE_BYTES) {
+    if (
+      typeof body.rawSource !== 'string'
+      || utf8Bytes(body.rawSource) > MAX_BUFFERED_SOURCE_ARTIFACT_BYTES
+    ) {
       return withCors(
-        Response.json({ error: 'rawSource too large or malformed', maxBytes: MAX_SOURCE_BYTES }, { status: 413 }),
+        Response.json(
+          {
+            error: 'rawSource too large or malformed',
+            maxBytes: MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
+          },
+          { status: 413 },
+        ),
         request,
       )
     }

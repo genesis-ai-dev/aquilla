@@ -18,6 +18,12 @@ export const MAX_SANDBOX_PROGRAM_CHARS = 60_000
  */
 export const MAX_SOURCE_ARTIFACT_BYTES = 95 * 1024 * 1024
 
+/**
+ * Largest source artifact a worker may materialize in memory. Inline legacy
+ * imports and uploads without streaming metadata must stay below this limit.
+ */
+export const MAX_BUFFERED_SOURCE_ARTIFACT_BYTES = 50 * 1024 * 1024
+
 export const ROUND_TRIP_FIDELITIES = [
   "native",
   "verified-recipe",

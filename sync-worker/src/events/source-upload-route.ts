@@ -15,6 +15,7 @@ import { r2KeyPrefix, type AudioEnv } from "../audio"
 import { verifyTokenForDoc } from "../auth"
 import { ROLE } from "./role-policy"
 import {
+  MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
   MAX_SOURCE_ARTIFACT_BYTES,
   sourceArtifactDescriptor,
 } from "../../../shared/import-contract"
@@ -24,7 +25,7 @@ const BINDING_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source-b
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export const MAX_SOURCE_BYTES = MAX_SOURCE_ARTIFACT_BYTES
-const MAX_LEGACY_BUFFERED_SOURCE_BYTES = 50 * 1024 * 1024
+const MAX_LEGACY_BUFFERED_SOURCE_BYTES = MAX_BUFFERED_SOURCE_ARTIFACT_BYTES
 
 export interface SourceUploadEnv extends Pick<AudioEnv, "R2_KEY_PREFIX"> {
   SNAPSHOTS: R2Bucket

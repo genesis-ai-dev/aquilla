@@ -19,24 +19,24 @@ test("alice posts a comment on a cell and it appears in the drawer", async ({ al
   await row.hover()
 
   const addCommentBtn = row.locator('button[aria-label="Add comment"]')
-  await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+  await expect(addCommentBtn).toBeVisible()
   await addCommentBtn.click()
 
   // CommentsDrawer should now be open. The drawer renders as a div with
   // data-testid="comments-drawer" (no aria-label or semantic landmark).
   const drawer = alice.locator("[data-testid='comments-drawer']").first()
-  await expect(drawer).toBeVisible({ timeout: 5_000 })
+  await expect(drawer).toBeVisible()
 
   // Type and post the comment.
   const commentText = `e2e-comment-${Date.now()}`
   const textarea = drawer.locator("textarea").first()
-  await textarea.waitFor({ state: "visible", timeout: 5_000 })
+  await textarea.waitFor({ state: "visible" })
   await textarea.fill(commentText)
 
   const postBtn = drawer.getByRole("button", { name: /post|submit|send/i }).first()
-  await expect(postBtn).toBeVisible({ timeout: 3_000 })
+  await expect(postBtn).toBeVisible()
   await postBtn.click()
 
   // The comment should appear in the drawer.
-  await expect(drawer).toContainText(commentText, { timeout: 8_000 })
+  await expect(drawer).toContainText(commentText)
 })

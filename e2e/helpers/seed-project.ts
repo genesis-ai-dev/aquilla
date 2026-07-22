@@ -136,8 +136,31 @@ export async function seedProjectWithFile(
  * for cells to render. Replaces createProject + openProject + importFile +
  * openFileBySubstring + waitForEditor. */
 export async function openSeededProject(page: Page, seeded: SeededProject): Promise<Workspace> {
+  const sourceCellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
+  const sourceCellsLoaded = page.waitForResponse((response) => {
+    if (response.request().method() !== "GET") return false
+    const url = new URL(response.url())
+    return url.pathname === sourceCellsPath && url.searchParams.get("side") === "source"
+  }, { timeout: 30_000 })
+
   await page.goto(`/project/${seeded.projectId}/file/${seeded.fileId}`)
+  const sourceResponse = await sourceCellsLoaded
+  if (!sourceResponse.ok()) {
+    throw new Error(
+      `Seeded source cells failed to load: HTTP ${sourceResponse.status()} — ${await sourceResponse.text()}`,
+    )
+  }
+  const payload = await sourceResponse.json() as {
+    cells?: Array<{ cellId?: string }>
+  }
+  const firstCellId = seeded.cellIds[0]
+  if (!firstCellId || !payload.cells?.some((cell) => cell.cellId === firstCellId)) {
+    throw new Error(
+      `Seeded source response did not contain expected first cell ${firstCellId ?? "<missing>"}`,
+    )
+  }
+
   const ws = new Workspace(page)
-  await ws.waitForEditor()
+  await ws.waitForEditor(firstCellId)
   return ws
 }

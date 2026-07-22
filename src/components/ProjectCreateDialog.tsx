@@ -256,10 +256,7 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
     form.reset()
     clearSubmitError()
     setSubmitWarning(null)
-    // Functional no-op when already empty: `setExtraLanguages([])` would mint a
-    // fresh array every run, re-render, and (because `clearSubmitError` from
-    // useSubmitError is a new closure each render, and is in this effect's deps)
-    // re-fire the effect forever. Returning the same ref when empty breaks that.
+    // Preserve the existing array reference when there is nothing to reset.
     setExtraLanguages((prev) => (prev.length === 0 ? prev : []))
   }, [open, form, clearSubmitError])
 

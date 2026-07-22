@@ -1,5 +1,12 @@
 import { type Page, type Locator, expect } from "@playwright/test"
 
+// A cold editor route hydrates project access, file metadata, sync state, and
+// source/target cells before the first row can render. Three isolated smoke
+// shards deliberately contend for local CPU/Postgres; 10 seconds is therefore
+// an assertion budget, not a safe cold-start watchdog. Keep this below the
+// 60-second per-test ceiling so a genuinely stuck editor still fails promptly.
+const EDITOR_READY_TIMEOUT_MS = 30_000
+
 interface FilePayload {
   name: string
   mimeType: string
@@ -206,8 +213,16 @@ export class Workspace {
       .click()
   }
 
-  async waitForEditor(): Promise<void> {
-    await expect(this.page.locator("[data-cell-id]").first()).toBeVisible({ timeout: 10_000 })
+  async waitForEditor(expectedCellId?: string): Promise<void> {
+    // Seeded fixture ids are UUIDs, so they are safe in this quoted attribute
+    // selector. Passing the expected id prevents a file navigation from being
+    // satisfied by a stale row that belonged to the previously open file.
+    const firstCell = expectedCellId
+      ? this.page.locator(`[data-cell-id="${expectedCellId}"]`)
+      : this.page.locator("[data-cell-id]").first()
+    await expect(firstCell).toBeVisible({
+      timeout: EDITOR_READY_TIMEOUT_MS,
+    })
   }
 
   cellRow(index = 0): Locator {
@@ -301,11 +316,17 @@ export class Workspace {
     await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
     await validationButton.click()
 
-    const removeButton = this.page.locator(
-      '[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]',
-    )
+    const removeButton = this.page.getByRole("button", {
+      name: "Remove your validation",
+      exact: true,
+    })
     await expect(removeButton).toBeVisible({ timeout: 8_000 })
-    await removeButton.click()
+    // The validation popover is hover-aware. Moving the pointer from the
+    // trigger to its portalled content can close and remount the content while
+    // Playwright is checking pointer stability. Keep the pointer on the
+    // trigger and activate the real focused button from the keyboard instead.
+    await removeButton.focus()
+    await this.page.keyboard.press("Enter")
     await expect(validationButton).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
   }
 

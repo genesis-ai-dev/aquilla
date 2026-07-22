@@ -56,6 +56,12 @@ describe("E2E determinism guardrails", () => {
       if (file.endsWith(".smoke.spec.ts") && /\.catch\(\s*\(\)\s*=>\s*false\s*\)/.test(source)) {
         violations.push(`${relative}: swallowed conditional probe`)
       }
+      if (
+        file.endsWith(".smoke.spec.ts")
+        && /expect\([\s\S]{0,200}?\.locator\(\s*["']\[data-cell-id\]["']\s*\)\.first\(\)\s*\)\.toBeVisible/.test(source)
+      ) {
+        violations.push(`${relative}: bypasses Workspace.waitForEditor readiness contract`)
+      }
     }
 
     expect(violations).toEqual([])

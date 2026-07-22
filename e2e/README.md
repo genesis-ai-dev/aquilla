@@ -123,11 +123,13 @@ See `e2e/JOURNEYS.md` for the canonical journey map and conventions.
   `networkidle` as a proxy for readiness.
 - Do not make required behavior optional with a caught timeout or early return.
   If the fixture should create the state, assert that it did.
-- Required asynchronous assertions use the shared 10-second timeout or a
-  justified longer timeout. Do not shorten them to make a test fail faster;
-  that makes the result depend on machine speed. A synchronous `isVisible()`
-  probe is only for choosing between real UI branches, never for deciding
-  whether required behavior should be tested.
+- Required asynchronous assertions use the shared 10-second timeout. Cold
+  application/editor hydration and multi-service workflows use a justified
+  30-second readiness watchdog while still waiting on observable state. Do not
+  force those through the shorter interaction budget or shorten waits merely
+  to make a test fail faster; that makes the result depend on machine speed. A
+  synchronous `isVisible()` probe is only for choosing between real UI
+  branches, never for deciding whether required behavior should be tested.
 - Never skip, fixme, or return early because a machine is slow. `skip` and
   `fixme` are reserved for documented product gaps and must cite the issue.
 

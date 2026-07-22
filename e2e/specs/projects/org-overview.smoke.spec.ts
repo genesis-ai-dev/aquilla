@@ -249,7 +249,15 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
 
 test("org overview does not present false zeroes while its portfolio is loading", async ({ alice }) => {
   let releasePortfolio!: () => void
+  let projectDirectoryRequests = 0
   const portfolioGate = new Promise<void>((resolve) => { releasePortfolio = resolve })
+  await alice.route("**/api/v2/projects**", async (route) => {
+    const request = route.request()
+    if (request.method() === "GET" && new URL(request.url()).pathname === "/api/v2/projects") {
+      projectDirectoryRequests += 1
+    }
+    await route.continue()
+  })
   await alice.route("**/api/v2/orgs/*/portfolio", async (route) => {
     await portfolioGate
     await route.continue()
@@ -260,6 +268,7 @@ test("org overview does not present false zeroes while its portfolio is loading"
 
     await expect(alice.getByTestId("org-home-loading")).toBeVisible()
     await expect(alice.getByText("Loading dashboard…")).toBeVisible()
+    await expect(alice.locator('[data-slot="app-shell-header"]')).toHaveCount(0)
     await expect(alice.getByText("Your organization is ready")).toHaveCount(0)
     await expect(alice.getByText("Avg translated", { exact: true })).toHaveCount(0)
   } finally {
@@ -268,4 +277,5 @@ test("org overview does not present false zeroes while its portfolio is loading"
 
   await expect(alice.getByTestId("org-home-loading")).toHaveCount(0)
   await expect(alice.getByText("Avg translated", { exact: true })).toBeVisible()
+  expect(projectDirectoryRequests).toBe(1)
 })

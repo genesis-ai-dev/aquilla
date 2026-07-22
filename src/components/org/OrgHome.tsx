@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -9,7 +10,6 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
-import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
@@ -50,24 +50,7 @@ import {
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { Spinner } from "@/components/ui/spinner"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
-
-function OrgHomeLoading() {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      data-testid="org-home-loading"
-      className="flex min-h-[50vh] items-center justify-center"
-    >
-      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-        <Spinner aria-hidden="true" className="size-5" />
-        <span>Loading dashboard…</span>
-      </div>
-    </div>
-  )
-}
 
 
 type ActivityStatus = "not-started" | "stalled" | "active"
@@ -458,7 +441,17 @@ export function ProjectTable({
 }
 
 export function OrgHome() {
-  const { activeOrg, activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, setActiveOrg } = useActiveOrg()
+  const {
+    activeOrg,
+    activeOrgId,
+    isAllOrgs,
+    orgs,
+    accessibleProjects,
+    accessibleProjectsLoading,
+    isLoading: orgLoading,
+    setActiveOrg,
+    refreshAccessibleProjects,
+  } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
   const jwt = session?.jwt ?? null
@@ -481,9 +474,6 @@ export function OrgHome() {
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
 
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
-  // AQU-335: accessible-project rows supply direct/group/org role attribution
-  // and identify projects shared from orgs the portfolio endpoint can't see.
-  const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
   // AQU-326: unredeemed invites addressed to the caller's email — without
   // this card, an invite whose link never arrived is undiscoverable in-app.
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
@@ -584,24 +574,6 @@ export function OrgHome() {
     return () => { cancelled = true }
   }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs, portfolioScopeKey, refreshTick])
 
-  // AQU-335: surface cross-org grants on the Projects page too — otherwise a user
-  // whose only project arrived via an invite link sees an empty dashboard.
-  useEffect(() => {
-    if (!jwt) {
-      setAccessibleProjects([])
-      return
-    }
-    if (orgLoading) return
-    let cancelled = false
-    fetchAccessibleProjects(jwt)
-      .then((all) => {
-        if (cancelled) return
-        setAccessibleProjects(all)
-      })
-      .catch(() => { if (!cancelled) setAccessibleProjects([]) })
-    return () => { cancelled = true }
-  }, [jwt, orgs, activeOrgId, orgLoading])
-
   // AQU-326: received-invites surface. Org-independent (matched by email).
   useEffect(() => {
     if (!jwt) { setPendingInvites([]); return }
@@ -640,8 +612,16 @@ export function OrgHome() {
 
   const isPageLoading = sessionLoading
     || orgLoading
+    || accessibleProjectsLoading
     || (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey)
   const workspaceLabel = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
+
+  // Keep cold-start chrome atomic: rendering AppShell before session, org,
+  // project-directory, and portfolio state agree produced three visibly
+  // different sidebars/headings before the dashboard was usable.
+  if (isPageLoading) {
+    return <LoadingOverlay label="Loading dashboard" data-testid="org-home-loading" />
+  }
 
   // Rollup stats
   const now = Date.now()
@@ -712,6 +692,7 @@ export function OrgHome() {
   }
 
   function handleCreated(project: ProjectRecord) {
+    void refreshAccessibleProjects()
     navigate(`/projects/${project.id}`)
   }
 
@@ -759,7 +740,11 @@ export function OrgHome() {
         <div className="flex items-center justify-between pr-4">
           <OrgBreadcrumb section="Projects" />
           {activeOrgId != null ? (
-            <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
+            <ProjectCreateDialog
+              orgId={activeOrgId}
+              onCreated={handleCreated}
+              linkableProjects={accessibleProjects}
+            />
           ) : (
             <Badge variant="outline">Select an organization to create a project</Badge>
           )}
@@ -769,9 +754,7 @@ export function OrgHome() {
       main={
         <Page size="wide">
           <PageHeader title={workspaceLabel} />
-          {isPageLoading ? (
-            <OrgHomeLoading />
-          ) : error ? (
+          {error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (
             <div className="space-y-6">
@@ -810,6 +793,7 @@ export function OrgHome() {
                   orgId={activeOrgId}
                   projectCount={projects.length}
                   onProjectCreated={handleCreated}
+                  linkableProjects={accessibleProjects}
                 />
               )}
 
@@ -1048,7 +1032,11 @@ export function OrgHome() {
                       action={
                         <div className="flex flex-wrap items-center justify-center gap-2">
                           {activeOrgId != null && (
-                            <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
+                            <ProjectCreateDialog
+                              orgId={activeOrgId}
+                              onCreated={handleCreated}
+                              linkableProjects={accessibleProjects}
+                            />
                           )}
                           <Button variant="outline" onClick={() => navigate("/members")}>
                             Invite your team

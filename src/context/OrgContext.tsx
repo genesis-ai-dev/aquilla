@@ -1,7 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useLocation } from "react-router-dom"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
-import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
+import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -23,6 +23,9 @@ interface OrgContextValue {
   isAllOrgs: boolean
   /** Orgs reached only through a direct project grant (no org membership). */
   guestOrgs: GuestOrg[]
+  /** One app-wide project discovery result, shared by dashboard/sidebar users. */
+  accessibleProjects: CloudProjectSummary[]
+  accessibleProjectsLoading: boolean
   setActiveOrg: (id: number) => void
   setAllOrgs: () => void
   isLoading: boolean
@@ -30,12 +33,13 @@ interface OrgContextValue {
   /** Fetch the latest org list. Returns the freshly loaded orgs so callers
    *  that need the result immediately don't race against a stale closure. */
   refresh: () => Promise<OrgSummary[]>
+  refreshAccessibleProjects: () => Promise<CloudProjectSummary[]>
 }
 
 const OrgContext = createContext<OrgContextValue | null>(null)
 
 export function OrgProvider({ children }: { children: ReactNode }) {
-  const { session } = useFrontierSession()
+  const { session, loading: sessionLoading } = useFrontierSession()
   const location = useLocation()
   const jwt = session?.jwt ?? null
   const [orgs, setOrgs] = useState<OrgSummary[]>([])
@@ -45,16 +49,33 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     const parsed = Number(raw)
     return Number.isFinite(parsed) ? parsed : null
   })
-  const [isLoading, setLoading] = useState<boolean>(!!jwt)
+  // Start unresolved even before IndexedDB supplies the session. Initializing
+  // from `!!jwt` painted a false-ready org context for one render on cold load.
+  const [isLoading, setLoading] = useState(true)
+  const [resolvedOrgJwt, setResolvedOrgJwt] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [guestOrgs, setGuestOrgs] = useState<GuestOrg[]>([])
-  const guestAliveRef = useRef(true)
+  const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
+  const [accessibleProjectsLoading, setAccessibleProjectsLoading] = useState(true)
+  const [resolvedProjectsJwt, setResolvedProjectsJwt] = useState<string | null>(null)
+  const orgRequestRef = useRef(0)
+  const projectsRequestRef = useRef(0)
 
   const refresh = useCallback(async (): Promise<OrgSummary[]> => {
-    if (!jwt) { setOrgs([]); return [] }
+    const requestId = ++orgRequestRef.current
+    if (sessionLoading) {
+      setLoading(true)
+      return []
+    }
+    if (!jwt) {
+      setOrgs([])
+      setResolvedOrgJwt(null)
+      setLoading(false)
+      return []
+    }
     setLoading(true); setError(null)
     try {
       const list = await listMyOrgs(jwt)
+      if (orgRequestRef.current !== requestId) return []
       setOrgs(list)
       setActiveOrgId((cur) =>
         list.length === 0 ? null
@@ -64,40 +85,69 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       )
       return list
     } catch (e) {
+      if (orgRequestRef.current !== requestId) return []
+      setOrgs([])
+      setActiveOrgId(null)
       if (e instanceof UserError && e.category === "session-expired") {
         notifySessionExpired()
       }
       setError(e instanceof Error ? e.message : String(e))
       return []
     } finally {
-      setLoading(false)
+      if (orgRequestRef.current === requestId) {
+        setResolvedOrgJwt(jwt)
+        setLoading(false)
+      }
     }
-  }, [jwt])
+  }, [jwt, sessionLoading])
 
   useEffect(() => { void refresh() }, [refresh])
 
-  // AQU-473: derive guest orgs (accessible-project orgs the caller isn't a
-  // member of) so the org switcher can surface them tagged "Guest". Race-
-  // guarded like the other org-scoped effects in this file/hooks.
-  const refreshGuestOrgs = useCallback(async (): Promise<void> => {
-    if (!jwt) { if (guestAliveRef.current) setGuestOrgs([]); return }
-    const projects = await fetchAccessibleProjects(jwt)
-    if (!guestAliveRef.current) return
+  // Fetch the accessible-project directory once per account. Previously the
+  // provider, sidebar, and dashboard each issued this same expensive request,
+  // and this provider issued it twice as `orgs` changed during startup.
+  const refreshAccessibleProjects = useCallback(async (): Promise<CloudProjectSummary[]> => {
+    const requestId = ++projectsRequestRef.current
+    if (sessionLoading) {
+      setAccessibleProjectsLoading(true)
+      return []
+    }
+    if (!jwt) {
+      setAccessibleProjects([])
+      setResolvedProjectsJwt(null)
+      setAccessibleProjectsLoading(false)
+      return []
+    }
+    setAccessibleProjectsLoading(true)
+    try {
+      const projects = await fetchAccessibleProjects(jwt)
+      if (projectsRequestRef.current !== requestId) return []
+      setAccessibleProjects(projects)
+      return projects
+    } catch {
+      if (projectsRequestRef.current === requestId) setAccessibleProjects([])
+      return []
+    } finally {
+      if (projectsRequestRef.current === requestId) {
+        setResolvedProjectsJwt(jwt)
+        setAccessibleProjectsLoading(false)
+      }
+    }
+  }, [jwt, sessionLoading])
+
+  useEffect(() => { void refreshAccessibleProjects() }, [refreshAccessibleProjects])
+
+  // AQU-473: derive guest orgs from the shared project directory instead of
+  // refetching it whenever the member-org list changes.
+  const guestOrgs = useMemo(() => {
     const memberOrgIds = new Set(orgs.map((o) => o.id))
     const seen = new Map<number, GuestOrg>()
-    for (const p of projects) {
+    for (const p of accessibleProjects) {
       if (p.orgId == null || memberOrgIds.has(p.orgId)) continue
       if (!seen.has(p.orgId)) seen.set(p.orgId, { id: p.orgId, name: p.orgName ?? null })
     }
-    setGuestOrgs(Array.from(seen.values()))
-  }, [jwt, orgs])
-
-  useEffect(() => {
-    guestAliveRef.current = true
-    return () => { guestAliveRef.current = false }
-  }, [])
-
-  useEffect(() => { void refreshGuestOrgs() }, [refreshGuestOrgs])
+    return Array.from(seen.values())
+  }, [accessibleProjects, orgs])
 
   // FRO-367: persist the CLAMP path as an effect (state updaters must stay
   // pure): when another tab switches to an account that can't see the org this
@@ -139,9 +189,25 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   const isAllOrgs = orgs.length > 1 && activeOrgId == null
   const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null
+  const orgsReady = !sessionLoading && (jwt == null || resolvedOrgJwt === jwt)
+  const projectsReady = !sessionLoading && (jwt == null || resolvedProjectsJwt === jwt)
 
   return (
-    <OrgContext.Provider value={{ orgs, activeOrgId, activeOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs, isLoading, error, refresh }}>
+    <OrgContext.Provider value={{
+      orgs,
+      activeOrgId,
+      activeOrg,
+      isAllOrgs,
+      guestOrgs,
+      accessibleProjects,
+      accessibleProjectsLoading: accessibleProjectsLoading || !projectsReady,
+      setActiveOrg,
+      setAllOrgs,
+      isLoading: isLoading || !orgsReady,
+      error,
+      refresh,
+      refreshAccessibleProjects,
+    }}>
       {children}
     </OrgContext.Provider>
   )

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { renderHook, act, waitFor } from "@testing-library/react"
+import { render, renderHook, act, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { useAccounts } from "./useAccounts"
+import { AccountsProvider, useAccounts } from "./useAccounts"
+import * as sessionStore from "@/lib/frontier/session-store"
 import {
   _resetDbForTesting, addSession, sessionKey,
 } from "@/lib/frontier/session-store"
@@ -21,6 +22,32 @@ describe("useAccounts", () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.active).toBeNull()
     expect(result.current.sessions).toHaveLength(0)
+  })
+
+  it("hydrates IndexedDB once for multiple app-level consumers", async () => {
+    const loadActiveSpy = vi.spyOn(sessionStore, "loadActiveSession")
+    const listSessionsSpy = vi.spyOn(sessionStore, "listSessions")
+    const qc = new QueryClient()
+
+    function Consumer() {
+      const { loading } = useAccounts()
+      return <span>{loading ? "loading" : "ready"}</span>
+    }
+
+    const view = render(
+      <QueryClientProvider client={qc}>
+        <AccountsProvider>
+          <Consumer />
+          <Consumer />
+        </AccountsProvider>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(view.getAllByText("ready")).toHaveLength(2)
+    })
+    expect(loadActiveSpy).toHaveBeenCalledTimes(1)
+    expect(listSessionsSpy).toHaveBeenCalledTimes(1)
   })
 
   it("reflects sessions after add", async () => {

@@ -57,6 +57,21 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgProvider", () => {
+  it("loads the shared project directory once while organization state resolves", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "A", role: { level: 700, name: "owner" } },
+      { id: 2, name: "B", role: { level: 600, name: "maintainer" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "p1", name: "Proj 1", orgId: 1, role: { level: 700, name: "owner", source: "org" } },
+    ])
+
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"))
+    await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalledTimes(1))
+  })
+
   it("loads multiple orgs and defaults to all organizations", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }, { id: 2, name: "B", role: { level: 600, name: "maintainer" } }])
     render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)

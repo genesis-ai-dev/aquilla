@@ -90,7 +90,9 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
+import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
@@ -172,6 +174,7 @@ import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useMyScopes } from "@/hooks/useMyScopes"
 import { getSelectedIds } from "@/lib/audio/selection"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
@@ -930,6 +933,36 @@ export function ProjectWorkspace() {
   const showStaleSiblingBanner =
     outboxStaleSiblingCount > 0 && outboxStaleSiblingEntries.length > 0
   const showStaleSourceBanner = outboxStaleSourceCount > staleSourceBannerDismissed
+  // AQU-633: a validate (or other target write) the server refused with a 403.
+  // Surface the reason so it isn't a silent flip-then-revert behind the pill.
+  // AQU-633: derive the "reason" banner from the outbox's quarantined 403
+  // records (source of truth) — captures a refusal regardless of which flush
+  // path quarantined it, unlike a flush callback. A local dismissed-id set hides
+  // the banner until a fresh refusal (new id) appears.
+  const forbiddenRecords = useForbiddenOutboxRecords(Boolean(project?.id))
+  const [dismissedForbidden, setDismissedForbidden] = useState<Set<string>>(new Set())
+  const forbiddenEntries = useMemo<ForbiddenEntry[]>(
+    () =>
+      forbiddenRecords
+        .filter((r) => !dismissedForbidden.has(r.id))
+        .map((r) => ({
+          id: r.id,
+          status: r.lastError?.status ?? 403,
+          reason: r.lastError?.reason ?? "forbidden",
+          kind: r.event.kind,
+          fileId: r.event.fileId ?? null,
+          cellId: r.event.cellId ?? null,
+        })),
+    [forbiddenRecords, dismissedForbidden],
+  )
+  const showForbiddenBanner = forbiddenEntries.length > 0
+  const dismissForbidden = useCallback(
+    () => setDismissedForbidden(new Set(forbiddenRecords.map((r) => r.id))),
+    [forbiddenRecords],
+  )
+  // AQU-633: the current user's own lane/file scopes, so bulk validate skips
+  // out-of-scope cells (no guaranteed-403) rather than silently reverting.
+  const myScopes = useMyScopes(project?.id ?? null)
 
   // D1-backed audit stats for the active file with the client outbox applied
   // on top — pending commits/validates show up immediately, before the next
@@ -3033,7 +3066,8 @@ export function ProjectWorkspace() {
     onOpenHistory: handleOpenHistory,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording])
+    myScopes, // AQU-633: per-cell validate scope gate
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -4405,6 +4439,8 @@ export function ProjectWorkspace() {
                   cellStore={cellStore}
                   session={frontierSession}
                   username={currentUsername}
+                  activeLane={activeLane}
+                  myScopes={myScopes}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
@@ -4516,6 +4552,21 @@ export function ProjectWorkspace() {
                     Dismiss
                   </button>
                 </div>
+              </div>
+            )}
+            {/* AQU-633: 403-refused banner — surfaces WHY a validate reverted
+                (scope / self-validation / role floor / allowlist) instead of a
+                silent flip-then-revert behind the "N failed" pill. */}
+            {showForbiddenBanner && (
+              <div className="flex items-center justify-between gap-2 bg-rose-50 px-4 py-2 text-xs text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                <span>{forbiddenBannerMessage(forbiddenEntries)}</span>
+                <button
+                  type="button"
+                  onClick={dismissForbidden}
+                  className="ml-2 rounded bg-rose-200/60 px-2 py-0.5 hover:bg-rose-200 dark:bg-rose-800/50 dark:hover:bg-rose-800"
+                >
+                  Dismiss
+                </button>
               </div>
             )}
             {/* F5: stale-source pin banner */}

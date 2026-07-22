@@ -75,6 +75,20 @@ export async function fetchSyncToken(
 interface CachedToken {
   value: string
   expiresAtMs: number
+  /**
+   * AQU-616: the session JWT that minted this token. The sync-token is
+   * role-scoped to the account the JWT authenticates, and the sync-worker
+   * stamps event authorship from the *token's* identity (it discards the
+   * client's per-event `author`). This minter's cache is keyed only by
+   * (projectId, fileId) and lives in a closure that outlives a multi-account
+   * switch / logout+login — none of which reload the page or reset it (see
+   * useAccounts.activate / useFrontierSession.logout). Pinning the cached
+   * token to its minting JWT lets us re-mint when the active identity changes,
+   * so account A's token is never served to account B (which would attribute
+   * B's writes — e.g. validations — to A). Mirrors the username-partitioned
+   * audio cache in src/lib/audio/sync-token-fetcher.ts.
+   */
+  jwt: string
 }
 
 const REFRESH_SAFETY_MS = 30_000
@@ -128,16 +142,25 @@ export function makeSyncTokenMinter(
   let cached: CachedToken | null = null
   return async () => {
     const now = Date.now()
-    if (cached && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
-      return { token: cached.value, status: 200 }
-    }
+    // Resolve the active JWT BEFORE the cache check: the cached token is only
+    // reusable for the identity that minted it. After an account switch
+    // (owner→contributor) or logout+login without a page reload, getJwt()
+    // returns the new account's JWT while `cached` still holds the previous
+    // account's token; serving it would attribute the new user's writes to the
+    // previous user, since the sync-worker authors events from the token's
+    // identity. A missing JWT (logged out) also correctly bypasses the cache
+    // rather than handing back a token from the signed-out session. AQU-616.
     const jwt = getJwt()
     if (!jwt) return { token: null, status: null }
+    if (cached && cached.jwt === jwt && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {
+      return { token: cached.value, status: 200 }
+    }
     try {
       const resp = await fetchSyncToken(jwt, projectId, fileId, bootstrap, apiUrl)
       cached = {
         value: resp.token,
         expiresAtMs: now + resp.expiresIn * 1000,
+        jwt,
       }
       callbacks.onRole?.(resp.role)
       return { token: resp.token, status: 200 }

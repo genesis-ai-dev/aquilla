@@ -36,6 +36,7 @@ import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
 import {
   enqueueTargetCommitBatch,
+  enqueueTargetCommits,
   bulkUploadMorphRows,
   publishStagedImport,
   reconcileSourceImport,
@@ -1346,6 +1347,38 @@ export async function emitParsedFile(
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
   })
+
+  // AQU-638: bilingual imports (CSV/TSV column mapping, TMX, XLIFF, csv-bilingual)
+  // carry target text on each parsed string. bulkUploadSource seeds only the
+  // SOURCE side, so without this the mapped/paired target column silently
+  // vanishes — source cells populate, targets stay empty. Emit one
+  // target.cell.commit per non-empty translation, chained on the freshly-minted
+  // source cell event id (AD-9 staleness pin). `cells[i]` is 1:1 with
+  // `result.strings[i]` — buildBulkCellsWithSpeakers emits exactly one cell per
+  // string in order and never skips. Source-only formats leave `translated`
+  // empty/undefined, so no target commits are emitted for them.
+  const targetCommits: TargetCommit[] = []
+  for (let i = 0; i < cells.length; i++) {
+    const translated = result.strings[i]?.translated?.trim()
+    if (translated) {
+      targetCommits.push({
+        id: uuidv7(),
+        cellId: cells[i].cellId,
+        parentId: cells[i].id,
+        value: translated,
+      })
+    }
+  }
+  if (targetCommits.length > 0) {
+    await enqueueTargetCommits({
+      projectId: ctx.projectId,
+      fileId,
+      author: ctx.author,
+      commits: targetCommits,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+  }
 
   return {
     ref: {

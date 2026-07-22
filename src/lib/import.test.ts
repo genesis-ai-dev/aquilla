@@ -157,3 +157,75 @@ describe("import — bulk upload", () => {
     expect(captured.at(-1)).toMatchObject({ complete: true, cells: [] })
   })
 })
+
+// AQU-638: a bilingual import (source + mapped target column) must land the
+// target text, not just the source. buildBulkCellsWithSpeakers only seeds the
+// source side, so emitParsedFile has to emit target.cell.commit events for any
+// parsed string carrying `translated`. Source cells go over the mocked fetch
+// (bulk /import); target commits are ENQUEUED to the CQRS outbox, so we assert
+// against the outbox rather than the captured HTTP bodies.
+describe("import — bilingual target text (AQU-638)", () => {
+  beforeEach(async () => {
+    await resetOutboxConnectionForTests()
+    await new Promise<void>((resolve, reject) => {
+      const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
+      d.onblocked = () => resolve()
+      d.onsuccess = () => resolve()
+      d.onerror = () => reject(d.error)
+    })
+  })
+
+  function bilingual(id: string, original: string, translated: string, group: string): TranslatableString {
+    return { id, original, translated, context: group, group, type: "text" }
+  }
+
+  it("emits target.cell.commit for each row with a mapped target, chained on its source cell", async () => {
+    const { ref } = await emitParsedFile(
+      {
+        name: "hungarian.csv",
+        strings: [
+          bilingual("row-1", "Title", "Templom", "Title"),
+          bilingual("row-2", "Scene one", "Első jelenet", "Row 2"),
+          // Source-only row: no target column value → no target commit.
+          bilingual("row-3", "Untranslated", "", "Row 3"),
+        ],
+      },
+      "csv",
+      { projectId: "p-bi", author: "alice", sourceLanguage: "eng", targetLanguage: "hun", getToken },
+    )
+
+    const rows = await peekOutboxBatch(100)
+    const commits = rows.filter((r) => r.event.kind === "target.cell.commit")
+    // Two rows carried target text; the empty one must NOT produce a commit.
+    expect(commits).toHaveLength(2)
+
+    const byCell = new Map(commits.map((c) => [c.event.cellId, c.event]))
+    const first = byCell.get("row-1")!
+    expect(first).toBeDefined()
+    expect(first.fileId).toBe(ref.id)
+    expect((first.payload as { value: string }).value).toBe("Templom")
+    // parentId pins the target to its own source cell's event id (AD-9).
+    expect(first.parentId).toBeTruthy()
+    expect((first.payload as { sourceEventId: string }).sourceEventId).toBe(first.parentId)
+
+    expect((byCell.get("row-2")!.payload as { value: string }).value).toBe("Első jelenet")
+    expect(byCell.has("row-3")).toBe(false)
+  })
+
+  it("emits no target commits when no row carries target text (no false fill)", async () => {
+    await emitParsedFile(
+      {
+        name: "monolingual.csv",
+        strings: [
+          bilingual("row-1", "Alpha", "", "Row 1"),
+          bilingual("row-2", "Beta", "", "Row 2"),
+        ],
+      },
+      "csv",
+      { projectId: "p-mono", author: "alice", getToken },
+    )
+
+    const rows = await peekOutboxBatch(100)
+    expect(rows.filter((r) => r.event.kind === "target.cell.commit")).toHaveLength(0)
+  })
+})

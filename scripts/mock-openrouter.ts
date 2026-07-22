@@ -101,6 +101,14 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex]?.content ?? "" : ""
   const userText = typeof lastUser === "string" ? lastUser : ""
 
+  // Copilot single-cell draft (buildPrompt in completion-service.ts): the user
+  // message ends with "Source: <text>\nTranslation:" awaiting the completion.
+  // Answer deterministically so the editor sparkle/Replace flow works end-to-end.
+  const copilotMatch = /(?:^|\n)Source: (.*)\nTranslation:$/.exec(userText.trimEnd())
+  if (copilotMatch) {
+    return respond(`[mock] ${copilotMatch[1].trim()}`)
+  }
+
   // The draft tool's INTERNAL model call: numbered source segments in, strict
   // [{i,t}] JSON out. Detected by the user-turn shape the tool builds.
   const translateMatch = userText.match(/^Translate these \d+ segments:/)
@@ -233,8 +241,24 @@ const server = http.createServer((req, res) => {
   req.on("data", (c) => (body += c))
   req.on("end", () => {
     try {
-      const parsed = JSON.parse(body) as { messages: ChatMessage[] }
+      const parsed = JSON.parse(body) as { messages: ChatMessage[]; stream?: boolean }
       const out = scriptMockResponse(parsed.messages ?? [])
+      // The copilot editor requests SSE (stream: true). Replay the scripted
+      // message as a couple of OpenAI-style delta frames + [DONE] so the
+      // SPA's consumeStream sees real content instead of an unparsed JSON body.
+      // Tool-call responses stay non-streaming (the agent loop never streams).
+      if (parsed.stream && !out.choices[0].message.tool_calls) {
+        res.writeHead(200, { "Content-Type": "text/event-stream" })
+        const content = out.choices[0].message.content ?? ""
+        const mid = Math.ceil(content.length / 2)
+        for (const chunk of [content.slice(0, mid), content.slice(mid)]) {
+          if (!chunk) continue
+          res.write(`data: ${JSON.stringify({ id: out.id, choices: [{ delta: { content: chunk } }] })}\n\n`)
+        }
+        res.write("data: [DONE]\n\n")
+        res.end()
+        return
+      }
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify(out))
     } catch (err) {

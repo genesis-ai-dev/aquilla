@@ -9,7 +9,7 @@ import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
-  ArrowRight, Activity, NotebookPen, Info, Pencil, Lock, ChevronRight, ChevronDown, Music, Braces,
+  ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
   Languages,
   Archive,
   Lock,

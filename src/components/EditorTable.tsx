@@ -603,7 +603,7 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   onCompleteBatch: (cells: CellData[]) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
@@ -2075,7 +2075,7 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2409,7 +2409,7 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -3712,8 +3712,13 @@ function EditorRow({
   // then re-focus the cell editor (the new text is now visible there) and show
   // a brief "Saved" confirmation.
   const completeSingleAndReturn = useCallback(async () => {
-    await onCompleteSingle(cell)
+    const saved = await onCompleteSingle(cell)
     onActivateEditor(cell.id)
+    // AQU-670: only confirm "Saved" when the draft actually committed. On a
+    // failed enqueue completeSingle resolves `false` and records the error
+    // (shown inline via the `error` line); showing "Saved" as well would give
+    // the translator directly contradictory signals for a draft that was lost.
+    if (!saved) return
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
     setShowSaved(true)
     savedTimerRef.current = setTimeout(() => {
@@ -5457,7 +5462,7 @@ function EditorRow({
                       return
                     }
                     if (isCompletionAvailable) {
-                      onCompleteSingle(cell, { regenerate: true })
+                      void onCompleteSingle(cell, { regenerate: true })
                     }
                   }}
                   disabled={

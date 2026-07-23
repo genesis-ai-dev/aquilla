@@ -1816,21 +1816,36 @@ export function ProjectWorkspace() {
     // of the first (which the server dead-letters) when the read-back hasn't
     // landed yet.
     const parentId = resolveTargetCommitParentId(cell)
-    const eventId = await emitTargetCellCommit({
-      projectId: project.id,
-      fileId: cell.fileId,
-      cellId: cell.id,
-      parentId,
-      sourceEventId: cell.sourceEventId ?? null,
-      value: text,
-      author,
-      targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
-      // FRO-292: tag AI-generated commits so the server projection can
-      // track ai_drafted on the cell row. A human edit (no aiSuggestion)
-      // will clear it on the next commit.
-      aiSuggestion: true,
-      aiDraft: provenance,
-    })
+    let eventId: string
+    try {
+      eventId = await emitTargetCellCommit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        parentId,
+        sourceEventId: cell.sourceEventId ?? null,
+        value: text,
+        author,
+        targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
+        // FRO-292: tag AI-generated commits so the server projection can
+        // track ai_drafted on the cell row. A human edit (no aiSuggestion)
+        // will clear it on the next commit.
+        aiSuggestion: true,
+        aiDraft: provenance,
+      })
+    } catch (err) {
+      // AQU-670: the AI draft never queued (IDB quota/private-mode, role
+      // rejection, etc.). Revert the optimistic patch — mirroring
+      // handleEditorCommit's catch — so the predicted text doesn't linger as a
+      // ghost (a new floor over the prior content also stops the freshness floor
+      // above from protecting the failed draft past the next refetch). Rethrow so
+      // the caller reports the failure instead of rendering "Saved".
+      applyOptimisticTargetEdit(cell.id, {
+        value: cell.translated ?? "",
+        valueHtml: cell.translatedHtml ?? "",
+      })
+      throw err
+    }
     pendingCompletionEventIdRef.current.set(cell.id, eventId)
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })

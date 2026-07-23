@@ -195,12 +195,17 @@ export function useCompletion(
     },
   }), [effectiveSettings.systemPrompt, modelName, provider, sourceLanguage, targetLanguage])
 
+  // AQU-670: resolves `true` only when the draft actually committed (the outbox
+  // enqueue succeeded), and `false` on any failure — commit/enqueue rejection,
+  // an abort, or an unconfigured provider. The single-cell sparkle flow reads
+  // this to decide whether to show the "Saved" confirmation, so a draft that
+  // never queued no longer reports success.
   const completeSingle = useCallback(async (
     cell: CellData,
     signal?: AbortSignal,
     opts?: { regenerate?: boolean },
-  ) => {
-    if (!isConfigured || !isAvailable) return
+  ): Promise<boolean> => {
+    if (!isConfigured || !isAvailable) return false
     // AQU-620: raise the temperature for an explicit regenerate so the second
     // request varies; leave first-draft generation on the configured value.
     const generationSettings: CompletionSettings = opts?.regenerate
@@ -308,17 +313,22 @@ export function useCompletion(
       )
       setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
       setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
+      return true
     } catch (err) {
       // AbortError: the user stopped the run — clear state without persisting
       // an error entry (no stuck spinner, no error badge on the cell).
       if (err instanceof DOMException && err.name === "AbortError") {
         setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
-        return
+        return false
       }
+      // AQU-670: a commit/enqueue failure lands here (commitCompletedCell
+      // rethrows after reverting its optimistic patch). Record the error and
+      // report failure so the caller does not show a "Saved" confirmation.
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
+      return false
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
 
@@ -518,19 +528,33 @@ export function useCompletion(
           const text = filledText.get(i + 1)
           if (text !== undefined) {
             if (commitCompletedCell) {
-              await commitCompletedCell(
-                cell,
-                text,
-                llmAuthor,
-                draftProvenance(
-                  "batch",
-                  uniqueExampleIds(
-                    passages.flatMap((passage) => passage.cells.map((example) => example.cellId)),
-                    batchValidatedPairs.map((example) => example.cellId),
+              try {
+                await commitCompletedCell(
+                  cell,
+                  text,
+                  llmAuthor,
+                  draftProvenance(
+                    "batch",
+                    uniqueExampleIds(
+                      passages.flatMap((passage) => passage.cells.map((example) => example.cellId)),
+                      batchValidatedPairs.map((example) => example.cellId),
+                    ),
+                    corpusCells.filter((candidate) => candidate.status === "validated").length,
                   ),
-                  corpusCells.filter((candidate) => candidate.status === "validated").length,
-                ),
-              )
+                )
+              } catch (err) {
+                // AQU-670: this cell's draft failed to queue. commitCompletedCell
+                // has already reverted its optimistic patch, so the drafted text
+                // won't linger; mark the cell errored (not done) and continue the
+                // run so one failed enqueue doesn't abandon the rest of the batch.
+                if (err instanceof DOMException && err.name === "AbortError") throw err
+                posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+                setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+                setCompleting((p) => new Map(p).set(cell.id, "error"))
+                setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
+                incrementBatchCompletionFailed(runId, 1)
+                continue
+              }
             }
             // AQU-235 fix: after await, re-check — another Start could have
             // superseded us during the commit. If so, do not increment or clear.

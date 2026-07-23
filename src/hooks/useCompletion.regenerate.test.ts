@@ -38,6 +38,9 @@ vi.mock("@/lib/completion/compress-examples", () => ({
   compressExampleSource: (src: string) => src,
   dedupeExamples: (exs: unknown[]) => exs,
   dropPrecedingContextDuplicates: (exs: unknown[]) => exs,
+  // completeSingle also calls dropValidatedPairDuplicates; without it in the
+  // mock the helper is undefined and the draft throws before any fetch fires.
+  dropValidatedPairDuplicates: (exs: unknown[]) => exs,
 }))
 
 import type { CompletionSettings } from "@/lib/parsers/types"

@@ -94,6 +94,21 @@ describe("mapFilePairToEvents", () => {
     expect(lastCommit.payload.valueHtml).toBe("<p>བཀྲ་ཤིས།</p>")
   })
 
+  it("decodes HTML entities into the plain-text value, keeps rich html raw (AQU-674)", () => {
+    // Reproduces the Codex→Aquilla data shape that surfaced literal `&nbsp;`
+    // in migrated Arabic (Algerian) target text: the HTML carries entities
+    // that must NOT survive as literal ASCII in the tags-stripped `value`.
+    const input = fixture()
+    input.target!.cells[1].metadata.edits![2].value = "<p>فِي&nbsp;ٱلْبَدْءِ&nbsp;&amp;خَلَقَ</p>"
+    const ev = mapFilePairToEvents(input, OPTS)
+    const lastCommit = ev.filter((e) => e.kind === "target.cell.commit").at(-1)!
+    // Plain value is entity-free (spaces separate the words, & is decoded once).
+    expect(lastCommit.payload.value).toBe("فِي ٱلْبَدْءِ &خَلَقَ")
+    expect(lastCommit.payload.value).not.toMatch(/&[a-z]+;/i)
+    // The rich html retains the original entities for HTML rendering.
+    expect(lastCommit.payload.valueHtml).toBe("<p>فِي&nbsp;ٱلْبَدْءِ&nbsp;&amp;خَلَقَ</p>")
+  })
+
   it("is idempotent: identical input → byte-identical event stream", () => {
     expect(mapFilePairToEvents(fixture(), OPTS)).toEqual(mapFilePairToEvents(fixture(), OPTS))
   })

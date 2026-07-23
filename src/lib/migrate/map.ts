@@ -22,9 +22,14 @@ import {
   validateEventId,
 } from "./ids"
 import type { IngestEvent } from "./types"
+import { decodeHtmlEntities } from "../html-entities"
 
+// Project HTML down to the plain-text `value`. Strip tags, decode entities
+// (so `&nbsp;` etc. don't survive as literal ASCII in the plain string —
+// AQU-674), then collapse whitespace. Decode before whitespace-collapse so a
+// decoded `&nbsp;` folds into surrounding spaces.
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim()
+  return decodeHtmlEntities(html.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim()
 }
 
 function canonicalRefOf(cell: CodexCell): string | undefined {

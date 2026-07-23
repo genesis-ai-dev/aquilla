@@ -17,6 +17,11 @@ export interface MockLLMRequest {
 // own TAG_RE so this generic echo stays in lockstep with the real protocol.
 const REQUEST_TAG_RE = /<c\s+id="([^"]+)">([\s\S]*?)<\/c>/g
 
+interface MockChatBody {
+  stream?: boolean
+  messages?: { content?: string }[]
+}
+
 export class MockLLMServer {
   private server: ReturnType<typeof createServer> | null = null
   private _nextResponse = "Traducción de prueba"
@@ -66,8 +71,8 @@ export class MockLLMServer {
       let body = ""
       req.on("data", (c) => { body += c })
       req.on("end", () => {
-        let parsed: { stream?: boolean; messages?: { content?: string }[] } | null = null
-        try { parsed = JSON.parse(body) as typeof parsed } catch {}
+        let parsed: MockChatBody | null = null
+        try { parsed = JSON.parse(body) as MockChatBody } catch {}
         this._requests.push({
           url: req.url!,
           method: req.method!,

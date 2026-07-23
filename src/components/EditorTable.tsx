@@ -1625,7 +1625,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </span>
         )}
         {showParagraphBoundary && (
-          <div className="grid grid-cols-[44px_1fr_1fr] border-t border-border/60">
+          <div className={`grid ${gridCols} border-t border-border/60`}>
             <div className="flex items-center justify-center py-1" title="New paragraph">
               <Pilcrow className="h-3 w-3 text-muted-foreground" />
             </div>

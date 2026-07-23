@@ -13,6 +13,7 @@ import {
   Languages,
   Archive,
   Lock,
+  Pilcrow,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -1539,18 +1540,40 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         {(cell) => {
           const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
           const footnoteOffsets = cellStore.getFootnoteOffsets(cell.id)
+          // AQU: paragraph-boundary visuals (p1-paragraph-ui-wiring). Only the
+          // FIRST cell of a paragraph carries paragraphStart; the file header
+          // already delimits the first paragraph of a file, so suppress the
+          // extra rule/pilcrow there to avoid a stray line at the top of every
+          // file. "First of file" is derived from the previous row's cached
+          // fileId (no new subscription — a synchronous cellStore getter,
+          // same idiom as footnoteOffsets above).
+          const isFirstOfFile = index === 0
+            || cellStore.getCellView(displayCellIds[index - 1])?.fileId !== cell.fileId
+          const showParagraphBoundary = cell.paragraphStart === true && !isFirstOfFile
           return (
       <div
         data-cell-id={cell.id}
         data-index={index}
         data-untimed={untimedInTimeLens ? "true" : undefined}
+        data-paragraph-start={showParagraphBoundary ? "true" : undefined}
         aria-label={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
-        className={cn("relative", untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70")}
+        className={cn(
+          "relative",
+          untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70",
+          showParagraphBoundary && "mt-3",
+        )}
       >
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
             no timing
           </span>
+        )}
+        {showParagraphBoundary && (
+          <div className="grid grid-cols-[44px_1fr_1fr] border-t border-border/60">
+            <div className="flex items-center justify-center py-1" title="New paragraph">
+              <Pilcrow className="h-3 w-3 text-muted-foreground" />
+            </div>
+          </div>
         )}
         <MemoizedRow
           key={cell.id}
@@ -1660,6 +1683,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     cellsWithRemoteChange,
     checkLockHolder,
     completing,
+    displayCellIds,
     errors,
     examples,
     footnotePanelActive,

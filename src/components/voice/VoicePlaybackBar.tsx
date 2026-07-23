@@ -34,6 +34,10 @@ interface Props {
   settings: ProjectTtsSettings | undefined
   /** Scroll a line into view when the queue advances to it. */
   onActiveCell?: (cellId: string) => void
+  /** The highlighted section (e.g. selected on the Dialogue timeline). When
+   *  set, pressing Play starts from this section instead of the file's start
+   *  (AQU-666). */
+  startCellId?: string | null
 }
 
 function fmtTime(s: number): string {
@@ -43,7 +47,7 @@ function fmtTime(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`
 }
 
-export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings, onActiveCell }: Props) {
+export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings, onActiveCell, startCellId }: Props) {
   const queue = useQueueState()
   const { currentTime, duration, rate, volume } = useQueueProgress()
 
@@ -84,8 +88,12 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
   const onPlayPause = useCallback(() => {
     if (isPlaying) { pauseQueue(); return }
     if (queue.kind === "paused") { void resumeQueue(); return }
-    startAt(0)
-  }, [isPlaying, queue.kind, startAt])
+    // Start from the highlighted section when one is selected, else the top of
+    // the file (AQU-666). The queue skips forward from here to the next cell
+    // that actually has audio, so an unplayable pick still behaves.
+    const from = startCellId ? cells.findIndex((c) => c.id === startCellId) : -1
+    startAt(from >= 0 ? from : 0)
+  }, [isPlaying, queue.kind, startAt, cells, startCellId])
 
   // Spacebar toggles play/pause while the Audio-lens bar is mounted (this bar
   // only renders in the audio lens, so the binding is naturally scoped to it).

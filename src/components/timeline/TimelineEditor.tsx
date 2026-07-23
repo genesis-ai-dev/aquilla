@@ -4,7 +4,7 @@
 // the only "media" dependency is a native <video> element for the linked-URL
 // preview (the remote host serves Range — no streaming work needed here).
 
-import { useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { Film, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -35,6 +35,9 @@ export interface TimelineEditorProps {
   terminologyConcepts?: Concept[]
   /** Per-cell rule infractions (keyed by cell id) for the detail-pane blots. */
   infractions?: Map<string, RuleInfraction[]>
+  /** Fires when the highlighted section changes so a sibling transport (the
+   *  bottom playback bar) can start playback from the selected section. */
+  onSelectCell?(cellId: string | null): void
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -71,9 +74,16 @@ export function TimelineEditor({
   project,
   terminologyConcepts,
   infractions,
+  onSelectCell,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Wrap selection so the parent hears every highlight change — the bottom
+  // playback bar starts from the highlighted section (AQU-666).
+  const selectCell = useCallback((id: string | null) => {
+    setSelectedId(id)
+    onSelectCell?.(id)
+  }, [onSelectCell])
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -119,7 +129,7 @@ export function TimelineEditor({
     viewEndSec,
     selectedId,
     editable,
-    onSelect: setSelectedId,
+    onSelect: selectCell,
     onRetime,
   }
 
@@ -211,7 +221,7 @@ export function TimelineEditor({
                     key={c.id}
                     type="button"
                     data-testid={`tl-untimed-${c.id}`}
-                    onClick={() => setSelectedId(c.id)}
+                    onClick={() => selectCell(c.id)}
                     className={cn(
                       "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",
                       selectedId === c.id && "ring-2 ring-sky-500",

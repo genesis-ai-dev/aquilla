@@ -793,6 +793,9 @@ export function ProjectWorkspace() {
     navigate(`/project/${projectId}/settings?q=gemini`)
   }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
+  // The section highlighted on the Dialogue timeline. Lifted here so the bottom
+  // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
+  const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
   // Holds a cellId to scroll to once cells are loaded after a restore-location
   // navigation. Set during the restore effect, consumed (and cleared) by a
@@ -4778,6 +4781,7 @@ export function ProjectWorkspace() {
                   project={editorProject ?? project ?? undefined}
                   terminologyConcepts={(editorProject ?? project)?.terminology ?? []}
                   infractions={infractions}
+                  onSelectCell={setTimelineSelectedCellId}
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>
@@ -4969,6 +4973,7 @@ export function ProjectWorkspace() {
                 session={frontierSession ?? null}
                 settings={tts.settings}
                 onActiveCell={jumpToCellId}
+                startCellId={timelineSelectedCellId}
               />
             )}
             <WorkspaceStatusBar

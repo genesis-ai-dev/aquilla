@@ -269,6 +269,35 @@ export function trimWindowForCell(cell: CellData): { start: number; end: number 
   return { start: startTime, end: endTime }
 }
 
+/**
+ * When a section's window ends, decide whether the next playable cell is
+ * simply the *next window on the same imported clip* — i.e. a sibling media
+ * segment. If so, the queue keeps the SAME `<audio>` element running and just
+ * walks its window cursor forward, so playback is gapless across the boundary
+ * (AQU-666). Anything else — a different clip, a non-media cell, or no next
+ * cell — returns null and the queue hands off to a fresh element as before.
+ */
+export function sameClipContinuation(
+  cells: CellData[],
+  currentIndex: number,
+  clipUrl: string,
+): { index: number; trim: { start: number; end: number } } | null {
+  const next = findNextPlayable(cells, currentIndex + 1)
+  if (next < 0) return null
+  const nextCell = cells[next]
+  const playable = pickPlayableAudio(nextCell)
+  const trim = trimWindowForCell(nextCell)
+  if (!playable || playable.url !== clipUrl || !trim) return null
+  return { index: next, trim }
+}
+
+// The next window usually abuts the previous one (segments tile the file), so
+// reaching trim.end already sits us inside the next window — we keep playing
+// the same samples for true gaplessness. Only when the next window starts
+// meaningfully ahead of where we are (a real silent gap in the file) do we
+// seek forward, still on the same element (no reload, so no audible cut).
+const CONTINUOUS_SEEK_EPS = 0.35
+
 async function playAt(index: number): Promise<void> {
   const ctx = activeContext
   if (!ctx) return
@@ -324,11 +353,15 @@ async function playAt(index: number): Promise<void> {
   currentUrl = resolved.objectUrl
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  const trim = trimWindowForCell(cell)
-  setProgress({ currentTime: trim?.start ?? 0, duration: 0 })
+  // Mutable window cursor for THIS element. A media file split into sibling
+  // segments shares one clip; as playback crosses a section boundary we walk
+  // this cursor forward on the same element (see sameClipContinuation) instead
+  // of tearing down and reloading, so the audio never cuts (AQU-666).
+  const seg = { index, cell, trim: trimWindowForCell(cell), clipUrl: playable.url }
+  setProgress({ currentTime: seg.trim?.start ?? 0, duration: 0 })
 
   const advance = () => {
-    const next = findNextPlayable(ctx.cells, index + 1)
+    const next = findNextPlayable(ctx.cells, seg.index + 1)
     if (next < 0) {
       setState(IDLE)
       disposeCurrent()
@@ -337,17 +370,33 @@ async function playAt(index: number): Promise<void> {
     void playAt(next)
   }
 
-  if (trim) {
+  if (seg.trim) {
     audio.onloadedmetadata = () => {
       if (seq !== currentSeq) return
-      audio.currentTime = trim.start
+      if (seg.trim) audio.currentTime = seg.trim.start
     }
   }
   audio.ontimeupdate = () => {
     if (seq !== currentSeq) return
-    // A media segment's window ends before the shared clip does — treat
-    // reaching trim.end as this cell's "ended" and move to the next cell.
-    if (trim && audio.currentTime >= trim.end) {
+    // A media segment's window ends before the shared clip does.
+    if (seg.trim && audio.currentTime >= seg.trim.end) {
+      const cont = sameClipContinuation(ctx.cells, seg.index, seg.clipUrl)
+      if (cont) {
+        // Next section is another window on the same clip: keep this element
+        // playing and just move the cursor. Only seek if a real gap separates
+        // the windows; a contiguous boundary plays through seamlessly.
+        if (cont.trim.start > audio.currentTime + CONTINUOUS_SEEK_EPS) {
+          audio.currentTime = cont.trim.start
+        }
+        seg.index = cont.index
+        seg.cell = ctx.cells[cont.index]
+        seg.trim = cont.trim
+        setState({ kind: "playing", cellIndex: seg.index, cellId: seg.cell.id })
+        ctx.onCellChange?.(seg.index, seg.cell.id)
+        return
+      }
+      // A different clip (or no next segment): stop here and hand off to a
+      // fresh element for the next cell, as before.
       audio.onpause = null // don't let the pause handler flash a "paused" state
       audio.pause()
       advance()
@@ -363,12 +412,12 @@ async function playAt(index: number): Promise<void> {
   audio.onplay = () => {
     if (seq !== currentSeq) return
     setActiveAudio(coordinatorController)
-    setState({ kind: "playing", cellIndex: index, cellId: cell.id })
+    setState({ kind: "playing", cellIndex: seg.index, cellId: seg.cell.id })
   }
   audio.onpause = () => {
     if (seq !== currentSeq) return
     if (audio.ended) return
-    setState({ kind: "paused", cellIndex: index, cellId: cell.id })
+    setState({ kind: "paused", cellIndex: seg.index, cellId: seg.cell.id })
   }
   audio.onended = () => {
     if (seq !== currentSeq) return

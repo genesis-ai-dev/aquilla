@@ -53,6 +53,12 @@ import {
 
 /** Window before a quiet keystroke pause counts as a commit-worthy idle. */
 export const COMMIT_IDLE_MS = 1_200
+/**
+ * AQU-664: much shorter debounce for the live terminology-violation check. The
+ * blot recomputes off the live buffer at this cadence so a forbidden rendering
+ * lights up nearly as-you-type instead of waiting on the commit-idle window.
+ */
+export const LIVE_CHECK_MS = 150
 const PRESENCE_SELECTION_THROTTLE_MS = 120
 export const PRESENCE_DRAFT_IDLE_MS = 650
 export const PRESENCE_WORD_BATCH_SIZE = 2
@@ -152,6 +158,19 @@ interface TranslatedEditorProps {
   ruleSeverity?: Map<string, "major" | "minor">
   waivedRuleIds?: Set<string>
   onRuleClick?: (ruleId: string, anchor: HTMLElement) => void
+  /**
+   * AQU-664: hover ("wave over") a violation blot to preview the rule
+   * explanation. Fires with the blot's `data-rule-id` + the blot element on
+   * mouse-in, and `(null, null)` on mouse-out so the caller can dismiss the
+   * popover reliably. Mirrors the footnote-marker hover handlers below.
+   */
+  onRuleHover?: (ruleId: string | null, anchor: HTMLElement | null) => void
+  /**
+   * AQU-664: called on a short debounce with the live editor text (before the
+   * ~1.2s commit-idle debounce fires) so the caller can recompute terminology
+   * violations off the live buffer and surface the inline blot as-you-type.
+   */
+  onLiveTextChange?: (text: string) => void
   audioTimings?: WordTiming[]
   /** Audio playback time in seconds. Drives the karaoke decoration. */
   audioCurrentTime?: number
@@ -225,6 +244,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   ruleSeverity,
   waivedRuleIds,
   onRuleClick,
+  onRuleHover,
+  onLiveTextChange,
   audioTimings,
   audioCurrentTime,
   onSeekToTime,
@@ -290,6 +311,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { isReadOnlyRef.current = isReadOnly }, [isReadOnly])
 
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // AQU-664: emits live text on a short debounce so terminology blots can be
+  // recomputed off the live buffer, well ahead of the ~1.2s commit-idle path.
+  const liveTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const presenceDraftIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSelectionKeyRef = useRef<string | null>(null)
@@ -314,6 +338,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // holding pre-draft text has NOT absorbed a newer authoritative value while
   // `initialPlain !== lastHydratedPlainRef`.
   const lastHydratedPlainRef = useRef(initialPlain)
+  const onLiveTextChangeRef = useRef(onLiveTextChange)
+  useEffect(() => { onLiveTextChangeRef.current = onLiveTextChange }, [onLiveTextChange])
+  const onRuleHoverRef = useRef(onRuleHover)
+  useEffect(() => { onRuleHoverRef.current = onRuleHover }, [onRuleHover])
 
   const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
   const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
@@ -440,13 +468,27 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         mouseover(view, event) {
           const target = event.target as HTMLElement | null
           const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
-          if (!marker || !view.dom.contains(marker)) return false
-          const index = Number(marker.dataset.footnoteIndex)
-          onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+          if (marker && view.dom.contains(marker)) {
+            const index = Number(marker.dataset.footnoteIndex)
+            onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+            return false
+          }
+          // AQU-664: hovering a violation blot previews its rule explanation.
+          const blot = target?.closest<HTMLElement>("[data-rule-id]")
+          if (blot && view.dom.contains(blot)) {
+            onRuleHoverRef.current?.(blot.getAttribute("data-rule-id"), blot)
+          }
           return false
         },
         mouseout(view, event) {
           const target = event.target as HTMLElement | null
+          const blot = target?.closest<HTMLElement>("[data-rule-id]")
+          if (blot && view.dom.contains(blot)) {
+            // AQU-664: dismiss the explanation once the pointer leaves the blot
+            // (ignore moves within the same blot's own children).
+            const related = event.relatedTarget as HTMLElement | null
+            if (!related || !blot.contains(related)) onRuleHoverRef.current?.(null, null)
+          }
           const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
           if (!marker || !view.dom.contains(marker)) return false
           const related = event.relatedTarget as HTMLElement | null
@@ -589,6 +631,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         lastCommittedRef.current = text
         onCommitRef.current({ value: text, valueHtml: html })
       }, COMMIT_IDLE_MS)
+      // AQU-664: publish the live buffer on a much shorter debounce so the
+      // caller can recompute terminology blots off it, well before the commit.
+      if (onLiveTextChangeRef.current) {
+        if (liveTextTimerRef.current !== null) clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = setTimeout(() => {
+          onLiveTextChangeRef.current?.(text)
+        }, LIVE_CHECK_MS)
+      }
     },
     onSelectionUpdate({ editor, transaction }) {
       // A typing transaction also moves the caret; onUpdate owns its batched
@@ -616,6 +666,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
       }
+      // AQU-664: flush the live buffer immediately on blur (so the blot tracks
+      // the final text without waiting on the debounce) and dismiss any hover
+      // explanation the pointer left behind.
+      if (liveTextTimerRef.current !== null) {
+        clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = null
+      }
+      onLiveTextChangeRef.current?.(editor.getText())
+      onRuleHoverRef.current?.(null, null)
       const text = editor.getText()
       const html = editor.getHTML()
       pendingCommitRef.current = null
@@ -652,6 +711,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       if (presenceDraftIdleTimerRef.current !== null) {
         clearTimeout(presenceDraftIdleTimerRef.current)
         presenceDraftIdleTimerRef.current = null
+      }
+      if (liveTextTimerRef.current !== null) {
+        clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = null
       }
       lastSelectionKeyRef.current = null
       onSelectionChangeRef.current?.(null)

@@ -1422,11 +1422,13 @@ export function ProjectWorkspace() {
 
   // Timeline editor detail pane: commit a target edit (same path as the table).
   const handleTimelineCommitTarget = useCallback(
-    async (cellId: string, value: string) => {
+    async (cellId: string, value: string, valueHtml?: string) => {
       if (!project?.id) return
       const cell = cellStore.getCellView(cellId)
       if (!cell) return
-      applyOptimisticTargetEdit(cellId, { value })
+      // AQU-659: carry the rich-text form so media-pane edits persist
+      // identically to the main table (footnotes, marks, violation blots).
+      applyOptimisticTargetEdit(cellId, valueHtml !== undefined ? { value, valueHtml } : { value })
       const parentId = resolveTargetCommitParentId(cell)
       const eventId = await emitTargetCellCommit({
         projectId: project.id,
@@ -1435,6 +1437,7 @@ export function ProjectWorkspace() {
         parentId,
         sourceEventId: cell.sourceEventId ?? null,
         value,
+        ...(valueHtml !== undefined ? { valueHtml } : {}),
         author: currentUsername,
         targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
       })
@@ -4743,6 +4746,9 @@ export function ProjectWorkspace() {
                   onRetime={handleRetime}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
+                  project={editorProject ?? project ?? undefined}
+                  terminologyConcepts={(editorProject ?? project)?.terminology ?? []}
+                  infractions={infractions}
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>

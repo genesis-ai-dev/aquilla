@@ -16,6 +16,8 @@ import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineCellDetail } from "./TimelineCellDetail"
 import { useTimelineClock } from "./useTimelineClock"
 import type { CellData } from "@/hooks/useCells"
+import type { Concept } from "@/lib/terminology/types"
+import type { ProjectRecord, RuleInfraction } from "@/lib/parsers/types"
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -24,9 +26,15 @@ export interface TimelineEditorProps {
   /** Used to scope the persisted zoom preference. */
   fileId: string
   onRetime(cellId: string, startSec: number, endSec: number): void
-  onCommitTarget(cellId: string, value: string): void
+  onCommitTarget(cellId: string, value: string, valueHtml?: string): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
+  /** Forwarded to the clip detail pane so it can resolve/stream source audio. */
+  project?: ProjectRecord
+  /** Active managed terminology concepts for the detail-pane editor's chips. */
+  terminologyConcepts?: Concept[]
+  /** Per-cell rule infractions (keyed by cell id) for the detail-pane blots. */
+  infractions?: Map<string, RuleInfraction[]>
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -60,6 +68,9 @@ export function TimelineEditor({
   onRetime,
   onCommitTarget,
   onLinkVideo,
+  project,
+  terminologyConcepts,
+  infractions,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -216,7 +227,14 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <TimelineCellDetail cell={selectedCell} editable={editable} onCommitTarget={onCommitTarget} />
+      <TimelineCellDetail
+        cell={selectedCell}
+        editable={editable}
+        onCommitTarget={onCommitTarget}
+        project={project}
+        terminologyConcepts={terminologyConcepts}
+        infractions={selectedCell ? infractions?.get(selectedCell.id) : undefined}
+      />
     </div>
   )
 }

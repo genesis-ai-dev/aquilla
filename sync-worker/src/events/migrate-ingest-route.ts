@@ -25,6 +25,7 @@
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
 import { buildEventInsertStmt } from './event-insert'
 import type { EventKind } from './types'
+import { secureCompare } from '../lib/secure-compare'
 
 // Keep each ingest transaction short so it commits and releases its locks
 // quickly — large batches hold a write transaction open longer and serialise
@@ -94,7 +95,7 @@ export async function handleMigrateIngestRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const authHeader = request.headers.get('Authorization') ?? ''
-  if (authHeader !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(authHeader, `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) {

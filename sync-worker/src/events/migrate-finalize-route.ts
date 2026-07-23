@@ -12,6 +12,7 @@
 // Idempotent: pure recompute from current cells, safe to call any number of times.
 
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { secureCompare } from '../lib/secure-compare'
 
 const PATH = '/migrate/finalize'
 
@@ -27,7 +28,7 @@ export async function handleMigrateFinalizeRequest(
   if (new URL(request.url).pathname !== PATH) return null
   if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if ((request.headers.get('Authorization') ?? '') !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

@@ -22,9 +22,6 @@ test("eBible corpus search input filters translation list", async ({ alice }) =>
   const name = `EBibleSearch ${Date.now()}`
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
-
-  await alice.waitForLoadState("networkidle")
-
   // Open ImportDialog.
   const importBtn = alice.getByRole("button", { name: /^Import$/i }).first()
   await expect(importBtn).toBeVisible({ timeout: 10_000 })

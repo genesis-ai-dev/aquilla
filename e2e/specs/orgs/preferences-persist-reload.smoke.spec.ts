@@ -21,8 +21,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("preferences analytics consent setting persists across page reload", async ({ alice }) => {
   await alice.goto("/preferences/privacy")
-  await alice.waitForLoadState("networkidle")
-
   const toggle = alice.getByRole("switch", { name: "Share usage data" })
   await expect(toggle).toBeVisible({ timeout: 10_000 })
 
@@ -37,8 +35,6 @@ test("preferences analytics consent setting persists across page reload", async 
 
   // Reload the page.
   await alice.reload()
-  await alice.waitForLoadState("networkidle")
-
   // Re-locate the toggle after reload — should still be in the toggled state.
   const toggleAfterReload = alice.getByRole("switch", { name: "Share usage data" })
   await expect(toggleAfterReload).toBeVisible({ timeout: 10_000 })

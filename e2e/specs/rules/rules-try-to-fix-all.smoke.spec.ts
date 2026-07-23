@@ -27,8 +27,6 @@ test("'Try to fix all' button navigates to editor with ?openRule= param", async 
   const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
   await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Create a rule via the inline RuleEditor ("+ Add Rule" in the header).
   const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 8_000 })

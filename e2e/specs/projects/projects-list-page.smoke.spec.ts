@@ -17,8 +17,6 @@ test("projects list page shows created project in grid", async ({ alice }) => {
   await seedProjectWithFile(await jwtFor("alice"), { name: projName })
 
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
-
   // Breadcrumb shows "Projects".
   await expect(alice.getByText("Projects").first()).toBeVisible({ timeout: 10_000 })
 

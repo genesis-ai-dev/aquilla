@@ -167,6 +167,69 @@ describe("makeSyncTokenFetcher", () => {
     expect(secondFetch).toHaveBeenCalledTimes(1)
   })
 
+  // AQU-616 regression: the minter cache is keyed by (projectId, fileId) and
+  // lives in a closure that survives a multi-account switch / logout+login (none
+  // reload the page). Because the sync-worker authors events from the *token's*
+  // identity, serving account A's still-valid cached token to account B after a
+  // switch attributes B's writes (e.g. bulk validations) to A. The cached token
+  // must be pinned to its minting JWT so a change in the active identity forces a
+  // fresh mint under the new JWT.
+  it("AQU-616: re-mints when the active JWT changes (never serves account A's token to account B)", async () => {
+    // Owner (account A) opens the file — mints a token under A's JWT.
+    const ownerFetch = mockFetch({
+      status: 200,
+      body: { token: "token-owner-A", expiresIn: 900, role: { level: 700, name: "owner", source: "creator" } },
+    })
+    global.fetch = ownerFetch as unknown as typeof fetch
+
+    let activeJwt = "jwt-owner-A"
+    const getToken = makeSyncTokenFetcher(() => activeJwt, "proj-1", "file-a", {}, API)
+    expect(await getToken()).toBe("token-owner-A")
+    expect(ownerFetch).toHaveBeenCalledTimes(1)
+
+    // Account switch owner→contributor WITHOUT advancing the clock: A's token is
+    // still well within its 15-min TTL, so the old (identity-blind) cache would
+    // have handed it straight back. The minter must instead mint fresh under B's
+    // JWT — otherwise the contributor's validations persist as the owner.
+    activeJwt = "jwt-contributor-B"
+    const contributorFetch = mockFetch({
+      status: 200,
+      body: { token: "token-contributor-B", expiresIn: 900, role: { level: 400, name: "contributor", source: "override" } },
+    })
+    global.fetch = contributorFetch as unknown as typeof fetch
+
+    expect(await getToken()).toBe("token-contributor-B")
+    expect(contributorFetch).toHaveBeenCalledTimes(1)
+    // The re-mint carried B's JWT as the bearer, not A's.
+    expect((contributorFetch.mock.calls[0][1]!.headers as Record<string, string>).Authorization)
+      .toBe("Bearer jwt-contributor-B")
+
+    // Same identity again → back to serving from cache (no extra fetch).
+    expect(await getToken()).toBe("token-contributor-B")
+    expect(contributorFetch).toHaveBeenCalledTimes(1)
+  })
+
+  // AQU-616: a logged-out session (JWT gone) must not serve the token cached
+  // under the still-recent session — it bypasses the cache and returns null.
+  it("AQU-616: does not serve a cached token once the JWT is gone (logout)", async () => {
+    const fetchMock = mockFetch({
+      status: 200,
+      body: { token: "token-live", expiresIn: 900, role: { level: 400, name: "contributor", source: "override" } },
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    let activeJwt: string | null = "jwt-live"
+    const getToken = makeSyncTokenFetcher(() => activeJwt, "proj-1", "file-a", {}, API)
+    expect(await getToken()).toBe("token-live")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    // Logout: jwtRef goes null. No further fetch, and the cached token is not
+    // handed back to the now-signed-out caller.
+    activeJwt = null
+    expect(await getToken()).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it("returns null and logs when the server rejects the jwt", async () => {
     global.fetch = mockFetch({ status: 401, body: "stale" }) as unknown as typeof fetch
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)

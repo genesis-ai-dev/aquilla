@@ -92,6 +92,23 @@ function makeCellWithHtml(
   }
 }
 
+function withDocxLocator(cell: CellData, paragraph: number, segment = 0): CellData {
+  return {
+    ...cell,
+    metadata: {
+      aquillaImport: {
+        sourceLocator: {
+          kind: "package-block",
+          memberPath: "word/document.xml",
+          blockPath: `w:p[${paragraph}]`,
+          segment,
+        },
+        physicalOrder: segment,
+      },
+    },
+  }
+}
+
 describe("exportDocx — translation injection (AQU-233)", () => {
   it("injects translated text into a single paragraph", async () => {
     const buffer = await makeDocx(para("Hello world"))
@@ -133,6 +150,19 @@ describe("exportDocx — translation injection (AQU-233)", () => {
     expect(outXml).toContain("Título del Capítulo")
     // Style is preserved.
     expect(outXml).toContain("Heading1")
+  })
+
+  it("uses package locators instead of editor order when cells are reordered", async () => {
+    const buffer = await makeDocx(para("First") + emptyPara() + para("Third"))
+    const cells = [
+      withDocxLocator(makeCell("c3", "Third", "Tercero", ""), 3),
+      withDocxLocator(makeCell("c1", "First", "Primero", ""), 1),
+    ]
+    const result = await exportDocx(buffer, cells)
+    const xml = await readDocumentXml(result.blob)
+    expect(xml.indexOf("Primero")).toBeLessThan(xml.indexOf("Tercero"))
+    expect(xml).not.toContain("First")
+    expect(xml).not.toContain("Third")
   })
 
   it("joins multi-segment cells (shared group) with a space", async () => {

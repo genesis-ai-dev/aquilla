@@ -170,7 +170,30 @@ CREATE TABLE project_invites (
     used_by    BIGINT,
     used_at    TIMESTAMPTZ,
     email      TEXT,
+    -- AQU-528: optional JSON array of lane (target-language) values to
+    -- auto-grant as kind='lane' project_member_scopes on accept. NULL =
+    -- unscoped invite (grants access across every lane the role allows).
+    scope_lanes TEXT,
     PRIMARY KEY (token, project_id)
+);
+
+-- AQU-626: authenticated per-user deep links + PIN (fresh-browser / diode-zone
+-- flow). A reusable link binds one pre-provisioned account to one project; the
+-- scrypt-hashed PIN is the only credential. See migrations/0036 for the full
+-- security model (indistinguishable failures, attempt-lockout, soft-revoke).
+CREATE TABLE project_access_links (
+    token           TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL,
+    user_id         BIGINT NOT NULL,
+    pin_hash        TEXT NOT NULL,
+    role_level      INTEGER NOT NULL DEFAULT 400,
+    created_by      BIGINT NOT NULL,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    expires_at      TIMESTAMPTZ,
+    revoked_at      TIMESTAMPTZ,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until    TIMESTAMPTZ,
+    last_used_at    TIMESTAMPTZ
 );
 
 -- Email-based organization invitations (see migrations/0043_org_invites.sql).
@@ -374,7 +397,8 @@ CREATE TABLE files (
     -- human-edited or validated). Recomputed by fileCountersRecomputeStmt on every
     -- target.cell.commit or cell.validate projection. Forward-only: 0 for all cells
     -- predating migration 0037.
-    ai_drafted_count INTEGER NOT NULL DEFAULT 0
+    ai_drafted_count INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (id, project_id)
 );
 
 CREATE TABLE cells (
@@ -665,6 +689,8 @@ CREATE INDEX idx_org_members_user ON org_members(user_id);
 CREATE UNIQUE INDEX idx_organizations_legacy_uuid ON organizations(legacy_uuid);
 CREATE INDEX idx_organizations_owner ON organizations(owner_user_id);
 CREATE INDEX idx_password_reset_tokens_token ON password_reset_tokens(token);
+CREATE INDEX idx_project_access_links_project ON project_access_links(project_id);
+CREATE INDEX idx_project_access_links_user ON project_access_links(user_id);
 CREATE INDEX idx_project_invites_project ON project_invites(project_id);
 CREATE INDEX idx_project_invites_token ON project_invites(token);
 CREATE INDEX idx_project_invites_unused ON project_invites(project_id, used_by) WHERE used_by IS NULL;
@@ -875,7 +901,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
     id                  UUID PRIMARY KEY,
     project_id          TEXT NOT NULL,
     uploaded_by_user_id TEXT NOT NULL,
-    credential_id       TEXT NOT NULL,
+    credential_id       TEXT,
     name                TEXT NOT NULL,
     content_type        TEXT,
     size_bytes          BIGINT NOT NULL,
@@ -884,9 +910,48 @@ CREATE TABLE IF NOT EXISTS artifacts (
     file_id             TEXT,
     kind                TEXT NOT NULL DEFAULT 'source',
     audio_id            TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    -- AQU-635: format inspection/classification facts that belong to the
+    -- immutable artifact rather than any one file interpretation.
+    metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (id, project_id)
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
+
+-- AQU-635: one immutable artifact can contribute multiple package members or
+-- files. Per-cell reversible locators remain in cells.metadata; this relation
+-- stores only file-level interpretation/provenance and compact manifests.
+CREATE TABLE IF NOT EXISTS artifact_bindings (
+    id              UUID PRIMARY KEY,
+    project_id      TEXT NOT NULL,
+    artifact_id     UUID NOT NULL,
+    file_id         TEXT NOT NULL,
+    binding_role    TEXT NOT NULL
+                      CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
+    target_lang     TEXT NOT NULL DEFAULT '',
+    member_path     TEXT NOT NULL DEFAULT '',
+    profile_id      TEXT NOT NULL,
+    profile_version TEXT NOT NULL,
+    fidelity        TEXT NOT NULL
+                      CHECK (fidelity IN ('native', 'verified-recipe', 'content-only', 'preserved-only')),
+    manifest        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    recipe          JSONB,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path),
+    CONSTRAINT artifact_bindings_artifact_project_fkey
+      FOREIGN KEY (artifact_id, project_id)
+      REFERENCES artifacts(id, project_id)
+      ON DELETE CASCADE,
+    CONSTRAINT artifact_bindings_file_project_fkey
+      FOREIGN KEY (file_id, project_id)
+      REFERENCES files(id, project_id)
+      ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_bindings_project_file
+  ON artifact_bindings(project_id, file_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_bindings_artifact
+  ON artifact_bindings(artifact_id);
 
 -- Agent memory + project brief (0066_agent_memory.sql; AQU-AGENT contracts §3).
 -- Long-term, human-reviewed agent memory. `agent_memories` rows move

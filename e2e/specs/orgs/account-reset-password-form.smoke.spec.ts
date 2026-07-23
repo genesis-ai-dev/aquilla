@@ -7,8 +7,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("forgot password form validates email on submit", async ({ alice }) => {
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
-
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()

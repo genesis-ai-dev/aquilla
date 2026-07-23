@@ -143,6 +143,17 @@ describe("RulesPage infraction derivation (AQU-186)", () => {
     vi.mocked(getProject).mockResolvedValue(makeProject())
   })
 
+  it("shows explicit progress while the rules project is unresolved", async () => {
+    const { getProject } = await import("@/lib/store/project-index")
+    vi.mocked(getProject).mockImplementationOnce(() => new Promise(() => {}))
+
+    renderRulesPage()
+
+    const status = screen.getByRole("status", { name: "Loading rules" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+  })
+
   it("does NOT render 'Harmonize all' when no cells violate any builtin check", async () => {
     // All cells are clean — empty-target fires only when source has content
     // and target is blank; here we give a good translation.

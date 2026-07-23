@@ -23,8 +23,6 @@ test("rules page Terminology button navigates to terminology page", async ({ ali
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // The rules surface rendered ("Built-in checks" card).
   await expect(alice.getByText("Built-in checks")).toBeVisible({ timeout: 10_000 })
 

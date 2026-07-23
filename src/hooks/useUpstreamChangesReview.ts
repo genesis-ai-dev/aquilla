@@ -84,10 +84,53 @@ export interface UseUpstreamChangesReviewOptions {
   enabled?: boolean
 }
 
-/** Cap on files scanned for staleness per revalidate — review panels are
- *  bounded surfaces (a project rarely has >100 files under active review);
- *  a larger project truncates silently rather than issuing an unbounded fan-out. */
-const MAX_FILES_SCANNED = 100
+const REVIEW_LOAD_CONCURRENCY = 6
+
+interface StaleFileState {
+  stale: Set<string>
+  tombstoned: Set<string>
+}
+
+type StaleResponseFetcher = typeof fetchStaleSourceResponse
+
+/**
+ * Load every file's upstream state with a small worker pool. A missing token
+ * or failed file read rejects the complete scan: callers must never publish a
+ * partial result as "Nothing flagged".
+ */
+export async function loadUpstreamStaleFiles(
+  projectId: string,
+  files: readonly Pick<FileReference, "id" | "name">[],
+  getToken: (fileId: string) => Promise<string | null>,
+  fetchStale: StaleResponseFetcher = fetchStaleSourceResponse,
+): Promise<{ staleByFile: Map<string, StaleFileState>; projectToken: string | null }> {
+  const states = new Array<[string, StaleFileState]>(files.length)
+  const tokens = new Array<string>(files.length)
+  let nextIndex = 0
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex++
+      if (index >= files.length) return
+      const file = files[index]
+      const jwt = await getToken(file.id)
+      if (!jwt) throw new Error(`Couldn't get a read token for ${file.name}.`)
+      const response = await fetchStale(projectId, file.id, jwt)
+      tokens[index] = jwt
+      states[index] = [file.id, {
+        stale: new Set(response.staleCellIds ?? []),
+        tombstoned: new Set(response.tombstonedCellIds ?? []),
+      }]
+    }
+  }
+
+  const workerCount = Math.min(REVIEW_LOAD_CONCURRENCY, files.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return {
+    staleByFile: new Map(states),
+    projectToken: tokens.find(Boolean) ?? null,
+  }
+}
 
 export function useUpstreamChangesReview(
   opts: UseUpstreamChangesReviewOptions,
@@ -110,11 +153,12 @@ export function useUpstreamChangesReview(
       setIsError(false)
       return
     }
+    const activeProjectId = projectId
     const gen = ++generationRef.current
     setIsLoading(true)
     setIsError(false)
     try {
-      const scanFiles = filesRef.current.slice(0, MAX_FILES_SCANNED)
+      const scanFiles = filesRef.current
       if (scanFiles.length === 0) {
         if (generationRef.current === gen) {
           setGroups([])
@@ -125,23 +169,10 @@ export function useUpstreamChangesReview(
 
       // 1. Per-file stale-source (parallel). Each file needs its own
       //    file-scoped token (sync-token claims are minted per fileId).
-      const staleByFile = new Map<string, { stale: Set<string>; tombstoned: Set<string> }>()
-      let projectToken: string | null = null
-      await Promise.all(
-        scanFiles.map(async (f) => {
-          const jwt = await tokenRef.current(f.id)
-          if (!jwt) return
-          projectToken ??= jwt // any file-scoped token works for project-scoped routes
-          try {
-            const res = await fetchStaleSourceResponse(projectId, f.id, jwt)
-            staleByFile.set(f.id, {
-              stale: new Set(res.staleCellIds ?? []),
-              tombstoned: new Set(res.tombstonedCellIds ?? []),
-            })
-          } catch (err) {
-            console.warn("[useUpstreamChangesReview] stale-source fetch failed:", f.id, err)
-          }
-        }),
+      const { staleByFile, projectToken } = await loadUpstreamStaleFiles(
+        activeProjectId,
+        scanFiles,
+        tokenRef.current,
       )
       if (generationRef.current !== gen) return
 
@@ -154,7 +185,7 @@ export function useUpstreamChangesReview(
 
       // 2. Mirror-sync batches (project-scoped; any file-scoped token works —
       //    verifyTokenForProject only checks the projectId claim).
-      const batchesRes = await fetchLinkCursorBatches(projectId, projectToken)
+      const batchesRes = await fetchLinkCursorBatches(activeProjectId, projectToken)
       if (generationRef.current !== gen) return
 
       // Build, per (fileId, cellId), the ordered list of mirror events across
@@ -203,20 +234,27 @@ export function useUpstreamChangesReview(
         arr.push(p.cellId)
         byFile.set(p.fileId, arr)
       }
-      await Promise.all(
-        [...byFile.entries()].map(async ([fileId, cellIds]) => {
+      const targetEntries = [...byFile.entries()]
+      let nextTargetIndex = 0
+      async function loadTargetWorker(): Promise<void> {
+        while (true) {
+          const index = nextTargetIndex++
+          if (index >= targetEntries.length) return
+          const [fileId, cellIds] = targetEntries[index]
           const jwt = await tokenRef.current(fileId)
-          if (!jwt) return
-          try {
-            const rows = await fetchCellsByIds(projectId, fileId, cellIds, jwt)
-            for (const row of rows) {
-              if (row.side !== "target") continue
-              targetByKey.set(`${fileId} ${row.cellId}`, row)
-            }
-          } catch (err) {
-            console.warn("[useUpstreamChangesReview] cells-by-ids fetch failed:", fileId, err)
+          if (!jwt) throw new Error(`Couldn't get a target read token for file ${fileId}.`)
+          const rows = await fetchCellsByIds(activeProjectId, fileId, cellIds, jwt)
+          for (const row of rows) {
+            if (row.side !== "target") continue
+            targetByKey.set(`${fileId} ${row.cellId}`, row)
           }
-        }),
+        }
+      }
+      await Promise.all(
+        Array.from(
+          { length: Math.min(REVIEW_LOAD_CONCURRENCY, targetEntries.length) },
+          () => loadTargetWorker(),
+        ),
       )
       if (generationRef.current !== gen) return
 

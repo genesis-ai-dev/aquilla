@@ -24,8 +24,6 @@ test("project settings Advanced LLM section expands and Custom endpoint radio to
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/settings?section=ai`)
-  await alice.waitForLoadState("networkidle")
-
   // The <details> summary is "Advanced LLM settings".
   const summary = alice.getByText(/Advanced LLM settings/i)
   await expect(summary).toBeVisible({ timeout: 10_000 })

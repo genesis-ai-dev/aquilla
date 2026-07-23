@@ -14,8 +14,6 @@ test("admin console Teams tab renders Team column header", async ({ alice }) => 
   await dash.goto()
 
   await alice.goto("/admin")
-  await alice.waitForLoadState("networkidle")
-
   // Verify we are on the admin page.
   await expect(alice.getByRole("heading", { name: /Admin console/i })).toBeVisible({
     timeout: 10_000,

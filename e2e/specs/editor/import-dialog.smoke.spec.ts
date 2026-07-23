@@ -23,8 +23,6 @@ test("import dialog shows Upload Files and eBible Corpus options", async ({ alic
   await dash.openProject(name)
 
   // Wait for workspace to load. With no files, PrimaryActionButton shows "Import".
-  await alice.waitForLoadState("networkidle")
-
   // Open ImportDialog via the primary action button or the sidebar import trigger.
   const importBtn = alice.getByRole("button", { name: /^Import$/i }).first()
   await expect(importBtn).toBeVisible({ timeout: 10_000 })

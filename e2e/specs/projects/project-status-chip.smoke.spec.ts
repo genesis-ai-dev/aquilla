@@ -20,8 +20,6 @@ test("status chip shows Overdue when deadline is in the past", async ({ alice })
   await dash.createProject({ name, source: "en", target: "fr" })
 
   await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  await alice.waitForLoadState("networkidle")
-
   // Set deadline button should be visible.
   const setDeadlineBtn = alice.getByRole("button", { name: /Set deadline/i })
   await expect(setDeadlineBtn).toBeVisible({ timeout: 10_000 })
@@ -52,8 +50,6 @@ test("status chip shows Due soon when deadline is within 7 days", async ({ alice
   await dash.createProject({ name, source: "en", target: "fr" })
 
   await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  await alice.waitForLoadState("networkidle")
-
   const setDeadlineBtn = alice.getByRole("button", { name: /Set deadline/i })
   await expect(setDeadlineBtn).toBeVisible({ timeout: 10_000 })
   await setDeadlineBtn.click()

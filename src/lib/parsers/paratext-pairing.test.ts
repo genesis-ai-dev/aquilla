@@ -19,8 +19,10 @@ describe("pairSourceTarget", () => {
     const byRef = new Map(mat.rows.map((r) => [r.ref, r]))
     expect(byRef.get("MAT 1:1")).toEqual({
       ref: "MAT 1:1",
+      type: "verse",
       sourceText: "The book of the genealogy",
       targetText: "تارگەت ١",
+      paragraphStart: true,
     })
     expect(byRef.get("MAT 1:2")!.sourceText).toBe("Abraham was the father of Isaac")
     expect(byRef.get("MAT 1:2")!.targetText).toBe("تارگەت ٢")
@@ -69,7 +71,13 @@ describe("pairSourceTarget", () => {
   it("handles a target book with no source coverage (all target-only)", () => {
     const books = pairSourceTarget([{ bookId: "GEN", rawSource: targetGEN }], [])
     expect(books[0].rows).toEqual([
-      { ref: "GEN 1:1", sourceText: "", targetText: "in the beginning (target)" },
+      {
+        ref: "GEN 1:1",
+        type: "verse",
+        sourceText: "",
+        targetText: "in the beginning (target)",
+        paragraphStart: true,
+      },
     ])
     expect(books[0].targetOnlyCount).toBe(1)
   })
@@ -92,6 +100,36 @@ describe("buildBilingualPlan", () => {
   it("carries the target raw bytes as the round-trip side-car", () => {
     const plan = buildBilingualPlan([{ bookId: "MAT", rawSource: targetMAT }], source)
     expect(plan[0].rawSource).toBe(targetMAT)
+  })
+
+  it("keeps target headings as unnumbered structural cells in physical order", () => {
+    const targetWithHeadings = [
+      "\\id GEN",
+      "\\mt1 Genesis",
+      "\\c 1",
+      "\\s1 The beginning",
+      "\\p",
+      "\\v 1 Target verse one",
+      "\\s2 A later section",
+      "\\v 2 Target verse two",
+    ].join("\n")
+    const plan = buildBilingualPlan(
+      [{ bookId: "GEN", rawSource: targetWithHeadings }],
+      [
+        { ref: "GEN 1:1", text: "Source verse one" },
+        { ref: "GEN 1:2", text: "Source verse two" },
+      ],
+    )[0]
+
+    expect(plan.cells.map((cell) => ({ type: cell.type, ref: cell.ref }))).toEqual([
+      { type: "paratext", ref: "GEN:mt1:1" },
+      { type: "heading", ref: "GEN 1:s1:1" },
+      { type: "verse", ref: "GEN 1:1" },
+      { type: "heading", ref: "GEN 1:s2:1" },
+      { type: "verse", ref: "GEN 1:2" },
+    ])
+    expect(plan.cells.filter((cell) => cell.type !== "verse").every((cell) => cell.sourceText === ""))
+      .toBe(true)
   })
 
   it("keeps counts + canonical order + corpus from the pairing", () => {

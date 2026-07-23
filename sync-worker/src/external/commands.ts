@@ -8,6 +8,14 @@
 // dependency-free.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
+import {
+  validatePlanImportManifest,
+  type PlanImportCell,
+  type PlanImportManifest,
+  type PlanImportVariant,
+} from './import-manifest'
+
+export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
 export interface SetTranslationCommand {
@@ -16,21 +24,6 @@ export interface SetTranslationCommand {
   cellId: string
   value: string
   valueHtml?: string
-}
-
-/** One already-parsed source cell in a PlanImport. Parsing (USFM/JSON/…) is
- *  client/agent-side for v1, exactly like the SPA /import path — the server
- *  receives cells, never a raw recipe (server-side recipe parsing is a Wave-3
- *  TRACE). Field names mirror import-route.ts's source.cell.create inputs:
- *  `id` is the cell identifier (chain key), `content` the source text. */
-export interface PlanImportCell {
-  /** Cell identifier; a fresh UUIDv7 is minted when omitted. */
-  id?: string
-  content: string
-  canonicalRef?: string
-  /** Logical section label (chapter/act/…); stored in the cell metadata bucket. */
-  section?: string
-  type?: string
 }
 
 /** Create a file and its source cells via the changeset pipeline (AQU-533 §5).
@@ -44,6 +37,8 @@ export interface PlanImportCommand {
   targetLanguage?: string
   /** Optional uploaded artifact to preserve + link to the created file. */
   artifactId?: string
+  /** Optional normalized profile/recipe selected by the unified importer. */
+  manifest?: PlanImportManifest
   cells: PlanImportCell[]
 }
 
@@ -187,6 +182,56 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'PlanImport.cells must be an array' })
         return
       }
+      let manifest: PlanImportManifest | undefined
+      if (c.manifest !== undefined) {
+        if (!isPlainObject(c.manifest)) {
+          issues.push({ index, message: 'PlanImport.manifest must be an object when present' })
+          return
+        }
+        const m = c.manifest
+        if (
+          m.version !== 1 ||
+          !isNonEmptyString(m.profileId) ||
+          !isNonEmptyString(m.profileVersion) ||
+          typeof m.deterministic !== 'boolean' ||
+          !isNonEmptyString(m.fidelity)
+        ) {
+          issues.push({ index, message: 'PlanImport.manifest has invalid required fields' })
+          return
+        }
+        if (m.memberPath !== undefined && typeof m.memberPath !== 'string') {
+          issues.push({ index, message: 'PlanImport.manifest.memberPath must be a string when present' })
+          return
+        }
+        if (m.warningCounts !== undefined && !isPlainObject(m.warningCounts)) {
+          issues.push({ index, message: 'PlanImport.manifest.warningCounts must be an object when present' })
+          return
+        }
+        if (
+          m.warningCounts !== undefined &&
+          Object.values(m.warningCounts).some((count) => typeof count !== 'number' || !Number.isInteger(count) || count < 0)
+        ) {
+          issues.push({ index, message: 'PlanImport.manifest.warningCounts values must be non-negative integers' })
+          return
+        }
+        if (m.recipe !== undefined) {
+          if (!isPlainObject(m.recipe) || !isPlainObject(m.recipe.config)) {
+            issues.push({ index, message: 'PlanImport.manifest.recipe and recipe.config must be objects' })
+            return
+          }
+          if (
+            m.recipe.version !== 1 ||
+            !isNonEmptyString(m.recipe.name) ||
+            !isNonEmptyString(m.recipe.inputFormat) ||
+            !isNonEmptyString(m.recipe.strategy) ||
+            (m.recipe.roundTripVerified !== undefined && typeof m.recipe.roundTripVerified !== 'boolean')
+          ) {
+            issues.push({ index, message: 'PlanImport.manifest.recipe has invalid fields' })
+            return
+          }
+        }
+        manifest = m as unknown as PlanImportManifest
+      }
       const cells: PlanImportCell[] = []
       let cellInvalid = false
       c.cells.forEach((rawCell, cellIndex) => {
@@ -206,22 +251,95 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
           cellInvalid = true
           return
         }
-        for (const k of ['canonicalRef', 'section', 'type'] as const) {
+        for (const k of ['canonicalRef', 'section', 'type', 'contentHtml', 'unitKey', 'speaker'] as const) {
           if (rc[k] !== undefined && typeof rc[k] !== 'string') {
             issues.push({ index, message: `PlanImport.cells[${cellIndex}].${k} must be a string when present` })
             cellInvalid = true
             return
           }
         }
+        if (rc.displayLabel !== undefined && rc.displayLabel !== null && typeof rc.displayLabel !== 'string') {
+          issues.push({ index, message: `PlanImport.cells[${cellIndex}].displayLabel must be a string or null when present` })
+          cellInvalid = true
+          return
+        }
+        for (const k of ['address', 'sourceLocator', 'metadata'] as const) {
+          if (rc[k] !== undefined && !isPlainObject(rc[k])) {
+            issues.push({ index, message: `PlanImport.cells[${cellIndex}].${k} must be an object when present` })
+            cellInvalid = true
+            return
+          }
+        }
+        for (const k of ['physicalOrder', 'startMs', 'endMs'] as const) {
+          if (rc[k] !== undefined && (typeof rc[k] !== 'number' || !Number.isFinite(rc[k]))) {
+            issues.push({ index, message: `PlanImport.cells[${cellIndex}].${k} must be a finite number when present` })
+            cellInvalid = true
+            return
+          }
+        }
+        if (rc.paragraphStart !== undefined && typeof rc.paragraphStart !== 'boolean') {
+          issues.push({ index, message: `PlanImport.cells[${cellIndex}].paragraphStart must be a boolean when present` })
+          cellInvalid = true
+          return
+        }
+        let variants: PlanImportVariant[] | undefined
+        if (rc.variants !== undefined) {
+          if (!Array.isArray(rc.variants)) {
+            issues.push({ index, message: `PlanImport.cells[${cellIndex}].variants must be an array when present` })
+            cellInvalid = true
+            return
+          }
+          variants = []
+          for (const [variantIndex, rawVariant] of rc.variants.entries()) {
+            if (!isPlainObject(rawVariant) || typeof rawVariant.laneId !== 'string' || typeof rawVariant.content !== 'string') {
+              issues.push({ index, message: `PlanImport.cells[${cellIndex}].variants[${variantIndex}] has invalid required fields` })
+              cellInvalid = true
+              return
+            }
+            if (rawVariant.languageTag !== undefined && typeof rawVariant.languageTag !== 'string') {
+              issues.push({ index, message: `PlanImport.cells[${cellIndex}].variants[${variantIndex}].languageTag must be a string when present` })
+              cellInvalid = true
+              return
+            }
+            if (rawVariant.contentHtml !== undefined && typeof rawVariant.contentHtml !== 'string') {
+              issues.push({ index, message: `PlanImport.cells[${cellIndex}].variants[${variantIndex}].contentHtml must be a string when present` })
+              cellInvalid = true
+              return
+            }
+            variants.push({
+              laneId: rawVariant.laneId,
+              content: rawVariant.content,
+              ...(rawVariant.languageTag !== undefined ? { languageTag: rawVariant.languageTag } : {}),
+              ...(rawVariant.contentHtml !== undefined ? { contentHtml: rawVariant.contentHtml } : {}),
+            })
+          }
+        }
         cells.push({
           ...(rc.id !== undefined ? { id: rc.id as string } : {}),
           content: rc.content,
+          ...(rc.contentHtml !== undefined ? { contentHtml: rc.contentHtml as string } : {}),
           ...(rc.canonicalRef !== undefined ? { canonicalRef: rc.canonicalRef as string } : {}),
           ...(rc.section !== undefined ? { section: rc.section as string } : {}),
           ...(rc.type !== undefined ? { type: rc.type as string } : {}),
+          ...(rc.unitKey !== undefined ? { unitKey: rc.unitKey as string } : {}),
+          ...(rc.displayLabel !== undefined ? { displayLabel: rc.displayLabel as string | null } : {}),
+          ...(rc.address !== undefined ? { address: rc.address as Record<string, unknown> } : {}),
+          ...(rc.sourceLocator !== undefined ? { sourceLocator: rc.sourceLocator as Record<string, unknown> } : {}),
+          ...(rc.physicalOrder !== undefined ? { physicalOrder: rc.physicalOrder as number } : {}),
+          ...(rc.startMs !== undefined ? { startMs: rc.startMs as number } : {}),
+          ...(rc.endMs !== undefined ? { endMs: rc.endMs as number } : {}),
+          ...(rc.speaker !== undefined ? { speaker: rc.speaker as string } : {}),
+          ...(rc.paragraphStart !== undefined ? { paragraphStart: rc.paragraphStart as boolean } : {}),
+          ...(rc.metadata !== undefined ? { metadata: rc.metadata as Record<string, unknown> } : {}),
+          ...(variants !== undefined ? { variants } : {}),
         })
       })
       if (cellInvalid) return
+      const manifestIssues = validatePlanImportManifest({ fileType: c.fileType, cells, ...(manifest ? { manifest } : {}) })
+      if (manifestIssues.length > 0) {
+        for (const message of manifestIssues) issues.push({ index, message: `PlanImport.${message}` })
+        return
+      }
       commands.push({
         kind: 'PlanImport',
         fileName: c.fileName,
@@ -229,6 +347,7 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         ...(c.sourceLanguage !== undefined ? { sourceLanguage: c.sourceLanguage as string } : {}),
         ...(c.targetLanguage !== undefined ? { targetLanguage: c.targetLanguage as string } : {}),
         ...(c.artifactId !== undefined ? { artifactId: c.artifactId as string } : {}),
+        ...(manifest ? { manifest } : {}),
         cells,
       })
       return

@@ -16,8 +16,6 @@ test("project settings More save options shows Close without saving", async ({ a
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `MoreSave ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings?section=general`)
-  await alice.waitForLoadState("networkidle")
-
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
   await sourceLanguage.fill("English (US)")

@@ -13,8 +13,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("preferences AI provider section expands and collapses", async ({ alice }) => {
   await alice.goto("/preferences/provider-keys")
-  await alice.waitForLoadState("networkidle")
-
   // Find the AI provider disclosure button.
   const expandBtn = alice.getByRole("button", { name: /AI provider \(advanced\)/i })
   await expect(expandBtn).toBeVisible({ timeout: 10_000 })

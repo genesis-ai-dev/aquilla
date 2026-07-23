@@ -43,7 +43,7 @@ import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
-import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates } from "@/lib/completion/compress-examples"
+import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates, dropValidatedPairDuplicates } from "@/lib/completion/compress-examples"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
@@ -237,12 +237,17 @@ export function useCompletion(
       // Compress the retrieved examples (deterministic source-span truncation using the
       // matched-token provenance the search already returns) and drop near-duplicates,
       // so the freed budget can hold the discourse window below. (D6)
-      // Examples that duplicate a preceding-context cell are dropped first (on the
-      // FULL source, before compression, so the match is exact cell identity):
-      // preceding-context is the stronger, exact signal, so we keep it and avoid
-      // rendering the same cell twice.
+      // Examples that duplicate a preceding-context cell OR a validated pair are dropped
+      // first (on the FULL source, before compression, so the match is exact cell
+      // identity): preceding-context and validated pairs are the stronger, exact signals
+      // and both render ahead of retrieved examples in the prompt, so we keep them and
+      // avoid rendering the same cell twice (which only bloats the prompt / prefill —
+      // AQU-617).
       const compressedExamples = dedupeExamples(
-        dropPrecedingContextDuplicates(found, precedingContext).map((e) => ({
+        dropValidatedPairDuplicates(
+          dropPrecedingContextDuplicates(found, precedingContext),
+          validatedPairs,
+        ).map((e) => ({
           source: compressExampleSource(e.source, { matchedTokens: e.matchedTokens }),
           target: e.target,
         })),

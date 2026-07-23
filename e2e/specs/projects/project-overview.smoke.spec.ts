@@ -24,8 +24,6 @@ test("project overview renders name, overview cards, and Open project button", a
 
   // createProject navigates to /projects/:id.
   await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  await alice.waitForLoadState("networkidle")
-
   // h1 — project name.
   await expect(
     alice.locator("h1").filter({ hasText: name })
@@ -65,4 +63,43 @@ test("project overview renders name, overview cards, and Open project button", a
   await expect(
     alice.getByRole("navigation", { name: "breadcrumb" }).getByText("All organizations", { exact: true }),
   ).toHaveAttribute("aria-current", "page")
+})
+
+test("project overview keeps its template visible with explicit progress while details load", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `Overview loading ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
+  const projectId = alice.url().match(/\/projects\/([^/?]+)/)?.[1]
+  expect(projectId).toBeTruthy()
+
+  await alice.goto("/")
+
+  let releaseProject!: () => void
+  const projectGate = new Promise<void>((resolve) => {
+    releaseProject = resolve
+  })
+  await alice.route(`**/api/v2/projects/${projectId}`, async (route) => {
+    if (route.request().method() === "GET") await projectGate
+    await route.continue()
+  })
+
+  try {
+    await alice.goto(`/projects/${projectId}`)
+
+    const loading = alice.getByRole("status", {
+      name: "Loading project details",
+    })
+    await expect(loading).toBeVisible()
+    await expect(loading.locator("[data-slot='spinner']")).toBeVisible()
+    await expect(alice.getByText("Loading project details…")).toBeVisible()
+    await expect(alice.getByRole("heading", { level: 1, name })).toHaveCount(0)
+  } finally {
+    releaseProject()
+  }
+
+  await expect(
+    alice.getByRole("heading", { level: 1, name }),
+  ).toBeVisible()
 })

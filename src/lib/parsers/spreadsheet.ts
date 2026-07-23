@@ -2,108 +2,22 @@
  * AQU-316: Spreadsheet parser for CSV and XLSX files.
  *
  * CSV: re-exports parseCsvRows from csv-bilingual (no dependency).
- * XLSX: zero-dependency approach — XLSX is a ZIP archive; we unzip using the
- * native `DecompressionStream` (available in modern browsers and Node ≥ 18).
- * We extract the shared strings table + each sheet's XML and return rows as
+ * XLSX: XLSX is a ZIP archive; JSZip reads its central directory and handles
+ * the ZIP variants emitted by Excel, LibreOffice, and Google Sheets. We then
+ * extract the shared strings table + each sheet's XML and return rows as
  * string[][].
  *
- * NOTE: DecompressionStream only supports deflate/deflate-raw; XLSX files may
- * also use "STORED" (no compression) entries — both are handled. Encrypted
- * XLSXs are not supported (they'd require a different ZIP format entirely).
+ * Encrypted XLSXs are not supported (they require an Office encryption
+ * container rather than a normal Open Packaging Convention ZIP).
  *
  * Column mapping is done by the caller (ColumnMappingPanel) using the
  * SpreadsheetSheet interface returned here.
  */
 
+import JSZip from "jszip"
 import { parseCsvRows } from "./csv-bilingual"
+import { assertSafeArchiveInputSize, assertSafeZipArchive } from "./zip-safety"
 export { parseCsvRows }
-
-// ─── ZIP / XLSX parser (no dependency) ────────────────────────────────────────
-
-/**
- * Minimal ZIP central-directory entry needed to extract one file.
- */
-interface ZipEntry {
-  name: string
-  /** Raw compressed bytes (may be uncompressed if method=0). */
-  data: Uint8Array
-  /** Compression method: 0=stored, 8=deflate. */
-  method: number
-}
-
-/**
- * Parse a ZIP archive (ArrayBuffer) and return the entries by filename.
- * Only reads the local file headers (start-of-archive); does not use the
- * central directory — sufficient for well-formed XLSX files.
- */
-function parseZipEntries(buffer: ArrayBuffer): Map<string, ZipEntry> {
-  const view = new DataView(buffer)
-  const bytes = new Uint8Array(buffer)
-  const entries = new Map<string, ZipEntry>()
-  let offset = 0
-
-  while (offset + 30 <= bytes.length) {
-    const sig = view.getUint32(offset, true)
-    // Local file header signature: 0x04034b50
-    if (sig !== 0x04034b50) break
-
-    const method = view.getUint16(offset + 8, true)
-    const compressedSize = view.getUint32(offset + 18, true)
-    const filenameLen = view.getUint16(offset + 26, true)
-    const extraLen = view.getUint16(offset + 28, true)
-
-    const nameBytes = bytes.slice(offset + 30, offset + 30 + filenameLen)
-    const name = new TextDecoder().decode(nameBytes)
-
-    const dataStart = offset + 30 + filenameLen + extraLen
-    const data = bytes.slice(dataStart, dataStart + compressedSize)
-
-    entries.set(name, { name, data, method })
-    offset = dataStart + compressedSize
-  }
-
-  return entries
-}
-
-/**
- * Decompress a deflate-compressed Uint8Array using DecompressionStream.
- * Falls back gracefully when DecompressionStream is unavailable (returns
- * the raw bytes — callers will get garbled text, but won't crash the import).
- */
-async function decompress(data: Uint8Array): Promise<Uint8Array> {
-  if (typeof DecompressionStream === "undefined") {
-    // Node <18 or old browser — best effort: return raw bytes (will fail XML parse).
-    return data
-  }
-  const ds = new DecompressionStream("deflate-raw")
-  const writer = ds.writable.getWriter()
-  const reader = ds.readable.getReader()
-  // Cast to satisfy the strict ArrayBuffer (not SharedArrayBuffer) constraint
-  writer.write(data.buffer as ArrayBuffer)
-  writer.close()
-  const chunks: Uint8Array[] = []
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-  }
-  const total = chunks.reduce((n, c) => n + c.length, 0)
-  const out = new Uint8Array(total)
-  let pos = 0
-  for (const c of chunks) {
-    out.set(c, pos)
-    pos += c.length
-  }
-  return out
-}
-
-/**
- * Decode a ZIP entry to a UTF-8 string.
- */
-async function entryText(entry: ZipEntry): Promise<string> {
-  const bytes = entry.method === 8 ? await decompress(entry.data) : entry.data
-  return new TextDecoder("utf-8").decode(bytes)
-}
 
 // ─── XLSX sheet XML parser ────────────────────────────────────────────────────
 
@@ -230,27 +144,35 @@ export function parseCsvToSheet(text: string, fileName: string): SpreadsheetShee
  * Parse an XLSX ArrayBuffer into one sheet per worksheet tab.
  * Returns the sheets in workbook order. Each sheet's `rows` includes headers.
  *
- * NOTE: This is a dependency-free implementation using the native ZIP + XML
- * APIs. It handles the common case (string/number cells, shared strings table).
+ * The XML reader handles the common case (string/number cells, shared strings
+ * table, and cached formula values).
  * Complex features (formulas that depend on external data, pivot tables,
  * encrypted workbooks) are not supported.
  */
 export async function parseXlsxToSheets(buffer: ArrayBuffer): Promise<SpreadsheetSheet[]> {
-  const entries = parseZipEntries(buffer)
+  assertSafeArchiveInputSize(buffer.byteLength, "XLSX workbook")
+  let archive: JSZip
+  try {
+    archive = await JSZip.loadAsync(buffer)
+  } catch (error) {
+    throw new Error(`Could not read XLSX archive: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  assertSafeZipArchive(archive, "XLSX workbook")
+
+  const readEntry = async (path: string): Promise<string | null> => {
+    const entry = archive.file(path)
+    return entry ? entry.async("string") : null
+  }
 
   // Shared strings table (optional — some XLSXs inline all strings)
   let sharedStrings: string[] = []
-  const ssEntry = entries.get("xl/sharedStrings.xml")
-  if (ssEntry) {
-    const ssXml = await entryText(ssEntry)
-    sharedStrings = parseSharedStrings(ssXml)
-  }
+  const ssXml = await readEntry("xl/sharedStrings.xml")
+  if (ssXml) sharedStrings = parseSharedStrings(ssXml)
 
   // Workbook: get sheet names + rIds in order
-  const wbEntry = entries.get("xl/workbook.xml")
+  const wbXml = await readEntry("xl/workbook.xml")
   const sheetMeta: { name: string; rId: string }[] = []
-  if (wbEntry) {
-    const wbXml = await entryText(wbEntry)
+  if (wbXml) {
     const sheetRegex = /<sheet\s[^>]*name="([^"]*)"[^>]*r:id="([^"]*)"[^>]*\/?>/g
     let m: RegExpExecArray | null
     while ((m = sheetRegex.exec(wbXml)) !== null) {
@@ -259,10 +181,9 @@ export async function parseXlsxToSheets(buffer: ArrayBuffer): Promise<Spreadshee
   }
 
   // Workbook relationships: rId → sheet path
-  const relsEntry = entries.get("xl/_rels/workbook.xml.rels")
+  const relsXml = await readEntry("xl/_rels/workbook.xml.rels")
   const rIdToPath = new Map<string, string>()
-  if (relsEntry) {
-    const relsXml = await entryText(relsEntry)
+  if (relsXml) {
     const relRegex = /<Relationship\s[^>]*Id="([^"]*)"[^>]*Target="([^"]*)"[^>]*\/?>/g
     let m: RegExpExecArray | null
     while ((m = relRegex.exec(relsXml)) !== null) {
@@ -277,9 +198,8 @@ export async function parseXlsxToSheets(buffer: ArrayBuffer): Promise<Spreadshee
   for (const meta of sheetMeta) {
     const path = rIdToPath.get(meta.rId)
     if (!path) continue
-    const sheetEntry = entries.get(path)
-    if (!sheetEntry) continue
-    const sheetXml = await entryText(sheetEntry)
+    const sheetXml = await readEntry(path)
+    if (!sheetXml) continue
     const rows = parseSheetXml(sheetXml, sharedStrings)
     sheets.push({ name: meta.name, rows })
   }
@@ -288,15 +208,17 @@ export async function parseXlsxToSheets(buffer: ArrayBuffer): Promise<Spreadshee
   if (sheets.length === 0) {
     let i = 1
     while (true) {
-      const entry = entries.get(`xl/worksheets/sheet${i}.xml`)
-      if (!entry) break
-      const sheetXml = await entryText(entry)
+      const sheetXml = await readEntry(`xl/worksheets/sheet${i}.xml`)
+      if (!sheetXml) break
       const rows = parseSheetXml(sheetXml, sharedStrings)
       sheets.push({ name: `Sheet${i}`, rows })
       i++
     }
   }
 
+  if (sheets.length === 0) {
+    throw new Error("The XLSX workbook does not contain any readable worksheets.")
+  }
   return sheets
 }
 
@@ -311,6 +233,8 @@ export interface ColumnMapping {
   targetCol: number | null
   /** Cell label / ref column (e.g. "GEN 1:1"). */
   labelCol: number | null
+  /** Optional semantic unit type (verse, heading, cue, paragraph, etc.). */
+  typeCol?: number | null
   /** Cast / character name column. */
   castCol: number | null
   /** Start timestamp column (numeric seconds or HH:MM:SS). */
@@ -332,6 +256,9 @@ export interface MappedRow {
   translated: string
   /** Canonical ref / cell label (e.g. "GEN 1:1") */
   ref: string
+  type?: string
+  /** One-based row in the source sheet (including its header, when present). */
+  sourceRow?: number
   castName: string | undefined
   start: number | undefined
   end: number | undefined
@@ -372,17 +299,30 @@ export function applyColumnMapping(
   const dataRows = hasHeader ? rows.slice(1) : rows
   const results: MappedRow[] = []
 
-  for (const row of dataRows) {
+  for (const [rowIndex, row] of dataRows.entries()) {
     const original = mapping.sourceCol !== null ? (row[mapping.sourceCol] ?? "").trim() : ""
     if (!original) continue
 
     const translated = mapping.targetCol !== null ? (row[mapping.targetCol] ?? "").trim() : ""
     const ref = mapping.labelCol !== null ? (row[mapping.labelCol] ?? "").trim() : ""
+    const type = mapping.typeCol !== null && mapping.typeCol !== undefined
+      ? (row[mapping.typeCol] ?? "").trim() || undefined
+      : undefined
     const castName = mapping.castCol !== null ? (row[mapping.castCol] ?? "").trim() || undefined : undefined
     const start = mapping.startCol !== null ? parseTimestamp(row[mapping.startCol] ?? "") : undefined
     const end = mapping.endCol !== null ? parseTimestamp(row[mapping.endCol] ?? "") : undefined
 
-    results.push({ id: uuid(), original, translated, ref, castName, start, end })
+    results.push({
+      id: uuid(),
+      original,
+      translated,
+      ref,
+      type,
+      sourceRow: rowIndex + (hasHeader ? 2 : 1),
+      castName,
+      start,
+      end,
+    })
   }
 
   return results
@@ -393,16 +333,70 @@ export function applyColumnMapping(
  * bulkUploadSource pipeline).
  */
 export function mappedRowsToStrings(rows: MappedRow[]): TranslatableString[] {
-  return rows.map((r, i) => ({
-    id: r.id,
-    original: r.original,
-    translated: r.translated,
-    context: r.ref || `Row ${i + 1}`,
-    group: r.ref || `row-${i + 1}`,
-    ...(r.start !== undefined && r.end !== undefined ? { start: r.start, end: r.end } : {}),
-    ...(r.castName ? { speaker: r.castName } : {}),
-    type: "text" as const,
-  }))
+  const strings = rows.map((r, i) => {
+    const explicitType = r.type?.trim().toLowerCase()
+    const scriptureRef = /^([1-3]?[A-Z]{2,3})\s+(\d+):(\d+[a-z]?(?:-\d+[a-z]?)?)$/i.exec(r.ref)
+    const canonicalRef = scriptureRef
+      ? `${scriptureRef[1].toUpperCase()} ${Number(scriptureRef[2])}:${scriptureRef[3]}`
+      : undefined
+    const type: TranslatableString["type"] = /^(heading|header|title|section|chapter)$/.test(explicitType ?? "")
+      ? "heading"
+      : explicitType === "verse" || (!explicitType && canonicalRef)
+        ? "verse"
+        : explicitType === "list"
+          ? "list"
+          : /^(blockquote|quote)$/.test(explicitType ?? "")
+            ? "blockquote"
+            : explicitType === "paratext"
+              ? "paratext"
+              : explicitType === "cue" || (!explicitType && r.start !== undefined && r.end !== undefined)
+                ? "cue"
+                : "text"
+    const scriptureScope = canonicalRef?.slice(0, canonicalRef.indexOf(":"))
+    const structuralReference = scriptureScope && (type === "heading" || type === "paratext")
+      ? `${scriptureScope}:${type === "heading" ? "h" : "p"}:${r.sourceRow ?? i + 1}`
+      : undefined
+    const identityReference = structuralReference ?? (type === "verse" ? canonicalRef : undefined)
+
+    return {
+      id: r.id,
+      original: r.original,
+      translated: r.translated,
+      context: r.ref || `Row ${i + 1}`,
+      group: identityReference ?? (r.ref || `row-${i + 1}`),
+      ...(identityReference
+        ? { globalReferences: [identityReference], ...(scriptureScope ? { section: scriptureScope } : {}) }
+        : {}),
+      ...(r.start !== undefined && r.end !== undefined ? { start: r.start, end: r.end } : {}),
+      ...(r.castName ? { speaker: r.castName } : {}),
+      type,
+      ...(type === "text" ? { paragraphStart: true } : {}),
+      metadata: {
+        aquillaRecipe: {
+          recipeId: "builtin:spreadsheet-mapping",
+          record: r.sourceRow ?? i + 1,
+          field: "source",
+        },
+        ...(r.ref && !canonicalRef ? { spreadsheetLabel: r.ref } : {}),
+      },
+    }
+  })
+
+  return strings.map((string, index) => {
+    if ((string.type !== "heading" && string.type !== "paratext") || string.section) return string
+    const nextScope = strings.slice(index + 1).find((candidate) => candidate.section)?.section
+    const previousScope = strings.slice(0, index).reverse().find((candidate) => candidate.section)?.section
+    const scriptureScope = nextScope ?? previousScope
+    if (!scriptureScope || !/^[1-3]?[A-Z]{2,3}\s+\d+$/i.test(scriptureScope)) return string
+    const occurrence = rows[index]?.sourceRow ?? index + 1
+    const structuralReference = `${scriptureScope}:${string.type === "heading" ? "h" : "p"}:${occurrence}`
+    return {
+      ...string,
+      section: scriptureScope,
+      group: structuralReference,
+      globalReferences: [structuralReference],
+    }
+  })
 }
 
 // ─── AQU-439: Cast-name / camera-angle splitter ──────────────────────────────

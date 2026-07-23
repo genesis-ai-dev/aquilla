@@ -24,7 +24,11 @@ import {
   laneOfEvent,
   type PersistedEvent,
 } from '../events/event-projection'
-import { laneQualifiedParentKey, GENESIS_PARENT_KEY } from '../events/chain-claims'
+import {
+  eventQualifiedParentKey,
+  laneQualifiedParentKey,
+  GENESIS_PARENT_KEY,
+} from '../events/chain-claims'
 import type { EventKind } from '../events/types'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
@@ -111,6 +115,15 @@ describe('laneQualifiedParentKey', () => {
     expect(laneQualifiedParentKey(null, undefined)).toBe(GENESIS_PARENT_KEY)
     expect(laneQualifiedParentKey('evt-1', undefined)).toBe('evt-1')
     expect(laneQualifiedParentKey('evt-1', '')).toBe('evt-1')
+  })
+
+  it('keeps source corrections independent from targets pinned to the same head', () => {
+    expect(eventQualifiedParentKey('src-head', 'source.cell.create', {}))
+      .toBe('src-head@side:source')
+    expect(eventQualifiedParentKey('src-head', 'target.cell.commit', {}))
+      .toBe('src-head')
+    expect(eventQualifiedParentKey('src-head', 'target.cell.commit', { targetLang: 'fr' }))
+      .toBe('src-head@lane:fr')
   })
   it('qualifies non-default lanes so sibling lanes get distinct slots', () => {
     const a = laneQualifiedParentKey('src-head', 'fr')
@@ -200,6 +213,21 @@ describe('projection — two lanes on one cell', () => {
 })
 
 describe('isWinningChild — lane-aware sibling arbitration', () => {
+  it('a source correction and target commit can share a source parent', async () => {
+    const target = ev({
+      kind: 'target.cell.commit', id: 'tc-default', parentId: 'src-1',
+      payload: { value: 'Bonjour' },
+    })
+    await insertEventRow(t.db, target)
+
+    const source = ev({
+      kind: 'source.cell.create', id: 'src-2', parentId: 'src-1',
+      payload: { cellId: CELL, value: 'Corrected source' },
+    })
+    await insertEventRow(t.db, source)
+    expect(await isWinningChild(t.db, source)).toBe(true)
+  })
+
   it('two lanes\' first commits share a parent but both win their slots', async () => {
     const frCommit = ev({
       kind: 'target.cell.commit', id: 'tc-fr', parentId: 'src-1',

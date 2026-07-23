@@ -1,5 +1,11 @@
 # AQU-AGENT Wave-1 contracts (READ-ONLY for builders — orchestrator-owned)
 
+> Historical implementation contract. The final AQU-635 integration supersedes
+> the Wave-1 `plan_import`/changeset-bridge design: current chat has no import
+> tool, and sandbox-assisted parsing returns to the dedicated Import dialog and
+> `ImportService`. External REST/MCP `PlanImport` remains supported. See
+> `docs/AGENT-SANDBOX.md` and `docs/AGENT-API.md` for current behavior.
+
 All Wave-1 agents code against these exactly. Deviations require a SWARM-TODO trace +
 note in your report; do NOT silently change a contract. TS snippets are normative shapes;
 copy types locally where imports can't cross (SPA ↔ workers). Workers share `db/shared/`.

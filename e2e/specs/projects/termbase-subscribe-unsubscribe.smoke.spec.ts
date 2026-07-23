@@ -34,8 +34,6 @@ test.skip("termbase subscribe and unsubscribe between two projects", async ({ al
   expect(projectAId).toBeTruthy()
 
   await alice.goto(`/project/${projectAId}/settings`)
-  await alice.waitForLoadState("networkidle")
-
   const publishSwitch = alice.locator('[aria-label="Publish termbase to org"]')
   await expect(publishSwitch).toBeVisible({ timeout: 10_000 })
   // Ensure it's off, then turn on.
@@ -55,8 +53,6 @@ test.skip("termbase subscribe and unsubscribe between two projects", async ({ al
   expect(projectBId).not.toEqual(projectAId)
 
   await alice.goto(`/project/${projectBId}/settings`)
-  await alice.waitForLoadState("networkidle")
-
   // --- Step 3: Verify Project A appears in Available section ---
   await expect(alice.getByText(/Available in your org/i).first()).toBeVisible({ timeout: 10_000 })
 

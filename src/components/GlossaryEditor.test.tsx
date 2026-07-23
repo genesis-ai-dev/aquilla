@@ -21,8 +21,13 @@ vi.mock("@/hooks/useProjectCells", () => ({
 
 const patchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
 let mockProject: ProjectRecord
+let mockProjectLoading = false
 vi.mock("@/hooks/useProject", () => ({
-  useProject: () => ({ project: mockProject, loading: false, patchSettings }),
+  useProject: () => ({
+    project: mockProject,
+    loading: mockProjectLoading,
+    patchSettings,
+  }),
 }))
 
 import { GlossaryEditor } from "./GlossaryEditor"
@@ -41,6 +46,7 @@ function concept(p: Partial<Concept>): Concept {
 beforeEach(() => {
   patchSettings.mockClear()
   projectCellsEnabled = false
+  mockProjectLoading = false
   mockProject = {
     id: "p1",
     name: "P",
@@ -57,6 +63,17 @@ function renderEditor() {
 }
 
 describe("GlossaryEditor", () => {
+  it("shows explicit progress over a value-free panel while the glossary loads", () => {
+    mockProjectLoading = true
+    renderEditor()
+
+    const status = screen.getByRole("status", { name: "Loading glossary" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(screen.getByTestId("loading-panel-template")).toBeInTheDocument()
+    expect(screen.queryByText("grace")).not.toBeInTheDocument()
+  })
+
   it("renders active concepts as rows", () => {
     renderEditor()
     expect(screen.getByText("grace")).toBeInTheDocument()

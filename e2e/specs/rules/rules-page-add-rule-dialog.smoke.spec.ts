@@ -32,8 +32,6 @@ test("Add Rule inline editor creates and displays new rule", async ({ alice }) =
   const projectId = match ? match[1] : ""
 
   await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()

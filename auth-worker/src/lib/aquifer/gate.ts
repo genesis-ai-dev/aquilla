@@ -25,7 +25,8 @@ import type { Env } from "../../types"
  *  match the codebase's existing placeholder convention. */
 const SCRIPTURE_FILE_KINDS = ["usfm", "ebible", "helloao"] as const
 
-/** True when the project has at least one non-deleted scripture-type file. */
+/** True when the project has at least one non-deleted native Scripture file or
+ * a format-neutral import whose manifest contains canonical Scripture units. */
 async function projectHasScriptureFiles(env: Env, projectId: string): Promise<boolean> {
   try {
     const placeholders = SCRIPTURE_FILE_KINDS.map(() => "?").join(",")
@@ -34,7 +35,10 @@ async function projectHasScriptureFiles(env: Env, projectId: string): Promise<bo
          SELECT 1 FROM files
           WHERE project_id = ?
             AND deleted_at IS NULL
-            AND kind IN (${placeholders})
+            AND (
+              kind IN (${placeholders})
+              OR meta::jsonb -> 'aquillaImport' ->> 'hasScriptureContent' = 'true'
+            )
        ) AS has_scripture`,
     )
       .bind(projectId, ...SCRIPTURE_FILE_KINDS)

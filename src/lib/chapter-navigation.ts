@@ -45,3 +45,18 @@ export function sectionLabelAtViewportStart(
   const cellId = cellIds[firstVisibleIndex]
   return cellId ? getSectionLabel(cellId) : ""
 }
+
+/**
+ * Keep an explicit picker/arrow selection authoritative until the user takes
+ * over scrolling. This matters for a short final chapter whose first row
+ * cannot physically reach the viewport's top edge.
+ */
+export function resolveActiveChapterLabel(
+  chapterLabels: readonly string[],
+  viewportLabel: string,
+  selectedLabel: string | null,
+): string {
+  if (selectedLabel && chapterLabels.includes(selectedLabel)) return selectedLabel
+  if (chapterLabels.includes(viewportLabel)) return viewportLabel
+  return chapterLabels[0] ?? ""
+}

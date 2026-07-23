@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   firstActuallyVisibleIndex,
+  resolveActiveChapterLabel,
   rowMatchesChapterHeading,
   sectionLabelAtViewportStart,
 } from "./chapter-navigation"
@@ -44,5 +45,21 @@ describe("sectionLabelAtViewportStart", () => {
       ["The word of the Lord remains forever"],
       "1 Peter 2",
     )).toBe(false)
+  })
+})
+
+describe("resolveActiveChapterLabel", () => {
+  const chapters = ["GEN 1", "GEN 2"]
+
+  it("keeps an explicit chapter selection authoritative over viewport tracking", () => {
+    expect(resolveActiveChapterLabel(chapters, "GEN 1", "GEN 2")).toBe("GEN 2")
+  })
+
+  it("returns to viewport tracking when there is no explicit selection", () => {
+    expect(resolveActiveChapterLabel(chapters, "GEN 2", null)).toBe("GEN 2")
+  })
+
+  it("ignores stale labels from another file", () => {
+    expect(resolveActiveChapterLabel(chapters, "GEN 2", "EXO 1")).toBe("GEN 2")
   })
 })

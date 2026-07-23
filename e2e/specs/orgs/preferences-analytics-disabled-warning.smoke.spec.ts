@@ -19,8 +19,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("preferences analytics disabled warning appears when switch is off", async ({ alice }) => {
   await alice.goto("/preferences/privacy")
-  await alice.waitForLoadState("networkidle")
-
   const toggle = alice.getByRole("switch", { name: "Share usage data" })
   await expect(toggle).toBeVisible({ timeout: 10_000 })
 

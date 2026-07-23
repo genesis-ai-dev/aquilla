@@ -18,8 +18,6 @@ test("rule editor Enabled switch toggles", async ({ alice }) => {
 
   // Navigate to the project rules page.
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Open the inline RuleEditor via the header "+ Add Rule" button.
   const createBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
   await expect(createBtn).toBeVisible({ timeout: 10_000 })

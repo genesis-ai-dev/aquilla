@@ -42,8 +42,6 @@ test("Org owner can dismiss a rule promotion request", async ({ alice, bob }) =>
 
   // Bob creates a rule and requests promotion.
   await bob.goto(`/project/${projectId}/rules`)
-  await bob.waitForLoadState("networkidle")
-
   const addRuleBtn = bob.getByRole("button", { name: /\+ Add Rule|New rule|Add rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
@@ -70,10 +68,7 @@ test("Org owner can dismiss a rule promotion request", async ({ alice, bob }) =>
 
   // Alice refreshes her rules view to pick up the pending request.
   await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
   await alice.reload()
-  await alice.waitForLoadState("networkidle")
-
   // Alice should see "Pending promotion requests" section with a Dismiss button.
   const dismissBtn = alice.getByRole("button", { name: /^Dismiss$/i }).first()
   await expect(dismissBtn).toBeVisible({ timeout: 10_000 })

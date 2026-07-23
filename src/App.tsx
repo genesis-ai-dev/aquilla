@@ -8,6 +8,7 @@ import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
 import { JoinPage } from "@/components/JoinPage"
+import { AccessLinkPage } from "@/components/AccessLinkPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
 import { VerifyEmailPage } from "@/components/VerifyEmailPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
@@ -24,6 +25,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -131,13 +133,9 @@ function RootRedirect() {
   return <OrgHome />
 }
 
-/** Minimal fallback used while lazy route chunks are loading. */
+/** Fallback used while lazy route chunks are loading (e.g. the workspace). */
 function RouteLoadingFallback() {
-  return (
-    <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-      Loading…
-    </div>
-  )
+  return <LoadingOverlay />
 }
 
 export default function App() {
@@ -185,6 +183,9 @@ function AppRoutes() {
         <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
+        {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
+            diode-zone flow lands here with no session and no onboarding). */}
+        <Route path="/link/:token" element={<AccessLinkPage />} />
         {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
         <Route path="/approve/:changesetId" element={<ApproveChangeset />} />
         <Route path="/join-org/:token" element={<JoinOrgPage />} />

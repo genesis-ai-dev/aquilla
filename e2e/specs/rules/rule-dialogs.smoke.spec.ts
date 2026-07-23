@@ -12,8 +12,6 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("Import from doc and Suggest from edits dialogs open on rules page", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `RuleDialogs ${Date.now()}` })
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // ── 1. "Import from doc" opens RuleImportDialog ──
   const importDocBtn = alice.getByRole("button", { name: /Import from doc/i })
   await expect(importDocBtn).toBeVisible({ timeout: 10_000 })

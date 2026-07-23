@@ -15,8 +15,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("signup form password checklist shows strength indicator", async ({ alice }) => {
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
-
   // Open account switcher.
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })

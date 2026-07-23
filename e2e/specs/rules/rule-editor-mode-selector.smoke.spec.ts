@@ -17,8 +17,6 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("rule editor mode selector toggles source pattern input visibility", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ModeToggle ${Date.now()}` })
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Open inline RuleEditor.
   const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })

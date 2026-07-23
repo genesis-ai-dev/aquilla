@@ -26,8 +26,6 @@ test("living memory Recent Examples shows ValidatedCellCard with Source and Tran
 
   // Navigate to the Living Memory page.
   await alice.goto(`/project/${seeded.projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
   // "Recent Examples" section should render.
   const recentSection = alice.locator('section[aria-label="Recent Examples"]')
   await expect(recentSection).toBeVisible({ timeout: 10_000 })

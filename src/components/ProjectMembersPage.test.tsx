@@ -111,6 +111,26 @@ describe("ProjectMembersPage", () => {
     vi.clearAllMocks()
   })
 
+  it("shows explicit progress while the member list is unresolved", () => {
+    mockUseProjectMembers.mockReturnValueOnce({
+      members: [],
+      isLoading: true,
+      error: null,
+      rosterHidden: false,
+      refresh: mockRefresh,
+      add: mockAdd,
+      remove: mockRemove,
+      changeRole: mockAdd,
+    })
+
+    renderPage()
+
+    const status = screen.getByRole("status", { name: "Loading members" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(screen.queryByText("No members yet.")).not.toBeInTheDocument()
+  })
+
   it("renders the page header and tab bar", () => {
     renderPage()
     expect(screen.getByText("Back to project")).toBeInTheDocument()

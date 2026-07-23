@@ -38,8 +38,6 @@ test("comments Filters button expands filter panel and sort picker works", async
   const match = projectUrl.match(/\/project\/([^/]+)/)
   const projectId = match ? match[1] : ""
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // The "Filters" button should be visible.
   const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
   await expect(filtersBtn).toBeVisible({ timeout: 10_000 })

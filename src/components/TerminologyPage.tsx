@@ -15,6 +15,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import {
   Card,
   CardContent,
@@ -1073,7 +1074,9 @@ export function TerminologyPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  if (loading) return <div className="p-8 text-muted-foreground">Loading…</div>
+  if (loading) {
+    return <LoadingPanel label="Loading terminology" className="min-h-screen" />
+  }
 
   // Drill-down view: overlay the detail panel when a concept is selected.
   // Cells are the project-wide CellData flattened across all files (derived on

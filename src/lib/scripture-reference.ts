@@ -44,6 +44,21 @@ export interface CellNumberLabelInput {
    * (AQU-610). Falls back to `rowIndex + 1` when not supplied.
    */
   contentNumber?: number
+  /** Normalized-import display label. `null` is an explicit structural row
+   *  marker; `undefined` means legacy content with no normalized metadata. */
+  displayLabel?: string | null
+}
+
+/** Read the normalized import display label without trusting arbitrary cell
+ * metadata. The three-way result is intentional: undefined = legacy row,
+ * null = structural/un-numbered row, string = importer-owned label. */
+export function importDisplayLabel(
+  metadata: Record<string, unknown> | null | undefined,
+): string | null | undefined {
+  const envelope = metadata?.aquillaImport
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) return undefined
+  const label = (envelope as Record<string, unknown>).displayLabel
+  return label === null || typeof label === "string" ? label : undefined
 }
 
 /**
@@ -60,12 +75,24 @@ export function cellNumberLabel({
   scriptureNumbering,
   rowIndex,
   contentNumber,
+  displayLabel,
 }: CellNumberLabelInput): string | null {
-  if (!lineNumbersEnabled || cellType === "paratext") return null
+  if (!lineNumbersEnabled) return null
+
+  // Structural identity wins over a nearby verse reference. Importers often
+  // retain that reference so a heading stays scoped to its chapter, but it is
+  // contextual—not the heading's display number.
+  if (displayLabel === null || cellType === "heading" || cellType === "paratext") {
+    return null
+  }
 
   const canonicalVerse = verseLabelFromCanonical(canonicalRef)
     ?? verseLabelFromCanonical(sourceCanonicalRef)
   if (canonicalVerse) return canonicalVerse
+
+  // A normalized manifest owns presentation identity. In particular, null is
+  // how headings/titles/introductions say "I am structural, not verse zero".
+  if (displayLabel !== undefined) return displayLabel
 
   return scriptureNumbering ? null : String(contentNumber ?? rowIndex + 1)
 }

@@ -18,8 +18,6 @@ test("invite to projects dialog opens from members page", async ({ alice }) => {
   await seedProjectWithFile(await jwtFor("alice"), { name: `InviteOpenProj ${Date.now()}` })
 
   await alice.goto("/members")
-  await alice.waitForLoadState("networkidle")
-
   // "Add to projects" button — only visible to org owners/admins.
   const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })
   await expect(inviteBtn).toBeEnabled({ timeout: 10_000 })

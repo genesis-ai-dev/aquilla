@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { advanceOnboardingTo } from "../../helpers/onboarding"
 
 /**
  * Onboarding wizard — NameStep (step 4) renders with display-name input.
@@ -21,23 +22,7 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("onboarding NameStep input accepts display name and Continue advances", async ({ alice }) => {
   await alice.goto("/onboarding")
-  await alice.waitForLoadState("networkidle")
-
-  // Keep pressing forward buttons until we reach the NameStep (id="display-name").
-  const MAX_CLICKS = 6
-  for (let i = 0; i < MAX_CLICKS; i++) {
-    const nameInput = alice.locator("#display-name")
-    if (await nameInput.isVisible({ timeout: 1_000 }).catch(() => false)) break
-
-    // Try common forward buttons.
-    const forwardBtn = alice.getByRole("button", { name: /Get started|Continue|Next|Already have|Sign in/i }).first()
-    if (await forwardBtn.isVisible({ timeout: 1_500 }).catch(() => false)) {
-      await forwardBtn.click()
-    } else {
-      break
-    }
-    await alice.waitForTimeout(500)
-  }
+  await advanceOnboardingTo(alice, 4)
 
   // NameStep is now visible.
   const nameInput = alice.locator("#display-name")

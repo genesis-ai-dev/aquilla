@@ -28,7 +28,7 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
 
   // Create a project so the portfolio has at least one entry.
   const name = `Overview dashboard project with a deliberately long name ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.createProject({ name, source: "en", target: "conversational Spanish" })
 
   // Give the project a deterministic status so the compact deadline indicator
   // and its explanatory tooltip can be exercised in the portfolio table.
@@ -39,8 +39,6 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
 
   // Navigate to the org home.
   await alice.goto("/")
-  await alice.waitForLoadState("networkidle")
-
   // 1. Org name heading (h1) renders.
   await expect(alice.locator("h1").first()).toBeVisible({ timeout: 10_000 })
 
@@ -68,8 +66,6 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   const aliceSession = await ensureAuthState("alice")
   await createOrg(aliceSession.jwt, `A second organization with a long name ${Date.now()}`)
   await alice.goto("/?org=all")
-  await alice.waitForLoadState("networkidle")
-
   const projectRow = alice.locator(`[data-project-id]`).filter({ hasText: name }).first()
   await expect(projectRow).toBeVisible({ timeout: 10_000 })
   const projectName = projectRow.getByTestId("project-table-name")
@@ -101,6 +97,8 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   const projectHeaderBox = await projectHeader.boundingBox()
   const translatedValueBox = await projectRow.getByTestId("project-table-translated-value").boundingBox()
   const languagesBox = await projectRow.getByTestId("project-table-languages").boundingBox()
+  const languageChip = projectRow.locator('[data-testid^="lane-chip-"]').first()
+  const languageChipBox = await languageChip.boundingBox()
   const validatedHeaderBox = await validatedHeader.boundingBox()
   const validatedValueBox = await projectRow.getByTestId("project-table-validated-value").boundingBox()
   const audioHeaderBox = await audioHeader.boundingBox()
@@ -110,6 +108,7 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   expect(projectHeaderBox).not.toBeNull()
   expect(translatedValueBox).not.toBeNull()
   expect(languagesBox).not.toBeNull()
+  expect(languageChipBox).not.toBeNull()
   expect(validatedHeaderBox).not.toBeNull()
   expect(validatedValueBox).not.toBeNull()
   expect(audioHeaderBox).not.toBeNull()
@@ -122,6 +121,16 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
     ),
   ).toBeLessThan(2)
   expect(Math.abs(translatedHeaderBox!.x - translatedValueBox!.x)).toBeLessThan(2)
+  // Assert the painted child boundary, not only the grid track. The latter can
+  // remain perfectly aligned while an intrinsically wide chip overpaints the
+  // adjacent percentage column (the AQU-651 regression).
+  expect(languageChipBox!.x).toBeGreaterThanOrEqual(languagesBox!.x)
+  expect(languageChipBox!.x + languageChipBox!.width).toBeLessThanOrEqual(
+    languagesBox!.x + languagesBox!.width,
+  )
+  expect(
+    translatedValueBox!.x - (languageChipBox!.x + languageChipBox!.width),
+  ).toBeGreaterThanOrEqual(8)
   expect(translatedValueBox!.x - (languagesBox!.x + languagesBox!.width)).toBeGreaterThanOrEqual(8)
   expect(Math.abs(validatedHeaderBox!.x - validatedValueBox!.x)).toBeLessThan(2)
   expect(Math.abs(audioHeaderBox!.x - audioValueBox!.x)).toBeLessThan(2)
@@ -203,6 +212,20 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   expect(narrowProjectsBox!.y + narrowProjectsBox!.height).toBeLessThan(650)
   await expect(alice.getByText("Org", { exact: true })).toBeVisible()
   await expect(alice.getByText("Language", { exact: true })).toBeVisible()
+  const narrowLanguagesBox = await projectRow.getByTestId("project-table-languages").boundingBox()
+  const narrowLanguageChipBox = await languageChip.boundingBox()
+  const narrowTranslatedValueBox = await projectRow
+    .getByTestId("project-table-translated-value")
+    .boundingBox()
+  expect(narrowLanguagesBox).not.toBeNull()
+  expect(narrowLanguageChipBox).not.toBeNull()
+  expect(narrowTranslatedValueBox).not.toBeNull()
+  expect(narrowLanguageChipBox!.x + narrowLanguageChipBox!.width).toBeLessThanOrEqual(
+    narrowLanguagesBox!.x + narrowLanguagesBox!.width,
+  )
+  expect(
+    narrowTranslatedValueBox!.x - (narrowLanguageChipBox!.x + narrowLanguageChipBox!.width),
+  ).toBeGreaterThanOrEqual(8)
   expect(
     await alice.getByTestId("projects-panel").evaluate(
       (element) => element.scrollWidth <= element.clientWidth,
@@ -222,4 +245,39 @@ test("org overview renders rollup stats and project filter", async ({ alice }) =
   })
   expect(await organizationsScroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
   await expect(projectTable.getByText("Project", { exact: true })).toBeVisible()
+})
+
+test("org overview does not present false zeroes while its portfolio is loading", async ({ alice }) => {
+  let releasePortfolio!: () => void
+  let projectDirectoryRequests = 0
+  const portfolioGate = new Promise<void>((resolve) => { releasePortfolio = resolve })
+  await alice.route("**/api/v2/projects**", async (route) => {
+    const request = route.request()
+    if (request.method() === "GET" && new URL(request.url()).pathname === "/api/v2/projects") {
+      projectDirectoryRequests += 1
+    }
+    await route.continue()
+  })
+  await alice.route("**/api/v2/orgs/*/portfolio", async (route) => {
+    await portfolioGate
+    await route.continue()
+  })
+
+  try {
+    await alice.goto("/")
+
+    await expect(alice.getByTestId("org-home-loading")).toBeVisible()
+    await expect(alice.getByText("Loading dashboard…")).toBeVisible()
+    await expect(alice.getByTestId("org-home-loading-template")).toBeVisible()
+    await expect(alice.locator('[data-slot="app-shell-header"]')).toBeVisible()
+    await expect(alice.getByTestId("loading-neutral-template")).toHaveCount(0)
+    await expect(alice.getByText("Your organization is ready")).toHaveCount(0)
+    await expect(alice.getByText("Avg translated", { exact: true })).toHaveCount(0)
+  } finally {
+    releasePortfolio()
+  }
+
+  await expect(alice.getByTestId("org-home-loading")).toHaveCount(0)
+  await expect(alice.getByText("Avg translated", { exact: true })).toBeVisible()
+  expect(projectDirectoryRequests).toBe(1)
 })

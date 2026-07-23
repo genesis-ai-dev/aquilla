@@ -14,6 +14,7 @@ import { ProjectCard } from "./ProjectCard"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
@@ -433,18 +434,24 @@ export function Dashboard() {
  *  second "No local projects yet…" flash before listProjects resolves. */
 function ProjectCardGridSkeleton({ count }: { count: number }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {Array.from({ length: count }).map((_, i) => (
-        <Card key={i} aria-hidden>
-          <CardHeader className="pb-2">
-            <Skeleton className="h-6 w-2/3" />
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <Skeleton className="h-4 w-1/3" />
-            <Skeleton className="h-4 w-1/2" />
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <LoadingTemplate
+      label="Loading projects"
+      className="min-h-40"
+      templateClassName="min-h-40"
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: count }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader className="pb-2">
+              <Skeleton className="h-6 w-2/3" />
+            </CardHeader>
+            <CardContent className="flex flex-col gap-2">
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="h-4 w-1/2" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </LoadingTemplate>
   )
 }

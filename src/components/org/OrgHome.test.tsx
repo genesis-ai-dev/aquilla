@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgHome, ProjectTable, activityStatus } from "./OrgHome"
@@ -167,7 +167,12 @@ describe("ProjectTable", () => {
     mockProjectNameOverflow(true)
     render(
       <MemoryRouter>
-        <ProjectTable projects={[project]} now={Date.now()} showOrg />
+        <ProjectTable
+          projects={[project]}
+          now={Date.now()}
+          showOrg
+          defaultLaneLabelByProjectId={new Map([[project.id, "conversational Spanish"]])}
+        />
       </MemoryRouter>,
     )
 
@@ -211,6 +216,18 @@ describe("ProjectTable", () => {
     expect(organization).not.toContainElement(deadlineStatus)
     expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
     expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
+    const languages = screen.getByTestId("project-table-languages")
+    const languageChip = screen.getByTestId(`lane-chip-${project.id}-`)
+    expect(languages).toHaveClass("min-w-0", "overflow-hidden")
+    expect(languageChip.parentElement).toHaveClass("w-full", "min-w-0", "max-w-full")
+    expect(languageChip).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
+    expect(within(languageChip).getByText("conversational Spanish")).toHaveClass(
+      "min-w-0",
+      "flex-1",
+      "truncate",
+    )
+    expect(languageChip).toHaveAccessibleName("conversational Spanish: 40% translated")
+    expect(languageChip).toHaveAttribute("title", "conversational Spanish — 40% translated")
     expect(screen.getByText("Language")).toBeInTheDocument()
     expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
     expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
@@ -252,6 +269,49 @@ describe("ProjectTable", () => {
 })
 
 describe("OrgHome", () => {
+  it("never paints a false-empty dashboard while the current portfolio is unresolved", async () => {
+    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    let resolvePortfolio!: (projects: PortfolioProject[]) => void
+    vi.mocked(getPortfolio).mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePortfolio = resolve }),
+    )
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const addedText: string[] = []
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) addedText.push(node.textContent ?? "")
+      }
+    })
+    observer.observe(container, { childList: true, subtree: true })
+
+    const view = render(
+      <MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>,
+      { container },
+    )
+
+    try {
+      await waitFor(() => expect(screen.getByTestId("org-home-loading")).toBeInTheDocument())
+      expect(screen.getByText("Loading dashboard…")).toBeInTheDocument()
+      expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
+      expect(document.querySelector('[data-slot="app-shell-header"]')).not.toBeNull()
+      expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
+      await act(async () => { await Promise.resolve() })
+      expect(addedText.join("\n")).not.toContain("Your organization is ready")
+      expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()
+
+      await act(async () => { resolvePortfolio([]) })
+      await waitFor(() => expect(screen.queryByTestId("org-home-loading")).not.toBeInTheDocument())
+      expect(screen.getByText("Your organization is ready")).toBeInTheDocument()
+      expect(within(projectsRollupStat()).getByText("0")).toBeInTheDocument()
+    } finally {
+      observer.disconnect()
+      view.unmount()
+      container.remove()
+    }
+  })
+
   it("renders the org name, nav, and admin links for an owner", async () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
@@ -284,10 +344,7 @@ describe("OrgHome", () => {
       },
     ])
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
-    // The page flashes "Loading…" while the portfolio effect settles, so the card
-    // and its link flicker on mount. Assert them together inside one waitFor so the
-    // checks all run against a single settled frame (a sync getByRole can otherwise
-    // catch a transient frame where the card is unmounted).
+    // Wait for the first portfolio to settle so the dashboard content is mounted.
     await waitFor(() => {
       const card = screen.getByTestId("pending-invitations")
       expect(card).toHaveTextContent("Ruth Translation")

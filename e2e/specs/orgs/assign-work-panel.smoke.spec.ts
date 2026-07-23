@@ -22,8 +22,6 @@ test("assign-work panel opens and shows Assignee and Book selects", async ({ ali
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AssignProj ${Date.now()}` })
 
   await alice.goto(`/projects/${seeded.projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // The "Assign…" button should be visible for the project owner.
   const assignBtn = alice.getByRole("button", { name: /^Assign…$/i })
     .or(alice.getByRole("button", { name: /^Assign$/i }))

@@ -1,103 +1,22 @@
 /**
- * useProjectCells — load cells for every file in a project, keyed by file,
- * for use by project-scope client-side export.
+ * Load the complete cell corpus for project-wide exports, terminology, and
+ * glossary workflows.
  *
- * Design mirrors useLivingMemory's unrolled fan-out (React rules-of-hooks
- * forbid dynamic arrays of hook calls). We support up to MAX_FILES = 40 files;
- * projects with more files will see cells from the first 40 only, and
- * `isTruncated` will be set. A SWARM-TODO marks the shape for a future server
- * batch endpoint.
- *
- * SWARM-TODO(project-export-scale): at scale (> 40 files) the N×useCells
- *   fan-out becomes impractical. A dedicated endpoint —
- *   GET /api/v2/projects/:projectId/cells?format=tsv
- *   — that streams all files' cells server-side and returns a pre-built zip
- *   would replace the fan-out. The endpoint shape should accept the same
- *   ExportFormat values so the server handles the serialization too.
+ * The old implementation unrolled 40 `useCells` calls to satisfy the Rules of
+ * Hooks, then silently truncated larger projects. Scripture projects commonly
+ * contain 66+ files, so completeness is a correctness requirement. This hook
+ * performs imperative, paginated reads with bounded concurrency instead: no
+ * hook-count limit, stable input order, and all-or-nothing publication.
  */
 
-import { useMemo } from "react"
-import type { CellData } from "@/hooks/useCells"
-import { useCells } from "@/hooks/useCells"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { buildCellData, type CellData } from "@/hooks/useCells"
+import { fetchAllFileCells } from "@/lib/sync/cells-read"
+import type { CellRow } from "@/lib/sync/cells-read-types"
+import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 
-// ── Per-file cell loader ───────────────────────────────────────────────────
-
-interface FileSlotOpts {
-  projectId: string | null
-  fileId: string | null
-  getToken: (fileId: string) => Promise<string | null>
-  enabled: boolean
-}
-
-function useFileCellSlot({ projectId, fileId, getToken, enabled }: FileSlotOpts): {
-  cells: CellData[]
-  isLoading: boolean
-} {
-  const { cells, isLoading } = useCells({ projectId, fileId, getToken, enabled })
-  return { cells, isLoading }
-}
-
-// React prohibits dynamic hook counts. Unroll exactly MAX_FILES slots.
-const MAX_FILES = 40
-
-function useAllFileSlots(
-  projectId: string | null,
-  fileIds: readonly string[],
-  getToken: (fileId: string) => Promise<string | null>,
-  enabled: boolean,
-) {
-  // Each slot is a fixed, unconditional hook call. Slots beyond the actual
-  // file count are disabled (enabled=false) and return empty cells.
-  const s0  = useFileCellSlot({ projectId, fileId: fileIds[0]  ?? null, getToken, enabled: enabled && !!fileIds[0] })
-  const s1  = useFileCellSlot({ projectId, fileId: fileIds[1]  ?? null, getToken, enabled: enabled && !!fileIds[1] })
-  const s2  = useFileCellSlot({ projectId, fileId: fileIds[2]  ?? null, getToken, enabled: enabled && !!fileIds[2] })
-  const s3  = useFileCellSlot({ projectId, fileId: fileIds[3]  ?? null, getToken, enabled: enabled && !!fileIds[3] })
-  const s4  = useFileCellSlot({ projectId, fileId: fileIds[4]  ?? null, getToken, enabled: enabled && !!fileIds[4] })
-  const s5  = useFileCellSlot({ projectId, fileId: fileIds[5]  ?? null, getToken, enabled: enabled && !!fileIds[5] })
-  const s6  = useFileCellSlot({ projectId, fileId: fileIds[6]  ?? null, getToken, enabled: enabled && !!fileIds[6] })
-  const s7  = useFileCellSlot({ projectId, fileId: fileIds[7]  ?? null, getToken, enabled: enabled && !!fileIds[7] })
-  const s8  = useFileCellSlot({ projectId, fileId: fileIds[8]  ?? null, getToken, enabled: enabled && !!fileIds[8] })
-  const s9  = useFileCellSlot({ projectId, fileId: fileIds[9]  ?? null, getToken, enabled: enabled && !!fileIds[9] })
-  const s10 = useFileCellSlot({ projectId, fileId: fileIds[10] ?? null, getToken, enabled: enabled && !!fileIds[10] })
-  const s11 = useFileCellSlot({ projectId, fileId: fileIds[11] ?? null, getToken, enabled: enabled && !!fileIds[11] })
-  const s12 = useFileCellSlot({ projectId, fileId: fileIds[12] ?? null, getToken, enabled: enabled && !!fileIds[12] })
-  const s13 = useFileCellSlot({ projectId, fileId: fileIds[13] ?? null, getToken, enabled: enabled && !!fileIds[13] })
-  const s14 = useFileCellSlot({ projectId, fileId: fileIds[14] ?? null, getToken, enabled: enabled && !!fileIds[14] })
-  const s15 = useFileCellSlot({ projectId, fileId: fileIds[15] ?? null, getToken, enabled: enabled && !!fileIds[15] })
-  const s16 = useFileCellSlot({ projectId, fileId: fileIds[16] ?? null, getToken, enabled: enabled && !!fileIds[16] })
-  const s17 = useFileCellSlot({ projectId, fileId: fileIds[17] ?? null, getToken, enabled: enabled && !!fileIds[17] })
-  const s18 = useFileCellSlot({ projectId, fileId: fileIds[18] ?? null, getToken, enabled: enabled && !!fileIds[18] })
-  const s19 = useFileCellSlot({ projectId, fileId: fileIds[19] ?? null, getToken, enabled: enabled && !!fileIds[19] })
-  const s20 = useFileCellSlot({ projectId, fileId: fileIds[20] ?? null, getToken, enabled: enabled && !!fileIds[20] })
-  const s21 = useFileCellSlot({ projectId, fileId: fileIds[21] ?? null, getToken, enabled: enabled && !!fileIds[21] })
-  const s22 = useFileCellSlot({ projectId, fileId: fileIds[22] ?? null, getToken, enabled: enabled && !!fileIds[22] })
-  const s23 = useFileCellSlot({ projectId, fileId: fileIds[23] ?? null, getToken, enabled: enabled && !!fileIds[23] })
-  const s24 = useFileCellSlot({ projectId, fileId: fileIds[24] ?? null, getToken, enabled: enabled && !!fileIds[24] })
-  const s25 = useFileCellSlot({ projectId, fileId: fileIds[25] ?? null, getToken, enabled: enabled && !!fileIds[25] })
-  const s26 = useFileCellSlot({ projectId, fileId: fileIds[26] ?? null, getToken, enabled: enabled && !!fileIds[26] })
-  const s27 = useFileCellSlot({ projectId, fileId: fileIds[27] ?? null, getToken, enabled: enabled && !!fileIds[27] })
-  const s28 = useFileCellSlot({ projectId, fileId: fileIds[28] ?? null, getToken, enabled: enabled && !!fileIds[28] })
-  const s29 = useFileCellSlot({ projectId, fileId: fileIds[29] ?? null, getToken, enabled: enabled && !!fileIds[29] })
-  const s30 = useFileCellSlot({ projectId, fileId: fileIds[30] ?? null, getToken, enabled: enabled && !!fileIds[30] })
-  const s31 = useFileCellSlot({ projectId, fileId: fileIds[31] ?? null, getToken, enabled: enabled && !!fileIds[31] })
-  const s32 = useFileCellSlot({ projectId, fileId: fileIds[32] ?? null, getToken, enabled: enabled && !!fileIds[32] })
-  const s33 = useFileCellSlot({ projectId, fileId: fileIds[33] ?? null, getToken, enabled: enabled && !!fileIds[33] })
-  const s34 = useFileCellSlot({ projectId, fileId: fileIds[34] ?? null, getToken, enabled: enabled && !!fileIds[34] })
-  const s35 = useFileCellSlot({ projectId, fileId: fileIds[35] ?? null, getToken, enabled: enabled && !!fileIds[35] })
-  const s36 = useFileCellSlot({ projectId, fileId: fileIds[36] ?? null, getToken, enabled: enabled && !!fileIds[36] })
-  const s37 = useFileCellSlot({ projectId, fileId: fileIds[37] ?? null, getToken, enabled: enabled && !!fileIds[37] })
-  const s38 = useFileCellSlot({ projectId, fileId: fileIds[38] ?? null, getToken, enabled: enabled && !!fileIds[38] })
-  const s39 = useFileCellSlot({ projectId, fileId: fileIds[39] ?? null, getToken, enabled: enabled && !!fileIds[39] })
-
-  return [
-    s0, s1, s2, s3, s4, s5, s6, s7, s8, s9,
-    s10, s11, s12, s13, s14, s15, s16, s17, s18, s19,
-    s20, s21, s22, s23, s24, s25, s26, s27, s28, s29,
-    s30, s31, s32, s33, s34, s35, s36, s37, s38, s39,
-  ] as const
-}
-
-// ── Public hook ────────────────────────────────────────────────────────────
+const LOAD_CONCURRENCY = 4
+const OUTBOX_READ_LIMIT = 10_000
 
 export interface ProjectFileCells {
   fileId: string
@@ -105,22 +24,143 @@ export interface ProjectFileCells {
   cells: CellData[]
 }
 
+interface ProjectFileInput {
+  id: string
+  name: string
+  type: string
+}
+
 export interface UseProjectCellsResult {
-  /** Per-file cells, in the same order as projectFiles (first MAX_FILES). */
+  /** Every requested file, in the same order as projectFiles. */
   files: ProjectFileCells[]
-  /** True while any file is still loading. */
+  /** True until the complete project snapshot has loaded. */
   isLoading: boolean
-  /** True when the project has more than MAX_FILES files; cells from overflow
-   *  files are not included. */
+  /** Retained for callers compiled against the old contract; always false. */
   isTruncated: boolean
+  /** A complete snapshot is never published when one file fails. */
+  error?: Error
 }
 
 export interface UseProjectCellsOpts {
   projectId: string | null
-  projectFiles: { id: string; name: string; type: string }[]
+  projectFiles: ProjectFileInput[]
   getToken: (fileId: string) => Promise<string | null>
   /** Pass false to defer fetching (e.g. while scope !== "project"). */
   enabled?: boolean
+  /** Target-language lane. Empty/omitted selects the legacy default lane. */
+  lane?: string
+}
+
+type FileRowsLoader = (
+  projectId: string,
+  fileId: string,
+  token: string,
+  side?: "source" | "target",
+  lane?: string,
+) => Promise<CellRow[]>
+
+/** Convert a server snapshot into the paired source/target view used by exporters. */
+export function buildProjectCellSnapshot(
+  rows: readonly CellRow[],
+  fileId: string,
+  lane = "",
+): CellData[] {
+  const sources = new Map<string, CellRow>()
+  const targets = new Map<string, CellRow>()
+  const order: string[] = []
+  const seen = new Set<string>()
+
+  for (const row of rows) {
+    let belongsToSnapshot = false
+    if (row.side === "source") {
+      if (!sources.has(row.cellId)) sources.set(row.cellId, row)
+      belongsToSnapshot = true
+    } else if ((row.targetLang ?? "") === lane && !targets.has(row.cellId)) {
+      targets.set(row.cellId, row)
+      belongsToSnapshot = true
+    }
+    if (belongsToSnapshot && !seen.has(row.cellId)) {
+      seen.add(row.cellId)
+      order.push(row.cellId)
+    }
+  }
+
+  return order.map((cellId) =>
+    buildCellData(
+      cellId,
+      sources.get(cellId),
+      targets.get(cellId),
+      fileId,
+      "local",
+      1,
+      undefined,
+    ),
+  )
+}
+
+/**
+ * Fetch all project files with a small worker pool. Results are assigned by
+ * input index, so response timing cannot reorder the exported project.
+ */
+export async function loadProjectCellFiles(
+  args: {
+    projectId: string
+    projectFiles: readonly ProjectFileInput[]
+    getToken: (fileId: string) => Promise<string | null>
+    lane?: string
+  },
+  loadRows: FileRowsLoader = fetchAllFileCells,
+): Promise<ProjectFileCells[]> {
+  const results = new Array<ProjectFileCells>(args.projectFiles.length)
+  let nextIndex = 0
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex++
+      if (index >= args.projectFiles.length) return
+      const file = args.projectFiles[index]
+      const token = await args.getToken(file.id)
+      if (!token) throw new Error(`Couldn't get a read token for ${file.name}.`)
+      const rows = await loadRows(args.projectId, file.id, token, undefined, args.lane)
+      results[index] = {
+        fileId: file.id,
+        fileName: file.name,
+        cells: buildProjectCellSnapshot(rows, file.id, args.lane),
+      }
+    }
+  }
+
+  const workers = Math.min(LOAD_CONCURRENCY, args.projectFiles.length)
+  await Promise.all(Array.from({ length: workers }, () => worker()))
+  return results
+}
+
+interface PendingTargetEdit {
+  value: string
+  valueHtml?: string
+  aiDrafted: boolean
+}
+
+function overlayPendingEdits(
+  files: ProjectFileCells[],
+  pending: ReadonlyMap<string, PendingTargetEdit>,
+): ProjectFileCells[] {
+  if (pending.size === 0) return files
+  return files.map((file) => ({
+    ...file,
+    cells: file.cells.map((cell) => {
+      const edit = pending.get(`${file.fileId}\0${cell.id}`)
+      if (!edit) return cell
+      return {
+        ...cell,
+        translated: edit.value,
+        translatedHtml: edit.valueHtml ?? cell.translatedHtml,
+        aiDrafted: edit.aiDrafted,
+        hasPendingEdit: true,
+        status: edit.value.trim() ? "unvalidated" : "empty",
+      }
+    }),
+  }))
 }
 
 export function useProjectCells({
@@ -128,40 +168,118 @@ export function useProjectCells({
   projectFiles,
   getToken,
   enabled = true,
+  lane = "",
 }: UseProjectCellsOpts): UseProjectCellsResult {
-  const cappedFiles = projectFiles.slice(0, MAX_FILES)
-  const isTruncated = projectFiles.length > MAX_FILES
+  const [serverFiles, setServerFiles] = useState<ProjectFileCells[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<Error | undefined>()
+  const [pending, setPending] = useState<ReadonlyMap<string, PendingTargetEdit>>(new Map())
+  const generationRef = useRef(0)
 
-  // Stable fileIds array (only re-derives when the joined id list changes).
-  const fileIds = useMemo(
-    () => cappedFiles.map((f) => f.id),
+  // Depend on content, not the caller's array identity. ProjectWorkspace maps
+  // its file list inline and would otherwise restart a whole-project read on
+  // every render.
+  const filesKey = JSON.stringify(projectFiles.map(({ id, name, type }) => [id, name, type]))
+  const requestedFiles = useMemo(
+    () => projectFiles.map((file) => ({ ...file })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [cappedFiles.map((f) => f.id).join(",")],
+    [filesKey],
   )
 
-  const slots = useAllFileSlots(projectId, fileIds, getToken, enabled)
-
-  const { files, isLoading } = useMemo(() => {
-    let anyLoading = false
-    const result: ProjectFileCells[] = []
-    for (let i = 0; i < cappedFiles.length; i++) {
-      const slot = slots[i]
-      if (slot.isLoading) anyLoading = true
-      result.push({
-        fileId: cappedFiles[i].id,
-        fileName: cappedFiles[i].name,
-        cells: slot.cells,
-      })
+  useEffect(() => {
+    const generation = ++generationRef.current
+    let cancelled = false
+    if (!enabled || !projectId || requestedFiles.length === 0) {
+      setServerFiles([])
+      setIsLoading(false)
+      setError(undefined)
+      return
     }
-    return { files: result, isLoading: anyLoading }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    cappedFiles,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    ...slots.map((s) => s.cells),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    ...slots.map((s) => s.isLoading),
-  ])
 
-  return { files, isLoading, isTruncated }
+    setServerFiles([])
+    setIsLoading(true)
+    setError(undefined)
+    void loadProjectCellFiles({ projectId, projectFiles: requestedFiles, getToken, lane })
+      .then((files) => {
+        if (cancelled || generation !== generationRef.current) return
+        setServerFiles(files)
+        setIsLoading(false)
+      })
+      .catch((cause: unknown) => {
+        if (cancelled || generation !== generationRef.current) return
+        setServerFiles([])
+        setError(cause instanceof Error ? cause : new Error(String(cause)))
+        setIsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [enabled, getToken, lane, projectId, requestedFiles])
+
+  // Match useCells' pending-edit semantics so a project export includes edits
+  // still queued locally, while quarantined writes remain excluded.
+  useEffect(() => {
+    if (!enabled || !projectId) {
+      setPending(new Map())
+      return
+    }
+    const fileIds = new Set(requestedFiles.map((file) => file.id))
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    async function refreshPending(): Promise<void> {
+      try {
+        const rows = await peekOutboxBatch(OUTBOX_READ_LIMIT)
+        if (cancelled) return
+        const next = new Map<string, PendingTargetEdit>()
+        for (const row of rows) {
+          if (row.status === "failed" || row.event.projectId !== projectId) continue
+          if (row.event.kind !== "target.cell.commit" && row.event.kind !== "target.cell.create") continue
+          const fileId = row.event.fileId
+          const cellId = row.event.cellId
+          if (!fileId || !cellId || !fileIds.has(fileId)) continue
+          const payload = row.event.payload as {
+            value?: string
+            valueHtml?: string
+            targetLang?: string
+            ai_suggestion?: true
+          }
+          if ((payload.targetLang ?? "") !== lane || typeof payload.value !== "string") continue
+          next.set(`${fileId}\0${cellId}`, {
+            value: payload.value,
+            valueHtml: payload.valueHtml,
+            aiDrafted: payload.ai_suggestion === true,
+          })
+        }
+        setPending(next)
+      } catch {
+        // IndexedDB can be unavailable in privacy modes. The authoritative
+        // server snapshot remains usable; pending overlay is best-effort.
+        if (!cancelled) setPending(new Map())
+      }
+    }
+
+    const scheduleRefresh = () => {
+      if (timer !== undefined) return
+      timer = setTimeout(() => {
+        timer = undefined
+        void refreshPending()
+      }, 50)
+    }
+    void refreshPending()
+    const unsubscribe = subscribeToOutbox(scheduleRefresh)
+    return () => {
+      cancelled = true
+      if (timer !== undefined) clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [enabled, lane, projectId, requestedFiles])
+
+  const files = useMemo(
+    () => overlayPendingEdits(serverFiles, pending),
+    [pending, serverFiles],
+  )
+
+  return { files, isLoading, isTruncated: false, error }
 }

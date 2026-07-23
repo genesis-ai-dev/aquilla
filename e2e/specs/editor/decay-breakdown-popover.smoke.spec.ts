@@ -19,7 +19,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  */
 test("hovering health ring in status bar opens DecayBreakdown popover", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Decay ${Date.now()}` })
-  const ws = await openSeededProject(alice, seeded)
+  await openSeededProject(alice, seeded)
 
   // The status bar / footer contains the HealthRing inside a <footer>.
   const footer = alice.locator("footer").last()
@@ -31,8 +31,6 @@ test("hovering health ring in status bar opens DecayBreakdown popover", async ({
   const healthRing = footer.getByRole("button").first()
   await expect(healthRing).toBeVisible({ timeout: 5_000 })
   await healthRing.hover()
-  // Allow the 300ms hover delay to fire.
-  await alice.waitForTimeout(500)
 
   // DecayBreakdown popover content: "% of cells need attention" text.
   await expect(

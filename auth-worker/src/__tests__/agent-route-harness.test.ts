@@ -95,13 +95,13 @@ describe("agent route — harness tool registration & dispatch", () => {
       "run_code",
       "load_artifact",
       "read_sandbox_file",
-      "plan_import",
       "propose_memory",
       "propose_brief_update",
       "read_memory",
     ]) {
       expect(toolNames).toContain(name)
     }
+    expect(toolNames).not.toContain("plan_import")
 
     // read_memory dispatched → its result reached the model on the next turn.
     const toolMsg = upstreamBodies[1].messages.find((m) => m.role === "tool")!

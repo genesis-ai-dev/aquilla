@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid"
+import { proxyOrigin } from "@/lib/net/resource-proxy"
 import type { TranslatableString } from "./types"
 import vrefRaw from "./ebible/vref.txt?raw"
 
@@ -20,7 +21,9 @@ export interface EBibleTranslation {
   updateDate: string
 }
 
-const CORPUS_BASE = "https://raw.githubusercontent.com/BibleNLP/ebible/main"
+// Routed through the same-origin resource proxy when configured (AQU-627);
+// transparent no-op when VITE_RESOURCES_BASE is unset.
+const CORPUS_BASE = `${proxyOrigin("https://raw.githubusercontent.com")}/BibleNLP/ebible/main`
 
 let vrefCache: string[] | null = null
 let translationsCache: EBibleTranslation[] | null = null

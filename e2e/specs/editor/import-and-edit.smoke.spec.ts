@@ -24,7 +24,6 @@ test("alice imports markdown, edits a cell, and the edit persists across reload"
 
   // Reload and assert the text survived
   await alice.reload()
-  await alice.waitForLoadState("networkidle")
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText(text, { timeout: 5_000 })

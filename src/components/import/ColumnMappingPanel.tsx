@@ -5,6 +5,7 @@
  *   - which column is the source text (required)
  *   - which column is the target translation (optional)
  *   - which column is the cell label / canonical ref (optional)
+ *   - which column identifies headings, verses, cues, or other unit types (optional)
  *   - which column is the cast / character name (optional)
  *   - which column is the start/end timestamp (optional)
  *
@@ -118,14 +119,22 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
     return null
   }
 
-  const [mapping, setMapping] = useState<ColumnMapping>(() => ({
-    sourceCol: autoDetect(["source", "src", "original", "source_text", "sourcetext", "en", "english"]) ?? (firstRow.length >= 1 ? 0 : null),
-    targetCol: autoDetect(["target", "tgt", "translation", "translated", "target_text", "targettext"]) ?? (firstRow.length >= 2 ? 1 : null),
-    labelCol: autoDetect(["ref", "id", "label", "cell", "verse", "canonical_ref", "key"]),
-    castCol: autoDetect(["cast", "character", "speaker", "cast_name", "character_name"]),
-    startCol: autoDetect(["start", "start_time", "timein", "time_in", "startms"]),
-    endCol: autoDetect(["end", "end_time", "timeout", "time_out", "endms"]),
-  }))
+  const [mapping, setMapping] = useState<ColumnMapping>(() => {
+    const detectedSource = autoDetect(["source", "src", "original", "source_text", "sourcetext", "en", "english"])
+    const detectedTarget = autoDetect(["target", "tgt", "translation", "translated", "target_text", "targettext"])
+    return {
+      sourceCol: detectedSource ?? (firstRow.length >= 1 ? 0 : null),
+      // Only assume a generic two-column source/target sheet when no semantic
+      // source header was found. A ref/source/type sheet must not silently copy
+      // its source text into the target lane.
+      targetCol: detectedTarget ?? (detectedSource === null && firstRow.length >= 2 ? 1 : null),
+      labelCol: autoDetect(["ref", "reference", "id", "label", "cell", "verse", "canonical_ref", "key"]),
+      typeCol: autoDetect(["type", "kind", "cell_type", "unit_type", "record_type"]),
+      castCol: autoDetect(["cast", "character", "speaker", "cast_name", "character_name"]),
+      startCol: autoDetect(["start", "start_time", "timein", "time_in", "startms"]),
+      endCol: autoDetect(["end", "end_time", "timeout", "time_out", "endms"]),
+    }
+  })
 
   function set(field: keyof ColumnMapping, v: number | null) {
     setMapping((m) => ({ ...m, [field]: v }))
@@ -181,6 +190,12 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
         />
         {!targetMode && (
           <>
+            <ColSelect
+              label="Content type"
+              headers={headers}
+              value={mapping.typeCol ?? null}
+              onChange={(v) => set("typeCol", v)}
+            />
             <ColSelect
               label="Cast / character"
               headers={headers}

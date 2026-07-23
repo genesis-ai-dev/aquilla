@@ -16,8 +16,6 @@ test("project overview assign work form opens and Cancel collapses it", async ({
 
   // Navigate to the project overview.
   await alice.goto(`/projects/${seeded.projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // "Assign…" button is visible.
   const assignBtn = alice.getByRole("button", { name: /^Assign…$/i })
   await expect(assignBtn).toBeVisible({ timeout: 10_000 })

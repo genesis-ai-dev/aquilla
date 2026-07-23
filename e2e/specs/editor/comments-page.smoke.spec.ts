@@ -23,8 +23,6 @@ test("comments page renders empty state for a new project", async ({ alice }) =>
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // h1 contains "Comments"
   await expect(
     alice.locator("h1").filter({ hasText: /Comments/i })

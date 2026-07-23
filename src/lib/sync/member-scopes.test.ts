@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { fetchMemberScopes, putMemberScopes, type MemberScope } from "./member-scopes"
+import {
+  fetchMemberScopes,
+  isInMemberScope,
+  putMemberScopes,
+  type MemberScope,
+} from "./member-scopes"
 
 const API = "https://api.example.com"
 
@@ -103,5 +108,44 @@ describe("putMemberScopes", () => {
   it("propagates network errors", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
     await expect(putMemberScopes("jwt", "p1", 1, [], API)).rejects.toThrow("offline")
+  })
+})
+
+const allowed = (scopes: MemberScope[], fileId = "file-1", lane = "fr") =>
+  isInMemberScope(scopes, fileId, lane)
+
+describe("isInMemberScope", () => {
+  it("fails open when scopes are absent so the server remains authoritative", () => {
+    expect(isInMemberScope(undefined, "file-1", "fr")).toBe(true)
+    expect(isInMemberScope(null, "file-1", "fr")).toBe(true)
+    expect(allowed([])).toBe(true)
+  })
+
+  it("requires the active lane to match one of the member's lane scopes", () => {
+    const scopes: MemberScope[] = [
+      { kind: "lane", value: "fr" },
+      { kind: "lane", value: "es" },
+    ]
+    expect(allowed(scopes, "file-1", "fr")).toBe(true)
+    expect(allowed(scopes, "file-1", "de")).toBe(false)
+  })
+
+  it("requires the file to match one of the member's file scopes", () => {
+    const scopes: MemberScope[] = [
+      { kind: "file", value: "file-1" },
+      { kind: "file", value: "file-2" },
+    ]
+    expect(allowed(scopes, "file-2", "fr")).toBe(true)
+    expect(allowed(scopes, "file-3", "fr")).toBe(false)
+  })
+
+  it("combines file and lane scope categories with AND semantics", () => {
+    const scopes: MemberScope[] = [
+      { kind: "file", value: "file-1" },
+      { kind: "lane", value: "fr" },
+    ]
+    expect(allowed(scopes, "file-1", "fr")).toBe(true)
+    expect(allowed(scopes, "file-2", "fr")).toBe(false)
+    expect(allowed(scopes, "file-1", "es")).toBe(false)
   })
 })

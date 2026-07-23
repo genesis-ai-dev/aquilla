@@ -16,8 +16,6 @@ test("admin console Projects tab shows Project column", async ({ alice }) => {
   await dash.createProject({ name: `Admin Project ${Date.now()}`, source: "en", target: "fr" })
 
   await alice.goto("/admin")
-  await alice.waitForLoadState("networkidle")
-
   // Click the Projects tab.
   const projectsTab = alice.getByRole("tab", { name: /^Projects$/i })
   await expect(projectsTab).toBeVisible({ timeout: 10_000 })

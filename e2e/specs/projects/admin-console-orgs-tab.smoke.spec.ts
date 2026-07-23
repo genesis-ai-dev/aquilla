@@ -10,8 +10,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("admin console Orgs tab shows Orgs table", async ({ alice }) => {
   await alice.goto("/admin")
-  await alice.waitForLoadState("networkidle")
-
   const tenantsTab = alice.getByRole("tab", { name: /^Tenants$/i })
   await expect(tenantsTab).toBeVisible({ timeout: 10_000 })
   await tenantsTab.click()

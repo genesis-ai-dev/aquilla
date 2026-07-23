@@ -27,8 +27,6 @@ test("project settings named validators input makes form dirty", async ({ alice 
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/settings?section=validation`)
-  await alice.waitForLoadState("networkidle")
-
   // The named validators input is visible.
   const namedUsersInput = alice.locator("#validation-named-users")
   await expect(namedUsersInput).toBeVisible({ timeout: 10_000 })

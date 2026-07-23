@@ -22,8 +22,6 @@ test("living memory edit entry updates the text in place", async ({ alice }) => 
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
   const instructionsSection = alice.locator('section[aria-label="Instructions"]')
   await expect(instructionsSection).toBeVisible({ timeout: 10_000 })
 

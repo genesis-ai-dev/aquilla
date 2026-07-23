@@ -79,8 +79,22 @@ describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
     expect(TEXT_PARSE_FILE_TYPES.has("usfm")).toBe(true)
     expect(TEXT_PARSE_FILE_TYPES.has("txt")).toBe(true)
     expect(TEXT_PARSE_FILE_TYPES.has("csv")).toBe(true)
+    expect(TEXT_PARSE_FILE_TYPES.has("json")).toBe(true)
+    expect(TEXT_PARSE_FILE_TYPES.has("po")).toBe(true)
+    expect(TEXT_PARSE_FILE_TYPES.has("properties")).toBe(true)
+    expect(TEXT_PARSE_FILE_TYPES.has("sbv")).toBe(true)
     // DOM-bound (DOMParser) formats must NOT be routed here.
     expect(TEXT_PARSE_FILE_TYPES.has("docx")).toBe(false)
     expect(TEXT_PARSE_FILE_TYPES.has("xliff")).toBe(false)
+  })
+
+  it.each([
+    ["json", "messages.json", '{"title":"Hello"}', "Hello"],
+    ["po", "messages.po", 'msgid "Hello"\nmsgstr "Bonjour"\n', "Hello"],
+    ["properties", "messages.properties", "title=Hello\n", "Hello"],
+    ["sbv", "captions.sbv", "0:00:01.000,0:00:02.000\nHello\n", "Hello"],
+  ] as const)("parses %s through its deterministic adapter", (fileType, name, text, expected) => {
+    const [result] = parseTextFormat({ fileType, name, text })
+    expect(result.strings[0].original).toBe(expected)
   })
 })

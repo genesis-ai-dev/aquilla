@@ -23,8 +23,6 @@ test("team member role select changes member role", async ({ alice }) => {
 
   // Create a team.
   await alice.goto("/teams")
-  await alice.waitForLoadState("networkidle")
-
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })
   await expect(createBtn).toBeVisible({ timeout: 10_000 })
   await createBtn.click()

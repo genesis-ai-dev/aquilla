@@ -66,6 +66,8 @@ const DIST_DIR = SHARDED ? `dist-e2e-s${K}` : "dist"
 
 const VERBOSE = process.env.E2E_VERBOSE === "1" || process.argv.includes("--verbose")
 const LOG_DIR = path.join(REPO_ROOT, `.e2e-logs${SUFFIX}`)
+const COMMAND_HEARTBEAT_MS = 15_000
+const COMMAND_TIMEOUT_MS = 10 * 60_000
 
 const cleanup: Array<() => Promise<void>> = []
 const logFiles: Record<string, string> = {}
@@ -116,6 +118,27 @@ function runOnce(
     const stdio: ("inherit" | "ignore" | "pipe")[] =
       VERBOSE ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"]
     const c = spawn(cmd, args, { cwd, stdio, env: env ? { ...process.env, ...env } : process.env })
+    const startedAt = Date.now()
+    const label = logLabel ?? `${cmd} ${args[0] ?? ""}`.trim()
+    let settled = false
+    const finish = (error?: Error): void => {
+      if (settled) return
+      settled = true
+      clearInterval(heartbeat)
+      clearTimeout(timeout)
+      if (error) reject(error)
+      else resolve()
+    }
+    const heartbeat = setInterval(() => {
+      const elapsedSeconds = Math.round((Date.now() - startedAt) / 1_000)
+      console.log(`${TAG}[e2e-up] ${label} still running (${elapsedSeconds}s)…`)
+    }, COMMAND_HEARTBEAT_MS)
+    heartbeat.unref()
+    const timeout = setTimeout(() => {
+      const error = new Error(`${label} exceeded ${Math.round(COMMAND_TIMEOUT_MS / 60_000)} minute command timeout`)
+      void killChildTree(c).finally(() => finish(error))
+    }, COMMAND_TIMEOUT_MS)
+    timeout.unref()
     if (!VERBOSE && logLabel && logFiles[logLabel]) {
       const stream = openLogFile(logFiles[logLabel])
       c.stdout?.pipe(stream, { end: false })
@@ -125,7 +148,11 @@ function runOnce(
       c.stdout?.on("data", () => {})
       c.stderr?.on("data", () => {})
     }
-    c.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} ${args.join(" ")} exit ${code}`))))
+    c.on("error", (error) => finish(error))
+    c.on("exit", (code, signal) => {
+      if (code === 0) finish()
+      else finish(new Error(`${cmd} ${args.join(" ")} exit ${code ?? `signal ${signal ?? "unknown"}`}`))
+    })
   })
 }
 
@@ -433,8 +460,8 @@ async function main(): Promise<void> {
   console.log("")
 
   // 8. Hand off to Playwright. Forward extra CLI args after `--`.
-  // Default to the `line` reporter for live one-line progress; user can
-  // override via `npm run test:e2e -- --reporter=list` etc.
+  // The default config combines Playwright's line/GitHub reporter with the
+  // heartbeat reporter. A caller may still override it explicitly.
   //
   // The config path is overridable via E2E_CONFIG so the same boot pipeline
   // can drive the recording harness (playwright.config.recordings.ts) without
@@ -449,10 +476,6 @@ async function main(): Promise<void> {
   const extra = process.argv.slice(2)
   const dashDashIdx = extra.indexOf("--")
   const userArgs = dashDashIdx >= 0 ? extra.slice(dashDashIdx + 1) : []
-  const userSpecifiedReporter = userArgs.some((a) => a === "--reporter" || a.startsWith("--reporter="))
-  if (!userSpecifiedReporter && !process.env.CI) {
-    playwrightArgs.push("--reporter=line")
-  }
   playwrightArgs.push(...userArgs)
   // When sharding, run this stack's slice and isolate artifacts so concurrent
   // shards don't fight over test-results/. Honor a user-supplied --shard.
@@ -474,6 +497,10 @@ async function main(): Promise<void> {
       ...browserEnv,
       E2E_BASE_URL: `http://127.0.0.1:${VITE_PORT}`,
     },
+  })
+  pw.on("error", (error) => {
+    console.error(`${TAG}[fail] could not start Playwright:`, error)
+    void shutdown(1)
   })
   pw.on("exit", (code) => {
     if (code !== 0 && !VERBOSE) {

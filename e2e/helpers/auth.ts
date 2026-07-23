@@ -154,7 +154,6 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
 
   // Reload so the app picks up the seeded session.
   await page.reload()
-  await page.waitForLoadState("networkidle")
 }
 
 /** Inject multiple FrontierSessions with a chosen active account. */
@@ -201,7 +200,6 @@ export async function injectSessions(
   }, { sessions, activeUsername })
 
   await page.reload()
-  await page.waitForLoadState("networkidle")
 }
 
 /** Convenience: load JSON from disk and inject into a page in one call. */
@@ -261,5 +259,4 @@ export async function injectAdditionalSession(
   }, session)
 
   await page.reload()
-  await page.waitForLoadState("networkidle")
 }

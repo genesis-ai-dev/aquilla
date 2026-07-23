@@ -58,7 +58,7 @@ test("clicking a sidebar section row opens the editor", async ({ alice }) => {
   await sectionRow.click()
 
   // After navigation the editor should be open.
-  await expect(alice.locator("[data-cell-id]").first()).toBeVisible({ timeout: 8_000 })
+  await ws.waitForEditor()
 
   // URL should now reference the file (contains /file/ segment).
   await expect(alice).toHaveURL(/\/file\//, { timeout: 5_000 })

@@ -64,6 +64,5 @@ test("targeted invite surfaces in bob's inbox; after accept, alice sees and revo
 
   // ── bob: the revoked project is gone from his dashboard too ──
   await bob.goto("/projects")
-  await bob.waitForLoadState("networkidle")
   await expect(bob.getByText(name)).toBeHidden({ timeout: 10_000 })
 })

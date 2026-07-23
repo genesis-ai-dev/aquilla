@@ -27,6 +27,7 @@ type SearchFn = (
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
 import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import { prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
 import { parseParagraphResponse } from "@/lib/completion/paragraph-protocol"
 import {
@@ -253,10 +254,16 @@ export function useCompletion(
         })),
       )
 
+      // AQU-662: decompose any inline footnote markers into clean base text +
+      // a translatable footnote block so raw \f...\f* markup is not fed to the
+      // model (and echoed back into the target). No-footnote cells pass through
+      // unchanged.
+      const { promptSource } = prepareFootnotesForPrompt(cell.original)
+
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        sourceText: cell.original,
+        sourceText: promptSource,
         examples: compressedExamples,
         rules,
         validatedPairs,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -51,6 +52,94 @@ import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
+
+function DashboardRowTemplate() {
+  return (
+    <div className="flex items-center gap-4 p-4">
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <Skeleton className="h-4 w-2/5" />
+        <Skeleton className="h-3 w-3/5" />
+      </div>
+      <Skeleton className="h-4 w-16 shrink-0" />
+    </div>
+  )
+}
+
+function DashboardPanelTemplate({ rows }: { rows: number }) {
+  return (
+    <section className="overflow-hidden rounded-2xl border bg-card">
+      <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-3 w-16" />
+        </div>
+        <Skeleton className="h-8 w-40" />
+      </div>
+      <div className="divide-y">
+        {Array.from({ length: rows }).map((_, index) => (
+          <DashboardRowTemplate key={index} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * A stable, value-free preview of the dashboard's eventual geometry. This
+ * never reads partially hydrated org/project state, so startup has exactly one
+ * visual transition: template → resolved dashboard.
+ */
+function OrgHomeLoadingTemplate() {
+  return (
+    <div data-testid="org-home-loading-template" className="h-full">
+      <AppShell
+        sidebar={
+          <div className="flex h-full flex-col gap-4 p-2">
+            <Skeleton className="h-9 w-full" />
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-3/4" />
+              <Skeleton className="h-8 w-2/3" />
+            </div>
+            <div className="mt-auto flex flex-col gap-2">
+              <Skeleton className="h-8 w-4/5" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          </div>
+        }
+        header={
+          <div className="flex items-center justify-between gap-4 px-4">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-7 w-56 rounded-full" />
+          </div>
+        }
+        statusBar={null}
+        main={
+          <Page size="wide">
+            <Skeleton className="mb-8 h-7 w-48" />
+            <div className="flex flex-col gap-6">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="flex h-[88px] flex-col gap-2 rounded-2xl border bg-card px-5 py-4"
+                  >
+                    <Skeleton className="h-6 w-12" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                ))}
+              </div>
+              <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
+                <DashboardPanelTemplate rows={3} />
+                <DashboardPanelTemplate rows={4} />
+              </div>
+            </div>
+          </Page>
+        }
+      />
+    </div>
+  )
+}
 
 
 type ActivityStatus = "not-started" | "stalled" | "active"
@@ -616,11 +705,15 @@ export function OrgHome() {
     || (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey)
   const workspaceLabel = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
 
-  // Keep cold-start chrome atomic: rendering AppShell before session, org,
-  // project-directory, and portfolio state agree produced three visibly
-  // different sidebars/headings before the dashboard was usable.
+  // Keep cold-start data atomic while preserving the destination's geometry.
+  // The template is intentionally disconnected from partial org/project state:
+  // unknown values remain skeletons and startup has one visual transition.
   if (isPageLoading) {
-    return <LoadingOverlay label="Loading dashboard" data-testid="org-home-loading" />
+    return (
+      <LoadingOverlay label="Loading dashboard" data-testid="org-home-loading">
+        <OrgHomeLoadingTemplate />
+      </LoadingOverlay>
+    )
   }
 
   // Rollup stats

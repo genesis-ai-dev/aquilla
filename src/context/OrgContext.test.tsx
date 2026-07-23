@@ -22,8 +22,12 @@ if (typeof globalThis.localStorage === "undefined") {
   })
 }
 
+const sessionState = {
+  session: { jwt: "jwt", username: "anna", createdAt: "x" },
+  loading: false,
+}
 vi.mock("@/hooks/useFrontierSession", () => ({
-  useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }),
+  useFrontierSession: () => sessionState,
 }))
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a) }))
@@ -50,6 +54,7 @@ function Probe() {
 
 beforeEach(() => {
   localStorage.clear()
+  sessionState.loading = false
   listMyOrgs.mockReset()
   fetchAccessibleProjects.mockReset()
   fetchAccessibleProjects.mockResolvedValue([])
@@ -69,6 +74,29 @@ describe("OrgProvider", () => {
     render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
 
     await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"))
+    await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalledTimes(1))
+  })
+
+  it("reuses an in-flight project directory request across same-account hydration bounces", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "A", role: { level: 700, name: "owner" } },
+    ])
+    let resolveProjects!: (projects: unknown[]) => void
+    fetchAccessibleProjects.mockImplementation(
+      () => new Promise((resolve) => { resolveProjects = resolve }),
+    )
+
+    const tree = () => <MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>
+    const view = render(tree())
+    await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalledTimes(1))
+
+    sessionState.loading = true
+    view.rerender(tree())
+    sessionState.loading = false
+    view.rerender(tree())
+
+    expect(fetchAccessibleProjects).toHaveBeenCalledTimes(1)
+    await act(async () => { resolveProjects([]) })
     await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalledTimes(1))
   })
 

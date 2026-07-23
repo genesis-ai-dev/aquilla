@@ -59,6 +59,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [resolvedProjectsJwt, setResolvedProjectsJwt] = useState<string | null>(null)
   const orgRequestRef = useRef(0)
   const projectsRequestRef = useRef(0)
+  const projectsInFlightRef = useRef<{
+    jwt: string
+    requestId: number
+    promise: Promise<CloudProjectSummary[]>
+  } | null>(null)
 
   const refresh = useCallback(async (): Promise<OrgSummary[]> => {
     const requestId = ++orgRequestRef.current
@@ -107,32 +112,48 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   // provider, sidebar, and dashboard each issued this same expensive request,
   // and this provider issued it twice as `orgs` changed during startup.
   const refreshAccessibleProjects = useCallback(async (): Promise<CloudProjectSummary[]> => {
-    const requestId = ++projectsRequestRef.current
     if (sessionLoading) {
       setAccessibleProjectsLoading(true)
       return []
     }
     if (!jwt) {
+      projectsRequestRef.current += 1
+      projectsInFlightRef.current = null
       setAccessibleProjects([])
       setResolvedProjectsJwt(null)
       setAccessibleProjectsLoading(false)
       return []
     }
+
+    // Account/session hydration can briefly re-enter `loading` while retaining
+    // the same JWT. Reuse the pending directory request rather than invalidating
+    // it and issuing an identical GET when hydration settles again.
+    const pending = projectsInFlightRef.current
+    if (pending?.jwt === jwt) return pending.promise
+
+    const requestId = ++projectsRequestRef.current
     setAccessibleProjectsLoading(true)
-    try {
-      const projects = await fetchAccessibleProjects(jwt)
-      if (projectsRequestRef.current !== requestId) return []
-      setAccessibleProjects(projects)
-      return projects
-    } catch {
-      if (projectsRequestRef.current === requestId) setAccessibleProjects([])
-      return []
-    } finally {
-      if (projectsRequestRef.current === requestId) {
-        setResolvedProjectsJwt(jwt)
-        setAccessibleProjectsLoading(false)
+    const promise = (async () => {
+      try {
+        const projects = await fetchAccessibleProjects(jwt)
+        if (projectsRequestRef.current !== requestId) return []
+        setAccessibleProjects(projects)
+        return projects
+      } catch {
+        if (projectsRequestRef.current === requestId) setAccessibleProjects([])
+        return []
+      } finally {
+        if (projectsInFlightRef.current?.requestId === requestId) {
+          projectsInFlightRef.current = null
+        }
+        if (projectsRequestRef.current === requestId) {
+          setResolvedProjectsJwt(jwt)
+          setAccessibleProjectsLoading(false)
+        }
       }
-    }
+    })()
+    projectsInFlightRef.current = { jwt, requestId, promise }
+    return promise
   }, [jwt, sessionLoading])
 
   useEffect(() => { void refreshAccessibleProjects() }, [refreshAccessibleProjects])

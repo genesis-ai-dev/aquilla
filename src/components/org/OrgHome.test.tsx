@@ -294,6 +294,9 @@ describe("OrgHome", () => {
     try {
       await waitFor(() => expect(screen.getByTestId("org-home-loading")).toBeInTheDocument())
       expect(screen.getByText("Loading dashboard…")).toBeInTheDocument()
+      expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
+      expect(document.querySelector('[data-slot="app-shell-header"]')).not.toBeNull()
+      expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
       await act(async () => { await Promise.resolve() })
       expect(addedText.join("\n")).not.toContain("Your organization is ready")
       expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()

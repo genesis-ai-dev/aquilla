@@ -22,6 +22,8 @@ describe("LoadingOverlay", () => {
     const spinner = container.querySelector("[data-slot='spinner']")
     expect(spinner).not.toBeNull()
     expect(spinner).toHaveClass("animate-spin")
+    expect(spinner).toHaveClass("motion-reduce:animate-none")
+    expect(screen.getByTestId("loading-neutral-template")).toBeInTheDocument()
   })
 
   it("supports a custom label", () => {
@@ -30,5 +32,17 @@ describe("LoadingOverlay", () => {
     expect(
       screen.getByRole("status", { name: "Opening project" }),
     ).toBeInTheDocument()
+  })
+
+  it("uses a supplied destination template instead of the neutral fallback", () => {
+    render(
+      <LoadingOverlay>
+        <div data-testid="custom-loading-template" />
+      </LoadingOverlay>,
+    )
+
+    expect(screen.getByTestId("custom-loading-template")).toBeInTheDocument()
+    expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
+    expect(screen.getByTestId("custom-loading-template").parentElement).toHaveAttribute("inert")
   })
 })

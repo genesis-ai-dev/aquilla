@@ -268,7 +268,9 @@ test("org overview does not present false zeroes while its portfolio is loading"
 
     await expect(alice.getByTestId("org-home-loading")).toBeVisible()
     await expect(alice.getByText("Loading dashboard…")).toBeVisible()
-    await expect(alice.locator('[data-slot="app-shell-header"]')).toHaveCount(0)
+    await expect(alice.getByTestId("org-home-loading-template")).toBeVisible()
+    await expect(alice.locator('[data-slot="app-shell-header"]')).toBeVisible()
+    await expect(alice.getByTestId("loading-neutral-template")).toHaveCount(0)
     await expect(alice.getByText("Your organization is ready")).toHaveCount(0)
     await expect(alice.getByText("Avg translated", { exact: true })).toHaveCount(0)
   } finally {

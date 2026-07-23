@@ -41,6 +41,30 @@ export interface ConceptViolationGroup {
 
 const TERM_PREFIX = "term:"
 
+/** Minimal cell shape needed to derive a human-meaningful violation-row label. */
+export interface ViolationCellRefSource {
+  context?: string
+  globalReferences?: string[]
+  cellLabel?: string
+}
+
+/**
+ * Human-meaningful label for an infringing cell row in the violations inbox.
+ *
+ * Prefers the cell's canonical ref/tag — `context`, then the first
+ * `globalReferences` entry — matching the editor precedent in `EditorTable`.
+ * Falls back to a human `cellLabel`, then a generic placeholder. It NEVER
+ * returns (or is passed) the raw internal cell id: exposing that id to users
+ * was the regression fixed in AQU-663.
+ */
+export function violationCellRef(cell: ViolationCellRefSource | undefined): string {
+  const ref = cell?.context?.trim() || cell?.globalReferences?.[0]?.trim()
+  if (ref) return ref
+  const label = cell?.cellLabel?.trim()
+  if (label) return label
+  return "Untitled cell"
+}
+
 /**
  * Parse a compiled terminology rule id into its conceptId + violation kind.
  * Returns null for any id that is not a terminology rule.

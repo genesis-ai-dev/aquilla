@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   parseTerminologyRuleId,
   groupTerminologyInfractions,
+  violationCellRef,
 } from "./violations-inbox"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import type { Concept } from "./types"
@@ -135,5 +136,28 @@ describe("groupTerminologyInfractions", () => {
     )
     expect(g.conceptId).toBe("c1")
     expect(g.forbiddenPresentCount).toBe(1)
+  })
+})
+
+describe("violationCellRef (AQU-663 regression guard)", () => {
+  it("prefers the canonical context ref/tag", () => {
+    expect(
+      violationCellRef({ context: "GEN 1:1", globalReferences: ["x"], cellLabel: "y" }),
+    ).toBe("GEN 1:1")
+  })
+
+  it("falls back to the first global reference when context is blank", () => {
+    expect(violationCellRef({ context: "  ", globalReferences: ["MRK 2:3"] })).toBe(
+      "MRK 2:3",
+    )
+  })
+
+  it("falls back to a human cellLabel when no ref/tag exists", () => {
+    expect(violationCellRef({ cellLabel: "Intro note" })).toBe("Intro note")
+  })
+
+  it("degrades to a generic placeholder when nothing is available — never a raw id", () => {
+    expect(violationCellRef(undefined)).toBe("Untitled cell")
+    expect(violationCellRef({})).toBe("Untitled cell")
   })
 })

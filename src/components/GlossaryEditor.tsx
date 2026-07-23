@@ -416,6 +416,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
             <TerminologyViolationsInbox
               concepts={concepts}
               cells={detailCells}
+              files={projectFiles}
               onJumpToCell={({ cellId, fileId }) => {
                 navigate(`/project/${id}/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
               }}

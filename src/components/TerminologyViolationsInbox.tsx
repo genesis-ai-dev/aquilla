@@ -12,7 +12,7 @@
  * scan only runs when the user is looking at this surface.
  */
 import { useMemo, useState } from "react"
-import { ChevronDown, ChevronRight, ShieldAlert } from "lucide-react"
+import { ChevronDown, ChevronRight, FileText, ShieldAlert } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
@@ -21,6 +21,7 @@ import { compileConceptsToRules } from "@/lib/terminology/compile"
 import { checkRules } from "@/lib/rules/rule-engine"
 import {
   groupTerminologyInfractions,
+  violationCellRef,
   type ConceptViolationGroup,
 } from "@/lib/terminology/violations-inbox"
 
@@ -28,11 +29,14 @@ interface Props {
   concepts: Concept[]
   /** Loaded project cells (flattened across files). */
   cells: CellData[]
+  /** Project files, used to represent an infringing cell's file by name
+   *  (via an icon affordance) instead of exposing the raw cell id. */
+  files?: Array<{ id: string; name: string }>
   /** Jump back to the editor focused on the offending cell, when supported. */
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
 }
 
-export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell }: Props) {
+export function TerminologyViolationsInbox({ concepts, cells, files, onJumpToCell }: Props) {
   // Compile active concepts → rules and evaluate over the loaded cells. This is
   // the same derive-on-read path the editor uses; it only runs while mounted
   // (the caller mounts this only on the active Violations tab).
@@ -55,6 +59,12 @@ export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell }: Pr
     for (const c of cells) m.set(c.id, c)
     return m
   }, [cells])
+
+  const fileNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const f of files ?? []) m.set(f.id, f.name)
+    return m
+  }, [files])
 
   const totalViolations = useMemo(
     () => groups.reduce((s, g) => s + g.count, 0),
@@ -100,6 +110,7 @@ export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell }: Pr
                 key={g.conceptId}
                 group={g}
                 cellById={cellById}
+                fileNameById={fileNameById}
                 onJumpToCell={onJumpToCell}
               />
             ))}
@@ -113,10 +124,12 @@ export function TerminologyViolationsInbox({ concepts, cells, onJumpToCell }: Pr
 function ConceptViolationRow({
   group,
   cellById,
+  fileNameById,
   onJumpToCell,
 }: {
   group: ConceptViolationGroup
   cellById: Map<string, CellData>
+  fileNameById: Map<string, string>
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -158,7 +171,9 @@ function ConceptViolationRow({
         <ul className="mt-2 space-y-1 pl-6">
           {group.infractions.map((inf, i) => {
             const cell = cellById.get(inf.cellId)
-            const label = cell?.cellLabel ?? inf.cellId
+            // AQU-663: show the cell's ref/tag, never the raw internal cell id.
+            const label = violationCellRef(cell)
+            const fileName = fileNameById.get(inf.fileId)
             const preview = cell?.translated?.trim() || cell?.original?.trim() || ""
             return (
               <li
@@ -174,6 +189,19 @@ function ConceptViolationRow({
                   )}
                 >
                   {inf.kind === "forbidden-present" ? "forbidden" : "missing"}
+                </span>
+                {/* AQU-663: represent the file with an icon affordance (name on
+                    hover) rather than exposing the raw cell id. */}
+                <span
+                  className="flex shrink-0 items-center gap-1 text-muted-foreground"
+                  title={fileName ? `In ${fileName}` : undefined}
+                >
+                  <FileText className="h-3 w-3" aria-hidden="true" />
+                  {fileName && (
+                    <span className="hidden max-w-[8rem] truncate sm:inline">
+                      {fileName}
+                    </span>
+                  )}
                 </span>
                 {onJumpToCell ? (
                   <button

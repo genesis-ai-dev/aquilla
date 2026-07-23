@@ -667,7 +667,17 @@ export function useCompletion(
         sourceLanguage,
         targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        cells: draftCells.map((c) => ({ cellId: c.id, source: c.original })),
+        // Full group, IN POSITION (coordinator adjudication): a validated
+        // cell mid-group must not leave a silent gap that makes its drafted
+        // neighbors read as artificially adjacent. Locked (validated) cells
+        // carry `lockedTarget` so buildParagraphPrompt renders them as a
+        // reference segment instead of a `<c id>` tag — they are never
+        // requested from the model.
+        cells: groupCells.map((c) => ({
+          cellId: c.id,
+          source: c.original,
+          ...(c.status === "validated" ? { lockedTarget: c.translated } : {}),
+        })),
         examples: examplesForPrompt,
         validatedPairs,
         rules,

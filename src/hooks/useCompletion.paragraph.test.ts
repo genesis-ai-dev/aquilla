@@ -466,8 +466,8 @@ describe("completeParagraph (D3)", () => {
   // commit a validated cell's draft, never error it, and (cleanly achievable
   // here, per parseParagraphResponse's expectedIds-only reconciliation) never
   // even ask the model to translate it.
-  it("skips an already-validated cell in the group: never commits it, never errors it, and never requests it from the model (D3 + coordinator adjudication)", async () => {
-    const validatedCell2 = { ...CELL_2, status: "validated" }
+  it("skips an already-validated cell in the group: never commits it, never errors it, renders it IN POSITION as a locked segment (not a <c id> tag), and expectedIds exclude it (D3 + coordinator adjudication)", async () => {
+    const validatedCell2 = { ...CELL_2, status: "validated", translated: "Verse two ALREADY TRANSLATED" }
     const cellsWithValidated = [CELL_1, validatedCell2, CELL_3]
 
     let capturedBody: string | null = null
@@ -518,6 +518,23 @@ describe("completeParagraph (D3)", () => {
     const body = JSON.parse(capturedBody!)
     const userMsg = body.messages.find((m: { role: string; content: string }) => m.role === "user")
     expect(userMsg.content).not.toContain(`<c id="cell-2">`)
+
+    // Instead it renders IN POSITION as a locked reference segment — source
+    // text plus its existing committed target, clearly marked — so cell-1
+    // and cell-3's tags don't read as artificially adjacent. (The living-
+    // memory validated-pairs few-shot block may ALSO surface this same
+    // committed pair earlier in the prompt as a reference example — that's
+    // unrelated and expected; isolate the "Source paragraph:" block itself
+    // to check the in-position ordering the locked-segment feature owns.)
+    expect(userMsg.content).toContain(
+      "Verse two source [already translated — do not output: Verse two ALREADY TRANSLATED]",
+    )
+    const liveParagraphBlock = (userMsg.content as string).split("Source paragraph:")[1]
+    expect(liveParagraphBlock).toBeDefined()
+    expect(liveParagraphBlock.indexOf(`<c id="cell-1">`))
+      .toBeLessThan(liveParagraphBlock.indexOf("Verse two ALREADY TRANSLATED"))
+    expect(liveParagraphBlock.indexOf("Verse two ALREADY TRANSLATED"))
+      .toBeLessThan(liveParagraphBlock.indexOf(`<c id="cell-3">`))
 
     // No stuck pulsing ring on the skipped cell.
     expect(result.current.completing.has("cell-2")).toBe(false)

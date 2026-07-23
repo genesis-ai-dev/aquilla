@@ -73,8 +73,14 @@ const project: ProjectRecord = {
 }
 
 // Three cells, one paragraph (only the first carries paragraphStart) — a
-// multi-cell group so the rail button is eligible to render.
-function makeRows(cellIds: string[], paragraphStartIds: ReadonlySet<string>): CellRow[] {
+// multi-cell group so the rail button is eligible to render. `validatedIds`
+// marks specific cells' TARGET as already validated (coordinator follow-up:
+// mixed-validation fixtures).
+function makeRows(
+  cellIds: string[],
+  paragraphStartIds: ReadonlySet<string>,
+  validatedIds: ReadonlySet<string> = new Set(),
+): CellRow[] {
   return cellIds.flatMap((id, i) => [
     {
       cellId: id,
@@ -104,13 +110,17 @@ function makeRows(cellIds: string[], paragraphStartIds: ReadonlySet<string>): Ce
       sourceEventId: `${id}-source`,
       lastEditor: "tester",
       lastEditAt: 2,
-      validated: false,
+      validated: validatedIds.has(id),
       wordCount: 1,
     },
   ] satisfies CellRow[])
 }
 
-function makeStore(cellIds: string[], paragraphStartIds: ReadonlySet<string>): CellStore {
+function makeStore(
+  cellIds: string[],
+  paragraphStartIds: ReadonlySet<string>,
+  validatedIds: ReadonlySet<string> = new Set(),
+): CellStore {
   const store = new CellStore()
   store.setRuntime({
     projectId: project.id,
@@ -119,11 +129,15 @@ function makeStore(cellIds: string[], paragraphStartIds: ReadonlySet<string>): C
     requiredValidations: 1,
     auditStats: new Map(),
   })
-  store.replaceRows(makeRows(cellIds, paragraphStartIds), { full: true, maxServerSeq: 1 })
+  store.replaceRows(makeRows(cellIds, paragraphStartIds, validatedIds), { full: true, maxServerSeq: 1 })
   return store
 }
 
-function renderTable(cellStore: CellStore, onCompleteParagraph?: (cellId: string) => void) {
+function renderTable(
+  cellStore: CellStore,
+  onCompleteParagraph?: (cellId: string) => void,
+  completing: Map<string, string> = new Map(),
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -134,7 +148,7 @@ function renderTable(cellStore: CellStore, onCompleteParagraph?: (cellId: string
           username="tester"
           isCompletionConfigured={true}
           isCompletionAvailable={true}
-          completing={new Map()}
+          completing={completing}
           examples={new Map()}
           errors={new Map()}
           previews={new Map()}
@@ -204,5 +218,61 @@ describe("EditorTable — Draft paragraph rail button (p1-paragraph-ui-wiring)",
     await screen.findByText("target 0")
 
     expect(screen.queryByRole("button", { name: /Draft paragraph/ })).not.toBeInTheDocument()
+  })
+
+  // Coordinator follow-up: dialog copy must never claim a count that
+  // doesn't match what will actually be drafted once validated cells are
+  // excluded (completeParagraph's skip-validated-cells guard).
+  it("shows truthful \"N of M\" copy in the confirm dialog when one cell in the group is already validated", async () => {
+    const onCompleteParagraph = vi.fn()
+    const store = makeStore(["cell-1", "cell-2", "cell-3"], new Set(["cell-1"]), new Set(["cell-2"]))
+    renderTable(store, onCompleteParagraph)
+
+    const button = await screen.findByRole("button", { name: "Draft paragraph (3 cells)" })
+    fireEvent.click(button)
+
+    expect(await screen.findByText(
+      "Draft this paragraph? 2 of 3 cells will be drafted; already-validated cells are kept as-is.",
+    )).toBeInTheDocument()
+  })
+
+  it("hides the button entirely when every cell in the group is already validated (nothing left to draft)", async () => {
+    const onCompleteParagraph = vi.fn()
+    const store = makeStore(
+      ["cell-1", "cell-2", "cell-3"],
+      new Set(["cell-1"]),
+      new Set(["cell-1", "cell-2", "cell-3"]),
+    )
+    renderTable(store, onCompleteParagraph)
+
+    await screen.findByText("target 0")
+
+    expect(screen.queryByRole("button", { name: /Draft paragraph/ })).not.toBeInTheDocument()
+  })
+
+  // Coordinator follow-up: a validated start cell never gets its own
+  // `completing` entry (it's excluded from the drafting set), so the button
+  // must derive its busy state from the WHOLE group, not just its own row.
+  it("disables the button while a sibling cell in the same group is completing, even though the start cell's own completing entry is absent", async () => {
+    const onCompleteParagraph = vi.fn()
+    const store = makeStore(["cell-1", "cell-2", "cell-3"], new Set(["cell-1"]))
+    // cell-2 (a non-start sibling) is mid-draft; cell-1 (the start/button row)
+    // has no completing entry of its own. Both cell-2's Sparkles button AND
+    // cell-1's paragraph-draft button surface a "Generating…" tooltip while
+    // ANY completion is in flight, so disambiguate by the row (cell-1 is the
+    // only row that can host the paragraph-draft button at all).
+    renderTable(store, onCompleteParagraph, new Map([["cell-2", "generating"]]))
+
+    await screen.findByText("target 0")
+    const row = document.querySelector('[data-cell-id="cell-1"]')
+    expect(row).not.toBeNull()
+    const buttons = row!.querySelectorAll('button[aria-label="Generating…"]')
+    // Exactly one — the paragraph-draft button (cell-1 itself has no own
+    // completing entry, so its Sparkles button is NOT in a "Generating…" state).
+    expect(buttons).toHaveLength(1)
+    const button = buttons[0] as HTMLButtonElement
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(onCompleteParagraph).not.toHaveBeenCalled()
   })
 })

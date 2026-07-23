@@ -23,6 +23,7 @@ import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passag
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
+import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
@@ -3729,6 +3730,21 @@ export function ProjectWorkspace() {
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
   )
 
+  // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
+  // active file. Export never hard-blocks on these — the count only drives a
+  // calm, non-blocking advisory in ExportDialog so users stop believing these
+  // "HTML/validation health errors" prevent a download.
+  const activeFileInfractionCount = useMemo(() => {
+    if (infractions.size === 0) return 0
+    let total = 0
+    for (const cell of legacyCells) {
+      const cellInfractions = infractions.get(cell.id)
+      if (!cellInfractions || cellInfractions.length === 0) continue
+      total += partitionInfractions(cellInfractions, cell.waivers).active.length
+    }
+    return total
+  }, [infractions, legacyCells])
+
   const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string, parentId?: string | null) => {
     if (cellId && committedEventId) {
       rememberPendingTargetCommit(cellId, committedEventId, parentId ?? null)
@@ -5132,6 +5148,7 @@ export function ProjectWorkspace() {
           targetLang={activeLane}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
+          outstandingInfractionCount={activeFileInfractionCount}
         />
       </Suspense>
       <ParallelPassagesPanel

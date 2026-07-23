@@ -1868,7 +1868,7 @@ export function ProjectWorkspace() {
     revalidateCell(cell.id)
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
-  const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, completeBatch, completeParagraph, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -1886,6 +1886,15 @@ export function ProjectWorkspace() {
   const handleCompleteSingle = useCallback(
     (cell: CellData, opts?: { regenerate?: boolean }) => completeSingle(cell, undefined, opts),
     [completeSingle],
+  )
+
+  // p1-paragraph-ui-wiring (Task 3): draft an entire paragraph group as one
+  // model call. `completeParagraph` resolves the paragraph containing
+  // `cellId` itself (paragraphGroupForCell), so this adapter is a thin
+  // identity pass-through — mirrors handleCompleteSingle's shape.
+  const handleCompleteParagraph = useCallback(
+    (cellId: string) => completeParagraph(cellId),
+    [completeParagraph],
   )
 
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
@@ -4757,6 +4766,7 @@ export function ProjectWorkspace() {
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
+            onCompleteParagraph={handleCompleteParagraph}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
             isBacktranslationConfigured={isBacktranslationConfigured}
             onBacktranslate={runBacktranslation}

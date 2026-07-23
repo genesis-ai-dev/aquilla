@@ -56,12 +56,32 @@ describe("CreditsDial — visibility gates", () => {
 })
 
 describe("CreditsDial — maintainer view", () => {
-  it("shows today's agent credits at a glance, in credits only (no $)", async () => {
+  it("shows only the ring by default; today's spend is on the hover tooltip, not inline (AQU-671)", async () => {
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
     render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
     const dial = await screen.findByTestId("credits-dial")
-    expect(dial).toHaveTextContent("150 cr")
-    expect(dial.textContent).not.toContain("$")
+    // No always-on inline number beside the ring — the icon stands alone.
+    expect(dial.textContent).not.toContain("150 cr")
+    expect(dial.querySelector("svg")).not.toBeNull()
+    // Today's agent-credit spend is surfaced on hover via the title/aria-label.
+    expect(dial).toHaveAttribute("title", "Agent credits used today: 150 cr")
+    expect(dial).toHaveAttribute("aria-label", "Agent credits used today: 150 cr")
+    // Still credits-only: no raw $.
+    expect(dial.getAttribute("title")).not.toContain("$")
+  })
+
+  it("never surfaces 'NaN cr' when today's agent credits are non-numeric (AQU-671)", async () => {
+    mockGetOrgCredits.mockResolvedValue({
+      ...SAMPLE_DATA,
+      day: { ...SAMPLE_DATA.day, agentCredits: NaN },
+    })
+    render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    const dial = await screen.findByTestId("credits-dial")
+    expect(dial.getAttribute("title")).not.toContain("NaN")
+    expect(dial.getAttribute("title")).toBe("Agent credits used today: 0 cr")
+    // The ring dasharray must stay finite even with a NaN spend.
+    const ring = dial.querySelectorAll("circle")[1]
+    expect(ring.getAttribute("stroke-dasharray") ?? "").not.toContain("NaN")
   })
 
   it("opens a popover with agent + all-rail day/week detail on click", async () => {

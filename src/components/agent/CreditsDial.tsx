@@ -65,8 +65,9 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
             type="button"
             onClick={refresh}
             data-testid="credits-dial"
-            title="Agent credits used today"
-            className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+            title={`Agent credits used today: ${formatCredits(day.agentCredits)}`}
+            aria-label={`Agent credits used today: ${formatCredits(day.agentCredits)}`}
+            className="flex items-center rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
           />
         }
       >
@@ -83,7 +84,6 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
             className={ringClass(pct)}
           />
         </svg>
-        <span>{formatCredits(day.agentCredits)}</span>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3 text-xs" data-testid="credits-dial-popover">
         <p className="mb-2 font-medium">Agent credits</p>

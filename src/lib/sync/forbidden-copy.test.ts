@@ -10,27 +10,27 @@ function entry(reason: string, over: Partial<ForbiddenEntry> = {}): ForbiddenEnt
 describe("forbiddenReasonCopy", () => {
   it("maps a file-scope refusal", () => {
     expect(forbiddenReasonCopy("file 'f1' not in scope for cell.validate")).toMatch(
-      /file isn't in your assigned scope/i,
+      /file was outside your assigned scope/i,
     )
   })
   it("maps a lane-scope refusal", () => {
     expect(forbiddenReasonCopy("lane 'es' not in scope for cell.validate")).toMatch(
-      /language lane isn't in your assigned scope/i,
+      /language lane was outside your assigned scope/i,
     )
   })
   it("maps a self-validation refusal", () => {
     expect(forbiddenReasonCopy("self-validation is not allowed on this project")).toMatch(
-      /can't validate a cell you translated/i,
+      /self-validation was off for this project at the time/i,
     )
   })
   it("maps a role-floor refusal", () => {
     expect(forbiddenReasonCopy("role too low to validate (project requires project_lead or above)")).toMatch(
-      /role can't validate/i,
+      /role wasn't allowed to validate/i,
     )
   })
   it("maps an allowlist refusal", () => {
     expect(forbiddenReasonCopy("user 'bob' is not in the project's validator allowlist")).toMatch(
-      /validator allowlist/i,
+      /weren't on this project's validator allowlist/i,
     )
   })
   it("falls back to the raw reason for an unmapped message", () => {
@@ -45,7 +45,7 @@ describe("forbiddenBannerMessage", () => {
       entry("file 'f1' not in scope for cell.validate"),
     ])
     expect(msg).toMatch(/2 changes weren't saved/i)
-    expect(msg).toMatch(/file isn't in your assigned scope/i)
+    expect(msg).toMatch(/file was outside your assigned scope/i)
   })
   it("uses the singular for one entry", () => {
     expect(forbiddenBannerMessage([entry("self-validation is not allowed on this project")])).toMatch(

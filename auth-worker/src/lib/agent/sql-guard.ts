@@ -118,8 +118,23 @@ export function guardSql(
   const PROJECT_TABLES =
     /\b(cells|files|events|comments|assignments|assignment_cells|cell_validators|cell_waivers|cell_backtranslations|cell_audio|cell_word_morph|project_settings|project_members|users|agent_runs|chain_claims|project_seq_counters)\b/i
   const catalogOnly = /\binformation_schema\s*\./i.test(masked) && !PROJECT_TABLES.test(masked)
-  if (!catalogOnly && !/(?<!:):project\b/.test(sql)) {
-    return { ok: false, error: "query must reference :project (all reads are project-scoped)" }
+  // Require :project in an actual equality against a project_id column, not
+  // merely present anywhere in the text — `WHERE project_id <> :project` (or
+  // any other operator/unrelated clause) used to satisfy the old presence-only
+  // check while excluding the caller's own project. This is app-level
+  // defence-in-depth only: it cannot catch a query that correctly filters one
+  // aliased table by :project while joining/selecting an unfiltered second
+  // table of the same shape (e.g. `cells c1 JOIN cells c2 ON 1=1`) — that
+  // cross-tenant case is closed at the database layer below via
+  // `db.withUser()` + the RLS backstop (db/postgres/migrations/0034), not by
+  // text analysis.
+  const PROJECT_EQ_RE =
+    /(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?project_id\s*=\s*(?<!:):project\b|(?<!:):project\b\s*=\s*(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?project_id\b/i
+  if (!catalogOnly && !PROJECT_EQ_RE.test(masked)) {
+    return {
+      ok: false,
+      error: "query must filter on project_id = :project (all reads are project-scoped)",
+    }
   }
 
   // Unknown :vars → reject before binding (a typo would otherwise reach PG
@@ -193,12 +208,19 @@ export async function runGuardedSql(
   // wrapper exists so a missing LIMIT can never stream an entire projection.
   const capped = `SELECT * FROM (${guarded.sql}) AS _agent_q LIMIT ${ROW_CAP + 1}`
 
+  // Thread the caller's identity so the RLS backstop (db/postgres/migrations/
+  // 0034_rls_backstop.sql) can filter rows the model's SQL text didn't scope
+  // correctly — real defence-in-depth against the guard above being wrong or
+  // incomplete for some query shape. Feature-detected: falls back to the bare
+  // handle for test doubles that don't implement identity threading.
+  const scopedDb = db.withUser?.(vars.userId) ?? db
+
   try {
-    const results = await db.batch([
-      db.prepare("SET TRANSACTION READ ONLY"),
-      db.prepare("SET LOCAL statement_timeout = '4s'"),
-      db.prepare(`SET LOCAL app.project_id = '${escapeLiteral(vars.projectId)}'`),
-      db.prepare(capped).bind(...guarded.params),
+    const results = await scopedDb.batch([
+      scopedDb.prepare("SET TRANSACTION READ ONLY"),
+      scopedDb.prepare("SET LOCAL statement_timeout = '4s'"),
+      scopedDb.prepare(`SET LOCAL app.project_id = '${escapeLiteral(vars.projectId)}'`),
+      scopedDb.prepare(capped).bind(...guarded.params),
     ])
     const last = results[results.length - 1]
     return { ok: true, rows: last.results as Record<string, unknown>[] }

@@ -12,6 +12,8 @@
 // 137k-event project streams in bounded chunks rather than one giant response.
 // Gated on SYNC_SECRET_KEY — same trust tier as /migrate/ingest.
 
+import { secureCompare } from '../lib/secure-compare'
+
 const PATH = '/migrate/event-ids'
 const MAX_LIMIT = 50000
 
@@ -28,7 +30,7 @@ export async function handleMigrateEventIdsRequest(
   if (url.pathname !== PATH) return null
   if (request.method !== 'GET') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if ((request.headers.get('Authorization') ?? '') !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

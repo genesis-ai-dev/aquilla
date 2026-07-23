@@ -33,6 +33,24 @@ function setState(next: QueueState): void {
 
 export function getQueueState(): QueueState { return state }
 
+/**
+ * True when an error is `fetchCellAudio`'s missing-bytes 404 sentinel — the R2
+ * object for a `frontier-audio://` clip doesn't exist (deleted, or an upload
+ * that never completed). Kept distinct from transient/auth failures so the
+ * queue can skip the dead clip and surface a clear "missing" state instead of
+ * dead-ending on the raw `audio not found (404): not found` as if playback were
+ * simply broken.
+ */
+export function isMissingAudioError(e: unknown): boolean {
+  if (e && typeof e === "object" && "status" in e && (e as { status?: unknown }).status === 404) {
+    return true
+  }
+  return e instanceof Error && e.message.includes("audio not found (404)")
+}
+
+/** User-facing copy for the "this clip has no bytes to play" state. */
+export const MISSING_AUDIO_MESSAGE = "This clip's audio is missing."
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
@@ -277,11 +295,22 @@ async function playAt(index: number): Promise<void> {
   setState({ kind: "loading", cellIndex: index, cellId: cell.id })
   ctx.onCellChange?.(index, cell.id)
 
+  // A clip whose bytes are gone must not dead-end the whole transport: skip to
+  // the next clip that has audio, and only surface a clear "missing" state when
+  // no playable clip remains (rather than the misleading raw 404).
+  const skipMissingFrom = (missingCellId: string): void => {
+    const next = findNextPlayable(ctx.cells, index + 1)
+    if (next >= 0) { void playAt(next); return }
+    disposeCurrent()
+    setState({ kind: "error", message: MISSING_AUDIO_MESSAGE, cellId: missingCellId })
+  }
+
   let resolved: ResolvedAudioSrc
   try {
     resolved = await resolveAudioSrc(playable.url, ctx.projectId, cell.fileId, ctx.session)
   } catch (e) {
     if (seq !== currentSeq) return // superseded
+    if (isMissingAudioError(e)) { skipMissingFrom(cell.id); return }
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
     return
   }
@@ -365,6 +394,7 @@ async function playAt(index: number): Promise<void> {
           await audio.play()
         } catch (e) {
           if (seq !== currentSeq) return
+          if (isMissingAudioError(e)) { skipMissingFrom(cell.id); return }
           setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
         }
       })()

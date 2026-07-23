@@ -18,6 +18,7 @@ import {
   hasAnyPlayableAudio, pauseQueue, resumeQueue, seekQueue, setQueueRate, setQueueVolume,
   skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
 } from "@/lib/audio/play-queue"
+import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellData } from "@/hooks/useCells"
@@ -85,6 +86,20 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
     if (queue.kind === "paused") { void resumeQueue(); return }
     startAt(0)
   }, [isPlaying, queue.kind, startAt])
+
+  // Spacebar toggles play/pause while the Audio-lens bar is mounted (this bar
+  // only renders in the audio lens, so the binding is naturally scoped to it).
+  // The predicate ignores the key when the user is typing or a control is
+  // focused, so editing a line or clicking a button keeps Space's normal effect.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!spacebarShouldToggle(e) || !canPlay) return
+      e.preventDefault()
+      onPlayPause()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [canPlay, onPlayPause])
 
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 

@@ -4,7 +4,7 @@
 // the only "media" dependency is a native <video> element for the linked-URL
 // preview (the remote host serves Range — no streaming work needed here).
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Film, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -66,6 +66,7 @@ export function TimelineEditor({
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const clock = useTimelineClock()
 
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
@@ -90,6 +91,104 @@ export function TimelineEditor({
       /* private mode / unavailable — zoom just won't persist */
     }
   }
+
+  // SUB-12: cursor-centered wheel/pinch zoom (⌘/ctrl + wheel — trackpad pinch
+  // arrives as a ctrlKey wheel). Native listener with passive:false because
+  // React's synthetic onWheel can't reliably preventDefault (the browser would
+  // page-zoom). Plain wheel (no modifier) keeps scrolling untouched.
+  //
+  // Smoothness (Sam's "spazzy" feedback on v1):
+  //  - the factor scales with gesture velocity (exp of deltaY) instead of a
+  //    fixed 1.15 step per event — a pinch emits dozens of small-delta events,
+  //    which v1 turned into runaway zoom speed;
+  //  - the scroll anchor is applied in a LAYOUT effect (post-commit, pre-paint)
+  //    instead of requestAnimationFrame, so the point under the cursor never
+  //    visibly jumps for a frame and snaps back;
+  //  - the listener attaches ONCE (refs carry current zoom), so no per-step
+  //    detach/re-attach gaps.
+  const pxPerSecRef = useRef(pxPerSec)
+  pxPerSecRef.current = pxPerSec
+  const zoomAnchorRef = useRef<{ timeSec: number; offsetX: number } | null>(null)
+  // Eased zoom: wheel/pinch moves a TARGET; the committed zoom glides toward it
+  // (~35%/frame exponential approach) for a light accel/decel feel. The first
+  // step applies synchronously so response is immediate; the rAF loop carries
+  // the tail. The anchor persists across the glide so the cursor-point stays
+  // pinned through every animated frame.
+  const zoomTargetRef = useRef(pxPerSec)
+  const zoomAnimRef = useRef<number | null>(null)
+  const zoomGestureAnchorRef = useRef<{ timeSec: number; offsetX: number } | null>(null)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    zoomTargetRef.current = pxPerSecRef.current
+
+    const step = () => {
+      const cur = pxPerSecRef.current
+      const target = zoomTargetRef.current
+      // Precision bypass: a SLOW gesture (per-tick increments ≤ ~6% of the
+      // current zoom, i.e. the gap never builds up) applies 1:1 with no glide —
+      // easing there reads as rubber-band lag. Fast gestures/wheel notches open
+      // a bigger gap and get the eased approach (and its decel tail on stop).
+      const next =
+        Math.abs(target - cur) <= Math.max(0.4, cur * 0.06)
+          ? target
+          : cur + (target - cur) * 0.35
+      zoomAnchorRef.current = zoomGestureAnchorRef.current
+      setPxPerSec(next)
+      if (next !== target) {
+        zoomAnimRef.current = requestAnimationFrame(step)
+      } else {
+        zoomAnimRef.current = null
+        zoomGestureAnchorRef.current = null
+      }
+    }
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      // Two very different inputs share this event: trackpad PINCH ticks are
+      // floats whose magnitude tracks gesture speed (~1 slow … ~60+ hard),
+      // wheel NOTCHES are ~±100+. Wheel keeps its dialed-in gain; pinch speed
+      // grows linearly with the tick and is CAPPED (not cliffed) so a hard
+      // pinch is uniformly fast — the old <40 threshold dropped fast-pinch
+      // ticks into the 8×-weaker wheel gain, deadening exactly the fast case.
+      const mag = Math.abs(e.deltaY)
+      const speed = mag >= 90 ? mag * 0.0022 : Math.min(mag * 0.019, 0.55)
+      const target = Math.max(
+        ZOOM_MIN,
+        Math.min(ZOOM_MAX, zoomTargetRef.current * Math.exp(e.deltaY < 0 ? speed : -speed)),
+      )
+      if (target === zoomTargetRef.current && target === pxPerSecRef.current) return
+      zoomTargetRef.current = target
+      const offsetX = e.clientX - el.getBoundingClientRect().left
+      zoomGestureAnchorRef.current = {
+        timeSec: pxToSec(el.scrollLeft + offsetX, pxPerSecRef.current),
+        offsetX,
+      }
+      try {
+        localStorage.setItem(zoomKey(fileId), String(target))
+      } catch {
+        /* private mode / unavailable — zoom just won't persist */
+      }
+      if (zoomAnimRef.current === null) step() // immediate first step; rAF glides the rest
+    }
+
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => {
+      el.removeEventListener("wheel", onWheel)
+      if (zoomAnimRef.current !== null) cancelAnimationFrame(zoomAnimRef.current)
+      zoomAnimRef.current = null
+    }
+  }, [fileId])
+  // Re-anchor the scroll position in the same commit as the zoom (before
+  // paint), keeping the time under the cursor stationary with zero flicker.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const anchor = zoomAnchorRef.current
+    if (!el || !anchor) return
+    zoomAnchorRef.current = null
+    el.scrollLeft = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
+  }, [pxPerSec])
 
   function seekTo(sec: number) {
     clock.seekTo(sec)
@@ -181,6 +280,8 @@ export function TimelineEditor({
           </div>
         </div>
         <div
+          ref={scrollRef}
+          data-testid="tl-scroll"
           className="overflow-x-auto"
           onScroll={(e) => {
             setScrollLeft(e.currentTarget.scrollLeft)

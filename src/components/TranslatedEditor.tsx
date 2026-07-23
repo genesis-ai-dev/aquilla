@@ -126,6 +126,15 @@ interface TranslatedEditorProps {
   /** Initial content. Plain string fallback used when html is absent. */
   initialHtml?: string
   initialPlain: string
+  /**
+   * AQU-667: the current authoritative value is an AI draft (sparkle / batch
+   * "Draft all") that the store — not this editor — produced. When set and the
+   * value changes, the editor absorbs it *even while focused* so the prediction
+   * is visible and a later blur can't commit the pre-draft text over it. A
+   * human's own in-flight edit commits with `aiDrafted=false`, so it keeps the
+   * normal focused-editing / discard-and-reload banner path instead.
+   */
+  aiDrafted?: boolean
   onCommit: (snapshot: TranslatedEditorCommit) => void
   onFocus?: () => void
   onBlur?: () => void
@@ -199,6 +208,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   cellId,
   initialHtml,
   initialPlain,
+  aiDrafted = false,
   onCommit,
   onFocus,
   onBlur,
@@ -292,6 +302,18 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const pendingCommitRef = useRef<TranslatedEditorCommit | null>(null)
   const onCommitRef = useRef(onCommit)
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
+  // AQU-667: mirrors read by the blur handler / re-hydrate effect so both can
+  // reason about "has an authoritative AI draft landed that this editor has not
+  // yet absorbed?" without recreating the editor.
+  const aiDraftedRef = useRef(aiDrafted)
+  useEffect(() => { aiDraftedRef.current = aiDrafted }, [aiDrafted])
+  const initialPlainRef = useRef(initialPlain)
+  useEffect(() => { initialPlainRef.current = initialPlain }, [initialPlain])
+  // The last stored value we hydrated the editor from. Declared here (not next
+  // to its effect) so the blur handler can compare against it: an editor still
+  // holding pre-draft text has NOT absorbed a newer authoritative value while
+  // `initialPlain !== lastHydratedPlainRef`.
+  const lastHydratedPlainRef = useRef(initialPlain)
 
   const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
   const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
@@ -597,7 +619,19 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       const text = editor.getText()
       const html = editor.getHTML()
       pendingCommitRef.current = null
-      if (text !== lastCommittedRef.current) {
+      // AQU-667 invariant: a blur must never commit text older than the newest
+      // authoritative draft for this cell. If an AI draft is pending in the
+      // store that this editor has not yet absorbed (its value differs from what
+      // we last hydrated) and the editor still holds the pre-draft text,
+      // committing here would chain a stale/blank revert onto the draft — the
+      // sparkle/batch prediction "randomly doesn't save". Skip: the draft is
+      // already durable in the store + outbox and the re-hydrate effect absorbs
+      // it on the next render.
+      const hasUnabsorbedDraft =
+        aiDraftedRef.current &&
+        initialPlainRef.current !== lastHydratedPlainRef.current &&
+        text !== initialPlainRef.current
+      if (!hasUnabsorbedDraft && text !== lastCommittedRef.current) {
         lastCommittedRef.current = text
         onCommitRef.current({ value: text, valueHtml: html })
       }
@@ -732,7 +766,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // would misread that load-time normalization as a user edit and emit a
   // phantom revision on the next blur, corrupting files just by opening them.
   // Seed once per editor instance (one editor per cellId). (AQU-216)
-  const lastHydratedPlainRef = useRef(initialPlain)
+  // (`lastHydratedPlainRef` is declared above so the blur handler can read it.)
   useEffect(() => {
     if (!editor) return
     lastCommittedRef.current = editor.getText()
@@ -740,18 +774,36 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor])
 
-  // Re-hydrate only when the stored value genuinely changes (a remote
-  // event.applied landed while we weren't editing) — keyed on the raw
-  // `initialPlain` so an escaping-only difference never forces a reload. We
-  // never overwrite if the editor is focused — that's what the banner is for.
+  // Re-hydrate only when the stored value genuinely changes — keyed on the raw
+  // `initialPlain` so an escaping-only difference never forces a reload.
+  //
+  // We normally never overwrite a focused editor — that's what the banner is
+  // for. AQU-667 EXCEPTION: an authoritative AI draft (sparkle / batch "Draft
+  // all") can land on this cell *while it is focused*. That draft lives in the
+  // store but is invisible inside the editor, and a later blur would commit the
+  // editor's stale pre-draft text over it (the prediction "randomly doesn't
+  // save"). So when the incoming value is an AI draft, absorb it even while
+  // focused, caret to end so the next keystroke edits the prediction — not the
+  // pre-prediction text. `aiDrafted` is the gate: a human's own in-flight edit
+  // commits with `aiDrafted=false`, so live typing is never yanked out.
   useEffect(() => {
     if (!editor) return
-    if (editor.isFocused) return
     if (initialPlain === lastHydratedPlainRef.current) return
+    if (editor.isFocused && !aiDrafted) return
+    const wasFocused = editor.isFocused
     lastHydratedPlainRef.current = initialPlain
     editor.commands.setContent(initialContent)
+    // Our own hydration must not schedule a phantom commit: clear any idle timer
+    // / pending snapshot the setContent onUpdate may have armed, so a stray
+    // commit can't fire the just-absorbed value back through the write path.
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    pendingCommitRef.current = null
+    if (wasFocused) editor.commands.focus("end")
     lastCommittedRef.current = editor.getText()
-  }, [editor, initialContent, initialPlain])
+  }, [editor, initialContent, initialPlain, aiDrafted])
 
   useEffect(() => {
     editor?.setEditable(!isReadOnly)

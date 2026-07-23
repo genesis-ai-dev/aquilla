@@ -3416,9 +3416,23 @@ function EditorRow({
 
   useEffect(() => {
     if (!localTargetDraft) return
-    if ((cell.translated ?? "") !== localTargetDraft.value) return
-    setLocalTargetDraft(null)
-  }, [cell.translated, localTargetDraft])
+    // Normal case: the authoritative value now carries our just-committed draft
+    // (server projection or optimistic echo) — drop the local hold.
+    if ((cell.translated ?? "") === localTargetDraft.value) {
+      setLocalTargetDraft(null)
+      return
+    }
+    // AQU-667 masking fix: an authoritative AI draft (sparkle / batch) landed
+    // whose value differs from our stale local hold. Previously the hold was
+    // only cleared on exact equality, so if a human edit's round-trip hadn't
+    // landed when the prediction arrived the values never converged: the row
+    // kept showing the OLD text indefinitely and a later keystroke committed
+    // that old text over the AI draft. The AI draft is the newer truth — clear
+    // the hold so the row (and the editor hydrating from it) shows the prediction.
+    if (cell.aiDrafted) {
+      setLocalTargetDraft(null)
+    }
+  }, [cell.translated, cell.aiDrafted, localTargetDraft])
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -5022,6 +5036,9 @@ function EditorRow({
                     cellId={cell.id}
                     initialPlain={visibleTranslated}
                     initialHtml={visibleTranslatedHtml}
+                    // AQU-667: only authoritative when we're not masking it with a
+                    // local human draft — then `visibleTranslated` IS cell.translated.
+                    aiDrafted={!localTargetDraft && cell.aiDrafted}
                     onCommit={handleEditorCommit}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}

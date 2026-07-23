@@ -36,6 +36,7 @@ import {
 import type { OutboxRawEvent } from "./project-do-types"
 import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
+import { secureCompare } from "./lib/secure-compare"
 
 const LEASE_SWEEP_INTERVAL_MS = 5_000
 
@@ -126,7 +127,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (request.method === "POST" && url.pathname === "/__link-sync") {
       const auth = request.headers.get("Authorization") ?? ""
       const expected = this.env.SYNC_SECRET_KEY ? `Bearer ${this.env.SYNC_SECRET_KEY}` : null
-      if (!expected || auth !== expected) {
+      if (!expected || !secureCompare(auth, expected)) {
         return new Response("unauthorized", { status: 401 })
       }
       const projectId = url.searchParams.get("project")
@@ -161,7 +162,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       const expected = this.env.SYNC_SECRET_KEY
         ? `Bearer ${this.env.SYNC_SECRET_KEY}`
         : null
-      if (!expected || auth !== expected) {
+      if (!expected || !secureCompare(auth, expected)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: unknown
@@ -190,7 +191,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       const expected = this.env.SYNC_SECRET_KEY
         ? `Bearer ${this.env.SYNC_SECRET_KEY}`
         : null
-      if (!expected || auth !== expected) {
+      if (!expected || !secureCompare(auth, expected)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: { project?: string; userId?: number; username?: string }

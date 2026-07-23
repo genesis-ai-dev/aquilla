@@ -31,6 +31,7 @@ import {
 import type { EventKind } from './types'
 import { eventQualifiedParentKey } from './chain-claims'
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { secureCompare } from '../lib/secure-compare'
 
 const BATCH_LIMIT = 100
 
@@ -72,7 +73,7 @@ export async function handleRebuildProjectionRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const auth = request.headers.get('Authorization') ?? ''
-  if (auth !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(auth, `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
 

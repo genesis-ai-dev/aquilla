@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { pickSelectOption, expectSelectValue } from "../../helpers/base-ui"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * CommentsPage — "Sort" select changes sort order.
@@ -21,41 +15,24 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * verify value changes → change to "creation" → verify value changes.
  */
 test("comments page sort select changes sort order", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `CommentSort ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CommentSort ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Post a comment so the comments page has content.
   const row = ws.cellRow(0)
   await row.hover()
-  const commentBtn = row.locator('[aria-label*="comment" i]').first()
-  if (await commentBtn.isVisible()) {
-    await commentBtn.click()
-  } else {
-    // Try opening via cell action popover.
-    const actionBtn = row.locator('[aria-label="Cell actions"]')
-    if (await actionBtn.isVisible()) {
-      await actionBtn.click()
-      await alice.getByRole("button", { name: /Comment/i }).first().click()
-    }
-  }
+  const commentBtn = row.getByRole("button", { name: /Add comment/i }).first()
+  await expect(commentBtn).toBeVisible({ timeout: 10_000 })
+  await commentBtn.click()
 
   // Post via the CommentsDrawer.
   const drawer = alice.locator('[data-testid="comments-drawer"]')
-  if (await drawer.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    const textarea = drawer.locator('textarea[placeholder*="comment" i], textarea[placeholder*="Comment" i]').first()
-    if (await textarea.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await textarea.fill("sort-test-comment")
-      await drawer.locator('button[type="submit"], button:has-text("Post")').first().click()
-    }
-  }
+  await expect(drawer).toBeVisible({ timeout: 10_000 })
+  const textarea = drawer.locator('textarea[placeholder*="comment" i], textarea[placeholder*="Comment" i]').first()
+  await expect(textarea).toBeVisible()
+  await textarea.fill("sort-test-comment")
+  await drawer.locator('button[type="submit"], button:has-text("Post")').first().click()
+  await expect(drawer.getByText("sort-test-comment")).toBeVisible({ timeout: 10_000 })
 
   // Navigate to /comments page for the project.
   await alice.waitForURL(/\/project\/([^/]+)\//, { timeout: 5_000 })
@@ -63,10 +40,8 @@ test("comments page sort select changes sort order", async ({ alice }) => {
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // The Sort control lives inside the collapsed "Filters" panel — expand it.
-  const filtersBtn = alice.getByRole("button", { name: /Filters/i })
+  const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
   await expect(filtersBtn).toBeVisible({ timeout: 10_000 })
   await filtersBtn.click()
 

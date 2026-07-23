@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * PrimaryActionButton "More actions" dropdown.
@@ -22,16 +16,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * without triggering any action.
  */
 test("workspace actions dropdown lists available actions", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Actions ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Actions ${Date.now()}` })
+  await openSeededProject(alice, seeded)
 
   const moreBtn = alice.getByRole("button", { name: /More actions/i })
   await expect(moreBtn).toBeVisible({ timeout: 10_000 })

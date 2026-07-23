@@ -36,6 +36,13 @@ import {
   resolveProjectRole,
   ROLE_NAMES,
 } from "../services/project-permissions"
+import {
+  applyInviteLaneScopes,
+  MAX_INVITE_SCOPE_LANES,
+  MAX_LANE_VALUE_LENGTH,
+  parseScopeLanes,
+  serializeScopeLanes,
+} from "../services/invite-scopes"
 
 const invites = new Hono<AuthHonoEnv>()
 
@@ -87,6 +94,15 @@ const createMultiInviteSchema = z.object({
   projectIds: z.array(z.string().min(1).max(256)).min(1).max(100),
   roleLevel: z.number().int().min(100).max(700).optional(),
   expiresAt: z.string().datetime().optional(),
+  /**
+   * AQU-528: optional lane (target-language) scopes auto-granted on join. The
+   * same lane set applies to every project sharing the token. Omitted/empty =
+   * unscoped invite (today's behavior).
+   */
+  scopeLanes: z
+    .array(z.string().max(MAX_LANE_VALUE_LENGTH))
+    .max(MAX_INVITE_SCOPE_LANES)
+    .optional(),
 })
 
 invites.post(
@@ -124,14 +140,17 @@ invites.post(
     const expiresAt =
       body.expiresAt ?? new Date(Date.now() + DEFAULT_INVITE_TTL_MS).toISOString()
 
+    // AQU-528: same lane scopes on every row sharing the token; null = unscoped.
+    const scopeLanesJson = serializeScopeLanes(body.scopeLanes)
+
     for (const pid of projectIds) {
       try {
         await c.env.AQUILLA_PG.prepare(
           `INSERT INTO project_invites
-             (token, project_id, role_level, created_by, expires_at)
-           VALUES (?, ?, ?, ?, ?)`,
+             (token, project_id, role_level, created_by, expires_at, scope_lanes)
+           VALUES (?, ?, ?, ?, ?, ?)`,
         )
-          .bind(token, pid, grantedRole, user.id, expiresAt)
+          .bind(token, pid, grantedRole, user.id, expiresAt, scopeLanesJson)
           .run()
       } catch (err) {
         console.error(`[invites/multi] insert failed for ${pid}:`, err)
@@ -144,6 +163,7 @@ invites.post(
       projectIds,
       role: grantedRole,
       expiresAt,
+      ...(scopeLanesJson ? { scopeLanes: parseScopeLanes(scopeLanesJson) } : {}),
     })
   },
 )
@@ -237,7 +257,7 @@ invites.get("/:token/preview", async (c) => {
 
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
-            expires_at, used_by, used_at
+            expires_at, used_by, used_at, scope_lanes
        FROM project_invites WHERE token = ?`,
   )
     .bind(token)
@@ -344,6 +364,9 @@ invites.get("/:token/preview", async (c) => {
     role: { level: first.role_level, name: roleNameFor(first.role_level) },
     expiresAt: first.expires_at,
     invitedBy: inviter?.name ?? null,
+    // AQU-528: lane scopes are shared across the token's rows (minted together);
+    // empty = unscoped invite.
+    scopeLanes: parseScopeLanes(first.scope_lanes),
     projects,
   })
 })
@@ -363,7 +386,7 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
 
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, role_level, created_by, created_at,
-            expires_at, used_by, used_at, email
+            expires_at, used_by, used_at, email, scope_lanes
        FROM project_invites WHERE token = ?`,
   )
     .bind(token)
@@ -481,6 +504,16 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
         )
           .bind(invite.project_id, user.id, finalRole, invite.created_by)
           .run()
+        // AQU-528: auto-grant the invite's lane scope(s) to the NEW member on
+        // join. Only for a fresh membership — never narrow an existing member.
+        await applyInviteLaneScopes(
+          c.env,
+          invite.project_id,
+          user.id,
+          parseScopeLanes(invite.scope_lanes),
+          invite.created_by,
+          finalRole,
+        )
       }
 
       accepted.push({ projectId: invite.project_id, role: finalRole })

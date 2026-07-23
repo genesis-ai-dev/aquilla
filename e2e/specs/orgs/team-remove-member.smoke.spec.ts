@@ -21,8 +21,6 @@ test("team remove member button removes the member from the team", async ({ alic
 
   // Navigate to teams and create a team.
   await alice.goto("/teams")
-  await alice.waitForLoadState("networkidle")
-
   const dash = new Dashboard(alice)
   void dash // suppress unused var
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })

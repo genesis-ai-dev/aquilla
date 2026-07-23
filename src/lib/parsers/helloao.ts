@@ -1,4 +1,5 @@
 import { v7 as uuidv7 } from "uuid"
+import { proxyOrigin } from "@/lib/net/resource-proxy"
 import type { TranslatableString } from "./types"
 
 // Client for the Free Use Bible API (bible.helloao.org) — AO Lab's free,
@@ -7,7 +8,9 @@ import type { TranslatableString } from "./types"
 //      per-chapter fan-out), filtered client-side to the selected books.
 //   2. Translator's helps sidebar: per-chapter fetches, cached per
 //      (translation, book, chapter) so scrolling within a chapter is free.
-const API_BASE = "https://bible.helloao.org/api"
+// Routed through the same-origin resource proxy when configured (AQU-627);
+// transparent no-op when VITE_RESOURCES_BASE is unset.
+const API_BASE = `${proxyOrigin("https://bible.helloao.org")}/api`
 
 export interface HelloaoTranslation {
   id: string // e.g. "BSB"
@@ -101,7 +104,8 @@ export async function fetchHelloaoBooks(
 export async function fetchHelloaoComplete(
   translationId: string,
   onProgress?: (received: number, total: number) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onRawSource?: (raw: string) => void,
 ): Promise<HelloaoComplete> {
   const res = await fetch(`${API_BASE}/${translationId}/complete.json`, { signal })
   if (!res.ok) {
@@ -109,7 +113,9 @@ export async function fetchHelloaoComplete(
   }
 
   if (!res.body || !onProgress) {
-    return (await res.json()) as HelloaoComplete
+    const raw = await res.text()
+    onRawSource?.(raw)
+    return JSON.parse(raw) as HelloaoComplete
   }
 
   const total = Number(res.headers.get("Content-Length") ?? 0)
@@ -126,7 +132,9 @@ export async function fetchHelloaoComplete(
     onProgress(received, total)
   }
   chunks.push(decoder.decode())
-  return JSON.parse(chunks.join("")) as HelloaoComplete
+  const raw = chunks.join("")
+  onRawSource?.(raw)
+  return JSON.parse(raw) as HelloaoComplete
 }
 
 export interface HelloaoChapterResponse {

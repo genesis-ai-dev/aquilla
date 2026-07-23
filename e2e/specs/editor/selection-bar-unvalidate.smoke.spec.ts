@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * SelectionBar — "Remove my validations" bulk unvalidate.
@@ -19,16 +13,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * clickable (cell unvalidation fires without error).
  */
 test("SelectionBar Remove my validations button removes validation", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Unvalidate ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Unvalidate ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Edit the first cell.
   const row = ws.cellRow(0)
@@ -53,9 +39,10 @@ test("SelectionBar Remove my validations button removes validation", async ({ al
   await expect(removeValBtn).toBeEnabled({ timeout: 3_000 })
   await removeValBtn.click()
 
-  // After clicking, SelectionBar may close or the button may become disabled.
-  // Either outcome means unvalidation was initiated.
-  await alice.waitForTimeout(500)
-  // No error toast should appear.
-  await expect(alice.getByRole("alert", { name: /error/i })).not.toBeVisible()
+  // Assert the actual state transition; a click without a persisted
+  // unvalidation is not success.
+  await expect(ws.validationToggle(0)).toHaveAttribute("aria-pressed", "false", {
+    timeout: 15_000,
+  })
+  await expect(removeValBtn).toBeDisabled()
 })

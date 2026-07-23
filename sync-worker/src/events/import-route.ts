@@ -31,17 +31,63 @@ import { withCors } from '../cors'
 import {
   buildEventProjectionStmts,
   buildBulkSourceCellCreateStmt,
+  buildBulkTargetCellCommitStmt,
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
 import { allocateSeqRange, buildBulkEventInsertStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
+import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES } from '../../../shared/import-contract'
 
 /** Rows per multi-row INSERT. Bounded by postgres.js's 65,534-bind-param
  *  ceiling: events rows bind 12 params, cells rows 20 → 1000 rows stays an
  *  order of magnitude under it while keeping SQL text small. */
 const BULK_ROWS = 1000
+const MAX_IMPORT_ATTACHMENTS = 10_000
+const MAX_IMPORT_WORD_TIMINGS = 50_000
+
+function optionalFiniteNonNegative(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+}
+
+function validImportTimings(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value) || value.length > MAX_IMPORT_WORD_TIMINGS) return false
+  return value.every((timing) => {
+    if (!timing || typeof timing !== 'object' || Array.isArray(timing)) return false
+    const row = timing as Record<string, unknown>
+    return (
+      typeof row.word === 'string'
+      && row.word.length <= 1024
+      && optionalFiniteNonNegative(row.t0)
+      && optionalFiniteNonNegative(row.t1)
+      && typeof row.t0 === 'number'
+      && typeof row.t1 === 'number'
+      && row.t1 >= row.t0
+      && Number.isSafeInteger(row.start)
+      && Number.isSafeInteger(row.end)
+      && (row.start as number) >= 0
+      && (row.end as number) >= (row.start as number)
+    )
+  })
+}
+
+// The client chunks at 1500 cells/request (src/lib/sync/bulk-import.ts
+// CHUNK). This is ~3x headroom for legitimate traffic while stopping a
+// single request from fanning out into an unbounded number of bulk-INSERT
+// statements against the shared Postgres (Neon) backend every project reads
+// and writes through.
+const MAX_CELLS_PER_REQUEST = 5000
+// Per-field byte caps — generous for a single verse/segment/sentence-sized
+// cell, but enough to stop one malformed/malicious cell from persisting a
+// multi-MB blob into a row that every reader of the file re-fetches.
+const MAX_CELL_TEXT_BYTES = 256 * 1024
+const MAX_METADATA_BYTES = 64 * 1024
+
+function utf8Bytes(s: string): number {
+  return new TextEncoder().encode(s).length
+}
 
 async function runImportBatch(
   db: AquillaDb,
@@ -78,6 +124,8 @@ interface ImportFileMeta {
   targetTextDirection?: 'ltr' | 'rtl'
   /** Timeline-segment-model order lens ('time' | 'sequence') → files.meta. */
   orderedBy?: string
+  /** Compact normalized-import summary; per-unit locators are cell metadata. */
+  importManifest?: Record<string, unknown>
 }
 
 interface ImportCell {
@@ -99,12 +147,39 @@ interface ImportCell {
   metadata?: Record<string, unknown>
 }
 
+interface ImportTarget {
+  id: string
+  cellId: string
+  parentId: string
+  value: string
+  targetLang?: string
+}
+
+interface ImportAudioAttachment {
+  id: string
+  cellId: string
+  audioId: string
+  url: string
+  slot: 'recording' | 'generatedVoice'
+  mimeType?: string
+  voiceId?: string
+  referenceAudioId?: string
+  durationMs?: number
+  trimStartMs?: number
+  trimEndMs?: number
+  timings?: Array<{ word: string; t0: number; t1: number; start: number; end: number }>
+}
+
 interface ImportBody {
   projectId: string
   fileId: string
   /** Present only on the first chunk → emits the genesis file.create. */
   file?: { id: string } & ImportFileMeta
   cells: ImportCell[]
+  /** Bilingual genesis commits paired to source cells in this same chunk. */
+  targets?: ImportTarget[]
+  /** Hide the file in the same transaction that creates it. */
+  stageEventId?: string
   clientTs?: number
   /** Raw bytes of the source file for formats that need round-trip fidelity
    *  (USFM today). Sent once with the first chunk alongside `file`. Stored in
@@ -117,6 +192,10 @@ interface ImportBody {
   /** Empty final request sent after concurrent source chunks finish. It emits
    * one accurate realtime progress invalidation and writes no cell events. */
   complete?: boolean
+  /** Reveal only after every source/target chunk and artifact upload succeeds. */
+  publishEventId?: string
+  /** Media metadata persisted atomically with the reveal event. */
+  attachments?: ImportAudioAttachment[]
 }
 
 function isImportBody(x: unknown): x is ImportBody {
@@ -126,6 +205,8 @@ function isImportBody(x: unknown): x is ImportBody {
     typeof b.projectId === 'string' &&
     typeof b.fileId === 'string' &&
     Array.isArray(b.cells) &&
+    (b.targets === undefined || Array.isArray(b.targets)) &&
+    (b.attachments === undefined || Array.isArray(b.attachments)) &&
     (b.complete === undefined || typeof b.complete === 'boolean')
   )
 }
@@ -167,6 +248,65 @@ export async function handleBulkImportRequest(
       request,
     )
   }
+  if (body.cells.length > MAX_CELLS_PER_REQUEST) {
+    return withCors(
+      Response.json(
+        { error: `too many cells in one request (${body.cells.length} > ${MAX_CELLS_PER_REQUEST})` },
+        { status: 413 },
+      ),
+      request,
+    )
+  }
+  if (body.rawSource !== undefined) {
+    if (
+      typeof body.rawSource !== 'string'
+      || utf8Bytes(body.rawSource) > MAX_BUFFERED_SOURCE_ARTIFACT_BYTES
+    ) {
+      return withCors(
+        Response.json(
+          {
+            error: 'rawSource too large or malformed',
+            maxBytes: MAX_BUFFERED_SOURCE_ARTIFACT_BYTES,
+          },
+          { status: 413 },
+        ),
+        request,
+      )
+    }
+  }
+  for (const cell of body.cells) {
+    if (cell.value !== undefined && typeof cell.value !== 'string') {
+      return withCors(new Response('cell.value must be a string', { status: 400 }), request)
+    }
+    if (cell.valueHtml !== undefined && typeof cell.valueHtml !== 'string') {
+      return withCors(new Response('cell.valueHtml must be a string', { status: 400 }), request)
+    }
+    if (
+      (typeof cell.value === 'string' && utf8Bytes(cell.value) > MAX_CELL_TEXT_BYTES) ||
+      (typeof cell.valueHtml === 'string' && utf8Bytes(cell.valueHtml) > MAX_CELL_TEXT_BYTES)
+    ) {
+      return withCors(
+        Response.json({ error: 'cell text exceeds size limit', maxBytes: MAX_CELL_TEXT_BYTES }, { status: 413 }),
+        request,
+      )
+    }
+    if (cell.metadata !== undefined) {
+      if (
+        typeof cell.metadata !== 'object' ||
+        cell.metadata === null ||
+        Array.isArray(cell.metadata) ||
+        utf8Bytes(JSON.stringify(cell.metadata)) > MAX_METADATA_BYTES
+      ) {
+        return withCors(
+          Response.json(
+            { error: 'cell.metadata must be a plain object within the size limit', maxBytes: MAX_METADATA_BYTES },
+            { status: 400 },
+          ),
+          request,
+        )
+      }
+    }
+  }
 
   // Auth: token must be scoped to this (project, file) and hold a source-write
   // role. Source-side writes are PROJECT_LEAD+ (importer authority).
@@ -184,6 +324,12 @@ export async function handleBulkImportRequest(
     return withCors(new Response('role too low for source import', { status: 403 }), request)
   }
 
+  const author =
+    typeof auth.claims.username === 'string' && auth.claims.username.trim() !== ''
+      ? auth.claims.username
+      : `user:${auth.claims.userId}`
+  const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
+
   // The browser sends this empty, authenticated marker only after every
   // concurrent data chunk has settled. Source chunks intentionally perform no
   // full-file scans; finalize all derived counters exactly once here. The
@@ -191,11 +337,129 @@ export async function handleBulkImportRequest(
   // safe after a dropped response or a partial import.
   if (body.complete && !body.file && body.cells.length === 0) {
     const finalizedAt = Date.now()
+    const finalizeStmts: AquillaStatement[] = [
+      fileCountersRecomputeStmt(db, body.projectId, body.fileId, finalizedAt),
+      ...fullProgressRecomputeStmts(db, body.projectId, body.fileId, finalizedAt),
+    ]
     try {
-      await runImportBatch(db, [
-        fileCountersRecomputeStmt(db, body.projectId, body.fileId, finalizedAt),
-        ...fullProgressRecomputeStmts(db, body.projectId, body.fileId, finalizedAt),
-      ])
+      if ((body.attachments?.length ?? 0) > MAX_IMPORT_ATTACHMENTS) {
+        return withCors(new Response('too many media attachments', { status: 400 }), request)
+      }
+      const finalizeEvents: PersistedEvent[] = []
+      let eventTs = finalizedAt
+      for (const attachment of body.attachments ?? []) {
+        if (
+          typeof attachment.id !== 'string'
+          || attachment.id.length === 0
+          || attachment.id.length > 255
+          || typeof attachment.cellId !== 'string'
+          || attachment.cellId.length === 0
+          || typeof attachment.audioId !== 'string'
+          || attachment.audioId.length === 0
+          || typeof attachment.url !== 'string'
+          || !['recording', 'generatedVoice'].includes(attachment.slot)
+          || attachment.cellId.length > 255
+          || attachment.audioId.length > 1024
+          || (attachment.mimeType !== undefined && (typeof attachment.mimeType !== 'string' || attachment.mimeType.length > 255))
+          || (attachment.voiceId !== undefined && (typeof attachment.voiceId !== 'string' || attachment.voiceId.length > 255))
+          || (attachment.referenceAudioId !== undefined && (typeof attachment.referenceAudioId !== 'string' || attachment.referenceAudioId.length > 1024))
+          || attachment.url !== `frontier-audio://${attachment.audioId}`
+          || !optionalFiniteNonNegative(attachment.durationMs)
+          || !optionalFiniteNonNegative(attachment.trimStartMs)
+          || !optionalFiniteNonNegative(attachment.trimEndMs)
+          || !validImportTimings(attachment.timings)
+          || (
+            attachment.trimStartMs !== undefined
+            && attachment.trimEndMs !== undefined
+            && attachment.trimEndMs < attachment.trimStartMs
+          )
+        ) {
+          return withCors(new Response('invalid media attachment', { status: 400 }), request)
+        }
+        finalizeEvents.push({
+          id: attachment.id,
+          schemaVersion: 1,
+          projectId: body.projectId,
+          fileId: body.fileId,
+          cellId: attachment.cellId,
+          parentId: null,
+          kind: 'cell.audio.attach',
+          author,
+          payload: {
+            audioId: attachment.audioId,
+            url: attachment.url,
+            slot: attachment.slot,
+            ...(attachment.mimeType !== undefined ? { mimeType: attachment.mimeType } : {}),
+            ...(attachment.voiceId !== undefined ? { voiceId: attachment.voiceId } : {}),
+            ...(attachment.referenceAudioId !== undefined ? { referenceAudioId: attachment.referenceAudioId } : {}),
+            ...(attachment.durationMs !== undefined ? { durationMs: attachment.durationMs } : {}),
+            ...(attachment.trimStartMs !== undefined ? { trimStartMs: attachment.trimStartMs } : {}),
+            ...(attachment.trimEndMs !== undefined ? { trimEndMs: attachment.trimEndMs } : {}),
+            ...(attachment.timings !== undefined ? { timings: attachment.timings } : {}),
+          },
+          clientTs,
+          serverTs: eventTs++,
+        } as PersistedEvent<'cell.audio.attach'>)
+      }
+      if (finalizeEvents.length > 0) {
+        const cellIds = [...new Set(finalizeEvents.map((event) => event.cellId!))]
+        const audioIds = [...new Set((body.attachments ?? []).map((attachment) => attachment.audioId))]
+        const cellPlaceholders = cellIds.map(() => '?').join(', ')
+        const audioPlaceholders = audioIds.map(() => '?').join(', ')
+        const [cells, artifacts] = await Promise.all([
+          db.prepare(
+            `SELECT cell_id FROM cells
+              WHERE project_id = ? AND file_id = ? AND side = 'source'
+                AND cell_id IN (${cellPlaceholders})`,
+          ).bind(body.projectId, body.fileId, ...cellIds).all<{ cell_id: string }>(),
+          db.prepare(
+            `SELECT audio_id FROM artifacts
+              WHERE project_id = ? AND file_id = ? AND kind = 'audio'
+                AND audio_id IN (${audioPlaceholders})`,
+          ).bind(body.projectId, body.fileId, ...audioIds).all<{ audio_id: string }>(),
+        ])
+        if (new Set(cells.results.map((row) => row.cell_id)).size !== cellIds.length) {
+          return withCors(new Response('media attachment refers to a cell outside this file', { status: 409 }), request)
+        }
+        if (new Set(artifacts.results.map((row) => row.audio_id)).size !== audioIds.length) {
+          return withCors(new Response('media attachment has no matching uploaded artifact', { status: 409 }), request)
+        }
+      }
+      if (body.publishEventId) {
+        const restoreEvent: PersistedEvent<'file.restore'> = {
+          id: body.publishEventId,
+          schemaVersion: 1,
+          projectId: body.projectId,
+          fileId: body.fileId,
+          cellId: null,
+          parentId: null,
+          kind: 'file.restore',
+          author,
+          payload: {},
+          clientTs,
+          serverTs: eventTs++,
+        }
+        finalizeEvents.push(restoreEvent)
+      }
+      if (finalizeEvents.length > 0) {
+        const seqBase = await allocateSeqRange(db, body.projectId, finalizeEvents.length)
+        finalizeStmts.push(buildBulkEventInsertStmt(db, finalizeEvents.map((event, index) => ({
+          id: event.id,
+          schemaVersion: event.schemaVersion,
+          projectId: event.projectId,
+          fileId: event.fileId ?? null,
+          cellId: event.cellId ?? null,
+          parentId: event.parentId ?? null,
+          kind: event.kind,
+          author: event.author,
+          payloadJson: JSON.stringify(event.payload),
+          clientTs: event.clientTs,
+          serverTs: event.serverTs,
+          serverSeq: seqBase + index,
+        }))))
+        for (const event of finalizeEvents) buildEventProjectionStmts(db, event, finalizeStmts)
+      }
+      await runImportBatch(db, finalizeStmts)
     } catch (err) {
       return withCors(
         Response.json({ error: `Import finalization failed: ${String(err)}` }, { status: 500 }),
@@ -217,18 +481,13 @@ export async function handleBulkImportRequest(
     return withCors(Response.json({ accepted: 0, fileId: body.fileId }), request)
   }
 
-  const author =
-    typeof auth.claims.username === 'string' && auth.claims.username.trim() !== ''
-      ? auth.claims.username
-      : `user:${auth.claims.userId}`
-  const clientTs = typeof body.clientTs === 'number' ? body.clientTs : Date.now()
-
   let serverTs = Date.now()
 
   const stmts: AquillaStatement[] = []
 
   // file.create (first chunk only).
   let fileEvent: PersistedEvent | null = null
+  let stageEvent: PersistedEvent<'file.delete'> | null = null
   if (body.file) {
     const f = body.file
     fileEvent = {
@@ -256,11 +515,29 @@ export async function handleBulkImportRequest(
         sourceTextDirection: f.sourceTextDirection,
         targetTextDirection: f.targetTextDirection,
         ...(f.orderedBy !== undefined ? { orderedBy: f.orderedBy } : {}),
+        ...(f.importManifest !== undefined ? { importManifest: f.importManifest } : {}),
       },
       clientTs,
       serverTs: serverTs++,
     }
     buildEventProjectionStmts(db, fileEvent, stmts)
+
+    if (body.stageEventId) {
+      stageEvent = {
+        id: body.stageEventId,
+        schemaVersion: 1,
+        projectId: body.projectId,
+        fileId: body.fileId,
+        cellId: null,
+        parentId: null,
+        kind: 'file.delete',
+        author,
+        payload: {},
+        clientTs,
+        serverTs: serverTs++,
+      }
+      buildEventProjectionStmts(db, stageEvent, stmts)
+    }
 
     // Side-car raw source for round-trip-fidelity formats. Only written on the
     // first chunk (when `file` is present). UPSERT so re-imports replace.
@@ -319,11 +596,49 @@ export async function handleBulkImportRequest(
     cellEvents.push(cellEvent)
   }
 
+  const targetEvents: PersistedEvent<'target.cell.commit'>[] = []
+  const sourceParentByCell = new Map(cellEvents.map((event) => [event.cellId, event.id]))
+  for (const target of body.targets ?? []) {
+    if (
+      typeof target.id !== 'string'
+      || typeof target.cellId !== 'string'
+      || typeof target.parentId !== 'string'
+      || typeof target.value !== 'string'
+      || (target.targetLang !== undefined && typeof target.targetLang !== 'string')
+    ) {
+      return withCors(new Response('each target needs string id, cellId, parentId, and value', { status: 400 }), request)
+    }
+    if (sourceParentByCell.get(target.cellId) !== target.parentId) {
+      return withCors(
+        new Response('each target must reference its source parent in the same import chunk', { status: 400 }),
+        request,
+      )
+    }
+    targetEvents.push({
+      id: target.id,
+      schemaVersion: 1,
+      projectId: body.projectId,
+      fileId: body.fileId,
+      cellId: target.cellId,
+      parentId: target.parentId,
+      kind: 'target.cell.commit',
+      author,
+      payload: {
+        value: target.value,
+        sourceEventId: target.parentId,
+        ...(target.targetLang ? { targetLang: target.targetLang } : {}),
+      },
+      clientTs,
+      serverTs: serverTs++,
+    })
+  }
+
   try {
     // One counter bump reserves a contiguous server_seq block for every event
     // in this request (file.create first, then cells in payload order — the
     // same ordering the old per-statement allocator produced).
-    const allEvents = fileEvent ? [fileEvent, ...cellEvents] : cellEvents
+    const lifecycleEvents = [fileEvent, stageEvent].filter((event): event is PersistedEvent => event !== null)
+    const allEvents = [...lifecycleEvents, ...cellEvents, ...targetEvents]
     if (allEvents.length > 0) {
       const seqBase = await allocateSeqRange(db, body.projectId, allEvents.length)
       for (let i = 0; i < allEvents.length; i += BULK_ROWS) {
@@ -354,6 +669,9 @@ export async function handleBulkImportRequest(
     // explicit completion request after every concurrent chunk settles.
     for (let i = 0; i < cellEvents.length; i += BULK_ROWS) {
       stmts.push(buildBulkSourceCellCreateStmt(db, cellEvents.slice(i, i + BULK_ROWS)))
+    }
+    for (let i = 0; i < targetEvents.length; i += BULK_ROWS) {
+      stmts.push(buildBulkTargetCellCommitStmt(db, targetEvents.slice(i, i + BULK_ROWS)))
     }
 
     // Keep each data request to the event log + direct projections only. The

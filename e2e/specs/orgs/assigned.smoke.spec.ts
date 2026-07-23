@@ -12,8 +12,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("assigned-to-me page renders empty state", async ({ alice }) => {
   await alice.goto("/assigned")
-  await alice.waitForLoadState("networkidle")
-
   await expect(alice.locator("h1").filter({ hasText: /Assigned to me/i })).toBeVisible({
     timeout: 10_000,
   })

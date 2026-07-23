@@ -23,8 +23,9 @@ export interface ToolCodeOutputFrame {
   durationMs: number
 }
 
-/** A PlanImport changeset was staged via changeset-bridge — the client links
- *  `approvalUrl` for the human to approve. Never carries the ephemeral token. */
+/** Backward-compatible frame for previously staged PlanImport changesets. The
+ * current product importer runs through the dedicated Import dialog, but old
+ * persisted agent timelines may still contain this frame. */
 export interface ChangesetStagedFrame {
   type: "changeset.staged"
   runId: string
@@ -52,20 +53,22 @@ export interface BriefProposedFrame {
   preview: string
 }
 
-/** Periodic run cost meter. spentCents / capCents in whole cents. */
+/** Periodic run cost meter. spentCredits / capCredits in org-facing CREDITS
+ *  (agent-rail markup already applied) — raw provider $ never reaches the
+ *  client, matching the org credits panel (credits-only per spec). */
 export interface BudgetFrame {
   type: "budget"
   runId: string
-  spentCents: number
-  capCents: number
+  spentCredits: number
+  capCredits: number
 }
 
-/** The run hit its cost cap and halted gracefully. */
+/** The run hit its cost cap and halted gracefully. Credits, same as BudgetFrame. */
 export interface BudgetExhaustedFrame {
   type: "budget.exhausted"
   runId: string
-  spentCents: number
-  capCents: number
+  spentCredits: number
+  capCredits: number
 }
 
 /** Union of every §4 frame W1B emits server-side. */

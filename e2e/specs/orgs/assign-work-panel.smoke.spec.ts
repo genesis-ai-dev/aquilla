@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * AssignWork panel — clicking "Assign…" opens the assignment form.
@@ -25,24 +19,9 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Assignee and Book selects visible.
  */
 test("assign-work panel opens and shows Assignee and Book selects", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AssignProj ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AssignProj ${Date.now()}` })
 
-  // Import a file so there is a "Book" to assign.
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-
-  // Navigate to the org project overview.
-  await alice.waitForURL(/\/project\/([^/]+)\//, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)\//)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/projects/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/projects/${seeded.projectId}`)
   // The "Assign…" button should be visible for the project owner.
   const assignBtn = alice.getByRole("button", { name: /^Assign…$/i })
     .or(alice.getByRole("button", { name: /^Assign$/i }))

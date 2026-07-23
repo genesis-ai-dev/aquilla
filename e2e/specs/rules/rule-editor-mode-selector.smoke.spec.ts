@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RuleEditor — Mode selector buttons toggle the rule type and show/hide
@@ -15,19 +15,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * pattern input disappears.
  */
 test("rule editor mode selector toggles source pattern input visibility", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ModeToggle ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
-
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ModeToggle ${Date.now()}` })
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   // Open inline RuleEditor.
   const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })

@@ -1,0 +1,36 @@
+# aquilla-resources — same-origin content proxy (AQU-627). NOT YET DEPLOYED.
+#
+# Mirrors the route convention of wrangler.toml / auth-worker / sync-worker:
+# routes live in [env.production] and are applied by a LOCAL deploy with a
+# zone-perm token (CI's token can't sync zone routes). See README.md for the
+# full turn-on checklist (route + DNS + security review + VITE_RESOURCES_BASE).
+#
+#   Account: Frontier R&D (6a80496d1e59948a9cbaa3c643ba81d7)
+
+name = "aquilla-resources"
+main = "index.ts"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+compatibility_date = "2025-05-01"
+workers_dev = true
+
+[observability]
+enabled = true
+
+# ---------------------------------------------------------------------------
+# Production — attaches resources.aquilla.app/* to this Worker once a local
+# zone-perm `wrangler deploy --env=production` claims the route + DNS record.
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-resources"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+routes = ["resources.aquilla.app/*"]
+
+# ---------------------------------------------------------------------------
+# Development staging — resources.dev.aquilla.app
+# ---------------------------------------------------------------------------
+[env.development]
+name = "aquilla-resources-development"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+routes = ["resources.dev.aquilla.app/*"]

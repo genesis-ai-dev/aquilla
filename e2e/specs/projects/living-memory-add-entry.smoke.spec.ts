@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Living Memory — add an Instructions entry.
@@ -12,18 +12,10 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * This spec tests the add-entry flow on the Instructions section.
  */
 test("living memory add entry form appears and Cancel closes it", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
   const name = `MemAdd ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/memory`)
   // The Instructions section has an "Add" button.
   const instructionsSection = alice.locator('section[aria-label="Instructions"]')
   await expect(instructionsSection).toBeVisible({ timeout: 10_000 })
@@ -53,18 +45,10 @@ test("living memory add entry form appears and Cancel closes it", async ({ alice
 })
 
 test("living memory add entry saves and appears in section", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
   const name = `MemSave ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/memory`)
   const instructionsSection = alice.locator('section[aria-label="Instructions"]')
   const addBtn = instructionsSection.getByRole("button", { name: /Add/i })
   await addBtn.click()

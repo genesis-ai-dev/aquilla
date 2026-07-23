@@ -14,9 +14,10 @@ import {
 import { buildBulkCells, type ImportContext } from "./import"
 import {
   bulkUploadSource,
-  enqueueTargetCommits,
+  publishStagedImport,
   type TargetCommit,
 } from "./sync/bulk-import"
+import { assertSourceUploadSize, bindSourceArtifact, uploadSourceOriginal } from "./sync/source-upload"
 
 export type SdbhImportPhase = "parse" | "source" | "target"
 
@@ -31,12 +32,18 @@ export interface SdbhImportProgress {
 
 export interface SdbhImportSummary {
   refs: FileReference[]
+  skipped: { book: string; reason: string }[]
   entryCount: number
   senseCount: number
   sourceCellCount: number
   targetCellCount: number
   /** Language code found in the localized edition's senses (e.g. "es"). */
   targetLanguageCode: string | null
+}
+
+export interface SdbhSourceArtifacts {
+  master: { name: string; bytes: ArrayBuffer }
+  localized?: { name: string; bytes: ArrayBuffer }
 }
 
 function parseEntries(jsonText: string, label: string): SdbhEntry[] {
@@ -64,6 +71,7 @@ export async function importSdbh(
   localizedJson: string | null,
   ctx: ImportContext,
   onProgress?: (p: SdbhImportProgress) => void,
+  sourceArtifacts?: SdbhSourceArtifacts,
 ): Promise<SdbhImportSummary> {
   onProgress?.({ phase: "parse" })
   const masterEntries = parseEntries(masterJson, "The master edition file")
@@ -75,13 +83,30 @@ export async function importSdbh(
 
   const files: SdbhParsedFile[] = [...parsed.files, parsed.domainFile]
   const refs: FileReference[] = []
+  const staged: Array<{ fileId: string; name: string }> = []
   let sourceCellCount = 0
   let targetCellCount = 0
+
+  const masterBytes = sourceArtifacts?.master.bytes
+    ?? new TextEncoder().encode(masterJson).buffer as ArrayBuffer
+  const localizedBytes = localizedJson === null
+    ? undefined
+    : sourceArtifacts?.localized?.bytes
+      ?? new TextEncoder().encode(localizedJson).buffer as ArrayBuffer
+  assertSourceUploadSize(masterBytes)
+  if (localizedBytes) assertSourceUploadSize(localizedBytes)
 
   for (let i = 0; i < files.length; i++) {
     const parsedFile = files[i]
     const fileId = uuidv7()
     const cells = buildBulkCells(parsedFile.strings)
+    const targets: TargetCommit[] = []
+    if (localized) {
+      for (const cell of cells) {
+        const value = localized.byCellId.get(cell.cellId)
+        if (value) targets.push({ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value })
+      }
+    }
 
     onProgress?.({ phase: "source", fileIndex: i + 1, fileCount: files.length, cellsEnqueued: 0, cellsTotal: cells.length })
     await bulkUploadSource({
@@ -100,38 +125,17 @@ export async function importSdbh(
         orderedBy: "sequence",
       },
       cells,
+      targets,
+      targetLang: ctx.targetLang,
+      deferPublication: true,
       getToken: ctx.getToken,
       signal: ctx.signal,
       onProgress: (uploaded, total) =>
         onProgress?.({ phase: "source", fileIndex: i + 1, fileCount: files.length, cellsEnqueued: uploaded, cellsTotal: total }),
     })
     sourceCellCount += cells.length
-
-    if (localized) {
-      // Source event ids come from the SAME buildBulkCells call that minted the
-      // uploaded cells, so the AD-2 parentId chain is correct by construction.
-      const commits: TargetCommit[] = []
-      for (const cell of cells) {
-        const value = localized.byCellId.get(cell.cellId)
-        if (value) {
-          commits.push({ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value })
-        }
-      }
-      if (commits.length > 0) {
-        onProgress?.({ phase: "target", fileIndex: i + 1, fileCount: files.length, cellsEnqueued: 0, cellsTotal: commits.length })
-        await enqueueTargetCommits({
-          projectId: ctx.projectId,
-          fileId,
-          author: ctx.author,
-          commits,
-          getToken: ctx.getToken,
-          signal: ctx.signal,
-          onProgress: (uploaded, total) =>
-            onProgress?.({ phase: "target", fileIndex: i + 1, fileCount: files.length, cellsEnqueued: uploaded, cellsTotal: total }),
-        })
-        targetCellCount += commits.length
-      }
-    }
+    targetCellCount += targets.length
+    staged.push({ fileId, name: parsedFile.name })
 
     refs.push({
       id: fileId,
@@ -143,8 +147,79 @@ export async function importSdbh(
     })
   }
 
+  const preserveEdition = async (
+    name: string,
+    bytes: ArrayBuffer,
+    format: "sdbh-master" | "sdbh-localized",
+  ): Promise<void> => {
+    const first = staged[0]
+    if (!first) return
+    const artifactId = uuidv7()
+    await uploadSourceOriginal({
+      projectId: ctx.projectId,
+      fileId: first.fileId,
+      artifactId,
+      bytes,
+      format,
+      artifactName: name,
+      bindingRole: "support",
+      memberPath: first.name,
+      profileId: "builtin:sdbh",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      updateSourceSidecar: false,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+    for (const binding of staged.slice(1)) {
+      await bindSourceArtifact({
+        projectId: ctx.projectId,
+        fileId: binding.fileId,
+        artifactId,
+        memberPath: binding.name,
+        profileId: "builtin:sdbh",
+        profileVersion: "1",
+        fidelity: "preserved-only",
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+    }
+  }
+
+  await preserveEdition(sourceArtifacts?.master.name ?? "SDBH-master.json", masterBytes, "sdbh-master")
+  if (localizedBytes) {
+    await preserveEdition(
+      sourceArtifacts?.localized?.name ?? "SDBH-localized.json",
+      localizedBytes,
+      "sdbh-localized",
+    )
+  }
+  const visibleRefs: FileReference[] = []
+  const skipped: { book: string; reason: string }[] = []
+  for (const file of staged) {
+    try {
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId: file.fileId,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+      const ref = refs.find((candidate) => candidate.id === file.fileId)
+      if (ref) visibleRefs.push(ref)
+    } catch (error) {
+      skipped.push({
+        book: file.name,
+        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+  if (visibleRefs.length === 0 && skipped.length > 0) {
+    throw new Error(`SDBH import could not publish any files: ${skipped[0].reason}`)
+  }
+
   return {
-    refs,
+    refs: visibleRefs,
+    skipped,
     entryCount: parsed.entryCount,
     senseCount: parsed.senseCount,
     sourceCellCount,

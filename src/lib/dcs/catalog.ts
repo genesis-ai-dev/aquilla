@@ -4,12 +4,18 @@
 // proxy. Every method takes an injectable `fetchImpl` (default global fetch) so
 // tests mock the network entirely.
 
+import { proxyOrigin } from "@/lib/net/resource-proxy"
 import type { DcsCatalogEntry, DcsCompareResult } from "./types"
 
+// Route DCS traffic through the same-origin resource proxy when configured
+// (AQU-627); `proxyOrigin` is a transparent no-op when VITE_RESOURCES_BASE is
+// unset, so the defaults stay `git.door43.org` for tests + today's build.
+const DCS_ORIGIN = proxyOrigin("https://git.door43.org")
+
 /** Catalog + Gitea API base (JSON endpoints). */
-export const DEFAULT_DCS_BASE = "https://git.door43.org/api/v1"
+export const DEFAULT_DCS_BASE = `${DCS_ORIGIN}/api/v1`
 /** Raw file host (blob bytes). Distinct from the API base — no `/api/v1`. */
-export const DEFAULT_DCS_RAW_BASE = "https://git.door43.org"
+export const DEFAULT_DCS_RAW_BASE = DCS_ORIGIN
 
 /** Ref kind for raw-file URLs: tags resolve under raw/tag/, branches under raw/branch/. */
 export type RefKind = "tag" | "branch"
@@ -30,7 +36,11 @@ export interface DcsClientOptions {
   retryBaseMs?: number
   /** Injected for tests so retries don't actually wait. Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>
+  /** Maximum raw repository member buffered by the browser. Defaults to 20 MiB. */
+  maxRawBytes?: number
 }
+
+export const MAX_DCS_RAW_BYTES = 20 * 1024 * 1024
 
 /** Params accepted by /catalog/search. All optional; passed through verbatim
  *  as query-string values. */
@@ -109,6 +119,7 @@ export class DcsClient {
   private readonly compareRetries: number
   private readonly retryBaseMs: number
   private readonly sleep: (ms: number) => Promise<void>
+  private readonly maxRawBytes: number
 
   constructor(opts: DcsClientOptions = {}) {
     // Native `fetch` loses its `this` binding when stored as an instance field
@@ -121,6 +132,7 @@ export class DcsClient {
     this.compareRetries = opts.compareRetries ?? 3
     this.retryBaseMs = opts.retryBaseMs ?? 500
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
+    this.maxRawBytes = opts.maxRawBytes ?? MAX_DCS_RAW_BYTES
   }
 
   private async getJson<T>(url: string): Promise<T> {
@@ -253,12 +265,44 @@ export class DcsClient {
     ref: string,
     path: string,
     refKind: RefKind = "tag",
+    signal?: AbortSignal,
   ): Promise<string> {
     const url = `${this.rawBaseUrl}/${owner}/${repo}/raw/${refKind}/${ref}/${path}`
-    const res = await this.fetchImpl(url)
+    const res = await this.fetchImpl(url, { signal })
     if (!res.ok) {
       throw new Error(`DCS raw fetch failed (HTTP ${res.status}) for ${url}`)
     }
-    return res.text()
+    const declaredLength = Number(res.headers?.get?.("Content-Length"))
+    if (Number.isFinite(declaredLength) && declaredLength > this.maxRawBytes) {
+      throw new Error(`DCS raw file exceeds the ${Math.floor(this.maxRawBytes / 1024 / 1024)} MB safety limit: ${path}`)
+    }
+    // Test doubles and non-browser fetch adapters may expose text() without a
+    // ReadableStream. Native browser responses take the bounded streaming path.
+    if (!res.body) return res.text()
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder("utf-8", { fatal: true })
+    let received = 0
+    let text = ""
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        received += value.byteLength
+        if (received > this.maxRawBytes) {
+          await reader.cancel()
+          throw new Error(`DCS raw file exceeds the ${Math.floor(this.maxRawBytes / 1024 / 1024)} MB safety limit: ${path}`)
+        }
+        text += decoder.decode(value, { stream: true })
+      }
+      text += decoder.decode()
+      return text
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new Error(`DCS raw file is not valid UTF-8 text: ${path}`)
+      }
+      throw error
+    } finally {
+      reader.releaseLock()
+    }
   }
 }

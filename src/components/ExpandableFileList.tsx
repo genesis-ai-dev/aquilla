@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Search as SearchIcon, X, ChevronDown, Pencil, BookOpen } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileTypeHasSections } from "@/lib/parsers/types"
+import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
 import { FileActionMenu } from "./FileActionMenu"
@@ -34,6 +34,8 @@ interface Props {
   suggestionFileIds: Set<string>
   validationCount: number
   getTokenForFile: (fileId: string) => Promise<string | null>
+  /** Storage lane used when exporting translated source files. */
+  targetLang?: string
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
@@ -57,6 +59,7 @@ interface Props {
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
+  targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   onOpenGlossary, glossaryActive,
 }: Props) {
@@ -203,7 +206,7 @@ export function ExpandableFileList({
                 {!isCollapsed && (
                   <div className="space-y-0.5">
                     {group.files.map((file) => {
-                      const canExpand = fileTypeHasSections(file.type)
+                      const canExpand = fileHasSections(file)
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (
@@ -295,7 +298,7 @@ export function ExpandableFileList({
     const name = /\.(sfm|usfm)$/i.test(file.name) ? file.name : `${file.name}.SFM`
     try {
       await downloadSourceFile({
-        projectId, fileId: file.id, downloadName: name, getToken: getTokenForFile,
+        projectId, fileId: file.id, downloadName: name, getToken: getTokenForFile, targetLang,
       })
       setExportToast({ msg: `Exported ${name}`, tone: "ok" })
     } catch (err) {

@@ -16,8 +16,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("account switcher add-account dialog Forgot password switches to reset mode", async ({ alice }) => {
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
-
   // Open the account switcher (username button with ChevronsUpDown icon).
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })

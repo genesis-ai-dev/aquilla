@@ -10,6 +10,7 @@ import { BrandProvider } from "./branding/BrandProvider"
 import { ThemeModeProvider } from "./branding/ThemeMode"
 import { ErrorBoundary } from "./components/ErrorBoundary"
 import { I18nProvider } from "./lib/i18n/I18nProvider"
+import { AccountsProvider } from "./hooks/useAccounts"
 // Buffer/crypto/etc. provided by vite-plugin-node-polyfills (see vite.config.ts)
 
 applyTheme(brand)
@@ -41,15 +42,17 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <I18nProvider>
-          <BrandProvider>
-            <ThemeModeProvider>
-              <BrowserRouter>
-                <App />
-              </BrowserRouter>
-            </ThemeModeProvider>
-          </BrandProvider>
-        </I18nProvider>
+        <AccountsProvider>
+          <I18nProvider>
+            <BrandProvider>
+              <ThemeModeProvider>
+                <BrowserRouter>
+                  <App />
+                </BrowserRouter>
+              </ThemeModeProvider>
+            </BrandProvider>
+          </I18nProvider>
+        </AccountsProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   </StrictMode>

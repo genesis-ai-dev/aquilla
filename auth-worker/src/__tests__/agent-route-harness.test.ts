@@ -95,13 +95,13 @@ describe("agent route — harness tool registration & dispatch", () => {
       "run_code",
       "load_artifact",
       "read_sandbox_file",
-      "plan_import",
       "propose_memory",
       "propose_brief_update",
       "read_memory",
     ]) {
       expect(toolNames).toContain(name)
     }
+    expect(toolNames).not.toContain("plan_import")
 
     // read_memory dispatched → its result reached the model on the next turn.
     const toolMsg = upstreamBodies[1].messages.find((m) => m.role === "tool")!
@@ -133,8 +133,9 @@ describe("agent route — harness tool registration & dispatch", () => {
     expect(frames.some((f) => f.type === "budget")).toBe(true)
     const exhausted = frames.find((f) => f.type === "budget.exhausted")
     expect(exhausted).toBeDefined()
-    expect(exhausted).toMatchObject({ capCents: 5 })
-    expect((exhausted!.spentCents as number)).toBeGreaterThanOrEqual(5)
+    // Frames carry CREDITS: cap 5¢ × agentMarkup 5 = 25 cr; spend ≥ cap.
+    expect(exhausted).toMatchObject({ capCredits: 25 })
+    expect((exhausted!.spentCredits as number)).toBeGreaterThanOrEqual(25)
     expect(frames.find((f) => f.type === "done")).toMatchObject({ status: "capped" })
   })
 

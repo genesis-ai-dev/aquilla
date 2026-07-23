@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * MultiProjectInviteDialog — "Add to projects" on the Members page.
@@ -15,13 +15,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 test("invite to projects dialog opens from members page", async ({ alice }) => {
   // The button is disabled while the org has zero accessible projects,
   // so create one first.
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  await dash.createProject({ name: `InviteOpenProj ${Date.now()}` })
+  await seedProjectWithFile(await jwtFor("alice"), { name: `InviteOpenProj ${Date.now()}` })
 
   await alice.goto("/members")
-  await alice.waitForLoadState("networkidle")
-
   // "Add to projects" button — only visible to org owners/admins.
   const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })
   await expect(inviteBtn).toBeEnabled({ timeout: 10_000 })

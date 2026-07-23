@@ -105,16 +105,16 @@ describe("AgentRunView", () => {
     expect(screen.getByText("3 cells")).toBeInTheDocument()
   })
 
-  it("renders the usage/cost line", () => {
+  it("renders the usage line in credits, never raw $", () => {
     render(
       <AgentRunView
         run={makeRun({
-          usage: { promptTokens: 12000, completionTokens: 3400, costCents: 2.5 },
+          usage: { promptTokens: 12000, completionTokens: 3400, costCredits: 13 },
         })}
       />,
     )
     expect(
-      screen.getByText(/12,000 prompt \+ 3,400 completion tokens · \$0\.0250/),
+      screen.getByText(/12,000 prompt \+ 3,400 completion tokens · 13 cr/),
     ).toBeInTheDocument()
   })
 

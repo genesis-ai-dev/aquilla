@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * SharePanel InviteLinkTab — email validation error on invalid input.
@@ -19,13 +19,10 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * verify the error message appears.
  */
 test("share invite link email validation error shown for invalid email", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ShareEmailVal ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ShareEmailVal ${Date.now()}` })
 
-  // Enter the workspace (openProject also dismisses the setup checklist).
-  await dash.openProject(name)
+  // Enter the workspace.
+  await openSeededProject(alice, seeded)
 
   // Open the share dialog from the sidebar "More" menu.
   await alice.getByRole("button", { name: /More project options/i }).click()

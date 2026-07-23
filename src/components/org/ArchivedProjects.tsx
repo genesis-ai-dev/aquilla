@@ -7,6 +7,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchArchivedProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { unarchiveProjectRemote } from "@/lib/sync/archive"
 import { Button } from "@/components/ui/button"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
 import { Archive, Building2 } from "lucide-react"
 
@@ -65,7 +66,7 @@ export function ArchivedProjects() {
               description="Archived projects are managed within a single organization."
             />
           ) : loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <LoadingPanel label="Loading archived projects" className="min-h-80" />
           ) : projects.length === 0 ? (
             <EmptyState
               icon={Archive}

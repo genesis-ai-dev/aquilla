@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — AI Instructions section.
@@ -14,18 +14,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * verifies "Save changes" button appears.
  */
 test("project settings AI instructions textarea makes form dirty", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AIInstr ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AIInstr ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/settings?section=ai`)
   // The system prompt textarea.
   const textarea = alice.locator("#sp")
   await expect(textarea).toBeVisible({ timeout: 10_000 })

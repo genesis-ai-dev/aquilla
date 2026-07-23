@@ -12,8 +12,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("org rename saves new name in settings page", async ({ alice }) => {
   await alice.goto("/settings/identity")
-  await alice.waitForLoadState("networkidle")
-
   // h1 "Identity"
   await expect(
     alice.locator("h1").filter({ hasText: /^Identity$/i })

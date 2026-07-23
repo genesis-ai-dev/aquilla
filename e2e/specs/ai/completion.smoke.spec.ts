@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Verify the sparkle-button → mock LLM flow.
@@ -21,11 +15,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * IDB layout: db "codex" v4, store "projects" keyed by id.
  */
 test("sparkle button fills target cell from mock LLM (config injected via IDB)", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AI ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "es" })
-  await dash.openProject(name)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AI ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Point the per-device LLM override at the mock server. getUserProviderOverride()
   // is checked first in complete() AND now in useCompletion (so isConfigured is
@@ -42,12 +33,6 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
 
   // Reload so React reads the patched project state.
   await alice.reload()
-  await alice.waitForLoadState("networkidle")
-
-  // Import sample, open, click sparkle.
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
   await ws.waitForEditor()
 
   // The sparkle lives in CellActionRail, hidden until the row is hovered
@@ -61,7 +46,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
     .first()
   await sparkle.scrollIntoViewIfNeeded()
   await alice.locator("[data-cell-id]").first().hover()
-  await alice.waitForTimeout(250) // let the 180ms opacity fade settle
+  await expect(sparkle).toBeVisible()
   await sparkle.click()
 
   // Mock LLM's default response is "Traducción de prueba".

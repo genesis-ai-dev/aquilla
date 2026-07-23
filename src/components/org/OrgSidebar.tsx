@@ -1,7 +1,6 @@
 import { NavLink } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
-import { useProjectsForNavigation } from "@/hooks/useAccessibleProjects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
@@ -11,7 +10,7 @@ const link = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "hover:bg-accent/60"}`
 
 export function OrgSidebar() {
-  const { orgs, activeOrg, activeOrgId, isAllOrgs } = useActiveOrg()
+  const { orgs, activeOrg, activeOrgId, isAllOrgs, accessibleProjects } = useActiveOrg()
   const isAdmin = !isAllOrgs && (activeOrg?.role.level ?? 0) >= 600
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
@@ -24,7 +23,6 @@ export function OrgSidebar() {
   // caller has at least one cross-org grant. Reachability is preserved for
   // zero-org invitees (the link and the /shared route work regardless of org
   // membership, unlike the all-orgs overview which requires 2+ member orgs).
-  const { projects: accessibleProjects } = useProjectsForNavigation()
   const hasSharedProjects =
     partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe.length > 0
 

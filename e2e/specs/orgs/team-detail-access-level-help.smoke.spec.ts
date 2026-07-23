@@ -18,8 +18,6 @@ test("team detail shows Access level definitions help indicator", async ({ alice
 
   // Navigate to the teams list at /teams.
   await alice.goto("/teams")
-  await alice.waitForLoadState("networkidle")
-
   // Create a new team.
   const createTeamBtn = alice.getByRole("button", { name: /New Team|Create.*team/i })
   await expect(createTeamBtn).toBeVisible({ timeout: 10_000 })

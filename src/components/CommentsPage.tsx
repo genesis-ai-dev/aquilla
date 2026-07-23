@@ -139,6 +139,35 @@ export function applySorting(roots: CommentRecord[], sort: SortOrder): CommentRe
   return copy
 }
 
+/**
+ * Count how many list-narrowing filters are active. `sort` is excluded (it is
+ * always set and never narrows the list); `search` is trimmed so a
+ * whitespace-only query — which `applyFilters` ignores — doesn't read as active.
+ */
+export function countActiveFilters(filter: FilterState): number {
+  return [
+    filter.fileId,
+    filter.authorId,
+    filter.participant,
+    filter.showResolved ? "1" : "",
+    filter.search.trim(),
+  ].filter(Boolean).length
+}
+
+/**
+ * AQU-650: the header count badge. When any filter is active it reflects what
+ * the user is actually looking at — the number of visible threads (top-level
+ * comments) in the filtered list below, including 0 when nothing matches. With
+ * no filters active it shows the project total comment count, exactly as before.
+ */
+export function headerBadgeCount(
+  totalComments: number,
+  visibleThreadCount: number,
+  activeFilterCount: number,
+): number {
+  return activeFilterCount > 0 ? visibleThreadCount : totalComments
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 function formatTs(ms: number): string {
@@ -803,6 +832,11 @@ export function CommentsPage() {
     projectId: projectId ?? null,
     getToken,
     author: session?.username ?? 'unknown',
+    // AQU-640: on a cold load the page can mount before the session JWT is
+    // available; getToken can only mint a real token once session.jwt exists.
+    // Signal readiness so the auto-load fires when the token arrives instead of
+    // bailing on the null token and requiring a manual Refresh.
+    tokenReady: !!session?.jwt,
   })
 
   // Separate top-level threads from replies.
@@ -872,13 +906,7 @@ export function CommentsPage() {
     navigate(`/project/${projectId}/file/${encodeURIComponent(root.fileId)}${params}`)
   }
 
-  const activeFilterCount = [
-    filter.fileId,
-    filter.authorId,
-    filter.participant,
-    filter.showResolved ? "1" : "",
-    filter.search,
-  ].filter(Boolean).length
+  const activeFilterCount = countActiveFilters(filter)
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
@@ -897,7 +925,9 @@ export function CommentsPage() {
           {project?.name ? `${project.name} — ` : ""}Comments
         </h1>
         {comments.length > 0 && (
-          <Badge variant="secondary">{comments.length}</Badge>
+          <Badge variant="secondary" data-testid="comments-count-badge">
+            {headerBadgeCount(comments.length, displayedRoots.length, activeFilterCount)}
+          </Badge>
         )}
         {activeFilterCount > 0 && (
           <Badge variant="outline" className="text-[10px]">

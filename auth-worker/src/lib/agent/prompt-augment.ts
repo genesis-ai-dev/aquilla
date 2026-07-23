@@ -72,10 +72,10 @@ export function buildAugmentSystemPrompt(args: AugmentArgs): string {
 
   // 3. New-tool guidance.
   sections.push(
-    "## Sandbox, import, and memory tools\n" +
-      "- run_code runs JS/Python in a locked-down sandbox (no network, no secrets) for parsing/inspecting files.\n" +
+    "## Sandbox and memory tools\n" +
+      "- run_code runs JS/Python in a locked-down sandbox (no network, no secrets) for analysis.\n" +
       "- load_artifact copies a project artifact into the sandbox; read_sandbox_file reads a sandbox file back.\n" +
-      "- plan_import STAGES a file import as a changeset for human approval — it never writes directly.\n" +
+      "- File importing belongs to the dedicated Import dialog, which owns detection, preview, and commit; do not try to import files from chat.\n" +
       "- propose_memory / propose_brief_update STAGE durable notes for human review. While you are parsing untrusted artifact content (after run_code or load_artifact in a turn), these are temporarily disabled.",
   )
 

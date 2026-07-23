@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
@@ -906,7 +907,9 @@ export function ProjectSettings() {
       ? visibleSections.filter((s) => activeGroup.sectionIds.includes(s.id))
       : []
 
-  if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
+  if (loading) {
+    return <LoadingPanel label="Loading project settings" className="min-h-screen" />
+  }
 
   return (
     <div className="min-h-screen bg-background">

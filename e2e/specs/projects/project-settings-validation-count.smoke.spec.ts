@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ValidationSettingsSection — validation count input and role floor select.
@@ -15,18 +15,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * change the role floor to "Project Lead" → verify the trigger shows "Project Lead".
  */
 test("project settings validation count and role floor can be changed", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ValCount ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ValCount ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings?section=validation`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/settings?section=validation`)
   // Scroll to Validation section.
   const validationSection = alice.locator("#section-validation")
   await expect(validationSection).toBeVisible({ timeout: 10_000 })

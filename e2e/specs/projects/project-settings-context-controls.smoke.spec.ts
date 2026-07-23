@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — AI context controls in the AI Instructions section.
@@ -18,18 +18,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * verify approved-only retrieval cannot be disabled.
  */
 test("project settings AI context controls mark form dirty", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `CtxControls ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CtxControls ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/settings?section=ai`)
   // #context-size select defaults to "Medium" — change to "Large".
   const contextSizeSelect = alice.locator("#context-size")
   await expect(contextSizeSelect).toBeVisible({ timeout: 10_000 })

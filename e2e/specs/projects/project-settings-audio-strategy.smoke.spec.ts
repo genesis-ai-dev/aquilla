@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — Audio loading section.
@@ -10,18 +10,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * Clicking a different strategy marks the form dirty and shows "Save changes".
  */
 test("project settings audio loading strategy selection marks form dirty", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AudioStrat ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AudioStrat ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings?section=audio-media`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/settings?section=audio-media`)
   // "Audio loading" card title is visible.
   await expect(alice.getByText(/Audio loading/i).first()).toBeVisible({ timeout: 10_000 })
 

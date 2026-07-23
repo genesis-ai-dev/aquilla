@@ -32,6 +32,20 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("ProjectsList", () => {
+  it("shows explicit progress over a value-free panel while projects are unresolved", async () => {
+    fetchAccessibleProjectsResultMock.mockImplementation(
+      () => new Promise(() => {}),
+    )
+    render(<MemoryRouter><OrgProvider><ProjectsList /></OrgProvider></MemoryRouter>)
+
+    const status = await screen.findByRole("status", {
+      name: "Loading projects",
+    })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(screen.queryByText("No projects in this org yet.")).not.toBeInTheDocument()
+  })
+
   it("fetches the unfiltered project list and renders active-org projects", async () => {
     fetchAccessibleProjectsResultMock.mockResolvedValue({
       ok: true,

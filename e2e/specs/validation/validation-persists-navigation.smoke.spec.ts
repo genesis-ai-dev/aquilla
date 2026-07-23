@@ -1,11 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Validation state persists across navigation.
@@ -23,22 +18,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   4. Verify cell 0's health button still shows "— validated".
  */
 test("validated cell stays validated after navigating away and back", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `ValidPersist ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ValidPersist ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
   await ws.editCell(0, "Persisted translation")
 
   // Validate cell 0 — waits for "— validated" title attribute.
@@ -48,15 +29,12 @@ test("validated cell stays validated after navigating away and back", async ({ a
   // OrgBreadcrumb renders plain spans) — assert arrival via the New Project
   // button instead.
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
   await expect(alice.getByRole("button", { name: /new project/i })).toBeVisible({
     timeout: 5_000,
   })
 
   // Navigate back to the project workspace.
-  await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}`)
   const ws2 = new Workspace(alice)
   await ws2.openFileBySubstring("sample")
   await ws2.waitForEditor()

@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — User section.
@@ -12,18 +12,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * verify the "Save changes" button becomes visible.
  */
 test("project settings User section username input makes form dirty", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `UserSection ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `UserSection ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings?section=general`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/settings?section=general`)
   // Scroll to the User section to ensure it's visible.
   const userSection = alice.locator("#section-user")
   await expect(userSection).toBeVisible({ timeout: 10_000 })

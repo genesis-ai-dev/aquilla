@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
+import { waitForProjectSyncReady } from "../../helpers/project-sync"
 import {
   createProjectServerSide,
   addProjectMember,
@@ -38,8 +39,6 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
 
   // 2. Alice navigates to the project, imports the sample file, opens it.
   await alice.goto(`/project/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // Server-side-created projects have no source/target language, so the import
   // flow opens a blocking "Set translation direction" screen after the preview
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
@@ -59,13 +58,13 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
 
   // 3. Bob opens the same project and file BEFORE alice edits — both need to
   //    be connected to the ProjectSync DO to receive the broadcast.
-  await bob.goto(`/project/${projectId}/file/${fileId}`)
-  await bob.waitForLoadState("networkidle")
+  const bobSyncReady = waitForProjectSyncReady(bob, projectId)
+  await Promise.all([
+    bob.goto(`/project/${projectId}/file/${fileId}`),
+    bobSyncReady,
+  ])
   const bobWs = new Workspace(bob)
   await bobWs.waitForEditor()
-
-  // Brief pause to let both WS connections establish to the ProjectSync DO.
-  await alice.waitForTimeout(1_000)
 
   // 4. Alice edits cell 0 and blurs. The edit is committed to IDB and flushed
   //    to the sync-worker outbox, which writes to D1 + broadcasts via DO.

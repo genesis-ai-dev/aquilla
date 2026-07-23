@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * BuiltinChecksList — toggle a built-in rule enabled/disabled.
@@ -12,18 +12,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * switch → verifies it's on → toggles it off → toggles back on to restore.
  */
 test("builtin rule enabled switch toggles the rule on and off", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `BuiltinToggle ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `BuiltinToggle ${Date.now()}` })
 
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   // Find the "Extra whitespace enabled" switch.
   const enabledSwitch = alice.getByRole("switch", { name: "Extra whitespace enabled" })
   await expect(enabledSwitch).toBeVisible({ timeout: 10_000 })

@@ -24,8 +24,6 @@ test("org home project filter shows only matching projects", async ({ alice }) =
 
   // Navigate to org home (/ redirects to /projects; org home may be at / or /projects).
   await alice.goto("/")
-  await alice.waitForLoadState("networkidle")
-
   // Filter input.
   const filterInput = alice.getByRole("textbox", { name: /Filter projects/i })
     .or(alice.locator('input[aria-label="Filter projects by name"]'))
@@ -34,7 +32,6 @@ test("org home project filter shows only matching projects", async ({ alice }) =
 
   // Type nameA (distinct prefix).
   await filterInput.first().fill("FilterAlpha")
-  await alice.waitForTimeout(300)
 
   // nameA visible, nameB hidden.
   await expect(alice.getByText(nameA).first()).toBeVisible({ timeout: 5_000 })
@@ -42,7 +39,6 @@ test("org home project filter shows only matching projects", async ({ alice }) =
 
   // Clear filter → both visible.
   await filterInput.first().fill("")
-  await alice.waitForTimeout(300)
   await expect(alice.getByText(nameA).first()).toBeVisible({ timeout: 5_000 })
   await expect(alice.getByText(nameB).first()).toBeVisible({ timeout: 5_000 })
 })

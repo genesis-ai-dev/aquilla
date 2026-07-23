@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 import { pickSelectOption, expectSelectValue } from "../../helpers/base-ui"
 
 /**
@@ -17,18 +17,9 @@ import { pickSelectOption, expectSelectValue } from "../../helpers/base-ui"
  * verifies the trigger label updated → changes it back to "Minor".
  */
 test("builtin rule severity select changes from minor to major", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Severity ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Severity ${Date.now()}` })
 
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   // Find the "Extra whitespace" severity select trigger.
   const severitySelect = alice.getByRole("combobox", { name: "Extra whitespace severity" })
   await expect(severitySelect).toBeVisible({ timeout: 10_000 })

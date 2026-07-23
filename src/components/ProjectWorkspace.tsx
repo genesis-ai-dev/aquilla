@@ -6,6 +6,7 @@ import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
@@ -29,7 +30,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileOrderedBy, fileTypeHasSections, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -90,7 +91,9 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
+import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
@@ -172,6 +175,7 @@ import { AssignModal } from "./AssignModal"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import { getMyAssignments, getProjectAssignments, type MyAssignment, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useMyScopes } from "@/hooks/useMyScopes"
 import { getSelectedIds } from "@/lib/audio/selection"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
@@ -715,7 +719,12 @@ export function ProjectWorkspace() {
       // default (the Agent tab itself stays unreachable during the takeover).
       setDockTab("files")
     } else if (centerSurface !== "agent" && prev === "agent") {
-      setDockTab((cur) => cur ?? dockTabBeforeAgentRef.current)
+      // Entry forces the scope picker ("files"), so treat that forced default
+      // (or a collapsed rail) as "no manual choice" and restore the saved tab.
+      // Any other tab was picked manually mid-takeover — keep it.
+      setDockTab((cur) =>
+        cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur,
+      )
     } else if (centerSurface === "agent" && dockTab === "agent") {
       // Restore/route paths can re-land the agent tab mid-takeover; collapse.
       setDockTab(null)
@@ -925,6 +934,36 @@ export function ProjectWorkspace() {
   const showStaleSiblingBanner =
     outboxStaleSiblingCount > 0 && outboxStaleSiblingEntries.length > 0
   const showStaleSourceBanner = outboxStaleSourceCount > staleSourceBannerDismissed
+  // AQU-633: a validate (or other target write) the server refused with a 403.
+  // Surface the reason so it isn't a silent flip-then-revert behind the pill.
+  // AQU-633: derive the "reason" banner from the outbox's quarantined 403
+  // records (source of truth) — captures a refusal regardless of which flush
+  // path quarantined it, unlike a flush callback. A local dismissed-id set hides
+  // the banner until a fresh refusal (new id) appears.
+  const forbiddenRecords = useForbiddenOutboxRecords(Boolean(project?.id))
+  const [dismissedForbidden, setDismissedForbidden] = useState<Set<string>>(new Set())
+  const forbiddenEntries = useMemo<ForbiddenEntry[]>(
+    () =>
+      forbiddenRecords
+        .filter((r) => !dismissedForbidden.has(r.id))
+        .map((r) => ({
+          id: r.id,
+          status: r.lastError?.status ?? 403,
+          reason: r.lastError?.reason ?? "forbidden",
+          kind: r.event.kind,
+          fileId: r.event.fileId ?? null,
+          cellId: r.event.cellId ?? null,
+        })),
+    [forbiddenRecords, dismissedForbidden],
+  )
+  const showForbiddenBanner = forbiddenEntries.length > 0
+  const dismissForbidden = useCallback(
+    () => setDismissedForbidden(new Set(forbiddenRecords.map((r) => r.id))),
+    [forbiddenRecords],
+  )
+  // AQU-633: the current user's own lane/file scopes, so bulk validate skips
+  // out-of-scope cells (no guaranteed-403) rather than silently reverting.
+  const myScopes = useMyScopes(project?.id ?? null)
 
   // D1-backed audit stats for the active file with the client outbox applied
   // on top — pending commits/validates show up immediately, before the next
@@ -1842,8 +1881,10 @@ export function ProjectWorkspace() {
   // draft (`onCompleteSingle(cell)`) or an explicit regenerate
   // (`onCompleteSingle(cell, { regenerate: true })`) — the latter maps to the
   // hook's third argument so a second iteration samples at a higher temperature.
+  // AQU-618: return the promise — EditorRow awaits it to show the "Saved"
+  // confirmation only after the draft actually commits, not at click time.
   const handleCompleteSingle = useCallback(
-    (cell: CellData, opts?: { regenerate?: boolean }) => { void completeSingle(cell, undefined, opts) },
+    (cell: CellData, opts?: { regenerate?: boolean }) => completeSingle(cell, undefined, opts),
     [completeSingle],
   )
 
@@ -2329,21 +2370,18 @@ export function ProjectWorkspace() {
   // fetchProjectFiles source). Then open one file and confirm its bars stay
   // live-accurate (move on edit) rather than freezing at the snapshot value.
 
-  // PROTOTYPE (AD-14 health-as-confidence): derive per-cell health on read from
-  // FTS5 similarity to validated cells, and overlay it onto the endorsement
-  // healthMap for the editor rings/tooltip so we can compare the two live.
-  //
-  // OPT-IN, default OFF. The overlay's async refetch re-renders the editor when
-  // it resolves, which races fast in-cell interactions (it reset cells mid-edit
-  // and mid-completion, failing the validate + AI-completion e2e smokes). Until
-  // that re-render is made non-disruptive, keep it behind a flag. Enable while
-  // exploring with: `localStorage.setItem("health-confidence-overlay","1")` then
-  // reload. When off, the hook is fully inert and the editor matches baseline.
+  // AD-14 health-as-confidence (AQU-641): derive per-cell health on read from
+  // FTS similarity to validated cells, and overlay it onto the endorsement
+  // healthMap for the editor rings/tooltip. Without the overlay the
+  // endorsement path is binary (0% until Validate, then 100%) because the
+  // neighborhood-endorsement loop was never built — the graded score IS this
+  // overlay, so it is ON by default. Kill switch (revert to binary baseline):
+  // `localStorage.setItem("health-confidence-overlay","0")` then reload.
   const confidenceOverlayEnabled = useMemo(() => {
     try {
-      return localStorage.getItem("health-confidence-overlay") === "1"
+      return localStorage.getItem("health-confidence-overlay") !== "0"
     } catch {
-      return false
+      return true
     }
   }, [])
   const confidence = useCellConfidence({
@@ -3029,7 +3067,8 @@ export function ProjectWorkspace() {
     onOpenHistory: handleOpenHistory,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording])
+    myScopes, // AQU-633: per-cell validate scope gate
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -4106,6 +4145,7 @@ export function ProjectWorkspace() {
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   getTokenForFile={getTokenForFile}
+                  targetLang={activeLane}
                   onSelectFile={(fileId, opts) => {
                     // Workbench: the explorer designates the agent's working
                     // area — stay in the takeover, retarget the session, and
@@ -4201,6 +4241,7 @@ export function ProjectWorkspace() {
                 bibleSummary={bibleSummary}
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
+                credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
                 onExpand={() => navigate(`/project/${projectId}/agent`)}
                 expanded={centerSurface === "agent"}
               />
@@ -4399,6 +4440,8 @@ export function ProjectWorkspace() {
                   cellStore={cellStore}
                   session={frontierSession}
                   username={currentUsername}
+                  activeLane={activeLane}
+                  myScopes={myScopes}
                   completeSingle={completeSingle}
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
@@ -4512,6 +4555,21 @@ export function ProjectWorkspace() {
                 </div>
               </div>
             )}
+            {/* AQU-633: 403-refused banner — surfaces WHY a validate reverted
+                (scope / self-validation / role floor / allowlist) instead of a
+                silent flip-then-revert behind the "N failed" pill. */}
+            {showForbiddenBanner && (
+              <div className="flex items-center justify-between gap-2 bg-rose-50 px-4 py-2 text-xs text-rose-800 dark:bg-rose-950 dark:text-rose-300">
+                <span>{forbiddenBannerMessage(forbiddenEntries)}</span>
+                <button
+                  type="button"
+                  onClick={dismissForbidden}
+                  className="ml-2 rounded bg-rose-200/60 px-2 py-0.5 hover:bg-rose-200 dark:bg-rose-800/50 dark:hover:bg-rose-800"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             {/* F5: stale-source pin banner */}
             {showStaleSourceBanner && (
               <div className="flex items-center justify-between gap-2 bg-blue-50 px-4 py-2 text-xs text-blue-800 dark:bg-blue-950 dark:text-blue-300">
@@ -4592,28 +4650,28 @@ export function ProjectWorkspace() {
           // navigates to /project/:id, which the restore-location effect turns
           // into the user's last open file (including scroll position).
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading comments…</div>}>
+            <Suspense fallback={<LoadingPanel label="Loading comments" />}>
               <CommentsPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "memory" ? (
           // FRO-254: Living Memory page inside the shell.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading living memory…</div>}>
+            <Suspense fallback={<LoadingPanel label="Loading living memory" />}>
               <LivingMemoryPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
+            <Suspense fallback={<LoadingPanel label="Loading terminology" />}>
               <GlossaryEditorContent files={projectFiles} />
             </Suspense>
           </div>
         ) : centerSurface === "members" ? (
           // FRO-180: Per-project members management inside the shell.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading members…</div>}>
+            <Suspense fallback={<LoadingPanel label="Loading members" />}>
               <ProjectMembersPageContent />
             </Suspense>
           </div>
@@ -4636,6 +4694,7 @@ export function ProjectWorkspace() {
               resolveCell: resolveCellById,
               onApplied: handleAgentApplied,
             }}
+            credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
             onClose={() => navigate(`/project/${projectId}`)}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
@@ -4772,7 +4831,7 @@ export function ProjectWorkspace() {
           <>
             {/* Parallel Bibles (helloao): edge tab → slide-out panel showing the
                 scroll-tracked verse in other bible versions. Scripture files only. */}
-            {centerSurface === "editor" && activeFile && fileTypeHasSections(activeFile.type) && (
+            {centerSurface === "editor" && activeFile && fileHasSections(activeFile) && (
               <ParallelBiblesSidebar
                 key={activeFile.id}
                 trackedRef={trackedCellRef}
@@ -4879,7 +4938,8 @@ export function ProjectWorkspace() {
             {/* File translation stats belong to the editor; the workbench has
                 its own working-set summary. Sync/outbox status above stays —
                 agent Apply flushes through the same outbox. */}
-            {centerSurface !== "agent" && (
+            {centerSurface !== "agent" &&
+              (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") && (
               <StatusBar
                 cells={cellSummaries}
                 projectHealth={projectHealth}
@@ -4975,6 +5035,8 @@ export function ProjectWorkspace() {
           username={currentUsername}
           getToken={getTokenForFile}
           sourceLanguage={project.sourceLanguage} targetLanguage={project.targetLanguage}
+          targetLang={activeLane}
+          identityToken={frontierSession?.jwt}
           onImported={handleImported}
           sourceCells={importSourceCells}
           ttsSettings={tts.settings}
@@ -5015,6 +5077,7 @@ export function ProjectWorkspace() {
             onOpenChange={setFileImportOpen}
             projectId={project.id}
             username={currentUsername}
+            targetLang={activeLane}
             fileName={activeFile?.name ?? "this file"}
             cells={fileTargetCells}
             getToken={getTokenForFile}
@@ -5066,6 +5129,7 @@ export function ProjectWorkspace() {
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={project.sourceLanguage}
           targetLanguage={project.targetLanguage}
+          targetLang={activeLane}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
         />

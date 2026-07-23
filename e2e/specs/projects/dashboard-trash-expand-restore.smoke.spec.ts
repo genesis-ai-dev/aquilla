@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Archived projects — archive then Restore moves the project back to active.
@@ -18,13 +18,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * back in the active projects list.
  */
 test("archived project can be restored back to active projects", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
   const name = `ArchiveRestore ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  // Creation lands on the project Overview (/projects/:id).
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
+  await alice.goto(`/projects/${seeded.projectId}`)
   await expect(alice.getByRole("heading", { name })).toBeVisible({ timeout: 10_000 })
 
   // Archive via the header overflow menu.
@@ -48,6 +44,5 @@ test("archived project can be restored back to active projects", async ({ alice 
 
   // …and it is back in the active projects list.
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
   await expect(alice.getByText(name)).toBeVisible({ timeout: 10_000 })
 })

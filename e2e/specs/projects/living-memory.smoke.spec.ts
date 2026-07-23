@@ -26,8 +26,6 @@ test("living memory page renders Instructions and Standards sections", async ({ 
 
   // Navigate to the living memory page.
   await alice.goto(`/project/${projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
   // Both authored sections render as <section aria-label="…">.
   // A fresh project has no authored entries but the section containers still render.
   const instructionsSection = alice.locator('section[aria-label="Instructions"]')

@@ -35,19 +35,19 @@ worker isolates — true Code-Mode-style dynamic isolates for Tier 1 are traced 
 ## Components
 
 ```
-SPA (AgentWorkbench, AgentDockView)
-  │  SSE (existing transport)
+SPA (AgentWorkbench / ImportDialog)
+  │  SSE agent transport / dedicated import request
   ▼
-auth-worker  ── agent.ts (harness loop, OpenRouter)
-  │  new tools: run_code, load_artifact, read_sandbox_file, plan_import,
-  │             propose_memory, propose_brief_update, read_memory
+auth-worker  ── agent.ts + /api/v1/import/parse (OpenRouter)
+  │  agent tools: run_code, load_artifact, read_sandbox_file,
+  │               propose_memory, propose_brief_update, read_memory
   │
   ├──HTTP (Bearer AGENT_SANDBOX_KEY)──▶  agent-worker (NEW, aquilla-agent-sandbox)
   │                                       Cloudflare Sandbox container per session
   │                                       exec / files / fetch-artifact / destroy
   │
-  ├──HTTP (ephemeral aqk_ ask-mode credential)──▶  sync-worker external command layer
-  │                                                  (PlanImport → staged changeset)
+  ├──validated normalized result──▶ ImportDialog preview ──▶ ImportService
+  │                                            (ordinary source/target-lane commit path)
   │
   └──Postgres (Neon)──▶  agent_memories, project_briefs, project_brief_proposals
 ```
@@ -55,17 +55,31 @@ auth-worker  ── agent.ts (harness loop, OpenRouter)
 - **Harness** (`auth-worker/src/routes/agent.ts` + `auth-worker/src/lib/agent/*`) — unchanged
   transport and run loop; extended with the new tools above.
 - **agent-worker** (new) — sandbox-execution-only. No model keys, no LLM loop, no business
-  logic. One Cloudflare Sandbox container per agent session (`sessionId`), destroyed at run end
-  (or idempotently on retry). See contracts §1 for the exact HTTP surface.
-- **Writes** — never raw events. The harness's `plan_import` tool mints an ephemeral,
-  project-scoped, **ask-mode** internal credential (`aqk_…`, `mode='ask'`, 2h expiry, named
-  `agent-run:<runId>`) via `db/shared/api-credentials.ts`, then calls the **existing**
-  `POST /api/v1/external/projects/:projectId/changesets` endpoint with a `PlanImport` command.
-  This is the same code path a human-authored API integration would use — the agent inherits
-  provenance, preconditions, and the approval UX for free. See `docs/AGENT-API.md` §3 for the
-  changeset/confirmation model this reuses verbatim.
+  logic. Chat uses one Cloudflare Sandbox container per run; a fallback import uses a unique
+  one-request session. Both are destroyed at the end (or idempotently on retry). See contracts
+  §1 for the exact HTTP surface.
+- **Import writes** — the sandbox route writes no project state. It stores the upload only under
+  a temporary R2 key, validates the normalized output, destroys the session, and deletes that
+  object. The browser shows the ordinary Import preview and, only after confirmation, commits
+  through `ImportService`; originals, target lanes, manifests, and bindings therefore use the
+  same path as every deterministic adapter. General chat intentionally has no import tool.
 - **Memory / brief** (new Postgres tables + auth-worker routes + SPA review UI) — see "Memory
   gating" below.
+
+### Local and deployed runtime
+
+`pnpm dev` continues to run the auth and sync Workers locally through Wrangler/workerd; those
+Workers do not require Docker. Code execution is an optional, separately isolated capability:
+
+- If `AGENT_SANDBOX_URL` and `AGENT_SANDBOX_KEY` are configured together in the process
+  environment or `auth-worker/.dev.vars`, the local auth Worker uses that endpoint and no local
+  container is started.
+- Otherwise, `scripts/dev-stack.ts` may start `agent-worker` on port 8790 when a compatible local
+  container engine is available. This path remains available for developers who use it.
+- `--no-sandbox` disables both choices. The rest of the stack still starts, and code-execution
+  tools report a clear unavailable result.
+- Deployed auth Workers must use a stable deployed sandbox URL. A `127.0.0.1` URL in deployed
+  Wrangler configuration points back at that Worker runtime, not at a developer's machine.
 
 ## Security model
 
@@ -74,7 +88,9 @@ auth-worker  ── agent.ts (harness loop, OpenRouter)
   files explicitly pushed to it (`POST /sessions/:id/files`, `fetch-artifact`), and returns
   stdout/stderr/a result value. The harness — outside the container — is the only thing that
   ever holds the ephemeral `aqk_` credential, and it is never passed into the sandbox.
-- **Default-deny egress.** The sandbox container has no arbitrary network access. It cannot
+- **Default-deny egress.** `agent-worker` subclasses the Cloudflare Sandbox Durable Object with
+  `enableInternet = false`, because Cloudflare Containers otherwise permit outbound internet
+  access by default. The sandbox container therefore has no arbitrary network access. It cannot
   exfiltrate data to an external host, cannot fetch a credentialed third-party URL on the
   user's behalf (contrast with the client-side agent pattern in `docs/AGENT-API.md` §5's
   "External-asset wrinkle" — that's a *different*, browser-context agent; the sandbox is
@@ -100,12 +116,9 @@ auth-worker  ── agent.ts (harness loop, OpenRouter)
   row again — a subsequent agent-originated PATCH gets `403 human_edit_protected`. The agent
   may propose a *new* memory or ask about the discrepancy in conversation, but it cannot
   silently clobber a human's correction. See contracts §3 for the full route/permission table.
-- **No act-mode from the agent's own writes.** `plan_import`'s changeset-bridge credential is
-  hardcoded `mode='ask'` — it is structurally incapable of auto-confirming its own changeset,
-  regardless of the calling user's own credential ceiling. A human always approves at
-  `/approve/:changesetId` before an agent-driven import lands (see `docs/AGENT-API.md` §2's
-  "autonomy modes" for what ask vs. act means at the credential layer generally — this is a
-  narrower, harness-internal application of the same idea).
+- **No parser-to-project write capability.** Generated parser code receives no token, database,
+  R2 binding, or network. It can only write `/workspace/result.json`; the auth worker treats
+  that output as untrusted, validates it, and returns it for a separate human preview.
 
 ## Memory gating (autonomy)
 
@@ -144,19 +157,17 @@ erroring mid-tool-call or silently truncating output. The SPA renders a running 
   `AgentMemoryTab` (proposed-memory review, approved-memory list with human-edit affordance and
   provenance display) and a `BriefEditor` (view/edit with optimistic-concurrency `ifMatchVersion`,
   proposal review).
-- Approval itself reuses the **existing** `/approve/:changesetId` page
-  (`src/pages/ApproveChangeset/ApproveChangeset.tsx`) unchanged — the agent's staged imports are
-  not a special case there, by design (contracts §0: "we inherit provenance, preconditions,
-  approval UX, and permission parity for free").
+- Import approval uses the existing Import-dialog preview; it is not mixed into agent chat or
+  the changeset approval page.
 
 ## Testing
 
-- `e2e/specs/agent-import.spec.ts` — end-to-end golden-path skeleton (skipped until the sandbox
-  stack exists in CI; see the spec's header comment and
+- `e2e/specs/agent-import.spec.ts` — container-gated Import-dialog golden path (enable with
+  `AGENT_SANDBOX_E2E=1` when provisioned; see the spec's header comment and
   [`e2e/JOURNEYS.md`](../e2e/JOURNEYS.md)).
 - `e2e/fixtures/agent/` — three deliberately messy fixtures (mixed-delimiter/BOM/swapped-column
   CSV, a hand-built legacy-shaped XLSX + CSV twin, a bilingual timestamped interview transcript)
-  with a README documenting each trap and the expected agent behavior.
+  with a README documenting each trap and the expected importer behavior.
 - Worker-side: PGlite for the new Postgres tables/routes (`db/shared/agent-memory.ts`,
   `auth-worker/src/routes/agent-memory.ts`); agent-worker gets its own package test suite
   (sandbox exec/files/fetch-artifact against a real or mocked Sandbox binding).
@@ -171,6 +182,5 @@ ones from this doc's perspective:
 - agent-worker's zone route claim and first `wrangler deploy` (CI's Cloudflare token can't
   mutate zone routes — this is a human/local task, same constraint as `sync-worker`/`auth-worker`
   per `CLAUDE.md`).
-- `e2e/specs/agent-import.spec.ts` is a structural skeleton, not a passing test, until the
-  sandbox stack (agent-worker, harness tools, memory routes, and the new frame renderers) all
-  exist — see the spec header and the row in `e2e/JOURNEYS.md`.
+- `e2e/specs/agent-import.spec.ts` remains container-gated until a sandbox endpoint is available
+  in CI; unit and worker route tests cover the same trust boundaries without a live container.

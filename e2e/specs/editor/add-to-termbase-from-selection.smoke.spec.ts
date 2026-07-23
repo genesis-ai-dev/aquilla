@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
 import { Glossary } from "../../helpers/page-objects/Glossary"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Add-to-termbase from source selection (Slice 5).
@@ -33,21 +27,9 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * click source cell, triple-click to select all text, then check for the button.
  */
 test("selecting source text reveals Add to termbase button and creates draft concept", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `AddToTermbase ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AddToTermbase ${Date.now()}` })
+  const projectId = seeded.projectId
+  await openSeededProject(alice, seeded)
 
   // Select text in the first source cell by triple-clicking it.
   // The source cell displays the original text from sample.md.
@@ -57,32 +39,10 @@ test("selecting source text reveals Add to termbase button and creates draft con
   const sourceArea = alice.locator('[aria-label="Source text"], .source-text, [data-cell-type="source"]').first()
 
   const addBtn = alice.getByRole("button", { name: /Add to term ?base/i })
-
-  if (await sourceArea.isVisible({ timeout: 3_000 })) {
-    // Triple-click selects all text in the element.
-    await sourceArea.click({ clickCount: 3 })
-    await alice.waitForTimeout(300)
-  } else {
-    // Fallback: find any cell content in the first row and triple-click it.
-    const cell = alice.locator('td, [role="gridcell"]').first()
-    if (await cell.isVisible({ timeout: 2_000 })) {
-      await cell.click({ clickCount: 3 })
-      await alice.waitForTimeout(300)
-    }
-  }
-
-  // Check if the Add to termbase button appeared.
-  const btnVisible = await addBtn.isVisible({ timeout: 3_000 })
-
-  if (!btnVisible) {
-    // Try directly on the source label text (the cell.original text in TipTap).
-    // sample.md first cell original text starts with "This is a"
-    const srcText = alice.getByText(/This is a/i).first()
-    if (await srcText.isVisible({ timeout: 2_000 })) {
-      await srcText.click({ clickCount: 3 })
-      await alice.waitForTimeout(300)
-    }
-  }
+  await expect(sourceArea).toBeVisible({ timeout: 10_000 })
+  // Triple-click selects the source text and synchronously dispatches the
+  // mouseup handler that opens the selection toolbar.
+  await sourceArea.click({ clickCount: 3 })
 
   // The Add to termbase button should now be visible.
   await expect(addBtn).toBeVisible({ timeout: 5_000 })
@@ -109,11 +69,10 @@ test("selecting source text reveals Add to termbase button and creates draft con
   // Draft concepts now live inline in the Glossary rather than in a separate
   // review queue. Reload-and-retry because patchSettings is a server round-trip.
   const glossary = new Glossary(alice)
-  await glossary.goto(projectId!)
+  await glossary.goto(projectId)
   const pending = alice.locator('[data-testid="glossary-row"][data-status="draft"]').first()
   await expect(async () => {
     await alice.reload()
-    await alice.waitForLoadState("networkidle")
     await expect(pending).toBeVisible({ timeout: 2_000 })
   }).toPass({ timeout: 20_000 })
   await expect(pending.getByRole("button", { name: "Accept term" })).toBeVisible()

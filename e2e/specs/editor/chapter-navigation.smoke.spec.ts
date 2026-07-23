@@ -34,13 +34,16 @@ test("scripture editor shows canonical verse numbers and supports chapter naviga
   await expect(chapterHeading.getByLabel("Line 1")).toHaveCount(0)
 
   await alice.getByRole("button", { name: "Next chapter" }).click()
-  await expect(alice.getByRole("button", { name: /Current chapter: Genesis 2/ })).toContainText("Verses 1–2")
 
   const chapterTwoVerse = alice.locator("[data-cell-id]").filter({
     hasText: "Thus the heavens and the earth were finished.",
   })
   await expect(chapterTwoVerse).toBeVisible()
   await expect(chapterTwoVerse.getByLabel("Line 1")).toBeVisible()
+  // Assert after the animated list jump has settled. The selected chapter
+  // must not be overwritten by viewport tracking when the final chapter is
+  // too short to align its first verse with the top edge.
+  await expect(alice.getByRole("button", { name: /Current chapter: Genesis 2/ })).toContainText("Verses 1–2")
 
   await chapterMenuTrigger.click()
   await alice.getByRole("option", { name: /Genesis 1/ }).click()

@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Org-level rule creation ("+ Add Org Rule").
@@ -14,18 +14,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * rule appears in the "Org Rules" card.
  */
 test("+ Add Org Rule creates an org-scoped rule", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `OrgRuleProj ${Date.now()}`
-  await dash.createProject({ name })
-  await dash.openProject(name)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
+    name: `OrgRuleProj ${Date.now()}`,
+  })
 
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   // The "Org Rules" card and "+ Add Org Rule" button (maintainer only).
   const addOrgRuleBtn = alice.getByRole("button", { name: /\+ Add Org Rule/i })
   await expect(addOrgRuleBtn).toBeVisible({ timeout: 10_000 })

@@ -15,6 +15,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { useProject } from "@/hooks/useProject"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -323,12 +324,12 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
   )
 
   if (loading) {
-    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading glossary…</div>
+    return <LoadingPanel label="Loading glossary" />
   }
 
   if (selectedConcept) {
     if (!cellDataReady) {
-      return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading term details…</div>
+      return <LoadingPanel label="Loading term details" />
     }
     return (
       <TerminologyTermDetail

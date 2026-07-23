@@ -16,7 +16,7 @@ import type { Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
-import { creditGuard, recordCredit } from "../lib/credits"
+import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
@@ -41,13 +41,11 @@ import {
 } from "../lib/agent/frames"
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
-import { revokeRunCredential, type RunCredential } from "../lib/agent/changeset-bridge"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import {
   runCode,
   loadArtifact,
   readSandboxFile,
-  planImport,
   proposeMemoryTool,
   proposeBriefUpdateTool,
   readMemoryTool,
@@ -55,7 +53,6 @@ import {
   type RunCodeArgs,
   type LoadArtifactArgs,
   type ReadSandboxFileArgs,
-  type PlanImportArgs,
   type ProposeMemoryArgs,
   type ProposeBriefArgs,
   type ReadMemoryArgs,
@@ -117,11 +114,12 @@ type AgentFrame =
   | { type: "proposal"; proposal: AgentProposal }
   | { type: "aquifer_proposal"; proposal: AquiferPublishProposal }
   | { type: "progress"; label: string; done: number; total: number }
-  | { type: "usage"; promptTokens: number; completionTokens: number; costCents: number }
+  | { type: "usage"; promptTokens: number; completionTokens: number; costCredits: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
-  // AQU-AGENT §4 — new harness frames (tool.code.*, changeset.staged,
-  // memory.proposed, brief.proposed, budget, budget.exhausted).
+  // AQU-AGENT §4 — harness frames (tool.code.*, memory.proposed,
+  // brief.proposed, budget, budget.exhausted) plus changeset.staged for
+  // backward-compatible rendering of persisted runs.
   | HarnessFrame
 
 // ── Tool schema (OpenAI tool-calling, served to the model) ──────────────────
@@ -303,39 +301,6 @@ function buildTools(bibleResourcesEnabled: boolean) {
             maxBytes: { type: "number" },
           },
           required: ["path"],
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "plan_import",
-        description:
-          "STAGE a file import as a changeset for human approval (nothing is written until a human approves). Each cell needs an `original` string. Max 5000 cells — split larger files.",
-        parameters: {
-          type: "object",
-          properties: {
-            fileName: { type: "string" },
-            fileType: { type: "string" },
-            sourceLanguage: { type: "string" },
-            targetLanguage: { type: "string" },
-            cells: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  original: { type: "string" },
-                  translated: { type: "string" },
-                  context: { type: "string" },
-                  group: { type: "string" },
-                  type: { type: "string" },
-                },
-                required: ["original"],
-              },
-            },
-          },
-          required: ["fileName", "fileType", "cells"],
         },
       },
     },
@@ -762,15 +727,19 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   let stagedCount = 0
   let status: "ok" | "capped" | "error" = "ok"
 
-  // AQU-AGENT §2 run state: cost cap, untrusted-content guard, ephemeral
-  // changeset credentials to revoke, and the sandbox container id.
+  // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
+  // container id.
   const costCapCents = resolveRunCostCapCents(env.AGENT_RUN_COST_CAP_CENTS)
+  // Budget/usage frames are org-facing: convert raw provider cents → CREDITS
+  // (agent-rail markup) so the client only ever sees credits, consistent with
+  // the org credits panel. resolveCreditConfig never throws.
+  const creditCfg = await resolveCreditConfig(env, env.AQUILLA_PG, orgId)
+  const toCredits = (cents: number) => creditsFor(cents, "agent", creditCfg)
   // `active` seeds from the session's carried-over bit so a run that inherits
   // untrusted content starts locked; `usedThisTurn` gates the within-run clear;
   // `runHad` records whether ANY turn in this run used an untrusted tool, which
   // is what we persist back to the session (adversarial-panel authz-M2/races-F2).
   const untrusted = { active: storedUntrusted, usedThisTurn: false, runHad: false }
-  const runCredentials: RunCredential[] = []
   // races-F4: one sandbox container PER RUN (never reuse the session's). Cross-run
   // container reuse is deferred to v2 — the model reloads artifacts each run via
   // load_artifact (see the attached-artifacts prompt). See AQU-AGENT-TRACES.md.
@@ -792,7 +761,6 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       untrusted.runHad = true
     },
     isUntrustedActive: () => untrusted.active,
-    registerCredential: (cred) => runCredentials.push(cred),
   }
 
   send({ type: "run_start", runId, ...(body.sessionId ? { sessionId: body.sessionId } : {}) })
@@ -821,7 +789,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       // once the accumulated OpenRouter cost reaches the ceiling.
       if (costCents >= costCapCents) {
         status = "capped"
-        send({ type: "budget.exhausted", runId, spentCents: Math.round(costCents), capCents: costCapCents })
+        send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
         break
       }
 
@@ -871,7 +839,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       }
 
       // AQU-AGENT §4 — cost meter after each turn's usage lands.
-      send({ type: "budget", runId, spentCents: Math.round(costCents), capCents: costCapCents })
+      send({ type: "budget", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
 
       convo.push({ ...message, role: "assistant" })
 
@@ -895,7 +863,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           (costCents >= costCapCents || promptTokens + completionTokens > TOKEN_CEILING)
         ) {
           status = "capped"
-          send({ type: "budget.exhausted", runId, spentCents: Math.round(costCents), capCents: costCapCents })
+          send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
           // Answer every not-yet-run tool_call so the stored transcript stays
           // valid for a follow-up run (each tool_call needs a tool message).
           for (let cj = ci; cj < toolCalls.length; cj++) {
@@ -955,17 +923,13 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     status = "error"
   }
 
-  // AQU-AGENT §2 — best-effort teardown: revoke every ephemeral changeset
-  // credential and destroy the sandbox container. Never blocks the run's
+  // AQU-AGENT §2 — best-effort sandbox teardown. Never blocks the run's
   // settlement; failures are logged, not surfaced.
-  for (const cred of runCredentials) {
-    await revokeRunCredential(env, cred)
-  }
   if (env.AGENT_SANDBOX_URL && env.AGENT_SANDBOX_KEY) {
     await sandboxDestroy(env, sandboxSessionId)
   }
 
-  send({ type: "usage", promptTokens, completionTokens, costCents })
+  send({ type: "usage", promptTokens, completionTokens, costCredits: toCredits(costCents) })
   send({ type: "done", runId, status })
 
   try {
@@ -1026,12 +990,12 @@ interface ToolCallEnv {
 }
 
 /** Does this tool call consume the write/SQL iteration budget? Write-shaped
- *  harness tools (plan_import stages a changeset; propose_* persist proposals)
+ *  harness tools (propose_* persist proposals)
  *  count too; sandbox reads + read_memory stay free (MAX_TOTAL_ROUNDS backstop). */
 function budgetedCall(call: ToolCall): boolean {
   const name = call.function.name
   if (name === "draft" || name === "propose" || name === "sql") return true
-  if (name === "plan_import" || name === "propose_memory" || name === "propose_brief_update") return true
+  if (name === "propose_memory" || name === "propose_brief_update") return true
   if (name !== "execute") return false
   try {
     const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
@@ -1214,8 +1178,6 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
       return loadArtifact(args as LoadArtifactArgs, t.harness)
     case "read_sandbox_file":
       return readSandboxFile(args as ReadSandboxFileArgs, t.harness)
-    case "plan_import":
-      return planImport(args as PlanImportArgs, t.harness)
     case "propose_memory":
       return proposeMemoryTool(args as ProposeMemoryArgs, t.harness)
     case "propose_brief_update":

@@ -44,11 +44,10 @@ export function parentKeyOf(parentId: string | null | undefined): string {
  * lane would lose the (project, file, cell, parent) claim and its projection
  * would be silently gated out.
  *
- * The default lane ('' / absent `targetLang`) keeps the EXACT legacy key so
- * every historical claim row, replay, and pre-lane client stays
- * byte-identical — including today's deliberate cross-side competition on a
- * shared parent. `@lane:` cannot collide with an event-id prefix (ids are
- * UUIDs) or with GENESIS_PARENT_KEY.
+ * The default target lane ('' / absent `targetLang`) keeps the EXACT legacy
+ * key. `@lane:` cannot collide with an event-id prefix (ids are UUIDs) or
+ * with GENESIS_PARENT_KEY. Source-side qualification is applied by
+ * eventQualifiedParentKey below.
  *
  * The same composed key MUST be used by all three arbitration sites — the
  * live claim (handlers/cell-events.ts), rebuild.ts's in-memory childKey, and
@@ -60,6 +59,27 @@ export function laneQualifiedParentKey(
 ): string {
   const base = parentKeyOf(parentId)
   return targetLang ? `${base}@lane:${targetLang}` : base
+}
+
+/**
+ * Fully qualify a cell event's arbitration slot.
+ *
+ * Source and target events can legitimately share the same source head: the
+ * first target commit pins that source event, while a later source correction
+ * also advances from it. They are separate chains and must not make one
+ * another stale. Named target lanes remain independent, while the default
+ * target lane retains its historical unqualified key.
+ */
+export function eventQualifiedParentKey(
+  parentId: string | null | undefined,
+  kind: string,
+  payload: unknown,
+): string {
+  const base = parentKeyOf(parentId)
+  if (kind.startsWith('source.cell.')) return `${base}@side:source`
+  if (!kind.startsWith('target.cell.')) return base
+  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  return typeof lang === 'string' && lang ? `${base}@lane:${lang}` : base
 }
 
 /** One AD-2 chain slot: (project, file, cell, parent). */

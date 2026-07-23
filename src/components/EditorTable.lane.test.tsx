@@ -18,6 +18,7 @@ import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { ROLE } from "@/lib/frontier/roles"
+import type { MemberScope } from "@/lib/sync/member-scopes"
 
 // Capture target-side emits without touching IndexedDB / posthog. Every helper
 // EditorTable imports must be present so the module resolves. `vi.hoisted`
@@ -110,11 +111,11 @@ function makeStore(cellId: string): CellStore {
   return store
 }
 
-function renderTable(activeLane: string) {
+function renderTable(activeLane: string, myScopes: MemberScope[] = []) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
-      <EditorActionsProvider value={{}}>
+      <EditorActionsProvider value={{ myScopes }}>
         <EditorTable
           project={project}
           cellStore={makeStore("cell-1")}
@@ -160,5 +161,15 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     expect(emitCellValidate).toHaveBeenCalledWith(
       expect.objectContaining({ cellId: "cell-1", targetLang: "" }),
     )
+  })
+
+  it("AQU-633: disables the per-cell validate action outside the member's lane scope", async () => {
+    emitCellValidate.mockClear()
+    renderTable("fr", [{ kind: "lane", value: "es" }])
+
+    const button = await screen.findByRole("button", { name: /Click to validate/ })
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(emitCellValidate).not.toHaveBeenCalled()
   })
 })

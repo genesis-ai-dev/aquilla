@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * RuleImportDialog — "Import from doc" button is disabled when LLM is not configured.
@@ -21,17 +21,8 @@ test("rule import button is disabled when LLM is not configured", async ({ alice
   // Make the frontier LLM provider unavailable (health probe fails).
   await alice.route("**/api/v2/health*", (route) => route.abort())
 
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `RuleImport ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1] ?? ""
-
-  await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `RuleImport ${Date.now()}` })
+  await alice.goto(`/project/${seeded.projectId}/rules`)
   // "Import from doc" button is disabled because LLM is not configured.
   const importBtn = alice.getByRole("button", { name: /Import from doc/i })
   await expect(importBtn).toBeVisible({ timeout: 10_000 })

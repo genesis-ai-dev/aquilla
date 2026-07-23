@@ -12,8 +12,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("team rename saves new name on team detail page", async ({ alice }) => {
   await alice.goto("/teams")
-  await alice.waitForLoadState("networkidle")
-
   // Create a new team.
   const newTeamBtn = alice.getByRole("button", { name: /New team/i })
   await expect(newTeamBtn).toBeVisible({ timeout: 10_000 })
@@ -27,8 +25,6 @@ test("team rename saves new name on team detail page", async ({ alice }) => {
 
   // Navigate to the team detail page.
   await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
-  await alice.waitForLoadState("networkidle")
-
   // h1 shows the team name.
   await expect(alice.locator("h1").filter({ hasText: originalName })).toBeVisible({ timeout: 5_000 })
 

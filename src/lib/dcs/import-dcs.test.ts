@@ -109,6 +109,9 @@ describe("importDcsResource — genesis transform (spec §3, §5)", () => {
     expect(summary.cells).toBe(2)
     expect(summary.cursor.ref).toBe("v89")
     expect(summary.cursor.commitSha).toBe("84c73ba0")
+    expect(client.fetchRaw).not.toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), "LICENSE.md", expect.anything(),
+    )
   })
 
   it("re-running the same import derives identical event ids (idempotent)", async () => {
@@ -159,6 +162,38 @@ describe("importDcsResource — genesis transform (spec §3, §5)", () => {
     const args = emit.mock.calls[0][0]
     expect(args.rawSource).toBe(TIT_USFM)
     expect(args.rawSourceFormat).toBe("usfm")
+  })
+
+  it("returns an explicit partial report when a later routed file fails", async () => {
+    const second = `\\id PHM
+\\c 1
+\\v 1 Paul, a prisoner of Christ Jesus.`
+    const client = fakeClient({
+      getTree: vi.fn(async () => ["57-TIT.usfm", "58-PHM.usfm", "manifest.yaml"]),
+      fetchRaw: vi.fn(async (_o: string, _r: string, _ref: string, path: string) => {
+        if (path === "manifest.yaml") return MANIFEST_YAML
+        if (path === "57-TIT.usfm") return TIT_USFM
+        if (path === "58-PHM.usfm") return second
+        return ""
+      }),
+    })
+    const emit = vi.fn(async (args: BulkUploadArgs) => {
+      if (args.file.name.startsWith("PHM")) throw new Error("source storage unavailable")
+    })
+
+    const summary = await importDcsResource({
+      entry: ENTRY,
+      projectId: "p",
+      client: client as any,
+      emit,
+      getToken: async () => "t",
+    })
+
+    expect(summary.files).toBe(1)
+    expect(summary.refs).toHaveLength(1)
+    expect(summary.skipped).toEqual([
+      expect.objectContaining({ book: expect.stringMatching(/^PHM/), reason: "source storage unavailable" }),
+    ])
   })
 
   it("throws a clear error when no route matches the resource", async () => {

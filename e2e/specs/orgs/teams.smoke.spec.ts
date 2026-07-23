@@ -15,8 +15,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("create a team and navigate to its detail page", async ({ alice }) => {
   await alice.goto("/teams")
-  await alice.waitForLoadState("networkidle")
-
   // 1. "New team" button is visible (only rendered for owners/admins).
   const newTeamBtn = alice.getByRole("button", { name: /New team/i })
   await expect(newTeamBtn).toBeVisible({ timeout: 10_000 })
@@ -34,8 +32,6 @@ test("create a team and navigate to its detail page", async ({ alice }) => {
 
   // The form navigates to /teams/:groupId on success.
   await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
-  await alice.waitForLoadState("networkidle")
-
   // 4. The team detail page shows the team name.
   await expect(alice.getByText(teamName).first()).toBeVisible({ timeout: 5_000 })
 })

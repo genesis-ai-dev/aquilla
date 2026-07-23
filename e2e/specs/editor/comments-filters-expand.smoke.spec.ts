@@ -1,12 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { pickSelectOption, expectSelectValue } from "../../helpers/base-ui"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * CommentsPage — "Filters" button expands/collapses the filter panel.
@@ -22,16 +16,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * verify select value → click "Filters" again → panel collapses.
  */
 test("comments Filters button expands filter panel and sort picker works", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `CommentsFilters ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CommentsFilters ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Post a comment so the comments page has content.
   const row = ws.cellRow(0)
@@ -52,8 +38,6 @@ test("comments Filters button expands filter panel and sort picker works", async
   const match = projectUrl.match(/\/project\/([^/]+)/)
   const projectId = match ? match[1] : ""
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // The "Filters" button should be visible.
   const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
   await expect(filtersBtn).toBeVisible({ timeout: 10_000 })

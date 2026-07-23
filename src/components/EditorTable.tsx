@@ -35,6 +35,7 @@ import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsS
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
+import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
@@ -103,10 +104,12 @@ import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
   chapterLabelFromCanonical,
+  importDisplayLabel,
   verseLabelFromCanonical,
 } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
+  resolveActiveChapterLabel,
   rowMatchesChapterHeading,
   sectionLabelAtViewportStart,
 } from "@/lib/chapter-navigation"
@@ -127,6 +130,7 @@ import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
+import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
@@ -594,7 +598,7 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   onCompleteBatch: (cells: CellData[]) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
@@ -744,6 +748,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
   const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
+  const [chapterNavigationSelection, setChapterNavigationSelection] = useState<{
+    fileId: string | null
+    label: string
+  } | null>(null)
+  const clearChapterNavigationSelection = useCallback(() => {
+    setChapterNavigationSelection(null)
+  }, [])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
   // Mirror ref so the imperative handle (getCurrentIndex) reads current
   // values without widening its dependency array — same pattern as
@@ -913,6 +924,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
+    clearChapterNavigationSelection()
     setActiveEditorCellId(targetId)
     lastActiveEditorCellIdRef.current = targetId
     void listRef.current?.scrollToIndex({
@@ -946,11 +958,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     }
     focusWhenMounted()
-  }, [getListQueryRoot])
+  }, [clearChapterNavigationSelection, getListQueryRoot])
 
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
+        clearChapterNavigationSelection()
         void listRef.current?.scrollToIndex({
           index,
           viewPosition: 0.5,
@@ -995,7 +1008,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
       })
     },
-  }), [displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1004,6 +1017,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
+    clearChapterNavigationSelection()
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -1026,7 +1040,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       rowEl.focus()
     }
     focusWhenMounted()
-  }, [getListQueryRoot])
+  }, [clearChapterNavigationSelection, getListQueryRoot])
 
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
@@ -1381,20 +1395,60 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       const map = new Map<string, number>()
       let ordinal = 0
       for (const id of displayCellIds) {
-        if (cellStore.getCellView(id)?.type === "paratext") continue
+        const view = cellStore.getCellView(id)
+        if (!view) continue
+        if (
+          view.type === "paratext"
+          || view.type === "heading"
+          || importDisplayLabel(view.metadata) === null
+        ) continue
         map.set(id, ++ordinal)
       }
       return map
     }),
   [cellStore, cellStoreVersion, displayCellIds])
 
-  const activeChapterLabel = chapterNavigationItems.some((chapter) => chapter.label === currentSectionLabel)
-    ? currentSectionLabel
-    : chapterNavigationItems[0]?.label ?? ""
+  const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
+    ? chapterNavigationSelection.label
+    : null
+  const activeChapterLabel = resolveActiveChapterLabel(
+    chapterNavigationItems.map((chapter) => chapter.label),
+    currentSectionLabel,
+    selectedChapterLabel,
+  )
+
+  const handleChapterListPointerDownCapture = useCallback((event: React.PointerEvent) => {
+    // Touch/pen gestures and a mouse press on the scroll container indicate
+    // manual scrolling. A normal click inside a row should not discard the
+    // chapter the user just chose.
+    if (event.pointerType !== "mouse" || event.target === parentRef.current) {
+      clearChapterNavigationSelection()
+    }
+  }, [clearChapterNavigationSelection])
+
+  const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
+    const target = event.target
+    if (
+      target instanceof HTMLElement
+      && (target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']"))
+    ) return
+    if (
+      event.key === "ArrowUp"
+      || event.key === "ArrowDown"
+      || event.key === "PageUp"
+      || event.key === "PageDown"
+      || event.key === "Home"
+      || event.key === "End"
+      || event.key === " "
+    ) {
+      clearChapterNavigationSelection()
+    }
+  }, [clearChapterNavigationSelection])
 
   const handleChapterSelect = useCallback((label: string) => {
     const index = cellStore.findIndexBySection(label)
     if (index < 0) return
+    setChapterNavigationSelection({ fileId: audioFileId, label })
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     void listRef.current?.scrollToIndex({
@@ -1402,7 +1456,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       viewPosition: 0,
       animated: true,
     })
-  }, [cellStore])
+  }, [audioFileId, cellStore])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -1838,7 +1892,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       </div>
 
       {displayCellIds.length > 0 ? (
-        <div ref={listRootRef} className="flex min-h-0 flex-1">
+        <div
+          ref={listRootRef}
+          className="flex min-h-0 flex-1"
+          onPointerDownCapture={handleChapterListPointerDownCapture}
+          onWheelCapture={clearChapterNavigationSelection}
+          onKeyDownCapture={handleChapterListKeyDownCapture}
+        >
           <LegendList
             ref={listRef}
             refScrollView={setListScrollElement}
@@ -1971,7 +2031,7 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2294,7 +2354,7 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -3208,7 +3268,12 @@ function EditorRow({
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
-  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
+  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording, myScopes } = useEditorActions()
+  // AQU-633: a scoped member can only validate cells in their assigned lane/file.
+  // Combine the role capability with the per-cell scope check so an out-of-scope
+  // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
+  // members (empty scopes) → always in scope, so this is a no-op for them.
+  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
@@ -3279,6 +3344,11 @@ function EditorRow({
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
+  // AQU-618: transient "Saved" confirmation shown after a Replace / AI-generate
+  // commit resolves, so the translator can see the change landed instead of
+  // being left on the (now-closed) dialog wondering whether it persisted.
+  const [showSaved, setShowSaved] = useState(false)
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
@@ -3522,7 +3592,18 @@ function EditorRow({
       // floor already required to reach this commit path), so anyone who can
       // edit can validate; guard defensively anyway. Skip empty commits so
       // clearing a cell doesn't mark an empty row "validated".
-      if (value.trim() && canValidate && canPerform("cell.validate", project.syncRole?.level ?? null)) {
+      // AQU-633: auto-validate-on-edit IS self-validation (you just authored the
+      // cell), so honor the project's allowSelfValidation rule. When it's off,
+      // your own work must wait for someone else — don't auto-validate. The
+      // server's self-check reads cells.last_editor, which isn't committed yet
+      // for this same-action commit+validate, so it can't catch this; the gate
+      // has to be here. Default/undefined = allowed, preserving codex behavior.
+      if (shouldAutoValidateHumanEdit({
+        value,
+        canValidate,
+        allowSelfValidation: project.allowSelfValidation,
+        roleLevel: project.syncRole?.level ?? null,
+      })) {
         void emitCellValidate({
           projectId: project.id,
           fileId: cell.fileId,
@@ -3551,7 +3632,30 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, canValidate, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+
+  // AQU-618: run a single-cell AI generate/Replace, then return the translator
+  // to the edited cell and confirm the save. Both entry points — the Replace
+  // confirm dialog and the direct sparkle on an empty cell — used to fire
+  // `onCompleteSingle` and leave focus on the dialog / rail button with no
+  // saved signal, so testers re-applied the change unsure it had persisted.
+  // We await the commit (completeSingle auto-commits and flushes the outbox),
+  // then re-focus the cell editor (the new text is now visible there) and show
+  // a brief "Saved" confirmation.
+  const completeSingleAndReturn = useCallback(async () => {
+    await onCompleteSingle(cell)
+    onActivateEditor(cell.id)
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+    setShowSaved(true)
+    savedTimerRef.current = setTimeout(() => {
+      setShowSaved(false)
+      savedTimerRef.current = null
+    }, 2400)
+  }, [onCompleteSingle, cell, onActivateEditor])
+
+  useEffect(() => () => {
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
+  }, [])
 
   // Source-edit commit path. The inline source editor (a plain TranslatedEditor)
   // calls this on idle/blur with the current source `{value, valueHtml}`. We emit
@@ -3849,6 +3953,14 @@ function EditorRow({
       console.warn("[validate] aborting: role too low for", validated ? "cell.validate" : "cell.unvalidate")
       return
     }
+    // AQU-633: additive lane/file scope guard. A scoped member's validate on an
+    // out-of-scope cell is a guaranteed 403 — don't optimistically flip then
+    // revert. The toggle is already greyed (canValidateThisCell); this covers
+    // keyboard/programmatic triggers too. Unscoped members are always in scope.
+    if (!isInMemberScope(myScopes, cell.fileId, activeLane)) {
+      console.warn("[validate] aborting: cell out of the caller's assigned scope")
+      return
+    }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
     setOptimisticSelfValidation(validated)
@@ -3871,7 +3983,7 @@ function EditorRow({
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback(() => {
@@ -4081,7 +4193,7 @@ function EditorRow({
     // on pointer press. The trigger button's own click handler performs the
     // validation, so the popover only needs to stay closed on first touch.
     if (details.reason === "trigger-press" || details.reason === "keyboard") {
-      if (canValidate && !isSelfValidated) {
+      if (canValidateThisCell && !isSelfValidated) {
         details.cancel()
         return
       }
@@ -4158,6 +4270,7 @@ function EditorRow({
     scriptureNumbering,
     rowIndex,
     contentNumber,
+    displayLabel: importDisplayLabel(cell.metadata),
   })
   const numberPill = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
@@ -4397,7 +4510,11 @@ function EditorRow({
   const cellRef = cell.context?.trim()
     || cell.globalReferences?.[0]?.trim()
     || `row ${rowIndex + 1}`
-  const validationTooltip = canValidate ? "Not validated — click to validate" : "Validation unavailable"
+  const validationTooltip = canValidateThisCell
+    ? "Not validated — click to validate"
+    : canValidate
+      ? "Outside your assigned files or lanes" // AQU-633: scoped-out, not a role gate
+      : "Validation unavailable"
   type PreventableReactEvent<T> = React.SyntheticEvent<T> & {
     preventBaseUIHandler?: () => void
   }
@@ -4436,7 +4553,7 @@ function EditorRow({
         vs === "others" && "hover:text-green-500",
         vs === "full-others" && "hover:text-green-500",
       )}
-      disabled={!canValidate}
+      disabled={!canValidateThisCell}
     >
       <HealthRing
         health={healthValue}
@@ -4465,7 +4582,7 @@ function EditorRow({
             delay={400}
             closeDelay={100}
             render={renderValidationButton(
-              canValidate && !isSelfValidated
+              canValidateThisCell && !isSelfValidated
                 ? () => emitValidationChange(true)
                 : undefined,
             )}
@@ -4514,7 +4631,7 @@ function EditorRow({
       ) : (
         <AppTooltip content={validationTooltip}>
           {renderValidationButton(
-            canValidate && !isSelfValidated
+            canValidateThisCell && !isSelfValidated
               ? () => emitValidationChange(true)
               : undefined,
           )}
@@ -4614,11 +4731,53 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
+        {/* Multi-select control — anchored to the FAR LEFT edge of the row
+            (inside the row's horizontal padding, before the number gutter) so
+            the only affordance between the source and target columns is the
+            validation button. */}
+        {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
+            no visual feedback and the action bar never appears. Root cause:
+            the drag-selection affordance (onPointerDown) uses setSelection()
+            via handleSelectionPointerDown in ProjectWorkspace but the
+            SelectionBar's useSelectedIds() doesn't react — likely because
+            the pointerdown handler only fires on drag (not click) and a
+            single tap does not call toggleSelected. Investigate:
+              1. Does a pointer-drag across two cells actually call setSelection?
+              2. Does SelectionBar mount when activeFileId is set but the bar
+                 doesn't appear because selected.size stays 0?
+              3. Consider adding a click handler that calls toggleSelected so
+                 single-cell selection gives immediate visual feedback, then
+                 the SelectionBar ("X selected" pill) appears for discoverability.
+            See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
+        <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={isMultiSelected}
+            aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
+            onPointerDown={onSelectionPointerDown}
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              "absolute left-1 top-10 z-20 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full border",
+              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+              isMultiSelected
+                ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
+            )}
+          >
+            {isMultiSelected ? (
+              <Check className="h-3 w-3" strokeWidth={3} />
+            ) : (
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+            )}
+          </button>
+        </AppTooltip>
         {/* Left gutter — a subtle line number sits to the LEFT of the
             validation circle, both anchored to the top of the card. The number
             is the single issue surface (severity tint + title); no
-            stripe/dot/warning. Selection lives on the source/target divider so
-            range selection follows the text. */}
+            stripe/dot/warning. Multi-select lives at the far-left row edge so
+            only the validation button sits between source and target. */}
         <div className="flex h-full w-full flex-wrap items-start justify-center gap-1 pt-5">
           {numberPill}
           {/* The validation circle moved next to the TARGET editing cell
@@ -4816,44 +4975,6 @@ function EditorRow({
           dir="ltr"
           style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
         >
-          {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
-              no visual feedback and the action bar never appears. Root cause:
-              the drag-selection affordance (onPointerDown) uses setSelection()
-              via handleSelectionPointerDown in ProjectWorkspace but the
-              SelectionBar's useSelectedIds() doesn't react — likely because
-              the pointerdown handler only fires on drag (not click) and a
-              single tap does not call toggleSelected. Investigate:
-                1. Does a pointer-drag across two cells actually call setSelection?
-                2. Does SelectionBar mount when activeFileId is set but the bar
-                   doesn't appear because selected.size stays 0?
-                3. Consider adding a click handler that calls toggleSelected so
-                   single-cell selection gives immediate visual feedback, then
-                   the SelectionBar ("X selected" pill) appears for discoverability.
-              See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
-          <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={isMultiSelected}
-              aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
-              onPointerDown={onSelectionPointerDown}
-              onClick={(e) => e.stopPropagation()}
-              className={cn(
-                "absolute left-0 top-8 z-20 grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border",
-                "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
-                "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
-                isMultiSelected
-                  ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                  : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
-              )}
-            >
-              {isMultiSelected ? (
-                <Check className="h-3 w-3" strokeWidth={3} />
-              ) : (
-                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-              )}
-            </button>
-          </AppTooltip>
           {/* Header lane — mirrors the source column's context line so the
               target's first text line aligns with the source text, and gives
               the floating action rail a lane of its own instead of letting it
@@ -5128,6 +5249,18 @@ function EditorRow({
                 </Button>
               </div>
             )}
+            {/* AQU-618: transient saved confirmation after a Replace / AI-generate
+                commit. `role="status"` announces it politely; the check + label
+                give the sighted translator the "it landed" signal they lacked. */}
+            {showSaved && !writeError && (
+              <div
+                role="status"
+                className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400"
+              >
+                <Check className="h-3 w-3" strokeWidth={3} />
+                <span>Saved</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -5195,12 +5328,12 @@ function EditorRow({
                     if (visibleTranslated.trim()) {
                       const isValidated = cell.status === "validated"
                       if (!isValidated && getSkipReplaceConfirm()) {
-                        onCompleteSingle(cell)
+                        void completeSingleAndReturn()
                       } else {
                         setShowGenerateConfirm(true)
                       }
                     } else {
-                      onCompleteSingle(cell)
+                      void completeSingleAndReturn()
                     }
                   }
                 }}
@@ -6055,7 +6188,7 @@ function EditorRow({
         onConfirm={(dontAskAgain) => {
           setShowGenerateConfirm(false)
           if (dontAskAgain) setSkipReplaceConfirm(true)
-          onCompleteSingle(cell)
+          void completeSingleAndReturn()
         }}
         onCancel={() => setShowGenerateConfirm(false)}
       />

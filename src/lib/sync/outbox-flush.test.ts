@@ -192,6 +192,39 @@ describe("flushOutboxBatch", () => {
     expect(pending.map((r) => r.id).sort()).toEqual(["e2"])
   })
 
+  // -- AQU-633: a 403-refused event is quarantined with its reason preserved --
+
+  it("AQU-633: quarantines a 403-refused event preserving the server reason (for the banner)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1", { cellId: "cell-42" }))
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [],
+        rejected: [
+          { id: "e1", status: 403, reason: "file 'f1' not in scope for cell.validate" },
+        ],
+      }),
+    )
+    const result = await flushOutboxBatch({
+      getTokenForFile: TOKEN_FN,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result).toMatchObject({ quarantined: 1 })
+    // The quarantined record keeps status "failed" + the server's reason, which
+    // is what the workspace banner (useForbiddenOutboxRecords) reads to explain
+    // WHY the validate reverted — regardless of which flush path quarantined it.
+    const all = await peekOutboxBatch(10)
+    const rec = all.find((r) => r.id === "e1")
+    expect(rec?.status).toBe("failed")
+    expect(rec?.lastError).toMatchObject({
+      status: 403,
+      reason: "file 'f1' not in scope for cell.validate",
+    })
+    // ...and it's not in the retryable-pending set.
+    const pending = await peekPendingOutboxBatch(10)
+    expect(pending.map((r) => r.id)).not.toContain("e1")
+  })
+
   // -- Token-mint failures (head-of-line wedge regression) -------------------
 
   it("quarantines the batch and does NOT call fetch when the token mint returns 403", async () => {

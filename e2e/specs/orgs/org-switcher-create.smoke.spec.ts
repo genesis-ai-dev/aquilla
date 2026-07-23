@@ -15,19 +15,17 @@ test("OrgSwitcher Create org creates and switches to new org", async ({ alice })
   const dash = new Dashboard(alice)
   await dash.goto()
 
-  // Open the OrgSwitcher dropdown.
-  const trigger = alice.locator("button").filter({ has: alice.locator(".lucide-chevron-down") }).first()
-  await expect(trigger).toBeVisible({ timeout: 10_000 })
-  await trigger.click()
+  // Open the OrgSwitcher dropdown through its accessible control. A visual
+  // "first chevron" selector can hit the account menu when layout/order shifts.
+  await dash.openOrganizationSwitcher()
 
   // Click "Create".
   const createOrgItem = alice.getByRole("menuitem", { name: /^create$/i })
-  await expect(createOrgItem).toBeVisible({ timeout: 3_000 })
   await createOrgItem.click()
 
   // The create dialog appears.
   const dialog = alice.getByRole("dialog", { name: /create organization/i })
-  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  await expect(dialog).toBeVisible()
 
   // Type the new org name.
   const newOrgName = `NewOrg ${Date.now()}`
@@ -37,8 +35,5 @@ test("OrgSwitcher Create org creates and switches to new org", async ({ alice })
   await dialog.getByRole("button", { name: /create organization/i }).click()
 
   // The switcher switches to the new org — its name appears in the trigger.
-  await expect(
-    alice.locator("button").filter({ has: alice.locator(".lucide-chevron-down") }).first()
-      .getByText(newOrgName)
-  ).toBeVisible({ timeout: 8_000 })
+  await expect(dash.organizationSwitcher()).toContainText(newOrgName, { timeout: 15_000 })
 })

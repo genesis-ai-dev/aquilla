@@ -27,8 +27,6 @@ test("living memory Recent Examples shows empty state for fresh project", async 
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
   // Recent Examples section is visible.
   const recentSection = alice.locator('section[aria-label="Recent Examples"]')
   await expect(recentSection).toBeVisible({ timeout: 10_000 })

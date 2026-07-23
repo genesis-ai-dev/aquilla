@@ -52,6 +52,15 @@ import {
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
 
+// Max events accepted in a single request. The outbox flusher caps its own
+// batches at 100 (src/lib/sync/outbox-flush.ts MAX_BATCH) — this is 5x
+// headroom for legitimate traffic while stopping an oversized/malicious body
+// from fanning out into an unbounded number of prefetch reads and Postgres
+// batch() calls within one request/transaction against the shared Neon
+// primary (via Hyperdrive) — long-running or connection-pool-exhausting
+// transactions degrade every other project sharing it, not just this one.
+const MAX_EVENTS_PER_REQUEST = 500
+
 // ── FRO-479 push accelerator: notify live downstreams of upstream commits ──
 //
 // Hard constraint (spec §8): push is a LOSSY ACCELERATOR, never load-bearing.
@@ -498,6 +507,14 @@ export async function handleEventsWriteRequest(
 
   if (rawEvents.length === 0) {
     return Response.json({ accepted: [], rejected: [] })
+  }
+  if (rawEvents.length > MAX_EVENTS_PER_REQUEST) {
+    return Response.json(
+      {
+        error: `too many events in one request (${rawEvents.length} > ${MAX_EVENTS_PER_REQUEST})`,
+      },
+      { status: 413 },
+    )
   }
 
   // 5. Token extraction.

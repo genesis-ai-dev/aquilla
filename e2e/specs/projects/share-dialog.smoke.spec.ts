@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Project Share dialog (SharePanel).
@@ -15,16 +9,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * This spec verifies the dialog opens and both tabs are accessible.
  */
 test("share dialog opens with Members and Invite link tabs", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `Share ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Share ${Date.now()}` })
+  await openSeededProject(alice, seeded)
 
   // The "Share" button is in the workspace sidebar nav.
   // Share lives in the sidebar "More" menu (sidebar cleanup).

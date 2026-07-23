@@ -23,6 +23,29 @@ export interface MemberScope {
   value: string
 }
 
+/**
+ * AQU-633: client mirror of the sync-worker's `enforceScopes` (authorize.ts)
+ * for a validate / target-cell write. `scopes` are the CURRENT user's own
+ * scopes; composition is AND — any lane scopes → the event's lane must match,
+ * any file scopes → the event's fileId must match. Empty = unscoped = allowed.
+ *
+ * A `null` scopes (couldn't load) is treated as IN scope so the client never
+ * hides an action the server would actually allow — the server stays
+ * authoritative, and a genuine refusal still surfaces via the outbox 403 path.
+ */
+export function isInMemberScope(
+  scopes: MemberScope[] | null | undefined,
+  fileId: string,
+  lane: string,
+): boolean {
+  if (!scopes || scopes.length === 0) return true
+  const laneScopes = scopes.filter((s) => s.kind === "lane").map((s) => s.value)
+  if (laneScopes.length > 0 && !laneScopes.includes(lane)) return false
+  const fileScopes = scopes.filter((s) => s.kind === "file").map((s) => s.value)
+  if (fileScopes.length > 0 && !fileScopes.includes(fileId)) return false
+  return true
+}
+
 function authHeaders(jwt: string): HeadersInit {
   return {
     "Content-Type": "application/json",

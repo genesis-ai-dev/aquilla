@@ -1,11 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 /**
  * Workspace status bar (StatusBar.tsx + DecayBreakdown).
@@ -19,19 +14,52 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * is present in the footer.
  */
 test("workspace status bar shows cell count after importing a file", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `StatusBar ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `StatusBar ${Date.now()}` })
+  await openSeededProject(alice, seeded)
 
   // Status bar footer shows "N cells · …"
   const footer = alice.locator("footer")
   await expect(footer).toBeVisible({ timeout: 5_000 })
   await expect(footer.getByText(/cells/i).first()).toBeVisible({ timeout: 5_000 })
+})
+
+test("file hydration shows explicit progress and withholds unresolved zero statistics", async ({ alice }) => {
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
+    name: `StatusBar loading ${Date.now()}`,
+  })
+  const cellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
+  let releaseCells!: () => void
+  const cellsGate = new Promise<void>((resolve) => {
+    releaseCells = resolve
+  })
+
+  await alice.route(`**${cellsPath}**`, async (route) => {
+    const url = new URL(route.request().url())
+    if (
+      route.request().method() === "GET" &&
+      url.pathname === cellsPath &&
+      url.searchParams.get("side") === "source"
+    ) {
+      await cellsGate
+    }
+    await route.continue()
+  })
+
+  try {
+    await alice.goto(`/project/${seeded.projectId}/file/${seeded.fileId}`)
+
+    const loading = alice.getByRole("status", {
+      name: "Syncing file from the cloud",
+    })
+    await expect(loading).toBeVisible()
+    await expect(loading.locator("[data-slot='spinner']")).toBeVisible()
+    await expect(alice.getByText("Syncing file from the cloud…")).toBeVisible()
+    await expect(alice.getByText(/^0 cells ·/)).toHaveCount(0)
+  } finally {
+    releaseCells()
+  }
+
+  const workspace = new Workspace(alice)
+  await workspace.waitForEditor(seeded.cellIds[0])
+  await expect(alice.getByText(/cells · \d+ translated/).first()).toBeVisible()
 })

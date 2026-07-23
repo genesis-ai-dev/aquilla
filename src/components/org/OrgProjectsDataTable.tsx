@@ -189,12 +189,13 @@ export function OrgProjectsDataTable({
         cell: ({ row }) => {
           const p = row.original
           return (
-            <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
               <LaneChips
                 projectId={p.id}
                 lanes={displayLanes(p)}
                 defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
                 onOverflowClick={() => toggleExpand(p.id)}
+                className="flex-1"
               />
               {jwt && canAddLanguage(p.id) && (
                 <AddLanguagePopover

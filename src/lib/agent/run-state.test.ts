@@ -79,11 +79,11 @@ describe("reduceRunFrame", () => {
       { type: "assistant_delta", text: "Drafting…" },
       { type: "proposal", proposal },
       { type: "assistant_delta", text: "Done — review below." },
-      { type: "usage", promptTokens: 10, completionTokens: 5, costCents: 0.1 },
+      { type: "usage", promptTokens: 10, completionTokens: 5, costCredits: 1 },
     ])
     expect(run.items.map((i) => i.kind)).toEqual(["text", "proposal", "text"])
     expect(proposalsOf(run)).toEqual([proposal])
-    expect(run.usage).toEqual({ promptTokens: 10, completionTokens: 5, costCents: 0.1 })
+    expect(run.usage).toEqual({ promptTokens: 10, completionTokens: 5, costCredits: 1 })
   })
 
   it("assistantTextOf joins prose segments for prior-turn wire content", () => {
@@ -206,15 +206,15 @@ describe("reduceRunFrame — AQU-AGENT additions", () => {
   })
 
   it("tracks the budget meter across budget frames, and marks it exhausted on budget.exhausted", () => {
-    const running = fold([{ type: "budget", runId: "r1", spentCents: 120, capCents: 500 }])
-    expect(running.budget).toEqual({ spentCents: 120, capCents: 500, exhausted: false })
+    const running = fold([{ type: "budget", runId: "r1", spentCredits: 120, capCredits: 500 }])
+    expect(running.budget).toEqual({ spentCredits: 120, capCredits: 500, exhausted: false })
 
     const halted = reduceRunFrame(running, {
       type: "budget.exhausted",
       runId: "r1",
-      spentCents: 500,
-      capCents: 500,
+      spentCredits: 500,
+      capCredits: 500,
     })
-    expect(halted.budget).toEqual({ spentCents: 500, capCents: 500, exhausted: true })
+    expect(halted.budget).toEqual({ spentCredits: 500, capCredits: 500, exhausted: true })
   })
 })

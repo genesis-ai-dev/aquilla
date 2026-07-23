@@ -47,7 +47,7 @@ const FRAMES: AgentFrame[] = [
       ],
     },
   },
-  { type: "usage", promptTokens: 1200, completionTokens: 340, costCents: 0.8 },
+  { type: "usage", promptTokens: 1200, completionTokens: 340, costCredits: 4 },
   { type: "done", runId: "run-1", status: "ok" },
 ]
 

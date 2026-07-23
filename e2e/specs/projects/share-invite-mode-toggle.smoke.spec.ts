@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * UsernameTypeahead mode toggle (@user vs email).
@@ -18,15 +18,10 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * switching back restores the username typeahead (type="text").
  */
 test("share panel invite mode toggles between @user and email", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `InviteMode ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  await seedProjectWithFile(await jwtFor("alice"), { name: `InviteMode ${Date.now()}` })
 
   // The mode toggle lives in the Members page "Add to projects" dialog.
   await alice.goto("/members")
-  await alice.waitForLoadState("networkidle")
-
   const addToProjectsBtn = alice.getByRole("button", { name: /Add to projects/i })
   await expect(addToProjectsBtn).toBeVisible({ timeout: 10_000 })
   await expect(addToProjectsBtn).toBeEnabled({ timeout: 10_000 })

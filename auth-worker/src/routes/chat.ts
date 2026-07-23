@@ -34,6 +34,16 @@ const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+/** Mirrors the agent route so local/dev/test can use the same scripted or
+ * self-hosted OpenAI-compatible upstream as every other AI surface. The dev
+ * stack points this override at scripts/mock-openrouter.ts; production keeps
+ * using OpenRouter when the override is absent. */
+function resolveOpenRouterUrl(env: Env): string {
+  return env.OPENROUTER_BASE_URL
+    ? `${env.OPENROUTER_BASE_URL.replace(/\/$/, "")}/chat/completions`
+    : OPENROUTER_URL
+}
+
 const messageSchema = z.object({
   role: z.string(),
   content: z.string(),
@@ -159,7 +169,7 @@ chat.post(
 
     try {
       const startedAt = Date.now()
-      const upstream = await fetch(OPENROUTER_URL, {
+      const upstream = await fetch(resolveOpenRouterUrl(c.env), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,

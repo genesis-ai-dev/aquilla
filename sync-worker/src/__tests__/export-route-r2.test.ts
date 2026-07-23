@@ -51,6 +51,28 @@ function makeStubBucket() {
 }
 
 describe("GET /source — R2 read branch", () => {
+  it("round-trips USFM after reconcile moved the original from inline text to R2", async () => {
+    const SNAPSHOTS = makeStubBucket()
+    const key = sourceObjectKey({ R2_KEY_PREFIX: "" }, "p1", "f1", "usfm")
+    const original = new TextEncoder().encode("\\id GEN\n\\c 1\n\\v 1 In the beginning.\n")
+    SNAPSHOTS._seed(key, original)
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "GEN.usfm", event_id: "ev1" }],
+      file_source_blobs: [
+        { file_id: "f1", project_id: "p1", format: "usfm", raw_source: null, r2_key: key },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 600 })
+    const res = await handleExportSourceRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, SNAPSHOTS } as any)
+
+    expect(res?.status).toBe(200)
+    expect(await res!.text()).toBe(new TextDecoder().decode(original))
+  })
+
   it("(a) serves docx bytes from R2 when r2_key is present", async () => {
     const SNAPSHOTS = makeStubBucket()
 
@@ -110,5 +132,28 @@ describe("GET /source — R2 read branch", () => {
     const res = await handleExportSourceRequest(req, env)
     expect(res?.status).toBe(200)
     expect(res?.headers.get("X-Export-Mode")).toBe("raw-sidecar")
+  })
+
+  it("serves an exact non-Office original without claiming translated round-trip", async () => {
+    const SNAPSHOTS = makeStubBucket()
+    const key = sourceObjectKey({ R2_KEY_PREFIX: "" }, "p1", "f1", "vtt")
+    const original = new TextEncoder().encode("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n")
+    SNAPSHOTS._seed(key, original)
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "episode.vtt", event_id: "ev1" }],
+      file_source_blobs: [
+        { file_id: "f1", project_id: "p1", format: "vtt", raw_source: null, r2_key: key },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 600 })
+    const res = await handleExportSourceRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, SNAPSHOTS } as any)
+
+    expect(res?.status).toBe(200)
+    expect(res?.headers.get("X-Export-Mode")).toBe("raw-original")
+    expect(new Uint8Array(await res!.arrayBuffer())).toEqual(original)
   })
 })

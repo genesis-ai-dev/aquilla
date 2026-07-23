@@ -54,12 +54,14 @@ function makeStubDb(
     /** org_settings.settings JSON; undefined = no row. */
     orgSettings?: string
     /** file_source_blobs row; null = 404. */
-    blob?: { format: string; raw_source: string } | null
+    blob?: { format: string; raw_source: string | null; r2_key?: string | null } | null
     /** Translated cell rows: [{canonical_ref, value}]. Empty by default. */
     cells?: { canonical_ref: string; value: string }[]
+    /** Captures the cells JOIN bind arguments for lane-selection assertions. */
+    cellBinds?: unknown[][]
   } = {},
 ): ExportRouteEnv["AQUILLA_PG"] {
-  const { orgSettings, blob = null, cells = [] } = options
+  const { orgSettings, blob = null, cells = [], cellBinds } = options
   // Call counter per `prepare` invocation to route to the right row.
   const calls: unknown[] = []
 
@@ -78,15 +80,18 @@ function makeStubDb(
   let idx = 0
 
   return {
-    prepare: () => {
+    prepare: (sql: string) => {
       const row = responses[idx++] ?? null
       calls.push(row)
       return {
-        bind: (..._args: unknown[]) => ({
+        bind: (...args: unknown[]) => {
+          if (sql.includes("FROM cells t")) cellBinds?.push(args)
+          return {
           first: async () => row,
           // 5th call is the cells JOIN — return the seeded rows
           all: async () => ({ results: cells }),
-        }),
+          }
+        },
       }
     },
   } as unknown as ExportRouteEnv["AQUILLA_PG"]
@@ -98,8 +103,9 @@ async function makeToken(role: number): Promise<string> {
   return sign(claims as unknown as Record<string, unknown>, SECRET, "HS256")
 }
 
-function exportReq(token: string): Request {
-  return new Request("https://w/api/v1/projects/p1/files/f1/source", {
+function exportReq(token: string, lane?: string): Request {
+  const query = lane ? `?lane=${encodeURIComponent(lane)}` : ""
+  return new Request(`https://w/api/v1/projects/p1/files/f1/source${query}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
 }
@@ -188,6 +194,23 @@ const PLAIN_USFM = `\\id GEN
 \\v 2 The earth was without form.`
 
 describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
+  it("selects translations only from the requested target lane", async () => {
+    const cellBinds: unknown[][] = []
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: PLAIN_USFM },
+        cells: [{ canonical_ref: "GEN 1:1", value: "Au commencement." }],
+        cellBinds,
+      }),
+      SNAPSHOTS: makeStubBucket(),
+    }
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600), "fr-CA"), env)
+
+    expect(res?.status).toBe(200)
+    expect(cellBinds).toEqual([["p1", "f1", "fr-CA"]])
+  })
+
   it("emits header=0 when export has no translated verses (all fall back to source)", async () => {
     const env: ExportRouteEnv = {
       SYNC_SECRET_KEY: SECRET,
@@ -251,5 +274,23 @@ describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(200)
     expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")
+  })
+})
+
+describe("custom source preservation (AQU-635)", () => {
+  it("returns the exact original text without pretending target injection is lossless", async () => {
+    const raw = "kind|source|target\nheading|Opening|Ouverture\n"
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "custom-original", raw_source: raw },
+      }),
+      SNAPSHOTS: makeStubBucket(),
+    }
+
+    const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(await res?.text()).toBe(raw)
+    expect(res?.headers.get("X-Export-Mode")).toBe("raw-original")
   })
 })

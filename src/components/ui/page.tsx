@@ -161,7 +161,7 @@ function StatTile({
 }) {
   return (
     <div className={cn("rounded-2xl border bg-card px-5 py-4", className)}>
-      <div className="text-2xl leading-none font-semibold tracking-tight tabular-nums text-foreground">
+      <div className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground">
         {value}
       </div>
       <div className="mt-1.5 text-sm text-muted-foreground">{label}</div>

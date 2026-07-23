@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * HistoryDrawer — "Show intermediate edits" / "Hide intermediate edits" toggle.
@@ -27,28 +21,17 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *   6. Verifies the text changes to "Hide intermediate edits".
  *   7. Clicks "Hide intermediate edits" → text reverts.
  *
- * If the history compression doesn't produce sub-entries (only 1 terminal),
- * the toggle won't appear — the spec gracefully exits early.
+ * Each edit waits for its event projection, so the drawer must produce the
+ * compressed sub-entries. Missing history is a failure, not an optional path.
  */
 test("HistoryDrawer show/hide intermediate edits toggle works", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `HistIntermed ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `HistIntermed ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Edit the first cell multiple times quickly to create sub-entries.
   await ws.editCell(0, "v1")
-  await alice.waitForTimeout(200)
   await ws.editCell(0, "v1 updated")
-  await alice.waitForTimeout(200)
   await ws.editCell(0, "v1 final")
-  await alice.waitForTimeout(500)
 
   // Hover the row to reveal the CellActionRail, then open the history drawer.
   const row = ws.cellRow(0)
@@ -63,14 +46,10 @@ test("HistoryDrawer show/hide intermediate edits toggle works", async ({ alice }
   await expect(alice.getByRole("heading", { name: /Edit history/i }).first()).toBeVisible({ timeout: 5_000 })
 
   // Look for "Show intermediate edits" toggle.
-  const showToggle = alice.getByText(/Show intermediate edits/i).first()
-  if (!(await showToggle.isVisible({ timeout: 2_000 }).catch(() => false))) {
-    // No sub-entries produced — spec exits gracefully.
-    return
-  }
+  const showToggle = alice.getByRole("button", { name: /Show intermediate edits/i }).first()
+  await expect(showToggle).toBeVisible({ timeout: 15_000 })
 
   await showToggle.click()
-  await alice.waitForTimeout(200)
 
   // Should now show "Hide intermediate edits".
   const hideToggle = alice.getByText(/Hide intermediate edits/i).first()
@@ -78,7 +57,6 @@ test("HistoryDrawer show/hide intermediate edits toggle works", async ({ alice }
 
   // Click to hide again.
   await hideToggle.click()
-  await alice.waitForTimeout(200)
 
   // Back to "Show intermediate edits".
   await expect(alice.getByText(/Show intermediate edits/i).first()).toBeVisible({ timeout: 3_000 })

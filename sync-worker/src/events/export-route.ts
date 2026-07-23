@@ -53,6 +53,9 @@ export async function handleExportSourceRequest(
   }
   const projectId = decodeURIComponent(match[1])
   const fileId = decodeURIComponent(match[2])
+  // AQU-538: exports are lane-specific. An omitted lane preserves the legacy
+  // single-target contract by selecting the default lane (`target_lang = ''`).
+  const lane = url.searchParams.get("lane") ?? ""
   const db = env.AQUILLA_PG
 
   const authHeader = request.headers.get("Authorization") ?? ""
@@ -160,6 +163,52 @@ export async function handleExportSourceRequest(
     )
   }
 
+  if (blob.format === "custom-original") {
+    if (blob.r2_key) {
+      const object = await env.SNAPSHOTS.get(blob.r2_key)
+      if (!object) return withCors(new Response("original source bytes are missing", { status: 404 }), request)
+      return withCors(new Response(await object.arrayBuffer(), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          "X-Export-Mode": "raw-original",
+        },
+      }), request)
+    }
+    if (blob.raw_source == null) return withCors(new Response("original source text is missing", { status: 404 }), request)
+    return withCors(
+      new Response(blob.raw_source, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+          // The exact original is recoverable, but translated cells have not
+          // been injected. The import manifest reports content-only fidelity.
+          "X-Export-Mode": "raw-original",
+        },
+      }),
+      request,
+    )
+  }
+
+  // Formats without a verified target serializer still retain their exact
+  // source artifact. Returning it explicitly as raw-original is honest about
+  // fidelity while ensuring VTT/SRT/XLIFF/TMX/CSV/TSV/document sources are
+  // never discarded during normalization.
+  if (blob.format !== "usfm" && blob.r2_key) {
+    const object = await env.SNAPSHOTS.get(blob.r2_key)
+    if (!object) return withCors(new Response("original source bytes are missing", { status: 404 }), request)
+    return withCors(new Response(await object.arrayBuffer(), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${fileName.replace(/"/g, "")}"`,
+        "X-Export-Mode": "raw-original",
+      },
+    }), request)
+  }
+
   if (blob.format !== "usfm") {
     return withCors(
       new Response(`export not yet supported for format "${blob.format}"`, { status: 501 }),
@@ -180,13 +229,15 @@ export async function handleExportSourceRequest(
           AND s.file_id    = t.file_id
           AND s.cell_id    = t.cell_id
           AND s.side       = 'source'
+          AND s.target_lang = ''
         WHERE t.project_id = ?
           AND t.file_id    = ?
           AND t.side       = 'target'
+          AND t.target_lang = ?
           AND s.canonical_ref IS NOT NULL
           AND t.value <> ''`,
     )
-    .bind(projectId, fileId)
+    .bind(projectId, fileId, lane)
     .all<{ canonical_ref: string; value: string }>()
 
   const overrides = new Map<string, string>()
@@ -194,7 +245,20 @@ export async function handleExportSourceRequest(
     overrides.set(row.canonical_ref, row.value)
   }
 
-  const rawSource = blob.raw_source
+  // Safe re-imports intentionally move the immutable original to R2 and
+  // atomically repoint file_source_blobs. Resolve either storage generation so
+  // round-trip export keeps working after a reconcile.
+  let rawSource = blob.raw_source
+  if (!rawSource && blob.r2_key) {
+    const object = await env.SNAPSHOTS.get(blob.r2_key)
+    if (!object) {
+      return withCors(
+        new Response("source bytes missing from storage — re-import", { status: 404 }),
+        request,
+      )
+    }
+    rawSource = new TextDecoder().decode(await object.arrayBuffer())
+  }
   if (!rawSource) {
     return withCors(
       new Response("no source text recorded — re-import to enable export", { status: 404 }),

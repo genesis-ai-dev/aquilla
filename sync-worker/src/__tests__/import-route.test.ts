@@ -94,6 +94,224 @@ async function makeCompletionRequest(token: string): Promise<Request> {
 }
 
 describe('POST /import — server_seq is race-safe', () => {
+  it('keeps a bilingual import hidden until an explicit idempotent publish', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    const sourceEventId = 'source-genesis-1'
+    const first = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-genesis-1', name: 'pairs.xlf', fileType: 'xliff' },
+        stageEventId: 'file-stage-1',
+        cells: [{ id: sourceEventId, cellId: 'unit-1', value: 'Hello' }],
+        targets: [{
+          id: 'target-genesis-1',
+          cellId: 'unit-1',
+          parentId: sourceEventId,
+          value: 'Bonjour',
+          targetLang: 'fr-CA',
+        }],
+      }),
+    })
+    expect((await handleBulkImportRequest(first, makeEnv(db)))?.status).toBe(200)
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+    expect((await rows<any>('cells')).map((cell) => [cell.side, cell.target_lang, cell.value]))
+      .toEqual(expect.arrayContaining([
+        ['source', '', 'Hello'],
+        ['target', 'fr-CA', 'Bonjour'],
+      ]))
+
+    const publish = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-publish-1',
+      }),
+    })
+    const publishRetry = publish.clone()
+    expect((await handleBulkImportRequest(publish, makeEnv(db)))?.status).toBe(200)
+    expect((await rows<any>('files'))[0].deleted_at).toBeNull()
+    expect((await rows<any>('events')).filter((event) => event.id === 'file-publish-1')).toHaveLength(1)
+
+    // A dropped publish response is safe to retry with the same event id.
+    expect((await handleBulkImportRequest(publishRetry, makeEnv(db)))?.status).toBe(200)
+    expect((await rows<any>('events')).filter((event) => event.id === 'file-publish-1')).toHaveLength(1)
+  })
+
+  it('persists media attachments and reveals the file in one final transaction', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    const first = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-media-1', name: 'recording.wav', fileType: 'audio' },
+        stageEventId: 'file-media-stage-1',
+        cells: [{ id: 'source-media-1', cellId: 'media-cell-1', value: 'recording.wav', medium: 'media' }],
+      }),
+    })
+    expect((await handleBulkImportRequest(first, makeEnv(db)))?.status).toBe(200)
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+    await db.prepare(
+      `INSERT INTO artifacts (
+         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
+         size_bytes, sha256, r2_key, file_id, kind, audio_id, metadata
+       ) VALUES (?::uuid, ?, '1', NULL, 'recording.wav', 'audio/wav', 3, ?, ?, ?, 'audio', 'audio-1.wav', '{}'::jsonb)`,
+    ).bind(
+      '01900000-0000-7000-8000-000000000101',
+      PROJECT_ID,
+      'a'.repeat(64),
+      'projects/project-race/files/file-race/audio/audio-1.wav',
+      FILE_ID,
+    ).run()
+
+    const publish = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-media-publish-1',
+        attachments: [{
+          id: 'media-attach-1',
+          cellId: 'media-cell-1',
+          audioId: 'audio-1.wav',
+          url: 'frontier-audio://audio-1.wav',
+          slot: 'recording',
+          mimeType: 'audio/wav',
+          durationMs: 1200,
+          trimStartMs: 0,
+          trimEndMs: 1200,
+        }],
+      }),
+    })
+    const retry = publish.clone()
+    const publishResponse = await handleBulkImportRequest(publish, makeEnv(db))
+    expect({ status: publishResponse?.status, body: await publishResponse?.clone().text() }).toEqual({
+      status: 200,
+      body: JSON.stringify({ accepted: 0, fileId: FILE_ID }),
+    })
+    expect((await rows<any>('files'))[0].deleted_at).toBeNull()
+    expect(await rows('cell_audio')).toHaveLength(1)
+    expect((await rows<any>('cell_audio'))[0]).toMatchObject({
+      cell_id: 'media-cell-1',
+      audio_id: 'audio-1.wav',
+      selected: 1,
+    })
+
+    expect((await handleBulkImportRequest(retry, makeEnv(db)))?.status).toBe(200)
+    expect(await rows('cell_audio')).toHaveLength(1)
+    expect((await rows<any>('events')).filter((event) => event.id === 'media-attach-1')).toHaveLength(1)
+  })
+
+  it('does not reveal staged media when the attachment has no matching artifact', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    expect((await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-media-2', name: 'recording.wav', fileType: 'audio' },
+        stageEventId: 'file-media-stage-2',
+        cells: [{ id: 'source-media-2', cellId: 'media-cell-2', value: 'recording.wav', medium: 'media' }],
+      }),
+    }), makeEnv(db)))?.status).toBe(200)
+
+    const response = await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-media-publish-2',
+        attachments: [{
+          id: 'media-attach-2',
+          cellId: 'media-cell-2',
+          audioId: 'missing.wav',
+          url: 'frontier-audio://missing.wav',
+          slot: 'recording',
+        }],
+      }),
+    }), makeEnv(db))
+
+    expect(response?.status).toBe(409)
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+    expect(await rows('cell_audio')).toHaveLength(0)
+  })
+
+  it('rejects malformed media timing metadata before revealing the staged file', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    expect((await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-media-3', name: 'recording.wav', fileType: 'audio' },
+        stageEventId: 'file-media-stage-3',
+        cells: [{ id: 'source-media-3', cellId: 'media-cell-3', value: 'recording.wav', medium: 'media' }],
+      }),
+    }), makeEnv(db)))?.status).toBe(200)
+
+    const response = await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [],
+        complete: true,
+        publishEventId: 'file-media-publish-3',
+        attachments: [{
+          id: 'media-attach-3',
+          cellId: 'media-cell-3',
+          audioId: 'audio-3.wav',
+          url: 'frontier-audio://audio-3.wav',
+          slot: 'recording',
+          timings: [{ word: 'bad', t0: 2, t1: 1, start: 0, end: 3 }],
+        }],
+      }),
+    }), makeEnv(db))
+
+    expect(response?.status).toBe(400)
+    expect((await rows<any>('files'))[0].deleted_at).not.toBeNull()
+    expect(await rows('cell_audio')).toHaveLength(0)
+  })
+
+  it('rejects a bulk target that is not paired to a source parent in the same chunk', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    const request = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [{ id: 'source-1', cellId: 'cell-1', value: 'Source' }],
+        targets: [{ id: 'target-1', cellId: 'cell-1', parentId: 'foreign-parent', value: 'Target' }],
+      }),
+    })
+    expect((await handleBulkImportRequest(request, makeEnv(db)))?.status).toBe(400)
+    expect(await rows('events')).toHaveLength(0)
+    expect(await rows('cells')).toHaveLength(0)
+  })
+
   it('defers derived rollups until one idempotent completion request', async () => {
     const token = await leadToken()
     const { db, rows } = await makeTestDb()
@@ -353,7 +571,7 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     expect((cellRows[0] as any).content_hash).toHaveLength(8)
   })
 
-  it('carries per-cell metadata through the import route into cells.metadata (OBS frame images)', async () => {
+  it('carries file and per-cell import provenance through the bulk route', async () => {
     // Regression: the bulk import route builds its own source.cell.create
     // payloads from body.cells. It must forward `metadata` to the projection,
     // or per-row attachments (OBS frame images) silently vanish even though the
@@ -364,10 +582,40 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     const attachments = [
       { type: 'image', url: 'https://cdn.door43.org/obs/jpg/360px/obs-en-01-01.jpg', alt: 'OBS Image' },
     ]
+    const importManifest = {
+      version: 1,
+      profileId: 'builtin:obs',
+      profileVersion: '1',
+      deterministic: true,
+      fidelity: 'content-only',
+      unitCount: 1,
+      warningCounts: {},
+    }
+    const unitProvenance = {
+      version: 1,
+      profileId: 'builtin:obs',
+      profileVersion: '1',
+      unitKey: 'sequence:OBS 1:1',
+      kind: 'segment',
+      displayLabel: '1',
+      address: { scheme: 'sequence', index: 1 },
+      sourceLocator: { kind: 'sequence', index: 1 },
+      physicalOrder: 0,
+      fidelity: 'content-only',
+    }
     const body = {
       projectId: PROJECT_ID,
       fileId: FILE_ID,
-      file: { id: 'f-obs', name: 'Open Bible Stories', fileType: 'obs' },
+      file: {
+        id: 'f-obs',
+        name: 'Open Bible Stories',
+        fileType: 'obs',
+        role: 'source',
+        kind: 'story',
+        importFormat: 'json',
+        parserVersion: 'builtin:obs@1',
+        importManifest,
+      },
       cells: [
         {
           id: 'obs-evt-1',
@@ -375,7 +623,7 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
           value: 'This is how God made everything in the beginning.',
           canonicalRef: 'OBS 1:1',
           type: 'text',
-          metadata: { attachments },
+          metadata: { attachments, aquillaImport: unitProvenance },
         },
       ],
     }
@@ -392,7 +640,15 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     const meta = cellRows[0].metadata
     // Postgres JSONB may surface as an object or a JSON string depending on driver.
     const parsed = typeof meta === 'string' ? JSON.parse(meta) : meta
-    expect(parsed).toEqual({ attachments })
+    expect(parsed).toEqual({ attachments, aquillaImport: unitProvenance })
+
+    const fileRows = await rows('files')
+    const fileMeta = typeof fileRows[0].meta === 'string'
+      ? JSON.parse(fileRows[0].meta)
+      : fileRows[0].meta
+    expect(fileMeta.aquillaImport).toEqual(importManifest)
+    expect(fileRows[0]).toMatchObject({ role: 'source', kind: 'story' })
+    expect(fileMeta).toMatchObject({ importFormat: 'json', parserVersion: 'builtin:obs@1' })
   })
 
   it('duplicate cellIds within one chunk dedupe last-wins (multi-row ON CONFLICT safety)', async () => {
@@ -477,5 +733,111 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     const blobRows = await rows('file_source_blobs')
     expect(blobRows).toHaveLength(1)
     expect(blobRows[0]).toMatchObject({ file_id: FILE_ID, format: 'usfm', raw_source: rawSource })
+  })
+})
+
+// [Pen test] Input validation & injection attacks — bulk import previously
+// accepted an unbounded `cells[]` array and unbounded per-field string/JSON
+// sizes, letting a single authenticated request fan out into an oversized
+// batch write against the shared single-writer DB, or persist arbitrarily
+// large blobs into a `cells` row every collaborator re-fetches.
+describe('POST /import — request-size and field-type limits', () => {
+  it('rejects a cells[] array over the per-request cap', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const cells = Array.from({ length: 5001 }, (_, i) => ({
+      id: `oversize-evt-${i}`,
+      cellId: `oversize-cell-${i}`,
+      value: 'x',
+    }))
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ projectId: PROJECT_ID, fileId: FILE_ID, cells }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(413)
+  })
+
+  it('rejects an oversized rawSource', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-evt-big', name: 'GEN.usfm', fileType: 'usfm' },
+        cells: [],
+        rawSource: 'x'.repeat(51 * 1024 * 1024),
+        rawSourceFormat: 'usfm',
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(413)
+  })
+
+  it('rejects a cell.value that is not a string', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [{ id: 'evt-1', cellId: 'cell-1', value: { not: 'a string' } }],
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(400)
+  })
+
+  it('rejects an oversized cell.value', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [{ id: 'evt-1', cellId: 'cell-1', value: 'x'.repeat(257 * 1024) }],
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(413)
+  })
+
+  it('rejects a non-object cell.metadata', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        cells: [{ id: 'evt-1', cellId: 'cell-1', value: 'ok', metadata: ['not', 'an', 'object'] }],
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(400)
+  })
+
+  it('still accepts a well-formed request under all limits', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+
+    const req = await makeImportRequest(token, { idPrefix: 'ok', cellCount: 3, includeFile: true })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+    expect(await rows('cells')).toHaveLength(3)
   })
 })

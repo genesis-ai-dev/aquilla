@@ -1,11 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { Workspace } from "../../helpers/page-objects/Workspace"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Next-unfinished navigation action.
@@ -29,16 +23,8 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *     that opening the menu itself causes.
  */
 test("next-unfinished menu item is enabled when unfinished cells exist and jumps without crashing", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `NextUnfinished ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
-  await dash.openProject(name)
-
-  const ws = new Workspace(alice)
-  await ws.importFile(SAMPLE_MD)
-  await ws.openFileBySubstring("sample")
-  await ws.waitForEditor()
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `NextUnfinished ${Date.now()}` })
+  const ws = await openSeededProject(alice, seeded)
 
   // Open the header ⋯ overflow menu — "Next unfinished" lives there (AQU-331).
   await ws.openHeaderOverflowMenu()

@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { advanceOnboardingTo } from "../../helpers/onboarding"
 
 /**
  * Onboarding wizard — ProjectStep (step 5) fields: proj-name, src-lang, tgt-lang.
@@ -20,38 +21,7 @@ test("onboarding ProjectStep inputs enable Create Project button", async ({ alic
   await alice.goto("/")
   await alice.evaluate(() => localStorage.removeItem("codex:onboardingComplete"))
   await alice.goto("/onboarding")
-  await alice.waitForLoadState("networkidle")
-
-  const MAX_CLICKS = 10
-  for (let i = 0; i < MAX_CLICKS; i++) {
-    // If ProjectStep inputs are visible, we're done navigating.
-    const projName = alice.locator("#proj-name")
-    if (await projName.isVisible({ timeout: 800 }).catch(() => false)) break
-
-    // If NameStep is visible, fill it and continue.
-    const nameInput = alice.locator("#display-name")
-    if (await nameInput.isVisible({ timeout: 800 }).catch(() => false)) {
-      const val = await nameInput.inputValue()
-      if (!val) await nameInput.fill("Alice Translator")
-      const continueBtn = alice.getByRole("button", { name: /Continue/i }).first()
-      if (await continueBtn.isEnabled({ timeout: 1_000 }).catch(() => false)) {
-        await continueBtn.click()
-        await alice.waitForTimeout(400)
-        continue
-      }
-    }
-
-    // Generic forward button.
-    const forwardBtn = alice.getByRole("button", {
-      name: /Get started|Continue|Next|Skip|Already have|Sign in|Just me/i,
-    }).first()
-    if (await forwardBtn.isVisible({ timeout: 1_500 }).catch(() => false)) {
-      await forwardBtn.click()
-    } else {
-      break
-    }
-    await alice.waitForTimeout(500)
-  }
+  await advanceOnboardingTo(alice, 7)
 
   const projName = alice.locator("#proj-name")
   await expect(projName).toBeVisible({ timeout: 10_000 })

@@ -91,3 +91,21 @@ export function dropPrecedingContextDuplicates<T extends { source: string }, C e
   const preceding = new Set(precedingContext.map((c) => normalizeSource(c.source)))
   return examples.filter((ex) => !preceding.has(normalizeSource(ex.source)))
 }
+
+/** Drop retrieved few-shot examples whose source also appears in the validated
+ *  pairs collected from living memory. Both sets are validated-only and ranked
+ *  against the same query, so the top branching-search hits are frequently the
+ *  SAME cells `collectValidatedPairs` surfaces locally — and buildPrompt renders
+ *  validated pairs first and retrieved examples second, so without this the same
+ *  source→target pair is rendered twice (bloating the prompt / prefill for no
+ *  added signal). Validated pairs are the stronger, uncompressed living-memory
+ *  signal, so we keep them and drop the redundant retrieved copy. Runs on the
+ *  FULL source before compression so the match is on real cell identity, not a
+ *  truncated span. (AQU-617) */
+export function dropValidatedPairDuplicates<T extends { source: string }, V extends { source: string }>(
+  examples: T[],
+  validatedPairs: V[],
+): T[] {
+  const validated = new Set(validatedPairs.map((p) => normalizeSource(p.source)))
+  return examples.filter((ex) => !validated.has(normalizeSource(ex.source)))
+}

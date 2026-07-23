@@ -65,7 +65,7 @@ export type AgentFrame =
   | { type: 'proposal'; proposal: AgentProposal }
   | { type: 'aquifer_proposal'; proposal: AquiferPublishProposal }
   | { type: 'progress'; label: string; done: number; total: number } // bulk-job heartbeat
-  | { type: 'usage'; promptTokens: number; completionTokens: number; costCents: number }
+  | { type: 'usage'; promptTokens: number; completionTokens: number; costCredits: number }
   | { type: 'done'; runId: string; status: 'ok' | 'capped' | 'error' }
   | { type: 'error'; message: string }
   // ── AQU-AGENT wave-1 additions (docs/swarm/AQU-AGENT-CONTRACTS.md §4) ────
@@ -76,8 +76,8 @@ export type AgentFrame =
   | { type: 'changeset.staged'; runId: string; changesetId: string; approvalUrl: string; summary: string; cellCount: number }
   | { type: 'memory.proposed'; runId: string; memoryId: string; path: string; preview: string }
   | { type: 'brief.proposed'; runId: string; proposalId: string; preview: string }
-  | { type: 'budget'; runId: string; spentCents: number; capCents: number }
-  | { type: 'budget.exhausted'; runId: string; spentCents: number; capCents: number }
+  | { type: 'budget'; runId: string; spentCredits: number; capCredits: number }
+  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number }
 
 // ── Staged proposal shape ──────────────────────────────────────────────────
 

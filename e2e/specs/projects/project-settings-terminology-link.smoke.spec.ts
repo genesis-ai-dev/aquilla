@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * ProjectSettings — Terminology Library card.
@@ -11,18 +11,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * → verify URL changes to the terminology route.
  */
 test("project settings Terminology Library button navigates to terminology page", async ({ alice }) => {
-  const dash = new Dashboard(alice)
-  await dash.goto()
-  const name = `TermLink ${Date.now()}`
-  await dash.createProject({ name, source: "en", target: "fr" })
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `TermLink ${Date.now()}` })
 
-  await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
-  expect(projectId).toBeTruthy()
-
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
-  await alice.waitForLoadState("networkidle")
-
+  await alice.goto(`/project/${seeded.projectId}/settings?section=ai`)
   // Scroll to the Terminology Library card.
   const termCard = alice.getByText(/Terminology Library/i).first()
   await expect(termCard).toBeVisible({ timeout: 10_000 })

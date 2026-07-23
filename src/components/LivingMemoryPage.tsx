@@ -21,6 +21,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
@@ -87,18 +88,23 @@ export function deleteEntry(
 
 function LivingMemorySkeleton() {
   return (
-    <div className="flex flex-col gap-3" role="status" aria-label="Loading validated translations">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <Card key={i} className="overflow-hidden">
-          <CardContent className="p-3 flex flex-col gap-2">
-            <Skeleton className="h-2.5 w-20" />
-            <Skeleton className="h-3.5 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-          </CardContent>
-        </Card>
-      ))}
-      <span className="sr-only">Loading…</span>
-    </div>
+    <LoadingTemplate
+      label="Loading validated translations"
+      className="min-h-96"
+      templateClassName="min-h-96"
+    >
+      <div className="flex flex-col gap-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Card key={i} className="overflow-hidden">
+            <CardContent className="flex flex-col gap-2 p-3">
+              <Skeleton className="h-2.5 w-20" />
+              <Skeleton className="h-3.5 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </LoadingTemplate>
   )
 }
 
@@ -437,7 +443,7 @@ export function LivingMemoryPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
-  const { cells, isLoading, isEmpty, isTruncated, fileCount } = useLivingMemory({
+  const { cells, isLoading, isEmpty, error: cellsError } = useLivingMemory({
     projectId: projectId ?? "",
   })
 
@@ -619,19 +625,13 @@ export function LivingMemoryPage() {
         />
       )}
 
-      {/* Truncation warning */}
-      {isTruncated && (
+      {cellsError && (
         <div
-          className="flex items-start gap-2 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border-y border-amber-200/60 dark:border-amber-800/40"
+          className="flex items-start gap-2 border-y border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
           role="alert"
         >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-          <span>
-            Showing cells from the first {fileCount} files.
-            {/* SWARM-TODO(living-mem-server): replace fan-out with a dedicated
-                GET /api/v2/projects/:projectId/validated-cells endpoint to
-                support projects with >40 files. */}
-          </span>
+          <span>Couldn&apos;t load the complete project memory: {cellsError.message}</span>
         </div>
       )}
 

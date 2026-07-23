@@ -16,7 +16,18 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { StaffLanePopover } from "./StaffLanePopover"
+
+// The popover links out to the project's invite page (AQU-607), so every
+// render needs a Router in context.
+function renderPopover() {
+  return render(
+    <MemoryRouter>
+      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />
+    </MemoryRouter>,
+  )
+}
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
@@ -114,9 +125,7 @@ beforeEach(() => {
 
 describe("StaffLanePopover", () => {
   it("happy path: POSTs membership at the picked role then PUTs merged scopes", async () => {
-    render(
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />,
-    )
+    renderPopover()
     openPopover()
     pickMaria()
 
@@ -141,9 +150,7 @@ describe("StaffLanePopover", () => {
       { kind: "file", value: "GEN" },
     ])
 
-    render(
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />,
-    )
+    renderPopover()
     openPopover()
     pickMaria()
     fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
@@ -170,9 +177,7 @@ describe("StaffLanePopover", () => {
       },
     ]
 
-    render(
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />,
-    )
+    renderPopover()
     openPopover()
     pickMaria()
     fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
@@ -182,9 +187,7 @@ describe("StaffLanePopover", () => {
   })
 
   it("lead path: 'Add as lead (unscoped)' POSTs project_lead membership and never PUTs scopes", async () => {
-    render(
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />,
-    )
+    renderPopover()
     openPopover()
     pickMaria()
 
@@ -200,9 +203,7 @@ describe("StaffLanePopover", () => {
   it("handles the server's 'leads unscopable' 400 gracefully as a success outcome", async () => {
     mockPutMemberScopes.mockRejectedValue(new Error("scopes are for contributor/reviewer roles"))
 
-    render(
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />,
-    )
+    renderPopover()
     openPopover()
     pickMaria()
     fireEvent.click(screen.getByRole("button", { name: /add to spanish/i }))
@@ -215,15 +216,24 @@ describe("StaffLanePopover", () => {
   })
 
   it("filters the org roster by the search query", async () => {
-    render(
-      <StaffLanePopover projectId="proj-1" lane="es" laneLabel="Spanish" orgId={1} />,
-    )
+    renderPopover()
     openPopover()
-    fireEvent.change(screen.getByPlaceholderText(/search by username/i), {
+    fireEvent.change(screen.getByPlaceholderText(/search your organization/i), {
       target: { value: "mari" },
     })
 
     expect(screen.getByText("maria")).toBeInTheDocument()
     expect(screen.queryByText("mark")).not.toBeInTheDocument()
+  })
+
+  // AQU-607: the old failure mode was a silent dead-end — searching for
+  // someone outside your org just showed "No matches" with no way forward.
+  // The picker must always offer the external-contributor path (invite link).
+  it("always offers the invite path to the project members page for outside-org adds", () => {
+    renderPopover()
+    openPopover()
+
+    const invite = screen.getByRole("link", { name: /invite them to the project/i })
+    expect(invite).toHaveAttribute("href", "/project/proj-1/members")
   })
 })

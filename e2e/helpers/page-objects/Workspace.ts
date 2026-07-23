@@ -1,5 +1,18 @@
 import { type Page, type Locator, expect } from "@playwright/test"
 
+// A cold editor route hydrates project access, file metadata, sync state, and
+// source/target cells before the first row can render. Three isolated smoke
+// shards deliberately contend for local CPU/Postgres; 10 seconds is therefore
+// an assertion budget, not a safe cold-start watchdog. Keep this below the
+// 60-second per-test ceiling so a genuinely stuck editor still fails promptly.
+const EDITOR_READY_TIMEOUT_MS = 30_000
+
+interface FilePayload {
+  name: string
+  mimeType: string
+  buffer: Buffer
+}
+
 /** Page object for the project workspace route ("/project/:id"). */
 export class Workspace {
   private readonly page: Page
@@ -8,15 +21,43 @@ export class Workspace {
     this.page = page
   }
 
-  async importFile(filePath: string): Promise<void> {
+  /** Select a file and stop at the human-review preview boundary. */
+  async previewImportFile(filePath: string): Promise<void> {
     await this.chooseImportFiles(filePath)
-    // AQU-310: selecting a file now lands on a Preview panel (parsed cells +
-    // counts) instead of starting the upload immediately. Confirm it to kick
-    // off the actual bulk upload.
+    const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Select an in-memory payload. Useful when the bytes are a real fixture but
+   * its supplied filename intentionally has an unknown legacy extension. */
+  async previewImportPayload(payload: FilePayload): Promise<void> {
+    await this.chooseImportFiles(payload)
+    await expect(this.page.getByRole("button", { name: /Confirm import/i }))
+      .toBeVisible({ timeout: 180_000 })
+  }
+
+  /** Commit the currently visible import preview and await publication. */
+  async confirmImportPreview(): Promise<void> {
     const confirmBtn = this.page.getByRole("button", { name: /Confirm import/i })
     await expect(confirmBtn).toBeVisible({ timeout: 10_000 })
     await confirmBtn.click()
     await this.waitForImportSettled()
+  }
+
+  async importFile(filePath: string): Promise<void> {
+    await this.previewImportFile(filePath)
+    await this.confirmImportPreview()
+  }
+
+  /** Select a spreadsheet through the normal Upload files card, accept the
+   * auto-detected column mapping, and stop at the shared human-review preview. */
+  async previewMappedSpreadsheet(filePath: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    const mapColumns = this.page.getByRole("button", { name: /^Map columns$/i })
+    await expect(mapColumns).toBeVisible({ timeout: 10_000 })
+    await mapColumns.click()
+    await expect(this.page.getByRole("button", { name: /Confirm import/i }))
+      .toBeVisible({ timeout: 10_000 })
   }
 
   /** Import an audio/video file. Media files bypass the AQU-310 preview panel
@@ -29,7 +70,7 @@ export class Workspace {
 
   /** Shared import prologue: dismiss the setup checklist, open the
    * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string): Promise<void> {
+  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
     // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
     // project, and the modal sheet intercepts workspace clicks. Pre-mark it
     // as already-shown for this project, then dismiss it if it beat us to it.
@@ -83,6 +124,33 @@ export class Workspace {
       return "pending"
     }, { timeout: 30_000 }).toBe("settled")
     if (outcome.startsWith("error:")) throw new Error(outcome.slice("error:".length))
+  }
+
+  /** Re-import a colliding file through the safe identity-based update path. */
+  async reimportFile(filePath: string): Promise<void> {
+    await this.openImportDialog()
+    await this.uploadFilesCard().click()
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 5_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    await expect(this.page.getByText(/re-import detected/i)).toBeVisible({ timeout: 10_000 })
+    const update = this.page.getByRole("button", { name: "Update existing" }).first()
+    await expect(update).toBeVisible()
+    await update.click()
+    await this.page.getByRole("button", { name: /^Continue$/i }).click()
+
+    const confirm = this.page.getByRole("button", { name: /Confirm import/i })
+    await expect(confirm).toBeVisible({ timeout: 10_000 })
+    const reconciled = this.page.waitForResponse(
+      (response) => response.url().endsWith("/import/reconcile") && response.request().method() === "POST",
+      { timeout: 30_000 },
+    )
+    await confirm.click()
+    const response = await reconciled
+    if (!response.ok()) {
+      throw new Error(`Re-import failed (${response.status()}): ${await response.text()}`)
+    }
   }
 
   private uploadFilesCard(): Locator {
@@ -145,8 +213,16 @@ export class Workspace {
       .click()
   }
 
-  async waitForEditor(): Promise<void> {
-    await expect(this.page.locator("[data-cell-id]").first()).toBeVisible({ timeout: 10_000 })
+  async waitForEditor(expectedCellId?: string): Promise<void> {
+    // Seeded fixture ids are UUIDs, so they are safe in this quoted attribute
+    // selector. Passing the expected id prevents a file navigation from being
+    // satisfied by a stale row that belonged to the previously open file.
+    const firstCell = expectedCellId
+      ? this.page.locator(`[data-cell-id="${expectedCellId}"]`)
+      : this.page.locator("[data-cell-id]").first()
+    await expect(firstCell).toBeVisible({
+      timeout: EDITOR_READY_TIMEOUT_MS,
+    })
   }
 
   cellRow(index = 0): Locator {
@@ -197,11 +273,21 @@ export class Workspace {
   async editCell(index: number, text: string): Promise<void> {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
+    // Blurring commits immediately. Wait for the authoritative event flush,
+    // rather than sleeping and assuming IDB + outbox + projection complete at
+    // a particular machine speed. This also guarantees a following validation
+    // has the committed editEventId available.
+    const committed = this.page.waitForResponse((response) => {
+      if (response.request().method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/events")
+      } catch {
+        return false
+      }
+    }, { timeout: 20_000 })
     await this.page.locator("aside").click() // blur outside editor
-    // Wait for the async IDB commit pipeline to complete (emitTargetCellCommit
-    // sets pendingTargetEventIdRef.current in a .then(), so validateCell can
-    // immediately follow without a race on the editEventId being null).
-    await this.page.waitForTimeout(800)
+    await committed
+    await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
   }
 
   async readCell(index: number): Promise<string> {
@@ -230,11 +316,17 @@ export class Workspace {
     await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 10_000 })
     await validationButton.click()
 
-    const removeButton = this.page.locator(
-      '[data-tooltip="Remove your validation"] button, button[aria-label="Remove your validation"]',
-    )
+    const removeButton = this.page.getByRole("button", {
+      name: "Remove your validation",
+      exact: true,
+    })
     await expect(removeButton).toBeVisible({ timeout: 8_000 })
-    await removeButton.click()
+    // The validation popover is hover-aware. Moving the pointer from the
+    // trigger to its portalled content can close and remount the content while
+    // Playwright is checking pointer stability. Keep the pointer on the
+    // trigger and activate the real focused button from the keyboard instead.
+    await removeButton.focus()
+    await this.page.keyboard.press("Enter")
     await expect(validationButton).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
   }
 

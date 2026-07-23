@@ -2264,13 +2264,20 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const completingState = completing.get(cellId)
   const isLoading = completingState === "searching" || completingState === "generating"
   // p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
-  // this row's paragraph group has a `completing` entry — not just this
-  // row's own (a validated start cell never gets one post-skip, so relying
-  // on `isLoading` alone would let a second click re-fire completeParagraph
+  // this row's paragraph group is ACTIVELY completing — not just this row's
+  // own (a validated start cell never gets one post-skip, so relying on
+  // `isLoading` alone would let a second click re-fire completeParagraph
   // mid-fan-out). Only paragraph-start rows with a >1-cell group carry
   // `paragraphGroupMemberIds`; every other row's guard is trivially false.
+  // Matches `isLoading`'s value check above (searching/generating only) —
+  // presence alone is wrong: a stuck "error" entry (none of useCompletion's
+  // three catch paths clear it) would otherwise permanently disable/pulse
+  // the button for that group.
   const paragraphGroupInFlight = useMemo(
-    () => paragraphGroupMemberIds?.some((id) => completing.has(id)) ?? false,
+    () => paragraphGroupMemberIds?.some((id) => {
+      const state = completing.get(id)
+      return state === "searching" || state === "generating"
+    }) ?? false,
     [paragraphGroupMemberIds, completing],
   )
   // Streaming preview text — populated chunk-by-chunk by useCompletion's

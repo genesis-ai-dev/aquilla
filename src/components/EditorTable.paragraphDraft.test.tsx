@@ -275,4 +275,26 @@ describe("EditorTable — Draft paragraph rail button (p1-paragraph-ui-wiring)",
     fireEvent.click(button)
     expect(onCompleteParagraph).not.toHaveBeenCalled()
   })
+
+  // Coordinator follow-up (re-review): `completing` presence alone is the
+  // wrong signal — none of useCompletion's three catch paths clear an
+  // "error" entry, so a stuck error on a sibling cell must NOT permanently
+  // disable the group's Draft-paragraph button. Only "searching"/
+  // "generating" values count as in-flight, matching `isLoading`'s own
+  // value check.
+  it("stays enabled when a sibling cell's completing value is a stuck \"error\" (not in-flight) — click still fires through the confirm dialog", async () => {
+    const onCompleteParagraph = vi.fn()
+    const store = makeStore(["cell-1", "cell-2", "cell-3"], new Set(["cell-1"]))
+    renderTable(store, onCompleteParagraph, new Map([["cell-2", "error"]]))
+
+    const button = await screen.findByRole("button", { name: "Draft paragraph (3 cells)" })
+    expect(button).not.toBeDisabled()
+    fireEvent.click(button)
+
+    const confirm = await screen.findByRole("button", { name: "Draft paragraph" })
+    fireEvent.click(confirm)
+
+    expect(onCompleteParagraph).toHaveBeenCalledTimes(1)
+    expect(onCompleteParagraph).toHaveBeenCalledWith("cell-1")
+  })
 })

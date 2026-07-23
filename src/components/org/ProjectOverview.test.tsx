@@ -250,6 +250,24 @@ describe("deriveProjectStatus", () => {
 })
 
 describe("ProjectOverview load states", () => {
+  it("shows explicit progress over the project-shaped template while details load", () => {
+    useProject.mockReturnValue({
+      project: null,
+      status: "loading",
+      refresh,
+    })
+
+    renderOverview()
+
+    const status = screen.getByRole("status", {
+      name: "Loading project details",
+    })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(screen.getByText("Loading project details…")).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { level: 1, name: "John" })).not.toBeInTheDocument()
+  })
+
   it("shows retry UI for unreachable project loads instead of an endless loading state", async () => {
     useProject.mockReturnValue({
       project: null,

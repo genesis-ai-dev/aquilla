@@ -4,41 +4,44 @@ import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 
+type LoadingTemplateProps = Omit<React.ComponentProps<"div">, "children"> & {
+  label?: string
+  children: ReactNode
+  templateClassName?: string
+}
+
 /**
- * Loading boundary for route/chunk and first-data transitions.
+ * Container-safe loading boundary for first-data transitions.
  *
- * The optional child is a non-interactive template of the destination. When a
- * route cannot supply one, the neutral shell below avoids a blank screen
- * without guessing at any values. The template is hidden from assistive
- * technology; the wrapper exposes one concise, live loading status.
+ * The child is a non-interactive template of the destination. It remains
+ * visible to preserve geometry, while assistive technology receives one
+ * concise live status instead of every decorative skeleton block.
  */
-function LoadingOverlay({
+function LoadingTemplate({
   label = "Loading",
   children,
   className,
+  templateClassName,
   ...props
-}: React.ComponentProps<"div"> & {
-  label?: string
-  children?: ReactNode
-}) {
+}: LoadingTemplateProps) {
   return (
     <div
       role="status"
       aria-busy="true"
       aria-label={label}
       aria-live="polite"
-      className={cn(
-        "relative h-full min-h-screen w-full overflow-hidden",
-        className,
-      )}
+      className={cn("relative w-full overflow-hidden", className)}
       {...props}
     >
       <div
         inert
         aria-hidden="true"
-        className="pointer-events-none h-full min-h-screen select-none"
+        className={cn(
+          "pointer-events-none h-full select-none",
+          templateClassName,
+        )}
       >
-        {children ?? <NeutralLoadingTemplate />}
+        {children}
       </div>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/20">
         <div className="flex items-center gap-3 rounded-full border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
@@ -47,6 +50,71 @@ function LoadingOverlay({
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Full-screen loading boundary for route/chunk transitions.
+ *
+ * When a route cannot supply a destination template, the neutral shell avoids
+ * a blank screen without guessing at labels or values.
+ */
+function LoadingOverlay({
+  label = "Loading",
+  children,
+  className,
+  ...props
+}: Omit<React.ComponentProps<"div">, "children"> & {
+  label?: string
+  children?: ReactNode
+}) {
+  return (
+    <LoadingTemplate
+      label={label}
+      className={cn("h-full min-h-screen", className)}
+      templateClassName="min-h-screen"
+      {...props}
+    >
+      {children ?? <NeutralLoadingTemplate />}
+    </LoadingTemplate>
+  )
+}
+
+/**
+ * Neutral major-panel fallback for lazily loaded workspace surfaces. It
+ * communicates shape and activity without fabricating route-specific data.
+ */
+function LoadingPanel({
+  label = "Loading",
+  className,
+  ...props
+}: Omit<React.ComponentProps<"div">, "children"> & {
+  label?: string
+}) {
+  return (
+    <LoadingTemplate
+      label={label}
+      className={cn("h-full min-h-64", className)}
+      templateClassName="min-h-64"
+      {...props}
+    >
+      <div
+        data-testid="loading-panel-template"
+        className="flex min-h-64 flex-col gap-5 p-6"
+      >
+        <Skeleton className="h-6 w-44" />
+        <div className="grid gap-4 sm:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Skeleton key={index} className="h-20 rounded-xl" />
+          ))}
+        </div>
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-12 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    </LoadingTemplate>
   )
 }
 
@@ -96,4 +164,4 @@ function NeutralLoadingTemplate() {
   )
 }
 
-export { LoadingOverlay }
+export { LoadingOverlay, LoadingPanel, LoadingTemplate }

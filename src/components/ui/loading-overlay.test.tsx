@@ -1,7 +1,11 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
-import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import {
+  LoadingOverlay,
+  LoadingPanel,
+  LoadingTemplate,
+} from "@/components/ui/loading-overlay"
 
 describe("LoadingOverlay", () => {
   // AQU-637: the route/chunk-transition loading state must be an accessible,
@@ -44,5 +48,29 @@ describe("LoadingOverlay", () => {
     expect(screen.getByTestId("custom-loading-template")).toBeInTheDocument()
     expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
     expect(screen.getByTestId("custom-loading-template").parentElement).toHaveAttribute("inert")
+  })
+
+  it("supports container-sized destination templates", () => {
+    render(
+      <LoadingTemplate label="Loading project details" className="min-h-64">
+        <div data-testid="project-details-template" />
+      </LoadingTemplate>,
+    )
+
+    expect(
+      screen.getByRole("status", { name: "Loading project details" }),
+    ).toHaveClass("min-h-64")
+    expect(screen.getByTestId("project-details-template").parentElement).toHaveAttribute("inert")
+    expect(screen.getByText("Loading project details…")).toBeInTheDocument()
+  })
+
+  it("provides a value-free fallback for major panels", () => {
+    render(<LoadingPanel label="Loading terminology" />)
+
+    expect(
+      screen.getByRole("status", { name: "Loading terminology" }),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId("loading-panel-template")).toBeInTheDocument()
+    expect(screen.getByText("Loading terminology…")).toBeInTheDocument()
   })
 })

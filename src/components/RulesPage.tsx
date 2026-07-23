@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
@@ -151,7 +152,7 @@ export function RulesPage() {
     return `${u.fixesApplied} fixes applied · ${calls} LLM calls this project`
   }, [project?.usage])
 
-  if (loading) return <div className="p-8 text-muted-foreground">Loading...</div>
+  if (loading) return <LoadingPanel label="Loading rules" className="min-h-screen" />
 
   function toggleExpanded(ruleId: string) {
     setExpandedRuleId((cur) => cur === ruleId ? null : ruleId)

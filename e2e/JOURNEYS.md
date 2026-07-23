@@ -121,7 +121,7 @@
 | Projects    | Project overview assign work form                     | `e2e/specs/projects/project-overview-assign-work.smoke.spec.ts` + `project-overview-assign-work-submit.smoke.spec.ts` | ✅ |
 | Projects    | Project overview overflow menu (archive/share/etc.)   | `e2e/specs/projects/project-overview-overflow-menu.smoke.spec.ts` |   ✅   |
 | Projects    | Projects list page renders project cards              | `e2e/specs/projects/projects-list-page.smoke.spec.ts`         |   ✅   |
-| Projects    | Project overview opens editor; breadcrumbs preserve clickable organization ancestry | `e2e/specs/projects/project-overview.smoke.spec.ts` | ✅ |
+| Projects    | Project overview shows scoped loading progress, then opens editor; breadcrumbs preserve clickable organization ancestry | `e2e/specs/projects/project-overview.smoke.spec.ts` | ✅ |
 | Projects    | Project settings keeps synced name read-only and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
 | Projects    | Project card role badge shows user's role             | `e2e/specs/projects/project-card-role-badge.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |
@@ -161,7 +161,7 @@
 | Editor      | Sidebar file filter narrows list; Clear restores it   | `e2e/specs/editor/sidebar-file-filter.smoke.spec.ts`          |   ✅   |
 | Editor      | Decay breakdown popover opens from cell indicator     | `e2e/specs/editor/decay-breakdown-popover.smoke.spec.ts`      |   ✅   |
 | Editor      | Sync status indicator in workspace status bar         | `e2e/specs/editor/sync-status-indicator.smoke.spec.ts`        |   ✅   |
-| Editor      | Workspace status bar shows file progress              | `e2e/specs/editor/workspace-status-bar.smoke.spec.ts`         |   ✅   |
+| Editor      | File hydration shows scoped loading progress without unresolved zero stats; status bar then shows file progress | `e2e/specs/editor/workspace-status-bar.smoke.spec.ts` | ✅ |
 | Editor      | Tab strip open/close file tabs                        | `e2e/specs/editor/tab-strip.smoke.spec.ts`                    |   ✅   |
 | Editor      | File filter sidebar input narrows file list           | `e2e/specs/editor/file-filter.smoke.spec.ts`                  |   ✅   |
 | Editor      | File move to corpus dialog                            | `e2e/specs/editor/file-move-corpus.smoke.spec.ts`             |   ✅   |

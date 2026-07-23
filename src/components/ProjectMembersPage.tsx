@@ -16,6 +16,7 @@ import {
   AlertTriangle, Copy, Lock, Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 import { FieldLabel } from "@/components/ui/field"
@@ -365,7 +366,7 @@ export function MembersTab({
         )}
 
         {isLoading && members.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Loading members…</p>
+          <LoadingPanel label="Loading members" className="min-h-48" />
         ) : members.length === 0 ? (
           <p className="text-sm text-muted-foreground">No members yet.</p>
         ) : (

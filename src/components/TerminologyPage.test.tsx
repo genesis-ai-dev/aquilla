@@ -130,6 +130,25 @@ describe("TerminologyPage", () => {
     mockPatchSettings.mockResolvedValue({ kind: "ok" })
   })
 
+  it("shows explicit progress while terminology is unresolved", () => {
+    vi.mocked(useProject).mockReturnValue({
+      project: null,
+      loading: true,
+      status: "loading",
+      isError: false,
+      isUnreachable: false,
+      roleLevel: null,
+      refresh: vi.fn(),
+      patchSettings: mockPatchSettings,
+    })
+
+    renderPage()
+
+    const status = screen.getByRole("status", { name: "Loading terminology" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+  })
+
   // ── Empty state ────────────────────────────────────────────────────────────
 
   it("renders empty state when no concepts exist", () => {

@@ -6,6 +6,7 @@ import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
@@ -4649,28 +4650,28 @@ export function ProjectWorkspace() {
           // navigates to /project/:id, which the restore-location effect turns
           // into the user's last open file (including scroll position).
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading comments…</div>}>
+            <Suspense fallback={<LoadingPanel label="Loading comments" />}>
               <CommentsPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "memory" ? (
           // FRO-254: Living Memory page inside the shell.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading living memory…</div>}>
+            <Suspense fallback={<LoadingPanel label="Loading living memory" />}>
               <LivingMemoryPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading terminology…</div>}>
+            <Suspense fallback={<LoadingPanel label="Loading terminology" />}>
               <GlossaryEditorContent files={projectFiles} />
             </Suspense>
           </div>
         ) : centerSurface === "members" ? (
           // FRO-180: Per-project members management inside the shell.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading members…</div>}>
+            <Suspense fallback={<LoadingPanel label="Loading members" />}>
               <ProjectMembersPageContent />
             </Suspense>
           </div>
@@ -4937,7 +4938,8 @@ export function ProjectWorkspace() {
             {/* File translation stats belong to the editor; the workbench has
                 its own working-set summary. Sync/outbox status above stays —
                 agent Apply flushes through the same outbox. */}
-            {centerSurface !== "agent" && (
+            {centerSurface !== "agent" &&
+              (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") && (
               <StatusBar
                 cells={cellSummaries}
                 projectHealth={projectHealth}

@@ -81,6 +81,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingTemplate } from "@/components/ui/loading-overlay"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -900,7 +901,13 @@ export function ProjectOverview() {
 
   const nonReadyContent =
     status === "loading" ? (
-      <ProjectOverviewSkeleton />
+      <LoadingTemplate
+        label="Loading project details"
+        className="min-h-[34rem] max-w-5xl"
+        data-testid="project-overview-loading"
+      >
+        <ProjectOverviewSkeleton />
+      </LoadingTemplate>
     ) : status === "unreachable" ? (
       <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
         <span className="text-amber-800 dark:text-amber-200">

@@ -39,6 +39,15 @@ function renderInbox() {
 }
 
 describe("AssignedToMe", () => {
+  it("shows explicit progress while assignments are unresolved", async () => {
+    mockGetMy.mockImplementationOnce(() => new Promise(() => {}))
+    renderInbox()
+
+    expect(
+      await screen.findByRole("status", { name: "Loading assignments" }),
+    ).toHaveAttribute("aria-busy", "true")
+  })
+
   it("aggregates the caller's open assignments across projects with progress", async () => {
     // One org-level request (GET /orgs/:orgId/assignments/mine) replaces the
     // old per-project fan-out — rows arrive with projectName attached.

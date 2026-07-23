@@ -21,6 +21,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
@@ -87,18 +88,23 @@ export function deleteEntry(
 
 function LivingMemorySkeleton() {
   return (
-    <div className="flex flex-col gap-3" role="status" aria-label="Loading validated translations">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <Card key={i} className="overflow-hidden">
-          <CardContent className="p-3 flex flex-col gap-2">
-            <Skeleton className="h-2.5 w-20" />
-            <Skeleton className="h-3.5 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-          </CardContent>
-        </Card>
-      ))}
-      <span className="sr-only">Loading…</span>
-    </div>
+    <LoadingTemplate
+      label="Loading validated translations"
+      className="min-h-96"
+      templateClassName="min-h-96"
+    >
+      <div className="flex flex-col gap-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Card key={i} className="overflow-hidden">
+            <CardContent className="flex flex-col gap-2 p-3">
+              <Skeleton className="h-2.5 w-20" />
+              <Skeleton className="h-3.5 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </LoadingTemplate>
   )
 }
 

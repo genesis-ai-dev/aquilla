@@ -35,6 +35,7 @@
 | Validation  | Disabled self-validation prevents auto-validation and explains an explicit 403 rejection | `e2e/specs/collab/aqu-633-self-validation.spec.ts` | |
 | Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
 | AI          | Sparkle button fills cell and marks it for individual human review | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings) | ✅ |
+| AI          | Paragraph pilcrow button drafts all cells of a paragraph as one unit (mock LLM) | `e2e/specs/ai/paragraph-draft.smoke.spec.ts` | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
 | Editor      | Import dialog escalates an unsupported container to the isolated parser, previews normalized source/target units, then commits through ImportService | `e2e/specs/agent-import.spec.ts` (container-gated with `AGENT_SANDBOX_E2E=1`) | |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |

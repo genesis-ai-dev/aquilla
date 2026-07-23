@@ -609,8 +609,24 @@ export function useCompletion(
 
     if (!groupCells.length) return
 
-    // Mark all cells in the paragraph as "generating".
-    for (const c of groupCells) setCompleting((p) => new Map(p).set(c.id, "generating"))
+    // AQU (p1-paragraph-ui-wiring, coordinator adjudication): a paragraph
+    // draft must NEVER overwrite an already-validated cell — the confirm
+    // dialog promises "cells already validated are skipped," matching the
+    // single-cell UI (the Regenerate rail button is likewise hidden once
+    // cell.status === "validated"). Validated cells are excluded from the
+    // model request entirely (not just the commit step) so the protocol
+    // never even asks for them; parseParagraphResponse only reconciles
+    // `expectedIds`, so leaving them out never flags them missing.
+    const draftCells = groupCells.filter((c) => c.status !== "validated")
+
+    if (!draftCells.length) {
+      // Every cell in the group is already validated — nothing to draft.
+      return
+    }
+
+    // Mark only the cells actually being drafted as "generating". Validated
+    // cells are left untouched (no pulsing ring — they were never queued).
+    for (const c of draftCells) setCompleting((p) => new Map(p).set(c.id, "generating"))
 
     // Track which cells were actually committed so a mid-loop commit failure
     // does NOT relabel already-persisted cells as errored (declared outside the
@@ -631,7 +647,7 @@ export function useCompletion(
 
       // Validated pairs from living memory for relevance-ranked few-shot.
       const topK = effectiveSettings.top_k ?? 15
-      const concatenated = groupCells.map((c) => c.original).join(" ")
+      const concatenated = draftCells.map((c) => c.original).join(" ")
       const validatedPairs = collectValidatedPairs(cells, concatenated, topK)
 
       // Retrieve passage examples for the paragraph's source text.
@@ -651,7 +667,7 @@ export function useCompletion(
         sourceLanguage,
         targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        cells: groupCells.map((c) => ({ cellId: c.id, source: c.original })),
+        cells: draftCells.map((c) => ({ cellId: c.id, source: c.original })),
         examples: examplesForPrompt,
         validatedPairs,
         rules,
@@ -680,12 +696,14 @@ export function useCompletion(
         signal,
         // Model A/B: the paragraph request drafts the whole group.
         onAbAssignment: (ab) => {
-          for (const c of groupCells) noteAbAssignment(c.fileId, c.id, ab)
+          for (const c of draftCells) noteAbAssignment(c.fileId, c.id, ab)
         },
       })
 
-      // 5. Parse + reconcile LOUDLY (D11).
-      const expectedIds = groupCells.map((c) => c.id)
+      // 5. Parse + reconcile LOUDLY (D11). Validated cells were excluded from
+      // the request above, so they're correctly absent from `expectedIds` —
+      // parseParagraphResponse never flags them missing.
+      const expectedIds = draftCells.map((c) => c.id)
       const { mapped, missing, extra } = parseParagraphResponse(result, expectedIds)
 
       // Surface extra (unknown) tags as a warning — never commit them.
@@ -712,7 +730,7 @@ export function useCompletion(
       // 6. Fan out: commit each mapped cell via the EXISTING commitCompletedCell path.
       const llmAuthor = modelName
       for (const { cellId, text } of mapped) {
-        const cell = groupCells.find((c) => c.id === cellId)
+        const cell = draftCells.find((c) => c.id === cellId)
         if (!cell) continue
         // D11 trust-killer guard: a present-but-empty tag (<c id="…"></c>) is
         // "no emitted content" just like a missing tag — flag it and NEVER commit
@@ -749,6 +767,8 @@ export function useCompletion(
         source_language: sourceLanguage,
         target_language: targetLanguage,
         group_size: groupCells.length,
+        drafted_count: draftCells.length,
+        skipped_validated_count: groupCells.length - draftCells.length,
         mapped_count: mapped.length,
         committed_count: committedIds.size,
         missing_count: missing.length,
@@ -756,7 +776,7 @@ export function useCompletion(
       })
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        for (const c of groupCells) {
+        for (const c of draftCells) {
           setPreviews((p) => { const m = new Map(p); m.delete(c.id); return m })
           setCompleting((p) => { const m = new Map(p); m.delete(c.id); return m })
         }
@@ -764,7 +784,7 @@ export function useCompletion(
       }
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       const msg = err instanceof Error ? err.message : "Failed"
-      for (const c of groupCells) {
+      for (const c of draftCells) {
         // Don't relabel a cell that was already committed before the failure —
         // its AI draft is persisted; only the still-uncommitted cells errored.
         if (committedIds.has(c.id)) {

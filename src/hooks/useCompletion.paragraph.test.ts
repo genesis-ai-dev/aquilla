@@ -458,4 +458,93 @@ describe("completeParagraph (D3)", () => {
     const userMsg = body.messages.find((m: { role: string; content: string }) => m.role === "user")
     expect(userMsg.content).not.toContain("Verse zero source\nTranslation:")
   })
+
+  // Coordinator adjudication (p1-paragraph-ui-wiring, Task 3 follow-up): the
+  // "Draft paragraph" confirm dialog promises "cells already validated are
+  // skipped" — matching the single-cell UI, where Regenerate is hidden once
+  // cell.status === "validated". completeParagraph must honor that: never
+  // commit a validated cell's draft, never error it, and (cleanly achievable
+  // here, per parseParagraphResponse's expectedIds-only reconciliation) never
+  // even ask the model to translate it.
+  it("skips an already-validated cell in the group: never commits it, never errors it, and never requests it from the model (D3 + coordinator adjudication)", async () => {
+    const validatedCell2 = { ...CELL_2, status: "validated" }
+    const cellsWithValidated = [CELL_1, validatedCell2, CELL_3]
+
+    let capturedBody: string | null = null
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        capturedBody = init.body as string
+        // The model only sees the two non-validated cells — respond to those.
+        const modelResponse = buildModelResponse([
+          { id: "cell-1", text: "Translation one" },
+          { id: "cell-3", text: "Translation three" },
+        ])
+        return {
+          ok: true,
+          json: () => Promise.resolve({ choices: [{ message: { content: modelResponse } }] }),
+          body: null,
+        }
+      }),
+    )
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        cellsWithValidated as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeParagraph("cell-1")
+    })
+
+    // Only cell-1 and cell-3 commit — the validated cell-2 is never touched.
+    expect(commitMock).toHaveBeenCalledTimes(2)
+    const calledIds = commitMock.mock.calls.map((args: unknown[]) => (args[0] as MinimalCell).id)
+    expect(calledIds).not.toContain("cell-2")
+
+    // Skipped (not missing, not errored) — a validated cell being excluded
+    // from the request is not a model failure, so it must not appear in errors.
+    expect(result.current.errors.has("cell-2")).toBe(false)
+
+    // Never even asked the model to translate cell-2 — the paragraph tag for
+    // it must not appear in the outgoing prompt.
+    expect(capturedBody).not.toBeNull()
+    const body = JSON.parse(capturedBody!)
+    const userMsg = body.messages.find((m: { role: string; content: string }) => m.role === "user")
+    expect(userMsg.content).not.toContain(`<c id="cell-2">`)
+
+    // No stuck pulsing ring on the skipped cell.
+    expect(result.current.completing.has("cell-2")).toBe(false)
+  })
+
+  it("does nothing (no model call, no commits) when every cell in the group is already validated", async () => {
+    const allValidated = ALL_CELLS.map((c) => ({ ...c, status: "validated" }))
+    const fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        allValidated as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeParagraph("cell-1")
+    })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(commitMock).not.toHaveBeenCalled()
+    expect(result.current.errors.size).toBe(0)
+  })
 })

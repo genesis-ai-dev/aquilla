@@ -137,6 +137,91 @@ describe("mapFilePairToEvents", () => {
     expect(create.payload.canonicalRef).toBeUndefined()
   })
 
+  it("skips cells deleted in Codex (materialized data.deleted) and does not anchor through them", () => {
+    // c1 (live) → c2 (deleted in Codex) → c3 (live). c3 must anchor to c1, and
+    // c2 must produce no events. Regression guard for AQU-673.
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "<p>a</p>", metadata: { id: "c1", type: "text" } },
+          { kind: 2, languageId: "html", value: "<p>b</p>", metadata: { id: "c2", type: "text", data: { deleted: true } } },
+          { kind: 2, languageId: "html", value: "<p>c</p>", metadata: { id: "c3", type: "text" } },
+        ],
+      },
+    }
+    const ev = mapFilePairToEvents(pair, OPTS)
+    const creates = ev.filter((e) => e.kind === "source.cell.create")
+    expect(creates.map((e) => e.cellId)).toEqual(["c1", "c3"]) // c2 dropped
+    expect(ev.some((e) => e.cellId === "c2")).toBe(false)
+    // c3 anchors to the prior LIVE cell (c1), not the deleted c2.
+    const c3create = creates.find((e) => e.cellId === "c3")!
+    expect(c3create.payload.anchorCellId).toBe("c1")
+  })
+
+  it("treats deletion recorded in the edit ledger as latest-edit-wins (delete then restore = present)", () => {
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          // deleted at ts 10, restored at ts 20 → still present.
+          {
+            kind: 2,
+            languageId: "html",
+            value: "<p>restored</p>",
+            metadata: {
+              id: "keep",
+              type: "text",
+              data: { deleted: true },
+              edits: [
+                { author: "a", timestamp: 10, type: "user-edit", editMap: ["metadata", "data", "deleted"], value: true },
+                { author: "a", timestamp: 20, type: "user-edit", editMap: ["metadata", "data", "deleted"], value: false },
+              ],
+            },
+          },
+          // deleted at ts 30 with no later restore → dropped, even though
+          // data.deleted was left false on the materialized cell.
+          {
+            kind: 2,
+            languageId: "html",
+            value: "<p>gone</p>",
+            metadata: {
+              id: "drop",
+              type: "text",
+              data: { deleted: false },
+              edits: [
+                { author: "a", timestamp: 30, type: "user-edit", editMap: ["metadata", "data", "deleted"], value: true },
+              ],
+            },
+          },
+        ],
+      },
+    }
+    const ids = mapFilePairToEvents(pair, OPTS)
+      .filter((e) => e.kind === "source.cell.create")
+      .map((e) => e.cellId)
+    expect(ids).toEqual(["keep"])
+  })
+
+  it("collectSpeakers skips cells deleted in Codex", () => {
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "x", metadata: { id: "c1", type: "text", cellLabel: "MARY MAGDALENE" } },
+          { kind: 2, languageId: "html", value: "y", metadata: { id: "c2", type: "text", cellLabel: "PETER", data: { deleted: true } } },
+        ],
+      },
+    }
+    expect(collectSpeakers(pair)).toEqual([{ cellId: "c1", speaker: "MARY MAGDALENE" }])
+  })
+
   it("collectSpeakers maps each cell's cellLabel to a speaker", () => {
     const pair: FilePairInput = {
       relPath: "F",

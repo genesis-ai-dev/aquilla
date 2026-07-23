@@ -9,11 +9,11 @@
 //   - Invite-link generation with expiry selector (reuses InviteLinkTab logic)
 //   - "Revoke all access" with grant-path enumeration + typed confirmation
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
   ArrowLeft, UserPlus, LinkIcon, ShieldOff, RefreshCcw,
-  AlertTriangle, Copy, Lock, Users,
+  AlertTriangle, Copy, Lock, Users, Check,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
@@ -29,6 +29,8 @@ import {
 import { cn } from "@/lib/utils"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useActiveOrgOptional } from "@/context/OrgContext"
+import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import {
   revokeAllProjectAccess, partitionMembers, type RevokeAllResult,
@@ -152,6 +154,29 @@ export function MembersTab({
   const callerMaxRole = ROLE.MAINTAINER
   const callerUserId = null
 
+  // AQU-672: source the org roster so the add-member field can suggest
+  // colleagues instead of forcing an exact-username guess. Read the org
+  // context optionally — this surface is also embedded on the org-side
+  // ProjectOverview and unit-rendered without a provider, where we simply
+  // fall back to a free-text field. A personal (org-less) project yields no
+  // suggestions and keeps working as plain free text.
+  const activeOrgId = useActiveOrgOptional()?.activeOrgId ?? null
+  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
+  useEffect(() => {
+    const jwt = session?.jwt
+    if (!jwt || activeOrgId == null) {
+      // Bail without a state change when already empty so we don't force an
+      // extra render (keeps this effect side-effect-free on org-less surfaces).
+      setOrgMembers((prev) => (prev.length === 0 ? prev : []))
+      return
+    }
+    let alive = true
+    listOrgMembers(jwt, activeOrgId)
+      .then((ms) => { if (alive) setOrgMembers(ms) })
+      .catch(() => { /* suggestions are best-effort; free text still works */ })
+    return () => { alive = false }
+  }, [session?.jwt, activeOrgId])
+
   // Add form state
   const [newUsername, setNewUsername] = useState("")
   const [newRole, setNewRole] = useState<number>(ROLE.CONTRIBUTOR)
@@ -199,6 +224,25 @@ export function MembersTab({
   // people actually granted access to THIS project (direct / group / creator)
   // are distinct from those who only reach it through an org-wide role.
   const { projectMembers, orgAccessMembers } = partitionMembers(members)
+
+  // AQU-672: eligibility mirrors the Team detail "Add member" combobox —
+  // org members minus those who already hold a direct grant on this project.
+  // `projectMembers` are exactly the people reached via a project-level path
+  // (direct/team/creator); org-access-only members stay eligible so they can
+  // be given an explicit project role.
+  const directGrantUserIds = useMemo(
+    () => new Set(projectMembers.map((m) => m.userId)),
+    [projectMembers],
+  )
+  const eligibleOrgMembers = useMemo(
+    () =>
+      orgMembers
+        .filter((m) => !directGrantUserIds.has(m.userId))
+        .sort((a, b) =>
+          a.username.localeCompare(b.username, undefined, { sensitivity: "base" }),
+        ),
+    [orgMembers, directGrantUserIds],
+  )
 
   const renderMemberRow = (m: ProjectMember) => {
     const isSelf = callerUserId !== null && m.userId === callerUserId
@@ -411,19 +455,17 @@ export function MembersTab({
           Add member
         </h2>
         <div className="flex gap-2">
-          <Input
-            placeholder="Aquilla username"
+          <MemberAddCombobox
+            members={eligibleOrgMembers}
             value={newUsername}
-            onChange={(e) => {
-              setNewUsername(e.target.value)
+            onChange={(v) => {
+              setNewUsername(v)
               setAddError(null)
               setAddForbidden(false)
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void handleAdd()
-            }}
+            onSubmit={() => void handleAdd()}
             disabled={adding}
-            className="flex-1"
+            orgLoaded={orgMembers.length > 0}
           />
           <Select
             items={grantableRoles.map((r) => ({
@@ -891,6 +933,140 @@ function SourceBadge({ source }: { source: string }) {
     <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
       {SOURCE_LABELS[source] ?? source}
     </span>
+  )
+}
+
+/**
+ * AQU-672: add-member field that suggests org members (a combobox), mirroring
+ * the Team detail "Add member" dialog, while remaining a free-text input so an
+ * exact username outside the suggestion list can still be granted.
+ *
+ *  - Clicking into / typing in the field opens a dropdown of `members`
+ *    (already filtered to org members without a direct grant, pre-sorted).
+ *  - The list narrows live by case-insensitive substring; picking a row fills
+ *    the field. The caller's Add button grants the typed value.
+ *  - When every org member already has a direct grant (`orgLoaded` and an empty
+ *    `members`), the dropdown shows an explicit empty state instead of opening
+ *    empty. With no org roster at all (personal project / no context) it stays
+ *    a plain free-text field with no dropdown.
+ */
+export function MemberAddCombobox({
+  members,
+  value,
+  onChange,
+  onSubmit,
+  disabled,
+  orgLoaded,
+}: {
+  members: OrgMember[]
+  value: string
+  onChange: (username: string) => void
+  onSubmit: () => void
+  disabled?: boolean
+  orgLoaded: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const query = value.trim().toLocaleLowerCase()
+  const filtered = useMemo(
+    () =>
+      query
+        ? members.filter((m) => m.username.toLocaleLowerCase().includes(query))
+        : members,
+    [members, query],
+  )
+
+  useEffect(() => {
+    if (!open) return
+    function onDocMouseDown(e: MouseEvent) {
+      if (containerRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener("mousedown", onDocMouseDown)
+    return () => document.removeEventListener("mousedown", onDocMouseDown)
+  }, [open])
+
+  // AC6: the org has members but none are eligible → everyone already added.
+  const allAlreadyGranted = orgLoaded && members.length === 0
+
+  let content: ReactNode = null
+  if (allAlreadyGranted) {
+    content = (
+      <p className="px-2 py-2 text-xs text-muted-foreground">
+        All org members are already on this project.
+      </p>
+    )
+  } else if (filtered.length > 0) {
+    content = filtered.map((m) => {
+      const isSelected = m.username === value
+      return (
+        <button
+          key={m.userId}
+          type="button"
+          role="option"
+          aria-selected={isSelected}
+          className={cn(
+            "flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted",
+            isSelected && "bg-muted/60",
+          )}
+          onClick={() => {
+            onChange(m.username)
+            setOpen(false)
+          }}
+        >
+          <span className="truncate">{m.username}</span>
+          {isSelected && (
+            <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          )}
+        </button>
+      )
+    })
+  } else if (query && members.length > 0) {
+    // Typed something no org member matches — still grantable as free text.
+    content = (
+      <p className="px-2 py-2 text-xs text-muted-foreground">
+        No org member matches “{value.trim()}”. Press Add to grant by exact username.
+      </p>
+    )
+  }
+
+  return (
+    <div ref={containerRef} className="relative flex-1">
+      <Input
+        placeholder="Aquilla username"
+        value={value}
+        role="combobox"
+        aria-label="Member to add"
+        aria-expanded={open}
+        aria-controls="project-member-add-list"
+        aria-autocomplete="list"
+        autoComplete="off"
+        onChange={(e) => {
+          onChange(e.target.value)
+          setOpen(true)
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            setOpen(false)
+            onSubmit()
+          } else if (e.key === "Escape") {
+            setOpen(false)
+          }
+        }}
+        disabled={disabled}
+      />
+      {open && !disabled && content && (
+        <div
+          id="project-member-add-list"
+          role="listbox"
+          aria-label="Org members"
+          className="absolute inset-x-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
+        >
+          {content}
+        </div>
+      )}
+    </div>
   )
 }
 

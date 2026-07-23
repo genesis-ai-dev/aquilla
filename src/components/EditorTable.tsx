@@ -55,7 +55,12 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
-import { computeRailPinned } from "@/lib/editor/cell-rail-pin"
+import {
+  computeRailPinned,
+  isRailFocusPinned,
+  railFocusOwnerOnBlur,
+  railFocusOwnerOnFocus,
+} from "@/lib/editor/cell-rail-pin"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
@@ -756,6 +761,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     setChapterNavigationSelection(null)
   }, [])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
+  // AQU-669: the single, exclusive cell whose action rail is focus-pinned. At
+  // most one cell is ever the "focused cell", so the rail pin is derived from
+  // `focusedRailCellId === cell.id` rather than each row's own local
+  // focus-within flag. When focus moves to another cell the new focus-in
+  // overwrites this id, which structurally un-pins the previous row even if its
+  // focus-out never fired (across TipTap/ProseMirror surfaces or re-rendered
+  // rows) — so stale rails can no longer accumulate. See cell-rail-pin.ts.
+  const [focusedRailCellId, setFocusedRailCellId] = useState<string | null>(null)
+  const handleRowFocusPin = useCallback((cellId: string) => {
+    setFocusedRailCellId((cur) => railFocusOwnerOnFocus(cur, cellId))
+  }, [])
+  const handleRowFocusRelease = useCallback((cellId: string) => {
+    // Only clear when this row is still the recorded owner: a newer focus has
+    // already overwritten the id, and an out-of-order focus-out from the row we
+    // just left must not wipe it.
+    setFocusedRailCellId((cur) => railFocusOwnerOnBlur(cur, cellId))
+  }, [])
   // Mirror ref so the imperative handle (getCurrentIndex) reads current
   // values without widening its dependency array — same pattern as
   // displayCellsRef below.
@@ -822,6 +844,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (displayCellIds.includes(activeEditorCellId)) return
     setActiveEditorCellId(null)
   }, [activeEditorCellId, displayCellIds])
+
+  // AQU-669: drop the focus pin if its cell scrolls out of the list / lane —
+  // a pin can't belong to a row that no longer renders.
+  useEffect(() => {
+    if (!focusedRailCellId) return
+    if (displayCellIds.includes(focusedRailCellId)) return
+    setFocusedRailCellId(null)
+  }, [focusedRailCellId, displayCellIds])
 
   const handleActivateEditor = useCallback((cellId: string) => {
     setActiveEditorCellId(cellId)
@@ -1557,6 +1587,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           project={project}
           cell={cell}
           isEditorActive={activeEditorCellId === cell.id}
+          isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
+          onRowFocusPin={handleRowFocusPin}
+          onRowFocusRelease={handleRowFocusRelease}
           onActivateEditor={handleActivateEditor}
           onDeactivateEditor={handleDeactivateEditor}
           isStaleSource={staleCellIds?.has(cell.id) ?? false}
@@ -1645,6 +1678,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
+    focusedRailCellId,
+    handleRowFocusPin,
+    handleRowFocusRelease,
     activeLane,
     audioByCellId,
     audioLens,
@@ -1989,6 +2025,14 @@ interface MemoizedRowProps {
   project: ProjectRecord
   cell: CellData
   isEditorActive: boolean
+  /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
+   *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
+   *  focus-out on some other row can never keep its rail revealed. */
+  isRowFocused: boolean
+  /** AQU-669: called when focus enters this row — sets the exclusive owner. */
+  onRowFocusPin: (cellId: string) => void
+  /** AQU-669: called when focus leaves this row — clears the owner if still ours. */
+  onRowFocusRelease: (cellId: string) => void
   onActivateEditor: (cellId: string) => void
   onDeactivateEditor: (cellId: string) => void
   username: string
@@ -2119,6 +2163,9 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceFontSize,
     targetFontSize,
     isEditorActive,
+    isRowFocused,
+    onRowFocusPin,
+    onRowFocusRelease,
     onActivateEditor,
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
@@ -2211,6 +2258,9 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         project={project}
         cell={cell}
         isEditorActive={isEditorActive}
+        isRowFocused={isRowFocused}
+        onRowFocusPin={onRowFocusPin}
+        onRowFocusRelease={onRowFocusRelease}
         onActivateEditor={onActivateEditor}
         onDeactivateEditor={onDeactivateEditor}
         username={username}
@@ -2302,6 +2352,11 @@ interface EditorRowProps {
   project: ProjectRecord
   cell: CellData
   isEditorActive: boolean
+  /** AQU-669: this row is the single exclusive focus-pin owner. */
+  isRowFocused: boolean
+  /** AQU-669: report focus entering / leaving this row to the exclusive owner. */
+  onRowFocusPin: (cellId: string) => void
+  onRowFocusRelease: (cellId: string) => void
   onActivateEditor: (cellId: string) => void
   onDeactivateEditor: (cellId: string) => void
   username: string
@@ -3232,7 +3287,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 }
 
 function EditorRow({
-  project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
+  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onActivateEditor, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
@@ -4303,7 +4358,12 @@ function EditorRow({
   // hovered. Do not add a per-row sticky selection latch here: visited rows
   // would accumulate visible rails.
   const [isHovering, setIsHovering] = useState(false)
-  const [hasFocusWithin, setHasFocusWithin] = useState(false)
+  // AQU-669: focus-within is no longer per-row local state (which went stale
+  // when a focus-out failed to fire and left the rail pinned forever). It's the
+  // single exclusive owner threaded from the table: this row has focus iff it
+  // is the `focusedRailCellId`. Focusing another cell overwrites that id and
+  // deterministically un-pins this one.
+  const hasFocusWithin = isRowFocused
   // AQU-354: does a rail control specifically hold focus? Used to pin the rail
   // open (an in-progress interaction must never be idle-collapsed).
   const [railHasFocus, setRailHasFocus] = useState(false)
@@ -4454,14 +4514,19 @@ function EditorRow({
     setIsHovering(false)
   }
   const handleRowFocusCapture = () => {
-    setHasFocusWithin(true)
+    // AQU-669: claim the exclusive focus pin for this cell. Because the table
+    // holds a single owner, this simultaneously releases whichever row was
+    // pinned before — no reliance on the previous row's focus-out.
+    onRowFocusPin(cell.id)
     // AQU-354: focusing anything in the row re-summons an idle-collapsed rail.
     registerRailActivity()
   }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
     if (next && rowRef.current?.contains(next)) return
-    setHasFocusWithin(false)
+    // AQU-669: focus left the row entirely — relinquish the pin (only if this
+    // row still holds it; a newer focus may already own it).
+    onRowFocusRelease(cell.id)
     // FRO-248: clear source-text selection when focus leaves this row so the
     // "Add to termbase" toolbar never floats over a different row's content.
     capturedSelectionRef.current = null

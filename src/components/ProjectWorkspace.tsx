@@ -29,7 +29,8 @@ import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
-import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
+import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
+import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -124,7 +125,6 @@ import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
-import { PrimaryActionButton } from "./PrimaryActionButton"
 import { ExpandableFileList } from "./ExpandableFileList"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
@@ -3652,7 +3652,7 @@ export function ProjectWorkspace() {
     },
     runExport: openExportFlow,
     // FRO-288: wire batch-validate through the real validation event path.
-    // Called AFTER the user confirms via PrimaryActionButton's confirmation
+    // Called AFTER the user confirms via the workspace-action confirmation
     // dialog (requiresConfirmation in registry.ts). Role floor is enforced
     // server-side; we mirror-check here to avoid queueing guaranteed-403
     // events (same pattern as emitValidationChange in EditorTable).
@@ -3714,6 +3714,20 @@ export function ProjectWorkspace() {
     },
     navigate,
   }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
+
+  // AQU-661: the dynamic primary-action button was removed; its actions now live
+  // in the ⋯ overflow menu. This preserves the button's confirmation flow —
+  // actions with `requiresConfirmation` route through the ConfirmActionDialog
+  // (rendered below) instead of running immediately.
+  const [pendingActionConfirm, setPendingActionConfirm] = useState<WorkspaceAction | null>(null)
+  const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
+    if (action.comingSoon) return
+    if (action.requiresConfirmation) {
+      setPendingActionConfirm(action)
+    } else {
+      action.run(actionCtx, actionArgs)
+    }
+  }, [actionCtx, actionArgs])
 
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
@@ -3794,7 +3808,22 @@ export function ProjectWorkspace() {
             ? "Diarize failed"
             : "Diarize"
 
-    const items: OverflowMenuItem[] = [
+    // AQU-661: the primary-action button and its caret dropdown are gone — the
+    // workspace actions (Import, Run AI completions, Export, Batch validate, …)
+    // now lead the ⋯ menu so nothing is lost and the header reads as a single
+    // overflow affordance. Confirmation-gated actions route through
+    // handleWorkspaceAction → ConfirmActionDialog (below).
+    const actionItems: OverflowMenuItem[] = getVisibleActions(workspaceActions, actionCtx).map((a) => ({
+      id: `action-${a.id}`,
+      label: a.label,
+      icon: a.icon,
+      disabled: a.comingSoon,
+      onClick: () => handleWorkspaceAction(a),
+    }))
+
+    const items: OverflowMenuItem[] = [...actionItems]
+    if (actionItems.length > 0) items.push({ id: "sep-actions", type: "separator" })
+    items.push(
       {
         id: "view-settings",
         label: "View settings",
@@ -3808,10 +3837,7 @@ export function ProjectWorkspace() {
         disabled: !activeFileId || !hasUnfinished,
         onClick: handleJumpNextUnfinished,
       },
-    ]
-
-    // Export intentionally absent here — it lives in the primary-action
-    // dropdown (workspace-actions registry), and duplicating it was noise.
+    )
 
     if (canAssignWork && activeFileId) {
       items.push({
@@ -3858,6 +3884,8 @@ export function ProjectWorkspace() {
 
     return items
   }, [
+    actionCtx,
+    handleWorkspaceAction,
     activeFileId,
     hasUnfinished,
     handleJumpNextUnfinished,
@@ -4389,7 +4417,8 @@ export function ProjectWorkspace() {
               </button>
             )}
 
-            <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
+            {/* AQU-661: the dynamic primary-action button was removed — its
+                actions now live in the ⋯ overflow menu (WorkspaceHeader). */}
 
             {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
             <ViewSettingsMenu
@@ -5189,6 +5218,19 @@ export function ProjectWorkspace() {
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
         current={videoAttachment} onSave={saveVideo}
       />
+      {/* AQU-661: confirmation for workspace actions folded from the removed
+          primary-action dropdown into the ⋯ overflow menu. */}
+      {pendingActionConfirm?.requiresConfirmation && (
+        <ConfirmActionDialog
+          open={true}
+          onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
+          title={pendingActionConfirm.requiresConfirmation.title}
+          description={pendingActionConfirm.requiresConfirmation.description(actionCtx)}
+          confirmLabel={pendingActionConfirm.requiresConfirmation.confirmLabel}
+          checkboxLabel="I understand this change will be attributed to my account."
+          onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
+        />
+      )}
       {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog
         open={pendingDeleteId !== null}

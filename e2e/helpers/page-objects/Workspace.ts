@@ -167,8 +167,10 @@ export class Workspace {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
 
+      // AQU-661: the primary-action dropdown was removed; Import now lives in
+      // the ⋯ overflow menu (button aria-label "More").
       const banner = this.page.getByRole("banner")
-      const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
+      const moreActionsBtn = banner.getByRole("button", { name: /^More$/i })
       if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
         await moreActionsBtn.click()
         const importItem = this.page
@@ -380,12 +382,9 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /View settings/i }).click()
   }
 
-  /** Export lives in the primary action dropdown. */
+  /** AQU-661: Export now lives in the header ⋯ overflow menu. */
   async openExportDialog(): Promise<void> {
-    const banner = this.page.getByRole("banner")
-    const moreActionsBtn = banner.getByRole("button", { name: /More actions/i })
-    await expect(moreActionsBtn).toBeVisible({ timeout: 10_000 })
-    await moreActionsBtn.click()
+    await this.openHeaderOverflowMenu()
     await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 

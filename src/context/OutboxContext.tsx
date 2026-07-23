@@ -32,6 +32,11 @@ export interface OutboxContextValue {
   staleSiblingCount: number
   staleSiblingEntries: StaleSiblingEntry[]
   clearStaleSiblings: () => void
+  /** AQU-668: surface stale-sibling dead-letters from an interactive flush into
+   *  the shared banner state (see useOutboxFlusher.reportStaleSiblings). */
+  reportStaleSiblings: (entries: StaleSiblingEntry[]) => void
+  /** AQU-668: same, for stale-source pins. */
+  reportStaleSource: (entries: Array<{ id: string; currentSourceEventId: string }>) => void
   staleSourceCount: number
 }
 
@@ -72,6 +77,8 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
     staleSiblingCount,
     staleSiblingEntries,
     clearStaleSiblings,
+    reportStaleSiblings,
+    reportStaleSource,
     staleSourceCount,
   } = useOutboxFlusher({
     // Drains whenever a session exists — independent of the current route, so
@@ -94,6 +101,8 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       staleSiblingCount,
       staleSiblingEntries,
       clearStaleSiblings,
+      reportStaleSiblings,
+      reportStaleSource,
       staleSourceCount,
     }),
     [
@@ -106,6 +115,8 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       staleSiblingCount,
       staleSiblingEntries,
       clearStaleSiblings,
+      reportStaleSiblings,
+      reportStaleSource,
       staleSourceCount,
     ],
   )

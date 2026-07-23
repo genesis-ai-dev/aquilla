@@ -83,6 +83,13 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
    *  Used by the banner's dismiss / "after-navigate" hooks so the surface
    *  doesn't keep re-firing for the same batch. */
   clearStaleSiblings: () => void
+  /** AQU-668: feed stale-sibling dead-letters from an OUTSIDE flush (e.g.
+   *  ProjectWorkspace's interactive `flushOutboxBatch`) into the same banner
+   *  state the background drain uses, so an immediate flush that drains-and-
+   *  deletes the record still surfaces the recovery banner. Stable identity. */
+  reportStaleSiblings: (entries: StaleSiblingEntry[]) => void
+  /** AQU-668: same as reportStaleSiblings, for stale-source pins. */
+  reportStaleSource: (entries: Array<{ id: string; currentSourceEventId: string }>) => void
   /** F5: increments whenever a flush returns stale-source pins.
    *  Caller should surface "Source changed — please re-confirm." */
   staleSourceCount: number
@@ -103,6 +110,26 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   const clearStaleSiblings = useCallback(() => {
     setStaleSiblingCount(0)
     setStaleSiblingEntries([])
+  }, [])
+  // AQU-668: the SINGLE place stale-sibling dead-letters feed the banner state.
+  // The background drain calls it via the flush callback below; interactive
+  // flushes (ProjectWorkspace's immediate `flushOutboxBatch` after a commit)
+  // call it directly through the exposed `reportStaleSiblings` — otherwise an
+  // immediate flush drains and deletes the record before the background loop
+  // ever sees it, so the recovery banner never fired for exactly the writes
+  // users care about most.
+  const reportStaleSiblings = useCallback((entries: StaleSiblingEntry[]) => {
+    if (entries.length === 0) return
+    setStaleSiblingCount((n) => n + entries.length)
+    // Latest-batch wins. We deliberately don't merge with prior entries:
+    // the banner shows one click-through target at a time, and stacking
+    // ancient stale entries on top of fresh ones makes the action ambiguous.
+    // The user dismisses (or clicks through) to clear.
+    setStaleSiblingEntries(entries)
+  }, [])
+  const reportStaleSource = useCallback((entries: Array<{ id: string; currentSourceEventId: string }>) => {
+    if (entries.length === 0) return
+    setStaleSourceCount((n) => n + entries.length)
   }, [])
   const backoffExp = useRef(0)
   const tokenRef = useRef(options.getTokenForFile)
@@ -150,18 +177,8 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
       const { madeProgress, postedAny, sawAuthError } = await drainCycle(() =>
         flushOutboxBatch({
           getTokenForFile: (pid, fid) => tokenRef.current(pid, fid),
-          onStaleSiblings: (entries) => {
-            if (entries.length === 0) return
-            setStaleSiblingCount((n) => n + entries.length)
-            // Latest-batch wins. We deliberately don't merge with prior entries:
-            // the banner shows one click-through target at a time, and stacking
-            // ancient stale entries on top of fresh ones makes the action
-            // ambiguous. The user dismisses (or clicks through) to clear.
-            setStaleSiblingEntries(entries)
-          },
-          onStaleSource: (entries) => {
-            setStaleSourceCount((n) => n + entries.length)
-          },
+          onStaleSiblings: reportStaleSiblings,
+          onStaleSource: reportStaleSource,
         }),
       )
       await refreshPending()
@@ -244,7 +261,7 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
       cancelled = true
       ac.abort()
     }
-  }, [options.enabled, refreshPending])
+  }, [options.enabled, refreshPending, reportStaleSiblings, reportStaleSource])
 
   // Network reconnect → requeue transiently-failed records + drain immediately
   // rather than waiting out the backoff. RES-2: records that failed due to
@@ -282,6 +299,8 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     staleSiblingCount,
     staleSiblingEntries,
     clearStaleSiblings,
+    reportStaleSiblings,
+    reportStaleSource,
     staleSourceCount,
   }
 }

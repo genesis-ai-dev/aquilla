@@ -92,6 +92,7 @@ import {
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
 import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { droppedPinnedCells } from "@/lib/sync/pending-commit-pin"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
@@ -921,6 +922,8 @@ export function ProjectWorkspace() {
     staleSiblingCount: outboxStaleSiblingCount,
     staleSiblingEntries: outboxStaleSiblingEntries,
     clearStaleSiblings: clearStaleSiblings,
+    reportStaleSiblings,
+    reportStaleSource,
     staleSourceCount: outboxStaleSourceCount,
   } = useOutbox()
   // F5/F6: dismiss the notification banners after the user has seen them.
@@ -1000,6 +1003,7 @@ export function ProjectWorkspace() {
     revalidateCell,
     applyOptimisticTargetEdit,
     applyOptimisticTargetEdits,
+    discardOptimisticEdit,
     isLoading: cellsLoading,
   } = useActiveCellStore({
     projectId: project?.id ?? null,
@@ -1119,6 +1123,55 @@ export function ProjectWorkspace() {
   const rememberPendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
     pendingTargetCommitHeadsRef.current.set(cellId, { eventId, parentId })
   }, [])
+
+  // AQU-668: every interactive (immediate) outbox flush goes through this so a
+  // commit the server drops as a stale sibling is not silently swallowed. The
+  // immediate flush drains-and-deletes the record before the background drain
+  // loop can see it, so without wiring the callback here the recovery banner
+  // never fired for exactly the writes users care about most (editor + sparkle
+  // commits). Two things happen when a drop is reported:
+  //   1. The pending-head PIN for the dropped cell is cleared and its
+  //      unconfirmed optimistic shadow discarded, then the cell is revalidated.
+  //      Otherwise the pin keeps pointing at the dead event id and the protected
+  //      shadow keeps the projection stuck at the stale parent, so every later
+  //      edit chains off the dead branch and is itself dropped — the cell
+  //      becomes a black hole for edits until reload.
+  //   2. The dead-letter entries are fed to the shared banner state so the
+  //      translator gets a visible notice with a history deep-link to recover
+  //      the dropped text.
+  const flushOutboxInteractive = useCallback(async () => {
+    await flushOutboxBatch({
+      getTokenForFile: getTokenForProjectFile,
+      onStaleSiblings: (entries) => {
+        const droppedEventIds = entries.map((e) => e.id)
+        // The cells to repair: those whose PINNED head is one of the dropped
+        // events. A cell whose pin points at a NEWER (non-dropped) commit is a
+        // fresh edit in flight — leave its pin and shadow untouched.
+        const stuckCells = new Set(droppedPinnedCells(pendingTargetCommitHeadsRef.current, droppedEventIds))
+        // Also repair cells whose dropped completion commit is still the pinned
+        // completion head but never got a target-head pin (AI-draft edge).
+        for (const [cellId, evId] of pendingCompletionEventIdRef.current) {
+          if (droppedEventIds.includes(evId) && !pendingTargetCommitHeadsRef.current.has(cellId)) {
+            stuckCells.add(cellId)
+          }
+        }
+        for (const cellId of stuckCells) {
+          const pin = pendingTargetCommitHeadsRef.current.get(cellId)
+          pendingTargetCommitHeadsRef.current.delete(cellId)
+          if (!pin || droppedEventIds.includes(pendingCompletionEventIdRef.current.get(cellId) ?? "")) {
+            pendingCompletionEventIdRef.current.delete(cellId)
+          }
+          // Discard the unconfirmed shadow so the projection can absorb the
+          // winning sibling; revalidate pulls that winner as the new head so
+          // the NEXT edit chains onto a live event instead of the dead branch.
+          discardOptimisticEdit(cellId)
+          revalidateCell(cellId)
+        }
+        reportStaleSiblings(entries)
+      },
+      onStaleSource: (entries) => reportStaleSource(entries),
+    })
+  }, [getTokenForProjectFile, discardOptimisticEdit, revalidateCell, reportStaleSiblings, reportStaleSource])
 
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
@@ -1365,14 +1418,14 @@ export function ProjectWorkspace() {
         saveTts: tts.saveTts,
         onPhase: (p) => setDiarizePhase(p),
       })
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await flushOutboxInteractive()
       revalidateCells()
       setDiarizePhase("done")
     } catch (e) {
       setDiarizePhase("failed")
       setDiarizeError(e instanceof Error ? e.message : String(e))
     }
-  }, [project?.id, activeFileId, currentUsername, cellStore, getTokenForFile, getTokenForProjectFile, tts.settings, tts.saveTts, revalidateCells])
+  }, [project?.id, activeFileId, currentUsername, cellStore, getTokenForFile, flushOutboxInteractive, tts.settings, tts.saveTts, revalidateCells])
 
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
   // direct URL. The Import dialog can't do this — it always creates a new
@@ -1385,9 +1438,9 @@ export function ProjectWorkspace() {
       author: currentUsername,
       getToken: getTokenForFile,
     })
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await flushOutboxInteractive()
     revalidateCells()
-  }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
+  }, [project?.id, activeFileId, currentUsername, getTokenForFile, flushOutboxInteractive, revalidateCells])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
@@ -1397,9 +1450,9 @@ export function ProjectWorkspace() {
       author: currentUsername,
       getToken: getTokenForFile,
     })
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await flushOutboxInteractive()
     revalidateCells()
-  }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
+  }, [project?.id, activeFileId, currentUsername, getTokenForFile, flushOutboxInteractive, revalidateCells])
 
   // Timeline editor: move/stretch a clip → cell.retime (timing on both sides).
   const handleRetime = useCallback(
@@ -1413,10 +1466,10 @@ export function ProjectWorkspace() {
         endMs: Math.round(endSec * 1000),
         author: currentUsername,
       })
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await flushOutboxInteractive()
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, flushOutboxInteractive, revalidateCells],
   )
 
   // Timeline editor detail pane: commit a target edit (same path as the table).
@@ -1438,7 +1491,7 @@ export function ProjectWorkspace() {
         targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
       })
       rememberPendingTargetCommit(cellId, eventId, parentId)
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await flushOutboxInteractive()
       await refreshOutboxPending()
       revalidateCell(cellId)
     },
@@ -1450,7 +1503,7 @@ export function ProjectWorkspace() {
       activeLane,
       resolveTargetCommitParentId,
       rememberPendingTargetCommit,
-      getTokenForProjectFile,
+      flushOutboxInteractive,
       refreshOutboxPending,
       revalidateCell,
     ],
@@ -1467,10 +1520,10 @@ export function ProjectWorkspace() {
         coreMediaUrl: url,
         author: currentUsername,
       })
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await flushOutboxInteractive()
       refresh()
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+    [project?.id, activeFileId, currentUsername, flushOutboxInteractive, refresh],
   )
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
@@ -1826,7 +1879,7 @@ export function ProjectWorkspace() {
     })
     pendingCompletionEventIdRef.current.set(cell.id, eventId)
     rememberPendingTargetCommit(cell.id, eventId, parentId)
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await flushOutboxInteractive()
     await refreshOutboxPending()
     // Targeted: we just changed exactly one cell. Pull only that row's stats
     // and cell data back (its authoritative event_id becomes the next
@@ -1835,7 +1888,7 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, flushOutboxInteractive, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -1861,12 +1914,12 @@ export function ProjectWorkspace() {
       targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
     })
     rememberPendingTargetCommit(cell.id, eventId, parentId)
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await flushOutboxInteractive()
     await refreshOutboxPending()
     // Single-cell promotion — targeted refetch (see commitCompletedCell).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, flushOutboxInteractive, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   const { completeSingle, completeBatch, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
@@ -1897,7 +1950,7 @@ export function ProjectWorkspace() {
   )
   const handleAgentApplied = useCallback(
     async (_eventIds: string[], cellIds: string[]) => {
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await flushOutboxInteractive()
       await refreshOutboxPending()
       // Targeted: the agent only touched cellIds — pull just those rows'
       // stats instead of the whole file's (see commitCompletedCell).
@@ -1906,7 +1959,7 @@ export function ProjectWorkspace() {
         revalidateCell(cellId)
       }
     },
-    [getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell],
+    [flushOutboxInteractive, refreshOutboxPending, revalidateCellStats, revalidateCell],
   )
 
   // ── Back-translation: LLM generation on demand ─────────────────────────────
@@ -3137,7 +3190,7 @@ export function ProjectWorkspace() {
       targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
     })
     rememberPendingTargetCommit(cell.id, eventId, parentId)
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await flushOutboxInteractive()
     await refreshOutboxPending()
     // Single-cell edit — targeted refetch (see commitCompletedCell).
     revalidateCellStats(cell.id)
@@ -3152,7 +3205,7 @@ export function ProjectWorkspace() {
     resolveTargetCommitParentId,
     rememberPendingTargetCommit,
     currentUsername,
-    getTokenForProjectFile,
+    flushOutboxInteractive,
     refreshOutboxPending,
     revalidateCellStats,
     revalidateCell,
@@ -3520,14 +3573,14 @@ export function ProjectWorkspace() {
       touched.push(cell.id)
     }
     if (touched.length === 0) return
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await flushOutboxInteractive()
     await refreshOutboxPending()
     revalidateAuditStats()
     for (const id of touched) {
       if (getActiveCell(id)?.fileId === activeFileId) revalidateCell(id)
     }
     rebuildSearchIndex()
-  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
+  }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, flushOutboxInteractive, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   const projectNavItems = useMemo(() => {
     // AQU-353: mirror the header lens toggle's label/icon exactly (see the
@@ -3675,7 +3728,7 @@ export function ProjectWorkspace() {
             targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
           })
         }
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await flushOutboxInteractive()
         await refreshOutboxPending()
         revalidateAuditStats()
         for (const cell of validatable) revalidateCell(cell.id)
@@ -3709,7 +3762,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, flushOutboxInteractive, refreshOutboxPending, revalidateAuditStats, revalidateCell])
 
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
@@ -3737,7 +3790,7 @@ export function ProjectWorkspace() {
     const pendingEdit = lastOptimisticEditRef.current
     lastOptimisticEditRef.current = null
 
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await flushOutboxInteractive()
     await refreshOutboxPending()
     // Targeted: a hand edit / validate / waive touches exactly one cell. Pull
     // only that row's stats and cell data instead of re-fetching the whole
@@ -3751,7 +3804,7 @@ export function ProjectWorkspace() {
       revalidateAuditStats()
       revalidateCells()
     }
-  }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
+  }, [flushOutboxInteractive, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
 
   // AQU-616: bulk validate/unvalidate from the SelectionBar enqueues N events
   // but has no per-cell commit callback, so without this the events would wait
@@ -3759,11 +3812,11 @@ export function ProjectWorkspace() {
   // seconds. Flush + revalidate immediately, mirroring handleCellCommitted and
   // the "validate all" workspace action.
   const handleBulkValidationCommitted = useCallback(async () => {
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+    await flushOutboxInteractive()
     await refreshOutboxPending()
     revalidateAuditStats()
     revalidateCells()
-  }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+  }, [flushOutboxInteractive, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
     const diarizeLabel =

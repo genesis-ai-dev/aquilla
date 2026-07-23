@@ -583,4 +583,48 @@ describe("useOutboxFlusher", () => {
       expect(mockFlush.mock.calls.length).toBe(callsBefore + 1)
     },
   )
+
+  // -- AQU-668: interactive flushes feed the SAME banner state ----------------
+  //
+  // An immediate flush after a commit drains-and-deletes the outbox record
+  // before the background loop can see it, so the recovery banner used to never
+  // fire for editor/sparkle commits. `reportStaleSiblings`/`reportStaleSource`
+  // let those interactive callers push into the same banner state the drain uses.
+  it("reportStaleSiblings surfaces entries into the shared banner state", async () => {
+    Object.defineProperty(navigator, "locks", { value: undefined, configurable: true })
+    mockFlush.mockResolvedValue(NOTHING)
+    const { result } = renderHook(() =>
+      useOutboxFlusher({ enabled: false, getTokenForFile: TOKEN_FN }),
+    )
+
+    expect(result.current.staleSiblingCount).toBe(0)
+    expect(result.current.staleSiblingEntries).toEqual([])
+
+    const entries = [{ id: "evtL", fileId: "f1", cellId: "c1" }]
+    act(() => { result.current.reportStaleSiblings(entries) })
+
+    expect(result.current.staleSiblingCount).toBe(1)
+    expect(result.current.staleSiblingEntries).toEqual(entries)
+
+    // Dismiss clears it (the banner's "View in history" / dismiss path).
+    act(() => { result.current.clearStaleSiblings() })
+    expect(result.current.staleSiblingCount).toBe(0)
+    expect(result.current.staleSiblingEntries).toEqual([])
+
+    // An empty report is a no-op (ordinary single-editor flush).
+    act(() => { result.current.reportStaleSiblings([]) })
+    expect(result.current.staleSiblingCount).toBe(0)
+  })
+
+  it("reportStaleSource increments the shared stale-source count", async () => {
+    Object.defineProperty(navigator, "locks", { value: undefined, configurable: true })
+    const { result } = renderHook(() =>
+      useOutboxFlusher({ enabled: false, getTokenForFile: TOKEN_FN }),
+    )
+    expect(result.current.staleSourceCount).toBe(0)
+    act(() => { result.current.reportStaleSource([{ id: "e1", currentSourceEventId: "src-9" }]) })
+    expect(result.current.staleSourceCount).toBe(1)
+    act(() => { result.current.reportStaleSource([]) })
+    expect(result.current.staleSourceCount).toBe(1)
+  })
 })

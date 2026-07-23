@@ -734,6 +734,30 @@ export class CellStore {
     return true
   }
 
+  /**
+   * AQU-668: forcibly drop a cell's UNCONFIRMED optimistic shadow (and its
+   * freshness floor) after the server dropped its commit as a stale sibling.
+   *
+   * Unlike `clearOptimisticIfValue` — which only clears when a server row
+   * echoes the shadow's value — this clears a shadow whose value the server
+   * will NEVER echo, because a competing sibling won the chain slot. Left in
+   * place, the shadow keeps the cell "protected" in `mergeProtectedRows`, so
+   * every refetch reverts the cell's projected head back to the stale parent
+   * and the winning sibling can never land. Clearing it lets the projection
+   * absorb the winner, so the next edit chains onto a live head instead of the
+   * dropped commit's dead branch. Returns true if a shadow was actually cleared.
+   */
+  discardOptimisticEdit(cellId: string): boolean {
+    const had = this.optimisticEdits.delete(cellId)
+    const hadFloor = this.freshnessFloors.delete(cellId)
+    if (had || hadFloor) {
+      this.bumpCells([cellId])
+      this.rebuildDerivedIndexes()
+      this.emit([cellId])
+    }
+    return had
+  }
+
   applyOptimisticTargetEdit(cellId: string, patch: PendingOverlay): void {
     const seq = ++this.writeSeq
     this.optimisticEdits.set(cellId, { ...patch, seq })
@@ -1099,6 +1123,9 @@ export interface UseActiveCellStoreResult {
   applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
   /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
+  /** AQU-668: drop a cell's unconfirmed optimistic shadow after its commit was
+   *  dropped as a stale sibling, so the winning sibling can land. */
+  discardOptimisticEdit: (cellId: string) => void
   isLoading: boolean
   isError: boolean
 }
@@ -1436,6 +1463,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     store.applyOptimisticTargetEdits(patches)
   }, [store])
 
+  const discardOptimisticEdit = useCallback((cellId: string) => {
+    store.discardOptimisticEdit(cellId)
+  }, [store])
+
   useEffect(() => {
     if (typeof window === "undefined") return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1475,7 +1506,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, isLoading, isError }
+  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, discardOptimisticEdit, isLoading, isError }
 }
 
 /**

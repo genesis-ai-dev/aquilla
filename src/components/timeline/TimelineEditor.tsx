@@ -42,6 +42,12 @@ export interface TimelineEditorProps {
   /** AQU-646 round 3: the text view's cell actions for the detail pane
    *  (AI translate, comments, history, record, footnote…). Pass-through. */
   detailActions?: TimelineDetailActions
+  /** AQU-646 round 3 (text→media trace): seeds selection on mount — opens the
+   *  detail pane, centers the track on the clip, and cues playback (paused)
+   *  at its start via onSeekToTime, same semantics as a clean card click. */
+  initialSelectedCellId?: string | null
+  /** AQU-646 round 3 (media→text trace): mirrors every selection change up. */
+  onSelectedCellChange?(cellId: string | null): void
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -78,9 +84,13 @@ export function TimelineEditor({
   onTranscribe,
   onSeekToTime,
   detailActions,
+  initialSelectedCellId,
+  onSelectedCellChange,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
+  // the detail pane and rings the card.
+  const [selectedId, setSelectedId] = useState<string | null>(() => initialSelectedCellId ?? null)
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
   const [follow, setFollow] = useState(true)
@@ -186,6 +196,29 @@ export function TimelineEditor({
     onSeekToTime?.(Math.max(0, sec))
     setFollow(true)
   }
+
+  // AQU-646 round 3: mirror every selection change up for the media→text
+  // trace (one effect catches the lanes' onSelect AND the untimed chips
+  // without touching call sites; the mount fire harmlessly mirrors the seed).
+  useEffect(() => {
+    onSelectedCellChange?.(selectedId)
+  }, [selectedId, onSelectedCellChange])
+
+  // AQU-646 round 3: consume the text→media trace once on mount. Reads the
+  // live clientWidth (viewportPx state is still 0 here — it lands via the
+  // measurement useLayoutEffect a beat later) to center the clip; seekTo cues
+  // the queue paused at the clip start and re-engages follow — identical to a
+  // clean card click. Untimed traced cells: selection + pane only.
+  useEffect(() => {
+    const id = initialSelectedCellId
+    if (!id) return
+    const cell = cells.find((c) => c.id === id)
+    if (!cell || typeof cell.startTime !== "number" || !Number.isFinite(cell.startTime)) return
+    const viewport = scrollRef.current?.clientWidth ?? 0
+    scrollTrackTo(Math.max(0, secToPx(cell.startTime, pxPerSec) - viewport / 2))
+    seekTo(cell.startTime)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only trace consume
+  }, [])
 
   // AQU-646 follow-playhead: page-flip the view when the playhead approaches
   // the right edge (or leaves the left). Reads the element's live scrollLeft —

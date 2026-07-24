@@ -126,6 +126,7 @@ import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { EditorModeToggle } from "./EditorModeToggle"
 import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
+import type { EditorLens } from "@/components/EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { PrimaryActionButton } from "./PrimaryActionButton"
@@ -650,7 +651,7 @@ export function ProjectWorkspace() {
     // If there is a remembered cell, park it in the ref so the scroll-restore
     // effect can consume it once cells are loaded.
     if (savedLoc?.cellId && savedLoc.fileId === nextFileId) {
-      pendingCellScrollRef.current = savedLoc.cellId
+      pendingCellScrollRef.current = { cellId: savedLoc.cellId, flash: false }
     }
     const target = `/project/${projectId}/file/${nextFileId}`
     if (redirectTo(target)) setSelectedFileId(nextFileId)
@@ -694,7 +695,7 @@ export function ProjectWorkspace() {
   // the scroll-restore effect (below) can consume it once cells are loaded.
   useEffect(() => {
     const cellId = searchParams.get("cellId")
-    if (cellId) pendingCellScrollRef.current = cellId
+    if (cellId) pendingCellScrollRef.current = { cellId, flash: false }
   }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
@@ -783,7 +784,7 @@ export function ProjectWorkspace() {
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
   useEffect(() => {
-    if (location.pathname.endsWith("/voice")) { setLens("audio"); setDockTab("voices") }
+    if (location.pathname.endsWith("/voice")) { switchLens("audio"); setDockTab("voices") }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
@@ -798,10 +799,11 @@ export function ProjectWorkspace() {
   }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
-  // Holds a cellId to scroll to once cells are loaded after a restore-location
-  // navigation. Set during the restore effect, consumed (and cleared) by a
-  // separate effect that fires when `cells` are available.
-  const pendingCellScrollRef = useRef<string | null>(null)
+  // Holds a cell to scroll to once cells are loaded after a restore-location
+  // navigation (or an AQU-646 media→text trace, which also flashes). Set by
+  // the restore effect / deep-link / switchLens; consumed by the effect that
+  // fires when `cells` are available AND the text editor is mounted.
+  const pendingCellScrollRef = useRef<{ cellId: string; flash: boolean } | null>(null)
   // Mirrors currentUsername (computed later in the function) so effects that
   // are declared before currentUsername can access it via ref.
   const currentUsernameRef = useRef<string>("local")
@@ -2449,13 +2451,48 @@ export function ProjectWorkspace() {
   // shows decay-derived health; the "biggest drags" popover redesign (cells
   // sorted by descending decay) is a deferred follow-up.
 
+  // AQU-646: scroll by ID in display space — findIndexByCellId resolves STORE
+  // order, which time-ordered files re-sort for display, so the old index
+  // path could land on the wrong row there.
   const jumpToCellId = useCallback((cellId: string) => {
-    const idx = cellStore.findIndexByCellId(cellId)
-    if (idx >= 0) {
-      editorRef.current?.scrollToCellIndex(idx)
-      editorRef.current?.flashCell(cellId, "")
+    editorRef.current?.scrollToCellId(cellId, { flash: true })
+  }, [])
+
+  // ── AQU-646 round 3: two-way cell tracing across the Text/Media switch ────
+  // timelineSelectedCellIdRef mirrors TimelineEditor's local selection (a ref,
+  // not state — no workspace re-render per card click); mediaTraceCellId seeds
+  // the timeline's selection on mount (state — must be render-visible then).
+  const timelineSelectedCellIdRef = useRef<string | null>(null)
+  const handleTimelineSelectedCell = useCallback((cellId: string | null) => {
+    timelineSelectedCellIdRef.current = cellId
+  }, [])
+  const [mediaTraceCellId, setMediaTraceCellId] = useState<string | null>(null)
+
+  // The single traced lens-switch entry point — every setLens call site routes
+  // through this so no path skips the trace. Self-no-ops when the lens isn't
+  // changing, the file isn't time-ordered, or there's nothing to trace.
+  const switchLens = useCallback((next: EditorLens) => {
+    const timeOrdered = Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+    if (next !== lens && timeOrdered) {
+      if (next === "audio") {
+        // TEXT → MEDIA: the row the user is on (last-active editor cell when
+        // visible, else the first visible row).
+        const idx = editorRef.current?.getCurrentIndex?.() ?? -1
+        setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
+      } else if (timelineSelectedCellIdRef.current) {
+        // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
+        // no edit-focus change.
+        pendingCellScrollRef.current = { cellId: timelineSelectedCellIdRef.current, flash: true }
+      }
     }
-  }, [cellStore])
+    setLens(next)
+  }, [lens, setLens, activeFile, cellStore])
+
+  // Traces never outlive the file they were captured in.
+  useEffect(() => {
+    timelineSelectedCellIdRef.current = null
+    setMediaTraceCellId(null)
+  }, [activeFileId])
 
   const pendingPresenceJumpRef = useRef<{ fileId: string; cellId?: string } | null>(null)
   const handleJumpToPresencePeer = useCallback((peer: ProjectPresencePeer) => {
@@ -2479,11 +2516,11 @@ export function ProjectWorkspace() {
       pendingPresenceJumpRef.current = null
       return
     }
-    const idx = readAtVersion(cellStoreVersion, () => cellStore.findIndexByCellId(pending.cellId!))
-    if (idx < 0) return
-    pendingPresenceJumpRef.current = null
-    editorRef.current?.scrollToCellIndex(idx)
-    editorRef.current?.flashCell(pending.cellId, "")
+    // Touch the version so this effect re-runs as rows land (readAtVersion
+    // keeps the subscription); the scroll itself resolves display-space by id.
+    readAtVersion(cellStoreVersion, () => cellStore.getCellCount())
+    const ok = editorRef.current?.scrollToCellId(pending.cellId, { flash: true }) ?? false
+    if (ok) pendingPresenceJumpRef.current = null
   }, [activeFileId, cellStore, cellStoreVersion])
 
   // Phase 0.5: run the deterministic check over the open file's cells.
@@ -2544,17 +2581,19 @@ export function ProjectWorkspace() {
 
   // ── last-location: scroll to remembered cell once cells are loaded ────────
   // After a restore-navigation the editor isn't rendered yet; we park the
-  // target cellId in pendingCellScrollRef and consume it here once `cells`
-  // is non-empty and the ref is set.
+  // target cell in pendingCellScrollRef and consume it here once `cells`
+  // are non-empty and the text editor is mounted. AQU-646: `lens` is a dep so
+  // a media→text switch consumes the parked trace the moment EditorTable
+  // mounts (the ref attaches during commit, before effects run — same pass);
+  // the id-based scroll also fixes the store-vs-display index mismatch on
+  // time-ordered files.
   useEffect(() => {
-    const cellId = pendingCellScrollRef.current
-    if (!cellId || cellStore.getCellCount() === 0) return
-    const idx = readAtVersion(cellStoreVersion, () => cellStore.findIndexByCellId(cellId))
-    if (idx >= 0) {
-      pendingCellScrollRef.current = null
-      editorRef.current?.scrollToCellIndex(idx)
-    }
-  }, [cellStore, cellStoreVersion])
+    const pending = pendingCellScrollRef.current
+    if (!pending) return
+    if (readAtVersion(cellStoreVersion, () => cellStore.getCellCount()) === 0) return
+    const ok = editorRef.current?.scrollToCellId(pending.cellId, { flash: pending.flash }) ?? false
+    if (ok) pendingCellScrollRef.current = null
+  }, [cellStore, cellStoreVersion, lens])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
@@ -3171,11 +3210,9 @@ export function ProjectWorkspace() {
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading]
   )
 
-  async function handleSearchSelect(result: WorkspaceSearchResult, query: string) {
+  async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
     const flash = () => {
-      const idx = cellStore.findIndexByCellId(result.cellId)
-      if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
-      editorRef.current?.flashCell(result.cellId, query)
+      editorRef.current?.scrollToCellId(result.cellId, { flash: true })
     }
     if (result.fileId !== activeFileId) {
       workspaceTabs.openFile(result.fileId)
@@ -3629,7 +3666,7 @@ export function ProjectWorkspace() {
       { id: "voice-studio", label: audioLensLabel(audioLensTimeOrdered), icon: audioLensIcon(audioLensTimeOrdered),
         onClick: () => {
           const next = lens === "audio" ? "text" : "audio"
-          setLens(next)
+          switchLens(next)
           // The Voices panel now lives in its own dock tab — surface it when
           // entering the Audio lens; fall back to Files when leaving.
           setDockTab(next === "audio" ? "voices" : "files")
@@ -3652,7 +3689,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
+  }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, switchLens, setDockTab, currentRoleLevel])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -4261,7 +4298,7 @@ export function ProjectWorkspace() {
       // AQU (mp3 "unusable" report): a media import has no text cells, so the
       // Text lens greets the user with "No text segments in this file" — which
       // reads as a failed import. Land them on the Media/Audio lens instead.
-      if (isMediaFileType(refs[0].type)) setLens("audio")
+      if (isMediaFileType(refs[0].type)) switchLens("audio")
     }
     // The bulk importer (lib/import.ts → POST /import) has already persisted
     // file.create + every source.cell.create server-side before resolving, so
@@ -4329,7 +4366,7 @@ export function ProjectWorkspace() {
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
-              if (t === "voices" && lens !== "audio") setLens("audio")
+              if (t === "voices" && lens !== "audio") switchLens("audio")
             }}
             voicesPanel={
               project ? (
@@ -4556,7 +4593,7 @@ export function ProjectWorkspace() {
                 <EditorModeToggle
                   lens={lens}
                   onChange={(l) => {
-                    setLens(l)
+                    switchLens(l)
                     // Surface the Voices tab when entering the Audio lens.
                     if (l === "audio") setDockTab("voices")
                   }}
@@ -4947,6 +4984,8 @@ export function ProjectWorkspace() {
                 <TimelineEditor
                   cells={audioMergedCells}
                   detailActions={timelineDetailActions ?? undefined}
+                  initialSelectedCellId={mediaTraceCellId}
+                  onSelectedCellChange={handleTimelineSelectedCell}
                   coreMediaUrl={activeFile.coreMediaUrl ?? null}
                   editable={!isReadOnly}
                   fileId={activeFile.id}

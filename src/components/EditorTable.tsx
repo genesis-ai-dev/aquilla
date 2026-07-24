@@ -478,6 +478,10 @@ export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate"
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
+  /** AQU-646: scroll to a cell by id in DISPLAY space (lens-sorted — correct
+   *  for time-ordered files, where store order ≠ display order), optionally
+   *  flashing it. Returns false when the id is not currently displayable. */
+  scrollToCellId: (cellId: string, opts?: { flash?: boolean }) => boolean
   focusCellEditorIndex: (index: number) => void
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
@@ -968,6 +972,20 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     focusWhenMounted()
   }, [clearChapterNavigationSelection, getListQueryRoot])
 
+  // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
+  // both defer to the next frame (the list may still be scrolling, so the DOM
+  // node may not exist yet).
+  const flashCellDom = useCallback((cellId: string) => {
+    requestAnimationFrame(() => {
+      const root = getListQueryRoot()
+      if (!root) return
+      const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
+      if (!el) return
+      el.classList.add("codex-search-flash")
+      window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
+    })
+  }, [getListQueryRoot])
+
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
@@ -978,6 +996,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           animated: false,
         })
       }
+    },
+    scrollToCellId(cellId, opts) {
+      // AQU-646 round 3: id-based scroll in DISPLAY space. The older
+      // index-based path resolved indexes via cellStore.findIndexByCellId —
+      // STORE order — but the list renders displayCellIds, which time-ordered
+      // files re-sort by timing, so those jumps could land on the wrong row.
+      const index = displayCellIdsRef.current.indexOf(cellId)
+      if (index < 0) return false
+      clearChapterNavigationSelection()
+      void listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false })
+      if (opts?.flash) flashCellDom(cellId)
+      return true
     },
     focusCellEditorIndex: focusCellEditorByIndex,
     getCurrentIndex: () => {
@@ -1005,18 +1035,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       })
     },
     flashCell(cellId, _searchTerm) {
-      // Defer to next frame: the list may still be scrolling, so the
-      // DOM node we want might not exist yet.
-      requestAnimationFrame(() => {
-        const root = getListQueryRoot()
-        if (!root) return
-        const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
-        if (!el) return
-        el.classList.add("codex-search-flash")
-        window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
-      })
+      flashCellDom(cellId)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.

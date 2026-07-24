@@ -82,4 +82,24 @@ describe("TimelineCard", () => {
     expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
     expect(onSeek).not.toHaveBeenCalled()
   })
+
+  // ── AQU-646: subtitle-lane mirror card for a media cell ──
+
+  it("subtitle-variant media cell shows translation over transcript (never the filename)", () => {
+    const media = cell({ original: "episode.mp3", transcription: "hello there", translated: "" })
+    const { rerender } = render(
+      <TimelineCard cell={media} {...base} variant="subtitle" onSelect={() => {}} onRetime={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-card-c1")).toHaveTextContent("hello there")
+    rerender(
+      <TimelineCard
+        cell={cell({ original: "episode.mp3", transcription: "hello there", translated: "hola" })}
+        {...base}
+        variant="subtitle"
+        onSelect={() => {}}
+        onRetime={() => {}}
+      />,
+    )
+    expect(screen.getByTestId("tl-card-c1")).toHaveTextContent("hola")
+  })
 })

@@ -7,6 +7,7 @@
 import { useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { secToPx, pxToSec, clampRange } from "@/lib/timeline/scale"
+import { subtitleMirrorText } from "@/lib/timeline/lanes"
 import { fmtClock } from "./format"
 import type { CellData } from "@/hooks/useCells"
 
@@ -98,8 +99,17 @@ export function TimelineCard({
   }
 
   const isDialogue = variant === "dialogue"
+  // AQU-646: a media cell rendered in the SUBTITLE lane is the mirror card of
+  // an audio block — it shows the translation once translated, else the
+  // transcript (never the filename-ish `original`).
   const label =
-    (isDialogue ? cell.transcription || cell.original : cell.original) || cell.cellLabel || "—"
+    (isDialogue
+      ? cell.transcription || cell.original
+      : (cell.medium ?? "text") === "media"
+        ? subtitleMirrorText(cell)
+        : cell.original) ||
+    cell.cellLabel ||
+    "—"
   const castName =
     cell.metadata && typeof cell.metadata.cast_name === "string"
       ? (cell.metadata.cast_name as string)

@@ -27,7 +27,8 @@ type SearchFn = (
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
 import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
-import { prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
+import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
+import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
 import { parseParagraphResponse } from "@/lib/completion/paragraph-protocol"
 import {
@@ -260,21 +261,28 @@ export function useCompletion(
       )
 
       // AQU-662: decompose any inline footnote markers into clean base text +
-      // a translatable footnote block so raw \f...\f* markup is not fed to the
-      // model (and echoed back into the target). No-footnote cells pass through
-      // unchanged.
-      const { promptSource } = prepareFootnotesForPrompt(cell.original)
+      // a separately-listed footnote block so raw \f...\f* markup is not fed
+      // to the model (and echoed back into the target). The output contract
+      // (translate the line keeping [n] markers, then one [n] line per
+      // footnote) rides in the SYSTEM prompt — inside `Source:` it contradicts
+      // the "final source line only" output rule and the model emits nothing.
+      // No-footnote cells pass through unchanged.
+      const prepared = prepareFootnotesForPrompt(cell.original)
 
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        sourceText: promptSource,
+        sourceText: prepared.promptSource,
         examples: compressedExamples,
         rules,
         validatedPairs,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
         precedingContext,
+        ...(prepared.footnoteCount > 0 && {
+          systemAddendum: buildFootnoteInstruction(prepared.footnoteCount),
+          preSourceBlock: prepared.footnoteBlock,
+        }),
       })
       const result = await complete({
         settings: generationSettings, session,
@@ -298,12 +306,37 @@ export function useCompletion(
         rule_count: (rules ?? []).filter((r) => r.enabled).length,
         regenerate: Boolean(opts?.regenerate),
       })
+      // Reassemble the model's [n]-form reply into real \f...\f* markers so
+      // the committed target carries actual footnotes, not placeholder text.
+      let finalText = result
+      if (prepared.footnoteCount > 0) {
+        const rein = reintegrateFootnotes(result, prepared.notes)
+        if (rein.missingNoteLines.length || rein.appendedCallers.length) {
+          console.warn(
+            `[completeSingle] footnote reply degraded for cell ${cell.id}: ` +
+            `missing note lines [${rein.missingNoteLines.join(", ")}], ` +
+            `appended callers [${rein.appendedCallers.join(", ")}]`,
+          )
+        }
+        finalText = rein.text ?? ""
+      }
+      // D11 trust-killer guard, single-cell edition (mirrors completeParagraph):
+      // an empty draft — the model returned nothing, or the footnote reply had
+      // no translated base — is flagged and NEVER committed, and we resolve
+      // false so the sparkle flow does not show its "Saved" confirmation.
+      if (!finalText.trim()) {
+        console.warn(`[completeSingle] empty draft from model (not committed): ${cell.id}`)
+        setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+        setCompleting((p) => new Map(p).set(cell.id, "error"))
+        setErrors((p) => new Map(p).set(cell.id, "The model returned no translation — nothing was saved"))
+        return false
+      }
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.
       const llmAuthor = modelName
       await commitCompletedCell?.(
         cell,
-        result,
+        finalText,
         llmAuthor,
         draftProvenance(
           "single",
@@ -526,7 +559,10 @@ export function useCompletion(
         for (let i = 0; i < chunk.length; i++) {
           const cell = chunk[i]
           const text = filledText.get(i + 1)
-          if (text !== undefined) {
+          // D11: a present-but-empty <vN></vN> is "no emitted content" just
+          // like a missing tag — send it to the per-cell fallback instead of
+          // committing an empty draft.
+          if (text !== undefined && text.trim()) {
             if (commitCompletedCell) {
               try {
                 await commitCompletedCell(
@@ -600,10 +636,13 @@ export function useCompletion(
           // AQU-235 fix: thread the batch signal into completeSingle so it is
           // visible to Stop during a batch. getBatchCompletionSignal(runId)
           // returns an already-aborted signal if this run has been superseded.
-          await completeSingle(cell, getBatchCompletionSignal(runId))
-          // Only increment if the run is still live after the await.
+          const committed = await completeSingle(cell, getBatchCompletionSignal(runId))
+          // Only count if the run is still live after the await — and count it
+          // where it actually landed: a fallback that failed (empty draft,
+          // enqueue rejection) must not inflate the "done" tally.
           if (!isBatchCompletionCancelled(runId)) {
-            incrementBatchCompletionDone(runId)
+            if (committed) incrementBatchCompletionDone(runId)
+            else incrementBatchCompletionFailed(runId, 1)
           }
         }
       } else {

@@ -267,7 +267,9 @@ export function CellTtsButton({
     playOnly,
   ])
 
-  if (!trimmed) return null
+  // Round 5: an untranslated cell shows the button DISABLED with the reason
+  // instead of vanishing — a disappearing control read as a bug in QA.
+  const noText = !trimmed
 
   const isLocalModel = provider === "mms" || provider === "kokoro"
   const downloadingModel = !playableAttachId && isLocalModel && modelStatus.kind === "downloading" && status.kind !== "idle"
@@ -287,23 +289,25 @@ export function CellTtsButton({
   // resolution generateAndAttachCellVoice/synthesizeForCell use, so the label
   // can't drift from the real synthesis path.
   const engineName = providerInfo(provider).shortTitle
-  const tooltip = isError
-    ? `TTS failed — ${status.message}`
-    : isLoadingModel
-      ? pct != null ? `Downloading voice model (${pct}%)…` : "Loading voice model…"
-      : isSynthesizing
-        ? "Synthesizing speech…"
-        : isPlaying
-          ? "Pause"
-          : playableAttachId
-            ? `Play generated voice (${voice.name})`
-            : `Generate & play (${voice.name} — ${engineName})`
+  const tooltip = noText
+    ? "Translate this line first to generate voice"
+    : isError
+      ? `TTS failed — ${status.message}`
+      : isLoadingModel
+        ? pct != null ? `Downloading voice model (${pct}%)…` : "Loading voice model…"
+        : isSynthesizing
+          ? "Synthesizing speech…"
+          : isPlaying
+            ? "Pause"
+            : playableAttachId
+              ? `Play generated voice (${voice.name})`
+              : `Generate & play (${voice.name} — ${engineName})`
 
   const button = (
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled || isLoadingModel || isSynthesizing}
+      disabled={disabled || noText || isLoadingModel || isSynthesizing}
       aria-label={tooltip}
       className={cn(
         "flex h-5 items-center justify-center gap-1 rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",

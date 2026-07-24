@@ -57,6 +57,10 @@ describe("TimelineEditor", () => {
   })
 
   it("zoom-in widens the cards", () => {
+    // Hermetic: zoom persists per file — under a persistent localStorage
+    // (NODE_OPTIONS --localstorage-file) each run would ratchet 1.3× until
+    // ZOOM_MAX and the assertion goes flat.
+    localStorage.removeItem("codex:timelineZoom:zoomfile")
     render(
       <TimelineEditor
         fileId="zoomfile"

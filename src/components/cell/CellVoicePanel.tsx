@@ -25,6 +25,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { useVoiceRecency, touchVoice } from "@/lib/store/voice-recency"
 import { CropButton } from "./CropEditor"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
@@ -257,14 +258,33 @@ export function CellVoicePanel({
   const audio = useCellAudio(project, cellForAudio, cell.fileId)
   const { currentTime, duration, isPlaying, seek, play, pause, setVolume, setTrim, state: audioState } = audio
 
+  // Round 5: is the panel playing the SHARED imported source clip? Then the
+  // playback window is the cell's section on the film timeline (never the
+  // whole film), and the crop tool goes away — a crop here would silently
+  // overwrite the section's stored source trim (retime the section in the
+  // timeline instead).
+  const isSourceClip =
+    cell.medium === "media" &&
+    playableId != null &&
+    playableId === cell.selectedAudioId &&
+    !audioIdSeededWith(playableId, cell.id)
+  const sectionWindow =
+    isSourceClip &&
+    typeof cell.startTime === "number" && Number.isFinite(cell.startTime) &&
+    typeof cell.endTime === "number" && Number.isFinite(cell.endTime) &&
+    cell.endTime > cell.startTime
+      ? { start: cell.startTime, end: cell.endTime }
+      : null
+
   // Per-cell volume + non-destructive crop, client-owned (localStorage) and
   // reactive — a write from here OR from "voice together" (which writes slices
   // across many cells at once) updates this player live. Pushed into the
-  // controller; null trim bounds = no constraint.
+  // controller; null trim bounds = no constraint. Source clips ignore the
+  // crop pref: their window IS the section.
   const pref = useCellPref(projectId, cell.id)
   const volume = pref.volume ?? 1
-  const trimStart = pref.trimStart ?? null
-  const trimEnd = pref.trimEnd ?? null
+  const trimStart = sectionWindow ? sectionWindow.start : (pref.trimStart ?? null)
+  const trimEnd = sectionWindow ? sectionWindow.end : (pref.trimEnd ?? null)
   useEffect(() => { setVolume(volume) }, [volume, setVolume])
   useEffect(() => { setTrim(trimStart, trimEnd) }, [trimStart, trimEnd, setTrim])
   const changeVolume = useCallback((v: number) => {
@@ -276,6 +296,9 @@ export function CellVoicePanel({
   const trimEmitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistTrimToServer = useCallback((start: number | null, end: number | null) => {
     if (!playableId) return
+    // Round 5 guard: never rewrite the SOURCE clip's per-section trims — the
+    // crop UI is hidden for source clips, this is the belt-and-braces.
+    if (isSourceClip) return
     const att = cell.attachments?.[playableId]
     if (!att) return
     const slot = playableId === cell.selectedAudioId ? "recording" : "generatedVoice"
@@ -295,7 +318,7 @@ export function CellVoicePanel({
       author: username,
     })
     notifyAudioAttachmentsChanged(cell.fileId)
-  }, [playableId, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username])
+  }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username])
 
   const changeTrim = useCallback((start: number | null, end: number | null) => {
     setCellPref(projectId, cell.id, { trimStart: start ?? undefined, trimEnd: end ?? undefined })
@@ -380,7 +403,11 @@ export function CellVoicePanel({
       {hasTake && (
         <>
           <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/voice:opacity-100">
-            <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
+            {/* Round 5: no crop on the shared source clip — its window is the
+                section's timing; retime the section in the timeline. */}
+            {!isSourceClip && (
+              <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
+            )}
             <VolumeButton volume={volume} onChange={changeVolume} />
             <HeaderIconButton title="Clone a voice from this take" onClick={onMakeCharacter}>
               <UserPlus className="h-3.5 w-3.5" />

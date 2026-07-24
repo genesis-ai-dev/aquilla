@@ -30,7 +30,6 @@ import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
-import { audioIdSeededWith } from "@/lib/audio/upload"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 
@@ -144,13 +143,6 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
       : null
 
   // ── Action-row derivations (mirror the text rail's gates) ─────────────────
-  const selectedAttachment = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
-  const hasAudio = Boolean(selectedAttachment && !selectedAttachment.isDeleted)
-  // SUB-29: the mic/upload gate counts recorded TAKES, not the imported source
-  // clip that squats in every section's recording slot (audioId provenance:
-  // takes are seeded with the cellId). Text cells behave exactly as before.
-  const hasRecordedTake =
-    hasAudio && (cell.medium !== "media" || audioIdSeededWith(cell.selectedAudioId, cell.id))
   const completingState = detailActions?.completing.get(cell.id)
   const busy = completingState === "searching" || completingState === "generating"
   const preview = detailActions?.previews.get(cell.id)
@@ -269,7 +261,9 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
                     <RefreshCw className="h-3 w-3" />
                   </ActionIconButton>
                 )}
-                {editable && !hasRecordedTake && (
+                {/* Round 5: mic/upload stay visible with a take present — the
+                    takes strip manages versions; a vanishing mic read as a bug. */}
+                {editable && (
                   <ActionIconButton
                     label="Record audio"
                     testId="tl-detail-record"
@@ -278,7 +272,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
                     <Mic className="h-3 w-3" />
                   </ActionIconButton>
                 )}
-                {editable && !hasRecordedTake && (
+                {editable && (
                   <CellAudioUploadButton
                     projectId={detailActions.projectId}
                     fileId={cell.fileId}
@@ -287,25 +281,25 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
                     disabled={!editable}
                   />
                 )}
-                {cell.translated.trim() !== "" && (
-                  <CellTtsButton
-                    cellId={cell.id}
-                    text={cell.translated}
-                    original={effectiveSourceText(cell)}
-                    context={cell.context}
-                    cellLabel={cell.cellLabel}
-                    sourceLanguage={detailActions.sourceLanguage}
-                    targetLanguage={detailActions.targetLanguage}
-                    projectTtsSettings={detailActions.projectTtsSettings}
-                    cellTtsSettings={cell.ttsSettings}
-                    generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
-                    attachments={cell.attachments}
-                    projectId={detailActions.projectId}
-                    fileId={cell.fileId}
-                    disabled={!editable}
-                    playOnly
-                  />
-                )}
+                {/* Round 5: no playOnly — generating here durably attaches the
+                    voice (it appears on the Target-audio track); untranslated
+                    cells render the button disabled with the reason. */}
+                <CellTtsButton
+                  cellId={cell.id}
+                  text={cell.translated}
+                  original={effectiveSourceText(cell)}
+                  context={cell.context}
+                  cellLabel={cell.cellLabel}
+                  sourceLanguage={detailActions.sourceLanguage}
+                  targetLanguage={detailActions.targetLanguage}
+                  projectTtsSettings={detailActions.projectTtsSettings}
+                  cellTtsSettings={cell.ttsSettings}
+                  generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
+                  attachments={cell.attachments}
+                  projectId={detailActions.projectId}
+                  fileId={cell.fileId}
+                  disabled={!editable}
+                />
                 {editable && (
                   <ActionIconButton
                     label="Add footnote"

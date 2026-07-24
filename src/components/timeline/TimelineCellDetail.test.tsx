@@ -202,15 +202,15 @@ describe("TimelineCellDetail — streaming state", () => {
 })
 
 describe("TimelineCellDetail — audio, comments, history, footnote", () => {
-  it("Record fires onOpenRecording; hidden when the cell already has audio", () => {
+  it("Record fires onOpenRecording; round 5: STAYS visible when a take exists (re-record)", () => {
     const actions = makeActions()
     const { rerender } = render(
       <TimelineCellDetail cell={timedCell()} editable onCommitTarget={() => {}} detailActions={actions} />,
     )
     fireEvent.click(screen.getByTestId("tl-detail-record"))
     expect(actions.onOpenRecording).toHaveBeenCalledWith("c1")
-    // SUB-29: hiding requires a recorded TAKE (cellId-seeded audioId) — an
-    // ambiguous/source-clip id keeps the mic visible on media cells.
+    // Round 5: a recorded take no longer hides the mic — the takes strip
+    // manages versions, and a vanishing control read as a bug in QA.
     const takeId = "audio-c1-1700000000-abcdefgh.webm"
     rerender(
       <TimelineCellDetail
@@ -223,7 +223,7 @@ describe("TimelineCellDetail — audio, comments, history, footnote", () => {
         detailActions={actions}
       />,
     )
-    expect(screen.queryByTestId("tl-detail-record")).toBeNull()
+    expect(screen.getByTestId("tl-detail-record")).toBeInTheDocument()
   })
 
   it("Comments and History fire with the cell id; comment label counts open threads", () => {
@@ -287,18 +287,19 @@ describe("TimelineCellDetail — SUB-29 mic gate + error message", () => {
     expect(screen.getByTestId("mock-upload")).toBeInTheDocument()
   })
 
-  it("mic hidden once a TAKE (cellId-seeded) is selected", () => {
+  it("round 5: mic + upload remain available with a TAKE selected; hidden only when not editable", () => {
     const takeId = "audio-c1-1700000000-abcdefgh.webm"
-    render(
-      <TimelineCellDetail
-        cell={timedCell({
-          selectedAudioId: takeId,
-          attachments: { [takeId]: { type: "audio", url: `frontier-audio://${takeId}` } },
-        } as Partial<CellData>)}
-        editable
-        onCommitTarget={() => {}}
-        detailActions={makeActions()}
-      />,
+    const withTake = timedCell({
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: `frontier-audio://${takeId}` } },
+    } as Partial<CellData>)
+    const { rerender } = render(
+      <TimelineCellDetail cell={withTake} editable onCommitTarget={() => {}} detailActions={makeActions()} />,
+    )
+    expect(screen.getByTestId("tl-detail-record")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-upload")).toBeInTheDocument()
+    rerender(
+      <TimelineCellDetail cell={withTake} editable={false} onCommitTarget={() => {}} detailActions={makeActions()} />,
     )
     expect(screen.queryByTestId("tl-detail-record")).toBeNull()
   })

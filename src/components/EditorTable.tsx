@@ -68,7 +68,6 @@ import { useCellAudio } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
-import { audioIdSeededWith } from "@/lib/audio/upload"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   MAX_SELECTED,
@@ -4207,11 +4206,6 @@ function EditorRow({
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
-  // SUB-29: the mic/upload gate counts recorded TAKES — the imported source
-  // clip squatting in every media section's recording slot must not hide the
-  // record affordance (audioId provenance: takes are seeded with the cellId).
-  const hasRecordedTake =
-    hasAudio && (cell.medium !== "media" || audioIdSeededWith(cell.selectedAudioId, cell.id))
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
@@ -4236,6 +4230,23 @@ function EditorRow({
     cell.attachments, cell.selectedAudioId,
   ])
   const audioController = useCellAudio(project, cellForAudio, cell.fileId)
+  // Round 5: when the rail plays the SHARED source clip (media section), it
+  // must stop at the section's end — the play-queue windows this clip, but
+  // this per-cell player was never told the window, so play ran on through
+  // the rest of the film. Takes and generated clips stay unconstrained.
+  const railSectionWindow =
+    isSourceSegmentSelected(cell) &&
+    typeof cell.startTime === "number" && Number.isFinite(cell.startTime) &&
+    typeof cell.endTime === "number" && Number.isFinite(cell.endTime) &&
+    cell.endTime > cell.startTime
+      ? { start: cell.startTime, end: cell.endTime }
+      : null
+  const { setTrim: setRailTrim } = audioController
+  useEffect(() => {
+    if (cell.medium !== "media") return
+    if (railSectionWindow) setRailTrim(railSectionWindow.start, railSectionWindow.end)
+    else setRailTrim(null, null)
+  }, [cell.medium, railSectionWindow?.start, railSectionWindow?.end, setRailTrim]) // eslint-disable-line react-hooks/exhaustive-deps -- window identity varies per render; primitives cover it
   const cellForGeneratedVoice = useMemo(() => ({
     metadata: {
       attachments: cell.attachments,
@@ -5587,16 +5598,16 @@ function EditorRow({
                 />
               )}
 
-              {/* FRO-237: Direct mic button on the rail when no audio — one-click
-                  action without needing to open a popover ("just hit the record
-                  mic — quick action"). Replaces the redundant Record item inside
-                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
-                  the overflow button already gives a direct play affordance.
+              {/* FRO-237: Direct mic button on the rail — one-click action
+                  without needing to open a popover ("just hit the record
+                  mic — quick action"). Round 5: stays visible when a take
+                  exists (re-recording is normal; the takes strip manages
+                  versions — a vanishing mic read as a bug in QA).
                   WARN fix: the button must NOT be disabled when micDenied —
                   disabled elements receive no mouse events, so the "click for
                   help" affordance is unreachable. Instead keep it enabled and
                   route clicks to the denied-help popover. */}
-              {!hasRecordedTake && onOpenRecording && editable && (() => {
+              {onOpenRecording && editable && (() => {
                 const unsupportedReason = getUnsupportedReason()
                 const isUnsupported = unsupportedReason !== null
                 const micTooltip = micDenied
@@ -5651,8 +5662,8 @@ function EditorRow({
               {/* AQU-513: file-picker upload next to the mic — a plain
                   <input type="file"> so phone browsers can attach an
                   existing wav/mp3/m4a recording without a desktop. Same
-                  gating as the mic (no audio yet, editable). */}
-              {!hasRecordedTake && editable && (
+                  gating as the mic (editable; visible with a take too). */}
+              {editable && (
                 <CellAudioUploadButton
                   projectId={project.id}
                   fileId={cell.fileId}
@@ -5687,25 +5698,25 @@ function EditorRow({
                 />
               )}
 
-              {visibleTranslated.trim().length > 0 && (
-                <CellTtsButton
-                  cellId={cell.id}
-                  text={visibleTranslated}
-                  original={effectiveSourceText(cell)}
-                  context={cell.context}
-                  cellLabel={cell.cellLabel}
-                  sourceLanguage={project.sourceLanguage}
-                  targetLanguage={project.targetLanguage}
-                  projectTtsSettings={project.ttsSettings}
-                  cellTtsSettings={cell.ttsSettings}
-                  generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
-                  attachments={cell.attachments}
-                  projectId={project.id}
-                  fileId={cell.fileId}
-                  disabled={!editable}
-                  playOnly
-                />
-              )}
+              {/* Round 5: no playOnly — generating here durably attaches the
+                  voice; an untranslated line shows the button disabled with
+                  the reason instead of hiding it. */}
+              <CellTtsButton
+                cellId={cell.id}
+                text={visibleTranslated}
+                original={effectiveSourceText(cell)}
+                context={cell.context}
+                cellLabel={cell.cellLabel}
+                sourceLanguage={project.sourceLanguage}
+                targetLanguage={project.targetLanguage}
+                projectTtsSettings={project.ttsSettings}
+                cellTtsSettings={cell.ttsSettings}
+                generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
+                attachments={cell.attachments}
+                projectId={project.id}
+                fileId={cell.fileId}
+                disabled={!editable}
+              />
 
               {editable && !isLoading && (
                 <RailButton

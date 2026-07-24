@@ -5,6 +5,8 @@
 //
 // Auth: Bearer ${SYNC_SECRET_KEY}, same as /admin/files/* and the archive hook.
 
+import { secureCompare } from "./lib/secure-compare"
+
 export interface MemberRemovedEnv {
   ProjectSync?: DurableObjectNamespace
   SYNC_SECRET_KEY?: string
@@ -75,7 +77,7 @@ export async function handleMemberRemovedRequest(
 
   const auth = request.headers.get("Authorization") ?? ""
   const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || auth !== expected) {
+  if (!expected || !secureCompare(auth, expected)) {
     return new Response("unauthorized", { status: 401 })
   }
 

@@ -15,6 +15,7 @@
 // Gated on SYNC_SECRET_KEY — same trust tier as /migrate/ingest + /migrate/audio.
 
 import { audioObjectKey } from "../audio"
+import { secureCompare } from "../lib/secure-compare"
 
 const RE = /^\/migrate\/audio-copy\/?$/
 
@@ -53,7 +54,7 @@ export async function handleMigrateAudioCopyRequest(
   if (!RE.test(url.pathname)) return null
   if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response("SYNC_SECRET_KEY not configured", { status: 500 })
-  if ((request.headers.get("Authorization") ?? "") !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(request.headers.get("Authorization") ?? "", `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response("unauthorized", { status: 401 })
   }
   if (!env.SNAPSHOTS) return new Response("SNAPSHOTS bucket not bound", { status: 500 })

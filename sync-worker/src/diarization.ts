@@ -18,18 +18,9 @@
 // in the cloud). `DIARIZATION_PUBLIC_BASE` is the externally-reachable base URL
 // of this worker (incl. any `/sync` apex prefix). Local dev needs a tunnel.
 
-import { timingSafeEqual } from "node:crypto"
 import { verifyTokenForFile } from "./auth"
 import { audioObjectKey } from "./audio"
-
-// Constant-time compare — a plain `!==` leaks timing information to anyone
-// hitting this publicly-reachable callback route.
-function constantTimeEqual(a: string, b: string): boolean {
-  const aBytes = Buffer.from(a)
-  const bBytes = Buffer.from(b)
-  if (aBytes.length !== bBytes.length) return false
-  return timingSafeEqual(aBytes, bBytes)
-}
+import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
 
 export interface DiarizationEnv {
   SNAPSHOTS: R2Bucket

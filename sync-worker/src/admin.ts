@@ -3,7 +3,7 @@
 // the partyserver import graph (which references cloudflare:* URLs Node
 // doesn't resolve).
 
-import { timingSafeEqual } from "node:crypto"
+import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
 
 export interface AdminEnv {
   SNAPSHOTS: R2Bucket
@@ -14,16 +14,6 @@ export interface AdminEnv {
 function r2KeyPrefix(env: Pick<AdminEnv, "R2_KEY_PREFIX">): string {
   const p = env.R2_KEY_PREFIX?.trim().replace(/^\/+|\/+$/g, "") ?? ""
   return p ? `${p}/` : ""
-}
-
-// Constant-time compare — a plain `!==` leaks timing information proportional
-// to the shared secret's matching prefix length to anyone who can hit this
-// public admin route.
-function constantTimeEqual(a: string, b: string): boolean {
-  const aBytes = Buffer.from(a)
-  const bBytes = Buffer.from(b)
-  if (aBytes.length !== bBytes.length) return false
-  return timingSafeEqual(aBytes, bBytes)
 }
 
 /**

@@ -67,17 +67,21 @@ export function deriveChecklistState(
   settings: Partial<CompletionSettings> | undefined,
   collaboratorReach: number,
   aiModelsReady: boolean,
-  fileCount: number = 0
+  fileCount: number = 0,
+  // AQU-701: an explicit "we don't use voice/transcription" skip counts the
+  // voice & transcription step as handled, so the checklist stops nagging.
+  aiSetupSkipped: boolean = false
 ): ChecklistState {
   const importFiles = fileCount > 0
   const aiInstructions = Boolean(settings?.systemPrompt?.trim())
   const collaborators = collaboratorReach > 0
-  const items = [importFiles, aiInstructions, collaborators, aiModelsReady]
+  const aiModels = aiModelsReady || aiSetupSkipped
+  const items = [importFiles, aiInstructions, collaborators, aiModels]
   return {
     importFiles,
     aiInstructions,
     collaborators,
-    aiModels: aiModelsReady,
+    aiModels,
     completedCount: items.filter(Boolean).length,
     totalCount: items.length,
   }
@@ -144,6 +148,7 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     memberCount,
     aiModelsReady,
     project?.files?.length ?? 0,
+    project?.aiSetupSkipped ?? false,
   )
 
   const dismiss = useCallback(async () => {

@@ -47,6 +47,19 @@ describe("deriveChecklistState", () => {
     expect(state.aiModels).toBe(true)
   })
 
+  // AQU-701: an explicit "we don't use voice/transcription" skip counts the
+  // voice & transcription step as handled so the checklist stops nagging.
+  it("AQU-701: marks aiModels complete when the step is skipped, even if models aren't ready", () => {
+    const state = deriveChecklistState({}, 0, false, 0, true)
+    expect(state.aiModels).toBe(true)
+    expect(state.totalCount).toBe(4)
+    expect(state.completedCount).toBe(1)
+  })
+
+  it("AQU-701: leaves aiModels incomplete when neither ready nor skipped", () => {
+    expect(deriveChecklistState({}, 0, false, 0, false).aiModels).toBe(false)
+  })
+
   it("counts completed items correctly", () => {
     const state = deriveChecklistState(
       { endpoint: "x", model: "m", maxTokens: 512, temperature: 0.3, systemPrompt: "y", llmHealthPenalty: 0.1 },

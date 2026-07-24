@@ -45,7 +45,14 @@ Content (compact card, scrollable in short docks, muted styling to match dock):
 
 ## Part 2 — Docs page (aquilla-docs-kieran repo)
 
-New `src/content/docs/ai-and-audio/ai-agent.mdx` ("The AI agent"):
+**Superseded during implementation:** pulling origin/main brought in a complete
+"Automation" section (`automation/using-the-agent.mdx`,
+`agent-memory-and-brief.mdx`, `approving-agent-changes.mdx`) covering
+everything below. The guide link targets `/automation/using-the-agent/`; the
+remaining docs work was the copilot↔agent cross-links and pushing the staged
+branding edits.
+
+Original plan — new `src/content/docs/ai-and-audio/ai-agent.mdx`:
 
 - What it is; how it differs from the inline **AI copilot** (drafting
   suggestions in the cell) — agent = conversational, project-wide, tool-using.

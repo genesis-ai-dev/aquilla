@@ -125,6 +125,57 @@ describe("self-assign carve-out (AQU-496)", () => {
   })
 })
 
+// ── AQU-676: assignee picker lists project members only ──────────────────────
+describe("project-member-only assignee picker (AQU-676)", () => {
+  // "carol" reaches the project ONLY through an org-wide role (source "org",
+  // no project-specific secondary path) — she must not be assignable. "anna"
+  // and "bob" have a direct project_members override, so they stay.
+  const ORG_ONLY_MEMBER = {
+    userId: 7,
+    username: "carol",
+    role: { level: 400, name: "contributor", source: "org" as const },
+    secondarySources: [],
+  }
+  const MIXED_PROPS = {
+    ...BASE_PROPS,
+    members: [...BASE_PROPS.members, ORG_ONLY_MEMBER],
+  }
+
+  it("omits org-baseline-only members from the assignee options", async () => {
+    render(<AssignModal {...MIXED_PROPS} />)
+    const trigger = screen.getByRole("combobox", { name: /assign to/i })
+    fireEvent.click(trigger)
+    // Project members are pickable…
+    expect(await screen.findByRole("option", { name: /anna/ })).toBeTruthy()
+    expect(screen.getByRole("option", { name: /bob/ })).toBeTruthy()
+    // …but the org-only member never appears as an option.
+    expect(screen.queryByRole("option", { name: /carol/ })).toBeNull()
+  })
+
+  it("still assigns to a legitimate project member end-to-end", async () => {
+    render(<AssignModal {...MIXED_PROPS} />)
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].assigneeUserId).toBe(42)
+  })
+
+  it("keeps a member reachable via a group/creator secondary path even if the winning role is org", async () => {
+    // Winning path is org-wide, but a secondary 'group' grant makes her a
+    // real project member — partitionMembers must keep her.
+    const GROUP_MEMBER = {
+      userId: 8,
+      username: "dora",
+      role: { level: 500, name: "lead", source: "org" as const },
+      secondarySources: [{ source: "group" as const, level: 400, name: "contributor" }],
+    }
+    render(<AssignModal {...BASE_PROPS} members={[GROUP_MEMBER]} />)
+    const trigger = screen.getByRole("combobox", { name: /assign to/i })
+    fireEvent.click(trigger)
+    expect(await screen.findByRole("option", { name: /dora/ })).toBeTruthy()
+  })
+})
+
 // Base UI Select renders a combobox trigger; options live in a portaled
 // popup. Under happy-dom, clicks on options don't commit a selection when the
 // select sits inside a modal Dialog — but hover-highlighting the option and

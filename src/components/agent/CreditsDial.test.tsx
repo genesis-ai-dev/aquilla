@@ -84,6 +84,22 @@ describe("CreditsDial — maintainer view", () => {
     expect(ring.getAttribute("stroke-dasharray") ?? "").not.toContain("NaN")
   })
 
+  it("draws the ring as a chip-backed 16px gauge, still with no inline number", async () => {
+    mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
+    render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    const dial = await screen.findByTestId("credits-dial")
+    expect(dial.querySelector("svg")?.getAttribute("class")).toContain("h-4")
+    expect(dial.className).toContain("rounded-full")
+    // The heavier treatment is styling only — the ring still stands alone (AQU-671).
+    expect(dial.textContent).not.toContain("150 cr")
+    expect(dial).toHaveAttribute("title", "Agent credits used today: 150 cr")
+    // The thicker arc must stay inside the 12x12 box: r + stroke/2 <= 6.
+    const ring = dial.querySelectorAll("circle")[1]
+    const r = Number(ring.getAttribute("r"))
+    const stroke = Number(ring.getAttribute("stroke-width"))
+    expect(r + stroke / 2).toBeLessThanOrEqual(6)
+  })
+
   it("opens a popover with agent + all-rail day/week detail on click", async () => {
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
     render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)

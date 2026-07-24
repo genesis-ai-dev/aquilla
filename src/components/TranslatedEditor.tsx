@@ -344,8 +344,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onRuleHoverRef.current = onRuleHover }, [onRuleHover])
 
   const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
+  // NOTE on `isDestroyed` guards here and in the effects below: `useEditor`'s
+  // deps are [cellId], so a call site that swaps cellId on ONE mounted
+  // instance (the Media details panel) destroys the old editor while the new
+  // one arrives a render later. Effects keyed on other changed deps (content,
+  // readonly, direction) re-run inside that window with the stale DESTROYED
+  // instance from their closure — non-null, but its view/command manager are
+  // gone, so `.commands`/`.view` dereferences crash the workspace boundary.
   const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
-    if (!editorInstance) return
+    if (!editorInstance || editorInstance.isDestroyed) return
     const next = directionModeRef.current === "auto"
       ? detectStrongTextDirection(editorInstance.getText()) ?? textDirectionRef.current
       : textDirectionRef.current
@@ -850,7 +857,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // pre-prediction text. `aiDrafted` is the gate: a human's own in-flight edit
   // commits with `aiDrafted=false`, so live typing is never yanked out.
   useEffect(() => {
-    if (!editor) return
+    // isDestroyed: see applyEditorDirection — a stale destroyed instance can
+    // reach this effect when initialPlain changes during an in-place cellId
+    // swap. Skip it; the replacement editor is created with the new
+    // initialContent and this effect re-runs when its identity lands.
+    if (!editor || editor.isDestroyed) return
     if (initialPlain === lastHydratedPlainRef.current) return
     if (editor.isFocused && !aiDrafted) return
     const wasFocused = editor.isFocused
@@ -869,7 +880,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   }, [editor, initialContent, initialPlain, aiDrafted])
 
   useEffect(() => {
-    editor?.setEditable(!isReadOnly)
+    if (!editor || editor.isDestroyed) return
+    editor.setEditable(!isReadOnly)
   }, [editor, isReadOnly])
 
   const [, forceEditorStateUpdate] = useState(0)

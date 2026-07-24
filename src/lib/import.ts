@@ -21,6 +21,8 @@ import type { FileType, FileReference, TranslatableString, OrderedBy } from "./p
 import { detectFileType, isMediaFileType } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
+import { tileSegments } from "./timeline/tile-segments"
+import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
 import {
@@ -1430,6 +1432,13 @@ export interface MediaSegmentSpec {
  * Never synthesizes timing — a fallback spec uses the real probed duration, or
  * is left untimed (editor flags it) if even that fails. Shared by the importer
  * (new file) and the media-lens attach flow (existing file).
+ *
+ * AQU-646 timing/trim split: cell TIMING (startMs/endMs) is TILED so the
+ * segments partition the whole clip — playback can never skip the audio
+ * between detected speech regions ("cuts, not deletions"). Attachment TRIMS
+ * (trimStartMs/trimEndMs) stay at the tight detected boundaries — they feed
+ * Whisper transcription and voice-reference extraction, which must not absorb
+ * silence or neighboring speech.
  */
 export async function computeMediaSegmentSpecs(
   file: File,
@@ -1438,9 +1447,16 @@ export async function computeMediaSegmentSpecs(
   const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
   const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
 
+  const timings = tileSegments(segments, durationMs)
   const specs: MediaSegmentSpec[] =
     segments.length >= 2
-      ? segments.map((s) => ({ cellId: uuidv7(), startMs: s.startMs, endMs: s.endMs, trimStartMs: s.startMs, trimEndMs: s.endMs }))
+      ? segments.map((s, i) => ({
+          cellId: uuidv7(),
+          startMs: timings[i].startMs,
+          endMs: timings[i].endMs,
+          trimStartMs: s.startMs,
+          trimEndMs: s.endMs,
+        }))
       : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
   return { durationMs, specs }
 }
@@ -1535,6 +1551,21 @@ export async function emitMediaFile(
     })),
     getToken: ctx.getToken,
     signal: ctx.signal,
+  })
+
+  // AQU-646: seed the post-import auto-transcribe — the workspace's
+  // import-completion handler consumes this (the cell store won't have these
+  // cells, let alone their attachments, until an unawaitable revalidate).
+  recordMediaImportSeed({
+    fileId,
+    cells: buildMediaSeedCells({
+      fileId,
+      fileName: file.name,
+      specs,
+      audioId: `${upload.audioId}.${upload.ext}`,
+      url: upload.url,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    }),
   })
 
   return {

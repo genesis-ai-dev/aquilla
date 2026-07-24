@@ -46,6 +46,7 @@ import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
 import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates, dropValidatedPairDuplicates } from "@/lib/completion/compress-examples"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
@@ -207,12 +208,30 @@ export function useCompletion(
     opts?: { regenerate?: boolean },
   ): Promise<boolean> => {
     if (!isConfigured || !isAvailable) return false
+    // SUB-28: media sections speak through their transcript — `original` is
+    // the import FILENAME, never legitimate source text. Untranscribed → a
+    // clear error instead of a garbage "translation" of the filename.
+    const sourceText = effectiveSourceText(cell)
+    if (!sourceText.trim()) {
+      setErrors((p) => new Map(p).set(cell.id, "No source text yet — transcribe this section first."))
+      setCompleting((p) => new Map(p).set(cell.id, "error"))
+      return false
+    }
     // AQU-620: raise the temperature for an explicit regenerate so the second
     // request varies; leave first-draft generation on the configured value.
     const generationSettings: CompletionSettings = opts?.regenerate
       ? { ...effectiveSettings, temperature: Math.max(effectiveSettings.temperature ?? 0, REGENERATE_TEMPERATURE) }
       : effectiveSettings
 
+    // A new attempt supersedes any prior error for this cell — without this,
+    // messages like the SUB-28 "transcribe first" guidance stuck to the cell
+    // forever (nothing ever deleted from the errors map).
+    setErrors((p) => {
+      if (!p.has(cell.id)) return p
+      const next = new Map(p)
+      next.delete(cell.id)
+      return next
+    })
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
     // top_k controls how many approved examples are requested. The injected
     // search adapter is drafting-specific and enforces validatedOnly=true on
@@ -220,7 +239,7 @@ export function useCompletion(
     const topK = effectiveSettings.top_k ?? 15
     let found: ScoredPair[] = []
     try {
-      found = await search(cell.original, topK, cell.id)
+      found = await search(sourceText, topK, cell.id)
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -231,7 +250,7 @@ export function useCompletion(
     // the cell being drafted. These represent human corrections — "fix it once,
     // the system learns." Limit to top_k most-relevant to keep the prompt tight.
     const corpusCells = getAllCells()
-    const validatedPairs = collectValidatedPairs(corpusCells, cell.original, topK)
+    const validatedPairs = collectValidatedPairs(corpusCells, sourceText, topK)
 
     try {
       // Left-context = committed target of the preceding cells (D4).
@@ -266,8 +285,10 @@ export function useCompletion(
       // (translate the line keeping [n] markers, then one [n] line per
       // footnote) rides in the SYSTEM prompt — inside `Source:` it contradicts
       // the "final source line only" output rule and the model emits nothing.
-      // No-footnote cells pass through unchanged.
-      const prepared = prepareFootnotesForPrompt(cell.original)
+      // No-footnote cells pass through unchanged. Runs on the EFFECTIVE
+      // source (SUB-28): for text cells that IS `original`; media transcripts
+      // carry no USFM markers and pass through.
+      const prepared = prepareFootnotesForPrompt(sourceText)
 
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
@@ -378,8 +399,14 @@ export function useCompletion(
   //   - The driver checks isBatchCompletionCancelled() before each chunk.
   //   - The in-flight fetch/stream receives the AbortSignal and terminates immediately.
   //   - Already-committed cells are unaffected; partial streaming text is discarded.
-  const completeBatch = useCallback(async (cells: CellData[]) => {
+  const completeBatch = useCallback(async (allRequested: CellData[]) => {
     if (!isConfigured || !isAvailable) return
+
+    // SUB-28: untranscribed media sections have NO source text (the filename
+    // doesn't count) — skip them instead of asking the model to "translate"
+    // an empty source line.
+    const cells = allRequested.filter((c) => effectiveSourceText(c).trim() !== "")
+    if (cells.length === 0) return
 
     const chunks: CellData[][] = []
     for (let i = 0; i < cells.length; i += MAX_CELLS_PER_CALL) {
@@ -410,8 +437,16 @@ export function useCompletion(
         // Stop starting new sub-batches if cancelled between chunks.
         if (isBatchCompletionCancelled(runId)) break
 
+        // A new attempt supersedes prior errors for these cells (see the
+        // matching completeSingle note).
+        setErrors((p) => {
+          if (!chunk.some((c) => p.has(c.id))) return p
+          const next = new Map(p)
+          for (const c of chunk) next.delete(c.id)
+          return next
+        })
         for (const c of chunk) setCompleting((p) => new Map(p).set(c.id, "searching"))
-        const concatenated = chunk.map((c) => c.original).join(" ")
+        const concatenated = chunk.map((c) => effectiveSourceText(c)).join(" ")
         let passages: PassageHit[] = []
         try {
           passages = await searchPassages(concatenated, 3, 2)
@@ -466,7 +501,7 @@ export function useCompletion(
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
           systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-          cells: chunk.map((c) => ({ source: c.original })),
+          cells: chunk.map((c) => ({ source: effectiveSourceText(c) })),
           examples: examplesForPrompt,
           rules,
           validatedPairs: batchValidatedPairs,
@@ -717,7 +752,7 @@ export function useCompletion(
 
       // Validated pairs from living memory for relevance-ranked few-shot.
       const topK = effectiveSettings.top_k ?? 15
-      const concatenated = draftCells.map((c) => c.original).join(" ")
+      const concatenated = draftCells.map((c) => effectiveSourceText(c)).join(" ")
       const validatedPairs = collectValidatedPairs(cells, concatenated, topK)
 
       // Retrieve passage examples for the paragraph's source text.
@@ -745,7 +780,7 @@ export function useCompletion(
         // requested from the model.
         cells: groupCells.map((c) => ({
           cellId: c.id,
-          source: c.original,
+          source: effectiveSourceText(c),
           ...(c.status === "validated" ? { lockedTarget: c.translated } : {}),
         })),
         examples: examplesForPrompt,

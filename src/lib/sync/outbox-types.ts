@@ -249,7 +249,13 @@ export interface OutboxEventPayloads {
     voiceId?: string
     referenceAudioId?: string
     durationMs?: number
+    /** Non-destructive playback trim window into the clip, in ms. */
+    trimStartMs?: number
+    trimEndMs?: number
     timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+    /** AQU-646: ASR transcript of the clip's trim window (media source segments
+     *  only) — the server lands it on the source cell's `transcription`. */
+    transcription?: string
   }
   "cell.audio.select": {
     audioId: string

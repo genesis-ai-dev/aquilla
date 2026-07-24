@@ -34,6 +34,9 @@ import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -48,8 +51,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
-import { startQueue } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, startQueueAtTime } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -71,7 +73,8 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll } from "@/lib/audio/batch-audio"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, isSourceSegmentSelected } from "@/lib/audio/batch-audio"
+import { transcribeCell } from "@/lib/audio/transcribe"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
@@ -83,7 +86,7 @@ import {
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
-import { TimelineEditor } from "@/components/timeline/TimelineEditor"
+import { TimelineEditor, type TimelineDetailActions } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useFocusLock } from "@/hooks/useFocusLock"
@@ -99,11 +102,13 @@ import { acknowledgeOutboxEvents } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
-import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
+import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
+import { extractVoiceReference } from "@/lib/audio/reference-extract"
+import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2, X } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2, X, Mic } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
@@ -125,6 +130,7 @@ import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { EditorModeToggle } from "./EditorModeToggle"
 import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
+import type { EditorLens } from "@/components/EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
@@ -648,7 +654,7 @@ export function ProjectWorkspace() {
     // If there is a remembered cell, park it in the ref so the scroll-restore
     // effect can consume it once cells are loaded.
     if (savedLoc?.cellId && savedLoc.fileId === nextFileId) {
-      pendingCellScrollRef.current = savedLoc.cellId
+      pendingCellScrollRef.current = { cellId: savedLoc.cellId, flash: false }
     }
     const target = `/project/${projectId}/file/${nextFileId}`
     if (redirectTo(target)) setSelectedFileId(nextFileId)
@@ -692,7 +698,7 @@ export function ProjectWorkspace() {
   // the scroll-restore effect (below) can consume it once cells are loaded.
   useEffect(() => {
     const cellId = searchParams.get("cellId")
-    if (cellId) pendingCellScrollRef.current = cellId
+    if (cellId) pendingCellScrollRef.current = { cellId, flash: false }
   }, [searchParams])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
@@ -781,7 +787,7 @@ export function ProjectWorkspace() {
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
   useEffect(() => {
-    if (location.pathname.endsWith("/voice")) { setLens("audio"); setDockTab("voices") }
+    if (location.pathname.endsWith("/voice")) { switchLens("audio"); setDockTab("voices") }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
@@ -799,10 +805,11 @@ export function ProjectWorkspace() {
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
-  // Holds a cellId to scroll to once cells are loaded after a restore-location
-  // navigation. Set during the restore effect, consumed (and cleared) by a
-  // separate effect that fires when `cells` are available.
-  const pendingCellScrollRef = useRef<string | null>(null)
+  // Holds a cell to scroll to once cells are loaded after a restore-location
+  // navigation (or an AQU-646 media→text trace, which also flashes). Set by
+  // the restore effect / deep-link / switchLens; consumed by the effect that
+  // fires when `cells` are available AND the text editor is mounted.
+  const pendingCellScrollRef = useRef<{ cellId: string; flash: boolean } | null>(null)
   // Mirrors currentUsername (computed later in the function) so effects that
   // are declared before currentUsername can access it via ref.
   const currentUsernameRef = useRef<string>("local")
@@ -1377,6 +1384,22 @@ export function ProjectWorkspace() {
     setDiarizeError(null)
     try {
       const cells = cellStore.getAllCellViews()
+      // AQU-646 ordering guard: diarization REPLACES all media cells, which
+      // destroys any transcriptions/translations on them. Warn before wiping
+      // work — the intended order is import → diarize → transcribe → translate.
+      const atRisk = cells.filter(
+        (c) => c.medium === "media" && (c.transcription?.trim() || c.translated?.trim()),
+      ).length
+      if (atRisk > 0) {
+        const ok = window.confirm(
+          `Diarizing re-segments this file and will DISCARD the transcription/translation on ${atRisk} section${atRisk === 1 ? "" : "s"}. ` +
+            `Diarize first, then transcribe and translate. Continue anyway?`,
+        )
+        if (!ok) {
+          setDiarizePhase(null)
+          return
+        }
+      }
       await runDiarization({
         projectId: project.id,
         fileId: activeFileId,
@@ -1409,7 +1432,23 @@ export function ProjectWorkspace() {
     })
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     revalidateCells()
-  }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
+    // AQU-646: the attach flow seeds auto-transcribe too — same "file gained
+    // media sections" moment as an import (see handleImported).
+    const seed = consumeMediaImportSeed(activeFileId)
+    if (seed) {
+      void autoTranscribeImportedMedia({
+        seed,
+        projectId: project.id,
+        session: frontierSession ?? null,
+        sourceLanguage: project.sourceLanguage,
+        targetLanguage: project.targetLanguage,
+        onDone: async () => {
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          revalidateCells()
+        },
+      })
+    }
+  }, [project?.id, project?.sourceLanguage, project?.targetLanguage, activeFileId, currentUsername, frontierSession, getTokenForFile, getTokenForProjectFile, revalidateCells])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
@@ -2308,7 +2347,7 @@ export function ProjectWorkspace() {
         // translator chose. The service derives the relevant hints from
         // the cell's source text; behavior is unchanged when nothing matches.
         concepts: project?.terminology ?? [],
-        sourceText: cell.original,
+        sourceText: effectiveSourceText(cell),
       })
       if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
       persistBt(cell, btText, true)
@@ -2538,13 +2577,48 @@ export function ProjectWorkspace() {
   // shows decay-derived health; the "biggest drags" popover redesign (cells
   // sorted by descending decay) is a deferred follow-up.
 
+  // AQU-646: scroll by ID in display space — findIndexByCellId resolves STORE
+  // order, which time-ordered files re-sort for display, so the old index
+  // path could land on the wrong row there.
   const jumpToCellId = useCallback((cellId: string) => {
-    const idx = cellStore.findIndexByCellId(cellId)
-    if (idx >= 0) {
-      editorRef.current?.scrollToCellIndex(idx)
-      editorRef.current?.flashCell(cellId, "")
+    editorRef.current?.scrollToCellId(cellId, { flash: true })
+  }, [])
+
+  // ── AQU-646 round 3: two-way cell tracing across the Text/Media switch ────
+  // timelineSelectedCellIdRef mirrors TimelineEditor's local selection (a ref,
+  // not state — no workspace re-render per card click); mediaTraceCellId seeds
+  // the timeline's selection on mount (state — must be render-visible then).
+  const timelineSelectedCellIdRef = useRef<string | null>(null)
+  const handleTimelineSelectedCell = useCallback((cellId: string | null) => {
+    timelineSelectedCellIdRef.current = cellId
+  }, [])
+  const [mediaTraceCellId, setMediaTraceCellId] = useState<string | null>(null)
+
+  // The single traced lens-switch entry point — every setLens call site routes
+  // through this so no path skips the trace. Self-no-ops when the lens isn't
+  // changing, the file isn't time-ordered, or there's nothing to trace.
+  const switchLens = useCallback((next: EditorLens) => {
+    const timeOrdered = Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+    if (next !== lens && timeOrdered) {
+      if (next === "audio") {
+        // TEXT → MEDIA: the row the user is on (last-active editor cell when
+        // visible, else the first visible row).
+        const idx = editorRef.current?.getCurrentIndex?.() ?? -1
+        setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
+      } else if (timelineSelectedCellIdRef.current) {
+        // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
+        // no edit-focus change.
+        pendingCellScrollRef.current = { cellId: timelineSelectedCellIdRef.current, flash: true }
+      }
     }
-  }, [cellStore])
+    setLens(next)
+  }, [lens, setLens, activeFile, cellStore])
+
+  // Traces never outlive the file they were captured in.
+  useEffect(() => {
+    timelineSelectedCellIdRef.current = null
+    setMediaTraceCellId(null)
+  }, [activeFileId])
 
   const pendingPresenceJumpRef = useRef<{ fileId: string; cellId?: string } | null>(null)
   const handleJumpToPresencePeer = useCallback((peer: ProjectPresencePeer) => {
@@ -2568,11 +2642,11 @@ export function ProjectWorkspace() {
       pendingPresenceJumpRef.current = null
       return
     }
-    const idx = readAtVersion(cellStoreVersion, () => cellStore.findIndexByCellId(pending.cellId!))
-    if (idx < 0) return
-    pendingPresenceJumpRef.current = null
-    editorRef.current?.scrollToCellIndex(idx)
-    editorRef.current?.flashCell(pending.cellId, "")
+    // Touch the version so this effect re-runs as rows land (readAtVersion
+    // keeps the subscription); the scroll itself resolves display-space by id.
+    readAtVersion(cellStoreVersion, () => cellStore.getCellCount())
+    const ok = editorRef.current?.scrollToCellId(pending.cellId, { flash: true }) ?? false
+    if (ok) pendingPresenceJumpRef.current = null
   }, [activeFileId, cellStore, cellStoreVersion])
 
   // Phase 0.5: run the deterministic check over the open file's cells.
@@ -2633,17 +2707,19 @@ export function ProjectWorkspace() {
 
   // ── last-location: scroll to remembered cell once cells are loaded ────────
   // After a restore-navigation the editor isn't rendered yet; we park the
-  // target cellId in pendingCellScrollRef and consume it here once `cells`
-  // is non-empty and the ref is set.
+  // target cell in pendingCellScrollRef and consume it here once `cells`
+  // are non-empty and the text editor is mounted. AQU-646: `lens` is a dep so
+  // a media→text switch consumes the parked trace the moment EditorTable
+  // mounts (the ref attaches during commit, before effects run — same pass);
+  // the id-based scroll also fixes the store-vs-display index mismatch on
+  // time-ordered files.
   useEffect(() => {
-    const cellId = pendingCellScrollRef.current
-    if (!cellId || cellStore.getCellCount() === 0) return
-    const idx = readAtVersion(cellStoreVersion, () => cellStore.findIndexByCellId(cellId))
-    if (idx >= 0) {
-      pendingCellScrollRef.current = null
-      editorRef.current?.scrollToCellIndex(idx)
-    }
-  }, [cellStore, cellStoreVersion])
+    const pending = pendingCellScrollRef.current
+    if (!pending) return
+    if (readAtVersion(cellStoreVersion, () => cellStore.getCellCount()) === 0) return
+    const ok = editorRef.current?.scrollToCellId(pending.cellId, { flash: pending.flash }) ?? false
+    if (ok) pendingCellScrollRef.current = null
+  }, [cellStore, cellStoreVersion, lens])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
@@ -3205,6 +3281,32 @@ export function ProjectWorkspace() {
     myScopes, // AQU-633: per-cell validate scope gate
   }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, myScopes])
 
+  // AQU-646 round 3: the media detail pane's action bundle — the same
+  // handlers/state the text rail uses, grouped as one prop instead of ten.
+  // Identity changes as completions stream; the timeline subtree is small and
+  // un-memoized, so that's fine.
+  const timelineDetailActions = useMemo<TimelineDetailActions | null>(() => project ? {
+    isCompletionConfigured: isConfigured,
+    isCompletionAvailable,
+    isAnonymous: !frontierSession,
+    completing,
+    previews,
+    errors,
+    onCompleteSingle: handleCompleteSingle,
+    onAiSetupNeeded: handleAiSetupNeeded,
+    onOpenComments: handleOpenComments,
+    onOpenHistory: handleOpenHistory,
+    onOpenRecording: handleOpenRecording,
+    openCommentCounts: liveCellOpenCommentCount,
+    projectId: project.id,
+    sourceLanguage: project.sourceLanguage,
+    targetLanguage: project.targetLanguage,
+    projectTtsSettings: project.ttsSettings,
+    username: currentUsername,
+  } : null, [project, isConfigured, isCompletionAvailable, frontierSession, completing, previews, errors,
+    handleCompleteSingle, handleAiSetupNeeded, handleOpenComments, handleOpenHistory,
+    handleOpenRecording, liveCellOpenCommentCount, currentUsername])
+
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
     // First assign the voice to this cell in the cast
@@ -3235,11 +3337,9 @@ export function ProjectWorkspace() {
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading]
   )
 
-  async function handleSearchSelect(result: WorkspaceSearchResult, query: string) {
+  async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
     const flash = () => {
-      const idx = cellStore.findIndexByCellId(result.cellId)
-      if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
-      editorRef.current?.flashCell(result.cellId, query)
+      editorRef.current?.scrollToCellId(result.cellId, { flash: true })
     }
     if (result.fileId !== activeFileId) {
       workspaceTabs.openFile(result.fileId)
@@ -3693,7 +3793,7 @@ export function ProjectWorkspace() {
       { id: "voice-studio", label: audioLensLabel(audioLensTimeOrdered), icon: audioLensIcon(audioLensTimeOrdered),
         onClick: () => {
           const next = lens === "audio" ? "text" : "audio"
-          setLens(next)
+          switchLens(next)
           // The Voices panel now lives in its own dock tab — surface it when
           // entering the Audio lens; fall back to Files when leaving.
           setDockTab(next === "audio" ? "voices" : "files")
@@ -3716,12 +3816,35 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
+  }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, switchLens, setDockTab, currentRoleLevel])
 
-  // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
-  // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
-  // lands; the "Transcribe all" / "Synth all" menu items can still render.
-  const audioCounts = useMemo(() => ({ untranscribed: 0, unsynthesized: 0 }), [])
+  // AQU-646 P0: cells from the store never carry audio attachments — only
+  // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
+  // internally). Workspace-level consumers (transcribe counts/batch, timeline,
+  // seek context) were silently seeing attachment-less cells, so anything
+  // gated on `selectedAudioId` no-oped. Read the per-file audio here once for
+  // the audio lens and merge where needed.
+  const { byCellId: workspaceAudioByCellId } = useFileAudioAttachments(
+    project?.id ?? null,
+    lens === "audio" ? activeFileId : null,
+  )
+
+  // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
+  // sharing the exact filters the batch runners use (needsTranscription /
+  // needsSynthesis) so the menu count always matches what the run would do.
+  // getActiveCells() is merged with audio attachments; keyed on the store
+  // version so counts track edits/attaches live.
+  const audioCounts = useMemo(() => {
+    if (!activeFileId) return { untranscribed: 0, unsynthesized: 0 }
+    const cells = mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    let untranscribed = 0
+    let unsynthesized = 0
+    for (const c of cells) {
+      if (needsTranscription(c)) untranscribed++
+      if (needsSynthesis(c)) unsynthesized++
+    }
+    return { untranscribed, unsynthesized }
+  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -3825,17 +3948,22 @@ export function ProjectWorkspace() {
     },
     runTranscribeAll: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells()
+      // AQU-646 P0: merge attachments in — needsTranscription gates on
+      // selectedAudioId, which raw store cells never carry.
+      const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void runBatchTranscribeAll({
         cells,
         projectId: project.id,
         session: frontierSession ?? null,
-        language: project.sourceLanguage,
+        // AQU-646: language follows the audio — media segments are source
+        // speech, recorded takes voice the target text (per-cell in the batch).
+        sourceLanguage: project.sourceLanguage,
+        targetLanguage: project.targetLanguage,
       })
     },
     runSynthAll: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells()
+      const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void runBatchSynthAll({
         cells,
         project,
@@ -3844,7 +3972,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, workspaceAudioByCellId])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -3886,6 +4014,35 @@ export function ProjectWorkspace() {
     () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
   )
+
+  // AQU-646 P0: attachment-merged view of the active file's cells for the
+  // timeline + playback seek context (workspaceAudioByCellId read above).
+  const audioMergedCells = useMemo(
+    () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
+    [legacyCells, workspaceAudioByCellId],
+  )
+
+  // AQU-646: timeline seeks (ruler click, clean card click) drive the audio
+  // queue in file-timeline seconds. Live queue → jump preserving play/pause;
+  // idle queue → CUE paused at the position (Sam's decision: clicking while
+  // paused positions only — pressing play then starts exactly there).
+  const handleTimelineSeekToTime = useCallback((sec: number) => {
+    if (!project?.id) return
+    const qs = getQueueState()
+    const activeForThisFile =
+      (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
+      audioMergedCells.some((c) => c.id === qs.cellId)
+    if (activeForThisFile) {
+      seekQueueToTime(sec)
+      return
+    }
+    if (!frontierSession?.jwt) return // cueing needs a session to mint audio tokens
+    startQueueAtTime(
+      { cells: audioMergedCells, projectId: project.id, session: frontierSession },
+      sec,
+      { play: false },
+    )
+  }, [project?.id, audioMergedCells, frontierSession])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -3937,6 +4094,68 @@ export function ProjectWorkspace() {
     revalidateAuditStats()
     revalidateCells()
   }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
+
+  // AQU-646: single-speaker path — adopt the imported file's speaker as a cast
+  // voice without diarizing. Extracts a reference from the file's (longest)
+  // media sections, creates a voice carrying it, and assigns the file's media
+  // cells to it so per-cell generate speaks in the imported voice.
+  const [adoptingSpeaker, setAdoptingSpeaker] = useState(false)
+  const handleAdoptSpeakerVoice = useCallback(async () => {
+    if (!project?.id || !activeFileId || adoptingSpeaker) return
+    setAdoptingSpeaker(true)
+    try {
+      const cells = cellStore.getAllCellViews()
+      const clip = findFileClip(cells)
+      if (!clip) return
+      const media = cells.filter((c) => c.medium === "media")
+      // Sections' trim windows (in-clip coordinates); fall back to the cell's
+      // timeline placement, which equals the trim for imported files.
+      const ranges = media.map((c) => {
+        const att = c.selectedAudioId ? c.attachments?.[c.selectedAudioId] : undefined
+        return {
+          startMs: att?.trimStartMs ?? Math.round((c.startTime ?? 0) * 1000),
+          endMs: att?.trimEndMs ?? Math.round((c.endTime ?? 0) * 1000),
+        }
+      })
+
+      const name = activeFile?.name ? `Speaker — ${activeFile.name}` : "Imported speaker"
+      const voices = [...getVoiceLibrary(tts.settings)]
+      let voiceId = voices.find((v) => v.name === name)?.id
+      if (!voiceId || !voices.find((v) => v.id === voiceId)?.referenceAudioId) {
+        const referenceAudioId = await extractVoiceReference({
+          projectId: project.id,
+          fileId: activeFileId,
+          clipUrl: clip.url,
+          ranges,
+          getSyncToken: (_pid, fid) => getTokenForFile(fid),
+        })
+        if (!referenceAudioId) return
+        if (voiceId) {
+          const idx = voices.findIndex((v) => v.id === voiceId)
+          voices[idx] = { ...voices[idx], referenceAudioId }
+        } else {
+          voiceId = newVoiceId()
+          voices.push({
+            id: voiceId,
+            name,
+            color: VOICE_PALETTE[voices.length % VOICE_PALETTE.length],
+            referenceAudioId,
+          })
+        }
+      }
+
+      const assignments: Record<string, string> = {}
+      for (const c of media) assignments[c.id] = voiceId
+      await tts.saveTts({
+        voices,
+        castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...assignments },
+      })
+    } catch (e) {
+      console.warn("[adopt-speaker-voice] failed:", e)
+    } finally {
+      setAdoptingSpeaker(false)
+    }
+  }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, getTokenForFile, tts.settings, tts.saveTts])
 
   const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
     const diarizeLabel =
@@ -4002,6 +4221,15 @@ export function ProjectWorkspace() {
         disabled: diarizeBusy,
         onClick: handleDiarize,
       })
+      // AQU-646: single-speaker alternative to diarize — adopt the imported
+      // file's speaker as a cast voice (reference extracted from the clip).
+      items.push({
+        id: "adopt-speaker-voice",
+        label: adoptingSpeaker ? "Extracting voice…" : "Use file's speaker as a voice",
+        icon: Mic,
+        disabled: adoptingSpeaker || diarizeBusy,
+        onClick: () => void handleAdoptSpeakerVoice(),
+      })
     }
 
     const contextual: OverflowMenuItem[] = [
@@ -4042,6 +4270,8 @@ export function ProjectWorkspace() {
     diarizeError,
     diarizeBusy,
     handleDiarize,
+    adoptingSpeaker,
+    handleAdoptSpeakerVoice,
     isSubtitleFile,
     suggestions.length,
     suggestionsDismissed,
@@ -4252,13 +4482,36 @@ export function ProjectWorkspace() {
       // AQU (mp3 "unusable" report): a media import has no text cells, so the
       // Text lens greets the user with "No text segments in this file" — which
       // reads as a failed import. Land them on the Media/Audio lens instead.
-      if (isMediaFileType(refs[0].type)) setLens("audio")
+      if (isMediaFileType(refs[0].type)) switchLens("audio")
     }
     // The bulk importer (lib/import.ts → POST /import) has already persisted
     // file.create + every source.cell.create server-side before resolving, so
     // there's nothing to flush — just pull the fresh projection in.
     refresh()
     revalidateCells()
+
+    // AQU-646: auto-transcribe the imported sections — importing an MP3 must
+    // surface source text without hunting for the Transcribe button. Fire and
+    // forget: the consent dialog (first run) + progress banner + per-cell
+    // badges carry the UX; a denial simply leaves manual transcribe available.
+    for (const ref of refs) {
+      if (!isMediaFileType(ref.type)) continue
+      const seed = consumeMediaImportSeed(ref.id)
+      if (!seed || !project?.id) continue
+      void autoTranscribeImportedMedia({
+        seed,
+        projectId: project.id,
+        session: frontierSession ?? null,
+        sourceLanguage: project.sourceLanguage,
+        targetLanguage: project.targetLanguage,
+        onDone: async () => {
+          // Transcripts ride outbox-queued cell.audio.attach emits — flush so
+          // they land, then pull the projection with the new source text.
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          revalidateCells()
+        },
+      })
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -4297,7 +4550,7 @@ export function ProjectWorkspace() {
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
-              if (t === "voices" && lens !== "audio") setLens("audio")
+              if (t === "voices" && lens !== "audio") switchLens("audio")
             }}
             voicesPanel={
               project ? (
@@ -4412,7 +4665,7 @@ export function ProjectWorkspace() {
                   const cell = getActiveCell(focusedCellId)
                   if (!cell) return null
                   return {
-                    sourceText: cell.original,
+                    sourceText: effectiveSourceText(cell),
                     translatedText: cell.translated,
                     context: cell.context ?? undefined,
                   }
@@ -4524,7 +4777,7 @@ export function ProjectWorkspace() {
                 <EditorModeToggle
                   lens={lens}
                   onChange={(l) => {
-                    setLens(l)
+                    switchLens(l)
                     // Surface the Voices tab when entering the Audio lens.
                     if (l === "audio") setDockTab("voices")
                   }}
@@ -4920,13 +5173,29 @@ export function ProjectWorkspace() {
             <div className="min-h-0 flex-1">
               {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
                 <TimelineEditor
-                  cells={legacyCells}
+                  cells={audioMergedCells}
+                  detailActions={timelineDetailActions ?? undefined}
+                  initialSelectedCellId={mediaTraceCellId}
+                  onSelectedCellChange={handleTimelineSelectedCell}
                   coreMediaUrl={activeFile.coreMediaUrl ?? null}
                   editable={!isReadOnly}
                   fileId={activeFile.id}
                   onRetime={handleRetime}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
+                  onSeekToTime={handleTimelineSeekToTime}
+                  // AQU-646/SUB-29: transcribe from the detail pane — language by
+                  // attachment provenance (source segment → source language;
+                  // a dub take on a media cell → target language).
+                  onTranscribe={(cell) => {
+                    if (!project) return
+                    void transcribeCell({
+                      cell,
+                      session: frontierSession ?? null,
+                      projectId: project.id,
+                      language: isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage,
+                    })
+                  }}
                   project={editorProject ?? project ?? undefined}
                   terminologyConcepts={(editorProject ?? project)?.terminology ?? []}
                   infractions={infractions}

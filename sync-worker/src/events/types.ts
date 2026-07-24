@@ -315,6 +315,15 @@ export interface EventPayloads {
     trimStartMs?: number
     trimEndMs?: number
     timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+    /**
+     * AQU-646: ASR transcript of this clip (its trim window). Only sent for
+     * `medium:"media"` source segments — the projection writes it to the
+     * SOURCE cell row's `transcription` column so imported audio surfaces
+     * translatable source text. Riding this event keeps the write at the
+     * CONTRIBUTOR floor (source.cell.* are project_lead) and avoids the
+     * source.cell.create UPSERT clobbering segment fields.
+     */
+    transcription?: string
   }
   'cell.audio.select': {
     audioId: string

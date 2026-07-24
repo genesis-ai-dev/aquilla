@@ -1,7 +1,26 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
+import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
+
+// AQU-646: the editor subscribes to the play-queue (read-only) for playhead
+// tracking. Mock the two hooks with mutable stubs so tests can simulate
+// playback without any Audio element.
+let mockQueueState: QueueState = { kind: "idle" }
+let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+vi.mock("@/lib/audio/play-queue", () => ({
+  useQueueState: () => mockQueueState,
+  useQueueProgress: () => mockProgress,
+}))
+// The detail pane's audio components need session/query providers — out of
+// scope here (covered by TimelineCellDetail.test.tsx with the same mocks).
+vi.mock("@/components/CellTtsButton", () => ({
+  CellTtsButton: () => <button type="button" data-testid="mock-tts" />,
+}))
+vi.mock("@/components/CellAudioUploadButton", () => ({
+  CellAudioUploadButton: () => <button type="button" data-testid="mock-upload" />,
+}))
 
 const cell = (o: Partial<CellData>): CellData =>
   ({ fileId: "f1", original: "", translated: "", ...o }) as unknown as CellData
@@ -108,5 +127,126 @@ describe("TimelineEditor", () => {
       />,
     )
     expect(screen.getByTestId("tl-video")).toBeInTheDocument()
+  })
+
+  // ── AQU-646: playhead follows the audio queue; clicks navigate playback ──
+
+  const mediaCells = [
+    cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 }),
+    cell({ id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20 }),
+  ]
+
+  it("the playhead tracks queue progress for THIS file's cells", () => {
+    mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+      )
+      const playhead = screen.getByTestId("tl-playhead")
+      // 12s at the default 38 px/s zoom.
+      expect(parseFloat(playhead.style.left)).toBeCloseTo(12 * 38, 0)
+    } finally {
+      mockQueueState = { kind: "idle" }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+    }
+  })
+
+  it("a queue playing ANOTHER file's cells does not move this playhead", () => {
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "other-file-cell" }
+    mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+      )
+      expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBe(0)
+    } finally {
+      mockQueueState = { kind: "idle" }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+    }
+  })
+
+  it("a clean card click seeks playback to the clip start AND opens the detail pane", () => {
+    const onSeekToTime = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetime={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Two")
+  })
+
+  it("an untimed chip selects but never seeks", () => {
+    const onSeekToTime = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[...mediaCells, cell({ id: "u1", original: "Untimed", medium: "text" })]}
+        onRetime={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-untimed-u1"))
+    expect(onSeekToTime).not.toHaveBeenCalled()
+    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Untimed")
+  })
+
+  it("renders the follow toggle, pressed by default, and it toggles", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+    )
+    const btn = screen.getByLabelText("Follow playhead")
+    expect(btn).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(btn)
+    expect(btn).toHaveAttribute("aria-pressed", "false")
+  })
+
+  // ── AQU-646 round 3: text→media trace seed + media→text selection mirror ──
+
+  it("initialSelectedCellId opens the detail pane and cues playback at the clip start", () => {
+    const onSeekToTime = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetime={() => {}} onCommitTarget={() => {}}
+        onSeekToTime={onSeekToTime} initialSelectedCellId="m2"
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Two")
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+  })
+
+  it("onSelectedCellChange mirrors the seed on mount and card clicks after", () => {
+    const onSelectedCellChange = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetime={() => {}} onCommitTarget={() => {}}
+        initialSelectedCellId="m1" onSelectedCellChange={onSelectedCellChange}
+      />,
+    )
+    expect(onSelectedCellChange).toHaveBeenCalledWith("m1")
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    expect(onSelectedCellChange).toHaveBeenLastCalledWith("m2")
+  })
+
+  it("passes detailActions through to the detail pane", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetime={() => {}} onCommitTarget={() => {}}
+        initialSelectedCellId="m1"
+        detailActions={{
+          isCompletionConfigured: true, isCompletionAvailable: true, isAnonymous: false,
+          completing: new Map(), previews: new Map(),
+          onCompleteSingle: async () => {}, onAiSetupNeeded: () => {},
+          onOpenComments: () => {}, onOpenHistory: () => {}, onOpenRecording: () => {},
+          projectId: "p1", username: "tester",
+        }}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-actions")).toBeInTheDocument()
   })
 })

@@ -15,7 +15,7 @@ import { Slider } from "@/components/ui/slider"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
-  hasAnyPlayableAudio, pauseQueue, resumeQueue, seekQueue, setQueueRate, setQueueVolume,
+  hasAnyPlayableAudio, pauseQueue, resumeQueue, seekQueueToTime, setQueueRate, setQueueVolume,
   skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
 } from "@/lib/audio/play-queue"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
@@ -118,7 +118,7 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
       <BarScrubber
         fraction={progressFraction}
         disabled={activeIndex < 0 || duration <= 0}
-        onSeek={(f) => seekQueue(f * duration)}
+        onSeek={(f) => seekQueueToTime(f * duration)}
       />
 
       <div className="flex items-center gap-3 px-4 py-1.5">

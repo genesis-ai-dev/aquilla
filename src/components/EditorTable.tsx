@@ -72,6 +72,8 @@ import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
+import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   MAX_SELECTED,
@@ -156,6 +158,8 @@ import {
 } from "@/lib/parsers/usfm-display"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
+import { defaultFootnoteRef } from "@/lib/footnotes/refs"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
@@ -481,6 +485,10 @@ export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate"
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
+  /** AQU-646: scroll to a cell by id in DISPLAY space (lens-sorted — correct
+   *  for time-ordered files, where store order ≠ display order), optionally
+   *  flashing it. Returns false when the id is not currently displayable. */
+  scrollToCellId: (cellId: string, opts?: { flash?: boolean }) => boolean
   focusCellEditorIndex: (index: number) => void
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
@@ -996,6 +1004,20 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     focusWhenMounted()
   }, [clearChapterNavigationSelection, getListQueryRoot])
 
+  // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
+  // both defer to the next frame (the list may still be scrolling, so the DOM
+  // node may not exist yet).
+  const flashCellDom = useCallback((cellId: string) => {
+    requestAnimationFrame(() => {
+      const root = getListQueryRoot()
+      if (!root) return
+      const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
+      if (!el) return
+      el.classList.add("codex-search-flash")
+      window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
+    })
+  }, [getListQueryRoot])
+
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
@@ -1006,6 +1028,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           animated: false,
         })
       }
+    },
+    scrollToCellId(cellId, opts) {
+      // AQU-646 round 3: id-based scroll in DISPLAY space. The older
+      // index-based path resolved indexes via cellStore.findIndexByCellId —
+      // STORE order — but the list renders displayCellIds, which time-ordered
+      // files re-sort by timing, so those jumps could land on the wrong row.
+      const index = displayCellIdsRef.current.indexOf(cellId)
+      if (index < 0) return false
+      clearChapterNavigationSelection()
+      void listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false })
+      if (opts?.flash) flashCellDom(cellId)
+      return true
     },
     focusCellEditorIndex: focusCellEditorByIndex,
     getCurrentIndex: () => {
@@ -1033,18 +1067,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       })
     },
     flashCell(cellId, _searchTerm) {
-      // Defer to next frame: the list may still be scrolling, so the
-      // DOM node we want might not exist yet.
-      requestAnimationFrame(() => {
-        const root = getListQueryRoot()
-        if (!root) return
-        const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
-        if (!el) return
-        el.classList.add("codex-search-flash")
-        window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
-      })
+      flashCellDom(cellId)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -2160,7 +2185,9 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  // AQU-670: resolves whether the draft actually committed — the rail's
+  // "Saved" confirmation reads it (matches the top-level props contract).
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
@@ -2533,7 +2560,8 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  // AQU-670: resolves whether the draft actually committed — see above.
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
@@ -2787,29 +2815,6 @@ function UsfmNoteChip({
       {chip}
     </AppTooltip>
   )
-}
-
-function defaultFootnoteRef(cell: CellData): string {
-  const candidates = [
-    ...(cell.globalReferences ?? []),
-    cell.group,
-    cell.context,
-    cell.cellLabel,
-  ].filter(Boolean)
-
-  for (const candidate of candidates) {
-    const text = String(candidate).trim()
-    const canonicalRef = text.match(/\b[1-3]?\s?[A-Z][A-Z0-9]{1,4}\s+\d+:\d+(?:[-–]\d+)?\b/i)
-    if (canonicalRef) return canonicalRef[0].replace(/\s+/g, " ")
-  }
-
-  for (const candidate of candidates) {
-    const text = String(candidate).trim()
-    const verseOnlyRef = text.match(/\b\d+:\d+(?:[-–]\d+)?\b/)
-    if (verseOnlyRef) return verseOnlyRef[0]
-  }
-
-  return ""
 }
 
 function humanFootnoteCellRef(cell: CellData): string {
@@ -4294,6 +4299,11 @@ function EditorRow({
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
+  // SUB-29: the mic/upload gate counts recorded TAKES — the imported source
+  // clip squatting in every media section's recording slot must not hide the
+  // record affordance (audioId provenance: takes are seeded with the cellId).
+  const hasRecordedTake =
+    hasAudio && (cell.medium !== "media" || audioIdSeededWith(cell.selectedAudioId, cell.id))
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
@@ -4381,8 +4391,12 @@ function EditorRow({
 
   const handleTranscribe = useCallback(async () => {
     if (!cell.selectedAudioId) return
-    void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
-  }, [cell, rowSession, project.id, project.targetLanguage])
+    // AQU-646: the ASR language must match the AUDIO. Imported media segments
+    // are SOURCE speech (→ sourceLanguage); recorded takes voice the TARGET
+    // text (→ targetLanguage). Mapping to a Whisper tag happens downstream.
+    const language = isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage
+    void transcribeCell({ cell, session: rowSession, projectId: project.id, language })
+  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage])
 
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const authoritativeSelfValidated = cell.activeValidators.includes(username)
@@ -5199,7 +5213,14 @@ function EditorRow({
               <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
             ) : (
               <UsfmSourceText
-                text={sourceDraft?.value ?? cell.original}
+                // AQU-646: an imported media segment's stored `value` is the
+                // filename; once transcribed, the ASR transcript IS the source
+                // text users translate. Non-media cells are unaffected.
+                text={
+                  cell.medium === "media" && cell.transcription?.trim()
+                    ? cell.transcription
+                    : (sourceDraft?.value ?? cell.original)
+                }
                 highlights={highlights}
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}
@@ -5697,7 +5718,7 @@ function EditorRow({
                   disabled elements receive no mouse events, so the "click for
                   help" affordance is unreachable. Instead keep it enabled and
                   route clicks to the denied-help popover. */}
-              {!hasAudio && onOpenRecording && editable && (() => {
+              {!hasRecordedTake && onOpenRecording && editable && (() => {
                 const unsupportedReason = getUnsupportedReason()
                 const isUnsupported = unsupportedReason !== null
                 const micTooltip = micDenied
@@ -5753,7 +5774,7 @@ function EditorRow({
                   <input type="file"> so phone browsers can attach an
                   existing wav/mp3/m4a recording without a desktop. Same
                   gating as the mic (no audio yet, editable). */}
-              {!hasAudio && editable && (
+              {!hasRecordedTake && editable && (
                 <CellAudioUploadButton
                   projectId={project.id}
                   fileId={cell.fileId}
@@ -5792,7 +5813,7 @@ function EditorRow({
                 <CellTtsButton
                   cellId={cell.id}
                   text={visibleTranslated}
-                  original={cell.original}
+                  original={effectiveSourceText(cell)}
                   context={cell.context}
                   cellLabel={cell.cellLabel}
                   sourceLanguage={project.sourceLanguage}
@@ -6551,16 +6572,9 @@ function EditorRow({
 }
 
 // ---------------------------------------------------------------------------
-// FRO-278 — GenerateOverwriteDialog
-// ---------------------------------------------------------------------------
-// Lightweight confirm dialog shown when the user clicks AI Generate on a cell
-// that already contains human-authored text. The copy is escalated when the
-// cell has been validated so the expert understands validation will be cleared.
-//
-// Cancel semantics: nothing is committed, no completion is triggered. The user
-// returns to the cell in its current state. We chose "never start" over
-// "start-then-discard" because an in-progress stream would occupy the cell's
-// "generating" state and confuse the UX on cancel.
+// FRO-278 — GenerateOverwriteDialog: extracted to its own module (AQU-646) so
+// the media-lens detail pane can reuse it without importing this whole file.
+// Re-imported here for the row-level confirm below.
 // ---------------------------------------------------------------------------
 
 import {
@@ -6571,73 +6585,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { Checkbox } from "@/components/ui/checkbox"
-
-interface GenerateOverwriteDialogProps {
-  open: boolean
-  /** True when cell.status === "validated" — escalates the dialog copy. */
-  isValidated: boolean
-  /**
-   * Confirm replacing the translation. `dontAskAgain` is true when the user
-   * ticked "Don't ask again" (AQU-591) — the caller persists the opt-out so
-   * future non-validated replacements skip this dialog.
-   */
-  onConfirm: (dontAskAgain: boolean) => void
-  onCancel: () => void
-}
-
-export function GenerateOverwriteDialog({
-  open,
-  isValidated,
-  onConfirm,
-  onCancel,
-}: GenerateOverwriteDialogProps) {
-  const [dontAskAgain, setDontAskAgain] = useState(false)
-
-  // Reset the checkbox each time the dialog opens so a prior tick never leaks
-  // into a later confirmation.
-  useEffect(() => {
-    if (open) setDontAskAgain(false)
-  }, [open])
-
-  const title = isValidated
-    ? "Replace validated translation?"
-    : "Replace existing translation?"
-
-  const description = isValidated
-    ? "This cell is validated — replacing it clears the validation. The current text is preserved in cell history and can be recovered."
-    : "Replace the existing translation? The current text is preserved in cell history and can be recovered."
-
-  return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
-      <DialogContent aria-labelledby="gen-overwrite-title" aria-describedby="gen-overwrite-desc">
-        <DialogHeader>
-          <DialogTitle id="gen-overwrite-title">{title}</DialogTitle>
-          <DialogDescription id="gen-overwrite-desc">{description}</DialogDescription>
-        </DialogHeader>
-        {/* AQU-591: opting out only skips the confirm for non-validated cells —
-            replacing a validated translation always confirms, so no opt-out. */}
-        {!isValidated && (
-          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-            <Checkbox
-              checked={dontAskAgain}
-              onCheckedChange={(c) => setDontAskAgain(c === true)}
-            />
-            Don't ask again when replacing a translation
-          </label>
-        )}
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button variant="destructive" onClick={() => onConfirm(dontAskAgain)}>
-            Replace
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
+import { GenerateOverwriteDialog } from "./GenerateOverwriteDialog"
 
 // ---------------------------------------------------------------------------
 // p1-paragraph-ui-wiring (Task 3) — ParagraphDraftConfirmDialog

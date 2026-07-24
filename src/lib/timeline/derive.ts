@@ -16,6 +16,10 @@ export interface TimelineSegment {
   /** intrinsic order key; fractional values allowed (see `sequenceBetween`). */
   sequenceIndex?: number
   medium?: SegmentMedium
+  /** AQU-646: text carried by media sections — drives the subtitle-lane
+   *  mirror (translation once translated, transcript before that). */
+  transcription?: string
+  translated?: string
 }
 
 /** A segment is "timed" only when it has a usable start AND end. */

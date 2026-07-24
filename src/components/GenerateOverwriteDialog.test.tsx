@@ -16,7 +16,7 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
-import { GenerateOverwriteDialog } from "./EditorTable"
+import { GenerateOverwriteDialog } from "./GenerateOverwriteDialog"
 
 function renderDialog(props: Partial<Parameters<typeof GenerateOverwriteDialog>[0]> = {}) {
   const defaults = {

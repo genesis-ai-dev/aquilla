@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { sameClipContinuation, trimWindowForCell } from "./play-queue"
+import { trimWindowForCell } from "./play-queue"
 import type { CellData } from "@/hooks/useCells"
 
 const baseCell = (over: Partial<CellData>): CellData =>
@@ -9,17 +9,6 @@ const baseCell = (over: Partial<CellData>): CellData =>
     activeValidators: [], validationHistory: [], history: [], threads: [],
     ...over,
   }) as CellData
-
-// A media segment sharing an imported clip: same attachment url, own window.
-const seg = (id: string, url: string, start: number, end: number): CellData =>
-  baseCell({
-    id,
-    medium: "media",
-    startTime: start,
-    endTime: end,
-    selectedAudioId: "a",
-    attachments: { a: { url, type: "audio/mpeg" } },
-  } as Partial<CellData>)
 
 // WHY (AQU mp3 "unusable"): a media import splits ONE audio file into N cells,
 // each attaching the SAME clip with a per-cell [startTime, endTime) window.
@@ -55,45 +44,25 @@ describe("trimWindowForCell", () => {
   })
 })
 
-// WHY (AQU-666): the bottom playback bar tore down and rebuilt the <audio>
-// element at every section boundary, so the file audibly cut between sections
-// instead of playing through. The queue now keeps ONE element running while the
-// next section is another window on the SAME clip. sameClipContinuation is the
-// decision at each window end: continue on this element, or hand off a fresh one.
-describe("sameClipContinuation", () => {
-  const clip = "https://cdn/colossians.mp3"
-
-  it("returns the next window when the next section shares the clip", () => {
-    const cells = [seg("s0", clip, 0, 3), seg("s1", clip, 3, 6), seg("s2", clip, 6, 9)]
-    expect(sameClipContinuation(cells, 0, clip)).toEqual({ index: 1, trim: { start: 3, end: 6 } })
-    expect(sameClipContinuation(cells, 1, clip)).toEqual({ index: 2, trim: { start: 6, end: 9 } })
+// SUB-29: a take recorded onto a media cell is its OWN clip — no film-timeline
+// window. The window only applies when the imported source clip is selected.
+describe("trimWindowForCell — attachment provenance (SUB-29)", () => {
+  it("source clip selected (fileId-seeded audioId) → windowed", () => {
+    expect(
+      trimWindowForCell(baseCell({
+        medium: "media", startTime: 2.9, endTime: 5,
+        selectedAudioId: "audio-file-9-1700000000-abcdefgh.mp3",
+      })),
+    ).toEqual({ start: 2.9, end: 5 })
   })
 
-  it("returns null at the end of the clip's segments", () => {
-    const cells = [seg("s0", clip, 0, 3), seg("s1", clip, 3, 6)]
-    expect(sameClipContinuation(cells, 1, clip)).toBeNull()
-  })
-
-  it("returns null when the next section is a different clip", () => {
-    const other = "https://cdn/philippians.mp3"
-    const cells = [seg("s0", clip, 0, 3), seg("s1", other, 0, 3)]
-    expect(sameClipContinuation(cells, 0, clip)).toBeNull()
-  })
-
-  it("returns null when the next cell is not a windowed media segment", () => {
-    const cells = [
-      seg("s0", clip, 0, 3),
-      baseCell({ id: "t1", medium: "text", selectedAudioId: "a", attachments: { a: { url: clip, type: "audio/mpeg" } } } as Partial<CellData>),
-    ]
-    expect(sameClipContinuation(cells, 0, clip)).toBeNull()
-  })
-
-  it("skips over an unplayable cell to the next same-clip segment", () => {
-    const cells = [
-      seg("s0", clip, 0, 3),
-      baseCell({ id: "gap", medium: "media", startTime: 3, endTime: 6 }), // no attachment → unplayable
-      seg("s2", clip, 6, 9),
-    ]
-    expect(sameClipContinuation(cells, 0, clip)).toEqual({ index: 2, trim: { start: 6, end: 9 } })
+  it("take selected (cellId-seeded audioId) → plays in full (null window)", () => {
+    expect(
+      trimWindowForCell(baseCell({
+        id: "c1",
+        medium: "media", startTime: 2.9, endTime: 5,
+        selectedAudioId: "audio-c1-1700000000-abcdefgh.webm",
+      })),
+    ).toBeNull()
   })
 })

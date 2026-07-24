@@ -944,6 +944,23 @@ case 'cell.audio.attach': {
             event.serverTs,
           ),
       )
+      // AQU-646: an attach may carry the ASR transcript of a media segment.
+      // Land it on the SOURCE cell row so imported audio surfaces translatable
+      // source text. Conditional (only when supplied) so ordinary re-attaches
+      // (timings refresh, trims) never clobber an existing transcription, and
+      // scoped to side='source' so a recorded take on a target cell can never
+      // overwrite source text.
+      if (typeof p.transcription === 'string') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET transcription = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(p.transcription, event.projectId, event.fileId, event.cellId),
+        )
+        return ['cell_audio', 'cells']
+      }
       return ['cell_audio']
     }
 

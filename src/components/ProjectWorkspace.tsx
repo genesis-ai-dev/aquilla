@@ -2482,20 +2482,48 @@ export function ProjectWorkspace() {
     setCheckOpen(false)
   }, [activeFileId])
 
-  // FRO-192: jump to the first cell matching an assignment's scopeLabel.
-  // Uses the same globalReferences prefix match as assignmentsByCellId build.
-  const jumpToScopeLabel = useCallback((scopeLabel: string) => {
+  // FRO-192: resolve the first cell index matching an assignment's scopeLabel
+  // (chapter section). -1 when nothing matches (e.g. a book-scope label with no
+  // chapter sections) — callers fall back to the top of the file.
+  const resolveScopeLabelIndex = useCallback((scopeLabel: string): number => {
     const chapterPart = scopeLabel.split(" in ")[0]?.trim() ?? scopeLabel
     const chapters = chapterPart.split(",").map((s) => s.trim()).filter(Boolean)
-    let idx = -1
     for (const ch of chapters) {
-      idx = cellStore.findIndexBySection(ch)
-      if (idx >= 0) break
+      const idx = cellStore.findIndexBySection(ch)
+      if (idx >= 0) return idx
     }
-    // If no chapter match, try scopeLabel against file name (book scope)
-    if (idx < 0) idx = 0  // scroll to top as best effort
-    editorRef.current?.scrollToCellIndex(idx)
+    return -1
   }, [cellStore])
+
+  // AQU-690: jump to an assignment from the "My assignments" panel — open its
+  // file, switch to its lane, then scroll to its first cell. Order matters: the
+  // lane sets the (lane-filtered) target column, and when the assignment lives
+  // in a different file its cells load asynchronously after the switch, so the
+  // scroll is deferred (same pending-ref pattern as the presence-peer jump
+  // above) until the target file's cells arrive. A same-file click scrolls
+  // immediately (section indexes are source-derived, so lane-stable).
+  const pendingScopeScrollRef = useRef<{ fileId: string; scopeLabel: string } | null>(null)
+  const jumpToAssignment = useCallback((a: MyAssignment) => {
+    setActiveLane(a.targetLang ?? "")
+    if (a.fileId && a.fileId !== activeFileId) {
+      pendingScopeScrollRef.current = { fileId: a.fileId, scopeLabel: a.scopeLabel }
+      workspaceTabs.openFile(a.fileId)
+      return
+    }
+    const idx = readAtVersion(cellStoreVersion, () => resolveScopeLabelIndex(a.scopeLabel))
+    editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
+  }, [activeFileId, cellStoreVersion, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
+
+  // Consume a parked assignment scroll once the target file's cells have
+  // loaded (AQU-690; mirrors the presence-peer deferred jump).
+  useEffect(() => {
+    const pending = pendingScopeScrollRef.current
+    if (!pending || pending.fileId !== activeFileId) return
+    if (cellStore.getCellCount() === 0) return
+    pendingScopeScrollRef.current = null
+    const idx = readAtVersion(cellStoreVersion, () => resolveScopeLabelIndex(pending.scopeLabel))
+    editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
+  }, [activeFileId, cellStore, cellStoreVersion, resolveScopeLabelIndex])
 
   // ── last-location: write on file change ──────────────────────────────────
   // Persist the active file whenever it changes so a fresh open resumes here.
@@ -4190,7 +4218,7 @@ export function ProjectWorkspace() {
                   <ProjectAssignedToMe
                     projectId={project.id}
                     jwt={jwt}
-                    onJumpToScopeLabel={jumpToScopeLabel}
+                    onJumpToAssignment={jumpToAssignment}
                     refreshKey={assignmentsRefreshKey}
                   />
                 )}

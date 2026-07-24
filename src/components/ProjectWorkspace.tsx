@@ -47,7 +47,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, startQueueAtTime } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -3794,6 +3794,28 @@ export function ProjectWorkspace() {
     [legacyCells, workspaceAudioByCellId],
   )
 
+  // AQU-646: timeline seeks (ruler click, clean card click) drive the audio
+  // queue in file-timeline seconds. Live queue → jump preserving play/pause;
+  // idle queue → CUE paused at the position (Sam's decision: clicking while
+  // paused positions only — pressing play then starts exactly there).
+  const handleTimelineSeekToTime = useCallback((sec: number) => {
+    if (!project?.id) return
+    const qs = getQueueState()
+    const activeForThisFile =
+      (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
+      audioMergedCells.some((c) => c.id === qs.cellId)
+    if (activeForThisFile) {
+      seekQueueToTime(sec)
+      return
+    }
+    if (!frontierSession?.jwt) return // cueing needs a session to mint audio tokens
+    startQueueAtTime(
+      { cells: audioMergedCells, projectId: project.id, session: frontierSession },
+      sec,
+      { play: false },
+    )
+  }, [project?.id, audioMergedCells, frontierSession])
+
   const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string, parentId?: string | null) => {
     if (cellId && committedEventId) {
       rememberPendingTargetCommit(cellId, committedEventId, parentId ?? null)
@@ -4865,6 +4887,7 @@ export function ProjectWorkspace() {
                   onRetime={handleRetime}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
+                  onSeekToTime={handleTimelineSeekToTime}
                   // AQU-646: transcribe a media segment from the detail pane.
                   // Media segments are SOURCE speech → source language.
                   onTranscribe={(cell) => {

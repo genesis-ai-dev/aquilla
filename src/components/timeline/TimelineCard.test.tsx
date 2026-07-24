@@ -58,4 +58,28 @@ describe("TimelineCard", () => {
     fireEvent.pointerUp(window, { clientX: 140 })
     expect(onRetime).not.toHaveBeenCalled()
   })
+
+  // ── AQU-646: clean click seeks; a drag is a retime, not a seek ──
+
+  it("fires onSeek on a clean click (alongside onSelect)", () => {
+    const onSeek = vi.fn()
+    const onSelect = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} onSelect={onSelect} onRetime={() => {}} onSeek={onSeek} />)
+    fireEvent.click(screen.getByTestId("tl-card-c1"))
+    expect(onSeek).toHaveBeenCalledWith("c1")
+    expect(onSelect).toHaveBeenCalledWith("c1")
+  })
+
+  it("suppresses onSeek after a drag (>3px), while the retime still commits", () => {
+    const onSeek = vi.fn()
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} onSelect={() => {}} onRetime={onRetime} onSeek={onSeek} />)
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 140 })
+    fireEvent.pointerUp(window, { clientX: 140 })
+    fireEvent.click(el) // browsers fire click after pointerup
+    expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
+    expect(onSeek).not.toHaveBeenCalled()
+  })
 })

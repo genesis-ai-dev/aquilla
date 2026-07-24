@@ -4,7 +4,7 @@
 // window-level pointer listeners (robust when the pointer leaves the card, and
 // testable under happy-dom). Read-only files disable drag but still select.
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { secToPx, pxToSec, clampRange } from "@/lib/timeline/scale"
 import { fmtClock } from "./format"
@@ -25,6 +25,10 @@ export interface TimelineCardProps {
   onSelect(cellId: string): void
   /** Final bounds in seconds, fired once on pointer-up. */
   onRetime(cellId: string, startSec: number, endSec: number): void
+  /** AQU-646: navigate playback to this clip on a CLEAN click (a drag that
+   *  moved the pointer >3px is a retime, not a seek). Optional — read-only
+   *  surfaces select without seeking. */
+  onSeek?(cellId: string): void
 }
 
 export function TimelineCard({
@@ -36,10 +40,14 @@ export function TimelineCard({
   editable,
   onSelect,
   onRetime,
+  onSeek,
 }: TimelineCardProps) {
   const startSec = cell.startTime ?? 0
   const endSec = cell.endTime ?? startSec + MIN_DUR_SEC
   const [drag, setDrag] = useState<{ mode: DragMode; dx: number } | null>(null)
+  // Set while a drag gesture moved the pointer — the click event that closes a
+  // drag must not also yank playback to the clip's start.
+  const movedRef = useRef(false)
 
   // Live preview geometry while dragging; committed values come from props.
   let left = secToPx(startSec - laneStartSec, pxPerSec)
@@ -63,7 +71,11 @@ export function TimelineCard({
       /* happy-dom / unsupported — window listeners still work */
     }
     setDrag({ mode, dx: 0 })
-    const onMove = (ev: PointerEvent) => setDrag((d) => (d ? { ...d, dx: ev.clientX - startX } : d))
+    movedRef.current = false
+    const onMove = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - startX) > 3) movedRef.current = true
+      setDrag((d) => (d ? { ...d, dx: ev.clientX - startX } : d))
+    }
     const onUp = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
@@ -98,7 +110,11 @@ export function TimelineCard({
       data-testid={`tl-card-${cell.id}`}
       role="button"
       tabIndex={0}
-      onClick={() => onSelect(cell.id)}
+      onClick={() => {
+        onSelect(cell.id)
+        if (!movedRef.current) onSeek?.(cell.id)
+        movedRef.current = false
+      }}
       onPointerDown={(e) => beginDrag("move", e)}
       className={cn(
         "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 overflow-hidden rounded-lg border px-2.5 transition-colors",

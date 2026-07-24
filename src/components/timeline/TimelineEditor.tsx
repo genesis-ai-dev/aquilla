@@ -4,12 +4,16 @@
 // the only "media" dependency is a native <video> element for the linked-URL
 // preview (the remote host serves Range — no streaming work needed here).
 
-import { useMemo, useRef, useState } from "react"
-import { Film, Minus, Plus } from "lucide-react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Film, LocateFixed, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { timelineBounds } from "@/lib/timeline/derive"
+import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+// Read-only queue subscriptions only — playback COMMANDS stay in the
+// workspace (onSeekToTime), keeping this component testable with a spy prop.
+import { useQueueProgress, useQueueState } from "@/lib/audio/play-queue"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
@@ -29,6 +33,10 @@ export interface TimelineEditorProps {
   onLinkVideo?(url: string | null): void
   /** AQU-646: transcribe a media clip's audio into source text (detail pane). */
   onTranscribe?(cell: CellData): void
+  /** AQU-646: navigate audio playback to a file-timeline second — ruler
+   *  clicks and clean card clicks route through this (the workspace decides
+   *  whether to jump the live queue or cue a paused one). */
+  onSeekToTime?(sec: number): void
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -63,13 +71,57 @@ export function TimelineEditor({
   onCommitTarget,
   onLinkVideo,
   onTranscribe,
+  onSeekToTime,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
+  const [follow, setFollow] = useState(true)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  /** Programmatic scrolls stamp this; the onScroll handler treats scroll
+   *  events within 150ms of a stamp as our own, not a user disengage. */
+  const lastProgrammaticScrollAt = useRef(0)
   const clock = useTimelineClock()
+
+  // AQU-646: bridge the audio play-queue into the timeline clock. Progress is
+  // file-timeline seconds for imported media (one shared clip); the cellIdSet
+  // guard keeps a stale singleton queue (playing another file) from hijacking
+  // this timeline's playhead.
+  const queueState = useQueueState()
+  const queueProgress = useQueueProgress()
+  const cellIdSet = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
+  const queueActive =
+    (queueState.kind === "playing" || queueState.kind === "paused" || queueState.kind === "loading") &&
+    cellIdSet.has(queueState.cellId)
+  const queuePlaying = queueState.kind === "playing" && cellIdSet.has(queueState.cellId)
+  useEffect(() => {
+    if (queueActive) clock.setCurrentSec(queueProgress.currentTime)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
+  }, [queueActive, queueProgress.currentTime])
+  useEffect(() => {
+    if (queuePlaying) {
+      clock.play()
+      // Starting playback is an explicit "watch this" — re-engage follow.
+      setFollow(true)
+    } else {
+      clock.pause()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
+  }, [queuePlaying])
+
+  // Measure the scroll viewport before first paint + on resizes — the
+  // windowing math and follow-scroll both need a real clientWidth.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    setViewportPx(el.clientWidth)
+    if (typeof ResizeObserver === "undefined") return // happy-dom
+    const ro = new ResizeObserver(() => setViewportPx(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
   const bounds = useMemo(() => timelineBounds(cells), [cells])
@@ -84,9 +136,30 @@ export function TimelineEditor({
     [cells, selectedId],
   )
 
+  function scrollTrackTo(left: number) {
+    const el = scrollRef.current
+    if (!el) return
+    lastProgrammaticScrollAt.current = performance.now()
+    el.scrollLeft = left
+    setScrollLeft(left)
+  }
+
   function applyZoom(next: number) {
     const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next))
-    setPxPerSec(z)
+    // AQU-646: keep an anchor stable across the zoom — the playhead when
+    // following live playback, otherwise the viewport center.
+    const el = scrollRef.current
+    if (el && viewportPx > 0) {
+      const followAnchor = follow && queueActive
+      const anchorSec = followAnchor ? clock.currentSec : pxToSec(scrollLeft + viewportPx / 2, pxPerSec)
+      const target = Math.max(0, secToPx(anchorSec, z) - (followAnchor ? viewportPx * 0.1 : viewportPx / 2))
+      setPxPerSec(z)
+      // Apply after React paints the new track width, or the browser clamps
+      // the scroll to the old width.
+      requestAnimationFrame(() => scrollTrackTo(target))
+    } else {
+      setPxPerSec(z)
+    }
     try {
       localStorage.setItem(zoomKey(fileId), String(z))
     } catch {
@@ -103,7 +176,27 @@ export function TimelineEditor({
         /* not seekable yet */
       }
     }
+    // AQU-646: explicit seeks drive the audio queue too, and re-engage follow.
+    onSeekToTime?.(Math.max(0, sec))
+    setFollow(true)
   }
+
+  // AQU-646 follow-playhead: page-flip the view when the playhead approaches
+  // the right edge (or leaves the left). Reads the element's live scrollLeft —
+  // state can lag a programmatic scroll by a frame.
+  useEffect(() => {
+    if (!follow || !queuePlaying) return
+    const el = scrollRef.current
+    if (!el) return
+    const target = computeFollowScroll(
+      secToPx(queueProgress.currentTime, pxPerSec),
+      el.scrollLeft,
+      viewportPx,
+      trackWidthPx,
+    )
+    if (target != null) scrollTrackTo(target)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- element scrollLeft is read live
+  }, [follow, queuePlaying, queueProgress.currentTime, pxPerSec, viewportPx, trackWidthPx])
 
   const laneProps = {
     pxPerSec,
@@ -113,6 +206,14 @@ export function TimelineEditor({
     editable,
     onSelect: setSelectedId,
     onRetime,
+    // Clean card click → navigate playback to the clip's start (both lanes;
+    // untimed chips have no timecode to seek to).
+    onSeek: (cellId: string) => {
+      const cell = cells.find((c) => c.id === cellId)
+      if (cell && typeof cell.startTime === "number" && Number.isFinite(cell.startTime)) {
+        seekTo(cell.startTime)
+      }
+    },
   }
 
   return (
@@ -121,6 +222,31 @@ export function TimelineEditor({
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">Timeline</span>
         <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-label="Follow playhead"
+            aria-pressed={follow}
+            title="Follow playhead"
+            onClick={() => {
+              const next = !follow
+              setFollow(next)
+              if (next) {
+                const el = scrollRef.current
+                if (el) {
+                  const target = computeFollowScroll(
+                    secToPx(clock.currentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
+                  )
+                  if (target != null) scrollTrackTo(target)
+                }
+              }
+            }}
+            className={cn(
+              "inline-flex items-center rounded-md border border-border px-1.5 py-1",
+              follow ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
+            )}
+          >
+            <LocateFixed className="h-3.5 w-3.5" />
+          </button>
           {onLinkVideo && (
             <button
               type="button"
@@ -184,10 +310,17 @@ export function TimelineEditor({
           </div>
         </div>
         <div
+          ref={scrollRef}
           className="overflow-x-auto"
           onScroll={(e) => {
             setScrollLeft(e.currentTarget.scrollLeft)
             setViewportPx(e.currentTarget.clientWidth)
+            // A MANUAL scroll while playback runs means "stop following me".
+            // Our own programmatic scrolls fire this handler too — the 150ms
+            // stamp window filters them out.
+            if (queuePlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
+              setFollow(false)
+            }
           }}
         >
           <div className="relative" style={{ width: `${trackWidthPx}px` }}>
@@ -214,7 +347,12 @@ export function TimelineEditor({
                 ))
               )}
             </div>
-            <TimelinePlayhead currentSec={clock.currentSec} pxPerSec={pxPerSec} />
+            <TimelinePlayhead
+              currentSec={clock.currentSec}
+              pxPerSec={pxPerSec}
+              playing={queuePlaying}
+              rate={queueProgress.rate}
+            />
           </div>
         </div>
       </div>

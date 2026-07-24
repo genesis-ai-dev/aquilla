@@ -15,6 +15,14 @@ import type {
   IdmlTranslationUnit,
   LegacyIdmlUpgradeResult,
 } from "./types.js"
+import {
+  decodeXmlBytes,
+  elementText,
+  getAttribute,
+  nearestAncestor,
+  parseXml,
+  type XmlElement,
+} from "./xml.js"
 
 type UnknownRecord = Record<string, unknown>
 
@@ -302,10 +310,15 @@ function exactSourceBlockBytes(input: UnknownRecord, structure: UnknownRecord): 
   return xml !== undefined ? new TextEncoder().encode(xml) : undefined
 }
 
-function resolveSourceBlockHash(
+interface SourceBlockEvidence {
+  readonly hash: string
+  readonly source: string
+}
+
+function resolveSourceBlockEvidence(
   input: UnknownRecord,
   structure: UnknownRecord,
-): string | LegacyIdmlUpgradeResult {
+): SourceBlockEvidence | LegacyIdmlUpgradeResult {
   const provided = uniqueDefined([
     validSha256(structure.sourceBlockHash),
     validSha256(input.sourceBlockHash),
@@ -315,16 +328,23 @@ function resolveSourceBlockHash(
     return rejected("SOURCE_HASH_MISMATCH", "Legacy IDML source block hashes disagree")
   }
   const bytes = exactSourceBlockBytes(input, structure)
-  const computed = bytes ? sha256Hex(bytes) : undefined
-  if (provided && computed && provided !== computed) {
+  if (!bytes) {
+    return rejected(
+      "SOURCE_HASH_MISMATCH",
+      "Legacy IDML upgrade needs the exact original paragraph XML block; a hash alone is insufficient",
+    )
+  }
+  let source: string
+  try {
+    source = decodeXmlBytes(bytes, "legacy-source-block.xml")
+  } catch {
+    return rejected("MALFORMED_XML", "Legacy IDML source block is not valid UTF-8 XML")
+  }
+  const computed = sha256Hex(bytes)
+  if (provided && provided !== computed) {
     return rejected("SOURCE_HASH_MISMATCH", "Legacy IDML source block hash does not match the exact XML block")
   }
-  if (provided) return provided
-  if (computed) return computed
-  return rejected(
-    "SOURCE_HASH_MISMATCH",
-    "Legacy IDML upgrade needs the exact original paragraph XML block or its SHA-256",
-  )
+  return { hash: computed, source }
 }
 
 function resolveLegacyMemberPath(
@@ -382,6 +402,107 @@ function localBreaks(
   return parsed.slots.map((slot, localIndex) => (
     localIndex > 0 && parsed.breakBefore[slot.index] === true
   ))
+}
+
+interface LegacySourceProof {
+  readonly content: readonly string[]
+  readonly characterStyles: readonly string[]
+  readonly breakBefore: readonly boolean[]
+}
+
+function proveLegacyParagraphSource(
+  source: string,
+  paragraphId: string | undefined,
+  paragraphStyle: string,
+): LegacySourceProof | LegacyIdmlUpgradeResult {
+  let root: XmlElement
+  try {
+    root = parseXml(source, "legacy-source-block.xml").root
+  } catch {
+    return rejected("MALFORMED_XML", "Legacy IDML source block is not well-formed safe XML")
+  }
+  if (root.localName !== "ParagraphStyleRange") {
+    return rejected(
+      "LOCATOR_MISSING",
+      "Legacy IDML source evidence must be one exact ParagraphStyleRange",
+    )
+  }
+  if (paragraphId && getAttribute(root, "Self") !== paragraphId) {
+    return rejected("LOCATOR_MISSING", "Legacy IDML source block does not match its paragraph ID")
+  }
+  if (getAttribute(root, "AppliedParagraphStyle") !== paragraphStyle) {
+    return rejected(
+      "ANCHOR_INVALID",
+      "Legacy IDML source block does not match its paragraph style",
+    )
+  }
+
+  const content: string[] = []
+  const characterStyles: string[] = []
+  const breakBefore: boolean[] = []
+  let pendingBreak = false
+  let unsupportedElement: string | undefined
+
+  const visit = (element: XmlElement): void => {
+    for (const child of element.children) {
+      if (child.kind !== "element") continue
+      if (child.localName === "ParagraphStyleRange") {
+        unsupportedElement = child.name
+        continue
+      }
+      if (child.localName === "Content") {
+        const rawInterior = source.slice(child.openEnd, child.closeStart)
+        if (
+          child.children.some((entry) => entry.kind === "element")
+          || rawInterior.includes("<!--")
+          || rawInterior.includes("<?")
+        ) {
+          unsupportedElement = child.name
+          continue
+        }
+        const characterRange = nearestAncestor(
+          child,
+          (ancestor) => ancestor.localName === "CharacterStyleRange",
+        )
+        content.push(elementText(child, "legacy-source-block.xml"))
+        characterStyles.push(
+          (characterRange && getAttribute(characterRange, "AppliedCharacterStyle"))
+          ?? "CharacterStyle/$ID/[No character style]",
+        )
+        breakBefore.push(pendingBreak)
+        pendingBreak = false
+        continue
+      }
+      if (child.localName === "Br") {
+        if (content.length === 0 || pendingBreak) {
+          unsupportedElement = child.name
+        } else {
+          pendingBreak = true
+        }
+        continue
+      }
+      if (
+        child.localName === "CharacterStyleRange"
+        || child.localName === "Properties"
+      ) {
+        visit(child)
+        continue
+      }
+      unsupportedElement = child.name
+    }
+  }
+  visit(root)
+  if (pendingBreak) unsupportedElement = "Br"
+  if (unsupportedElement) {
+    return rejected(
+      "UNSUPPORTED_CONSTRUCT",
+      `Legacy IDML source block contains <${unsupportedElement}> that its HTML cannot prove`,
+    )
+  }
+  if (content.length === 0) {
+    return rejected("ANCHOR_MISSING", "Legacy IDML source block has no literal Content slots")
+  }
+  return { content, characterStyles, breakBefore }
 }
 
 function legacyScope(value: unknown): IdmlScope | undefined {
@@ -538,13 +659,35 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
       "Legacy IDML needs a valid member path or a stable Story ID",
     )
   }
-  const sourceBlockHash = resolveSourceBlockHash(input, structure)
-  if (typeof sourceBlockHash !== "string") return sourceBlockHash
-
   const scope = legacyScope(structure.scope) ?? "story-paragraph"
   const elementPath = paragraphId
     ? `/Story/ParagraphStyleRange[@Self="${paragraphId}"]`
     : `/Story/ParagraphStyleRange[${(paragraphOrder ?? 0) + 1}]`
+  const sourceEvidence = resolveSourceBlockEvidence(input, structure)
+  if ("ok" in sourceEvidence) return sourceEvidence
+  const sourceProof = proveLegacyParagraphSource(
+    sourceEvidence.source,
+    paragraphId ?? undefined,
+    paragraphStyle,
+  )
+  if ("ok" in sourceProof) return sourceProof
+  if (
+    !sameNumbers(
+      sourceProof.breakBefore.map((value) => value ? 1 : 0),
+      storedBreakBefore.map((value) => value ? 1 : 0),
+    )
+    || sourceProof.content.length !== contentSegments.length
+    || sourceProof.content.some((value, index) => value !== contentSegments[index])
+    || parsedSource.slots.some((
+      slot,
+      localIndex,
+    ) => sourceProof.characterStyles[slot.index] !== parsedSource.slots[localIndex]?.characterStyleId)
+  ) {
+    return rejected(
+      "ANCHOR_INVALID",
+      "Legacy IDML XML, content metadata, and segment HTML do not describe the same paragraph",
+    )
+  }
   const locator: IdmlLocator = {
     kind: "idml",
     memberPath,
@@ -554,7 +697,7 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
     scope,
     part: part ?? 0,
     slotIndexes,
-    sourceBlockHash,
+    sourceBlockHash: sourceEvidence.hash,
   }
 
   const slots: readonly IdmlTextSlot[] = parsedSource.slots.map((slot, localIndex) => ({

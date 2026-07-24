@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest"
 import { sha256Hex, validateIdmlTranslation } from "./html.js"
 import { upgradeLegacyIdmlMetadata } from "./legacy.js"
 
-const sourceBlockXml = '<ParagraphStyleRange Self="p1"><Content>A &amp; Ω</Content><Br/><Content></Content></ParagraphStyleRange>'
+const sourceBlockXml = [
+  '<ParagraphStyleRange Self="p1" AppliedParagraphStyle="ParagraphStyle/Body">',
+  '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>A &amp; Ω</Content></CharacterStyleRange>',
+  "<Br/>",
+  '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content></Content></CharacterStyleRange>',
+  "</ParagraphStyleRange>",
+].join("")
 
 const sourceHtml = [
   '<p class="indesign-paragraph" data-paragraph-style="ParagraphStyle/Body" data-story-id="u1" data-segment-count="2">',
@@ -92,7 +98,7 @@ describe("upgradeLegacyIdmlMetadata", () => {
     })
   })
 
-  it("accepts a supplied exact source-block hash instead of requiring XML in metadata", () => {
+  it("rejects a supplied source-block hash without the exact XML evidence", () => {
     const input = legacyInput()
     const metadata = input.metadata as {
       data: { idmlStructure: Record<string, unknown> }
@@ -101,8 +107,8 @@ describe("upgradeLegacyIdmlMetadata", () => {
     metadata.data.idmlStructure.sourceBlockHash = sha256Hex(sourceBlockXml)
 
     const result = upgradeLegacyIdmlMetadata(input)
-    expect(result.ok).toBe(true)
-    if (result.ok) expect(result.locator.sourceBlockHash).toBe(sha256Hex(sourceBlockXml))
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.diagnostics[0]?.code).toBe("SOURCE_HASH_MISMATCH")
   })
 
   it("supports an explicit member path plus stable paragraph order", () => {
@@ -135,8 +141,8 @@ describe("upgradeLegacyIdmlMetadata", () => {
 
   it("upgrades a producer-valid cell that omits a declared structural apostrophe slot", () => {
     const apostropheBlock = [
-      '<ParagraphStyleRange Self="p1">',
-      "<Content>Zmluvné</Content><Content>ʼ</Content><Content>dejiny</Content>",
+      '<ParagraphStyleRange Self="p1" AppliedParagraphStyle="ParagraphStyle/Body">',
+      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>Zmluvné</Content><Content>ʼ</Content><Content>dejiny</Content></CharacterStyleRange>',
       "</ParagraphStyleRange>",
     ].join("")
     const apostropheHtml = [
@@ -172,8 +178,8 @@ describe("upgradeLegacyIdmlMetadata", () => {
 
   it("upgrades producer-valid sliced cells using global slot indexes and relationship parts", () => {
     const slicedBlock = [
-      '<ParagraphStyleRange Self="p1">',
-      "<Content>zero</Content><Br/><Content>one</Content><Content>two</Content>",
+      '<ParagraphStyleRange Self="p1" AppliedParagraphStyle="ParagraphStyle/Body">',
+      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>zero</Content><Br/><Content>one</Content><Content>two</Content></CharacterStyleRange>',
       "</ParagraphStyleRange>",
     ].join("")
     const makeSlice = (
@@ -230,6 +236,30 @@ describe("upgradeLegacyIdmlMetadata", () => {
     if (!upgraded.ok) return
 
     expect(upgradeLegacyIdmlMetadata(upgraded)).toEqual(upgraded)
+  })
+
+  it.each([
+    ["arbitrary XML", "<not-proof/>", "LOCATOR_MISSING"],
+    [
+      "wrong paragraph identity",
+      sourceBlockXml.replace('Self="p1"', 'Self="other"'),
+      "LOCATOR_MISSING",
+    ],
+    [
+      "unrepresented inline object",
+      sourceBlockXml.replace("<Br/>", '<Rectangle Self="object-1"/><Br/>'),
+      "UNSUPPORTED_CONSTRUCT",
+    ],
+  ])("rejects legacy source evidence with %s", (_label, sourceBlock, code) => {
+    const input = legacyInput()
+    const metadata = input.metadata as {
+      data: { idmlStructure: Record<string, unknown> }
+    }
+    metadata.data.idmlStructure.sourceBlockXml = sourceBlock
+
+    const result = upgradeLegacyIdmlMetadata(input)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.diagnostics[0]?.code).toBe(code)
   })
 
   it.each([

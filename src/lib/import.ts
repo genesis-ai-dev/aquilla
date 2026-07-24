@@ -45,6 +45,7 @@ import {
 } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
+import { extractIdmlStrings } from "./parsers/idml"
 import { extractHtmlStrings } from "./parsers/html"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
@@ -650,7 +651,7 @@ export async function prepareImportFile(
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
     if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
-      if (extensionType === "docx" || extensionType === "pptx") {
+      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml") {
         return preparedParsedFile(file, extensionType, await parseFile(file, extensionType))
       }
       const bytes = await file.arrayBuffer()
@@ -2141,6 +2142,12 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       const strings = await extractPptxStrings(buffer)
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
+    }
+    case "idml": {
+      const buffer = await file.arrayBuffer()
+      const strings = await extractIdmlStrings(buffer)
+      // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
+      return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "idml" }]
     }
     case "xlsx":
       throw new Error("XLSX files import through spreadsheet column mapping")

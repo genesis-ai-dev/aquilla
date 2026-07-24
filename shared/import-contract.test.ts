@@ -13,6 +13,7 @@ describe("source artifact format registry", () => {
       "ebible",
       "helloao",
       "html",
+      "idml",
       "json",
       "macula-tsv",
       "md",
@@ -48,7 +49,7 @@ describe("source artifact format registry", () => {
       .filter(([, descriptor]) => descriptor.defaultFidelity === "native")
       .map(([format]) => format)
       .sort()
-    expect(native).toEqual(["docx", "pptx", "usfm"])
+    expect(native).toEqual(["docx", "idml", "pptx", "usfm"])
     expect(sourceArtifactDescriptor("future-vendor-format")).toEqual({
       extension: "bin",
       contentType: "application/octet-stream",

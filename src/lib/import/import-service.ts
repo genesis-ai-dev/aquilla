@@ -75,6 +75,8 @@ function profileId(fileType: FileType): string {
     case "docx":
     case "pptx":
       return `builtin:ooxml-${fileType}`
+    case "idml":
+      return "builtin:idml"
     case "vtt":
     case "srt":
       return `builtin:subtitle-${fileType}`

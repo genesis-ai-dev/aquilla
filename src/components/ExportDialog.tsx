@@ -58,7 +58,7 @@ import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "pptx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -93,6 +93,15 @@ const FORMAT_OPTIONS: FormatOption[] = [
     label: "PowerPoint (.pptx)",
     ext: ".pptx",
     description: "Translations injected back into the original slide deck. Slide/shape/paragraph structure is preserved; mixed per-run formatting inside a translated paragraph keeps the first run's styling. Requires the original file to have been imported after round-trip export support was added — re-import older files to enable.",
+    lossy: false,
+  },
+  {
+    // IDML round-trip export with story/paragraph structure preserved.
+    // Only shown for files imported as .idml (activeFileType).
+    id: "idml",
+    label: "InDesign (.idml)",
+    ext: ".idml",
+    description: "Translations injected back into the original InDesign document. Story/paragraph structure, styles, and footnotes are preserved; mixed per-run formatting inside a translated paragraph keeps the first run's styling. Requires the original file's stored bytes (re-import older files to enable).",
     lossy: false,
   },
   {
@@ -195,6 +204,7 @@ const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
   usfm: "usfm",
   docx: "docx",
   pptx: "pptx",
+  idml: "idml",
   md: "md",
   txt: "txt",
   vtt: "vtt",
@@ -315,7 +325,7 @@ export function ExportDialog({
   }, [activeFileId, nativeFormatId])
 
   // audio-by-character, vtt, docx, pptx, and plain-text-dump only support file scope.
-  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "pptx", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   const isProjectOnlyFormat = format === "sdbh-xml"
@@ -518,6 +528,29 @@ export function ExportDialog({
           ...collectInlineStyleWarnings(cells),
         ])
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.pptx${note}` })
+      } else if (fmt === "idml") {
+        // IDML round-trip export: fetch the raw IDML side-car from the server,
+        // then inject translations client-side (JSZip, surgical string splice),
+        // mirroring the DOCX/PPTX paths above.
+        setStatus({ kind: "busy", msg: "Fetching original document…" })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
+        setStatus({ kind: "busy", msg: "Injecting translations…" })
+        const { exportIdml } = await import("@/lib/export/exporters/idml")
+        const result = await exportIdml(rawBytes, cells)
+        const baseName = buildExportStem(false)
+        downloadBlob(result.blob, `${baseName}.idml`)
+        const note = result.injected === 0
+          ? " (no translations to inject — download original structure)"
+          : ` (${result.injected} paragraph${result.injected === 1 ? "" : "s"} translated)`
+        setFidelityWarnings([
+          ...result.warnings.map((w) => ({
+            kind: "inline-style-simplified" as const,
+            segment: w.segment,
+            detail: w.detail,
+          })),
+          ...collectInlineStyleWarnings(cells),
+        ])
+        setStatus({ kind: "ok", msg: `Downloaded ${baseName}.idml${note}` })
       } else if (fmt === "audio-by-character") {
         setStatus({ kind: "busy", msg: "Decoding audio…" })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
@@ -801,6 +834,7 @@ export function ExportDialog({
               if (f.id === "usfm") return activeFileType === "usfm"
               if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
               if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
+              if (f.id === "idml") return activeFileType === "idml" // only for idml imports
               if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
               if (f.id === "plain-text-dump") return false // shown in Advanced section only
               return true

@@ -315,6 +315,7 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "usfm":
     case "docx":
     case "pptx":
+    case "idml":
       return "native"
     case "xliff":
     case "tmx":

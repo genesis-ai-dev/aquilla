@@ -99,10 +99,10 @@ export async function handleExportSourceRequest(
     .first<{ name: string }>()
   const fileName = fileMeta?.name || `${fileId}.sfm`
 
-  if (blob.format === "docx" || blob.format === "pptx") {
-    // AQU-233: For binary Office formats (DOCX/PPTX) the server serves the
-    // raw side-car bytes as-is (base64-decoded back to binary). The client is
-    // responsible for XML-injection of translations using JSZip + DOMParser —
+  if (blob.format === "docx" || blob.format === "pptx" || blob.format === "idml") {
+    // AQU-233: For binary zip-of-XML formats (DOCX/PPTX/IDML) the server
+    // serves the raw side-car bytes as-is (base64-decoded back to binary). The
+    // client is responsible for XML-injection of translations using JSZip —
     // the worker lacks a ZIP reader library and adding jszip would be a new
     // heavy dependency (flagged per HARD LIMITS). The raw bytes are sufficient
     // for a client-side "open in Word with structure intact" export.
@@ -113,8 +113,10 @@ export async function handleExportSourceRequest(
     // serializer that mirrors serializeUsfmLossless.
     const mimeType = blob.format === "docx"
       ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-      : "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    const ext = blob.format === "docx" ? ".docx" : ".pptx"
+      : blob.format === "pptx"
+        ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        : "application/vnd.adobe.indesign-idml-package"
+    const ext = `.${blob.format}`
     const downloadName = fileName.endsWith(ext) ? fileName : `${fileName}${ext}`
 
     // Resolve binary bytes: prefer R2 (r2_key), fall back to legacy base64 raw_source.

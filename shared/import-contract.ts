@@ -46,6 +46,7 @@ export type RoundTripFidelity = (typeof ROUND_TRIP_FIDELITIES)[number]
 export const SOURCE_ARTIFACT_FORMATS = {
   docx: { extension: "docx", contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", defaultFidelity: "native" },
   pptx: { extension: "pptx", contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", defaultFidelity: "native" },
+  idml: { extension: "idml", contentType: "application/vnd.adobe.indesign-idml-package", defaultFidelity: "native" },
   xlsx: { extension: "xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", defaultFidelity: "content-only" },
   usfm: { extension: "usfm", contentType: "text/plain; charset=utf-8", defaultFidelity: "native" },
   usx: { extension: "usx", contentType: "application/xml; charset=utf-8", defaultFidelity: "content-only" },

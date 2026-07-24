@@ -7,6 +7,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
+import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -139,10 +140,13 @@ function ProjectRow({
   project: p,
   orgLabel,
   onOpen,
+  isNew = false,
 }: {
   project: CloudProjectSummary
   orgLabel?: string
   onOpen: () => void
+  /** AQU-696: show the "New" badge (shared-projects list only). */
+  isNew?: boolean
 }) {
   return (
     <li>
@@ -154,6 +158,11 @@ function ProjectRow({
         {/* Name + status badge */}
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-medium">{p.name}</span>
+          {isNew && (
+            <Badge className="shrink-0" data-testid="new-shared-badge">
+              New
+            </Badge>
+          )}
           {orgLabel && (
             <Badge variant="secondary" className="shrink-0">
               {orgLabel}
@@ -178,6 +187,7 @@ export function ProjectsList() {
   const { activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, error: orgError, refresh: refreshOrgs } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const username = session?.username ?? null
   const navigate = useNavigate()
   const [projects, setProjects] = useState<CloudProjectSummary[]>([])
   const [portfolioProjects, setPortfolioProjects] = useState<PortfolioProject[]>([])
@@ -505,7 +515,16 @@ export function ProjectsList() {
                   </div>
                   <ul className="divide-y">
                     {filteredShared.map((p) => (
-                      <ProjectRow key={p.id} project={p} onOpen={() => navigate(`/projects/${p.id}`)} />
+                      <ProjectRow
+                        key={p.id}
+                        project={p}
+                        isNew={
+                          username
+                            ? isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id))
+                            : false
+                        }
+                        onOpen={() => navigate(`/projects/${p.id}`)}
+                      />
                     ))}
                   </ul>
                 </section>

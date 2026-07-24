@@ -334,6 +334,11 @@ projects.get("/", authMiddleware, async (c) => {
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, o.name AS org_name, p.archived_at, p.is_active,
             p.source_project_id,
+            -- AQU-696: when the caller was granted access, for the "New" badge
+            -- on newly-shared projects. Honest coalesce of the direct-membership
+            -- grant and the group grant (a group-granted project has no pm row,
+            -- so returning null would hide the badge for exactly that case).
+            COALESCE(pm.granted_at, gg.max_grant_at) AS granted_at,
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
@@ -363,7 +368,12 @@ projects.get("/", authMiddleware, async (c) => {
        LEFT JOIN org_members om
          ON om.org_id = p.org_id AND om.user_id = ?
        LEFT JOIN (
-         SELECT gpg.project_id, MAX(gpg.role_level) AS max_grant
+         SELECT gpg.project_id,
+                MAX(gpg.role_level) AS max_grant,
+                -- AQU-696: most-recent group grant time for this user, taken
+                -- as the honest coalesce of the project→group grant and the
+                -- user→group membership (whichever is present).
+                MAX(COALESCE(gpg.granted_at, gm.added_at)) AS max_grant_at
            FROM group_project_grants gpg
            JOIN group_members gm
              ON gm.group_id = gpg.group_id
@@ -397,6 +407,7 @@ projects.get("/", authMiddleware, async (c) => {
       archived_at: string | null
       is_active: boolean
       source_project_id: string | null
+      granted_at: string | null
       role_level: number
       role_source: "creator" | "override" | "org" | "group"
     }>()
@@ -432,6 +443,9 @@ projects.get("/", authMiddleware, async (c) => {
         // AQU-478: see the single-project route's comment — this field was
         // declared on CloudProjectSummary but never actually populated.
         sourceProjectId: row.source_project_id,
+        // AQU-696: null for own/creator projects (no grant row) — the client
+        // treats absence as "not new".
+        grantedAt: row.granted_at,
         role,
         files: filesByProject.get(row.id) ?? [],
       }

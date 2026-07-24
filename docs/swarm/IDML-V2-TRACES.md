@@ -4,6 +4,7 @@
 
 - [OPEN] Adobe automation requires a licensed InDesign or InDesign Server runtime. Keep `native` disabled until AQU-709 records a green corpus run.
 - [OPEN] Codex integration must wait for the current HTML-repair work to land; do not touch its dirty checkout.
+- [OPEN] GitHub Packages scopes are account/organization namespaces. The requested package scope is `@aquilla`, but both repositories are owned by `genesis-ai-dev` and the public `aquilla` GitHub account is unrelated unless ownership is confirmed. Keep the local package name, but do not publish it or add a credential until the namespace owner/registry is explicitly confirmed. A safe fallback is publishing under `@genesis-ai-dev` and consuming it through an npm dependency alias named `@aquilla/idml-roundtrip`.
 
 ## Deferred to dependent tickets
 

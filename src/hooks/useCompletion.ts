@@ -44,6 +44,7 @@ import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
 import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates, dropValidatedPairDuplicates } from "@/lib/completion/compress-examples"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
@@ -200,6 +201,15 @@ export function useCompletion(
     opts?: { regenerate?: boolean },
   ) => {
     if (!isConfigured || !isAvailable) return
+    // SUB-28: media sections speak through their transcript — `original` is
+    // the import FILENAME, never legitimate source text. Untranscribed → a
+    // clear error instead of a garbage "translation" of the filename.
+    const sourceText = effectiveSourceText(cell)
+    if (!sourceText.trim()) {
+      setErrors((p) => new Map(p).set(cell.id, "No source text yet — transcribe this section first."))
+      setCompleting((p) => new Map(p).set(cell.id, "error"))
+      return
+    }
     // AQU-620: raise the temperature for an explicit regenerate so the second
     // request varies; leave first-draft generation on the configured value.
     const generationSettings: CompletionSettings = opts?.regenerate
@@ -213,7 +223,7 @@ export function useCompletion(
     const topK = effectiveSettings.top_k ?? 15
     let found: ScoredPair[] = []
     try {
-      found = await search(cell.original, topK, cell.id)
+      found = await search(sourceText, topK, cell.id)
     } catch (err) {
       console.warn("[useCompletion] few-shot retrieval failed:", err)
     }
@@ -224,7 +234,7 @@ export function useCompletion(
     // the cell being drafted. These represent human corrections — "fix it once,
     // the system learns." Limit to top_k most-relevant to keep the prompt tight.
     const corpusCells = getAllCells()
-    const validatedPairs = collectValidatedPairs(corpusCells, cell.original, topK)
+    const validatedPairs = collectValidatedPairs(corpusCells, sourceText, topK)
 
     try {
       // Left-context = committed target of the preceding cells (D4).
@@ -256,7 +266,7 @@ export function useCompletion(
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        sourceText: cell.original,
+        sourceText,
         examples: compressedExamples,
         rules,
         validatedPairs,
@@ -328,8 +338,14 @@ export function useCompletion(
   //   - The driver checks isBatchCompletionCancelled() before each chunk.
   //   - The in-flight fetch/stream receives the AbortSignal and terminates immediately.
   //   - Already-committed cells are unaffected; partial streaming text is discarded.
-  const completeBatch = useCallback(async (cells: CellData[]) => {
+  const completeBatch = useCallback(async (allRequested: CellData[]) => {
     if (!isConfigured || !isAvailable) return
+
+    // SUB-28: untranscribed media sections have NO source text (the filename
+    // doesn't count) — skip them instead of asking the model to "translate"
+    // an empty source line.
+    const cells = allRequested.filter((c) => effectiveSourceText(c).trim() !== "")
+    if (cells.length === 0) return
 
     const chunks: CellData[][] = []
     for (let i = 0; i < cells.length; i += MAX_CELLS_PER_CALL) {
@@ -361,7 +377,7 @@ export function useCompletion(
         if (isBatchCompletionCancelled(runId)) break
 
         for (const c of chunk) setCompleting((p) => new Map(p).set(c.id, "searching"))
-        const concatenated = chunk.map((c) => c.original).join(" ")
+        const concatenated = chunk.map((c) => effectiveSourceText(c)).join(" ")
         let passages: PassageHit[] = []
         try {
           passages = await searchPassages(concatenated, 3, 2)
@@ -416,7 +432,7 @@ export function useCompletion(
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
           systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-          cells: chunk.map((c) => ({ source: c.original })),
+          cells: chunk.map((c) => ({ source: effectiveSourceText(c) })),
           examples: examplesForPrompt,
           rules,
           validatedPairs: batchValidatedPairs,
@@ -647,7 +663,7 @@ export function useCompletion(
 
       // Validated pairs from living memory for relevance-ranked few-shot.
       const topK = effectiveSettings.top_k ?? 15
-      const concatenated = draftCells.map((c) => c.original).join(" ")
+      const concatenated = draftCells.map((c) => effectiveSourceText(c)).join(" ")
       const validatedPairs = collectValidatedPairs(cells, concatenated, topK)
 
       // Retrieve passage examples for the paragraph's source text.
@@ -675,7 +691,7 @@ export function useCompletion(
         // requested from the model.
         cells: groupCells.map((c) => ({
           cellId: c.id,
-          source: c.original,
+          source: effectiveSourceText(c),
           ...(c.status === "validated" ? { lockedTarget: c.translated } : {}),
         })),
         examples: examplesForPrompt,

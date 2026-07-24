@@ -26,6 +26,7 @@
 
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import { buildTermRegex } from "@/lib/terminology/match"
 import type { Concept } from "@/lib/terminology/types"
@@ -43,6 +44,9 @@ export interface CheckableCell {
   original: string
   translated: string
   status: CellData["status"]
+  // SUB-28: media sections match against their transcript, not the filename.
+  medium?: import("@/lib/sync/cells-read-types").SegmentMedium | null
+  transcription?: string
 }
 
 /** One rule with every cell that breaks it (grouped for card rendering). */
@@ -132,7 +136,7 @@ export function scanTermConsistency(
 
     for (const cell of cells) {
       if (cell.status === "empty" || !cell.translated.trim()) continue
-      if (!sourceRe.test(cell.original)) continue
+      if (!sourceRe.test(effectiveSourceText(cell))) continue
       totalOccurrences++
 
       let matchedAny = false

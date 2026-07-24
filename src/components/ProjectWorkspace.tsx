@@ -34,6 +34,7 @@ import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFil
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -2221,7 +2222,7 @@ export function ProjectWorkspace() {
         // translator chose. The service derives the relevant hints from
         // the cell's source text; behavior is unchanged when nothing matches.
         concepts: project?.terminology ?? [],
-        sourceText: cell.original,
+        sourceText: effectiveSourceText(cell),
       })
       if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
       persistBt(cell, btText, true)
@@ -4481,7 +4482,7 @@ export function ProjectWorkspace() {
                   const cell = getActiveCell(focusedCellId)
                   if (!cell) return null
                   return {
-                    sourceText: cell.original,
+                    sourceText: effectiveSourceText(cell),
                     translatedText: cell.translated,
                     context: cell.context ?? undefined,
                   }

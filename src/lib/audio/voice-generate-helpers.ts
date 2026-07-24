@@ -5,6 +5,7 @@
 
 import { generateAndAttachCellVoice } from "./generate-voice"
 import { resolveCastVoice } from "./voices"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { setTtsStatus, ttsStatusKey, synthesizeForCell } from "./tts"
 import { AiModelConsentDeniedError } from "./ai-consent"
 import type { CellData } from "@/hooks/useCells"
@@ -54,7 +55,8 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       geminiContext: {
         sourceLanguage: project.sourceLanguage,
         targetLanguage: project.targetLanguage,
-        original: cell.original,
+        // SUB-28: media sections speak through their transcript, not the filename.
+        original: effectiveSourceText(cell),
         context: cell.context,
         cellLabel: cell.cellLabel,
       },

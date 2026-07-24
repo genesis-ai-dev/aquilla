@@ -1,6 +1,7 @@
 import type { CompletionSettings, CompletionProvider, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
+import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
 
 // ---------------------------------------------------------------------------
@@ -33,36 +34,39 @@ export interface ValidatedPair {
  * @param limit - max pairs to return (default 20; callers may want fewer)
  */
 export function collectValidatedPairs(
-  cells: { id?: string; status: string; original: string; translated: string }[],
+  cells: ({ id?: string; status: string; translated: string } & SourceTextCell)[],
   query?: string,
   limit = 20,
 ): ValidatedPair[] {
-  const validated = cells.filter(
-    (c) => c.status === "validated" && c.original.trim() && c.translated.trim(),
-  )
+  // SUB-28: example sources read through effectiveSourceText — a validated
+  // media section contributes its TRANSCRIPT, never the import filename, and
+  // an untranscribed one is dropped by the trim filter.
+  const validated = cells
+    .map((c) => ({ cell: c, source: effectiveSourceText(c) }))
+    .filter((x) => x.cell.status === "validated" && x.source.trim() && x.cell.translated.trim())
 
   if (query && query.trim()) {
     // Token overlap: lower-case split on whitespace/punctuation
     const queryTokens = new Set(
       query.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean),
     )
-    const withScore = validated.map((c) => {
-      const srcTokens = c.original.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean)
+    const withScore = validated.map((x) => {
+      const srcTokens = x.source.toLowerCase().split(/[\s\p{P}]+/u).filter(Boolean)
       const overlap = srcTokens.filter((t) => queryTokens.has(t)).length
-      return { pair: c, overlap }
+      return { pair: x, overlap }
     })
     withScore.sort((a, b) => b.overlap - a.overlap)
     return withScore.slice(0, limit).map((x) => ({
-      ...(x.pair.id ? { cellId: x.pair.id } : {}),
-      source: x.pair.original,
-      target: x.pair.translated,
+      ...(x.pair.cell.id ? { cellId: x.pair.cell.id } : {}),
+      source: x.pair.source,
+      target: x.pair.cell.translated,
     }))
   }
 
-  return validated.slice(0, limit).map((c) => ({
-    ...(c.id ? { cellId: c.id } : {}),
-    source: c.original,
-    target: c.translated,
+  return validated.slice(0, limit).map((x) => ({
+    ...(x.cell.id ? { cellId: x.cell.id } : {}),
+    source: x.source,
+    target: x.cell.translated,
   }))
 }
 

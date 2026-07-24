@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useCallback } from "react"
 import { DualIndex, type ScoredPair } from "@/lib/search/dual-index"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { memMark } from "@/lib/perf-log"
 import type { FileReference } from "@/lib/parsers/types"
 import type { CellData } from "./useCells"
@@ -35,22 +36,29 @@ export function useSearchIndex(_files: FileReference[], allProjectCells: CellDat
   const lookupRef = useRef<Map<string, { fileId: string; source: string; target: string }>>(new Map())
 
   useEffect(() => {
+    // SUB-28: the index + passage lookup carry the SEMANTIC source — a
+    // validated media section is indexed by its transcript, never the import
+    // filename, and an untranscribed one stays out entirely.
     indexRef.current.buildFromProject(
-      allProjectCells.filter((c) => c.status === "validated").map((c) => ({
-        id: c.id,
-        original: c.original,
-        translated: c.translated,
-        fileId: c.fileId,
-      })),
+      allProjectCells
+        .filter((c) => c.status === "validated" && effectiveSourceText(c).trim() !== "")
+        .map((c) => ({
+          id: c.id,
+          original: effectiveSourceText(c),
+          translated: c.translated,
+          fileId: c.fileId,
+        })),
     )
     const order = new Map<string, string[]>()
     const lookup = new Map<string, { fileId: string; source: string; target: string }>()
     for (const c of allProjectCells) {
       if (c.status !== "validated") continue
+      const src = effectiveSourceText(c)
+      if (!src.trim()) continue
       let arr = order.get(c.fileId)
       if (!arr) { arr = []; order.set(c.fileId, arr) }
       arr.push(c.id)
-      lookup.set(c.id, { fileId: c.fileId, source: c.original, target: c.translated })
+      lookup.set(c.id, { fileId: c.fileId, source: src, target: c.translated })
     }
     fileOrderRef.current = order
     lookupRef.current = lookup

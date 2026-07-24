@@ -153,6 +153,7 @@ import {
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
@@ -5683,7 +5684,7 @@ function EditorRow({
                 <CellTtsButton
                   cellId={cell.id}
                   text={visibleTranslated}
-                  original={cell.original}
+                  original={effectiveSourceText(cell)}
                   context={cell.context}
                   cellLabel={cell.cellLabel}
                   sourceLanguage={project.sourceLanguage}

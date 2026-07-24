@@ -1,5 +1,6 @@
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { BUILTIN_CHECKS } from "@/lib/lqa/builtin-registry"
 
 // Compiled-regex cache. Rule patterns are stable across cells and across
@@ -74,6 +75,9 @@ export function checkRulesForCell(
 }
 
 function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleInfraction | null {
+  // SUB-28: media sections match rules against their transcript (the displayed
+  // source), never the import filename / span offsets stay display-aligned.
+  const source = effectiveSourceText(cell)
   const check = rule.check
   // Terminology rules (id `term:…`) are compiled by compileConceptsToRules using
   // the shared matcher in lib/terminology/match.ts, whose wildcard/boundary
@@ -103,7 +107,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       if (!sourceRe) return null
       sourceRe.lastIndex = 0
       const sourceSpans: import("@/lib/parsers/types").InfractionSpan[] = []
-      for (const m of cell.original.matchAll(sourceRe)) {
+      for (const m of source.matchAll(sourceRe)) {
         if (m.index === undefined) continue
         sourceSpans.push({ side: "source", start: m.index, end: m.index + m[0].length, matchedText: m[0] })
       }
@@ -122,7 +126,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       if (!re) return null
       re.lastIndex = 0 // cached regex — clear any leftover state before matchAll
       const sourceSpans: import("@/lib/parsers/types").InfractionSpan[] = []
-      for (const m of cell.original.matchAll(re)) {
+      for (const m of source.matchAll(re)) {
         if (m.index === undefined) continue
         sourceSpans.push({ side: "source", start: m.index, end: m.index + m[0].length, matchedText: m[0] })
       }
@@ -140,7 +144,7 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
     case "builtin": {
       const def = BUILTIN_CHECKS[check.checkId]
       if (!def) return null
-      const spans = def.run(cell.original, cell.translated)
+      const spans = def.run(source, cell.translated)
       if (!spans || spans.length === 0) return null
       const message = typeof def.message === "function" ? def.message(spans) : def.message
       return {

@@ -28,6 +28,7 @@ import { CellTtsButton } from "@/components/CellTtsButton"
 import { CellAudioUploadButton } from "@/components/CellAudioUploadButton"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -282,7 +283,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
                   <CellTtsButton
                     cellId={cell.id}
                     text={cell.translated}
-                    original={cell.original}
+                    original={effectiveSourceText(cell)}
                     context={cell.context}
                     cellLabel={cell.cellLabel}
                     sourceLanguage={detailActions.sourceLanguage}

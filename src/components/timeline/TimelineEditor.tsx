@@ -17,9 +17,11 @@ import { useQueueProgress, useQueueState } from "@/lib/audio/play-queue"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
-import { TimelineCellDetail } from "./TimelineCellDetail"
+import { TimelineCellDetail, type TimelineDetailActions } from "./TimelineCellDetail"
 import { useTimelineClock } from "./useTimelineClock"
 import type { CellData } from "@/hooks/useCells"
+
+export type { TimelineDetailActions } from "./TimelineCellDetail"
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -37,6 +39,9 @@ export interface TimelineEditorProps {
    *  clicks and clean card clicks route through this (the workspace decides
    *  whether to jump the live queue or cue a paused one). */
   onSeekToTime?(sec: number): void
+  /** AQU-646 round 3: the text view's cell actions for the detail pane
+   *  (AI translate, comments, history, record, footnote…). Pass-through. */
+  detailActions?: TimelineDetailActions
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -72,6 +77,7 @@ export function TimelineEditor({
   onLinkVideo,
   onTranscribe,
   onSeekToTime,
+  detailActions,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -357,7 +363,7 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <TimelineCellDetail cell={selectedCell} editable={editable} onCommitTarget={onCommitTarget} onTranscribe={onTranscribe} />
+      <TimelineCellDetail cell={selectedCell} editable={editable} onCommitTarget={onCommitTarget} onTranscribe={onTranscribe} detailActions={detailActions} />
     </div>
   )
 }

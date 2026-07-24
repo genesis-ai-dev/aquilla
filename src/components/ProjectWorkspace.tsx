@@ -83,7 +83,7 @@ import {
 import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
-import { TimelineEditor } from "@/components/timeline/TimelineEditor"
+import { TimelineEditor, type TimelineDetailActions } from "@/components/timeline/TimelineEditor"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { useFocusLock } from "@/hooks/useFocusLock"
@@ -3116,6 +3116,31 @@ export function ProjectWorkspace() {
     myScopes, // AQU-633: per-cell validate scope gate
   }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, myScopes])
 
+  // AQU-646 round 3: the media detail pane's action bundle — the same
+  // handlers/state the text rail uses, grouped as one prop instead of ten.
+  // Identity changes as completions stream; the timeline subtree is small and
+  // un-memoized, so that's fine.
+  const timelineDetailActions = useMemo<TimelineDetailActions | null>(() => project ? {
+    isCompletionConfigured: isConfigured,
+    isCompletionAvailable,
+    isAnonymous: !frontierSession,
+    completing,
+    previews,
+    onCompleteSingle: handleCompleteSingle,
+    onAiSetupNeeded: handleAiSetupNeeded,
+    onOpenComments: handleOpenComments,
+    onOpenHistory: handleOpenHistory,
+    onOpenRecording: handleOpenRecording,
+    openCommentCounts: liveCellOpenCommentCount,
+    projectId: project.id,
+    sourceLanguage: project.sourceLanguage,
+    targetLanguage: project.targetLanguage,
+    projectTtsSettings: project.ttsSettings,
+    username: currentUsername,
+  } : null, [project, isConfigured, isCompletionAvailable, frontierSession, completing, previews,
+    handleCompleteSingle, handleAiSetupNeeded, handleOpenComments, handleOpenHistory,
+    handleOpenRecording, liveCellOpenCommentCount, currentUsername])
+
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
     // First assign the voice to this cell in the cast
@@ -4921,6 +4946,7 @@ export function ProjectWorkspace() {
               {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
                 <TimelineEditor
                   cells={audioMergedCells}
+                  detailActions={timelineDetailActions ?? undefined}
                   coreMediaUrl={activeFile.coreMediaUrl ?? null}
                   editable={!isReadOnly}
                   fileId={activeFile.id}

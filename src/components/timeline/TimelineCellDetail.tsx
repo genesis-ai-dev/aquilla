@@ -3,13 +3,61 @@
 // metadata. Deliberately NOT the full editor row: that component takes ~40 props
 // and reusing it would couple the timeline to the entire editor. Same intent
 // (read + edit a clip from the timeline) with a fraction of the surface.
+//
+// AQU-646 round 3: the target card carries the text view's cell actions
+// (AI translate, regenerate, record/upload audio, play generated voice,
+// footnote, comments, history) via the optional `detailActions` bundle — when
+// absent the pane renders exactly as before (read-only surfaces, tests).
 
 import { useEffect, useState } from "react"
-import { Loader2, Mic } from "lucide-react"
+import {
+  History as HistoryIcon,
+  Loader2,
+  MessageCircle,
+  Mic,
+  NotebookPen,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtClock } from "./format"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
+import { GenerateOverwriteDialog } from "@/components/GenerateOverwriteDialog"
+import { AddFootnoteDialog } from "@/components/footnotes/AddFootnoteDialog"
+import { CellTtsButton } from "@/components/CellTtsButton"
+import { CellAudioUploadButton } from "@/components/CellAudioUploadButton"
+import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
+import { defaultFootnoteRef } from "@/lib/footnotes/refs"
+import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
+import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+
+/** The text view's cell-action bundle, drilled from ProjectWorkspace as one
+ *  object (the EditorActionsContext exists for row-memo stability across
+ *  hundreds of rows — this pane is one component, plain props are simpler). */
+export interface TimelineDetailActions {
+  // AI completion (mirrors the text rail's gates)
+  isCompletionConfigured: boolean
+  isCompletionAvailable: boolean
+  isAnonymous: boolean
+  /** cellId → "searching" | "generating" | "error" */
+  completing: Map<string, string>
+  /** cellId → streaming draft text */
+  previews: Map<string, string>
+  onCompleteSingle(cell: CellData, opts?: { regenerate?: boolean }): Promise<unknown>
+  onAiSetupNeeded(): void
+  // Workspace drawers/modal (same handlers the text rail reaches via context)
+  onOpenComments(cellId: string): void
+  onOpenHistory(cellId: string): void
+  onOpenRecording(cellId: string): void
+  openCommentCounts?: Map<string, number>
+  // Context CellTtsButton / CellAudioUploadButton need beyond the cell
+  projectId: string
+  sourceLanguage?: string
+  targetLanguage?: string
+  projectTtsSettings?: ProjectTtsSettings
+  username: string
+}
 
 export interface TimelineCellDetailProps {
   cell: CellData | null
@@ -18,6 +66,8 @@ export interface TimelineCellDetailProps {
   /** AQU-646: transcribe this clip's audio into source text (media segments).
    *  When absent the Transcribe affordance is hidden (read-only surfaces). */
   onTranscribe?(cell: CellData): void
+  /** AQU-646 round 3: when absent, no action row renders (back-compat). */
+  detailActions?: TimelineDetailActions
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -28,8 +78,43 @@ function Pill({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscribe }: TimelineCellDetailProps) {
+function ActionIconButton({
+  label,
+  onClick,
+  disabled,
+  active,
+  testId,
+  children,
+}: {
+  label: string
+  onClick(): void
+  disabled?: boolean
+  active?: boolean
+  testId: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60",
+        active ? "text-sky-600 dark:text-sky-400" : "text-foreground/80",
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscribe, detailActions }: TimelineCellDetailProps) {
   const [draft, setDraft] = useState("")
+  const [footnoteOpen, setFootnoteOpen] = useState(false)
+  const [overwriteOpen, setOverwriteOpen] = useState(false)
   const transcribeStatus = useTranscribeStatus(cell?.selectedAudioId)
   useEffect(() => {
     setDraft(cell?.translated ?? "")
@@ -53,6 +138,35 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
     cell.metadata && typeof cell.metadata.cast_name === "string"
       ? (cell.metadata.cast_name as string)
       : null
+
+  // ── Action-row derivations (mirror the text rail's gates) ─────────────────
+  const selectedAttachment = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
+  const hasAudio = Boolean(selectedAttachment && !selectedAttachment.isDeleted)
+  const completingState = detailActions?.completing.get(cell.id)
+  const busy = completingState === "searching" || completingState === "generating"
+  const preview = detailActions?.previews.get(cell.id)
+  const isValidated = cell.status === "validated"
+  const openComments = detailActions?.openCommentCounts?.get(cell.id) ?? 0
+
+  const startCompletion = () => {
+    const actions = detailActions
+    if (!actions) return
+    if (!actions.isCompletionConfigured) {
+      actions.onAiSetupNeeded()
+      return
+    }
+    if (draft.trim()) {
+      // Same confirm policy as the text rail: validated cells always confirm;
+      // non-validated respect the AQU-591 "don't ask again" opt-out.
+      if (!isValidated && getSkipReplaceConfirm()) {
+        void actions.onCompleteSingle(cell)
+      } else {
+        setOverwriteOpen(true)
+      }
+      return
+    }
+    void actions.onCompleteSingle(cell)
+  }
 
   return (
     <div data-testid="tl-detail" className="border-t border-border bg-muted/20 px-4 py-3">
@@ -113,13 +227,116 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
           </div>
         </div>
         <div className="rounded-lg border border-border bg-card p-2.5">
-          <div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Target
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Target
+            </span>
+            {detailActions && (
+              <div data-testid="tl-detail-actions" className="flex items-center gap-1">
+                {editable && (
+                  <ActionIconButton
+                    label={
+                      completingState === "error"
+                        ? "Generation failed — try again"
+                        : "Translate with AI"
+                    }
+                    testId="tl-detail-ai"
+                    onClick={startCompletion}
+                    disabled={detailActions.isAnonymous || !detailActions.isCompletionAvailable || busy}
+                    active={completingState === "error"}
+                  >
+                    <Sparkles
+                      className={cn("h-3 w-3", completingState === "error" && "text-amber-600 dark:text-amber-400")}
+                    />
+                  </ActionIconButton>
+                )}
+                {editable && !detailActions.isAnonymous && !isValidated && draft.trim() !== "" && (
+                  <ActionIconButton
+                    label="Regenerate translation"
+                    testId="tl-detail-regenerate"
+                    onClick={() => void detailActions.onCompleteSingle(cell, { regenerate: true })}
+                    disabled={!detailActions.isCompletionAvailable || busy}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                  </ActionIconButton>
+                )}
+                {editable && !hasAudio && (
+                  <ActionIconButton
+                    label="Record audio"
+                    testId="tl-detail-record"
+                    onClick={() => detailActions.onOpenRecording(cell.id)}
+                  >
+                    <Mic className="h-3 w-3" />
+                  </ActionIconButton>
+                )}
+                {editable && !hasAudio && (
+                  <CellAudioUploadButton
+                    projectId={detailActions.projectId}
+                    fileId={cell.fileId}
+                    cellId={cell.id}
+                    username={detailActions.username}
+                    disabled={!editable}
+                  />
+                )}
+                {cell.translated.trim() !== "" && (
+                  <CellTtsButton
+                    cellId={cell.id}
+                    text={cell.translated}
+                    original={cell.original}
+                    context={cell.context}
+                    cellLabel={cell.cellLabel}
+                    sourceLanguage={detailActions.sourceLanguage}
+                    targetLanguage={detailActions.targetLanguage}
+                    projectTtsSettings={detailActions.projectTtsSettings}
+                    cellTtsSettings={cell.ttsSettings}
+                    generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
+                    attachments={cell.attachments}
+                    projectId={detailActions.projectId}
+                    fileId={cell.fileId}
+                    disabled={!editable}
+                    playOnly
+                  />
+                )}
+                {editable && (
+                  <ActionIconButton
+                    label="Add footnote"
+                    testId="tl-detail-footnote"
+                    onClick={() => setFootnoteOpen(true)}
+                  >
+                    <NotebookPen className="h-3 w-3" />
+                  </ActionIconButton>
+                )}
+                <ActionIconButton
+                  label={openComments > 0 ? `Comments (${openComments} open)` : "Add comment"}
+                  testId="tl-detail-comments"
+                  onClick={() => detailActions.onOpenComments(cell.id)}
+                  active={openComments > 0}
+                >
+                  <MessageCircle className="h-3 w-3" />
+                </ActionIconButton>
+                <ActionIconButton
+                  label="Edit history"
+                  testId="tl-detail-history"
+                  onClick={() => detailActions.onOpenHistory(cell.id)}
+                >
+                  <HistoryIcon className="h-3 w-3" />
+                </ActionIconButton>
+              </div>
+            )}
           </div>
+          {busy && (
+            <div
+              data-testid="tl-detail-generating"
+              className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground"
+            >
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {completingState === "searching" ? "Finding examples…" : "Generating…"}
+            </div>
+          )}
           <textarea
             data-testid="tl-detail-target"
-            value={draft}
-            disabled={!editable}
+            value={busy ? (preview ?? draft) : draft}
+            disabled={!editable || busy}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => {
               if (editable && draft !== (cell.translated ?? "")) onCommitTarget(cell.id, draft)
@@ -133,6 +350,34 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
           />
         </div>
       </div>
+      {detailActions && (
+        <>
+          <GenerateOverwriteDialog
+            open={overwriteOpen}
+            isValidated={isValidated}
+            onConfirm={(dontAskAgain) => {
+              setOverwriteOpen(false)
+              if (dontAskAgain) setSkipReplaceConfirm(true)
+              void detailActions.onCompleteSingle(cell)
+            }}
+            onCancel={() => setOverwriteOpen(false)}
+          />
+          <AddFootnoteDialog
+            open={footnoteOpen}
+            defaults={{ caller: "+", ref: defaultFootnoteRef(cell), text: "", markerStyle: "numbered" }}
+            onOpenChange={setFootnoteOpen}
+            onAdd={(value) => {
+              // The pane's target is a plain textarea (no rich-text caret) —
+              // append the marker at the end, same as the text view's fallback.
+              const marker = createUsfmFootnoteMarker(value)
+              const next = `${draft}${marker}`
+              setDraft(next)
+              onCommitTarget(cell.id, next)
+              setFootnoteOpen(false)
+            }}
+          />
+        </>
+      )}
     </div>
   )
 }

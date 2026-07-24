@@ -3217,6 +3217,10 @@ export function ProjectWorkspace() {
   const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
+  // AQU-693: set true while an import launched from the setup checklist's step 1
+  // is on screen, so the drawer is reopened (not dismissed) once that import
+  // dialog closes — whether the import succeeded, was cancelled, or errored.
+  const [resumeChecklistAfterImport, setResumeChecklistAfterImport] = useState(false)
 
   // Open setup once only when onboarding explicitly lands in the new project.
   // Ordinary project visits, refreshes, and collaborators opening the same
@@ -5006,7 +5010,15 @@ export function ProjectWorkspace() {
             void dismissChecklist()
             setChecklistOpen(false)
           }}
-          onOpenImport={() => setImportOpen(true)}
+          onOpenImport={() => {
+            // AQU-693: hide the checklist WITHOUT persisting a dismissal
+            // (setChecklistOpen bypasses handleChecklistOpenChange, which is the
+            // dismissal path), and remember to reopen it once the import dialog
+            // closes. Using step 1 must not silently abandon the setup flow.
+            setResumeChecklistAfterImport(true)
+            setChecklistOpen(false)
+            setImportOpen(true)
+          }}
         />
       )}
       {project && (
@@ -5072,7 +5084,17 @@ export function ProjectWorkspace() {
       )}
       <Suspense fallback={null}>
         {/* FRO-287 glue: existingFiles activates the re-import collision guard. */}
-        <ImportDialog open={importOpen} onOpenChange={setImportOpen}
+        <ImportDialog open={importOpen} onOpenChange={(next) => {
+            setImportOpen(next)
+            // AQU-693: when an import launched from the setup checklist closes
+            // (success, cancel, or error), return the user to the still-live
+            // checklist — step 1 now reflects its true state — instead of
+            // leaving them stranded in the editor with the flow silently gone.
+            if (!next && resumeChecklistAfterImport) {
+              setResumeChecklistAfterImport(false)
+              setChecklistOpen(true)
+            }
+          }}
           projectId={project.id}
           username={currentUsername}
           getToken={getTokenForFile}

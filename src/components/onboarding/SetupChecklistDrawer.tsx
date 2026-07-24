@@ -99,7 +99,14 @@ export function SetupChecklistDrawer({
             <ImportFilesStep
               project={project}
               onOpenImport={() => {
-                onOpenChange(false)
+                // AQU-693: launching the import dialog from step 1 must NOT
+                // count as a dismissal. Calling onOpenChange(false) here routed
+                // through the workspace's close handler, which persists the
+                // `setupChecklistDismissed` flag — silently ending the whole
+                // setup flow the moment the user used step 1 as intended. The
+                // parent (ProjectWorkspace) now owns hiding the drawer while the
+                // import dialog is on top and reopening it afterwards, without
+                // ever recording a dismissal.
                 onOpenImport?.()
               }}
             />

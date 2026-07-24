@@ -1,7 +1,7 @@
 // Organization-permission helpers for the codex-web identity/project backend.
 
 import type { Env, AuthUser } from "../types"
-import { resolveProjectRole } from "./project-permissions"
+import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
@@ -377,6 +377,9 @@ export async function listEffectiveProjectMembers(
       .all<{ user_id: number; username: string; role_level: number }>()
 
     for (const r of orgMembers.results ?? []) {
+      // AQU-435: only Maintainer+ org roles are an access path — a
+      // sub-maintainer org member does NOT appear as having access via org.
+      if (r.role_level < ORG_WIDE_ACCESS_FLOOR) continue
       record(r.user_id, r.username, "org", r.role_level)
     }
   }
@@ -493,7 +496,7 @@ export async function listEffectiveMembersForOrg(
           p.created_by = ?
           OR pm.user_id = ?
           OR gg.max_grant IS NOT NULL
-          OR om.user_id = ?
+          OR (om.user_id = ? AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )`,
   )
     .bind(viewerId, viewerId, viewerId, orgId, viewerId, viewerId, viewerId)
@@ -582,9 +585,11 @@ export async function listEffectiveMembersForOrg(
     if (r.role_level == null) continue
     record(r.project_id, r.user_id, r.username, "group", r.role_level)
   }
-  // org + creator paths apply to every accessible project.
+  // org + creator paths apply to every accessible project. AQU-435: the org
+  // path exists only for Maintainer+ members.
   for (const p of projects) {
     for (const om of orgMembers.results ?? []) {
+      if (om.role_level < ORG_WIDE_ACCESS_FLOOR) continue
       record(p.id, om.user_id, om.username, "org", om.role_level)
     }
     const cu = creatorUsername.get(p.created_by)
@@ -1079,8 +1084,9 @@ export interface MemberEffectiveAccess {
 /**
  * Per-project grant-path breakdown for one org member (AD-12 effective-access).
  * Covers the org's non-archived projects where the user has a direct / group /
- * creator path; the org-wide baseline (orgRole) is reported once and folded
- * into each project's resolved max. Read-only "why does X have access?" surface.
+ * creator path; orgRole is reported once at the top level, but per AQU-435 it
+ * only appears as a per-project `org` contribution (and folds into `resolved`)
+ * at Maintainer+. Read-only "why does X have access?" surface.
  */
 export async function getMemberEffectiveAccess(
   env: Env,
@@ -1091,6 +1097,9 @@ export async function getMemberEffectiveAccess(
     "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
   ).bind(orgId, userId).first<{ role_level: number }>()
   const orgRole = orgRow?.role_level ?? null
+  // AQU-435: sub-maintainer org membership confers no project access, so it
+  // must not show up as a per-project grant path or inflate `resolved`.
+  const orgAccessRole = orgRole != null && orgRole >= ORG_WIDE_ACCESS_FLOOR ? orgRole : null
 
   const direct = await env.AQUILLA_PG.prepare(
     `SELECT pm.project_id AS project_id, p.name AS name, pm.role_level AS role_level
@@ -1116,7 +1125,7 @@ export async function getMemberEffectiveAccess(
   const ensure = (projectId: string, name: string): ProjectAccessBreakdown => {
     let row = map.get(projectId)
     if (!row) {
-      row = { projectId, projectName: name, direct: null, groups: [], org: orgRole, creator: false, resolved: 0 }
+      row = { projectId, projectName: name, direct: null, groups: [], org: orgAccessRole, creator: false, resolved: 0 }
       map.set(projectId, row)
     }
     return row

@@ -9,9 +9,14 @@ import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
 // playback without any Audio element.
 let mockQueueState: QueueState = { kind: "idle" }
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+// Round 5: the speaker buttons push audibility straight into the queue.
+let lastAudibility: { source: boolean; target: boolean } | null = null
 vi.mock("@/lib/audio/play-queue", () => ({
   useQueueState: () => mockQueueState,
   useQueueProgress: () => mockProgress,
+  setQueueAudibility: (a: { source: boolean; target: boolean }) => {
+    lastAudibility = a
+  },
 }))
 // The detail pane's audio components need session/query providers — out of
 // scope here (covered by TimelineCellDetail.test.tsx with the same mocks).
@@ -187,6 +192,103 @@ describe("TimelineEditor", () => {
     expect(onSelectedCellChange).toHaveBeenCalledWith("m1")
     fireEvent.click(screen.getByTestId("tl-card-m2"))
     expect(onSelectedCellChange).toHaveBeenLastCalledWith("m2")
+  })
+
+  // ── Round 5: Source/Target audio tracks + per-track speaker buttons ──
+
+  const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
+  const dubbedCells = [
+    cell({
+      id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10,
+      selectedAudioId: SOURCE_ID,
+      attachments: { [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" } },
+    }),
+    cell({
+      id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20,
+      selectedAudioId: "audio-m2-1700000000-take.webm",
+      attachments: {
+        "audio-m2-1700000000-take.webm": { type: "audio", url: "frontier-audio://take" },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    }),
+    cell({
+      id: "m3", original: "Three", medium: "media", startTime: 20, endTime: 30,
+      selectedAudioId: SOURCE_ID,
+      selectedGeneratedVoiceAudioId: "audio-m3-1700000001-gen.wav",
+      attachments: {
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        "audio-m3-1700000001-gen.wav": { type: "audio", url: "frontier-audio://gen" },
+      },
+    }),
+  ]
+
+  it("renames the lane headers to Subtitles / Source audio / Target audio", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+    )
+    expect(screen.getByText("Subtitles")).toBeInTheDocument()
+    expect(screen.getByText("Source audio")).toBeInTheDocument()
+    expect(screen.getByText("Target audio")).toBeInTheDocument()
+  })
+
+  it("shows a Target-track chip only for sections with dub audio, kinded and positioned at the section", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={dubbedCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+    )
+    // m1 has only the source clip — no chip.
+    expect(screen.queryByTestId("tl-target-m1")).toBeNull()
+    // m2 has a recorded take.
+    const take = screen.getByTestId("tl-target-m2")
+    expect(take).toHaveAttribute("data-kind", "take")
+    expect(parseFloat(take.style.left)).toBeCloseTo(10 * 38, 0)
+    expect(parseFloat(take.style.width)).toBeCloseTo(10 * 38, 0)
+    // m3 has a generated voice.
+    expect(screen.getByTestId("tl-target-m3")).toHaveAttribute("data-kind", "generated")
+  })
+
+  it("clicking a Target-track chip selects the section and seeks playback to it", () => {
+    const onSeekToTime = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={dubbedCells}
+        onRetime={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-target-m2"))
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Two")
+  })
+
+  it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
+    localStorage.removeItem("codex:timelineAudibility:spkfile")
+    lastAudibility = null
+    render(
+      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+    )
+    // Mount pushes the default (both audible).
+    expect(lastAudibility).toEqual({ source: true, target: true })
+    const src = screen.getByTestId("tl-speaker-source")
+    const tgt = screen.getByTestId("tl-speaker-target")
+    expect(src).toHaveAttribute("aria-pressed", "true")
+    expect(tgt).toHaveAttribute("aria-pressed", "true")
+
+    fireEvent.click(src)
+    expect(src).toHaveAttribute("aria-pressed", "false")
+    expect(lastAudibility).toEqual({ source: false, target: true })
+    expect(JSON.parse(localStorage.getItem("codex:timelineAudibility:spkfile")!)).toEqual({ source: false, target: true })
+
+    fireEvent.click(tgt)
+    expect(lastAudibility).toEqual({ source: false, target: false })
+  })
+
+  it("a muted-source preference persists across mounts", () => {
+    localStorage.setItem("codex:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
+    lastAudibility = null
+    render(
+      <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
+    expect(lastAudibility).toEqual({ source: false, target: true })
   })
 
   it("passes detailActions through to the detail pane", () => {

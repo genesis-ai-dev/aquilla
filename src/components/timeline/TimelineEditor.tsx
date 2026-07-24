@@ -4,8 +4,8 @@
 // the only "media" dependency is a native <video> element for the linked-URL
 // preview (the remote host serves Range — no streaming work needed here).
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Film, LocateFixed, Minus, Plus } from "lucide-react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Film, LocateFixed, Minus, Plus, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { timelineBounds } from "@/lib/timeline/derive"
@@ -13,9 +13,13 @@ import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
-import { useQueueProgress, useQueueState } from "@/lib/audio/play-queue"
+// Round 5 exception: the per-track speaker buttons drive setQueueAudibility
+// directly — muting is a pure element-level concern with no workspace state.
+import { useQueueProgress, useQueueState, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
+import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
+import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineCellDetail, type TimelineDetailActions } from "./TimelineCellDetail"
 import { useTimelineClock } from "./useTimelineClock"
@@ -61,14 +65,34 @@ function loadZoom(fileId: string): number {
   }
 }
 
-function LaneLabel({ name, sub, dot }: { name: string; sub: string; dot: string }) {
+// Round 5: which tracks are AUDIBLE, persisted per file like zoom. Both-on is
+// the default; the queue itself only ever sees element.muted flags.
+const audibilityKey = (fileId: string) => `codex:timelineAudibility:${fileId}`
+
+function loadAudibility(fileId: string): TrackAudibility {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(audibilityKey(fileId)) ?? "")
+    if (parsed && typeof parsed === "object") {
+      const p = parsed as Partial<TrackAudibility>
+      return { source: p.source !== false, target: p.target !== false }
+    }
+  } catch {
+    /* unset / private mode */
+  }
+  return { source: true, target: true }
+}
+
+function LaneLabel({ name, sub, dot, trailing }: { name: string; sub: string; dot: string; trailing?: ReactNode }) {
   return (
-    <div className="flex h-[66px] flex-col justify-center gap-0.5 border-b border-border px-3">
-      <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-        <span className={cn("h-1.5 w-1.5 rounded-sm", dot)} />
-        {name}
-      </span>
-      <span className="text-[10px] text-muted-foreground">{sub}</span>
+    <div className="flex h-[66px] items-center justify-between gap-1 border-b border-border px-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+          <span className={cn("h-1.5 w-1.5 rounded-sm", dot)} />
+          {name}
+        </span>
+        <span className="text-[10px] text-muted-foreground">{sub}</span>
+      </div>
+      {trailing}
     </div>
   )
 }
@@ -88,6 +112,7 @@ export function TimelineEditor({
   onSelectedCellChange,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
+  const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
   const [selectedId, setSelectedId] = useState<string | null>(() => initialSelectedCellId ?? null)
@@ -139,7 +164,56 @@ export function TimelineEditor({
     return () => ro.disconnect()
   }, [])
 
+  // Round 5: keep the queue's element muting in lockstep with the speaker
+  // buttons (mount + every toggle).
+  useEffect(() => {
+    setQueueAudibility(audibility)
+  }, [audibility])
+
+  function toggleTrackAudible(track: keyof TrackAudibility) {
+    setAudibility((prev) => {
+      const next = { ...prev, [track]: !prev[track] }
+      try {
+        localStorage.setItem(audibilityKey(fileId), JSON.stringify(next))
+      } catch {
+        /* private mode — just won't persist */
+      }
+      return next
+    })
+  }
+
+  function speakerToggle(track: keyof TrackAudibility, name: string) {
+    const audible = audibility[track]
+    return (
+      <button
+        type="button"
+        data-testid={`tl-speaker-${track}`}
+        aria-label={audible ? `Mute ${name}` : `Unmute ${name}`}
+        aria-pressed={audible}
+        title={audible ? `${name} is audible — click to mute` : `${name} is muted — click to unmute`}
+        onClick={() => toggleTrackAudible(track)}
+        className={cn(
+          "inline-flex shrink-0 items-center rounded-md border border-border p-1",
+          audible
+            ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+            : "bg-background text-foreground/50 hover:bg-muted",
+        )}
+      >
+        {audible ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+      </button>
+    )
+  }
+
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
+  // Round 5: the Target-audio track's chips — one per section with dub audio.
+  const targetItems = useMemo<TargetAudioItem[]>(
+    () =>
+      dialogue.flatMap((c) => {
+        const target = activeTargetForCell(c)
+        return target ? [{ cell: c, kind: target.kind }] : []
+      }),
+    [dialogue],
+  )
   const bounds = useMemo(() => timelineBounds(cells), [cells])
   const durationSec = (bounds?.end ?? 0) + 2
   const trackWidthPx = secToPx(durationSec, pxPerSec)
@@ -341,8 +415,9 @@ export function TimelineEditor({
       <div className="grid min-h-0 grid-cols-[128px_1fr]">
         <div className="border-r border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
-          <LaneLabel name="Subtitle" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
-          <LaneLabel name="Dialogue" sub="audio · recording" dot="bg-sky-600" />
+          <LaneLabel name="Subtitles" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
+          <LaneLabel name="Source audio" sub="original speech" dot="bg-sky-600" trailing={speakerToggle("source", "source audio")} />
+          <LaneLabel name="Target audio" sub="takes · generated" dot="bg-emerald-600" trailing={speakerToggle("target", "target audio")} />
           <div className="flex h-12 flex-col justify-center px-3">
             <span className="text-xs font-semibold text-foreground">Untimed</span>
             <span className="text-[10px] text-muted-foreground">no timecode</span>
@@ -366,6 +441,15 @@ export function TimelineEditor({
             <TimelineRuler durationSec={durationSec} pxPerSec={pxPerSec} onScrub={seekTo} />
             <TimelineLane cells={subtitle} variant="subtitle" {...laneProps} />
             <TimelineLane cells={dialogue} variant="dialogue" {...laneProps} />
+            <TargetAudioLane
+              items={targetItems}
+              pxPerSec={pxPerSec}
+              viewStartSec={viewStartSec}
+              viewEndSec={viewEndSec}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onSeek={laneProps.onSeek}
+            />
             <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
               {untimed.length === 0 ? (
                 <span className="text-[10px] text-muted-foreground">No untimed clips.</span>

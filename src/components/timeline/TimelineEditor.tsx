@@ -73,10 +73,14 @@ export function TimelineEditor({
   const bounds = useMemo(() => timelineBounds(cells), [cells])
   const durationSec = (bounds?.end ?? 0) + 2
   const trackWidthPx = secToPx(durationSec, pxPerSec)
-  const viewStartSec = pxToSec(scrollLeft, pxPerSec)
+  // SUB-18: overscan the visibility window by ~240px each side so cards at the
+  // edges don't pop in/out during zoom glides and fast scrolls (windowing was
+  // exact-to-the-pixel, so any transient scroll/zoom mismatch blinked cards).
+  const overscanSec = pxToSec(240, pxPerSec)
+  const viewStartSec = pxToSec(scrollLeft, pxPerSec) - overscanSec
   // Before the scroll container is measured (viewportPx 0), fall back to the
   // full track so every card renders — correct, and keeps tests deterministic.
-  const viewEndSec = pxToSec(scrollLeft + (viewportPx || trackWidthPx), pxPerSec)
+  const viewEndSec = pxToSec(scrollLeft + (viewportPx || trackWidthPx), pxPerSec) + overscanSec
   const selectedCell = useMemo(
     () => cells.find((c) => c.id === selectedId) ?? null,
     [cells, selectedId],
@@ -133,8 +137,17 @@ export function TimelineEditor({
         Math.abs(target - cur) <= Math.max(0.4, cur * 0.06)
           ? target
           : cur + (target - cur) * 0.35
-      zoomAnchorRef.current = zoomGestureAnchorRef.current
+      const anchor = zoomGestureAnchorRef.current
+      zoomAnchorRef.current = anchor
       setPxPerSec(next)
+      // SUB-18 (flicker): update the scroll STATE in the same batch as the
+      // zoom. Otherwise each glide frame renders with new zoom + stale
+      // scrollLeft (state only catches up via the DOM scroll event a beat
+      // later), the visibility window miscomputes for that frame, and edge
+      // cards blink out. The layout effect still writes the DOM scrollLeft.
+      if (anchor) {
+        setScrollLeft(Math.max(0, secToPx(anchor.timeSec, next) - anchor.offsetX))
+      }
       if (next !== target) {
         zoomAnimRef.current = requestAnimationFrame(step)
       } else {

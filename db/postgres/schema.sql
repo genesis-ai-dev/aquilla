@@ -1016,50 +1016,55 @@ CREATE TABLE IF NOT EXISTS project_brief_history (
   PRIMARY KEY (project_id, version)
 );
 
--- 0069: Monday.com integration. One OAuth connection per org (token AES-GCM
--- encrypted, never plaintext), one board link per project (config =
--- MondayMapping, see auth-worker/src/lib/monday/types.ts), and an entity →
--- Monday-item map for idempotent upserts.
-CREATE TABLE IF NOT EXISTS monday_connections (
+-- 0069: external integrations (provider-generic; Monday.com first). One OAuth
+-- connection per (org, provider) with AES-GCM-encrypted tokens, one remote
+-- link per (project, provider) (config = per-provider mapping, e.g.
+-- MondayMapping in auth-worker/src/lib/monday/types.ts), and an entity ->
+-- remote-item map for idempotent upserts.
+CREATE TABLE IF NOT EXISTS integration_connections (
   id TEXT PRIMARY KEY,                -- uuid
-  org_id TEXT NOT NULL UNIQUE,
-  monday_account_id TEXT,
-  monday_account_slug TEXT,
-  monday_user_id TEXT,
-  monday_user_name TEXT,
-  access_token_enc TEXT NOT NULL,     -- AES-GCM, base64(iv||ciphertext), key = SHA-256(SECRET_KEY || ":monday-token")
+  org_id TEXT NOT NULL,
+  provider TEXT NOT NULL,             -- 'monday' (first of several)
+  account JSONB,                      -- provider identity, e.g. {accountId, accountSlug, userId, userName}
+  access_token_enc TEXT NOT NULL,     -- AES-GCM, base64(iv||ciphertext)
+  refresh_token_enc TEXT,             -- OAuth 2.1 rotating refresh token, same encryption; NULL for legacy non-expiring tokens
+  access_token_expires_at TIMESTAMPTZ,-- from the access-token JWT exp claim; NULL = non-expiring (legacy flow)
+  needs_reauth BOOLEAN NOT NULL DEFAULT FALSE, -- set when refresh fails (revoked/max lifetime); cleared on successful OAuth callback
   scopes TEXT,
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (org_id, provider)
 );
 
-CREATE TABLE IF NOT EXISTS monday_board_links (
+CREATE TABLE IF NOT EXISTS integration_links (
   id TEXT PRIMARY KEY,                -- uuid
-  project_id TEXT NOT NULL UNIQUE,
-  connection_id TEXT NOT NULL REFERENCES monday_connections(id) ON DELETE CASCADE,
-  board_id TEXT NOT NULL,
-  board_name TEXT,
-  config JSONB NOT NULL,              -- MondayMapping (lib/monday/types.ts)
+  project_id TEXT NOT NULL,
+  provider TEXT NOT NULL,             -- 'monday'
+  connection_id TEXT NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
+  external_id TEXT NOT NULL,          -- remote container id (Monday: board id)
+  external_name TEXT,                 -- remote container name (Monday: board name)
+  config JSONB NOT NULL,              -- per-provider mapping config (Monday: MondayMapping)
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
-  webhook_ids JSONB NOT NULL DEFAULT '[]'::jsonb,   -- Monday webhook ids we created
-  board_structure JSONB,              -- cached columns/groups {fetchedAt, columns:[{id,title,type,settings_str}], groups:[{id,title}]}
-  structure_stale BOOLEAN NOT NULL DEFAULT FALSE,
+  webhook_ids JSONB NOT NULL DEFAULT '[]'::jsonb,   -- remote webhook ids we created
+  remote_state JSONB,                 -- cached remote structure (Monday: {fetchedAt, columns, groups})
+  remote_state_stale BOOLEAN NOT NULL DEFAULT FALSE,
   dirty_at TIMESTAMPTZ,               -- set when progress changed but push was debounced
   last_pushed_at TIMESTAMPTZ,
   last_push_status TEXT,              -- 'ok' | 'error'
   last_push_error TEXT,
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, provider)
 );
-CREATE INDEX IF NOT EXISTS idx_monday_board_links_dirty ON monday_board_links (dirty_at) WHERE dirty_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_integration_links_dirty ON integration_links (dirty_at) WHERE dirty_at IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS monday_item_links (
-  link_id TEXT NOT NULL REFERENCES monday_board_links(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS integration_item_links (
+  link_id TEXT NOT NULL REFERENCES integration_links(id) ON DELETE CASCADE,
   entity_kind TEXT NOT NULL,          -- 'project' | 'file'
   entity_id TEXT NOT NULL,            -- project_id or file_id
-  monday_item_id TEXT NOT NULL,
+  external_item_id TEXT NOT NULL,     -- remote item id (Monday: item id)
   PRIMARY KEY (link_id, entity_kind, entity_id)
 );
 

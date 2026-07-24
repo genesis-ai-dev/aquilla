@@ -47,6 +47,39 @@ describe("TimelineCard", () => {
     expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
   })
 
+  // ── SUB-11: live millisecond readout while dragging ───────────────────────
+
+  it("shows a live drag chip with the exact times release would commit", () => {
+    render(<TimelineCard cell={cell()} {...base} onSelect={() => {}} onRetime={() => {}} />)
+    const el = screen.getByTestId("tl-card-c1")
+
+    // No chip at rest.
+    expect(screen.queryByTestId("tl-drag-chip")).not.toBeInTheDocument()
+
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 140 }) // +40px = +1s → 2s–4s
+    const chip = screen.getByTestId("tl-drag-chip")
+    // Move mode: both bounds with ms precision, plus the signed delta.
+    expect(chip.textContent).toContain("00:02.000–00:04.000")
+    expect(chip.textContent).toContain("+1.00s")
+
+    fireEvent.pointerUp(window, { clientX: 140 })
+    expect(screen.queryByTestId("tl-drag-chip")).not.toBeInTheDocument()
+  })
+
+  it("chip tracks the dragged edge on resize and respects the min-duration clamp", () => {
+    render(<TimelineCard cell={cell()} {...base} onSelect={() => {}} onRetime={() => {}} />)
+    // Grab the right-edge grip: the second grip span (aria-hidden handles).
+    const el = screen.getByTestId("tl-card-c1")
+    const grips = el.querySelectorAll("span.cursor-ew-resize")
+    fireEvent.pointerDown(grips[1] as Element, { clientX: 200, pointerId: 2 })
+    fireEvent.pointerMove(window, { clientX: 180 }) // −20px = −0.5s → end 2.5s
+    const chip = screen.getByTestId("tl-drag-chip")
+    expect(chip.textContent).toContain("00:02.500")
+    expect(chip.textContent).toContain("−0.50s")
+    fireEvent.pointerUp(window, { clientX: 180 })
+  })
+
   it("does not retime when not editable", () => {
     const onRetime = vi.fn()
     render(

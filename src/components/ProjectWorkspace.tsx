@@ -95,6 +95,7 @@ import {
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
 import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { acknowledgeOutboxEvents } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
@@ -923,6 +924,7 @@ export function ProjectWorkspace() {
     refreshPending: refreshOutboxPending,
     flushNow: outboxFlushNow,
     records: outboxRecords,
+    inspectorRecords: outboxInspectorRecords,
     staleSiblingCount: outboxStaleSiblingCount,
     staleSiblingEntries: outboxStaleSiblingEntries,
     clearStaleSiblings: clearStaleSiblings,
@@ -943,27 +945,28 @@ export function ProjectWorkspace() {
   // Surface the reason so it isn't a silent flip-then-revert behind the pill.
   // AQU-633: derive the "reason" banner from the outbox's quarantined 403
   // records (source of truth) — captures a refusal regardless of which flush
-  // path quarantined it, unlike a flush callback. A local dismissed-id set hides
-  // the banner until a fresh refusal (new id) appears.
+  // path quarantined it, unlike a flush callback. Dismissal is a persistent
+  // acknowledgment stamped on the record (SUB-8), so refusals banner once.
   const forbiddenRecords = useForbiddenOutboxRecords(Boolean(project?.id))
-  const [dismissedForbidden, setDismissedForbidden] = useState<Set<string>>(new Set())
   const forbiddenEntries = useMemo<ForbiddenEntry[]>(
     () =>
-      forbiddenRecords
-        .filter((r) => !dismissedForbidden.has(r.id))
-        .map((r) => ({
-          id: r.id,
-          status: r.lastError?.status ?? 403,
-          reason: r.lastError?.reason ?? "forbidden",
-          kind: r.event.kind,
-          fileId: r.event.fileId ?? null,
-          cellId: r.event.cellId ?? null,
-        })),
-    [forbiddenRecords, dismissedForbidden],
+      forbiddenRecords.map((r) => ({
+        id: r.id,
+        status: r.lastError?.status ?? 403,
+        reason: r.lastError?.reason ?? "forbidden",
+        kind: r.event.kind,
+        fileId: r.event.fileId ?? null,
+        cellId: r.event.cellId ?? null,
+      })),
+    [forbiddenRecords],
   )
   const showForbiddenBanner = forbiddenEntries.length > 0
+  // SUB-8: Dismiss = persistent acknowledgment (stamped on the IDB record, so
+  // the banner stays gone across reloads). The hook's subscription re-derives
+  // the list after the write, which hides the banner — no local state needed.
+  // The records themselves remain in the outbox inspector until discarded.
   const dismissForbidden = useCallback(
-    () => setDismissedForbidden(new Set(forbiddenRecords.map((r) => r.id))),
+    () => void acknowledgeOutboxEvents(forbiddenRecords.map((r) => r.id)),
     [forbiddenRecords],
   )
   // AQU-633: the current user's own lane/file scopes, so bulk validate skips
@@ -4535,13 +4538,19 @@ export function ProjectWorkspace() {
             {project && centerSurface === "editor" && activeFileId && (
               <button
                 type="button"
-                onClick={() => void runCheck()}
+                // SUB-6: toggle semantics — while the drawer is open, clicking
+                // the button closes it (like the other dock toggles) instead of
+                // silently re-running the check. Re-check = close, click again.
+                onClick={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
                 disabled={checkRunning}
+                aria-expanded={checkOpen}
                 className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
                 title={
-                  checkResult
-                    ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
-                    : "Check the open file against the project's rules and term base"
+                  checkOpen
+                    ? "Close file check"
+                    : checkResult
+                      ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+                      : "Check the open file against the project's rules and term base"
                 }
                 aria-label="Check file"
                 data-testid="check-file-button"
@@ -5128,7 +5137,10 @@ export function ProjectWorkspace() {
                     pendingCount={Math.max(0, outboxPending - outboxFailed)}
                     failureStreak={outboxFailures}
                     failedCount={outboxFailed}
-                    records={outboxRecords}
+                    // SUB-9: all-status feed so quarantined refusals render in
+                    // the inspector (with reason + Retry/Discard) instead of
+                    // the popover claiming "all caught up" beside a failed pill.
+                    records={outboxInspectorRecords}
                     onRetryNow={outboxFlushNow}
                   />
                 </div>

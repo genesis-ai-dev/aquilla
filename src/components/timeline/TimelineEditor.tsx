@@ -27,6 +27,8 @@ export interface TimelineEditorProps {
   onCommitTarget(cellId: string, value: string): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
+  /** AQU-646: transcribe a media clip's audio into source text (detail pane). */
+  onTranscribe?(cell: CellData): void
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -60,6 +62,7 @@ export function TimelineEditor({
   onRetime,
   onCommitTarget,
   onLinkVideo,
+  onTranscribe,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -216,7 +219,7 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <TimelineCellDetail cell={selectedCell} editable={editable} onCommitTarget={onCommitTarget} />
+      <TimelineCellDetail cell={selectedCell} editable={editable} onCommitTarget={onCommitTarget} onTranscribe={onTranscribe} />
     </div>
   )
 }

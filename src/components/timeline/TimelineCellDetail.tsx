@@ -5,14 +5,19 @@
 // (read + edit a clip from the timeline) with a fraction of the surface.
 
 import { useEffect, useState } from "react"
+import { Loader2, Mic } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtClock } from "./format"
+import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import type { CellData } from "@/hooks/useCells"
 
 export interface TimelineCellDetailProps {
   cell: CellData | null
   editable: boolean
   onCommitTarget(cellId: string, value: string): void
+  /** AQU-646: transcribe this clip's audio into source text (media segments).
+   *  When absent the Transcribe affordance is hidden (read-only surfaces). */
+  onTranscribe?(cell: CellData): void
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -23,8 +28,9 @@ function Pill({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function TimelineCellDetail({ cell, editable, onCommitTarget }: TimelineCellDetailProps) {
+export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscribe }: TimelineCellDetailProps) {
   const [draft, setDraft] = useState("")
+  const transcribeStatus = useTranscribeStatus(cell?.selectedAudioId)
   useEffect(() => {
     setDraft(cell?.translated ?? "")
   }, [cell?.id, cell?.translated])
@@ -72,8 +78,35 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget }: TimelineC
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-border bg-card p-2.5">
-          <div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Source{isDialogue ? " · dialogue" : ""}
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Source{isDialogue ? " · dialogue" : ""}
+            </span>
+            {/* AQU-646: transcribe the clip's audio into source text right
+                where the clip is being worked on. Media segments only. */}
+            {onTranscribe && isDialogue && cell.selectedAudioId && (
+              <button
+                type="button"
+                data-testid="tl-detail-transcribe"
+                onClick={() => onTranscribe(cell)}
+                disabled={
+                  !editable ||
+                  transcribeStatus.kind === "loading" ||
+                  transcribeStatus.kind === "transcribing"
+                }
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing" ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" /> Transcribing…
+                  </>
+                ) : (
+                  <>
+                    <Mic className="h-3 w-3" /> {cell.transcription ? "Re-transcribe" : "Transcribe"}
+                  </>
+                )}
+              </button>
+            )}
           </div>
           <div data-testid="tl-detail-source" className="text-sm leading-snug text-foreground">
             {cell.transcription || cell.original || "—"}

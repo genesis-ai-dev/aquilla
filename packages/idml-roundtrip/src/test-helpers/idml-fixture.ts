@@ -62,6 +62,7 @@ export async function makeIdml(
       compressionOptions: { level: 6 },
       createFolders: false,
       date: FIXTURE_DATE,
+      dir: path.endsWith("/"),
     })
   }
   return zip.generateAsync({

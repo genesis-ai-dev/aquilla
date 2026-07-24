@@ -70,11 +70,18 @@ interface ParsedInternal {
 interface SlotElement {
   readonly element: XmlElement
   readonly slot: IdmlTextSlot
+  readonly contentPart: number
+  readonly contentPartCount: number
 }
 
 interface UnitExtraction {
   readonly unit: IdmlTranslationUnit
   readonly slotElements: readonly SlotElement[]
+}
+
+interface ParagraphExtraction {
+  readonly extraction?: UnitExtraction
+  readonly diagnostics: readonly IdmlDiagnostic[]
 }
 
 interface Replacement {
@@ -307,6 +314,7 @@ export async function exportIdml(
       total: translations.length,
       memberPath: translation.locator.memberPath,
     })
+    if ((index & 31) === 31) await yieldToEventLoop()
   }
 
   if (diagnostics.length > 0) {
@@ -354,15 +362,28 @@ export async function exportIdml(
     }
 
     let unitChanged = false
-    for (let slotIndex = 0; slotIndex < slotElements.length; slotIndex += 1) {
-      const slotElement = slotElements[slotIndex]!
-      const translatedText = item.targetSlots[slotIndex] ?? ""
-      if (translatedText === slotElement.slot.text) continue
+    const contentGroups = new Map<XmlElement, SlotElement[]>()
+    for (const slotElement of slotElements) {
+      const group = contentGroups.get(slotElement.element) ?? []
+      group.push(slotElement)
+      contentGroups.set(slotElement.element, group)
+    }
+    for (const [contentElement, bindings] of contentGroups) {
+      const translatedParts = bindings.map(
+        (binding) => item.targetSlots[binding.slot.index] ?? "",
+      )
+      if (
+        bindings.every(
+          (binding, index) => translatedParts[index] === binding.slot.text,
+        )
+      ) {
+        continue
+      }
       unitChanged = true
       const replacement = replacementForSlot(
         member.xml.source,
-        slotElement.element,
-        translatedText,
+        contentElement,
+        translatedParts.join("\t"),
         member.inspection.path,
       )
       const memberReplacements = replacementsByMember.get(member.inspection.path) ?? []
@@ -376,6 +397,7 @@ export async function exportIdml(
       total: accepted.length,
       memberPath: item.unit.locator.memberPath,
     })
+    if ((acceptedIndex & 31) === 31) await yieldToEventLoop()
   }
 
   if (replacementsByMember.size === 0) {
@@ -414,7 +436,7 @@ export async function exportIdml(
     total: parsed.loaded.members.size,
   })
   const exportedBytes = await packageIdml(parsed.loaded, changedMemberBytes, options)
-  const changedMemberPaths = [...changedMemberBytes.keys()].sort()
+  const changedMemberPaths = [...changedMemberBytes.keys()].sort(codeUnitCompare)
   return {
     bytes: exportedBytes,
     report: {
@@ -432,10 +454,18 @@ export async function exportIdml(
   }
 }
 
+/**
+ * Validates package membership and non-literal XML structure. Literal Content
+ * values are intentionally omitted from structural fingerprints, so this API
+ * cannot distinguish an intended translation from tampered literal text
+ * without the original translation inputs.
+ */
 export async function validateExport(
   bytes: Uint8Array | ArrayBuffer,
   manifest: IdmlSourceManifest,
+  options?: IdmlParseOptions,
 ): Promise<readonly IdmlDiagnostic[]> {
+  throwIfAborted(options?.signal)
   if ((manifest as { readonly version: number }).version !== 2) {
     return deepFreeze([
       diagnostic(
@@ -446,7 +476,7 @@ export async function validateExport(
   }
   let loaded: LoadedPackage
   try {
-    loaded = await loadPackage(bytes)
+    loaded = await loadPackage(bytes, options)
   } catch (error) {
     if (error instanceof IdmlError && isReadableValidationDifference(error.code)) {
       return deepFreeze([...error.diagnostics])
@@ -455,6 +485,12 @@ export async function validateExport(
   }
 
   const diagnostics: IdmlDiagnostic[] = []
+  const validationTotal = manifest.members.length + manifest.unitLocators.length
+  emitProgress(options?.onProgress, {
+    phase: "validate",
+    completed: 0,
+    total: validationTotal,
+  })
   const expected = new Map(manifest.members.map((member) => [member.path, member]))
   const actual = new Map(
     [...loaded.members.values()].map((member) => [member.inspection.path, member] as const),
@@ -473,24 +509,71 @@ export async function validateExport(
   }
 
   const translatableMembers = new Set(manifest.unitLocators.map((locator) => locator.memberPath))
-  for (const expectedMember of manifest.members) {
+  const changedMembers = new Set<string>()
+  const reportChangedMember = (path: string, message: string): void => {
+    if (changedMembers.has(path)) return
+    changedMembers.add(path)
+    diagnostics.push(diagnostic("MEMBER_CHANGED", message, path))
+  }
+  for (let memberIndex = 0; memberIndex < manifest.members.length; memberIndex += 1) {
+    throwIfAborted(options?.signal)
+    const expectedMember = manifest.members[memberIndex]!
     const actualMember = actual.get(expectedMember.path)
+    if (!actualMember) {
+      emitProgress(options?.onProgress, {
+        phase: "validate",
+        completed: memberIndex + 1,
+        total: validationTotal,
+        memberPath: expectedMember.path,
+      })
+      continue
+    }
+    if (actualMember.inspection.isDirectory !== expectedMember.isDirectory) {
+      reportChangedMember(
+        expectedMember.path,
+        "An IDML member changed between a file and an explicit directory",
+      )
+      emitProgress(options?.onProgress, {
+        phase: "validate",
+        completed: memberIndex + 1,
+        total: validationTotal,
+        memberPath: expectedMember.path,
+      })
+      continue
+    }
     if (
-      actualMember &&
       !translatableMembers.has(expectedMember.path) &&
       actualMember.hash !== expectedMember.sha256
     ) {
-      diagnostics.push(
-        diagnostic(
-          "MEMBER_CHANGED",
-          "A non-translatable IDML member changed during export",
-          expectedMember.path,
-        ),
+      reportChangedMember(
+        expectedMember.path,
+        "A non-translatable IDML member changed during export",
       )
     }
+    if (expectedMember.structuralSha256) {
+      if (!actualMember.xml) {
+        reportChangedMember(expectedMember.path, "An expected XML member is no longer XML")
+      } else if (
+        (await structuralXmlSha256(actualMember.xml)) !== expectedMember.structuralSha256
+      ) {
+        reportChangedMember(
+          expectedMember.path,
+          "IDML XML structure changed outside literal translatable text",
+        )
+      }
+    }
+    emitProgress(options?.onProgress, {
+      phase: "validate",
+      completed: memberIndex + 1,
+      total: validationTotal,
+      memberPath: expectedMember.path,
+    })
+    if ((memberIndex & 7) === 7) await yieldToEventLoop()
   }
 
-  for (const locator of manifest.unitLocators) {
+  for (let locatorIndex = 0; locatorIndex < manifest.unitLocators.length; locatorIndex += 1) {
+    throwIfAborted(options?.signal)
+    const locator = manifest.unitLocators[locatorIndex]!
     const member = actual.get(locator.memberPath)
     if (!member?.xml) {
       if (member) {
@@ -498,10 +581,7 @@ export async function validateExport(
           diagnostic("LOCATOR_MISSING", "Locator member is not XML", locator.memberPath),
         )
       }
-      continue
-    }
-    const target = resolveLocatorForValidation(member.xml, locator)
-    if (!target) {
+    } else if (!resolveLocatorForValidation(member.xml, locator)) {
       diagnostics.push(
         diagnostic(
           "LOCATOR_MISSING",
@@ -510,6 +590,13 @@ export async function validateExport(
         ),
       )
     }
+    emitProgress(options?.onProgress, {
+      phase: "validate",
+      completed: manifest.members.length + locatorIndex + 1,
+      total: validationTotal,
+      memberPath: locator.memberPath,
+    })
+    if ((locatorIndex & 31) === 31) await yieldToEventLoop()
   }
   return deepFreeze(diagnostics)
 }
@@ -574,52 +661,63 @@ async function parseIdmlInternal(
   const extractions: UnitExtraction[] = []
   let order = 0
 
-  emitProgress(options?.onProgress, {
-    phase: "parse",
-    completed: 0,
-    total: storyMembers.length,
-  })
-  for (let storyIndex = 0; storyIndex < storyMembers.length; storyIndex += 1) {
-    throwIfAborted(options?.signal)
-    const memberPath = storyMembers[storyIndex]!
+  const paragraphTasks: Array<{
+    readonly memberPath: string
+    readonly document: XmlDocument
+    readonly paragraph: XmlElement
+  }> = []
+  for (const memberPath of storyMembers) {
     const member = loaded.members.get(memberPath)
     if (!member?.xml) {
       throw new IdmlError("MISSING_STORY", `Story member ${memberPath} is missing or is not XML`)
     }
-    const paragraphs = elementDescendants(
+    for (const paragraph of elementDescendants(
       member.xml.root,
       (element) => element.localName === "ParagraphStyleRange",
+    )) {
+      paragraphTasks.push({ memberPath, document: member.xml, paragraph })
+    }
+  }
+  emitProgress(options?.onProgress, {
+    phase: "parse",
+    completed: 0,
+    total: paragraphTasks.length,
+  })
+  for (let paragraphIndex = 0; paragraphIndex < paragraphTasks.length; paragraphIndex += 1) {
+    throwIfAborted(options?.signal)
+    const task = paragraphTasks[paragraphIndex]!
+    const result = await extractParagraphUnit(
+      task.document,
+      task.memberPath,
+      task.paragraph,
+      order,
+      storyContext,
     )
-    for (const paragraph of paragraphs) {
-      const extraction = await extractParagraphUnit(
-        member.xml,
-        memberPath,
-        paragraph,
-        order,
-        storyContext,
-      )
-      if (!extraction) continue
-      extractions.push(extraction)
-      diagnostics.push(...extraction.unit.diagnostics)
+    diagnostics.push(...result.diagnostics)
+    if (result.extraction) {
+      extractions.push(result.extraction)
       order += 1
     }
     emitProgress(options?.onProgress, {
       phase: "parse",
-      completed: storyIndex + 1,
-      total: storyMembers.length,
-      memberPath,
+      completed: paragraphIndex + 1,
+      total: paragraphTasks.length,
+      memberPath: task.memberPath,
     })
+    if ((paragraphIndex & 31) === 31) await yieldToEventLoop()
   }
 
+  let customMemberIndex = 0
   for (const member of loaded.members.values()) {
+    throwIfAborted(options?.signal)
+    customMemberIndex += 1
     if (!member.xml) continue
     const variables = elementDescendants(
       member.xml.root,
-      (element) => element.localName === "TextVariable",
+      isTextVariableDefinition,
     )
     for (const variable of variables) {
-      const variableType = getAttribute(variable, "VariableType") ?? ""
-      if (!/CustomTextType/i.test(variableType)) {
+      if (!isCustomTextVariableDefinition(variable)) {
         diagnostics.push(
           diagnostic(
             "UNSUPPORTED_CONSTRUCT",
@@ -640,25 +738,33 @@ async function parseIdmlInternal(
       diagnostics.push(...extraction.unit.diagnostics)
       order += 1
     }
+    if ((customMemberIndex & 7) === 0) await yieldToEventLoop()
   }
 
-  const includeUnit =
-    typeof profile === "object" && profile.includeUnit ? profile.includeUnit : undefined
-  const units = includeUnit
-    ? extractions.map((entry) => entry.unit).filter((unit) => includeUnit(unit))
-    : extractions.map((entry) => entry.unit)
+  const units = unitsForSemanticProfile(profile, extractions)
   const profileId = typeof profile === "string" ? profile : profile.id
+  const manifestMembers = []
+  let manifestMemberIndex = 0
+  for (const member of loaded.members.values()) {
+    throwIfAborted(options?.signal)
+    manifestMembers.push({
+      path: member.inspection.path,
+      sha256: member.hash,
+      byteLength: member.bytes.byteLength,
+      isDirectory: member.inspection.isDirectory,
+      ...(member.xml
+        ? { structuralSha256: await structuralXmlSha256(member.xml) }
+        : {}),
+    })
+    if ((manifestMemberIndex & 7) === 7) await yieldToEventLoop()
+    manifestMemberIndex += 1
+  }
+  manifestMembers.sort((left, right) => codeUnitCompare(left.path, right.path))
   const manifest: IdmlSourceManifest = {
     version: 2,
     sourceSha256: await sha256(loaded.inputBytes),
     profile: profileId,
-    members: [...loaded.members.values()]
-      .map((member) => ({
-        path: member.inspection.path,
-        sha256: member.hash,
-        byteLength: member.bytes.byteLength,
-      }))
-      .sort((left, right) => left.path.localeCompare(right.path)),
+    members: manifestMembers,
     unitLocators: units.map((unit) => unit.locator),
     diagnostics,
   }
@@ -668,6 +774,24 @@ async function parseIdmlInternal(
     diagnostics,
   })
   return { result, loaded }
+}
+
+function unitsForSemanticProfile(
+  profile: IdmlSemanticProfile,
+  extractions: readonly UnitExtraction[],
+): IdmlTranslationUnit[] {
+  const allLiteralUnits = extractions.map((entry) => entry.unit)
+  if (profile === "biblica") {
+    // v2 deliberately includes the same complete set of literal IDML locations
+    // as generic. The legacy Biblica notes-only view omitted valid stories,
+    // tables, footnotes, variables, and other text, so any presentation filter
+    // belongs in an adapter after the lossless shared-engine parse.
+    return allLiteralUnits
+  }
+  if (typeof profile === "object" && profile.includeUnit) {
+    return allLiteralUnits.filter((unit) => profile.includeUnit?.(unit) === true)
+  }
+  return allLiteralUnits
 }
 
 async function loadPackage(
@@ -689,24 +813,26 @@ async function loadPackage(
       `Unable to read IDML archive: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
-  const fileMembers = inspection.members.filter((member) => !member.isDirectory)
+  const packageMembers = inspection.members
   const members = new Map<string, LoadedMember>()
   emitProgress(options?.onProgress, {
     phase: "unpack",
     completed: 0,
-    total: fileMembers.length,
+    total: packageMembers.length,
   })
-  for (let memberIndex = 0; memberIndex < fileMembers.length; memberIndex += 1) {
+  for (let memberIndex = 0; memberIndex < packageMembers.length; memberIndex += 1) {
     throwIfAborted(options?.signal)
-    const memberInspection = fileMembers[memberIndex]!
-    const entry = zip.file(memberInspection.path)
+    const memberInspection = packageMembers[memberIndex]!
+    const entry = zip.files[memberInspection.path]
     if (!entry) {
       throw new IdmlError(
         "INVALID_ZIP",
         `Central-directory member ${memberInspection.path} could not be loaded`,
       )
     }
-    const memberBytes = await entry.async("uint8array")
+    const memberBytes = memberInspection.isDirectory
+      ? new Uint8Array()
+      : await entry.async("uint8array")
     let xml: XmlDocument | undefined
     if (XML_MEMBER_PATTERN.test(memberInspection.path)) {
       const source = decodeXmlBytes(memberBytes, memberInspection.path)
@@ -722,9 +848,10 @@ async function loadPackage(
     emitProgress(options?.onProgress, {
       phase: "unpack",
       completed: memberIndex + 1,
-      total: fileMembers.length,
+      total: packageMembers.length,
       memberPath: memberInspection.path,
     })
+    if ((memberIndex & 7) === 7) await yieldToEventLoop()
   }
   return { inputBytes, inspection, members }
 }
@@ -757,7 +884,7 @@ function discoverStoryMembers(
   }
   const remaining = [...loaded.members.keys()]
     .filter((memberPath) => STORY_MEMBER_PATTERN.test(memberPath) && !seen.has(memberPath))
-    .sort((left, right) => left.localeCompare(right))
+    .sort(codeUnitCompare)
   ordered.push(...remaining)
   return ordered
 }
@@ -808,11 +935,29 @@ async function extractParagraphUnit(
   paragraph: XmlElement,
   order: number,
   storyContext: StoryContext,
-): Promise<UnitExtraction | null> {
+): Promise<ParagraphExtraction> {
   const scope = paragraphScope(paragraph, storyContext)
   const slotElements = extractSlotElements(paragraph, scope, document.source)
-  if (slotElements.length === 0) return null
   const { tokens, diagnostics } = extractProtectedTokens(paragraph, memberPath, document.source)
+  if (slotElements.length === 0) {
+    if (tokens.length === 0) return { diagnostics }
+    return {
+      diagnostics: [
+        ...diagnostics,
+        {
+          code: "UNSUPPORTED_CONSTRUCT",
+          severity: "warning",
+          message:
+            "Paragraph contains only protected IDML tokens and was preserved without a translation unit",
+          memberPath,
+          details: {
+            elementPath: elementPath(paragraph),
+            protectedTokenCount: tokens.length,
+          },
+        },
+      ],
+    }
+  }
   const story = nearestAncestor(paragraph, (ancestor) => ancestor.localName === "Story")
   const storyId = story ? getAttribute(story, "Self") : undefined
   const locator = await createLocator(
@@ -830,7 +975,7 @@ async function extractParagraphUnit(
     tokens,
     diagnostics,
   )
-  return { unit, slotElements }
+  return { extraction: { unit, slotElements }, diagnostics }
 }
 
 async function extractCustomVariableUnit(
@@ -846,15 +991,16 @@ async function extractCustomVariableUnit(
       nearestAncestor(element, (ancestor) => ancestor.localName === "TextVariable") === variable,
   )
   if (contents.length === 0) return null
-  const slotElements: SlotElement[] = contents.map((element, index) => ({
-    element,
-    slot: {
-      index,
-      text: contentText(element),
-      characterStyleId: DEFAULT_CHARACTER_STYLE,
-      editable: !contentHasOpaqueMarkup(document.source, element),
-    },
-  }))
+  const slotElements: SlotElement[] = []
+  for (const element of contents) {
+    appendContentSlots(
+      slotElements,
+      element,
+      DEFAULT_CHARACTER_STYLE,
+      document.source,
+    )
+  }
+  const protectedTokens = tabTokensForContentSlots(slotElements)
   const locator = await createLocator(
     document,
     variable,
@@ -866,7 +1012,7 @@ async function extractCustomVariableUnit(
     locator,
     order,
     slotElements.map((entry) => entry.slot),
-    [],
+    protectedTokens,
     [],
   )
   return { unit, slotElements }
@@ -878,21 +1024,17 @@ function extractSlotElements(
   source: string,
 ): SlotElement[] {
   if (scope === "custom-variable") {
-    return elementDescendants(
+    const slots: SlotElement[] = []
+    for (const element of elementDescendants(
       paragraphOrVariable,
       (element) =>
         element.localName === "Contents" &&
         nearestAncestor(element, (ancestor) => ancestor.localName === "TextVariable") ===
           paragraphOrVariable,
-    ).map((element, index) => ({
-      element,
-      slot: {
-        index,
-        text: contentText(element),
-        characterStyleId: DEFAULT_CHARACTER_STYLE,
-        editable: !contentHasOpaqueMarkup(source, element),
-      },
-    }))
+    )) {
+      appendContentSlots(slots, element, DEFAULT_CHARACTER_STYLE, source)
+    }
+    return slots
   }
 
   const slots: SlotElement[] = []
@@ -901,24 +1043,19 @@ function extractSlotElements(
       if (child.kind !== "element") continue
       if (child.localName === "ParagraphStyleRange") continue
       if (child.localName === "Content") {
-        const text = contentText(child)
         const characterRange = nearestAncestor(
           child,
           (ancestor) => ancestor.localName === "CharacterStyleRange",
         )
-        slots.push({
-          element: child,
-          slot: {
-            index: slots.length,
-            text,
-            characterStyleId:
-              (characterRange &&
-                (getAttribute(characterRange, "AppliedCharacterStyle") ??
-                  getAttribute(characterRange, "Self"))) ||
-              DEFAULT_CHARACTER_STYLE,
-            editable: !text.includes("\t") && !contentHasOpaqueMarkup(source, child),
-          },
-        })
+        appendContentSlots(
+          slots,
+          child,
+          (characterRange &&
+            (getAttribute(characterRange, "AppliedCharacterStyle") ??
+              getAttribute(characterRange, "Self"))) ||
+            DEFAULT_CHARACTER_STYLE,
+          source,
+        )
         continue
       }
       visit(child)
@@ -943,29 +1080,26 @@ function extractProtectedTokens(
       if (child.localName === "ParagraphStyleRange") continue
       if (child.localName === "Content") {
         const text = contentText(child)
-        if (text.includes("\t")) {
-          tokens.push({
-            index: tokens.length,
-            kind: "tab",
-            xmlName: child.name,
-            position: slotBoundary,
-          })
-          if (text !== "\t") {
-            diagnostics.push(
-              diagnostic(
-                "UNSUPPORTED_CONSTRUCT",
-                "A Content slot containing both a tab and text was locked to prevent tab loss",
-                memberPath,
-              ),
-            )
+        if (text.includes("\t") && !contentHasOpaqueMarkup(source, child)) {
+          const parts = text.split("\t")
+          for (let partIndex = 1; partIndex < parts.length; partIndex += 1) {
+            tokens.push({
+              index: tokens.length,
+              kind: "tab",
+              xmlName: child.name,
+              position: slotBoundary + partIndex,
+            })
           }
+          slotBoundary += parts.length
+        } else {
+          slotBoundary += 1
         }
         if (contentHasOpaqueMarkup(source, child)) {
           tokens.push({
             index: tokens.length,
             kind: "unknown",
             xmlName: child.name,
-            position: slotBoundary,
+            position: Math.max(0, slotBoundary - 1),
           })
           diagnostics.push(
             diagnostic(
@@ -975,7 +1109,6 @@ function extractProtectedTokens(
             ),
           )
         }
-        slotBoundary += 1
         continue
       }
       if (child.localName === "Properties") continue
@@ -1004,6 +1137,46 @@ function extractProtectedTokens(
   return { tokens, diagnostics }
 }
 
+function appendContentSlots(
+  slots: SlotElement[],
+  element: XmlElement,
+  characterStyleId: string,
+  source: string,
+): void {
+  const text = contentText(element)
+  const opaque = contentHasOpaqueMarkup(source, element)
+  const parts = opaque ? [text] : text.split("\t")
+  for (let contentPart = 0; contentPart < parts.length; contentPart += 1) {
+    slots.push({
+      element,
+      contentPart,
+      contentPartCount: parts.length,
+      slot: {
+        index: slots.length,
+        text: parts[contentPart] ?? "",
+        characterStyleId,
+        editable: !opaque,
+      },
+    })
+  }
+}
+
+function tabTokensForContentSlots(
+  slots: readonly SlotElement[],
+): IdmlProtectedToken[] {
+  const tokens: IdmlProtectedToken[] = []
+  for (const binding of slots) {
+    if (binding.contentPart === 0) continue
+    tokens.push({
+      index: tokens.length,
+      kind: "tab",
+      xmlName: binding.element.name,
+      position: binding.slot.index,
+    })
+  }
+  return tokens
+}
+
 function contentText(element: XmlElement): string {
   let text = ""
   for (const child of element.children) {
@@ -1016,6 +1189,79 @@ function contentHasOpaqueMarkup(source: string, element: XmlElement): boolean {
   if (element.selfClosing) return false
   const interior = source.slice(element.openEnd, element.closeStart)
   return interior.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "").includes("<")
+}
+
+async function structuralXmlSha256(document: XmlDocument): Promise<string> {
+  return sha256Text(JSON.stringify(structuralXmlElement(document.root)))
+}
+
+function structuralXmlElement(element: XmlElement): unknown {
+  const attributes = [...element.attributes]
+    .map((attribute) => [attribute.name, attribute.value] as const)
+    .sort((left, right) => codeUnitCompare(left[0], right[0]))
+  if (isLiteralTextElement(element)) {
+    return ["literal", element.name, attributes]
+  }
+
+  const significantChildren = element.children.filter(
+    (child) => child.kind === "element" || child.value.trim().length > 0,
+  )
+  const children: unknown[] = []
+  for (let index = 0; index < significantChildren.length; index += 1) {
+    const child = significantChildren[index]!
+    if (child.kind !== "element") {
+      children.push(["text", child.kind, child.value])
+      continue
+    }
+    children.push(structuralXmlElement(child))
+    if (child.localName !== "Content") continue
+
+    // A translated slot containing editor line breaks is exported as an
+    // alternating Content/Br/Content chain. Fold only attribute-free injected
+    // pairs; original adjacent Content siblings remain independently visible.
+    while (index + 2 < significantChildren.length) {
+      const lineBreak = significantChildren[index + 1]
+      const continuation = significantChildren[index + 2]
+      if (
+        lineBreak?.kind !== "element" ||
+        lineBreak.localName !== "Br" ||
+        lineBreak.attributes.length !== 0 ||
+        continuation?.kind !== "element" ||
+        continuation.localName !== "Content" ||
+        continuation.attributes.length !== 0
+      ) {
+        break
+      }
+      index += 2
+    }
+  }
+  return ["element", element.name, attributes, element.selfClosing, children]
+}
+
+function isLiteralTextElement(element: XmlElement): boolean {
+  if (element.localName === "Content") return true
+  if (element.localName !== "Contents") return false
+  const variable = nearestAncestor(
+    element,
+    (ancestor) => ancestor.localName === "TextVariable",
+  )
+  return variable ? isCustomTextVariableDefinition(variable) : false
+}
+
+function isTextVariableDefinition(element: XmlElement): boolean {
+  return (
+    element.localName === "TextVariable" &&
+    Boolean(getAttribute(element, "Self")) &&
+    Boolean(getAttribute(element, "VariableType")) &&
+    !getAttribute(element, "src")
+  )
+}
+
+function isCustomTextVariableDefinition(element: XmlElement): boolean {
+  return (
+    isTextVariableDefinition(element) &&
+    /CustomTextType/i.test(getAttribute(element, "VariableType") ?? "")
+  )
 }
 
 function protectedTokenKind(element: XmlElement): IdmlProtectedTokenKind | null {
@@ -1133,7 +1379,7 @@ async function createUnit(
   const draft: IdmlTranslationUnit = {
     id,
     order,
-    sourceText: slots.map((slot) => slot.text).join(""),
+    sourceText: sourceTextFromSlots(slots, protectedTokens),
     sourceHtml: "",
     locator,
     metadata,
@@ -1142,6 +1388,23 @@ async function createUnit(
     diagnostics: [...diagnostics],
   }
   return { ...draft, sourceHtml: renderIdmlUnitHtml(draft) }
+}
+
+function sourceTextFromSlots(
+  slots: readonly IdmlTextSlot[],
+  protectedTokens: readonly IdmlProtectedToken[],
+): string {
+  const tabsByBoundary = new Map<number, number>()
+  for (const token of protectedTokens) {
+    if (token.kind !== "tab") continue
+    tabsByBoundary.set(token.position, (tabsByBoundary.get(token.position) ?? 0) + 1)
+  }
+  let value = "\t".repeat(tabsByBoundary.get(0) ?? 0)
+  for (const slot of slots) {
+    value += slot.text
+    value += "\t".repeat(tabsByBoundary.get(slot.index + 1) ?? 0)
+  }
+  return value
 }
 
 function resolveAndVerifyElement(
@@ -1238,7 +1501,7 @@ async function packageIdml(
     date: mimetype.zipEntry.date,
   })
   const remainingMembers = loaded.inspection.members.filter(
-    (member) => !member.isDirectory && member.path !== "mimetype",
+    (member) => member.path !== "mimetype",
   )
   for (let index = 0; index < remainingMembers.length; index += 1) {
     throwIfAborted(options.signal)
@@ -1253,6 +1516,7 @@ async function packageIdml(
       compressionOptions: { level: 6 },
       createFolders: false,
       date: member.zipEntry.date,
+      dir: memberInspection.isDirectory,
     })
     emitProgress(options.onProgress, {
       phase: "package",
@@ -1260,15 +1524,30 @@ async function packageIdml(
       total: loaded.members.size,
       memberPath: memberInspection.path,
     })
+    await yieldToEventLoop()
   }
-  const generated = await output.generateAsync({
-    type: "uint8array",
-    mimeType: IDML_MIMETYPE,
-    compression: "DEFLATE",
-    compressionOptions: { level: 6 },
-    platform: "UNIX",
-    streamFiles: false,
-  })
+  const generated = await output.generateAsync(
+    {
+      type: "uint8array",
+      mimeType: IDML_MIMETYPE,
+      compression: "DEFLATE",
+      compressionOptions: { level: 6 },
+      platform: "UNIX",
+      streamFiles: false,
+    },
+    (metadata) => {
+      throwIfAborted(options.signal)
+      emitProgress(options.onProgress, {
+        phase: "package",
+        completed: Math.min(
+          loaded.members.size,
+          Math.floor((metadata.percent / 100) * loaded.members.size),
+        ),
+        total: loaded.members.size,
+        ...(metadata.currentFile ? { memberPath: metadata.currentFile } : {}),
+      })
+    },
+  )
   return forceDeflateForEmptyMembers(generated)
 }
 
@@ -1312,7 +1591,10 @@ function forceDeflateForEmptyMembers(bytes: Uint8Array): Uint8Array {
       originalLocalOffset,
       originalLocalOffset + localHeaderLength + compressedSize,
     )
-    const forceDeflate = memberPath !== "mimetype" && uncompressedSize === 0
+    const forceDeflate =
+      memberPath !== "mimetype" &&
+      !memberPath.endsWith("/") &&
+      uncompressedSize === 0
     if (forceDeflate) {
       const rewrittenLocal = new Uint8Array(localHeaderLength + 2)
       rewrittenLocal.set(localRecord.slice(0, localHeaderLength))
@@ -1446,6 +1728,14 @@ function emitProgress(
   progress: IdmlProgress,
 ): void {
   callback?.(progress)
+}
+
+function codeUnitCompare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
 }
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {

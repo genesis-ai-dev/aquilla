@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { inspectIdml } from "./archive.js"
+import { DEFAULT_IDML_LIMITS, inspectIdml } from "./archive.js"
 import type { IdmlDiagnosticCode } from "./types.js"
 
 const MIMETYPE = "application/vnd.adobe.indesign-idml-package"
@@ -194,6 +194,16 @@ async function expectIdmlError(
 }
 
 describe("inspectIdml", () => {
+  it("uses browser-safe default expansion limits", () => {
+    expect(DEFAULT_IDML_LIMITS).toEqual({
+      maxInputBytes: 128 * 1024 * 1024,
+      maxEntries: 10_000,
+      maxEntryUncompressedBytes: 64 * 1024 * 1024,
+      maxTotalUncompressedBytes: 512 * 1024 * 1024,
+      maxCompressionRatio: 200,
+    })
+  })
+
   it("accepts a valid UCF package and preserves central-directory order", async () => {
     const archive = makeZip(idmlEntries(), { centralOrder: [1, 0] })
 

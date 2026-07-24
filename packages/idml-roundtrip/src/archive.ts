@@ -35,10 +35,10 @@ const CP437_HIGH_CHARACTERS = Array.from(
 )
 
 export const DEFAULT_IDML_LIMITS: Readonly<IdmlLimits> = Object.freeze({
-  maxInputBytes: 512 * 1024 * 1024,
-  maxEntries: 20_000,
-  maxEntryUncompressedBytes: 256 * 1024 * 1024,
-  maxTotalUncompressedBytes: 1024 * 1024 * 1024,
+  maxInputBytes: 128 * 1024 * 1024,
+  maxEntries: 10_000,
+  maxEntryUncompressedBytes: 64 * 1024 * 1024,
+  maxTotalUncompressedBytes: 512 * 1024 * 1024,
   maxCompressionRatio: 200,
 })
 

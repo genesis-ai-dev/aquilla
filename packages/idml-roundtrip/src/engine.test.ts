@@ -4,7 +4,7 @@ import { inspectIdml } from "./archive.js"
 import { IdmlError } from "./errors.js"
 import { exportIdml, parseIdml, validateExport } from "./engine.js"
 import type { IdmlTranslation, IdmlTranslationUnit } from "./types.js"
-import { makeIdml } from "./test-helpers/idml-fixture.js"
+import { makeIdml, mixedStoryXml } from "./test-helpers/idml-fixture.js"
 
 describe("IDML structural parser", () => {
   it("creates immutable ordered units without allowing outer paragraphs to steal nested slots", async () => {
@@ -74,19 +74,120 @@ describe("IDML structural parser", () => {
     ])
   })
 
-  it("locks tab-bearing Content slots and represents the tab at its slot boundary", async () => {
+  it("models literal tabs as protected boundaries between editable virtual slots", async () => {
     const tabStory = `<?xml version="1.0" encoding="UTF-8"?>
-<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="ptab"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>\t</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
-    const parsed = await parseIdml(await makeIdml({ "Stories/Story_u1.xml": tabStory }))
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="ptab"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>before\tmiddle\t\tend</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const bytes = await makeIdml({ "Stories/Story_u1.xml": tabStory })
+    const parsed = await parseIdml(bytes)
     const unit = unitById(parsed.units, "ptab")
 
-    expect(unit.slots).toEqual([
-      expect.objectContaining({ index: 0, text: "\t", editable: false }),
+    expect(unit.slots.map(({ index, text, editable }) => ({ index, text, editable }))).toEqual([
+      { index: 0, text: "before", editable: true },
+      { index: 1, text: "middle", editable: true },
+      { index: 2, text: "", editable: true },
+      { index: 3, text: "end", editable: true },
     ])
-    expect(unit.metadata.editableSlotIndexes).toEqual([])
-    expect(unit.protectedTokens).toContainEqual(
-      expect.objectContaining({ kind: "tab", position: 0 }),
+    expect(unit.sourceText).toBe("before\tmiddle\t\tend")
+    expect(unit.metadata.editableSlotIndexes).toEqual([0, 1, 2, 3])
+    expect(unit.protectedTokens.map(({ kind, position }) => ({ kind, position }))).toEqual(
+      [
+        { kind: "tab", position: 1 },
+        { kind: "tab", position: 2 },
+        { kind: "tab", position: 3 },
+      ],
     )
+
+    const targetHtml = unit.sourceHtml
+      .replace("before", "avant")
+      .replace("middle", "milieu")
+      .replace(">end<", ">fin<")
+    const exported = await exportIdml(bytes, [translationFor(unit, targetHtml)], {
+      strict: true,
+    })
+    expect(await memberText(exported.bytes, "Stories/Story_u1.xml")).toContain(
+      "<Content>avant\tmilieu\t\tfin</Content>",
+    )
+  })
+
+  it("ignores designmap variable references and only diagnoses actual computed definitions", async () => {
+    const bytes = await makeIdml({
+      "designmap.xml":
+        '<?xml version="1.0" encoding="UTF-8"?><idPkg:DesignMap xmlns:idPkg="urn:test"><idPkg:Story src="Stories/Story_u1.xml"/><idPkg:Story src="Stories/Story_u3.xml"/><idPkg:TextVariable src="Resources/TextVariables.xml"/></idPkg:DesignMap>',
+    })
+    const parsed = await parseIdml(bytes)
+
+    expect(
+      parsed.units.filter((unit) => unit.locator.scope === "custom-variable"),
+    ).toHaveLength(1)
+    expect(
+      parsed.diagnostics.filter(
+        (entry) =>
+          entry.code === "UNSUPPORTED_CONSTRUCT" && entry.message.includes("Computed text variable"),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        memberPath: "Resources/TextVariables.xml",
+        message: expect.stringContaining("TextVariable/Page"),
+      }),
+    ])
+  })
+
+  it("reports protected-only paragraphs without manufacturing an editable unit", async () => {
+    const protectedStory = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="protected-only"><CharacterStyleRange><TextVariableInstance Self="page"/><Br/></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const parsed = await parseIdml(
+      await makeIdml({ "Stories/Story_u1.xml": protectedStory }),
+    )
+
+    expect(parsed.units.some((unit) => unit.locator.elementId === "protected-only")).toBe(false)
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "UNSUPPORTED_CONSTRUCT",
+        memberPath: "Stories/Story_u1.xml",
+        details: {
+          elementPath: "/idPkg:Story[1]/Story[1]/ParagraphStyleRange[1]",
+          protectedTokenCount: 2,
+        },
+      }),
+    )
+  })
+
+  it("uses deterministic code-unit ordering for stories not listed in designmap", async () => {
+    const story = (storyId: string, paragraphId: string) =>
+      `<?xml version="1.0"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="${storyId}"><ParagraphStyleRange Self="${paragraphId}"><CharacterStyleRange><Content>${storyId}</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const parsed = await parseIdml(
+      await makeIdml({
+        "Stories/Story_Z.xml": story("Z", "pZ"),
+        "Stories/Story_a.xml": story("a", "pa"),
+        "Stories/Story_ä.xml": story("ä", "pä"),
+      }),
+    )
+
+    expect([
+      ...new Set(
+        parsed.units
+          .map((unit) => unit.locator.memberPath)
+          .filter((path) => path.startsWith("Stories/")),
+      ),
+    ]).toEqual([
+      "Stories/Story_u1.xml",
+      "Stories/Story_u3.xml",
+      "Stories/Story_Z.xml",
+      "Stories/Story_a.xml",
+      "Stories/Story_u9.xml",
+      "Stories/Story_ä.xml",
+    ])
+  })
+
+  it("keeps Biblica lossless by exposing the same complete literal locations as generic", async () => {
+    const bytes = await makeIdml()
+    const generic = await parseIdml(bytes, "generic")
+    const biblica = await parseIdml(bytes, "biblica")
+
+    expect(biblica.units.map((unit) => unit.locator)).toEqual(
+      generic.units.map((unit) => unit.locator),
+    )
+    expect(biblica.manifest.profile).toBe("biblica")
   })
 
   it("derives note, endnote, text-path, and master-story scopes from structural evidence", async () => {
@@ -123,6 +224,35 @@ describe("IDML structural parser", () => {
         }),
       ),
     ).rejects.toMatchObject({ code: "UNSAFE_XML_DECLARATION" })
+  })
+
+  it("emits paragraph progress and cooperatively cancels parsing", async () => {
+    const paragraphs = Array.from(
+      { length: 64 },
+      (_, index) =>
+        `<ParagraphStyleRange Self="p${index}"><CharacterStyleRange><Content>text ${index}</Content></CharacterStyleRange></ParagraphStyleRange>`,
+    ).join("")
+    const story = `<?xml version="1.0"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1">${paragraphs}</Story></idPkg:Story>`
+    const controller = new AbortController()
+    const progress: number[] = []
+
+    await expect(
+      parseIdml(
+        await makeIdml({ "Stories/Story_u1.xml": story }),
+        "generic",
+        {
+          signal: controller.signal,
+          onProgress(update) {
+            if (update.phase !== "parse") return
+            progress.push(update.completed)
+            if (update.completed === 1) {
+              controller.abort(new DOMException("fixture cancellation", "AbortError"))
+            }
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(progress).toEqual([0, 1])
   })
 })
 
@@ -170,6 +300,7 @@ describe("strict surgical IDML export", () => {
     expect(storyXml).toContain(
       'AppliedCharacterStyle="CharacterStyle/Footnote"><Content>line 1</Content><Br/><Content>line 2</Content>',
     )
+    await expect(validateExport(exported.bytes, parsed.manifest)).resolves.toEqual([])
   })
 
   it("locks and preserves comments or other markup embedded inside Content", async () => {
@@ -321,6 +452,76 @@ describe("strict surgical IDML export", () => {
     )
   })
 
+  it("preserves explicit directory entries without synthesizing parent directories", async () => {
+    const bytes = await makeIdml({ "Explicit/": new Uint8Array() })
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p4")
+    const exported = await exportIdml(
+      bytes,
+      [translationFor(unit, unit.sourceHtml.replace("anchored", "translated"))],
+      { strict: true },
+    )
+    const inspection = await inspectIdml(exported.bytes)
+
+    expect(parsed.manifest.members).toContainEqual(
+      expect.objectContaining({ path: "Explicit/", isDirectory: true }),
+    )
+    expect(inspection.members).toContainEqual(
+      expect.objectContaining({ path: "Explicit/", isDirectory: true }),
+    )
+    expect(inspection.members.some((member) => member.path === "Stories/")).toBe(false)
+    await expect(validateExport(exported.bytes, parsed.manifest)).resolves.toEqual([])
+    await expect(
+      validateExport(await makeIdml({ "Explicit/": null }), parsed.manifest),
+    ).resolves.toContainEqual(
+      expect.objectContaining({ code: "MEMBER_REMOVED", memberPath: "Explicit/" }),
+    )
+  })
+
+  it("detects XML structural tampering while intentionally allowing arbitrary literal changes", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    expect(
+      parsed.manifest.members.find((member) => member.path === "Stories/Story_u1.xml"),
+    ).toMatchObject({ structuralSha256: expect.stringMatching(/^[a-f0-9]{64}$/) })
+
+    const literalOnly = await makeIdml({
+      "Stories/Story_u1.xml": mixedStoryXml.replace(
+        "<Content> Bold </Content>",
+        "<Content>arbitrary literal</Content>",
+      ),
+    })
+    // validateExport has no translation inputs, so a literal change is
+    // intentionally indistinguishable from an authorized translation.
+    await expect(validateExport(literalOnly, parsed.manifest)).resolves.toEqual([])
+
+    const structuralMutations = [
+      mixedStoryXml.replace(
+        'AppliedParagraphStyle="ParagraphStyle/Body"',
+        'AppliedParagraphStyle="ParagraphStyle/Heading"',
+      ),
+      mixedStoryXml.replace('<Mystery Self="m1"/>', ""),
+      mixedStoryXml.replace("<Content>and</Content>", ""),
+      mixedStoryXml.replace(
+        '<CrossReferenceSource Self="xref1"/><TextVariableInstance Self="var1"/>',
+        '<TextVariableInstance Self="var1"/><CrossReferenceSource Self="xref1"/>',
+      ),
+    ]
+    for (const storyXml of structuralMutations) {
+      await expect(
+        validateExport(
+          await makeIdml({ "Stories/Story_u1.xml": storyXml }),
+          parsed.manifest,
+        ),
+      ).resolves.toContainEqual(
+        expect.objectContaining({
+          code: "MEMBER_CHANGED",
+          memberPath: "Stories/Story_u1.xml",
+        }),
+      )
+    }
+  })
+
   it("validates locator presence and hashes of unchanged package members", async () => {
     const bytes = await makeIdml()
     const parsed = await parseIdml(bytes)
@@ -356,6 +557,27 @@ describe("strict surgical IDML export", () => {
         code: "UNSUPPORTED_SCHEMA_VERSION",
       }),
     )
+  })
+
+  it("emits structural-validation progress and cooperatively cancels", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    const controller = new AbortController()
+    const progress: number[] = []
+
+    await expect(
+      validateExport(bytes, parsed.manifest, {
+        signal: controller.signal,
+        onProgress(update) {
+          if (update.phase !== "validate") return
+          progress.push(update.completed)
+          if (update.completed === 1) {
+            controller.abort(new DOMException("validation cancellation", "AbortError"))
+          }
+        },
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(progress).toEqual([0, 1])
   })
 })
 

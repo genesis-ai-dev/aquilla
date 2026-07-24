@@ -139,6 +139,13 @@ export interface IdmlManifestMember {
   readonly path: string
   readonly sha256: string
   readonly byteLength: number
+  readonly isDirectory: boolean
+  /**
+   * Canonical XML structure with literal translatable text removed. Injected
+   * Content/Br/Content line-break chains are folded so legitimate translation
+   * reflow does not look like structural corruption.
+   */
+  readonly structuralSha256?: string
 }
 
 export interface IdmlSourceManifest {

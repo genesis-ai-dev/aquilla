@@ -13,6 +13,14 @@ vi.mock("@/lib/audio/play-queue", () => ({
   useQueueState: () => mockQueueState,
   useQueueProgress: () => mockProgress,
 }))
+// The detail pane's audio components need session/query providers — out of
+// scope here (covered by TimelineCellDetail.test.tsx with the same mocks).
+vi.mock("@/components/CellTtsButton", () => ({
+  CellTtsButton: () => <button type="button" data-testid="mock-tts" />,
+}))
+vi.mock("@/components/CellAudioUploadButton", () => ({
+  CellAudioUploadButton: () => <button type="button" data-testid="mock-upload" />,
+}))
 
 const cell = (o: Partial<CellData>): CellData =>
   ({ fileId: "f1", original: "", translated: "", ...o }) as unknown as CellData
@@ -150,5 +158,52 @@ describe("TimelineEditor", () => {
     expect(btn).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(btn)
     expect(btn).toHaveAttribute("aria-pressed", "false")
+  })
+
+  // ── AQU-646 round 3: text→media trace seed + media→text selection mirror ──
+
+  it("initialSelectedCellId opens the detail pane and cues playback at the clip start", () => {
+    const onSeekToTime = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetime={() => {}} onCommitTarget={() => {}}
+        onSeekToTime={onSeekToTime} initialSelectedCellId="m2"
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Two")
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+  })
+
+  it("onSelectedCellChange mirrors the seed on mount and card clicks after", () => {
+    const onSelectedCellChange = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetime={() => {}} onCommitTarget={() => {}}
+        initialSelectedCellId="m1" onSelectedCellChange={onSelectedCellChange}
+      />,
+    )
+    expect(onSelectedCellChange).toHaveBeenCalledWith("m1")
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    expect(onSelectedCellChange).toHaveBeenLastCalledWith("m2")
+  })
+
+  it("passes detailActions through to the detail pane", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetime={() => {}} onCommitTarget={() => {}}
+        initialSelectedCellId="m1"
+        detailActions={{
+          isCompletionConfigured: true, isCompletionAvailable: true, isAnonymous: false,
+          completing: new Map(), previews: new Map(),
+          onCompleteSingle: async () => {}, onAiSetupNeeded: () => {},
+          onOpenComments: () => {}, onOpenHistory: () => {}, onOpenRecording: () => {},
+          projectId: "p1", username: "tester",
+        }}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-actions")).toBeInTheDocument()
   })
 })

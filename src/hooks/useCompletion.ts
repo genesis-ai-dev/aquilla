@@ -276,6 +276,16 @@ export function useCompletion(
         // user's validate/edit gesture can be attributed to the served model.
         onAbAssignment: (ab) => noteAbAssignment(cell.fileId, cell.id, ab),
       })
+      // AQU-685: a successful HTTP call can still yield an empty completion —
+      // the model produced no content, or a streamed 200 carried only an
+      // error/usage frame with no content deltas. Committing that persists a
+      // blank translation and clears the spinner, so the prediction silently
+      // "doesn't show up" with nothing to tell the user it failed. Treat an
+      // empty result as a failure so the catch path below surfaces it visibly
+      // (error badge + message) instead of writing an empty draft.
+      if (!result.trim()) {
+        throw new Error("The AI returned an empty translation. Please try again.")
+      }
       posthog.capture("ai translation completed", {
         provider,
         model: modelName,

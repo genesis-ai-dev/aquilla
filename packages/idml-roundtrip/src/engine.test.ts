@@ -286,7 +286,13 @@ describe("strict surgical IDML export", () => {
 
     await expect(
       exportIdml(bytes, [translationFor(unit, targetHtml)], { strict: true }),
-    ).rejects.toMatchObject({ code: "MALFORMED_XML" })
+    ).rejects.toSatisfy(
+      (error: unknown) => (
+        error instanceof IdmlError
+        && error.code === "EXPORT_REJECTED"
+        && error.diagnostics.some((entry) => entry.code === "ANCHOR_INVALID")
+      ),
+    )
   })
 
   it("repackages as UCF with mimetype first/stored, other files deflated, and no directory entries", async () => {

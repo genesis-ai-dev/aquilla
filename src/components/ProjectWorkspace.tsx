@@ -4199,6 +4199,11 @@ export function ProjectWorkspace() {
                     transient onboarding state out of the action header. The
                     account switcher now lives in the dock footer (LeftDock) so
                     it's present in every tab, not just this Files panel. */}
+                {/* AQU-695: once dismissed, the chip must stay reachable (so the
+                    user can bring the checklist back without dev tools) but be
+                    visibly de-emphasised — no progress count, dimmed — so a
+                    dismissed user is not presented the same prominent "Setup: n/N"
+                    affordance as someone who has not dismissed. */}
                 {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
                   <div className="mt-auto border-t px-2 pb-2 pt-2">
                     <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
@@ -4206,12 +4211,14 @@ export function ProjectWorkspace() {
                         render={
                           <button
                             onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium hover:bg-accent hover:text-foreground ${checklistDismissed ? "text-muted-foreground/50" : "text-muted-foreground"}`}
                           />
                         }
                       >
                         <ClipboardList className="h-3 w-3" />
-                        Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                        {checklistDismissed
+                          ? "Setup"
+                          : `Setup: ${checklistState.completedCount}/${checklistState.totalCount}`}
                       </TooltipTrigger>
                       <TooltipContent side="right">
                         Reopen the setup checklist anytime from here.

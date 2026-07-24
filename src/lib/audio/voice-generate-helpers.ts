@@ -4,6 +4,7 @@
 // and "Generate all" flows so every cell synthesizes identically.
 
 import { generateAndAttachCellVoice } from "./generate-voice"
+import { resolveCastVoice } from "./voices"
 import { setTtsStatus, ttsStatusKey, synthesizeForCell } from "./tts"
 import { AiModelConsentDeniedError } from "./ai-consent"
 import type { CellData } from "@/hooks/useCells"
@@ -46,7 +47,10 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       cellId: cell.id,
       text,
       projectTtsSettings: project.ttsSettings,
-      cellVoiceId: voiceId ?? cell.ttsSettings?.voiceId,
+      // AQU-646: an explicit caller override wins; otherwise honor persisted
+      // cast assignments (diarization's Speaker N → cell mapping) before the
+      // cell's own voice, so batch + Voice Studio speak in the assigned voice.
+      cellVoiceId: voiceId ?? resolveCastVoice(project.ttsSettings, cell.id, cell.ttsSettings?.voiceId).id,
       geminiContext: {
         sourceLanguage: project.sourceLanguage,
         targetLanguage: project.targetLanguage,

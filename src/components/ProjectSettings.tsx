@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType }
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
-  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines,
+  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug,
 } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
@@ -54,6 +54,7 @@ import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsS
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
+import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -804,6 +805,9 @@ export function ProjectSettings() {
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
     { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
+    // Monday.com board sync — cloud (synced) projects only: the link lives on
+    // the server against the project's org connection.
+    { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -882,6 +886,13 @@ export function ProjectSettings() {
       description: "Post-edit distance and AI usage",
       icon: BarChart3,
       sectionIds: ["section-ai-metrics"],
+    },
+    {
+      id: "integrations",
+      label: "Integrations",
+      description: "Monday.com board sync",
+      icon: Plug,
+      sectionIds: ["section-monday"],
     },
   ]
 
@@ -1736,6 +1747,14 @@ export function ProjectSettings() {
         )}
         {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && sectionsToRender.some((s) => s.id === "section-termbase-sharing") && (
           <TermbaseSharingSection
+            projectId={id}
+            orgId={org?.id ?? null}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+
+        {id && sectionsToRender.some((s) => s.id === "section-monday") && (
+          <MondayIntegrationSection
             projectId={id}
             orgId={org?.id ?? null}
             roleLevel={project?.syncRole?.level ?? null}

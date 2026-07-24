@@ -16,6 +16,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
+  // AQU-672: MembersTab (embedded in the overview Members card) fetches the org
+  // roster to suggest add-member candidates; stub it so the picker is empty.
+  listOrgMembers: vi.fn(async () => []),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 

@@ -116,6 +116,25 @@ export interface Env {
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string
 
+  // ── Monday.com integration (routes/monday.ts, lib/monday/*) ──────────────
+  /** Monday OAuth app client id (plain var, [vars] in wrangler.toml). */
+  MONDAY_CLIENT_ID?: string
+  /** Monday OAuth client secret (secret: `wrangler secret put` / .dev.vars). */
+  MONDAY_CLIENT_SECRET?: string
+  /** Monday app Signing Secret — verifies webhook JWTs (secret). */
+  MONDAY_SIGNING_SECRET?: string
+  /** Monday app id (plain var; informational/config). */
+  MONDAY_APP_ID?: string
+  /** Monday app slug (plain var; informational/config). */
+  MONDAY_APP_SLUG?: string
+  /** OAuth redirect URI — must EXACTLY match the redirect URL registered in
+   *  the Monday Developer Center (the SPA's /oauth/callback route; the SPA
+   *  forwards code+state to the worker). Default: https://aquilla.app/oauth/callback. */
+  MONDAY_REDIRECT_URI?: string
+  /** API-facing origin for OAuth redirect + webhook URLs (e.g.
+   *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
+  BASE_URL_API?: string
+
   // ── AQU-AGENT harness (routes/agent.ts new tools) ────────────────────────
   /** Base URL of the sandbox worker (aquilla-agent-sandbox). Local dev may
    *  inject http://127.0.0.1:8790 or a configured deployed endpoint. Unset →

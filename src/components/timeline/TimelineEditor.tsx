@@ -4,7 +4,7 @@
 // the only "media" dependency is a native <video> element for the linked-URL
 // preview (the remote host serves Range — no streaming work needed here).
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Film, Minus, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
@@ -15,7 +15,12 @@ import { TimelineLane } from "./TimelineLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineCellDetail } from "./TimelineCellDetail"
 import { useTimelineClock } from "./useTimelineClock"
+import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
+import type { Concept } from "@/lib/terminology/types"
+import type { ProjectRecord, RuleInfraction } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
+import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -24,9 +29,25 @@ export interface TimelineEditorProps {
   /** Used to scope the persisted zoom preference. */
   fileId: string
   onRetime(cellId: string, startSec: number, endSec: number): void
-  onCommitTarget(cellId: string, value: string): void
+  onCommitTarget(cellId: string, value: string, valueHtml?: string): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
+  /** Forwarded to the clip detail pane so it can resolve/stream source audio. */
+  project?: ProjectRecord
+  /** Active managed terminology concepts for the detail-pane editor's chips. */
+  terminologyConcepts?: Concept[]
+  /** Per-cell rule infractions (keyed by cell id) for the detail-pane blots. */
+  infractions?: Map<string, RuleInfraction[]>
+  /** Fires when the highlighted section changes so a sibling transport (the
+   *  bottom playback bar) can start playback from the selected section. */
+  onSelectCell?(cellId: string | null): void
+  /** Session for the missing-audio probe that badges a selected clip whose
+   *  recording is permanently gone. Absent (focused unit tests) → no probe. */
+  session?: FrontierSession | null
+  /** Per-file audio-attachment reads (from useFileAudioAttachments). Timeline
+   *  cells carry no attachments, so the probe resolves the selected clip's take
+   *  from this map. Absent → no badge. */
+  audioByCellId?: Map<string, CellAudioEntry>
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -60,9 +81,21 @@ export function TimelineEditor({
   onRetime,
   onCommitTarget,
   onLinkVideo,
+  project,
+  terminologyConcepts,
+  infractions,
+  onSelectCell,
+  session,
+  audioByCellId,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Wrap selection so the parent hears every highlight change — the bottom
+  // playback bar starts from the highlighted section (AQU-666).
+  const selectCell = useCallback((id: string | null) => {
+    setSelectedId(id)
+    onSelectCell?.(id)
+  }, [onSelectCell])
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -85,6 +118,16 @@ export function TimelineEditor({
     () => cells.find((c) => c.id === selectedId) ?? null,
     [cells, selectedId],
   )
+  const selectedClipAudio = useMemo(
+    () => (selectedId ? resolveEntryAudio(audioByCellId?.get(selectedId)) : null),
+    [audioByCellId, selectedId],
+  )
+  const audioMissing = useClipAudioMissing({
+    audio: selectedClipAudio,
+    projectId: project?.id ?? null,
+    fileId,
+    session: session ?? null,
+  })
 
   function applyZoom(next: number) {
     const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next))
@@ -220,7 +263,7 @@ export function TimelineEditor({
     viewEndSec,
     selectedId,
     editable,
-    onSelect: setSelectedId,
+    onSelect: selectCell,
     onRetime,
   }
 
@@ -314,7 +357,7 @@ export function TimelineEditor({
                     key={c.id}
                     type="button"
                     data-testid={`tl-untimed-${c.id}`}
-                    onClick={() => setSelectedId(c.id)}
+                    onClick={() => selectCell(c.id)}
                     className={cn(
                       "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",
                       selectedId === c.id && "ring-2 ring-sky-500",
@@ -330,7 +373,15 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <TimelineCellDetail cell={selectedCell} editable={editable} onCommitTarget={onCommitTarget} />
+      <TimelineCellDetail
+        cell={selectedCell}
+        editable={editable}
+        onCommitTarget={onCommitTarget}
+        project={project}
+        terminologyConcepts={terminologyConcepts}
+        infractions={selectedCell ? infractions?.get(selectedCell.id) : undefined}
+        audioMissing={audioMissing}
+      />
     </div>
   )
 }

@@ -2,7 +2,6 @@ import type { CompletionSettings, CompletionProvider, TranslationRule } from "@/
 import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
-import { encodeParagraphCells } from "@/lib/completion/paragraph-protocol"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
@@ -188,6 +187,17 @@ export function buildPrompt(options: {
    *  real continuity, not a retrieved example. Left-context is the TARGET, not the
    *  source: it is what gives connectives and participant reference real flow. (D4) */
   precedingContext?: { source: string; target: string }[]
+  /** Extra task instruction appended to the system prompt after the rules
+   *  block. Must be placeholder-free — it is appended AFTER the
+   *  {sourceLanguage}/{targetLanguage} substitution. Used by the footnote
+   *  output contract (buildFootnoteInstruction); instructions must live here,
+   *  never inside `sourceText`, where they contradict the base prompt's
+   *  "translate the final source line only" rule. */
+  systemAddendum?: string
+  /** Labelled context block rendered in the user message after
+   *  precedingContext and immediately BEFORE the final `Source:` line — never
+   *  inside it. Used for the source-footnote listing. */
+  preSourceBlock?: string
 }): ChatMessage[] {
   let sys = options.systemPrompt
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
@@ -201,6 +211,8 @@ export function buildPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+
+  if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -234,6 +246,7 @@ export function buildPrompt(options: {
       user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
     }
   }
+  if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
   user += `Source: ${options.sourceText}\nTranslation:`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
@@ -339,6 +352,16 @@ const PARAGRAPH_SYSTEM_SUFFIX =
 export interface ParagraphPromptCell {
   cellId: string
   source: string
+  /**
+   * p1-paragraph-ui-wiring (coordinator adjudication): present when this
+   * cell's target is already validated and therefore excluded from
+   * translation (completeParagraph's skip-validated-cells guard). The cell
+   * still renders IN POSITION within the source paragraph — as a locked
+   * reference segment, never a `<c id>` tag — so drafted neighbors don't
+   * read as artificially contiguous across a silently-dropped gap. Absent/
+   * undefined ⇒ a normal draftable cell (today's `<c id>` behavior).
+   */
+  lockedTarget?: string
 }
 
 export function buildParagraphPrompt(options: {
@@ -385,6 +408,18 @@ export function buildParagraphPrompt(options: {
 
   if (targetOnly) {
     sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
+  }
+
+  // p1-paragraph-ui-wiring (coordinator adjudication): warn the model about
+  // locked segments ONLY when at least one is present, so callers with no
+  // validated cells in the group (today's only path, and every existing
+  // test) see byte-identical system prompt output.
+  const hasLockedCells = options.cells.some((c) => c.lockedTarget !== undefined)
+  if (hasLockedCells) {
+    sys = sys + "\n\nSome segments in the source paragraph are marked "
+      + "\"[already translated — do not output: ...]\" — these are already "
+      + "committed, validated translations. Do NOT translate them, do NOT "
+      + "emit a <c id> tag for them, and do NOT repeat their text in your response."
   }
 
   // Build user message: examples → discourse window → live paragraph
@@ -446,10 +481,19 @@ export function buildParagraphPrompt(options: {
     }
   }
 
-  // Live paragraph: encode source cells with stable <c id> tags (D11).
-  const liveSource = encodeParagraphCells(
-    options.cells.map((c) => ({ cellId: c.cellId, text: c.source })),
-  )
+  // Live paragraph: encode DRAFTABLE source cells with stable <c id> tags
+  // (D11). A locked (already-validated) cell renders IN POSITION instead —
+  // source text plus its existing committed target, clearly marked, and
+  // deliberately NOT wrapped in a <c id> tag — so a validated cell sitting
+  // mid-group doesn't leave a silent gap that makes its drafted neighbors
+  // read as artificially adjacent. If the model emits a stray tag for a
+  // locked cell anyway, parseParagraphResponse's expectedIds already
+  // excludes it, so it's discarded as `extra` (D11) — unchanged.
+  const liveSource = options.cells
+    .map((c) => (c.lockedTarget !== undefined
+      ? `${c.source} [already translated — do not output: ${c.lockedTarget}]`
+      : `<c id="${c.cellId}">${c.source}</c>`))
+    .join("\n")
   user += `Source paragraph:\n${liveSource}\n\nTranslation paragraph:\n`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]

@@ -96,7 +96,10 @@ export async function seedProjectWithFile(
       ...(str.type !== undefined ? { type: str.type } : {}),
       ...(str.group ? { canonicalRef: str.group } : {}),
       sequenceIndex: seq,
-      ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      // useCells reads paragraphStart from `source.metadata.paragraphStart`
+      // (src/hooks/useCells.ts), not the top-level field — mirror
+      // buildBulkCellsWithSpeakers (src/lib/import.ts), which sets both.
+      ...(str.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
     }
     prevCellId = str.id
     return cell

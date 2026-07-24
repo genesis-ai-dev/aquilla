@@ -35,6 +35,10 @@
 | Validation  | Disabled self-validation prevents auto-validation and explains an explicit 403 rejection | `e2e/specs/collab/aqu-633-self-validation.spec.ts` | |
 | Validation  | History persists across navigation                   | `e2e/specs/validation/validation-persists-navigation.smoke.spec.ts` | ✅ |
 | AI          | Sparkle button fills cell and marks it for individual human review | `e2e/specs/ai/completion.smoke.spec.ts` (IDB-injected settings) | ✅ |
+| AI          | Sparkle on a footnoted source commits translated base + reintegrated `\f…\f*` footnote (never an empty "Saved") | `e2e/specs/ai/completion-footnote.spec.ts` (spec-local mock LLM) | |
+| AI          | Sparkle in a secondary target lane commits into that lane only — survives reload, default lane untouched | `e2e/specs/ai/completion-lane.spec.ts` (spec-local mock LLM) | |
+| AI          | Rapid sparkle sequences (regenerate, edit-then-sparkle, lane repeats) never dead-letter as stale siblings | `e2e/specs/ai/completion-races.spec.ts` (spec-local mock LLM) | |
+| AI          | Paragraph pilcrow button drafts all cells of a paragraph as one unit (mock LLM) | `e2e/specs/ai/paragraph-draft.smoke.spec.ts` | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
 | Editor      | Import dialog escalates an unsupported container to the isolated parser, previews normalized source/target units, then commits through ImportService | `e2e/specs/agent-import.spec.ts` (container-gated with `AGENT_SANDBOX_E2E=1`) | |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
@@ -93,7 +97,7 @@
 | Editor      | Per-file "Apply rename suggestion" sparkle applies one rename and shows undo toast | `e2e/specs/editor/suggestion-banner-per-file-apply.smoke.spec.ts` | ✅ |
 | Rules       | Delete a custom rule removes it from the list          | `e2e/specs/rules/rule-delete.smoke.spec.ts`             |   ✅   |
 | Terminology | Archive hides an active term while preserving it for restore | `e2e/specs/projects/terminology-delete-concept.smoke.spec.ts` | ✅ |
-| Editor      | Pre-acceptance warning band for forbidden terminology rendering | `e2e/specs/editor/preacceptance-warning-band.smoke.spec.ts` | ✅ |
+| Editor      | Terminology violation shows only the inline blot (no advisory band), live + explained on hover | `e2e/specs/editor/terminology-inline-blot.smoke.spec.ts` | ✅ |
 | Editor      | Manual direction mismatch offers Auto repair and restores content-driven direction | `e2e/specs/editor/rtl-hint-adjust-opens-settings.smoke.spec.ts` | ✅ |
 | Editor      | Workspace "Settings" dropdown item navigates to project settings     | `e2e/specs/editor/workspace-settings-navigate.smoke.spec.ts`   |   ✅   |
 | Projects    | Settings sub-menu link navigates to its pane and back (AQU-501) | `e2e/specs/projects/project-settings-nav-link-click.smoke.spec.ts` | ✅ |
@@ -157,6 +161,7 @@
 | Editor      | HistoryDrawer show/hide intermediate edits toggle     | `e2e/specs/editor/history-drawer-intermediate-edits.smoke.spec.ts` | ✅ |
 | Editor      | CellActionRail direct Add comment opens drawer        | `e2e/specs/editor/cell-more-actions-popover.smoke.spec.ts`    |   ✅   |
 | Editor      | CellActionsMenu "More actions" → History opens drawer | `e2e/specs/editor/cell-actions-menu-history.smoke.spec.ts`   |   ✅   |
+| Editor      | Walking focus across cells leaves exactly one revealed rail | `e2e/specs/editor/cell-rail-focus-exclusive.smoke.spec.ts` | ✅ |
 | Editor      | CellActionRail direct Add comment opens drawer        | `e2e/specs/editor/cell-actions-menu-add-comment.smoke.spec.ts` | ✅ |
 | Editor      | Sidebar file filter narrows list; Clear restores it   | `e2e/specs/editor/sidebar-file-filter.smoke.spec.ts`          |   ✅   |
 | Editor      | Decay breakdown popover opens from cell indicator     | `e2e/specs/editor/decay-breakdown-popover.smoke.spec.ts`      |   ✅   |

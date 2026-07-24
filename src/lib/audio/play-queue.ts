@@ -33,6 +33,24 @@ function setState(next: QueueState): void {
 
 export function getQueueState(): QueueState { return state }
 
+/**
+ * True when an error is `fetchCellAudio`'s missing-bytes 404 sentinel — the R2
+ * object for a `frontier-audio://` clip doesn't exist (deleted, or an upload
+ * that never completed). Kept distinct from transient/auth failures so the
+ * queue can skip the dead clip and surface a clear "missing" state instead of
+ * dead-ending on the raw `audio not found (404): not found` as if playback were
+ * simply broken.
+ */
+export function isMissingAudioError(e: unknown): boolean {
+  if (e && typeof e === "object" && "status" in e && (e as { status?: unknown }).status === 404) {
+    return true
+  }
+  return e instanceof Error && e.message.includes("audio not found (404)")
+}
+
+/** User-facing copy for the "this clip has no bytes to play" state. */
+export const MISSING_AUDIO_MESSAGE = "This clip's audio is missing."
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
@@ -88,6 +106,19 @@ const coordinatorController: ActiveAudioController = {
 
 function disposeCurrent(): void {
   if (currentAudio) {
+    // Detach handlers BEFORE clearing src: setting src="" re-runs the media
+    // load algorithm, which fires a final `error` event on the element. With
+    // handlers still attached (and seq unchanged — dispose isn't always
+    // followed by a new playAt), that zombie onerror would stomp whatever
+    // state the caller just set (e.g. MISSING_AUDIO_MESSAGE) with the generic
+    // "Audio failed to load".
+    currentAudio.onerror = null
+    currentAudio.onended = null
+    currentAudio.ontimeupdate = null
+    currentAudio.onloadedmetadata = null
+    currentAudio.ondurationchange = null
+    currentAudio.onpause = null
+    currentAudio.onplay = null
     currentAudio.pause()
     currentAudio.src = ""
     currentAudio = null
@@ -251,7 +282,36 @@ export function trimWindowForCell(cell: CellData): { start: number; end: number 
   return { start: startTime, end: endTime }
 }
 
-async function playAt(index: number): Promise<void> {
+/**
+ * When a section's window ends, decide whether the next playable cell is
+ * simply the *next window on the same imported clip* — i.e. a sibling media
+ * segment. If so, the queue keeps the SAME `<audio>` element running and just
+ * walks its window cursor forward, so playback is gapless across the boundary
+ * (AQU-666). Anything else — a different clip, a non-media cell, or no next
+ * cell — returns null and the queue hands off to a fresh element as before.
+ */
+export function sameClipContinuation(
+  cells: CellData[],
+  currentIndex: number,
+  clipUrl: string,
+): { index: number; trim: { start: number; end: number } } | null {
+  const next = findNextPlayable(cells, currentIndex + 1)
+  if (next < 0) return null
+  const nextCell = cells[next]
+  const playable = pickPlayableAudio(nextCell)
+  const trim = trimWindowForCell(nextCell)
+  if (!playable || playable.url !== clipUrl || !trim) return null
+  return { index: next, trim }
+}
+
+// The next window usually abuts the previous one (segments tile the file), so
+// reaching trim.end already sits us inside the next window — we keep playing
+// the same samples for true gaplessness. Only when the next window starts
+// meaningfully ahead of where we are (a real silent gap in the file) do we
+// seek forward, still on the same element (no reload, so no audible cut).
+const CONTINUOUS_SEEK_EPS = 0.35
+
+async function playAt(index: number, explicitStart = false): Promise<void> {
   const ctx = activeContext
   if (!ctx) return
   const cell = ctx.cells[index]
@@ -277,11 +337,30 @@ async function playAt(index: number): Promise<void> {
   setState({ kind: "loading", cellIndex: index, cellId: cell.id })
   ctx.onCellChange?.(index, cell.id)
 
+  const surfaceMissing = (missingCellId: string): void => {
+    disposeCurrent()
+    setState({ kind: "error", message: MISSING_AUDIO_MESSAGE, cellId: missingCellId })
+  }
+  // A clip whose bytes are gone must not dead-end the whole transport: during
+  // auto-advance we skip to the next clip that has audio, surfacing a clear
+  // "missing" state only when none remain (rather than the misleading raw 404).
+  // But when the user EXPLICITLY started on this clip (selected it on the
+  // timeline and pressed Play), skipping would silently play a neighbour — the
+  // reported bug (AQU-660). In that case surface the missing state on the
+  // selected clip instead of hopping past it.
+  const skipMissingFrom = (missingCellId: string): void => {
+    if (explicitStart) { surfaceMissing(missingCellId); return }
+    const next = findNextPlayable(ctx.cells, index + 1)
+    if (next >= 0) { void playAt(next); return }
+    surfaceMissing(missingCellId)
+  }
+
   let resolved: ResolvedAudioSrc
   try {
     resolved = await resolveAudioSrc(playable.url, ctx.projectId, cell.fileId, ctx.session)
   } catch (e) {
     if (seq !== currentSeq) return // superseded
+    if (isMissingAudioError(e)) { skipMissingFrom(cell.id); return }
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
     return
   }
@@ -295,11 +374,15 @@ async function playAt(index: number): Promise<void> {
   currentUrl = resolved.objectUrl
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  const trim = trimWindowForCell(cell)
-  setProgress({ currentTime: trim?.start ?? 0, duration: 0 })
+  // Mutable window cursor for THIS element. A media file split into sibling
+  // segments shares one clip; as playback crosses a section boundary we walk
+  // this cursor forward on the same element (see sameClipContinuation) instead
+  // of tearing down and reloading, so the audio never cuts (AQU-666).
+  const seg = { index, cell, trim: trimWindowForCell(cell), clipUrl: playable.url }
+  setProgress({ currentTime: seg.trim?.start ?? 0, duration: 0 })
 
   const advance = () => {
-    const next = findNextPlayable(ctx.cells, index + 1)
+    const next = findNextPlayable(ctx.cells, seg.index + 1)
     if (next < 0) {
       setState(IDLE)
       disposeCurrent()
@@ -308,17 +391,33 @@ async function playAt(index: number): Promise<void> {
     void playAt(next)
   }
 
-  if (trim) {
+  if (seg.trim) {
     audio.onloadedmetadata = () => {
       if (seq !== currentSeq) return
-      audio.currentTime = trim.start
+      if (seg.trim) audio.currentTime = seg.trim.start
     }
   }
   audio.ontimeupdate = () => {
     if (seq !== currentSeq) return
-    // A media segment's window ends before the shared clip does — treat
-    // reaching trim.end as this cell's "ended" and move to the next cell.
-    if (trim && audio.currentTime >= trim.end) {
+    // A media segment's window ends before the shared clip does.
+    if (seg.trim && audio.currentTime >= seg.trim.end) {
+      const cont = sameClipContinuation(ctx.cells, seg.index, seg.clipUrl)
+      if (cont) {
+        // Next section is another window on the same clip: keep this element
+        // playing and just move the cursor. Only seek if a real gap separates
+        // the windows; a contiguous boundary plays through seamlessly.
+        if (cont.trim.start > audio.currentTime + CONTINUOUS_SEEK_EPS) {
+          audio.currentTime = cont.trim.start
+        }
+        seg.index = cont.index
+        seg.cell = ctx.cells[cont.index]
+        seg.trim = cont.trim
+        setState({ kind: "playing", cellIndex: seg.index, cellId: seg.cell.id })
+        ctx.onCellChange?.(seg.index, seg.cell.id)
+        return
+      }
+      // A different clip (or no next segment): stop here and hand off to a
+      // fresh element for the next cell, as before.
       audio.onpause = null // don't let the pause handler flash a "paused" state
       audio.pause()
       advance()
@@ -334,12 +433,12 @@ async function playAt(index: number): Promise<void> {
   audio.onplay = () => {
     if (seq !== currentSeq) return
     setActiveAudio(coordinatorController)
-    setState({ kind: "playing", cellIndex: index, cellId: cell.id })
+    setState({ kind: "playing", cellIndex: seg.index, cellId: seg.cell.id })
   }
   audio.onpause = () => {
     if (seq !== currentSeq) return
     if (audio.ended) return
-    setState({ kind: "paused", cellIndex: index, cellId: cell.id })
+    setState({ kind: "paused", cellIndex: seg.index, cellId: seg.cell.id })
   }
   audio.onended = () => {
     if (seq !== currentSeq) return
@@ -365,6 +464,7 @@ async function playAt(index: number): Promise<void> {
           await audio.play()
         } catch (e) {
           if (seq !== currentSeq) return
+          if (isMissingAudioError(e)) { skipMissingFrom(cell.id); return }
           setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
         }
       })()
@@ -377,13 +477,23 @@ async function playAt(index: number): Promise<void> {
     await audio.play()
   } catch (e) {
     if (seq !== currentSeq) return
+    // A source that fails to LOAD rejects play() with NotSupportedError and
+    // also fires the element's onerror — which owns recovery (blob fallback →
+    // missing-bytes skip → MISSING_AUDIO_MESSAGE). Publishing the raw
+    // rejection here would race that path and surface "Failed to load because
+    // no supported source was found." for a merely-missing clip (AQU-660).
+    // Genuine playback refusals (e.g. autoplay's NotAllowedError) don't fire
+    // onerror, so they still report here.
+    if (e instanceof DOMException && e.name === "NotSupportedError") return
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
   }
 }
 
 /** Start playback at a specific cell index (or skip forward to the next
- *  cell with audio if the start index has none). */
-export function startQueue(ctx: PlayContext, fromIndex: number): void {
+ *  cell with audio if the start index has none). `explicit` marks a
+ *  user-chosen start (e.g. a selected timeline clip) so a missing clip there
+ *  surfaces its "missing" state rather than skipping to a neighbour. */
+export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false): void {
   activeContext = ctx
   const start = findNextPlayable(ctx.cells, Math.max(0, fromIndex))
   if (start < 0) {
@@ -391,7 +501,7 @@ export function startQueue(ctx: PlayContext, fromIndex: number): void {
     disposeCurrent()
     return
   }
-  void playAt(start)
+  void playAt(start, explicit)
 }
 
 export function pauseQueue(): void {

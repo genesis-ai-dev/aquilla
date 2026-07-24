@@ -17,8 +17,14 @@
 ## Quality
 
 - [OPEN] Publish `@aquilla/idml-roundtrip@2.0.0` to private GitHub Packages only after the shared conformance gate is green and both consumers are ready to pin it.
+- [OPEN] Browser archive central-directory inspection is synchronous. Browser-safe limits reduce the exposure; AQU-705 must instantiate the transferable worker entrypoint so parsing, XML validation, and export never run on the UI thread.
+- [OPEN] `validateExport(bytes, manifest)` can prove package/XML structure but cannot distinguish an intended literal translation from arbitrary literal tampering without translation inputs. Strict `exportIdml` performs that source/target proof before mutation.
+- [OPEN] Biblica v2 intentionally parses every literal location. Marker-specific locking (ACE instructions, references, and Source Serif apostrophe glue) requires richer semantic classification in AQU-706; it must not restore the legacy notes-only data loss.
 
 ## DONE
 
 - [DONE] Current `origin/dev` baseline build passes.
 - [DONE] AQU-704 through AQU-709 created with explicit dependencies and acceptance criteria.
+- [DONE] AQU-704 shared engine parses nested literal locations structurally, exports selected `<Content>` slots surgically, returns exact no-op bytes, and validates UCF/XML/member invariants.
+- [DONE] Legacy Codex multipart paragraphs and structural-apostrophe omissions are source-proven, non-overlapping, and aggregated before replacement.
+- [DONE] Package conformance suite passes in Node/Vitest and exercises the transferable browser-worker protocol (137 tests); package TypeScript build passes.

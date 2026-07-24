@@ -44,6 +44,17 @@ const IDML_MIMETYPE = "application/vnd.adobe.indesign-idml-package"
 const DEFAULT_CHARACTER_STYLE = "CharacterStyle/$ID/[No character style]"
 const STORY_MEMBER_PATTERN = /^Stories\/[^/]+\.xml$/i
 const XML_MEMBER_PATTERN = /\.xml$/i
+const IDML_SCOPES: ReadonlySet<IdmlScope> = new Set([
+  "story-paragraph",
+  "table-cell",
+  "footnote",
+  "endnote",
+  "note",
+  "text-path",
+  "anchored-story",
+  "master-story",
+  "custom-variable",
+])
 const ZIP_LOCAL_SIGNATURE = 0x04034b50
 const ZIP_CENTRAL_SIGNATURE = 0x02014b50
 const ZIP_EOCD_SIGNATURE = 0x06054b50
@@ -107,8 +118,11 @@ export async function exportIdml(
   translations: readonly IdmlTranslation[],
   options: IdmlExportOptions,
 ): Promise<IdmlExportResult> {
-  if (options.strict !== true) {
+  if (!options || options.strict !== true) {
     throw new IdmlError("EXPORT_REJECTED", "IDML export must run in strict mode")
+  }
+  if (!Array.isArray(translations)) {
+    throw new IdmlError("EXPORT_REJECTED", "IDML translations must be an array")
   }
   throwIfAborted(options.signal)
   const parsed = await parseIdmlInternal(bytes, "generic", {
@@ -156,17 +170,28 @@ export async function exportIdml(
     unitsByElementId.set(key, matches)
   }
   const seenTranslationLocators = new Set<string>()
-  const seenUnitLocations = new Set<string>()
+  const seenUnitSlots = new Set<string>()
+  const seenUnitParts = new Set<string>()
   const diagnostics: IdmlDiagnostic[] = []
   const accepted: Array<{
     readonly translation: IdmlTranslation
     readonly unit: IdmlTranslationUnit
+    readonly slotPositions: readonly number[]
     readonly targetSlots: readonly string[]
   }> = []
 
   for (let index = 0; index < translations.length; index += 1) {
     throwIfAborted(options.signal)
-    const translation = translations[index]!
+    const translation = translations[index] as unknown
+    if (!isRuntimeTranslation(translation)) {
+      diagnostics.push(
+        diagnostic(
+          "LOCATOR_STALE",
+          "IDML translation payload or locator is malformed",
+        ),
+      )
+      continue
+    }
     const exactKey = locatorIdentityKey(translation.locator)
     const locationKey = locatorLocationKey(translation.locator)
     if (seenTranslationLocators.has(exactKey)) {
@@ -218,20 +243,19 @@ export async function exportIdml(
       )
       continue
     }
-    const resolvedLocationKey = locatorLocationKey(unit.locator)
-    if (seenUnitLocations.has(resolvedLocationKey)) {
+    const projected = projectUnitForLocator(unit, translation.locator)
+    if (!projected) {
       diagnostics.push(
         diagnostic(
-          "LOCATOR_DUPLICATED",
-          "Multiple translations resolve to the same IDML paragraph",
+          "LOCATOR_STALE",
+          "IDML locator slot indexes no longer match the source structure",
           translation.locator.memberPath,
           translation.unitId,
         ),
       )
       continue
     }
-    seenUnitLocations.add(resolvedLocationKey)
-    if (!sameLocatorStructure(translation.locator, unit.locator, reconciledByElementId)) {
+    if (!sameLocatorBase(translation.locator, unit.locator, reconciledByElementId)) {
       diagnostics.push(
         diagnostic(
           "LOCATOR_STALE",
@@ -241,6 +265,37 @@ export async function exportIdml(
         ),
       )
       continue
+    }
+    const resolvedLocationKey = locatorLocationKey(unit.locator)
+    const partKey = `${resolvedLocationKey}\u0000${translation.locator.part}`
+    if (seenUnitParts.has(partKey)) {
+      diagnostics.push(
+        diagnostic(
+          "LOCATOR_DUPLICATED",
+          `Multiple translations use IDML part ${translation.locator.part}`,
+          translation.locator.memberPath,
+          translation.unitId,
+        ),
+      )
+      continue
+    }
+    const overlappingSlot = translation.locator.slotIndexes.find((slotIndex) => (
+      seenUnitSlots.has(unitSlotKey(resolvedLocationKey, slotIndex))
+    ))
+    if (overlappingSlot !== undefined) {
+      diagnostics.push(
+        diagnostic(
+          "LOCATOR_DUPLICATED",
+          `Multiple translations resolve to IDML slot ${overlappingSlot}`,
+          translation.locator.memberPath,
+          translation.unitId,
+        ),
+      )
+      continue
+    }
+    seenUnitParts.add(partKey)
+    for (const slotIndex of translation.locator.slotIndexes) {
+      seenUnitSlots.add(unitSlotKey(resolvedLocationKey, slotIndex))
     }
     if (translation.locator.sourceBlockHash !== unit.locator.sourceBlockHash) {
       diagnostics.push(
@@ -254,8 +309,8 @@ export async function exportIdml(
       continue
     }
     if (
-      translation.sourceHtml !== unit.sourceHtml ||
-      !sameMetadata(translation.metadata, unit.metadata)
+      translation.sourceHtml !== projected.unit.sourceHtml ||
+      !sameMetadata(translation.metadata, projected.unit.metadata)
     ) {
       diagnostics.push(
         diagnostic(
@@ -282,11 +337,11 @@ export async function exportIdml(
       )
       continue
     }
-    if (validation.slots.length !== unit.slots.length) {
+    if (validation.slots.length !== projected.unit.slots.length) {
       diagnostics.push(
         diagnostic(
           "ANCHOR_INVALID",
-          `Translation returned ${validation.slots.length} slots; expected ${unit.slots.length}`,
+          `Translation returned ${validation.slots.length} slots; expected ${projected.unit.slots.length}`,
           translation.locator.memberPath,
           translation.unitId,
         ),
@@ -307,7 +362,12 @@ export async function exportIdml(
       )
       continue
     }
-    accepted.push({ translation, unit, targetSlots: validation.slots })
+    accepted.push({
+      translation,
+      unit,
+      slotPositions: projected.slotPositions,
+      targetSlots: validation.slots,
+    })
     emitProgress(options.onProgress, {
       phase: "validate",
       completed: index + 1,
@@ -325,39 +385,56 @@ export async function exportIdml(
     )
   }
 
+  const updatesByUnit = new Map<string, {
+    readonly unit: IdmlTranslationUnit
+    readonly targetSlots: string[]
+  }>()
+  for (const item of accepted) {
+    const unitKey = locatorLocationKey(item.unit.locator)
+    const update = updatesByUnit.get(unitKey) ?? {
+      unit: item.unit,
+      targetSlots: item.unit.slots.map((slot) => slot.text),
+    }
+    for (let localIndex = 0; localIndex < item.slotPositions.length; localIndex += 1) {
+      const position = item.slotPositions[localIndex]!
+      update.targetSlots[position] = item.targetSlots[localIndex] ?? ""
+    }
+    updatesByUnit.set(unitKey, update)
+  }
+  const replacementsByMember = new Map<string, Replacement[]>()
+  let translatedCount = 0
+  const updates = [...updatesByUnit.values()]
   emitProgress(options.onProgress, {
     phase: "export",
     completed: 0,
-    total: accepted.length,
+    total: updates.length,
   })
-  const replacementsByMember = new Map<string, Replacement[]>()
-  let translatedCount = 0
-  for (let acceptedIndex = 0; acceptedIndex < accepted.length; acceptedIndex += 1) {
+  for (let acceptedIndex = 0; acceptedIndex < updates.length; acceptedIndex += 1) {
     throwIfAborted(options.signal)
-    const item = accepted[acceptedIndex]!
-    const member = parsed.loaded.members.get(item.unit.locator.memberPath)
+    const update = updates[acceptedIndex]!
+    const member = parsed.loaded.members.get(update.unit.locator.memberPath)
     if (!member?.xml) {
       throw new IdmlError(
         "LOCATOR_MISSING",
-        `IDML member ${item.unit.locator.memberPath} is unavailable during export`,
+        `IDML member ${update.unit.locator.memberPath} is unavailable during export`,
       )
     }
-    const target = resolveAndVerifyElement(member.xml, item.unit.locator, item.unit.id)
+    const target = resolveAndVerifyElement(member.xml, update.unit.locator, update.unit.id)
     const slotElements = extractSlotElements(
       target,
-      item.unit.locator.scope,
+      update.unit.locator.scope,
       member.xml.source,
     )
     if (
-      slotElements.length !== item.unit.slots.length ||
+      slotElements.length !== update.unit.slots.length ||
       !sameNumbers(
-        item.unit.locator.slotIndexes,
+        update.unit.locator.slotIndexes,
         slotElements.map((slot) => slot.slot.index),
       )
     ) {
       throw new IdmlError(
         "LOCATOR_STALE",
-        `IDML slot structure changed for ${item.unit.id}`,
+        `IDML slot structure changed for ${update.unit.id}`,
       )
     }
 
@@ -370,7 +447,7 @@ export async function exportIdml(
     }
     for (const [contentElement, bindings] of contentGroups) {
       const translatedParts = bindings.map(
-        (binding) => item.targetSlots[binding.slot.index] ?? "",
+        (binding) => update.targetSlots[binding.slot.index] ?? "",
       )
       if (
         bindings.every(
@@ -394,8 +471,8 @@ export async function exportIdml(
     emitProgress(options.onProgress, {
       phase: "export",
       completed: acceptedIndex + 1,
-      total: accepted.length,
-      memberPath: item.unit.locator.memberPath,
+      total: updates.length,
+      memberPath: update.unit.locator.memberPath,
     })
     if ((acceptedIndex & 31) === 31) await yieldToEventLoop()
   }
@@ -1654,15 +1731,90 @@ function concatenateBytes(parts: readonly Uint8Array[]): Uint8Array {
   return output
 }
 
+function isRuntimeTranslation(value: unknown): value is IdmlTranslation {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const candidate = value as {
+    readonly unitId?: unknown
+    readonly locator?: unknown
+    readonly metadata?: unknown
+    readonly sourceHtml?: unknown
+    readonly targetHtml?: unknown
+  }
+  return (
+    typeof candidate.unitId === "string"
+    && candidate.unitId.length > 0
+    && isRuntimeLocator(candidate.locator)
+    && typeof candidate.metadata === "object"
+    && candidate.metadata !== null
+    && typeof candidate.sourceHtml === "string"
+    && typeof candidate.targetHtml === "string"
+  )
+}
+
+function isRuntimeLocator(value: unknown): value is IdmlLocator {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const locator = value as {
+    readonly kind?: unknown
+    readonly memberPath?: unknown
+    readonly storyId?: unknown
+    readonly elementPath?: unknown
+    readonly elementId?: unknown
+    readonly scope?: unknown
+    readonly part?: unknown
+    readonly slotIndexes?: unknown
+    readonly sourceBlockHash?: unknown
+  }
+  if (
+    locator.kind !== "idml"
+    || typeof locator.memberPath !== "string"
+    || locator.memberPath.length === 0
+    || /[\u0000-\u001f]/.test(locator.memberPath)
+    || locator.memberPath.startsWith("/")
+    || /^[A-Za-z]:/.test(locator.memberPath)
+    || locator.memberPath.includes("\\")
+    || locator.memberPath.split("/").some((component) => (
+      component === "" || component === "." || component === ".."
+    ))
+    || typeof locator.elementPath !== "string"
+    || locator.elementPath.length === 0
+    || (locator.storyId !== undefined && typeof locator.storyId !== "string")
+    || (locator.elementId !== undefined && typeof locator.elementId !== "string")
+    || typeof locator.scope !== "string"
+    || !IDML_SCOPES.has(locator.scope as IdmlScope)
+    || typeof locator.part !== "number"
+    || !Number.isSafeInteger(locator.part)
+    || locator.part < 0
+    || !Array.isArray(locator.slotIndexes)
+    || locator.slotIndexes.length === 0
+    || typeof locator.sourceBlockHash !== "string"
+    || !/^[a-f0-9]{64}$/.test(locator.sourceBlockHash)
+  ) {
+    return false
+  }
+  let previous = -1
+  for (const slotIndex of locator.slotIndexes) {
+    if (
+      typeof slotIndex !== "number"
+      || !Number.isSafeInteger(slotIndex)
+      || slotIndex < 0
+      || slotIndex <= previous
+    ) {
+      return false
+    }
+    previous = slotIndex
+  }
+  return true
+}
+
 function locatorLocationKey(locator: IdmlLocator): string {
   return `${locator.memberPath}\u0000${locator.elementPath}\u0000${locator.elementId ?? ""}`
 }
 
 function locatorIdentityKey(locator: IdmlLocator): string {
-  return `${locatorLocationKey(locator)}\u0000${locator.sourceBlockHash}\u0000${locator.slotIndexes.join(",")}`
+  return `${locatorLocationKey(locator)}\u0000${locator.sourceBlockHash}\u0000${locator.part}\u0000${locator.slotIndexes.join(",")}`
 }
 
-function sameLocatorStructure(
+function sameLocatorBase(
   left: IdmlLocator,
   right: IdmlLocator,
   allowReconciledElementPath = false,
@@ -1676,10 +1828,79 @@ function sameLocatorStructure(
         left.elementId !== undefined &&
         left.elementId === right.elementId)) &&
     left.elementId === right.elementId &&
-    left.scope === right.scope &&
-    left.part === right.part &&
-    sameNumbers(left.slotIndexes, right.slotIndexes)
+    left.scope === right.scope
   )
+}
+
+function unitSlotKey(locationKey: string, slotIndex: number): string {
+  return `${locationKey}\u0000${slotIndex}`
+}
+
+function projectUnitForLocator(
+  unit: IdmlTranslationUnit,
+  locator: IdmlLocator,
+): {
+  readonly unit: IdmlTranslationUnit
+  readonly slotPositions: readonly number[]
+} | undefined {
+  if (locator.slotIndexes.length === 0) return undefined
+  const positionBySlotIndex = new Map(
+    unit.locator.slotIndexes.map((slotIndex, position) => [slotIndex, position] as const),
+  )
+  const slotPositions = locator.slotIndexes.map((slotIndex) => positionBySlotIndex.get(slotIndex))
+  if (
+    slotPositions.some((position) => position === undefined)
+    || slotPositions.some((position, index) => (
+      index > 0 && position! <= slotPositions[index - 1]!
+    ))
+  ) {
+    return undefined
+  }
+  const positions = slotPositions as number[]
+  const slots = positions.map((position, index): IdmlTextSlot => {
+    const source = unit.slots[position]!
+    return { ...source, index }
+  })
+  const protectedTokens = unit.protectedTokens
+    .filter((token) => {
+      if (token.position === 0) {
+        return positions[0] === 0 && locator.part === 0
+      }
+      if (token.position === unit.slots.length) {
+        return positions.at(-1) === unit.slots.length - 1
+      }
+      return positions.indexOf(token.position) > 0
+    })
+    .map((token, index): IdmlProtectedToken => {
+      let position: number
+      if (token.position === 0) {
+        position = 0
+      } else if (token.position === unit.slots.length) {
+        position = slots.length
+      } else {
+        position = positions.indexOf(token.position)
+      }
+      return { ...token, index, position }
+    })
+  const metadata: IdmlFormatMetadataV2 = {
+    version: 2,
+    slotCount: slots.length,
+    editableSlotIndexes: slots.filter((slot) => slot.editable).map((slot) => slot.index),
+    protectedTokenCount: protectedTokens.length,
+    anchorSequenceHash: computeIdmlAnchorSequenceHash(slots, protectedTokens),
+  }
+  const draft: IdmlTranslationUnit = {
+    ...unit,
+    locator,
+    slots,
+    protectedTokens,
+    metadata,
+    sourceHtml: "",
+  }
+  return {
+    unit: { ...draft, sourceHtml: renderIdmlUnitHtml(draft) },
+    slotPositions: positions,
+  }
 }
 
 function locatorElementIdKey(memberPath: string, elementId: string): string {

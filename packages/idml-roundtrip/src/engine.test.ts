@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { inspectIdml } from "./archive.js"
 import { IdmlError } from "./errors.js"
 import { exportIdml, parseIdml, validateExport } from "./engine.js"
+import { upgradeLegacyIdmlMetadata } from "./legacy.js"
 import type { IdmlTranslation, IdmlTranslationUnit } from "./types.js"
 import { makeIdml, mixedStoryXml } from "./test-helpers/idml-fixture.js"
 
@@ -389,6 +390,13 @@ describe("strict surgical IDML export", () => {
         error instanceof IdmlError &&
         error.diagnostics.some((entry) => entry.code === "LOCATOR_MISSING"),
     )
+    await expect(
+      exportIdml(bytes, [{ ...valid, locator: { kind: "idml" } } as never], { strict: true }),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof IdmlError &&
+        error.diagnostics.some((entry) => entry.code === "LOCATOR_STALE"),
+    )
   })
 
   it("reconciles a legacy path through a unique element ID and source hash", async () => {
@@ -406,6 +414,73 @@ describe("strict surgical IDML export", () => {
     const exported = await exportIdml(bytes, [legacyPathTranslation], { strict: true })
     expect(await memberText(exported.bytes, "Stories/Story_u1.xml")).toContain(
       "<Content> Reconciled </Content>",
+    )
+  })
+
+  it("merges non-overlapping legacy Codex parts into one surgical paragraph export", async () => {
+    const paragraphBlock = [
+      '<ParagraphStyleRange Self="legacy-p1" AppliedParagraphStyle="ParagraphStyle/Body">',
+      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>zero</Content></CharacterStyleRange>',
+      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Glue"><Content>ʼ</Content></CharacterStyleRange>',
+      "<Br/>",
+      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>one</Content><Content>two</Content></CharacterStyleRange>',
+      "</ParagraphStyleRange>",
+    ].join("")
+    const story = `<?xml version="1.0" encoding="UTF-8"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1">${paragraphBlock}</Story></idPkg:Story>`
+    const bytes = await makeIdml({ "Stories/Story_u1.xml": story })
+    const first = upgradeLegacyIdmlMetadata(legacyPartInput({
+      paragraphBlock,
+      part: 0,
+      slotIndexes: [0],
+      targetTexts: ["ZERO"],
+    }))
+    const second = upgradeLegacyIdmlMetadata(legacyPartInput({
+      paragraphBlock,
+      part: 1,
+      slotIndexes: [2, 3],
+      targetTexts: ["ONE", "TWO"],
+    }))
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+    if (!first.ok || !second.ok || !first.targetHtml || !second.targetHtml) return
+
+    const translations: IdmlTranslation[] = [
+      {
+        unitId: "legacy-p1-part-0",
+        locator: first.locator,
+        metadata: first.metadata,
+        sourceHtml: first.sourceHtml,
+        targetHtml: first.targetHtml,
+      },
+      {
+        unitId: "legacy-p1-part-1",
+        locator: second.locator,
+        metadata: second.metadata,
+        sourceHtml: second.sourceHtml,
+        targetHtml: second.targetHtml,
+      },
+    ]
+    const exported = await exportIdml(bytes, translations, { strict: true })
+    const exportedStory = await memberText(exported.bytes, "Stories/Story_u1.xml")
+
+    expect(exportedStory).toContain("<Content>ZERO</Content>")
+    expect(exportedStory).toContain('<Content>ʼ</Content>')
+    expect(exportedStory).toContain("<Br/>")
+    expect(exportedStory).toContain("<Content>ONE</Content><Content>TWO</Content>")
+    expect(exported.report).toMatchObject({ translated: 1, rejected: 0 })
+
+    const overlapping: IdmlTranslation = {
+      ...translations[0]!,
+      unitId: "legacy-p1-overlap",
+      locator: { ...translations[0]!.locator, part: 9 },
+    }
+    await expect(
+      exportIdml(bytes, [translations[0]!, overlapping], { strict: true }),
+    ).rejects.toSatisfy(
+      (error: unknown) => (
+        error instanceof IdmlError
+        && error.diagnostics.some((entry) => entry.code === "LOCATOR_DUPLICATED")
+      ),
     )
   })
 
@@ -605,4 +680,62 @@ async function memberText(bytes: Uint8Array, path: string): Promise<string> {
   const entry = zip.file(path)
   if (!entry) throw new Error(`Missing exported fixture member ${path}`)
   return entry.async("string")
+}
+
+function legacyPartInput({
+  paragraphBlock,
+  part,
+  slotIndexes,
+  targetTexts,
+}: {
+  paragraphBlock: string
+  part: number
+  slotIndexes: readonly number[]
+  targetTexts: readonly string[]
+}): Record<string, unknown> {
+  const contentSegments = ["zero", "ʼ", "one", "two"]
+  const characterStyles = [
+    "CharacterStyle/Body",
+    "CharacterStyle/Glue",
+    "CharacterStyle/Body",
+    "CharacterStyle/Body",
+  ]
+  const html = (texts: readonly string[]): string => [
+    '<p class="indesign-paragraph" data-paragraph-style="ParagraphStyle/Body" data-story-id="u1" data-segment-count="4">',
+    ...slotIndexes.flatMap((slotIndex, localIndex) => [
+      localIndex === 0
+        ? ""
+        : '<span class="idml-eoc" data-eoc="1" aria-hidden="true"></span>',
+      `<span class="idml-segment" data-segment-index="${slotIndex}" data-character-style="${characterStyles[slotIndex]}">${texts[localIndex]}</span>`,
+    ]),
+    "</p>",
+  ].join("")
+  return {
+    valueHtml: html(slotIndexes.map((index) => contentSegments[index] ?? "")),
+    targetHtml: html(targetTexts),
+    metadata: {
+      storyId: "u1",
+      paragraphId: "legacy-p1",
+      data: {
+        idmlStructure: {
+          storyId: "u1",
+          paragraphId: "legacy-p1",
+          contentSegments,
+          contentSegmentCount: contentSegments.length,
+          contentSegmentBreakBefore: [false, false, true, false],
+          structuralApostropheSegmentIndexes: [1],
+          sourceBlockXml: paragraphBlock,
+          paragraphStyleRange: {
+            appliedParagraphStyle: "ParagraphStyle/Body",
+          },
+        },
+        relationships: {
+          parentStory: "u1",
+          paragraphOrder: 0,
+          segmentIndex: part,
+          totalSegments: 2,
+        },
+      },
+    },
+  }
 }

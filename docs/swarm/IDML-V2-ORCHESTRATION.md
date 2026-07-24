@@ -4,10 +4,10 @@
 
 ## §0 STOP checklist
 
-- [ ] Shared package browser and Node conformance tests are green.
-- [ ] Aquilla `npm run build` is green.
+- [x] Shared package browser and Node conformance tests are green for the AQU-704 tracer corpus.
+- [x] Aquilla `npm run build` is green on the AQU-704 integration branch.
 - [ ] Codex compile and webview builds are green.
-- [ ] Affected worker tests are green.
+- [x] AQU-704 transferable IDML worker protocol tests are green.
 - [ ] Direct-web and Codex-migration producer/consumer tests are green.
 - [ ] Targeted real-fixture IDML smoke test is green.
 - [ ] Complete Aquilla smoke suite is green before push.
@@ -35,10 +35,14 @@
 | --- | --- | --- | --- | --- |
 | AQU-704-A | Protected HTML and legacy upgrade | Merged | `html.ts`, `legacy.ts`, focused tests | 40 focused tests; exact identity/order |
 | AQU-704-B | Defensive UCF/ZIP inspection | Merged | `archive.ts`, focused tests | 22 tests; central/local safety + UCF |
-| AQU-704-C | XML parse and surgical export | Ready | `xml.ts`, `engine.ts`, focused tests | Stable paths + verbatim replacement |
-| AQU-704-I | Integration fixtures and gates | Active | package config, shared fixtures, orchestration | Root orchestrator |
+| AQU-704-C | XML parse and surgical export | Merged | `xml.ts`, `engine.ts`, focused tests | Stable paths + verbatim replacement |
+| AQU-704-H | Runtime/structural hardening | Merged | engine, archive, worker protocol, conformance tests | Tabs, cancellation, fingerprints, directories |
+| AQU-704-I | Integration fixtures and gates | Active | package config, shared fixtures, orchestration | Multipart legacy proof + root build |
 
 ## §4 Merge log
 
 - 2026-07-24 · AQU-704-B · `codex/aqu-704-archive` · `5c4e72eb` · package build ✅ · archive tests 22/22 ✅ · no open trace.
 - 2026-07-24 · AQU-704-A · `codex/aqu-704-html` · `6afcab61` · package build ✅ · HTML/legacy tests 40/40 ✅; combined package 62/62 ✅ · no open trace.
+- 2026-07-24 · AQU-704-C · `codex/aqu-704-engine` · `3caaf1f0` · structural parser and strict surgical export merged.
+- 2026-07-24 · AQU-704-H · `codex/aqu-704-engine` · `e9d558bc` (integrated as `bff6bd76`) · browser worker, tabs, structural fingerprints, explicit directories, progress/cancellation, and lossless Biblica semantics; package tests/build ✅.
+- 2026-07-24 · AQU-704-I · integration branch · legacy Codex parts now resolve only to exact, non-overlapping source slots and aggregate into one paragraph replacement; structural apostrophe and `<Br/>` bytes remain untouched; combined package tests 137/137 ✅ and package build ✅.

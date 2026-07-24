@@ -4,8 +4,10 @@
 //   1. Direct `project_members` row (`override`).
 //   2. Group attachments: `group_project_grants` JOIN `group_members`
 //      (`group`). Added in migration 0007 per spec §"Group project grant".
-//   3. Org-wide grant: `org_members` when `project.org_id IS NOT NULL`
-//      (`org`).
+//   3. Org-wide oversight: `org_members` at Maintainer+ (`role_level >= 600`)
+//      when `project.org_id IS NOT NULL` (`org`). AQU-435: sub-maintainer
+//      org membership is NOT a grant path — a Contributor reaches a project
+//      only via direct membership or a group grant.
 //   4. Creator fallback: `projects.created_by = user.id` → owner (`creator`).
 //
 // **Effective role = max(role_level) over every path that grants something.**
@@ -41,6 +43,14 @@ export const ROLE_NAMES: Record<number, string> = {
 
 export const ALL_ROLE_LEVELS = [100, 200, 300, 400, 500, 600, 700] as const
 export type RoleLevel = (typeof ALL_ROLE_LEVELS)[number]
+
+/**
+ * AQU-435: floor for the org-wide grant path. Org-wide project access is
+ * *oversight* for managers (Maintainer+), not blanket read for every org
+ * member. The SQL in routes/projects.ts GET "/" and the org-path recording
+ * in services/org-permissions.ts inline this same threshold — keep in sync.
+ */
+export const ORG_WIDE_ACCESS_FLOOR = 600 // maintainer
 
 // Capped at contributor — managerial roles never granted via tokenized URL.
 export const LINK_ROLE_ALLOWED = [100, 200, 300, 400] as const
@@ -168,7 +178,10 @@ async function resolveProjectRoleInternal(
   if (override) contributions.push({ source: "override", level: override.role_level })
   if (group?.role_level != null)
     contributions.push({ source: "group", level: group.role_level })
-  if (org) contributions.push({ source: "org", level: org.role_level })
+  // AQU-435: the org path fires only at Maintainer+ — a sub-maintainer
+  // org_members row contributes nothing.
+  if (org && org.role_level >= ORG_WIDE_ACCESS_FLOOR)
+    contributions.push({ source: "org", level: org.role_level })
   if (project.created_by === user.id)
     contributions.push({ source: "creator", level: 700 })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every

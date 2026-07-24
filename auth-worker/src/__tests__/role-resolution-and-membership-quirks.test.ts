@@ -101,9 +101,9 @@ describe("AD-12 max-wins role resolution (project-permissions.ts:103-186)", () =
 
   it("org path beats lower direct override (higher wins)", async () => {
     await seedBase()
-    // org at 400, override at 100
+    // org at 600 (maintainer — the AQU-435 floor for the org path), override at 100
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 600, 1)",
     ).run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj-role', 2, 100, 1)",
@@ -115,8 +115,8 @@ describe("AD-12 max-wins role resolution (project-permissions.ts:103-186)", () =
       env,
     )
     const body = (await res.json()) as { role: { level: number; source: string } }
-    // org(400) beats override(100)
-    expect(body.role.level).toBe(400)
+    // org(600) beats override(100)
+    expect(body.role.level).toBe(600)
     expect(body.role.source).toBe("org")
   })
 

@@ -57,7 +57,7 @@ import {
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
 import type { ProjectMember } from "@/lib/frontier/members"
-import type { FileReference } from "@/lib/parsers/types"
+import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
   createAssignment,
   createBulkFileAssignments,
@@ -117,12 +117,27 @@ interface AssignModalProps {
   onAssigned: () => void
 }
 
-const SCOPE_OPTIONS: { value: ScopeKind; label: string }[] = [
-  { value: "selection", label: "Current selection" },
-  { value: "verses", label: "All verses in file" },
-  { value: "chapters", label: "Chapters" },
-  { value: "books", label: "Books (files)" },
-]
+// AQU-658: file types whose natural units are Bible verses/chapters. For
+// everything else the scope copy is neutral ("Entire file" / "Sections" /
+// "segment") so the modal reads correctly for non-scripture imports. When no
+// file is in scope (launched from a project lane) we fall back to the neutral
+// wording too.
+const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set([
+  "usfm",
+  "ebible",
+  "helloao",
+  "sdbh",
+])
+
+// Scopes that operate on the currently-open editor file. When the modal is
+// launched from a lane there is no active file, so these are disabled and the
+// modal defaults to the "books" (file-picker) scope instead — otherwise the
+// user hits a dead-end "No file open." on submit (AQU-658).
+const ACTIVE_FILE_SCOPES: ReadonlySet<ScopeKind> = new Set([
+  "selection",
+  "verses",
+  "chapters",
+])
 
 export function AssignModal({
   open,
@@ -165,7 +180,13 @@ export function AssignModal({
   // is disabled below.
   useEffect(() => {
     if (open) {
-      setScopeKind(selectedCellIds.size > 0 ? "selection" : "verses")
+      // AQU-658: default to a scope that actually works from where the modal
+      // was launched. With a selection → "selection"; with an open file but no
+      // selection → "verses"; launched from a lane (no open file) → "books",
+      // which surfaces the file picker instead of failing "No file open.".
+      setScopeKind(
+        selectedCellIds.size > 0 ? "selection" : activeFileId ? "verses" : "books",
+      )
       setSelectedMemberId(isSelfAssignMode && callerUserId != null ? String(callerUserId) : "")
       setSelectedLane(defaultLane)
       setSelectedFileIds(new Set())
@@ -175,7 +196,28 @@ export function AssignModal({
       setNote("")
       setDeadlineDate(undefined)
     }
-  }, [open, selectedCellIds.size, isSelfAssignMode, callerUserId, defaultLane])
+  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, callerUserId, defaultLane])
+
+  // AQU-658: derive the unit vocabulary from the active file's type so the
+  // scope options and confirmation copy read correctly for non-scripture
+  // files. No active file (lane launch) ⇒ neutral wording.
+  const activeFile = useMemo(
+    () => (activeFileId ? projectFiles.find((f) => f.id === activeFileId) ?? null : null),
+    [activeFileId, projectFiles],
+  )
+  const isScripture = activeFile ? SCRIPTURE_FILE_TYPES.has(activeFile.type) : false
+  const sectionNoun = isScripture ? "Chapters" : "Sections"
+  const sectionNounLower = isScripture ? "chapters" : "sections"
+  const sectionSingularLower = isScripture ? "chapter" : "section"
+  const segmentNoun = isScripture ? "verse" : "segment"
+  const wholeFileLabel = isScripture ? "All verses in file" : "Entire file"
+
+  const scopeOptions: { value: ScopeKind; label: string }[] = [
+    { value: "selection", label: "Current selection" },
+    { value: "verses", label: wholeFileLabel },
+    { value: "chapters", label: sectionNoun },
+    { value: "books", label: "Books (files)" },
+  ]
 
   // AQU-497: group the books-scope file list by corpusMarker (real season/
   // testament grouping — see file banner) so a whole season can be selected
@@ -311,14 +353,17 @@ export function AssignModal({
     if (scopeKind === "selection" || scopeKind === "verses") {
       if (!activeFileId) { setError("No file open."); return }
       const file = projectFiles.find((f) => f.id === activeFileId)
+      const fileName = file?.name ?? activeFileId
       scope = [{ fileId: activeFileId }]
       scopeLabel = scopeKind === "selection"
-        ? `${selectedCellIds.size} verse(s) in ${file?.name ?? activeFileId}`
-        : `All verses in ${file?.name ?? activeFileId}`
+        ? `${selectedCellIds.size} ${segmentNoun}(s) in ${fileName}`
+        : isScripture
+          ? `All verses in ${fileName}`
+          : `Entire ${fileName}`
       apiScopeKind = "books"
     } else if (scopeKind === "chapters") {
       if (!activeFileId) { setError("No file open."); return }
-      if (selectedChapters.size === 0) { setError("Select at least one chapter."); return }
+      if (selectedChapters.size === 0) { setError(`Select at least one ${sectionSingularLower}.`); return }
       const file = projectFiles.find((f) => f.id === activeFileId)
       scope = Array.from(selectedChapters).map((ch) => ({ fileId: activeFileId, chapter: ch }))
       scopeLabel = `${Array.from(selectedChapters).join(", ")} in ${file?.name ?? activeFileId}`
@@ -360,7 +405,7 @@ export function AssignModal({
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, callerUserId, deadlineDate, groupLabelByFileId,
-    selectedLane,
+    selectedLane, isScripture, segmentNoun, sectionSingularLower,
   ])
 
   // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
@@ -398,7 +443,7 @@ export function AssignModal({
           <Field>
             <FieldLabel htmlFor="assign-modal-scope">Scope</FieldLabel>
             <Select
-              items={SCOPE_OPTIONS.map((opt) => ({
+              items={scopeOptions.map((opt) => ({
                 value: opt.value,
                 label:
                   opt.value === "selection" && selectedCellIds.size > 0
@@ -413,8 +458,13 @@ export function AssignModal({
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {SCOPE_OPTIONS.map((opt) => {
-                    const disabled = opt.value === "selection" && selectedCellIds.size === 0
+                  {scopeOptions.map((opt) => {
+                    // AQU-658: scopes that need the open editor file are
+                    // disabled when the modal is launched from a lane (no
+                    // active file); only "books" (file picker) works there.
+                    const disabled =
+                      (opt.value === "selection" && selectedCellIds.size === 0) ||
+                      (ACTIVE_FILE_SCOPES.has(opt.value) && !activeFileId)
                     return (
                       <SelectItem key={opt.value} value={opt.value} disabled={disabled}>
                         {opt.label}
@@ -504,14 +554,14 @@ export function AssignModal({
 
           {scopeKind === "chapters" && (
             <Field>
-              <FieldLabel>Chapters</FieldLabel>
+              <FieldLabel>{sectionNoun}</FieldLabel>
               {chaptersLoading ? (
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Spinner className="size-3" />
-                  Loading chapters…
+                  Loading {sectionNounLower}…
                 </div>
               ) : availableChapters.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No chapters found in this file.</p>
+                <p className="text-xs text-muted-foreground">No {sectionNounLower} found in this file.</p>
               ) : (
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border p-2">
                   {availableChapters.map((ch) => (

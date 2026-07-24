@@ -33,7 +33,9 @@ export interface AudioError {
   message: string
 }
 
-export type PeaksState = "idle" | "loading" | "ready" | "error"
+/** "missing" = the clip's stored audio is permanently gone (404) — unlike
+ *  "error" it is not retryable, so UI must not offer a retry affordance. */
+export type PeaksState = "idle" | "loading" | "ready" | "error" | "missing"
 
 /** External http(s) clip attached by URL (timeline media layer) — streamed
  *  straight from its source, never copied into R2. Playback uses the media
@@ -530,15 +532,19 @@ export function useCellAudio(
     } catch (e) {
       const kind = (e && typeof e === "object" && "kind" in e) ? (e as AudioError).kind : null
       // pointer-missing / no-session are expected in many real-world states
-      // (no recording for this cell yet, anonymous session). Don't spam the console.
-      if (kind !== "pointer-missing" && kind !== "no-session") {
+      // (no recording for this cell yet, anonymous session); audio-deleted is a
+      // handled permanent state. Don't spam the console for any of them.
+      if (kind !== "pointer-missing" && kind !== "no-session" && kind !== "audio-deleted") {
         console.error("[useCellAudio] requestPeaks failed", e)
       }
       // Leave peaksRequestedRef pinned to bins so we don't retry in a loop.
       // The user can re-mount (e.g. scroll the row out and back) to retry.
       // Don't downgrade a waveform that already decoded successfully — a
       // second, redundant request failing must not blank a good render.
-      if (!peaksReadyRef.current) setPeaksState("error")
+      // audio-deleted (permanent 404) → non-retryable "missing", not "error".
+      if (!peaksReadyRef.current) {
+        setPeaksState(kind === "audio-deleted" ? "missing" : "error")
+      }
     }
   }, [attachmentUrl, selectedAudioId, ensureBytes])
 

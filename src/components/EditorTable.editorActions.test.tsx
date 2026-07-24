@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -211,7 +211,8 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   })
 
   it("shows a Saved confirmation after a single-cell AI generate/Replace resolves (AQU-618)", async () => {
-    const onCompleteSingle = vi.fn().mockResolvedValue(undefined)
+    // AQU-670: `true` = the draft committed; "Saved" is now gated on that signal.
+    const onCompleteSingle = vi.fn().mockResolvedValue(true)
     const qc = new QueryClient()
     render(
       <QueryClientProvider client={qc}>
@@ -256,7 +257,8 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   // to the bare onCompleteSingle and silently dropped it (only the empty-cell
   // path above was covered, so CI stayed green).
   it("shows a Saved confirmation after confirming Replace in the overwrite dialog (AQU-618)", async () => {
-    const onCompleteSingle = vi.fn().mockResolvedValue(undefined)
+    // AQU-670: `true` = the draft committed; "Saved" is now gated on that signal.
+    const onCompleteSingle = vi.fn().mockResolvedValue(true)
     const qc = new QueryClient()
     render(
       <QueryClientProvider client={qc}>
@@ -294,6 +296,48 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     expect(onCompleteSingle).toHaveBeenCalledTimes(1)
     expect(onCompleteSingle).toHaveBeenCalledWith(expect.objectContaining({ id: "cell-1" }))
     expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+
+  // AQU-670: a draft that failed to queue (completeSingle resolves `false`) must
+  // NOT render the "Saved" confirmation — showing it alongside the failure error
+  // gave the translator directly contradictory signals for a lost draft.
+  it("does NOT show a Saved confirmation when the single-cell draft fails to queue (AQU-670)", async () => {
+    const onCompleteSingle = vi.fn().mockResolvedValue(false)
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={makeEmptyTargetStore("cell-1")}
+            username="tester"
+            isCompletionConfigured={true}
+            isCompletionAvailable={true}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={onCompleteSingle}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+
+    const sparkle = await screen.findByRole("button", { name: "Translate with AI" })
+    fireEvent.click(sparkle)
+
+    // The completion was attempted...
+    await waitFor(() => expect(onCompleteSingle).toHaveBeenCalledTimes(1))
+    // ...but it reported failure, so the "Saved" confirmation must never appear.
+    // Give the (unwanted) async confirmation a chance to render, then assert absence.
+    await Promise.resolve()
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument()
   })
   // AQU-590: an in-progress AI translation must be evident ON the cell, even
   // when the cell already has a translation (the sparkle regenerate/replace

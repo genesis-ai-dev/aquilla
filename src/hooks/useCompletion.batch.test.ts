@@ -38,6 +38,8 @@ vi.mock("@/lib/completion/compress-examples", () => ({
   compressExampleSource: (src: string) => src,
   dedupeExamples: (exs: unknown[]) => exs,
   dropPrecedingContextDuplicates: (exs: unknown[]) => exs,
+  // Needed by the per-cell fallback path (completeSingle) exercised below.
+  dropValidatedPairDuplicates: (exs: unknown[]) => exs,
 }))
 
 // Deliberately NOT mocking @/lib/completion/batch-completion — this test
@@ -158,6 +160,65 @@ describe("completeBatch — mid-run sub-batch failure (AQU-361)", () => {
     expect(finalProgress?.total).toBe(30)
     expect(finalProgress?.done).toBe(20)
     expect(finalProgress?.failed).toBe(10)
+    expect(finalProgress?.finished).toBe(true)
+  })
+})
+
+// D11 never-commit-empty, batch edition: a present-but-empty <vN></vN> is "no
+// emitted content" just like a missing tag. It must fall through to the
+// per-cell fallback rather than committing an empty draft — and when the
+// fallback ALSO yields nothing, the cell ends errored and the run summary
+// counts it failed, not done (the batch cousin of the sparkle "Saved but
+// empty" bug).
+describe("completeBatch — empty <vN> is never committed", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    clearBatchCompletionProgress()
+  })
+
+  it("routes an empty tag to the single-cell fallback and counts a doubly-empty cell as failed", async () => {
+    const cells = [1, 2, 3].map((i) => makeCell(`cell-${i}`, FILE_A, `Source sentence ${i}`))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        const body = typeof init?.body === "string" ? init.body : ""
+        // The batch request frames cells as <vN>; cell 2 comes back empty.
+        // The subsequent single-cell fallback request (no <v1> framing) for
+        // cell 2 returns nothing as well.
+        const content = body.includes("<v1>")
+          ? "<v1>Translated 1</v1>\n<v2></v2>\n<v3>Translated 3</v3>"
+          : ""
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ choices: [{ message: { content } }] }),
+          body: null,
+        })
+      }),
+    )
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        cells as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeBatch(cells as never)
+    })
+
+    // Cells 1 and 3 commit; cell 2 must never be committed with "".
+    const committedIds = commitMock.mock.calls.map((args: unknown[]) => (args[0] as MinimalCell).id)
+    expect(committedIds.sort()).toEqual(["cell-1", "cell-3"])
+    // The empty cell is flagged, and the summary counts it failed — not done.
+    expect(result.current.errors.has("cell-2")).toBe(true)
+    const finalProgress = getCompletionBatchProgress()
+    expect(finalProgress?.total).toBe(3)
+    expect(finalProgress?.done).toBe(2)
+    expect(finalProgress?.failed).toBe(1)
     expect(finalProgress?.finished).toBe(true)
   })
 })

@@ -1,0 +1,380 @@
+import JSZip from "jszip"
+import { describe, expect, it } from "vitest"
+import { inspectIdml } from "./archive.js"
+import { IdmlError } from "./errors.js"
+import { exportIdml, parseIdml, validateExport } from "./engine.js"
+import type { IdmlTranslation, IdmlTranslationUnit } from "./types.js"
+import { makeIdml } from "./test-helpers/idml-fixture.js"
+
+describe("IDML structural parser", () => {
+  it("creates immutable ordered units without allowing outer paragraphs to steal nested slots", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+
+    expect(parsed.units.map((unit) => unit.locator.elementId)).toEqual([
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+      "p9",
+      "TextVariable/Custom",
+    ])
+    const outer = unitById(parsed.units, "p1")
+    expect(outer.slots.map((slot) => slot.text)).toEqual([
+      " Bold ",
+      "and",
+      " italic e\u0301漢字",
+    ])
+    expect(outer.slots.map((slot) => slot.characterStyleId)).toEqual([
+      "CharacterStyle/Bold",
+      "CharacterStyle/Bold",
+      "CharacterStyle/Italic",
+    ])
+    expect(outer.sourceText).toBe(" Bold and italic e\u0301漢字")
+    expect(outer.locator.slotIndexes).toEqual([0, 1, 2])
+    expect(outer.locator.sourceBlockHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(outer.protectedTokens.map(({ kind, position }) => ({ kind, position }))).toEqual([
+      { kind: "cross-reference", position: 3 },
+      { kind: "variable", position: 3 },
+      { kind: "unknown", position: 3 },
+      { kind: "inline-object", position: 3 },
+      { kind: "br", position: 3 },
+    ])
+    expect(unitById(parsed.units, "p2").slots.map((slot) => slot.text)).toEqual([" cell "])
+    expect(unitById(parsed.units, "p2").locator.scope).toBe("table-cell")
+    expect(unitById(parsed.units, "p3").slots.map((slot) => slot.text)).toEqual(["foot&note"])
+    expect(unitById(parsed.units, "p3").locator.scope).toBe("footnote")
+    expect(unitById(parsed.units, "p4").locator.scope).toBe("anchored-story")
+    expect(unitById(parsed.units, "p9").order).toBe(4)
+    expect(unitById(parsed.units, "TextVariable/Custom").locator.scope).toBe("custom-variable")
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "UNSUPPORTED_CONSTRUCT",
+        message: expect.stringContaining("Computed"),
+      }),
+    )
+
+    expect(Object.isFrozen(parsed)).toBe(true)
+    expect(Object.isFrozen(parsed.units)).toBe(true)
+    expect(Object.isFrozen(outer)).toBe(true)
+    expect(Object.isFrozen(outer.slots)).toBe(true)
+    expect(Object.isFrozen(parsed.manifest)).toBe(true)
+    expect(parsed.manifest.members).toHaveLength(9)
+  })
+
+  it("discovers designmap stories first and appends remaining stories deterministically", async () => {
+    const parsed = await parseIdml(await makeIdml())
+    expect(parsed.units.map((unit) => unit.locator.memberPath)).toEqual([
+      "Stories/Story_u1.xml",
+      "Stories/Story_u1.xml",
+      "Stories/Story_u1.xml",
+      "Stories/Story_u3.xml",
+      "Stories/Story_u9.xml",
+      "Resources/TextVariables.xml",
+    ])
+  })
+
+  it("locks tab-bearing Content slots and represents the tab at its slot boundary", async () => {
+    const tabStory = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="ptab"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>\t</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const parsed = await parseIdml(await makeIdml({ "Stories/Story_u1.xml": tabStory }))
+    const unit = unitById(parsed.units, "ptab")
+
+    expect(unit.slots).toEqual([
+      expect.objectContaining({ index: 0, text: "\t", editable: false }),
+    ])
+    expect(unit.metadata.editableSlotIndexes).toEqual([])
+    expect(unit.protectedTokens).toContainEqual(
+      expect.objectContaining({ kind: "tab", position: 0 }),
+    )
+  })
+
+  it("derives note, endnote, text-path, and master-story scopes from structural evidence", async () => {
+    const scopedStory = (storyId: string, paragraphId: string, text: string) =>
+      `<?xml version="1.0" encoding="UTF-8"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="${storyId}"><ParagraphStyleRange Self="${paragraphId}"><CharacterStyleRange><Content>${text}</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const nestedStory = `<?xml version="1.0" encoding="UTF-8"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><Note><ParagraphStyleRange Self="pnote"><CharacterStyleRange><Content>note</Content></CharacterStyleRange></ParagraphStyleRange></Note><EndnoteRange><ParagraphStyleRange Self="pendnote"><CharacterStyleRange><Content>endnote</Content></CharacterStyleRange></ParagraphStyleRange></EndnoteRange></Story></idPkg:Story>`
+    const bytes = await makeIdml({
+      "designmap.xml":
+        '<?xml version="1.0" encoding="UTF-8"?><idPkg:DesignMap xmlns:idPkg="urn:test"><idPkg:Story src="Stories/Story_u1.xml"/><idPkg:Story src="Stories/Story_u5.xml"/><idPkg:Story src="Stories/Story_u6.xml"/></idPkg:DesignMap>',
+      "Stories/Story_u1.xml": nestedStory,
+      "Stories/Story_u5.xml": scopedStory("u5", "pmaster", "master"),
+      "Stories/Story_u6.xml": scopedStory("u6", "ppath", "path"),
+      "MasterSpreads/MasterSpread_u5.xml":
+        '<?xml version="1.0"?><idPkg:MasterSpread xmlns:idPkg="urn:test"><TextFrame ParentStory="u5"/></idPkg:MasterSpread>',
+      "Spreads/Spread_u6.xml":
+        '<?xml version="1.0"?><idPkg:Spread xmlns:idPkg="urn:test"><TextPath ParentStory="u6"/></idPkg:Spread>',
+    })
+    const parsed = await parseIdml(bytes)
+
+    expect(unitById(parsed.units, "pnote").locator.scope).toBe("note")
+    expect(unitById(parsed.units, "pendnote").locator.scope).toBe("endnote")
+    expect(unitById(parsed.units, "pmaster").locator.scope).toBe("master-story")
+    expect(unitById(parsed.units, "ppath").locator.scope).toBe("text-path")
+  })
+
+  it("validates every XML member and rejects malformed XML and DTD declarations", async () => {
+    await expect(
+      parseIdml(await makeIdml({ "Resources/Styles.xml": "<Styles><Broken></Styles>" })),
+    ).rejects.toMatchObject({ code: "MALFORMED_XML" })
+    await expect(
+      parseIdml(
+        await makeIdml({
+          "Resources/Styles.xml": '<!DOCTYPE Styles [<!ENTITY x "bad">]><Styles>&x;</Styles>',
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "UNSAFE_XML_DECLARATION" })
+  })
+})
+
+describe("strict surgical IDML export", () => {
+  it("replaces every mixed-style Content slot in place and preserves unknown XML", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p1")
+    const targetHtml = unit.sourceHtml
+      .replace(" Bold ", " Gras ")
+      .replace(">and<", ">et<")
+      .replace(" italic e\u0301漢字", " italique")
+    const exported = await exportIdml(bytes, [translationFor(unit, targetHtml)], {
+      strict: true,
+    })
+    const storyXml = await memberText(exported.bytes, "Stories/Story_u1.xml")
+
+    expect(storyXml).toContain(
+      'AppliedCharacterStyle="CharacterStyle/Bold"><Content> Gras </Content><Content>et</Content>',
+    )
+    expect(storyXml).toContain(
+      'AppliedCharacterStyle="CharacterStyle/Italic"><Content> italique</Content><CrossReferenceSource Self="xref1"/><TextVariableInstance Self="var1"/><Mystery Self="m1"/>',
+    )
+    expect(storyXml).not.toContain("<Content></Content>")
+    expect(storyXml).toContain('<Mystery Self="m1"/>')
+    expect(exported.report).toMatchObject({
+      translated: 1,
+      unchanged: parsed.units.length - 1,
+      missing: 0,
+      rejected: 0,
+      changedMemberPaths: ["Stories/Story_u1.xml"],
+    })
+  })
+
+  it("encodes user line breaks as Br and additional Content nodes in the original style run", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p3")
+    const targetHtml = unit.sourceHtml.replace("foot&amp;note", "line 1<br>line 2")
+    const exported = await exportIdml(bytes, [translationFor(unit, targetHtml)], {
+      strict: true,
+    })
+    const storyXml = await memberText(exported.bytes, "Stories/Story_u1.xml")
+
+    expect(storyXml).toContain(
+      'AppliedCharacterStyle="CharacterStyle/Footnote"><Content>line 1</Content><Br/><Content>line 2</Content>',
+    )
+  })
+
+  it("locks and preserves comments or other markup embedded inside Content", async () => {
+    const commentStory = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="pcomment"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>left<!--keep-->right</Content><Content>editable</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const bytes = await makeIdml({ "Stories/Story_u1.xml": commentStory })
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "pcomment")
+
+    expect(unit.slots[0]).toMatchObject({ text: "leftright", editable: false })
+    expect(unit.protectedTokens).toContainEqual(
+      expect.objectContaining({ kind: "unknown", position: 0 }),
+    )
+    const exported = await exportIdml(
+      bytes,
+      [translationFor(unit, unit.sourceHtml.replace(">editable</span>", ">translated</span>"))],
+      { strict: true },
+    )
+    const storyXml = await memberText(exported.bytes, "Stories/Story_u1.xml")
+    expect(storyXml).toContain("<Content>left<!--keep-->right</Content>")
+    expect(storyXml).toContain("<Content>translated</Content>")
+  })
+
+  it("preserves a Content slot's CDATA representation while replacing its text", async () => {
+    const cdataStory = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="pcdata"><CharacterStyleRange><Content><![CDATA[A < B]]></Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const bytes = await makeIdml({ "Stories/Story_u1.xml": cdataStory })
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "pcdata")
+    const exported = await exportIdml(
+      bytes,
+      [translationFor(unit, unit.sourceHtml.replace("A &lt; B", "C &lt; D"))],
+      { strict: true },
+    )
+    expect(await memberText(exported.bytes, "Stories/Story_u1.xml")).toContain(
+      "<Content><![CDATA[C < D]]></Content>",
+    )
+  })
+
+  it("returns the exact original bytes for no translations or unchanged translations", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p1")
+
+    await expect(exportIdml(bytes, [], { strict: true })).resolves.toMatchObject({
+      bytes,
+      report: { translated: 0 },
+    })
+    const unchanged = await exportIdml(bytes, [translationFor(unit, unit.sourceHtml)], {
+      strict: true,
+    })
+    expect(unchanged.bytes).toEqual(bytes)
+    expect(unchanged.report.translated).toBe(0)
+  })
+
+  it("rejects stale, duplicate, and missing locators without emitting a partial package", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p1")
+    const valid = translationFor(unit, unit.sourceHtml.replace(" Bold ", " Changed "))
+    const stale: IdmlTranslation = {
+      ...valid,
+      locator: { ...valid.locator, sourceBlockHash: "0".repeat(64) },
+    }
+    const missing: IdmlTranslation = {
+      ...valid,
+      locator: {
+        ...valid.locator,
+        elementPath: "/idPkg:Story[1]/Story[1]/Missing[1]",
+        elementId: undefined,
+      },
+    }
+
+    await expect(exportIdml(bytes, [stale], { strict: true })).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof IdmlError &&
+        error.diagnostics.some((entry) => entry.code === "SOURCE_HASH_MISMATCH"),
+    )
+    await expect(exportIdml(bytes, [valid, valid], { strict: true })).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof IdmlError &&
+        error.diagnostics.some((entry) => entry.code === "LOCATOR_DUPLICATED"),
+    )
+    await expect(exportIdml(bytes, [missing], { strict: true })).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof IdmlError &&
+        error.diagnostics.some((entry) => entry.code === "LOCATOR_MISSING"),
+    )
+  })
+
+  it("reconciles a legacy path through a unique element ID and source hash", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p1")
+    const translation = translationFor(unit, unit.sourceHtml.replace(" Bold ", " Reconciled "))
+    const legacyPathTranslation: IdmlTranslation = {
+      ...translation,
+      locator: {
+        ...translation.locator,
+        elementPath: "/legacy:Story[1]/ParagraphStyleRange[77]",
+      },
+    }
+    const exported = await exportIdml(bytes, [legacyPathTranslation], { strict: true })
+    expect(await memberText(exported.bytes, "Stories/Story_u1.xml")).toContain(
+      "<Content> Reconciled </Content>",
+    )
+  })
+
+  it("rejects target text containing characters forbidden by XML 1.0", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p4")
+    const targetHtml = unit.sourceHtml.replace("anchored", "bad\u0000text")
+
+    await expect(
+      exportIdml(bytes, [translationFor(unit, targetHtml)], { strict: true }),
+    ).rejects.toMatchObject({ code: "MALFORMED_XML" })
+  })
+
+  it("repackages as UCF with mimetype first/stored, other files deflated, and no directory entries", async () => {
+    const bytes = await makeIdml({ "Extra/empty.bin": new Uint8Array() })
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p4")
+    const exported = await exportIdml(
+      bytes,
+      [translationFor(unit, unit.sourceHtml.replace("anchored", "ancré"))],
+      { strict: true },
+    )
+    const inspection = await inspectIdml(exported.bytes)
+
+    expect(inspection.members[0]).toMatchObject({
+      path: "mimetype",
+      compressionMethod: 0,
+    })
+    expect(inspection.members.slice(1).every((member) => member.compressionMethod === 8)).toBe(true)
+    expect(inspection.members.every((member) => !member.isDirectory)).toBe(true)
+    expect(new Set(inspection.members.map((member) => member.path))).toEqual(
+      new Set(parsed.manifest.members.map((member) => member.path)),
+    )
+    const zip = await JSZip.loadAsync(exported.bytes)
+    await expect(zip.file("Extra/empty.bin")?.async("uint8array")).resolves.toEqual(
+      new Uint8Array(),
+    )
+  })
+
+  it("validates locator presence and hashes of unchanged package members", async () => {
+    const bytes = await makeIdml()
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "p4")
+    const exported = await exportIdml(
+      bytes,
+      [translationFor(unit, unit.sourceHtml.replace("anchored", "translated"))],
+      { strict: true },
+    )
+    await expect(validateExport(exported.bytes, parsed.manifest)).resolves.toEqual([])
+
+    const tampered = await makeIdml({
+      "Resources/Styles.xml":
+        '<?xml version="1.0" encoding="UTF-8"?><idPkg:Styles xmlns:idPkg="urn:test"><Root Self="tampered"/></idPkg:Styles>',
+    })
+    await expect(validateExport(tampered, parsed.manifest)).resolves.toContainEqual(
+      expect.objectContaining({
+        code: "MEMBER_CHANGED",
+        memberPath: "Resources/Styles.xml",
+      }),
+    )
+    await expect(
+      validateExport(await makeIdml({ "designmap.xml": null }), parsed.manifest),
+    ).resolves.toContainEqual(
+      expect.objectContaining({
+        code: "MISSING_DESIGNMAP",
+      }),
+    )
+    await expect(
+      validateExport(bytes, { ...parsed.manifest, version: 3 } as never),
+    ).resolves.toContainEqual(
+      expect.objectContaining({
+        code: "UNSUPPORTED_SCHEMA_VERSION",
+      }),
+    )
+  })
+})
+
+function unitById(
+  units: readonly IdmlTranslationUnit[],
+  elementId: string,
+): IdmlTranslationUnit {
+  const unit = units.find((candidate) => candidate.locator.elementId === elementId)
+  if (!unit) throw new Error(`Missing fixture unit ${elementId}`)
+  return unit
+}
+
+function translationFor(unit: IdmlTranslationUnit, targetHtml: string): IdmlTranslation {
+  return {
+    unitId: unit.id,
+    locator: unit.locator,
+    metadata: unit.metadata,
+    sourceHtml: unit.sourceHtml,
+    targetHtml,
+  }
+}
+
+async function memberText(bytes: Uint8Array, path: string): Promise<string> {
+  const zip = await JSZip.loadAsync(bytes, { createFolders: false })
+  const entry = zip.file(path)
+  if (!entry) throw new Error(`Missing exported fixture member ${path}`)
+  return entry.async("string")
+}

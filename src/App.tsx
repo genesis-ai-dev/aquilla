@@ -63,6 +63,13 @@ const OrgSettingsExport = lazy(() =>
 const OrgSettingsProviders = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsProviders })),
 )
+const OrgSettingsMonday = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
+)
+// Monday OAuth landing — Monday's registered redirect URI is this SPA route.
+const MondayOAuthCallback = lazy(() =>
+  import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
+)
 const OrgSettingsRoster = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRoster })),
 )
@@ -234,6 +241,9 @@ function AppRoutes() {
         <Route path="/settings/roster" element={<OrgSettingsRoster />} />
         <Route path="/settings/assignment" element={<OrgSettingsAssignment />} />
         <Route path="/settings/providers" element={<OrgSettingsProviders />} />
+        <Route path="/settings/monday" element={<OrgSettingsMonday />} />
+        {/* Monday.com OAuth redirect URI (top-level; see MondayOAuthCallback). */}
+        <Route path="/oauth/callback" element={<MondayOAuthCallback />} />
         <Route path="/members" element={<MembersPage />} />
         <Route path="/teams" element={<TeamsList />} />
         <Route path="/teams/:groupId" element={<TeamDetail />} />

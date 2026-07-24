@@ -31,6 +31,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
+import { AgentEmptyState } from "./AgentEmptyState"
 import { AgentRunView } from "./AgentRunView"
 import { PassageCard } from "./cards/PassageCard"
 import { passageRowsFor } from "./cards/registry"
@@ -209,14 +210,14 @@ export function AgentDockView({
       />
 
       {state.runs.length === 0 ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
-          <Bot className="h-5 w-5" />
-          <p className="text-xs">
-            {jwt
-              ? "Ask the agent to draft, check, or explain — it proposes changes you review and apply."
-              : "Sign in to use the agent."}
-          </p>
-        </div>
+        jwt ? (
+          <AgentEmptyState onPromptSelect={(text) => composerRef.current?.insertText(text)} />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
+            <Bot className="h-5 w-5" />
+            <p className="text-xs">Sign in to use the agent.</p>
+          </div>
+        )
       ) : (
         <MessageScrollerProvider>
           <MessageScroller className="flex-1">

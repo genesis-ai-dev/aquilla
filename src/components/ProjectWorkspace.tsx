@@ -3931,7 +3931,13 @@ export function ProjectWorkspace() {
     // now lead the ⋯ menu so nothing is lost and the header reads as a single
     // overflow affordance. Confirmation-gated actions route through
     // handleWorkspaceAction → ConfirmActionDialog (below).
-    const actionItems: OverflowMenuItem[] = getVisibleActions(workspaceActions, actionCtx).map((a) => ({
+    //
+    // Guard: on a file deep-link the first render happens before useProject
+    // resolves, so actionCtx.project is still null (its `project!` is a lie
+    // until then) and the role-gated isAvailable checks would throw
+    // (`null.syncRole`), error-bounding the whole workspace. Render the menu
+    // without action items until the project record lands.
+    const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx).map((a) => ({
       id: `action-${a.id}`,
       label: a.label,
       icon: a.icon,
@@ -4017,7 +4023,7 @@ export function ProjectWorkspace() {
     isSubtitleFile,
     suggestions.length,
     suggestionsDismissed,
-    project?.suggestionsDismissedAt,
+    project,
     handleReinviteSuggestions,
   ])
 

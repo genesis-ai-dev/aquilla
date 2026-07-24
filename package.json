@@ -27,6 +27,8 @@
     "parity:corpus": "tsx parity/corpus/generate.ts",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
+    "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",
     "test:watch": "vitest",
     "test:e2e:guard": "vitest run scripts/e2e-determinism.test.ts",
     "test:e2e:smoke": "pnpm run test:e2e:guard && tsx scripts/e2e-shard.ts 3 -- smoke.spec",

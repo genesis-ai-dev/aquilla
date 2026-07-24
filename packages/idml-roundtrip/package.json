@@ -1,0 +1,46 @@
+{
+  "name": "@aquilla/idml-roundtrip",
+  "version": "2.0.0",
+  "description": "Strict, runtime-neutral IDML parsing and protected-slot round-trip export",
+  "type": "module",
+  "license": "UNLICENSED",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest --config vitest.config.ts",
+    "prepack": "pnpm run build && pnpm run test"
+  },
+  "dependencies": {
+    "jszip": "3.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "~7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/genesis-ai-dev/aquilla.git",
+    "directory": "packages/idml-roundtrip"
+  }
+}

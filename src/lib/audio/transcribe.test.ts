@@ -236,3 +236,37 @@ describe("transcribeCell — imported media segments (AQU-646)", () => {
     expect(opts.trim).toBeUndefined()
   })
 })
+
+// ── SUB-29: a TAKE recorded onto a media cell is target speech ─────────────
+
+function makeMediaCellWithTake(): CellData {
+  // Take audioId is seeded with the CELL id (recorder convention).
+  const takeId = `audio-${"cell-1"}-1700000000-abcdefgh.webm`
+  const base = makeCell()
+  return {
+    ...base,
+    medium: "media",
+    translated: "hola mundo",
+    selectedAudioId: takeId,
+    attachments: {
+      [takeId]: { type: "audio", url: buildFrontierAudioUrl(`audio-cell-1-1700000000-abcdefgh`, "webm") } as never,
+    },
+  } as CellData
+}
+
+describe("transcribeCell — dub take on a media cell (SUB-29)", () => {
+  it("transcribes the WHOLE take (no trim window) and never writes transcription", async () => {
+    const takeAudioId = "audio-cell-1-1700000000-abcdefgh"
+    await audioCachePut(takeAudioId, "webm", new Uint8Array([1, 2, 3]))
+    const impl = fakeTranscribe(["hola", "mundo"])
+    __setTranscribeAudioForTests(impl)
+
+    await transcribeCell({ cell: makeMediaCellWithTake(), session, projectId: "proj-1", language: "spa" })
+
+    const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
+    expect(opts.trim).toBeUndefined() // take plays/transcribes in full
+    expect(emitCellAudioAttach).toHaveBeenCalledOnce()
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input).not.toHaveProperty("transcription") // source text untouched
+  })
+})

@@ -101,3 +101,34 @@ describe("uploadCellAudio size guard", () => {
     expect(fetchFn.mock.calls[1][1]).toMatchObject({ body: blob })
   })
 })
+
+// SUB-29: audioId provenance — the seed embedded at build time distinguishes
+// the imported source clip (fileId seed) from user takes (cellId seed).
+import { audioIdSeededWith, buildAudioId, buildDenoisedAudioId } from "./upload"
+
+describe("audioIdSeededWith", () => {
+  const FILE_ID = "0198f2ab-1111-7000-8000-aaaaaaaaaaaa"
+  const CELL_ID = "0198f2ab-2222-7000-8000-bbbbbbbbbbbb"
+
+  it("recognizes a freshly built id's seed (and rejects the other id)", () => {
+    const takeId = buildAudioId(CELL_ID)
+    expect(audioIdSeededWith(takeId, CELL_ID)).toBe(true)
+    expect(audioIdSeededWith(takeId, FILE_ID)).toBe(false)
+    const sourceId = buildAudioId(FILE_ID)
+    expect(audioIdSeededWith(sourceId, FILE_ID)).toBe(true)
+    expect(audioIdSeededWith(sourceId, CELL_ID)).toBe(false)
+  })
+
+  it("works with an .ext suffix (import stores audioId.ext)", () => {
+    expect(audioIdSeededWith(`${buildAudioId(FILE_ID)}.mp3`, FILE_ID)).toBe(true)
+  })
+
+  it("works for denoised takes (dn- prefix)", () => {
+    expect(audioIdSeededWith(buildDenoisedAudioId(CELL_ID), CELL_ID)).toBe(true)
+  })
+
+  it("is false for missing inputs", () => {
+    expect(audioIdSeededWith(undefined, CELL_ID)).toBe(false)
+    expect(audioIdSeededWith("audio-x-1-2", "")).toBe(false)
+  })
+})

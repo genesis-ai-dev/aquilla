@@ -107,6 +107,7 @@ async function runBatch<T>(
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { transcribeCell } from "./transcribe"
+import { audioIdSeededWith } from "./upload"
 import { getTranscribeStatus } from "./transcribe-status"
 import { generateCellVoice } from "./voice-generate-helpers"
 import { ttsStatusKey, getTtsStatus } from "./tts"
@@ -142,9 +143,21 @@ export interface TranscribeAllArgs {
  */
 export function needsTranscription(c: CellData): boolean {
   if (!c.selectedAudioId) return false
-  if (c.medium === "media") return !c.transcription?.trim()
+  // SUB-29: the source-vs-take split is attachment PROVENANCE, not cell
+  // medium — a dub take recorded onto a media section follows the take rule.
+  if (isSourceSegmentSelected(c)) return !c.transcription?.trim()
   const existingTimings = c.audioTimings?.[c.selectedAudioId]
   return !existingTimings || existingTimings.length === 0
+}
+
+/** SUB-29: true when a media cell's selected recording is the IMPORTED SOURCE
+ *  CLIP (audioId seeded with the fileId) rather than a user take (seeded with
+ *  the cellId). Ambiguous/legacy ids on media cells default to source — the
+ *  safe side for transcription. Shared by the batch predicates + language
+ *  routing here and in the workspace call sites. */
+export function isSourceSegmentSelected(c: CellData): boolean {
+  if (c.medium !== "media" || !c.selectedAudioId) return false
+  return !audioIdSeededWith(c.selectedAudioId, c.id)
 }
 
 /**
@@ -174,9 +187,10 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
         cell,
         session,
         projectId,
-        // AQU-646: language follows the audio — media segments are source
-        // speech, recorded takes voice the target text.
-        language: cell.medium === "media" ? (args.sourceLanguage ?? targetLang) : targetLang,
+        // AQU-646/SUB-29: language follows the audio by PROVENANCE — source
+        // segments are source speech; every take (incl. dub takes on media
+        // cells) voices the target text.
+        language: isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLang) : targetLang,
       }),
     {
       kind: "transcribe",

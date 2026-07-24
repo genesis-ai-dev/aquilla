@@ -209,11 +209,14 @@ describe("TimelineCellDetail — audio, comments, history, footnote", () => {
     )
     fireEvent.click(screen.getByTestId("tl-detail-record"))
     expect(actions.onOpenRecording).toHaveBeenCalledWith("c1")
+    // SUB-29: hiding requires a recorded TAKE (cellId-seeded audioId) — an
+    // ambiguous/source-clip id keeps the mic visible on media cells.
+    const takeId = "audio-c1-1700000000-abcdefgh.webm"
     rerender(
       <TimelineCellDetail
         cell={timedCell({
-          selectedAudioId: "a1",
-          attachments: { a1: { type: "audio", url: "frontier-audio://a1.webm" } },
+          selectedAudioId: takeId,
+          attachments: { [takeId]: { type: "audio", url: `frontier-audio://${takeId}` } },
         } as Partial<CellData>)}
         editable
         onCommitTarget={() => {}}
@@ -263,5 +266,52 @@ describe("TimelineCellDetail — audio, comments, history, footnote", () => {
     expect(screen.queryByTestId("tl-detail-footnote")).toBeNull()
     expect(screen.getByTestId("tl-detail-comments")).toBeInTheDocument()
     expect(screen.getByTestId("tl-detail-history")).toBeInTheDocument()
+  })
+})
+
+describe("TimelineCellDetail — SUB-29 mic gate + error message", () => {
+  it("mic/upload VISIBLE on an imported section (source clip in the recording slot)", () => {
+    const sourceId = "audio-file-9-1700000000-abcdefgh.mp3"
+    render(
+      <TimelineCellDetail
+        cell={timedCell({
+          selectedAudioId: sourceId,
+          attachments: { [sourceId]: { type: "audio", url: `frontier-audio://${sourceId}` } },
+        } as Partial<CellData>)}
+        editable
+        onCommitTarget={() => {}}
+        detailActions={makeActions()}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-record")).toBeInTheDocument()
+    expect(screen.getByTestId("mock-upload")).toBeInTheDocument()
+  })
+
+  it("mic hidden once a TAKE (cellId-seeded) is selected", () => {
+    const takeId = "audio-c1-1700000000-abcdefgh.webm"
+    render(
+      <TimelineCellDetail
+        cell={timedCell({
+          selectedAudioId: takeId,
+          attachments: { [takeId]: { type: "audio", url: `frontier-audio://${takeId}` } },
+        } as Partial<CellData>)}
+        editable
+        onCommitTarget={() => {}}
+        detailActions={makeActions()}
+      />,
+    )
+    expect(screen.queryByTestId("tl-detail-record")).toBeNull()
+  })
+
+  it("error state surfaces the drilled message, not the generic tooltip", () => {
+    const actions = makeActions({
+      completing: new Map([["c1", "error"]]),
+      errors: new Map([["c1", "No source text yet — transcribe this section first."]]),
+    })
+    render(<TimelineCellDetail cell={timedCell()} editable onCommitTarget={() => {}} detailActions={actions} />)
+    expect(screen.getByTestId("tl-detail-ai")).toHaveAttribute(
+      "aria-label",
+      "No source text yet — transcribe this section first.",
+    )
   })
 })

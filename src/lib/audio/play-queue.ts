@@ -6,7 +6,7 @@
 
 import { useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
-import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl } from "./upload"
+import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { audioMimeForExt } from "./mime"
@@ -78,11 +78,6 @@ export function useQueueProgress(): QueueProgress {
   return useSyncExternalStore(subscribeProgress, () => progress, () => progress)
 }
 
-/** Imperative progress read (e.g. ruler drags) — same object the hook returns. */
-export function getQueueProgress(): QueueProgress {
-  return progress
-}
-
 // ── Single owned audio element ──────────────────────────────────────────────
 
 let currentAudio: HTMLAudioElement | null = null
@@ -124,8 +119,9 @@ function disposeCurrent(): void {
   setProgress({ currentTime: 0, duration: 0 })
 }
 
-/** Seek within the currently-playing clip (seconds). */
-export function seekQueue(seconds: number): void {
+/** Seek within the currently-playing clip (seconds). Internal primitive —
+ *  external callers use seekQueueToTime (file-timeline coords). */
+function seekQueue(seconds: number): void {
   if (!currentAudio) return
   const d = currentAudio.duration
   currentAudio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(seconds, d)) : Math.max(0, seconds)
@@ -268,6 +264,11 @@ function findPrevPlayable(cells: CellData[], startIndex: number): number {
  */
 export function trimWindowForCell(cell: CellData): { start: number; end: number } | null {
   if (cell.medium !== "media") return null
+  // SUB-29: the window addresses the SHARED IMPORTED CLIP — a user take
+  // recorded onto a media cell (dub) is its own short clip whose clock has
+  // nothing to do with the file timeline, so it plays in full. Provenance
+  // comes from the audioId seed (source clip = fileId, takes = cellId).
+  if (cell.selectedAudioId && audioIdSeededWith(cell.selectedAudioId, cell.id)) return null
   const { startTime, endTime } = cell
   if (typeof startTime !== "number" || typeof endTime !== "number") return null
   if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null

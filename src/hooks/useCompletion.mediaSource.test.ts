@@ -193,3 +193,26 @@ describe("SUB-28 — completion sources from the transcript, never the filename"
     expect(bodies[0]).toContain("Verse one source")
   })
 })
+
+describe("SUB-29 flight — error hygiene", () => {
+  it("the 'transcribe first' error CLEARS when a retry starts after transcription", async () => {
+    const bodies: string[] = []
+    mockFetchCapturing(bodies)
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(commitMock, [UNTRANSCRIBED])
+
+    await act(async () => {
+      await result.current.completeSingle(UNTRANSCRIBED as never)
+    })
+    expect(result.current.errors.get("sec-2")).toMatch(/transcribe/i)
+
+    // Transcription lands; the user retries — the stale guidance must clear.
+    const nowTranscribed = { ...UNTRANSCRIBED, transcription: "and the word was heard" }
+    await act(async () => {
+      await result.current.completeSingle(nowTranscribed as never)
+    })
+    expect(result.current.errors.get("sec-2")).toBeUndefined()
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toContain("and the word was heard")
+  })
+})

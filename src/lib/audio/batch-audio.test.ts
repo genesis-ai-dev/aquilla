@@ -231,3 +231,22 @@ describe("runTranscribeAll — language follows the audio (AQU-646)", () => {
     expect(call.language).toBe("spa")
   })
 })
+
+describe("needsTranscription — dub take on a media cell (SUB-29)", () => {
+  it("a take-selected media cell follows the TIMINGS rule, not the transcript rule", () => {
+    const takeId = "audio-c1-1700000000-abcdefgh.webm"
+    const base = {
+      medium: "media" as const,
+      transcription: "already transcribed source",
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { url: `frontier-audio://${takeId}` } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment },
+    }
+    // Transcript exists but the TAKE has no timings → still needs transcription.
+    expect(needsTranscription(makeCell(base))).toBe(true)
+    expect(
+      needsTranscription(
+        makeCell({ ...base, audioTimings: { [takeId]: [{ word: "hi", start: 0, end: 2, t0: 0, t1: 0.5 }] } }),
+      ),
+    ).toBe(false)
+  })
+})

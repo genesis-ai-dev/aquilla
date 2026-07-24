@@ -10,7 +10,7 @@ import { alignChunks } from "./timings"
 import { whisperLanguageFromTag } from "./language"
 import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import { setTranscribeStatus } from "./transcribe-status"
-import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
+import { fetchCellAudio, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
@@ -262,8 +262,15 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // cell's trim window. Recorded takes have no trims (whole clip). And route
     // the language through the Whisper tag mapper (raw project language names
     // were being fed to transformers.js verbatim; unmapped → auto-detect).
-    const isMediaSegment = cell.medium === "media"
-    const trim = isMediaSegment
+    //
+    // SUB-29: "media segment" must mean the SOURCE CLIP is selected — a user
+    // can record a take onto a media cell (dubbing), and that take is target
+    // speech: whole-clip transcription, timings against the translation, and
+    // it must NEVER write the section's source transcription. Provenance
+    // comes from the audioId seed (source clip = fileId, takes = cellId).
+    const isMediaCell = cell.medium === "media"
+    const isSourceSegment = isMediaCell && !audioIdSeededWith(audioId, cell.id)
+    const trim = isSourceSegment
       ? { trimStartMs: attachment?.trimStartMs ?? null, trimEndMs: attachment?.trimEndMs ?? null }
       : undefined
 
@@ -291,10 +298,11 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // karaoke decoration maps them against the TipTap doc, so align against
     // cell.translated (transcript offsets as fallback when counts mismatch).
     const transcriptText = result.text.trim()
-    if (result.chunks.length > 0 || (isMediaSegment && transcriptText)) {
-      // AQU-646: for media segments align timings against the transcript itself
-      // (there's no target text yet — the transcript IS the text karaoke maps).
-      const timings = alignChunks(result.chunks, isMediaSegment ? transcriptText : cell.translated)
+    if (result.chunks.length > 0 || (isSourceSegment && transcriptText)) {
+      // AQU-646: for SOURCE segments align timings against the transcript itself
+      // (there's no target text yet — the transcript IS the text karaoke maps);
+      // takes (incl. dub takes on media cells) align against the translation.
+      const timings = alignChunks(result.chunks, isSourceSegment ? transcriptText : cell.translated)
       // Signed-out transcribes (cache hit) have no session — the emit queues
       // to the local outbox and can throw a role-gate error, so swallow it:
       // transcription itself succeeded, and the timings re-emit on a manual
@@ -315,10 +323,12 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         ...(attachment?.durationMs != null ? { durationMs: attachment.durationMs } : {}),
         ...(attachment?.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment?.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
-        // AQU-646: media segments carry the transcript — the server lands it on
-        // the SOURCE cell's `transcription` (translatable source text). Never
-        // sent for recorded takes (target audio must not write source text).
-        ...(isMediaSegment && transcriptText ? { transcription: transcriptText } : {}),
+        // AQU-646/SUB-29: only the SOURCE segment carries the transcript — the
+        // server lands it on the cell's `transcription` (translatable source
+        // text). Takes are target audio and must not write source text; the
+        // guard is attachment PROVENANCE, not cell medium, so a dub take
+        // recorded onto a media section can never clobber its transcript.
+        ...(isSourceSegment && transcriptText ? { transcription: transcriptText } : {}),
         author: session?.username ?? "local",
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)

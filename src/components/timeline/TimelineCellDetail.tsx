@@ -30,6 +30,7 @@ import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 
@@ -45,6 +46,8 @@ export interface TimelineDetailActions {
   completing: Map<string, string>
   /** cellId → streaming draft text */
   previews: Map<string, string>
+  /** cellId → last error message (e.g. the SUB-28 "transcribe first" guidance). */
+  errors?: Map<string, string>
   onCompleteSingle(cell: CellData, opts?: { regenerate?: boolean }): Promise<unknown>
   onAiSetupNeeded(): void
   // Workspace drawers/modal (same handlers the text rail reaches via context)
@@ -143,6 +146,11 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
   // ── Action-row derivations (mirror the text rail's gates) ─────────────────
   const selectedAttachment = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAttachment && !selectedAttachment.isDeleted)
+  // SUB-29: the mic/upload gate counts recorded TAKES, not the imported source
+  // clip that squats in every section's recording slot (audioId provenance:
+  // takes are seeded with the cellId). Text cells behave exactly as before.
+  const hasRecordedTake =
+    hasAudio && (cell.medium !== "media" || audioIdSeededWith(cell.selectedAudioId, cell.id))
   const completingState = detailActions?.completing.get(cell.id)
   const busy = completingState === "searching" || completingState === "generating"
   const preview = detailActions?.previews.get(cell.id)
@@ -238,7 +246,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
                   <ActionIconButton
                     label={
                       completingState === "error"
-                        ? "Generation failed — try again"
+                        ? detailActions.errors?.get(cell.id) ?? "Generation failed — try again"
                         : "Translate with AI"
                     }
                     testId="tl-detail-ai"
@@ -261,7 +269,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
                     <RefreshCw className="h-3 w-3" />
                   </ActionIconButton>
                 )}
-                {editable && !hasAudio && (
+                {editable && !hasRecordedTake && (
                   <ActionIconButton
                     label="Record audio"
                     testId="tl-detail-record"
@@ -270,7 +278,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
                     <Mic className="h-3 w-3" />
                   </ActionIconButton>
                 )}
-                {editable && !hasAudio && (
+                {editable && !hasRecordedTake && (
                   <CellAudioUploadButton
                     projectId={detailActions.projectId}
                     fileId={cell.fileId}

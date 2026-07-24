@@ -216,6 +216,15 @@ export function useCompletion(
       ? { ...effectiveSettings, temperature: Math.max(effectiveSettings.temperature ?? 0, REGENERATE_TEMPERATURE) }
       : effectiveSettings
 
+    // A new attempt supersedes any prior error for this cell — without this,
+    // messages like the SUB-28 "transcribe first" guidance stuck to the cell
+    // forever (nothing ever deleted from the errors map).
+    setErrors((p) => {
+      if (!p.has(cell.id)) return p
+      const next = new Map(p)
+      next.delete(cell.id)
+      return next
+    })
     setCompleting((p) => new Map(p).set(cell.id, "searching"))
     // top_k controls how many approved examples are requested. The injected
     // search adapter is drafting-specific and enforces validatedOnly=true on
@@ -376,6 +385,14 @@ export function useCompletion(
         // Stop starting new sub-batches if cancelled between chunks.
         if (isBatchCompletionCancelled(runId)) break
 
+        // A new attempt supersedes prior errors for these cells (see the
+        // matching completeSingle note).
+        setErrors((p) => {
+          if (!chunk.some((c) => p.has(c.id))) return p
+          const next = new Map(p)
+          for (const c of chunk) next.delete(c.id)
+          return next
+        })
         for (const c of chunk) setCompleting((p) => new Map(p).set(c.id, "searching"))
         const concatenated = chunk.map((c) => effectiveSourceText(c)).join(" ")
         let passages: PassageHit[] = []

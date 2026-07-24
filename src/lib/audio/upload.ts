@@ -56,6 +56,22 @@ export function buildDenoisedAudioId(cellId: string): string {
 }
 
 /**
+ * SUB-29 (AQU-646): was this audioId seeded with `id` when built? buildAudioId
+ * embeds its seed verbatim for uuid ids (the normaliser only touches chars R2
+ * dislikes), so provenance is readable back out: the IMPORTED SOURCE CLIP is
+ * seeded with the FILE id (import + attach-media flows), while every mic/upload
+ * take is seeded with the CELL id. This is the only per-cell O(1) signal that
+ * distinguishes them — attachment trims fail in both directions (single-segment
+ * imports carry none; cropped takes gain some). Relies on the seed convention
+ * above staying stable — change buildAudioId's seeding and this breaks.
+ */
+export function audioIdSeededWith(audioId: string | undefined, id: string): boolean {
+  if (!audioId || !id) return false
+  const normalised = id.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
+  return audioId.includes(`-${normalised}-`)
+}
+
+/**
  * True when an audioId names a denoised take. Tolerates the stored
  * `<id>.<ext>` form since the marker is on the leading segment.
  */

@@ -71,7 +71,7 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis } from "@/lib/audio/batch-audio"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
@@ -3166,6 +3166,7 @@ export function ProjectWorkspace() {
     isAnonymous: !frontierSession,
     completing,
     previews,
+    errors,
     onCompleteSingle: handleCompleteSingle,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenComments: handleOpenComments,
@@ -3177,7 +3178,7 @@ export function ProjectWorkspace() {
     targetLanguage: project.targetLanguage,
     projectTtsSettings: project.ttsSettings,
     username: currentUsername,
-  } : null, [project, isConfigured, isCompletionAvailable, frontierSession, completing, previews,
+  } : null, [project, isConfigured, isCompletionAvailable, frontierSession, completing, previews, errors,
     handleCompleteSingle, handleAiSetupNeeded, handleOpenComments, handleOpenHistory,
     handleOpenRecording, liveCellOpenCommentCount, currentUsername])
 
@@ -4994,15 +4995,16 @@ export function ProjectWorkspace() {
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
                   onSeekToTime={handleTimelineSeekToTime}
-                  // AQU-646: transcribe a media segment from the detail pane.
-                  // Media segments are SOURCE speech → source language.
+                  // AQU-646/SUB-29: transcribe from the detail pane — language by
+                  // attachment provenance (source segment → source language;
+                  // a dub take on a media cell → target language).
                   onTranscribe={(cell) => {
                     if (!project) return
                     void transcribeCell({
                       cell,
                       session: frontierSession ?? null,
                       projectId: project.id,
-                      language: project.sourceLanguage,
+                      language: isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage,
                     })
                   }}
                 />

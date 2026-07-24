@@ -67,6 +67,8 @@ import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
+import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   MAX_SELECTED,
@@ -4205,6 +4207,11 @@ function EditorRow({
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
+  // SUB-29: the mic/upload gate counts recorded TAKES — the imported source
+  // clip squatting in every media section's recording slot must not hide the
+  // record affordance (audioId provenance: takes are seeded with the cellId).
+  const hasRecordedTake =
+    hasAudio && (cell.medium !== "media" || audioIdSeededWith(cell.selectedAudioId, cell.id))
   const cellAudioTimings = cell.selectedAudioId ? cell.audioTimings?.[cell.selectedAudioId] : undefined
   const selectedGeneratedVoice = cell.selectedGeneratedVoiceAudioId
     ? cell.attachments?.[cell.selectedGeneratedVoiceAudioId]
@@ -4295,7 +4302,7 @@ function EditorRow({
     // AQU-646: the ASR language must match the AUDIO. Imported media segments
     // are SOURCE speech (→ sourceLanguage); recorded takes voice the TARGET
     // text (→ targetLanguage). Mapping to a Whisper tag happens downstream.
-    const language = cell.medium === "media" ? project.sourceLanguage : project.targetLanguage
+    const language = isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language })
   }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage])
 
@@ -5589,7 +5596,7 @@ function EditorRow({
                   disabled elements receive no mouse events, so the "click for
                   help" affordance is unreachable. Instead keep it enabled and
                   route clicks to the denied-help popover. */}
-              {!hasAudio && onOpenRecording && editable && (() => {
+              {!hasRecordedTake && onOpenRecording && editable && (() => {
                 const unsupportedReason = getUnsupportedReason()
                 const isUnsupported = unsupportedReason !== null
                 const micTooltip = micDenied
@@ -5645,7 +5652,7 @@ function EditorRow({
                   <input type="file"> so phone browsers can attach an
                   existing wav/mp3/m4a recording without a desktop. Same
                   gating as the mic (no audio yet, editable). */}
-              {!hasAudio && editable && (
+              {!hasRecordedTake && editable && (
                 <CellAudioUploadButton
                   projectId={project.id}
                   fileId={cell.fileId}

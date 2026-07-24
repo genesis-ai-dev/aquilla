@@ -311,7 +311,7 @@ export function sameClipContinuation(
 // seek forward, still on the same element (no reload, so no audible cut).
 const CONTINUOUS_SEEK_EPS = 0.35
 
-async function playAt(index: number): Promise<void> {
+async function playAt(index: number, explicitStart = false): Promise<void> {
   const ctx = activeContext
   if (!ctx) return
   const cell = ctx.cells[index]
@@ -337,14 +337,22 @@ async function playAt(index: number): Promise<void> {
   setState({ kind: "loading", cellIndex: index, cellId: cell.id })
   ctx.onCellChange?.(index, cell.id)
 
-  // A clip whose bytes are gone must not dead-end the whole transport: skip to
-  // the next clip that has audio, and only surface a clear "missing" state when
-  // no playable clip remains (rather than the misleading raw 404).
-  const skipMissingFrom = (missingCellId: string): void => {
-    const next = findNextPlayable(ctx.cells, index + 1)
-    if (next >= 0) { void playAt(next); return }
+  const surfaceMissing = (missingCellId: string): void => {
     disposeCurrent()
     setState({ kind: "error", message: MISSING_AUDIO_MESSAGE, cellId: missingCellId })
+  }
+  // A clip whose bytes are gone must not dead-end the whole transport: during
+  // auto-advance we skip to the next clip that has audio, surfacing a clear
+  // "missing" state only when none remain (rather than the misleading raw 404).
+  // But when the user EXPLICITLY started on this clip (selected it on the
+  // timeline and pressed Play), skipping would silently play a neighbour — the
+  // reported bug (AQU-660). In that case surface the missing state on the
+  // selected clip instead of hopping past it.
+  const skipMissingFrom = (missingCellId: string): void => {
+    if (explicitStart) { surfaceMissing(missingCellId); return }
+    const next = findNextPlayable(ctx.cells, index + 1)
+    if (next >= 0) { void playAt(next); return }
+    surfaceMissing(missingCellId)
   }
 
   let resolved: ResolvedAudioSrc
@@ -482,8 +490,10 @@ async function playAt(index: number): Promise<void> {
 }
 
 /** Start playback at a specific cell index (or skip forward to the next
- *  cell with audio if the start index has none). */
-export function startQueue(ctx: PlayContext, fromIndex: number): void {
+ *  cell with audio if the start index has none). `explicit` marks a
+ *  user-chosen start (e.g. a selected timeline clip) so a missing clip there
+ *  surfaces its "missing" state rather than skipping to a neighbour. */
+export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false): void {
   activeContext = ctx
   const start = findNextPlayable(ctx.cells, Math.max(0, fromIndex))
   if (start < 0) {
@@ -491,7 +501,7 @@ export function startQueue(ctx: PlayContext, fromIndex: number): void {
     disposeCurrent()
     return
   }
-  void playAt(start)
+  void playAt(start, explicit)
 }
 
 export function pauseQueue(): void {

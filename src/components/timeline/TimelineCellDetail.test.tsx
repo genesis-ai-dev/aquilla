@@ -119,4 +119,17 @@ describe("TimelineCellDetail", () => {
     render(<TimelineCellDetail cell={cell({ original: "plain subtitle" })} editable onCommitTarget={() => {}} />)
     expect(screen.queryByTestId("tl-detail-source-audio")).toBeNull()
   })
+
+  it("shows a calm non-retryable missing-audio badge only when audioMissing is set", () => {
+    const { rerender } = render(
+      <TimelineCellDetail cell={cell({})} editable onCommitTarget={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-detail-audio-missing")).not.toBeInTheDocument()
+
+    rerender(<TimelineCellDetail cell={cell({})} editable onCommitTarget={() => {}} audioMissing />)
+    const badge = screen.getByTestId("tl-detail-audio-missing")
+    expect(badge).toHaveTextContent("This clip's audio is missing.")
+    // Permanent deletion — a status, not an actionable retry control.
+    expect(badge.querySelector("button")).toBeNull()
+  })
 })

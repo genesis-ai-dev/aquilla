@@ -80,19 +80,20 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
   const isPlaying = queue.kind === "playing"
   const isLoading = queue.kind === "loading"
 
-  const startAt = useCallback((from: number) => {
+  const startAt = useCallback((from: number, explicit = false) => {
     if (!session?.jwt) return
-    startQueue({ cells, projectId, session, onCellChange: (_, cellId) => onActiveCell?.(cellId) }, from)
+    startQueue({ cells, projectId, session, onCellChange: (_, cellId) => onActiveCell?.(cellId) }, from, explicit)
   }, [cells, projectId, session, onActiveCell])
 
   const onPlayPause = useCallback(() => {
     if (isPlaying) { pauseQueue(); return }
     if (queue.kind === "paused") { void resumeQueue(); return }
     // Start from the highlighted section when one is selected, else the top of
-    // the file (AQU-666). The queue skips forward from here to the next cell
-    // that actually has audio, so an unplayable pick still behaves.
+    // the file (AQU-666). A selected start is "explicit": if that clip's audio
+    // is missing, surface it there instead of skipping to a neighbour (AQU-660);
+    // plain play-all keeps skipping forward past a missing clip.
     const from = startCellId ? cells.findIndex((c) => c.id === startCellId) : -1
-    startAt(from >= 0 ? from : 0)
+    startAt(from >= 0 ? from : 0, from >= 0)
   }, [isPlaying, queue.kind, startAt, cells, startCellId])
 
   // Spacebar toggles play/pause while the Audio-lens bar is mounted (this bar

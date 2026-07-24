@@ -48,6 +48,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
+import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { startQueue } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -3851,6 +3852,15 @@ export function ProjectWorkspace() {
     cellAreaState.kind === "ready" &&
     lens === "audio" &&
     Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+  // Per-file audio attachments for the Media timeline's missing-clip badge.
+  // Timeline cells carry no attachments, so the badge probe resolves the
+  // selected clip's take from this read. Gated on timeline visibility so no
+  // read fires outside the Media lens; the playback bar keeps its own
+  // independent read (same file bus dedupes them).
+  const { byCellId: timelineAudioByCellId } = useFileAudioAttachments(
+    project?.id ?? null,
+    timelineEditorVisible ? activeFileId : null,
+  )
   const legacyCellsNeeded =
     centerSurface === "rules" ||
     dockTab === "voices" ||
@@ -4903,6 +4913,8 @@ export function ProjectWorkspace() {
                   terminologyConcepts={(editorProject ?? project)?.terminology ?? []}
                   infractions={infractions}
                   onSelectCell={setTimelineSelectedCellId}
+                  session={frontierSession ?? null}
+                  audioByCellId={timelineAudioByCellId}
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>

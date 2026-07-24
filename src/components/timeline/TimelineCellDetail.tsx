@@ -5,10 +5,12 @@
 // media pane rich text, footnotes, terminology chips, and violation blots for
 // free, and its commits persist identically to the main table.
 
+import { VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtClock } from "./format"
 import { TimelineSourceAudio } from "./TimelineSourceAudio"
 import { TranslatedEditor } from "@/components/TranslatedEditor"
+import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
 import type { RuleInfraction } from "@/lib/parsers/types"
@@ -27,6 +29,10 @@ export interface TimelineCellDetailProps {
   terminologyConcepts?: Concept[]
   /** Rule infractions for the selected cell — drives the violation blots. */
   infractions?: RuleInfraction[]
+  /** The selected clip's stored recording is permanently gone (404). Shows a
+   *  calm, non-retryable badge — matches the transport/waveform copy so the
+   *  three surfaces agree. */
+  audioMissing?: boolean
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -44,6 +50,7 @@ export function TimelineCellDetail({
   project,
   terminologyConcepts,
   infractions,
+  audioMissing,
 }: TimelineCellDetailProps) {
   if (!cell) {
     return (
@@ -89,6 +96,16 @@ export function TimelineCellDetail({
           </Pill>
         )}
       </div>
+      {audioMissing && (
+        <div
+          data-testid="tl-detail-audio-missing"
+          role="status"
+          className="mb-2.5 flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground"
+        >
+          <VolumeX className="h-3.5 w-3.5 shrink-0" />
+          <span>{MISSING_AUDIO_MESSAGE}</span>
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-border bg-card p-2.5">
           <div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">

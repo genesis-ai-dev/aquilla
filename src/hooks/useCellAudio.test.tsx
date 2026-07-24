@@ -180,6 +180,31 @@ describe("useCellAudio", () => {
     expect(result.current.error?.message).toMatch(/deleted/)
   })
 
+  // The waveform strip loads bytes through requestPeaks, not play(); the same
+  // 404 sentinel must surface there as the non-retryable "missing" peaks state
+  // so CellWaveform renders calm "audio missing" copy instead of the retry chip.
+  it("requestPeaks: surfaces peaksState 'missing' when the audio is gone (404)", async () => {
+    fetchMock.mockResolvedValue(new Response("not found", { status: 404 }))
+
+    const project = makeProject()
+    const cell = makeCell("a-peaks-gone", buildFrontierAudioUrl("a-peaks-gone", "webm"))
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
+
+    await act(async () => { await result.current.requestPeaks(64) })
+    expect(result.current.peaksState).toBe("missing")
+  })
+
+  it("requestPeaks: keeps peaksState 'error' (retryable) for transient failures", async () => {
+    fetchMock.mockResolvedValue(new Response("boom", { status: 500 }))
+
+    const project = makeProject()
+    const cell = makeCell("a-peaks-5xx", buildFrontierAudioUrl("a-peaks-5xx", "webm"))
+    const { result } = renderHook(() => useCellAudio(project, cell, "file-1"))
+
+    await act(async () => { await result.current.requestPeaks(64) })
+    expect(result.current.peaksState).toBe("error")
+  })
+
   it("reuses the existing element on a second play (no new element, no fetch)", async () => {
     const project = makeProject()
     const cell = makeCell("a4", buildFrontierAudioUrl("a4", "webm"))

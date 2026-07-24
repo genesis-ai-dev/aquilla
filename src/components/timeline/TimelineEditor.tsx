@@ -15,9 +15,12 @@ import { TimelineLane } from "./TimelineLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineCellDetail } from "./TimelineCellDetail"
 import { useTimelineClock } from "./useTimelineClock"
+import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
 import type { ProjectRecord, RuleInfraction } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
+import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -38,6 +41,13 @@ export interface TimelineEditorProps {
   /** Fires when the highlighted section changes so a sibling transport (the
    *  bottom playback bar) can start playback from the selected section. */
   onSelectCell?(cellId: string | null): void
+  /** Session for the missing-audio probe that badges a selected clip whose
+   *  recording is permanently gone. Absent (focused unit tests) → no probe. */
+  session?: FrontierSession | null
+  /** Per-file audio-attachment reads (from useFileAudioAttachments). Timeline
+   *  cells carry no attachments, so the probe resolves the selected clip's take
+   *  from this map. Absent → no badge. */
+  audioByCellId?: Map<string, CellAudioEntry>
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -75,6 +85,8 @@ export function TimelineEditor({
   terminologyConcepts,
   infractions,
   onSelectCell,
+  session,
+  audioByCellId,
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -101,6 +113,16 @@ export function TimelineEditor({
     () => cells.find((c) => c.id === selectedId) ?? null,
     [cells, selectedId],
   )
+  const selectedClipAudio = useMemo(
+    () => (selectedId ? resolveEntryAudio(audioByCellId?.get(selectedId)) : null),
+    [audioByCellId, selectedId],
+  )
+  const audioMissing = useClipAudioMissing({
+    audio: selectedClipAudio,
+    projectId: project?.id ?? null,
+    fileId,
+    session: session ?? null,
+  })
 
   function applyZoom(next: number) {
     const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next))
@@ -244,6 +266,7 @@ export function TimelineEditor({
         project={project}
         terminologyConcepts={terminologyConcepts}
         infractions={selectedCell ? infractions?.get(selectedCell.id) : undefined}
+        audioMissing={audioMissing}
       />
     </div>
   )

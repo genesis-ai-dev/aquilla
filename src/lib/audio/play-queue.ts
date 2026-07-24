@@ -106,6 +106,19 @@ const coordinatorController: ActiveAudioController = {
 
 function disposeCurrent(): void {
   if (currentAudio) {
+    // Detach handlers BEFORE clearing src: setting src="" re-runs the media
+    // load algorithm, which fires a final `error` event on the element. With
+    // handlers still attached (and seq unchanged — dispose isn't always
+    // followed by a new playAt), that zombie onerror would stomp whatever
+    // state the caller just set (e.g. MISSING_AUDIO_MESSAGE) with the generic
+    // "Audio failed to load".
+    currentAudio.onerror = null
+    currentAudio.onended = null
+    currentAudio.ontimeupdate = null
+    currentAudio.onloadedmetadata = null
+    currentAudio.ondurationchange = null
+    currentAudio.onpause = null
+    currentAudio.onplay = null
     currentAudio.pause()
     currentAudio.src = ""
     currentAudio = null
@@ -456,6 +469,14 @@ async function playAt(index: number): Promise<void> {
     await audio.play()
   } catch (e) {
     if (seq !== currentSeq) return
+    // A source that fails to LOAD rejects play() with NotSupportedError and
+    // also fires the element's onerror — which owns recovery (blob fallback →
+    // missing-bytes skip → MISSING_AUDIO_MESSAGE). Publishing the raw
+    // rejection here would race that path and surface "Failed to load because
+    // no supported source was found." for a merely-missing clip (AQU-660).
+    // Genuine playback refusals (e.g. autoplay's NotAllowedError) don't fire
+    // onerror, so they still report here.
+    if (e instanceof DOMException && e.name === "NotSupportedError") return
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
   }
 }

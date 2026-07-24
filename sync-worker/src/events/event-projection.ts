@@ -1156,11 +1156,14 @@ case 'cell.audio.attach': {
       stmts.push(
         db
           .prepare(
+            // AQU-692: created_for_translated stores the target-text snapshot
+            // captured on the client at thread-creation time. Null for replies,
+            // non-cell scopes, and legacy events that predate the field.
             `INSERT INTO comments (
               comment_id, project_id, scope_kind, file_id, cell_id,
               parent_comment_id, body, resolved, author_id, author_label,
-              created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL)
+              created_at, updated_at, deleted_at, created_for_translated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?)
             ON CONFLICT(comment_id) DO NOTHING`,
           )
           .bind(
@@ -1175,6 +1178,7 @@ case 'cell.audio.attach': {
             event.author,
             event.serverTs,
             event.serverTs,
+            p.createdForTranslated ?? null,
           ),
       )
       return ['comments']

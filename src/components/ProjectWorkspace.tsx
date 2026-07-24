@@ -1604,11 +1604,15 @@ export function ProjectWorkspace() {
 
   const addThread = useCallback(async (cellId: string, text: string) => {
     if (!project?.id || !activeFileId) return
+    // AQU-692: snapshot the cell's current target text so the thread's "stale"
+    // badge only fires when the translation genuinely changes afterwards.
+    const createdForTranslated = getActiveCell(cellId)?.translated ?? ""
     await addCommentEvent({
       scope: { kind: "cell", fileId: activeFileId, cellId },
       body: text,
+      createdForTranslated,
     })
-  }, [project?.id, activeFileId, addCommentEvent])
+  }, [project?.id, activeFileId, addCommentEvent, getActiveCell])
 
   const addMessage = useCallback(async (cellId: string, threadId: string, text: string) => {
     if (!project?.id || !activeFileId) return

@@ -655,7 +655,12 @@ export interface CommentThread {
   createdAt: string
   resolvedAt?: string
   resolvedBy?: string
-  createdForTranslated: string
+  /**
+   * AQU-692: snapshot of the target text when the thread was created, used to
+   * decide the "Translation changed since this thread was created" badge.
+   * `null` = unknown baseline (legacy thread or git-imported) → never stale.
+   */
+  createdForTranslated: string | null
   messages: CommentMessage[]
 }
 

@@ -303,6 +303,11 @@ export interface OutboxEventPayloads {
     scope: CommentScope
     body: string // markdown OK
     parentCommentId: string | null // null = top-level thread; non-null = reply
+    // AQU-692: snapshot of the cell's target text at thread-creation time, for
+    // the "Translation changed since this thread was created" badge. Only
+    // meaningful on a root (parentCommentId === null); omit/null for replies and
+    // for scopes with no target text. A missing value is an unknown baseline.
+    createdForTranslated?: string | null
   }
   "comment.edit": {
     commentId: string

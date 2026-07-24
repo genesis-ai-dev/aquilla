@@ -37,6 +37,9 @@ interface CommentRowRaw {
   // comment belongs to instead of the opaque cellId. Null when the cell has no
   // canonical ref (non-scripture) or the cell no longer exists.
   cell_ref: string | null
+  // AQU-692: target-text snapshot captured when the thread was created. Null for
+  // replies, non-cell scopes, and legacy rows created before the column existed.
+  created_for_translated: string | null
 }
 
 export interface CommentRowOut {
@@ -55,6 +58,8 @@ export interface CommentRowOut {
   deletedAt: number | null
   /** AQU-599: human-readable cell reference resolved from the source cell. */
   cellRef: string | null
+  /** AQU-692: target-text snapshot at thread creation; null = unknown baseline. */
+  createdForTranslated: string | null
 }
 
 function toOut(row: CommentRowRaw): CommentRowOut {
@@ -73,6 +78,7 @@ function toOut(row: CommentRowRaw): CommentRowOut {
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
     cellRef: row.cell_ref,
+    createdForTranslated: row.created_for_translated,
   }
 }
 
@@ -120,7 +126,7 @@ export async function handleCommentsReadRequest(
     'SELECT',
     '  cm.comment_id, cm.project_id, cm.scope_kind, cm.file_id, cm.cell_id,',
     '  cm.parent_comment_id, cm.body, cm.resolved, cm.author_id, cm.author_label,',
-    '  cm.created_at, cm.updated_at, cm.deleted_at,',
+    '  cm.created_at, cm.updated_at, cm.deleted_at, cm.created_for_translated,',
     '  c.canonical_ref AS cell_ref',
     'FROM comments cm',
     'LEFT JOIN cells c',

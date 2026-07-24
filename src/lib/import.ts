@@ -22,6 +22,7 @@ import { detectFileType, isMediaFileType } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
 import { tileSegments } from "./timeline/tile-segments"
+import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
 import {
@@ -1550,6 +1551,21 @@ export async function emitMediaFile(
     })),
     getToken: ctx.getToken,
     signal: ctx.signal,
+  })
+
+  // AQU-646: seed the post-import auto-transcribe — the workspace's
+  // import-completion handler consumes this (the cell store won't have these
+  // cells, let alone their attachments, until an unawaitable revalidate).
+  recordMediaImportSeed({
+    fileId,
+    cells: buildMediaSeedCells({
+      fileId,
+      fileName: file.name,
+      specs,
+      audioId: `${upload.audioId}.${upload.ext}`,
+      url: upload.url,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    }),
   })
 
   return {

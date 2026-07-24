@@ -33,6 +33,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -1407,7 +1408,23 @@ export function ProjectWorkspace() {
     })
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     revalidateCells()
-  }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
+    // AQU-646: the attach flow seeds auto-transcribe too — same "file gained
+    // media sections" moment as an import (see handleImported).
+    const seed = consumeMediaImportSeed(activeFileId)
+    if (seed) {
+      void autoTranscribeImportedMedia({
+        seed,
+        projectId: project.id,
+        session: frontierSession ?? null,
+        sourceLanguage: project.sourceLanguage,
+        targetLanguage: project.targetLanguage,
+        onDone: async () => {
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          revalidateCells()
+        },
+      })
+    }
+  }, [project?.id, project?.sourceLanguage, project?.targetLanguage, activeFileId, currentUsername, frontierSession, getTokenForFile, getTokenForProjectFile, revalidateCells])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
@@ -4226,6 +4243,29 @@ export function ProjectWorkspace() {
     // there's nothing to flush — just pull the fresh projection in.
     refresh()
     revalidateCells()
+
+    // AQU-646: auto-transcribe the imported sections — importing an MP3 must
+    // surface source text without hunting for the Transcribe button. Fire and
+    // forget: the consent dialog (first run) + progress banner + per-cell
+    // badges carry the UX; a denial simply leaves manual transcribe available.
+    for (const ref of refs) {
+      if (!isMediaFileType(ref.type)) continue
+      const seed = consumeMediaImportSeed(ref.id)
+      if (!seed || !project?.id) continue
+      void autoTranscribeImportedMedia({
+        seed,
+        projectId: project.id,
+        session: frontierSession ?? null,
+        sourceLanguage: project.sourceLanguage,
+        targetLanguage: project.targetLanguage,
+        onDone: async () => {
+          // Transcripts ride outbox-queued cell.audio.attach emits — flush so
+          // they land, then pull the projection with the new source text.
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+          revalidateCells()
+        },
+      })
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────

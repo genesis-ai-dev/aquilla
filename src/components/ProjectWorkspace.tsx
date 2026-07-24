@@ -68,7 +68,8 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll } from "@/lib/audio/batch-audio"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis } from "@/lib/audio/batch-audio"
+import { transcribeCell } from "@/lib/audio/transcribe"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
@@ -95,11 +96,13 @@ import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
-import { runDiarization, type DiarizationPhase } from "@/lib/diarization/run-diarization"
+import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
+import { extractVoiceReference } from "@/lib/audio/reference-extract"
+import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2, X } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Loader2, X, Mic } from "lucide-react"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
@@ -1355,6 +1358,22 @@ export function ProjectWorkspace() {
     setDiarizeError(null)
     try {
       const cells = cellStore.getAllCellViews()
+      // AQU-646 ordering guard: diarization REPLACES all media cells, which
+      // destroys any transcriptions/translations on them. Warn before wiping
+      // work — the intended order is import → diarize → transcribe → translate.
+      const atRisk = cells.filter(
+        (c) => c.medium === "media" && (c.transcription?.trim() || c.translated?.trim()),
+      ).length
+      if (atRisk > 0) {
+        const ok = window.confirm(
+          `Diarizing re-segments this file and will DISCARD the transcription/translation on ${atRisk} section${atRisk === 1 ? "" : "s"}. ` +
+            `Diarize first, then transcribe and translate. Continue anyway?`,
+        )
+        if (!ok) {
+          setDiarizePhase(null)
+          return
+        }
+      }
       await runDiarization({
         projectId: project.id,
         fileId: activeFileId,
@@ -3592,10 +3611,23 @@ export function ProjectWorkspace() {
     return items
   }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
 
-  // Phase 2c-gamma: countTranscribeTargets/countSynthTargets lived in bulk-audio
-  // (Y.Doc-coupled). They're zeroed until the audio-attachment event grammar
-  // lands; the "Transcribe all" / "Synth all" menu items can still render.
-  const audioCounts = useMemo(() => ({ untranscribed: 0, unsynthesized: 0 }), [])
+  // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
+  // sharing the exact filters the batch runners use (needsTranscription /
+  // needsSynthesis) so the menu count always matches what the run would do.
+  // getActiveCells() is merged with audio attachments; keyed on the store
+  // version so counts track edits/attaches live.
+  const audioCounts = useMemo(() => {
+    if (!activeFileId) return { untranscribed: 0, unsynthesized: 0 }
+    const cells = readAtVersion(cellStoreVersion, getActiveCells)
+    let untranscribed = 0
+    let unsynthesized = 0
+    for (const c of cells) {
+      if (needsTranscription(c)) untranscribed++
+      if (needsSynthesis(c)) unsynthesized++
+    }
+    return { untranscribed, unsynthesized }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cellStoreVersion is the reactivity key for getActiveCells
+  }, [activeFileId, cellStoreVersion, getActiveCells])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -3704,7 +3736,10 @@ export function ProjectWorkspace() {
         cells,
         projectId: project.id,
         session: frontierSession ?? null,
-        language: project.sourceLanguage,
+        // AQU-646: language follows the audio — media segments are source
+        // speech, recorded takes voice the target text (per-cell in the batch).
+        sourceLanguage: project.sourceLanguage,
+        targetLanguage: project.targetLanguage,
       })
     },
     runSynthAll: () => {
@@ -3774,6 +3809,68 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
+  // AQU-646: single-speaker path — adopt the imported file's speaker as a cast
+  // voice without diarizing. Extracts a reference from the file's (longest)
+  // media sections, creates a voice carrying it, and assigns the file's media
+  // cells to it so per-cell generate speaks in the imported voice.
+  const [adoptingSpeaker, setAdoptingSpeaker] = useState(false)
+  const handleAdoptSpeakerVoice = useCallback(async () => {
+    if (!project?.id || !activeFileId || adoptingSpeaker) return
+    setAdoptingSpeaker(true)
+    try {
+      const cells = cellStore.getAllCellViews()
+      const clip = findFileClip(cells)
+      if (!clip) return
+      const media = cells.filter((c) => c.medium === "media")
+      // Sections' trim windows (in-clip coordinates); fall back to the cell's
+      // timeline placement, which equals the trim for imported files.
+      const ranges = media.map((c) => {
+        const att = c.selectedAudioId ? c.attachments?.[c.selectedAudioId] : undefined
+        return {
+          startMs: att?.trimStartMs ?? Math.round((c.startTime ?? 0) * 1000),
+          endMs: att?.trimEndMs ?? Math.round((c.endTime ?? 0) * 1000),
+        }
+      })
+
+      const name = activeFile?.name ? `Speaker — ${activeFile.name}` : "Imported speaker"
+      const voices = [...getVoiceLibrary(tts.settings)]
+      let voiceId = voices.find((v) => v.name === name)?.id
+      if (!voiceId || !voices.find((v) => v.id === voiceId)?.referenceAudioId) {
+        const referenceAudioId = await extractVoiceReference({
+          projectId: project.id,
+          fileId: activeFileId,
+          clipUrl: clip.url,
+          ranges,
+          getSyncToken: (_pid, fid) => getTokenForFile(fid),
+        })
+        if (!referenceAudioId) return
+        if (voiceId) {
+          const idx = voices.findIndex((v) => v.id === voiceId)
+          voices[idx] = { ...voices[idx], referenceAudioId }
+        } else {
+          voiceId = newVoiceId()
+          voices.push({
+            id: voiceId,
+            name,
+            color: VOICE_PALETTE[voices.length % VOICE_PALETTE.length],
+            referenceAudioId,
+          })
+        }
+      }
+
+      const assignments: Record<string, string> = {}
+      for (const c of media) assignments[c.id] = voiceId
+      await tts.saveTts({
+        voices,
+        castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...assignments },
+      })
+    } catch (e) {
+      console.warn("[adopt-speaker-voice] failed:", e)
+    } finally {
+      setAdoptingSpeaker(false)
+    }
+  }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, getTokenForFile, tts.settings, tts.saveTts])
+
   const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
     const diarizeLabel =
       diarizePhase === "starting" || diarizePhase === "running"
@@ -3820,6 +3917,15 @@ export function ProjectWorkspace() {
         disabled: diarizeBusy,
         onClick: handleDiarize,
       })
+      // AQU-646: single-speaker alternative to diarize — adopt the imported
+      // file's speaker as a cast voice (reference extracted from the clip).
+      items.push({
+        id: "adopt-speaker-voice",
+        label: adoptingSpeaker ? "Extracting voice…" : "Use file's speaker as a voice",
+        icon: Mic,
+        disabled: adoptingSpeaker || diarizeBusy,
+        onClick: () => void handleAdoptSpeakerVoice(),
+      })
     }
 
     const contextual: OverflowMenuItem[] = [
@@ -3858,6 +3964,8 @@ export function ProjectWorkspace() {
     diarizeError,
     diarizeBusy,
     handleDiarize,
+    adoptingSpeaker,
+    handleAdoptSpeakerVoice,
     isSubtitleFile,
     suggestions.length,
     suggestionsDismissed,
@@ -4736,6 +4844,17 @@ export function ProjectWorkspace() {
                   onRetime={handleRetime}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
+                  // AQU-646: transcribe a media segment from the detail pane.
+                  // Media segments are SOURCE speech → source language.
+                  onTranscribe={(cell) => {
+                    if (!project) return
+                    void transcribeCell({
+                      cell,
+                      session: frontierSession ?? null,
+                      projectId: project.id,
+                      language: project.sourceLanguage,
+                    })
+                  }}
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>

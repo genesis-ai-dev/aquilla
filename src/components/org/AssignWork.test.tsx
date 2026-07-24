@@ -136,6 +136,55 @@ describe("AssignWork", () => {
   })
 })
 
+// ── AQU-678: canonical, fully-spelled-out book dropdown ─────────────────────
+describe("AssignWork — book dropdown canonicalization (AQU-678)", () => {
+  // Files whose `name` is a non-canonical abbreviation but which carry a stable
+  // bookCode. Deliberately supplied out of canonical order and mixing an OT and
+  // NT book so the test proves ordering + spelling both come from the code.
+  const abbreviatedFiles = [
+    { id: "1co", name: "1 Cor", bookCode: "1CO" },
+    { id: "ezk", name: "Ezek", bookCode: "EZK" },
+    { id: "gen", name: "Genesis", bookCode: "GEN" },
+    { id: "notes", name: "Translation Notes" }, // non-book file, no bookCode
+  ]
+
+  it("lists books fully spelled out and in canonical order, book files before non-book files", async () => {
+    mockList.mockResolvedValue(members)
+    render(
+      <AssignWork projectId="p1" files={abbreviatedFiles} orgId={1} jwt="jwt" author="wendi" onAssigned={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    const bookTrigger = screen.getByRole("combobox", { name: /^book$/i })
+    fireEvent.click(bookTrigger)
+
+    const options = await screen.findAllByRole("option")
+    const labels = options.map((o) => o.textContent?.trim())
+    // Genesis (OT) → Ezekiel (OT) → 1 Corinthians (NT) → non-book last;
+    // abbreviations resolved to their canonical spelled-out names.
+    expect(labels).toEqual(["Genesis", "Ezekiel", "1 Corinthians", "Translation Notes"])
+  })
+
+  it("uses the canonical spelled-out name in the emitted scopeLabel", async () => {
+    mockList.mockResolvedValue(members)
+    mockCreate.mockResolvedValue("as-canon")
+    render(
+      <AssignWork projectId="p1" files={abbreviatedFiles} orgId={1} jwt="jwt" author="wendi" onAssigned={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    // Default selection is the first file in prop order ("1 Cor"), whose raw
+    // name is an abbreviation — the emitted scopeLabel must still be canonical.
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ fileId: "1co", scopeLabel: "1 Corinthians" }),
+      ),
+    )
+  })
+})
+
 // ── AQU-496: self-assign carve-out ──────────────────────────────────────────
 describe("AssignWork — self-assign carve-out (AQU-496)", () => {
   function renderSelfAssign(onAssigned = vi.fn()) {

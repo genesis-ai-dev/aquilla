@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
-import { compareByCanonicalBookOrder } from "@/lib/file-labeling/bible-book-names"
+import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
@@ -31,10 +31,23 @@ import {
  * chapter scope = a real chapter picked from the file's chapter dropdown
  * (the canonical_ref prefix, e.g. "GEN 1", matched server-side via LIKE).
  */
+/**
+ * AQU-678: the "Book" dropdown must list every book fully spelled out and in
+ * canonical position, matching the sidebar. A file's `name` can be an
+ * abbreviation or a locale rename (two data sources — see the issue), so we
+ * resolve the canonical English book name from its stable `bookCode` when we
+ * have one and fall back to the raw `name` for non-scripture files. Sorting on
+ * the resolved label keeps a book like Ezekiel in its canonical slot even when
+ * its file name is a non-canonical abbreviation the ordinal lookup can't match.
+ */
+function bookLabel(f: { name: string; bookCode?: string }): string {
+  return (f.bookCode ? getBookName(f.bookCode) : undefined) ?? f.name
+}
+
 export interface AssignWorkProps {
   projectId: string
   /** Files in the project (book = one file). */
-  files: { id: string; name: string }[]
+  files: { id: string; name: string; bookCode?: string }[]
   orgId: number
   jwt: string
   /** Manager's username — stamped as the event author (server re-verifies). */
@@ -74,11 +87,17 @@ export function AssignWork({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // AQU-582: list books in canonical Bible reading order (Genesis → Revelation)
-  // rather than the incoming prop order, matching the sidebar and the Assign
-  // modal. Non-book files fall back to alphabetic via the shared comparator.
+  // AQU-582 / AQU-678: list books in canonical Bible reading order (Genesis →
+  // Revelation) rather than the incoming prop order, matching the sidebar and
+  // the Assign modal, and label each with its fully spelled-out canonical name
+  // (via bookLabel) so abbreviations don't leak through. Sorting on the resolved
+  // label keeps every book in its canonical slot; non-book files fall back to
+  // alphabetic via the shared comparator.
   const sortedFiles = useMemo(
-    () => [...files].sort((a, b) => compareByCanonicalBookOrder(a.name, b.name)),
+    () =>
+      files
+        .map((f) => ({ ...f, label: bookLabel(f) }))
+        .sort((a, b) => compareByCanonicalBookOrder(a.label, b.label)),
     [files],
   )
 
@@ -116,7 +135,7 @@ export function AssignWork({
       setError("You can only assign work to yourself.")
       return
     }
-    const fileName = files.find((f) => f.id === fileId)?.name ?? "file"
+    const fileName = sortedFiles.find((f) => f.id === fileId)?.label ?? "file"
     const chap = chapter.trim()
     const scopeKind = chap ? "chapters" : "books"
     const scope = chap ? [{ fileId, chapter: chap }] : [{ fileId }]
@@ -207,7 +226,7 @@ export function AssignWork({
           <Field>
             <FieldLabel htmlFor="assign-work-book">Book</FieldLabel>
             <Select
-              items={sortedFiles.map((f) => ({ value: f.id, label: f.name }))}
+              items={sortedFiles.map((f) => ({ value: f.id, label: f.label }))}
               value={fileId}
               onValueChange={(v) => setFileId(v ?? "")}
               disabled={busy}
@@ -218,7 +237,7 @@ export function AssignWork({
               <SelectContent>
                 <SelectGroup>
                   {sortedFiles.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>
                   ))}
                 </SelectGroup>
               </SelectContent>

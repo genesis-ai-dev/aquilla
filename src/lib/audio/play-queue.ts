@@ -47,6 +47,10 @@ export function useQueueState(): QueueState {
 // re-render the playback bar's scrubber, not every QueueState consumer.
 
 export interface QueueProgress {
+  /** Seconds on the current CLIP's clock. For an imported media file (one
+   *  shared clip, sections windowed by trims) this IS file-timeline seconds,
+   *  and `duration` is the file length — the transport + timeline playhead
+   *  read it directly. (AQU-646) */
   currentTime: number
   duration: number
   /** Playback speed multiplier (persists across tracks). */
@@ -74,11 +78,27 @@ export function useQueueProgress(): QueueProgress {
   return useSyncExternalStore(subscribeProgress, () => progress, () => progress)
 }
 
+/** Imperative progress read (e.g. ruler drags) — same object the hook returns. */
+export function getQueueProgress(): QueueProgress {
+  return progress
+}
+
 // ── Single owned audio element ──────────────────────────────────────────────
 
 let currentAudio: HTMLAudioElement | null = null
 let currentUrl: string | null = null
 let currentSeq = 0
+
+// AQU-646: mutable current-segment state, readable by the element handlers.
+// With seamless same-clip advance the element OUTLIVES the cell it was opened
+// for — handlers must not close over a stale index/trim, they read these.
+let currentIndex = -1
+let currentTrim: { start: number; end: number } | null = null
+/** The cell ATTACHMENT url (e.g. frontier-audio://…) — NOT the resolved src,
+ *  so the streaming→blob fallback swap doesn't break same-clip matching. */
+let currentAttachmentUrl: string | null = null
+/** Seek target applied on loadedmetadata (Safari rejects pre-metadata seeks). */
+let pendingStartSeconds: number | null = null
 
 const coordinatorController: ActiveAudioController = {
   isPlaying: () => Boolean(currentAudio && !currentAudio.paused),
@@ -96,6 +116,10 @@ function disposeCurrent(): void {
     URL.revokeObjectURL(currentUrl)
     currentUrl = null
   }
+  currentIndex = -1
+  currentTrim = null
+  currentAttachmentUrl = null
+  pendingStartSeconds = null
   clearActiveAudioIf(coordinatorController)
   setProgress({ currentTime: 0, duration: 0 })
 }
@@ -208,7 +232,7 @@ async function resolveAudioSrc(
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-interface PlayContext {
+export interface PlayContext {
   cells: CellData[]
   projectId: string
   session: FrontierSession
@@ -251,7 +275,115 @@ export function trimWindowForCell(cell: CellData): { start: number; end: number 
   return { start: startTime, end: endTime }
 }
 
-async function playAt(index: number): Promise<void> {
+// ── AQU-646: pure planners (exported for tests) ─────────────────────────────
+
+/** Seamless-advance rewind tolerance: a next window starting slightly before
+ *  the current position plays straight on; a genuinely overlapping
+ *  diarization turn rewinds to its start. Must exceed the ~250ms timeupdate
+ *  tick, or plain overshoot at a boundary would stutter-rewind. */
+const REWIND_EPSILON_SEC = 0.35
+
+export type SeekPlan =
+  | { kind: "none" }
+  | { kind: "element"; index: number; seconds: number }
+  | { kind: "seamless"; index: number; seconds: number }
+  | { kind: "open"; index: number; seconds: number }
+
+export type AdvancePlan =
+  | { kind: "stop" }
+  | { kind: "seamless"; index: number; seekTo?: number }
+  | { kind: "open"; index: number }
+
+/**
+ * Index of the media cell owning file-time `seconds`: the first playable media
+ * cell whose window END is past it — [start, end), so a shared tiled boundary
+ * belongs to the LATER cell, and on legacy gap-y files a gap resolves to the
+ * FOLLOWING cell. -1 when past the last window (or no windowed cells).
+ */
+export function findCellAtTime(cells: CellData[], seconds: number): number {
+  for (let i = 0; i < cells.length; i++) {
+    if (!pickPlayableAudio(cells[i])) continue
+    const w = trimWindowForCell(cells[i])
+    if (!w) continue
+    if (seconds < w.end) return i
+  }
+  return -1
+}
+
+/** How to reach file-time `seconds` from the current cell/clip. */
+export function planSeek(
+  cells: CellData[],
+  currentIdx: number,
+  attachmentUrl: string | null,
+  seconds: number,
+): SeekPlan {
+  const target = findCellAtTime(cells, seconds)
+  if (target < 0) {
+    // No media window owns this time — a non-media current take can still
+    // seek its own element (today's seekQueue semantics).
+    const cur = cells[currentIdx]
+    if (cur && pickPlayableAudio(cur) && !trimWindowForCell(cur)) {
+      return { kind: "element", index: currentIdx, seconds }
+    }
+    return { kind: "none" }
+  }
+  if (target === currentIdx) return { kind: "element", index: target, seconds }
+  const targetUrl = pickPlayableAudio(cells[target])?.url
+  const sameClip = attachmentUrl != null && targetUrl === attachmentUrl
+  return sameClip
+    ? { kind: "seamless", index: target, seconds }
+    : { kind: "open", index: target, seconds }
+}
+
+/**
+ * What to do when the current cell's window ends (or the clip ends). Same
+ * shared clip → adopt the next cell in place and keep playing (skipping any
+ * windows the ~250ms timeupdate overshoot already passed); different clip →
+ * open it; nothing left → stop. On legacy gap-y files the next window starts
+ * ahead of the current position — no seek is planned, so the gap audio simply
+ * plays through (the data-migration-free fix for pre-tiling imports).
+ */
+export function planAdvance(
+  cells: CellData[],
+  currentIdx: number,
+  attachmentUrl: string | null,
+  currentTimeSeconds: number,
+): AdvancePlan {
+  let next = findNextPlayable(cells, currentIdx + 1)
+  while (next >= 0) {
+    const url = pickPlayableAudio(cells[next])?.url
+    const w = trimWindowForCell(cells[next])
+    const sameClip = attachmentUrl != null && url === attachmentUrl
+    if (!sameClip || !w) return { kind: "open", index: next }
+    if (w.end > currentTimeSeconds) {
+      return w.start < currentTimeSeconds - REWIND_EPSILON_SEC
+        ? { kind: "seamless", index: next, seekTo: w.start }
+        : { kind: "seamless", index: next }
+    }
+    next = findNextPlayable(cells, next + 1)
+  }
+  return { kind: "stop" }
+}
+
+/** Make `index` the current cell WITHOUT touching the audio element's source —
+ *  the seamless-advance/seek primitive for cells sharing one clip. */
+function adoptCell(index: number, seekTo?: number): void {
+  const ctx = activeContext
+  const audio = currentAudio
+  if (!ctx || !audio) return
+  const cell = ctx.cells[index]
+  if (!cell) return
+  currentIndex = index
+  currentTrim = trimWindowForCell(cell)
+  setState({ kind: audio.paused ? "paused" : "playing", cellIndex: index, cellId: cell.id })
+  ctx.onCellChange?.(index, cell.id)
+  if (seekTo != null) {
+    audio.currentTime = seekTo
+    setProgress({ currentTime: seekTo })
+  }
+}
+
+async function playAt(index: number, opts: { atSeconds?: number; autoplay?: boolean } = {}): Promise<void> {
   const ctx = activeContext
   if (!ctx) return
   const cell = ctx.cells[index]
@@ -269,7 +401,27 @@ async function playAt(index: number): Promise<void> {
       disposeCurrent()
       return
     }
-    return playAt(next)
+    return playAt(next, { autoplay: opts.autoplay })
+  }
+
+  const autoplay = opts.autoplay ?? true
+
+  // AQU-646 seamless fast path: the target cell shares the clip the element
+  // already has open (imported media file) — adopt it in place instead of
+  // disposing + recreating. No boundary hiccup; cross-cell scrubs are instant.
+  if (currentAudio && currentAttachmentUrl === playable.url) {
+    adoptCell(index)
+    const at = opts.atSeconds ?? currentTrim?.start
+    if (at != null && currentAudio) {
+      currentAudio.currentTime = at
+      setProgress({ currentTime: at })
+    }
+    if (autoplay && currentAudio.paused) {
+      try { await currentAudio.play() } catch { /* user-driven, ignore */ }
+    } else if (!autoplay && !currentAudio.paused) {
+      currentAudio.pause()
+    }
+    return
   }
 
   disposeCurrent()
@@ -293,35 +445,53 @@ async function playAt(index: number): Promise<void> {
   const audio = new Audio(resolved.src)
   currentAudio = audio
   currentUrl = resolved.objectUrl
+  currentAttachmentUrl = playable.url
+  currentIndex = index
+  currentTrim = trimWindowForCell(cell)
+  pendingStartSeconds = opts.atSeconds ?? null
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  const trim = trimWindowForCell(cell)
-  setProgress({ currentTime: trim?.start ?? 0, duration: 0 })
+  setProgress({ currentTime: pendingStartSeconds ?? currentTrim?.start ?? 0, duration: 0 })
 
-  const advance = () => {
-    const next = findNextPlayable(ctx.cells, index + 1)
-    if (next < 0) {
+  // Handlers read the MUTABLE module state (currentIndex/currentTrim) — with
+  // seamless adoption the element outlives the cell it was opened for, so a
+  // closure over `index`/`trim` would go stale.
+  const stateCell = (): { cellIndex: number; cellId: string } => {
+    const c = activeContext?.cells[currentIndex]
+    return { cellIndex: currentIndex, cellId: c?.id ?? cell.id }
+  }
+  const applyAdvance = (plan: AdvancePlan): void => {
+    if (plan.kind === "seamless") {
+      // Same clip: audio keeps playing straight through the boundary — just
+      // make the next cell current (and rewind only for a real overlap).
+      adoptCell(plan.index, plan.seekTo)
+      return
+    }
+    audio.onpause = null // don't let the pause handler flash a "paused" state
+    audio.pause()
+    if (plan.kind === "stop") {
       setState(IDLE)
       disposeCurrent()
       return
     }
-    void playAt(next)
+    void playAt(plan.index)
   }
 
-  if (trim) {
-    audio.onloadedmetadata = () => {
-      if (seq !== currentSeq) return
-      audio.currentTime = trim.start
+  audio.onloadedmetadata = () => {
+    if (seq !== currentSeq) return
+    const target = pendingStartSeconds ?? currentTrim?.start
+    pendingStartSeconds = null
+    if (target != null) {
+      const d = audio.duration
+      audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(target, d)) : target
     }
   }
   audio.ontimeupdate = () => {
     if (seq !== currentSeq) return
     // A media segment's window ends before the shared clip does — treat
-    // reaching trim.end as this cell's "ended" and move to the next cell.
-    if (trim && audio.currentTime >= trim.end) {
-      audio.onpause = null // don't let the pause handler flash a "paused" state
-      audio.pause()
-      advance()
+    // reaching the window end as this cell's "ended" and advance.
+    if (currentTrim && audio.currentTime >= currentTrim.end) {
+      applyAdvance(planAdvance(activeContext?.cells ?? [], currentIndex, currentAttachmentUrl, audio.currentTime))
       return
     }
     setProgress({ currentTime: audio.currentTime })
@@ -334,16 +504,17 @@ async function playAt(index: number): Promise<void> {
   audio.onplay = () => {
     if (seq !== currentSeq) return
     setActiveAudio(coordinatorController)
-    setState({ kind: "playing", cellIndex: index, cellId: cell.id })
+    setState({ kind: "playing", ...stateCell() })
   }
   audio.onpause = () => {
     if (seq !== currentSeq) return
     if (audio.ended) return
-    setState({ kind: "paused", cellIndex: index, cellId: cell.id })
+    setState({ kind: "paused", ...stateCell() })
   }
   audio.onended = () => {
     if (seq !== currentSeq) return
-    advance()
+    const at = Number.isFinite(audio.duration) ? audio.duration : Number.POSITIVE_INFINITY
+    applyAdvance(planAdvance(activeContext?.cells ?? [], currentIndex, currentAttachmentUrl, at))
   }
   let triedBlobFallback = false
   audio.onerror = () => {
@@ -373,6 +544,13 @@ async function playAt(index: number): Promise<void> {
     setState({ kind: "error", message: "Audio failed to load", cellId: cell.id })
   }
 
+  if (!autoplay) {
+    // AQU-646 cue-without-play: element loaded + positioned, transport shows
+    // paused at the cue point; play/resumeQueue starts exactly there. The
+    // coordinator is only claimed onplay, so a cue never steals active audio.
+    setState({ kind: "paused", cellIndex: index, cellId: cell.id })
+    return
+  }
   try {
     await audio.play()
   } catch (e) {
@@ -392,6 +570,68 @@ export function startQueue(ctx: PlayContext, fromIndex: number): void {
     return
   }
   void playAt(start)
+}
+
+/**
+ * AQU-646: seek in FILE-TIMELINE seconds (== clip seconds for imported media
+ * files). Locates the cell owning the target time, adopts/opens it, and
+ * positions playback exactly there — the transport scrubber, ruler, and
+ * click-a-section all route through this. `play`: true = ensure playing,
+ * false = cue paused, undefined = preserve the current playing/paused state.
+ * No-op when the queue is idle — use startQueueAtTime from idle.
+ */
+export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}): void {
+  const ctx = activeContext
+  if (!ctx) return
+  if (state.kind === "idle" || state.kind === "error") return
+  const idx = state.cellIndex
+  const wantPlay = opts.play ?? (state.kind === "playing" || state.kind === "loading")
+  const plan = planSeek(ctx.cells, idx, currentAttachmentUrl, Math.max(0, seconds))
+  if (plan.kind === "none") return
+  if (!currentAudio) {
+    // Still loading — reopen at the target instead of racing the resolve.
+    void playAt(plan.index, { atSeconds: plan.seconds, autoplay: wantPlay })
+    return
+  }
+  if (plan.kind === "element") {
+    seekQueue(plan.seconds)
+    syncPlayState(wantPlay)
+    return
+  }
+  if (plan.kind === "seamless") {
+    adoptCell(plan.index)
+    seekQueue(plan.seconds)
+    syncPlayState(wantPlay)
+    return
+  }
+  void playAt(plan.index, { atSeconds: plan.seconds, autoplay: wantPlay })
+}
+
+function syncPlayState(wantPlay: boolean): void {
+  const audio = currentAudio
+  if (!audio) return
+  if (wantPlay && audio.paused) void audio.play().catch(() => { /* user-driven */ })
+  else if (!wantPlay && !audio.paused) audio.pause()
+}
+
+/** AQU-646: start (or cue, with play:false) the queue at a file-timeline
+ *  position — clicking a section / the ruler while the queue is idle. Falls
+ *  back to the first playable cell when no window owns the time. */
+export function startQueueAtTime(ctx: PlayContext, seconds: number, opts: { play?: boolean } = {}): void {
+  activeContext = ctx
+  const at = Math.max(0, seconds)
+  const target = findCellAtTime(ctx.cells, at)
+  if (target < 0) {
+    const start = findNextPlayable(ctx.cells, 0)
+    if (start < 0) {
+      setState(IDLE)
+      disposeCurrent()
+      return
+    }
+    void playAt(start, { autoplay: opts.play ?? true })
+    return
+  }
+  void playAt(target, { atSeconds: at, autoplay: opts.play ?? true })
 }
 
 export function pauseQueue(): void {

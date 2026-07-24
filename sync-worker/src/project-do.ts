@@ -34,6 +34,7 @@ import {
   type ProjectDoServerMessage,
 } from "./project-do-handlers"
 import type { OutboxRawEvent } from "./project-do-types"
+import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
 import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
 
@@ -78,7 +79,14 @@ interface DOEnv {
   HYPERDRIVE?: { connectionString: string }
   /** Test seam: inject a fake AquillaDb directly, bypassing HYPERDRIVE. */
   AQUILLA_PG?: AquillaDb
+  /** Identity worker base URL for the Monday integration push nudge
+   *  (monday-notify.ts). Absent → the nudge is a no-op. */
+  AUTH_WORKER_URL?: string
 }
+
+/** Min gap between Monday push nudges per DO instance. Identity debounces and
+ *  dirty-flags on its side too; this only caps subrequest chatter. */
+const MONDAY_NOTIFY_THROTTLE_MS = 60_000
 
 export class ProjectSync extends DurableObject<DOEnv> {
   private connections = new Map<WebSocket, ConnectionState>()
@@ -100,6 +108,9 @@ export class ProjectSync extends DurableObject<DOEnv> {
    * through the ProjectSync DO" means concretely.
    */
   private linkSyncInFlight: Promise<MirrorSyncResult> | null = null
+  /** Monday push nudge throttle (in-memory; eviction resets it, which is fine —
+   *  identity's cron reconciliation covers gaps). */
+  private lastMondayNotifyAt = 0
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
@@ -174,8 +185,16 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // e.g. archive-broadcast) or a broadcast.batch envelope carrying all
       // of a project's frames for one POST /events request. Clients receive
       // one WS frame per message either way.
-      for (const msg of unpackBroadcastBody(body)) {
+      const frames = unpackBroadcastBody(body)
+      for (const msg of frames) {
         this.broadcastToAll(msg)
+      }
+      // Monday integration nudge: content frames imply progress may have
+      // changed. Throttled + best-effort; never blocks the broadcast reply.
+      const mondayProject = mondayNotifyProject(frames)
+      if (mondayProject && Date.now() - this.lastMondayNotifyAt > MONDAY_NOTIFY_THROTTLE_MS) {
+        this.lastMondayNotifyAt = Date.now()
+        this.ctx.waitUntil(notifyMondayProgress(this.env, mondayProject))
       }
       return Response.json({ ok: true, recipients: this.connections.size })
     }

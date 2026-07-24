@@ -1016,6 +1016,53 @@ CREATE TABLE IF NOT EXISTS project_brief_history (
   PRIMARY KEY (project_id, version)
 );
 
+-- 0069: Monday.com integration. One OAuth connection per org (token AES-GCM
+-- encrypted, never plaintext), one board link per project (config =
+-- MondayMapping, see auth-worker/src/lib/monday/types.ts), and an entity →
+-- Monday-item map for idempotent upserts.
+CREATE TABLE IF NOT EXISTS monday_connections (
+  id TEXT PRIMARY KEY,                -- uuid
+  org_id TEXT NOT NULL UNIQUE,
+  monday_account_id TEXT,
+  monday_account_slug TEXT,
+  monday_user_id TEXT,
+  monday_user_name TEXT,
+  access_token_enc TEXT NOT NULL,     -- AES-GCM, base64(iv||ciphertext), key = SHA-256(SECRET_KEY || ":monday-token")
+  scopes TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS monday_board_links (
+  id TEXT PRIMARY KEY,                -- uuid
+  project_id TEXT NOT NULL UNIQUE,
+  connection_id TEXT NOT NULL REFERENCES monday_connections(id) ON DELETE CASCADE,
+  board_id TEXT NOT NULL,
+  board_name TEXT,
+  config JSONB NOT NULL,              -- MondayMapping (lib/monday/types.ts)
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  webhook_ids JSONB NOT NULL DEFAULT '[]'::jsonb,   -- Monday webhook ids we created
+  board_structure JSONB,              -- cached columns/groups {fetchedAt, columns:[{id,title,type,settings_str}], groups:[{id,title}]}
+  structure_stale BOOLEAN NOT NULL DEFAULT FALSE,
+  dirty_at TIMESTAMPTZ,               -- set when progress changed but push was debounced
+  last_pushed_at TIMESTAMPTZ,
+  last_push_status TEXT,              -- 'ok' | 'error'
+  last_push_error TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_monday_board_links_dirty ON monday_board_links (dirty_at) WHERE dirty_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS monday_item_links (
+  link_id TEXT NOT NULL REFERENCES monday_board_links(id) ON DELETE CASCADE,
+  entity_kind TEXT NOT NULL,          -- 'project' | 'file'
+  entity_id TEXT NOT NULL,            -- project_id or file_id
+  monday_item_id TEXT NOT NULL,
+  PRIMARY KEY (link_id, entity_kind, entity_id)
+);
+
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new
 -- inserts don't collide with migrated ids:

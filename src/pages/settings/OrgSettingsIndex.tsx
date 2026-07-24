@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Archive, Building2, Download, EyeOff, KeyRound, UserCheck, Users, UsersRound } from "lucide-react"
+import { Archive, Building2, Download, EyeOff, KeyRound, UserCheck, Users, UsersRound, Workflow } from "lucide-react"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -43,6 +43,7 @@ export function OrgSettingsIndex() {
             hint={allowSelfAssignment ? "Self-assign on" : "Leads only"}
           />
           <NavRow to="/settings/providers" icon={KeyRound} title="AI provider keys" hint="Org keys" />
+          <NavRow to="/settings/monday" icon={Workflow} title="Monday.com" hint="Board sync" />
         </NavList>
 
         <NavList label="People & Projects">

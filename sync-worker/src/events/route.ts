@@ -32,7 +32,8 @@ import {
 } from './event-projection'
 import {
   GENESIS_PARENT_KEY,
-  parentKeyOf,
+  eventQualifiedParentKey,
+  qualifyParentKeyBase,
   readClaimWinners,
   slotKey,
   type ChainSlot,
@@ -315,11 +316,23 @@ function cellKeyOf(projectId: string, fileId: string, cellId: string): string {
 /**
  * Batched equivalent of `isWinningChild` (event-projection.ts): the earliest
  * committed chain-mutating sibling per AD-2 slot, for every cell touched by
- * this request, in ONE SELECT. Keyed by `slotKey()`; a candidate wins its
- * slot iff the slot is absent or maps to the candidate's own id (idempotent
- * replay). The WHERE narrows by (project, file, cell) — the prefix of
- * idx_events_parent_lookup — and the window ranks within each parent slot
- * with the same (server_seq, id) tie-break the per-event query used.
+ * this request, in ONE SELECT. Keyed by `slotKey()` with the SAME side/lane-
+ * qualified parent key the claim insert and isWinningChild use; a candidate
+ * wins its slot iff the slot is absent or maps to the candidate's own id
+ * (idempotent replay).
+ *
+ * Qualification runs in JS (payload is TEXT — no portable jsonb cast), so the
+ * SQL window ranks within the UNQUALIFIED (cell, parent) slot and returns the
+ * first 100 rows per slot for JS to split by side/lane — mirroring the
+ * per-event isWinningChild's LIMIT 100. A truncated scan can only produce a
+ * false "winner"; the atomic chain_claims gate remains authoritative for
+ * in-flight races.
+ *
+ * Regression note: this prefetch originally kept the SQL's unqualified rn=1
+ * winner, silently re-introducing the pre-AQU-538 arbitration for the whole
+ * route — the second lane's first commit (or a source correction after a
+ * target commit) shares its parent with an earlier sibling in another
+ * namespace, lost the slot, and was dead-lettered as stale.
  */
 async function prefetchChainWinners(
   db: AquillaDb,
@@ -335,8 +348,8 @@ async function prefetchChainWinners(
 
   const { results } = await db
     .prepare(
-      `SELECT id, project_id, file_id, cell_id, parent_key FROM (
-         SELECT id, project_id, file_id, cell_id,
+      `SELECT id, project_id, file_id, cell_id, parent_key, kind, payload, server_seq FROM (
+         SELECT id, project_id, file_id, cell_id, kind, payload, server_seq,
                 COALESCE(parent_id, '${GENESIS_PARENT_KEY}') AS parent_key,
                 ROW_NUMBER() OVER (
                   PARTITION BY project_id, file_id, cell_id,
@@ -347,7 +360,7 @@ async function prefetchChainWinners(
          WHERE kind IN (${kindList})
            AND (project_id, file_id, cell_id) IN (${placeholders})
        ) ranked
-       WHERE rn = 1`,
+       WHERE rn <= 100`,
     )
     .bind(...binds)
     .all<{
@@ -356,19 +369,36 @@ async function prefetchChainWinners(
       file_id: string
       cell_id: string
       parent_key: string
+      kind: string
+      payload: string
+      server_seq: number
     }>()
 
+  // Reduce to the earliest (server_seq, id) row per QUALIFIED slot. Rows
+  // arrive grouped per unqualified slot but interleaved across slots, so the
+  // min is tracked explicitly rather than relying on scan order.
+  const best = new Map<string, { id: string; serverSeq: number }>()
   for (const r of results) {
-    winners.set(
-      slotKey({
-        projectId: r.project_id,
-        fileId: r.file_id,
-        cellId: r.cell_id,
-        parentKey: r.parent_key,
-      }),
-      r.id,
-    )
+    let payload: unknown = null
+    try {
+      payload = JSON.parse(r.payload)
+    } catch {
+      // Invalid historical payloads cannot qualify a named target lane, but
+      // still arbitrate deterministically in their side/default namespace
+      // (same policy as isWinningChild).
+    }
+    const key = slotKey({
+      projectId: r.project_id,
+      fileId: r.file_id,
+      cellId: r.cell_id,
+      parentKey: qualifyParentKeyBase(r.parent_key, r.kind, payload),
+    })
+    const prev = best.get(key)
+    if (!prev || r.server_seq < prev.serverSeq || (r.server_seq === prev.serverSeq && r.id < prev.id)) {
+      best.set(key, { id: r.id, serverSeq: r.server_seq })
+    }
   }
+  for (const [key, row] of best) winners.set(key, row.id)
   return winners
 }
 
@@ -774,12 +804,16 @@ export async function handleEventsWriteRequest(
     // wins iff its slot has no committed winner or the winner is itself.
     let updateProjection = true
     if (isChainMutating && candidate.fileId && candidate.cellId) {
+      // Side/lane-qualified slot — MUST match the qualification the claim
+      // insert (handlers/cell-events.ts) and isWinningChild use, or a second
+      // lane's first commit / a source correction sharing a target commit's
+      // parent is judged a sibling of the other namespace and dead-lettered.
       const winner = chainWinners.get(
         slotKey({
           projectId: candidate.projectId,
           fileId: candidate.fileId,
           cellId: candidate.cellId,
-          parentKey: parentKeyOf(candidate.parentId),
+          parentKey: eventQualifiedParentKey(candidate.parentId, candidate.kind, candidate.payload),
         }),
       )
       updateProjection = winner === undefined || winner === candidate.id

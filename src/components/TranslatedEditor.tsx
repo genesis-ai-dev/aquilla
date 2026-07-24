@@ -53,6 +53,12 @@ import {
 
 /** Window before a quiet keystroke pause counts as a commit-worthy idle. */
 export const COMMIT_IDLE_MS = 1_200
+/**
+ * AQU-664: much shorter debounce for the live terminology-violation check. The
+ * blot recomputes off the live buffer at this cadence so a forbidden rendering
+ * lights up nearly as-you-type instead of waiting on the commit-idle window.
+ */
+export const LIVE_CHECK_MS = 150
 const PRESENCE_SELECTION_THROTTLE_MS = 120
 export const PRESENCE_DRAFT_IDLE_MS = 650
 export const PRESENCE_WORD_BATCH_SIZE = 2
@@ -126,6 +132,15 @@ interface TranslatedEditorProps {
   /** Initial content. Plain string fallback used when html is absent. */
   initialHtml?: string
   initialPlain: string
+  /**
+   * AQU-667: the current authoritative value is an AI draft (sparkle / batch
+   * "Draft all") that the store — not this editor — produced. When set and the
+   * value changes, the editor absorbs it *even while focused* so the prediction
+   * is visible and a later blur can't commit the pre-draft text over it. A
+   * human's own in-flight edit commits with `aiDrafted=false`, so it keeps the
+   * normal focused-editing / discard-and-reload banner path instead.
+   */
+  aiDrafted?: boolean
   onCommit: (snapshot: TranslatedEditorCommit) => void
   onFocus?: () => void
   onBlur?: () => void
@@ -143,6 +158,19 @@ interface TranslatedEditorProps {
   ruleSeverity?: Map<string, "major" | "minor">
   waivedRuleIds?: Set<string>
   onRuleClick?: (ruleId: string, anchor: HTMLElement) => void
+  /**
+   * AQU-664: hover ("wave over") a violation blot to preview the rule
+   * explanation. Fires with the blot's `data-rule-id` + the blot element on
+   * mouse-in, and `(null, null)` on mouse-out so the caller can dismiss the
+   * popover reliably. Mirrors the footnote-marker hover handlers below.
+   */
+  onRuleHover?: (ruleId: string | null, anchor: HTMLElement | null) => void
+  /**
+   * AQU-664: called on a short debounce with the live editor text (before the
+   * ~1.2s commit-idle debounce fires) so the caller can recompute terminology
+   * violations off the live buffer and surface the inline blot as-you-type.
+   */
+  onLiveTextChange?: (text: string) => void
   audioTimings?: WordTiming[]
   /** Audio playback time in seconds. Drives the karaoke decoration. */
   audioCurrentTime?: number
@@ -199,6 +227,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   cellId,
   initialHtml,
   initialPlain,
+  aiDrafted = false,
   onCommit,
   onFocus,
   onBlur,
@@ -215,6 +244,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   ruleSeverity,
   waivedRuleIds,
   onRuleClick,
+  onRuleHover,
+  onLiveTextChange,
   audioTimings,
   audioCurrentTime,
   onSeekToTime,
@@ -280,6 +311,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { isReadOnlyRef.current = isReadOnly }, [isReadOnly])
 
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // AQU-664: emits live text on a short debounce so terminology blots can be
+  // recomputed off the live buffer, well ahead of the ~1.2s commit-idle path.
+  const liveTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const presenceDraftIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSelectionKeyRef = useRef<string | null>(null)
@@ -292,10 +326,33 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const pendingCommitRef = useRef<TranslatedEditorCommit | null>(null)
   const onCommitRef = useRef(onCommit)
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
+  // AQU-667: mirrors read by the blur handler / re-hydrate effect so both can
+  // reason about "has an authoritative AI draft landed that this editor has not
+  // yet absorbed?" without recreating the editor.
+  const aiDraftedRef = useRef(aiDrafted)
+  useEffect(() => { aiDraftedRef.current = aiDrafted }, [aiDrafted])
+  const initialPlainRef = useRef(initialPlain)
+  useEffect(() => { initialPlainRef.current = initialPlain }, [initialPlain])
+  // The last stored value we hydrated the editor from. Declared here (not next
+  // to its effect) so the blur handler can compare against it: an editor still
+  // holding pre-draft text has NOT absorbed a newer authoritative value while
+  // `initialPlain !== lastHydratedPlainRef`.
+  const lastHydratedPlainRef = useRef(initialPlain)
+  const onLiveTextChangeRef = useRef(onLiveTextChange)
+  useEffect(() => { onLiveTextChangeRef.current = onLiveTextChange }, [onLiveTextChange])
+  const onRuleHoverRef = useRef(onRuleHover)
+  useEffect(() => { onRuleHoverRef.current = onRuleHover }, [onRuleHover])
 
   const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
+  // NOTE on `isDestroyed` guards here and in the effects below: `useEditor`'s
+  // deps are [cellId], so a call site that swaps cellId on ONE mounted
+  // instance (the Media details panel) destroys the old editor while the new
+  // one arrives a render later. Effects keyed on other changed deps (content,
+  // readonly, direction) re-run inside that window with the stale DESTROYED
+  // instance from their closure — non-null, but its view/command manager are
+  // gone, so `.commands`/`.view` dereferences crash the workspace boundary.
   const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
-    if (!editorInstance) return
+    if (!editorInstance || editorInstance.isDestroyed) return
     const next = directionModeRef.current === "auto"
       ? detectStrongTextDirection(editorInstance.getText()) ?? textDirectionRef.current
       : textDirectionRef.current
@@ -418,13 +475,27 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         mouseover(view, event) {
           const target = event.target as HTMLElement | null
           const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
-          if (!marker || !view.dom.contains(marker)) return false
-          const index = Number(marker.dataset.footnoteIndex)
-          onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+          if (marker && view.dom.contains(marker)) {
+            const index = Number(marker.dataset.footnoteIndex)
+            onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+            return false
+          }
+          // AQU-664: hovering a violation blot previews its rule explanation.
+          const blot = target?.closest<HTMLElement>("[data-rule-id]")
+          if (blot && view.dom.contains(blot)) {
+            onRuleHoverRef.current?.(blot.getAttribute("data-rule-id"), blot)
+          }
           return false
         },
         mouseout(view, event) {
           const target = event.target as HTMLElement | null
+          const blot = target?.closest<HTMLElement>("[data-rule-id]")
+          if (blot && view.dom.contains(blot)) {
+            // AQU-664: dismiss the explanation once the pointer leaves the blot
+            // (ignore moves within the same blot's own children).
+            const related = event.relatedTarget as HTMLElement | null
+            if (!related || !blot.contains(related)) onRuleHoverRef.current?.(null, null)
+          }
           const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
           if (!marker || !view.dom.contains(marker)) return false
           const related = event.relatedTarget as HTMLElement | null
@@ -567,6 +638,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         lastCommittedRef.current = text
         onCommitRef.current({ value: text, valueHtml: html })
       }, COMMIT_IDLE_MS)
+      // AQU-664: publish the live buffer on a much shorter debounce so the
+      // caller can recompute terminology blots off it, well before the commit.
+      if (onLiveTextChangeRef.current) {
+        if (liveTextTimerRef.current !== null) clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = setTimeout(() => {
+          onLiveTextChangeRef.current?.(text)
+        }, LIVE_CHECK_MS)
+      }
     },
     onSelectionUpdate({ editor, transaction }) {
       // A typing transaction also moves the caret; onUpdate owns its batched
@@ -594,10 +673,31 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
       }
+      // AQU-664: flush the live buffer immediately on blur (so the blot tracks
+      // the final text without waiting on the debounce) and dismiss any hover
+      // explanation the pointer left behind.
+      if (liveTextTimerRef.current !== null) {
+        clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = null
+      }
+      onLiveTextChangeRef.current?.(editor.getText())
+      onRuleHoverRef.current?.(null, null)
       const text = editor.getText()
       const html = editor.getHTML()
       pendingCommitRef.current = null
-      if (text !== lastCommittedRef.current) {
+      // AQU-667 invariant: a blur must never commit text older than the newest
+      // authoritative draft for this cell. If an AI draft is pending in the
+      // store that this editor has not yet absorbed (its value differs from what
+      // we last hydrated) and the editor still holds the pre-draft text,
+      // committing here would chain a stale/blank revert onto the draft — the
+      // sparkle/batch prediction "randomly doesn't save". Skip: the draft is
+      // already durable in the store + outbox and the re-hydrate effect absorbs
+      // it on the next render.
+      const hasUnabsorbedDraft =
+        aiDraftedRef.current &&
+        initialPlainRef.current !== lastHydratedPlainRef.current &&
+        text !== initialPlainRef.current
+      if (!hasUnabsorbedDraft && text !== lastCommittedRef.current) {
         lastCommittedRef.current = text
         onCommitRef.current({ value: text, valueHtml: html })
       }
@@ -618,6 +718,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       if (presenceDraftIdleTimerRef.current !== null) {
         clearTimeout(presenceDraftIdleTimerRef.current)
         presenceDraftIdleTimerRef.current = null
+      }
+      if (liveTextTimerRef.current !== null) {
+        clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = null
       }
       lastSelectionKeyRef.current = null
       onSelectionChangeRef.current?.(null)
@@ -732,7 +836,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // would misread that load-time normalization as a user edit and emit a
   // phantom revision on the next blur, corrupting files just by opening them.
   // Seed once per editor instance (one editor per cellId). (AQU-216)
-  const lastHydratedPlainRef = useRef(initialPlain)
+  // (`lastHydratedPlainRef` is declared above so the blur handler can read it.)
   useEffect(() => {
     if (!editor) return
     lastCommittedRef.current = editor.getText()
@@ -740,21 +844,44 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor])
 
-  // Re-hydrate only when the stored value genuinely changes (a remote
-  // event.applied landed while we weren't editing) — keyed on the raw
-  // `initialPlain` so an escaping-only difference never forces a reload. We
-  // never overwrite if the editor is focused — that's what the banner is for.
+  // Re-hydrate only when the stored value genuinely changes — keyed on the raw
+  // `initialPlain` so an escaping-only difference never forces a reload.
+  //
+  // We normally never overwrite a focused editor — that's what the banner is
+  // for. AQU-667 EXCEPTION: an authoritative AI draft (sparkle / batch "Draft
+  // all") can land on this cell *while it is focused*. That draft lives in the
+  // store but is invisible inside the editor, and a later blur would commit the
+  // editor's stale pre-draft text over it (the prediction "randomly doesn't
+  // save"). So when the incoming value is an AI draft, absorb it even while
+  // focused, caret to end so the next keystroke edits the prediction — not the
+  // pre-prediction text. `aiDrafted` is the gate: a human's own in-flight edit
+  // commits with `aiDrafted=false`, so live typing is never yanked out.
   useEffect(() => {
-    if (!editor) return
-    if (editor.isFocused) return
+    // isDestroyed: see applyEditorDirection — a stale destroyed instance can
+    // reach this effect when initialPlain changes during an in-place cellId
+    // swap. Skip it; the replacement editor is created with the new
+    // initialContent and this effect re-runs when its identity lands.
+    if (!editor || editor.isDestroyed) return
     if (initialPlain === lastHydratedPlainRef.current) return
+    if (editor.isFocused && !aiDrafted) return
+    const wasFocused = editor.isFocused
     lastHydratedPlainRef.current = initialPlain
     editor.commands.setContent(initialContent)
+    // Our own hydration must not schedule a phantom commit: clear any idle timer
+    // / pending snapshot the setContent onUpdate may have armed, so a stray
+    // commit can't fire the just-absorbed value back through the write path.
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    pendingCommitRef.current = null
+    if (wasFocused) editor.commands.focus("end")
     lastCommittedRef.current = editor.getText()
-  }, [editor, initialContent, initialPlain])
+  }, [editor, initialContent, initialPlain, aiDrafted])
 
   useEffect(() => {
-    editor?.setEditable(!isReadOnly)
+    if (!editor || editor.isDestroyed) return
+    editor.setEditable(!isReadOnly)
   }, [editor, isReadOnly])
 
   const [, forceEditorStateUpdate] = useState(0)

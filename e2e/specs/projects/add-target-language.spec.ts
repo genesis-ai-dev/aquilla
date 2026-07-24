@@ -94,4 +94,16 @@ test("add target language, switch lane, translate independently per lane", async
   // Switch to "es" again — the Spanish text persisted.
   await ws.switchLane("es")
   await expect(ws.cellRow(0)).toContainText(spanishText, { timeout: 5_000 })
+
+  // Reload and re-check BOTH lanes from the server projection. The in-memory
+  // optimistic shadow satisfied the assertions above even when the server had
+  // dead-lettered the es commit (the unqualified chain-slot regression behind
+  // the "saved but empty lane cell" bug) — only a fresh load proves the lane
+  // writes actually projected.
+  await alice.reload()
+  await ws.waitForEditor()
+  if ((await ws.readActiveLane()) !== "es") await ws.switchLane("es")
+  await expect(ws.cellRow(0)).toContainText(spanishText, { timeout: 10_000 })
+  await ws.switchLane("")
+  await expect(ws.cellRow(0)).toContainText(frenchText, { timeout: 10_000 })
 })

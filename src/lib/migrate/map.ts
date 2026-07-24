@@ -22,9 +22,14 @@ import {
   validateEventId,
 } from "./ids"
 import type { IngestEvent } from "./types"
+import { decodeHtmlEntities } from "../html-entities"
 
+// Project HTML down to the plain-text `value`. Strip tags, decode entities
+// (so `&nbsp;` etc. don't survive as literal ASCII in the plain string —
+// AQU-674), then collapse whitespace. Decode before whitespace-collapse so a
+// decoded `&nbsp;` folds into surrounding spaces.
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim()
+  return decodeHtmlEntities(html.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim()
 }
 
 function canonicalRefOf(cell: CodexCell): string | undefined {
@@ -35,6 +40,28 @@ function canonicalRefOf(cell: CodexCell): string | undefined {
   const gr = cell.metadata.data?.globalReferences
   if (gr && gr.length > 0) return gr[0]
   return undefined
+}
+
+// A cell soft-deleted in Codex is retained in the notebook's `cells` array with
+// `metadata.data.deleted === true` (the deletion is recorded as an edit on the
+// `metadata.data.deleted` path — see codex-editor merge/cells resolver). The
+// migration must respect that deletion; recreating the cell is what made deleted
+// paratextual cells reappear in Aquilla (AQU-673). Latest-edit-wins so a
+// delete-then-restore correctly reads as present.
+function isCellDeleted(cell: CodexCell | undefined): boolean {
+  if (!cell) return false
+  let latestTs = -Infinity
+  let latestVal: boolean | undefined
+  for (const e of cell.metadata.edits ?? []) {
+    if (e.editMap?.join(".") !== "metadata.data.deleted") continue
+    const ts = typeof e.timestamp === "number" ? e.timestamp : -Infinity
+    if (ts >= latestTs) {
+      latestTs = ts
+      latestVal = e.value === true
+    }
+  }
+  if (latestVal !== undefined) return latestVal
+  return cell.metadata.data?.deleted === true
 }
 
 function earliestEditTs(cell: CodexCell | undefined): number | undefined {
@@ -109,6 +136,12 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     const cellId = ordered.metadata.id
     const s = sourceById.get(cellId)
     const t = targetById.get(cellId)
+
+    // Skip cells deleted in Codex — do not recreate them, and do not advance the
+    // anchor chain through them, so surviving cells anchor to the prior live
+    // cell (AQU-673).
+    if (isCellDeleted(ordered) || isCellDeleted(t) || isCellDeleted(s)) continue
+
     const anchorCell = s ?? t ?? ordered
 
     // Source text: the paired source value, falling back to the cell's own
@@ -219,6 +252,7 @@ export function collectSpeakers(
   const cells = pair.target?.cells ?? pair.source?.cells ?? []
   const out: { cellId: string; speaker: string }[] = []
   for (const c of cells) {
+    if (isCellDeleted(c)) continue // deleted cells contribute no cast (AQU-673)
     const speaker = c.metadata.cellLabel?.trim()
     if (speaker) out.push({ cellId: c.metadata.id, speaker })
   }

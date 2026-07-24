@@ -41,9 +41,13 @@ export function creditsFor(rawCents: number, rail: Rail, cfg: Pick<CreditConfig,
  * Large values get locale-specific thousand separators.
  *
  * Examples: 0 → "0 cr", 42 → "42 cr", 1500 → "1,500 cr"
+ *
+ * Non-finite input (NaN/undefined/±Infinity — e.g. a not-yet-loaded or
+ * malformed credit value) is treated as 0 so the UI never renders "NaN cr".
  */
 export function formatCredits(n: number): string {
-  return `${Math.round(n).toLocaleString()} cr`
+  const value = Number.isFinite(n) ? n : 0
+  return `${Math.round(value).toLocaleString()} cr`
 }
 
 /**
@@ -55,5 +59,6 @@ export function formatCredits(n: number): string {
  */
 export function capUsagePct(used: number, cap: number): number {
   if (cap <= 0) return 0
+  if (!Number.isFinite(used)) return 0
   return Math.min(100, Math.max(0, Math.round((used / cap) * 100)))
 }

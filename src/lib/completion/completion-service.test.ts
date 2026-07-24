@@ -69,6 +69,57 @@ describe("buildPrompt", () => {
     // One complete example + the live source line.
     expect((messages[1].content.match(/Source: /g) || []).length).toBe(2)
   })
+
+  it("appends systemAddendum to the system message — after the rules block, custom prompts included", () => {
+    const rules: TranslationRule[] = [{
+      id: "r1", name: "r1", description: "", severity: "minor", source: "user",
+      scope: "project", enabled: true, createdAt: new Date().toISOString(),
+      check: { type: "target-forbids", targetPattern: "forbidden-word" },
+    }]
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: "Translate {sourceLanguage} to {targetLanguage}.",
+      sourceText: "test", examples: [], rules,
+      systemAddendum: "Footnote output: also return [n] lines.",
+    })
+    const sys = messages[0].content
+    expect(sys.startsWith("Translate English to French.")).toBe(true)
+    expect(sys.endsWith("Footnote output: also return [n] lines.")).toBe(true)
+    expect(sys.indexOf("forbidden-word")).toBeLessThan(sys.indexOf("Footnote output"))
+    // Never leaks into the user message.
+    expect(messages[1].content).not.toContain("Footnote output")
+  })
+
+  it("renders preSourceBlock in the user message before — never inside — the final Source: line", () => {
+    const messages = buildPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "Base[1] text.",
+      examples: [{ source: "God created", target: "Dieu crea" }],
+      precedingContext: [{ source: "prev src", target: "prev tgt" }],
+      preSourceBlock: "Source footnotes for the [n] markers in the source line below:\n[1] a note",
+    })
+    const user = messages[1].content
+    // The message still ends with the bare live-source frame; the block sits
+    // between the discourse window and the final Source: line.
+    expect(user.endsWith("Source: Base[1] text.\nTranslation:")).toBe(true)
+    const blockIdx = user.indexOf("Source footnotes for")
+    expect(blockIdx).toBeGreaterThan(user.indexOf("prev tgt"))
+    expect(blockIdx).toBeLessThan(user.lastIndexOf("Source: Base[1] text."))
+    // The block is not part of the system message.
+    expect(messages[0].content).not.toContain("Source footnotes for")
+  })
+
+  it("is byte-identical to the pre-addendum output when neither new param is passed", () => {
+    const options = {
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "Hello world",
+      examples: [{ source: "God created", target: "Dieu crea" }],
+    }
+    const plain = buildPrompt(options)
+    const withUndefined = buildPrompt({ ...options, systemAddendum: undefined, preSourceBlock: undefined })
+    expect(withUndefined).toEqual(plain)
+    expect(plain[1].content.endsWith("Source: Hello world\nTranslation:")).toBe(true)
+  })
 })
 
 describe("buildBatchPrompt", () => {

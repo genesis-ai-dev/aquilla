@@ -27,6 +27,8 @@ type SearchFn = (
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
 import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
+import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
 import { parseParagraphResponse } from "@/lib/completion/paragraph-protocol"
 import {
@@ -195,12 +197,17 @@ export function useCompletion(
     },
   }), [effectiveSettings.systemPrompt, modelName, provider, sourceLanguage, targetLanguage])
 
+  // AQU-670: resolves `true` only when the draft actually committed (the outbox
+  // enqueue succeeded), and `false` on any failure — commit/enqueue rejection,
+  // an abort, or an unconfigured provider. The single-cell sparkle flow reads
+  // this to decide whether to show the "Saved" confirmation, so a draft that
+  // never queued no longer reports success.
   const completeSingle = useCallback(async (
     cell: CellData,
     signal?: AbortSignal,
     opts?: { regenerate?: boolean },
-  ) => {
-    if (!isConfigured || !isAvailable) return
+  ): Promise<boolean> => {
+    if (!isConfigured || !isAvailable) return false
     // SUB-28: media sections speak through their transcript — `original` is
     // the import FILENAME, never legitimate source text. Untranscribed → a
     // clear error instead of a garbage "translation" of the filename.
@@ -208,7 +215,7 @@ export function useCompletion(
     if (!sourceText.trim()) {
       setErrors((p) => new Map(p).set(cell.id, "No source text yet — transcribe this section first."))
       setCompleting((p) => new Map(p).set(cell.id, "error"))
-      return
+      return false
     }
     // AQU-620: raise the temperature for an explicit regenerate so the second
     // request varies; leave first-draft generation on the configured value.
@@ -272,16 +279,31 @@ export function useCompletion(
         })),
       )
 
+      // AQU-662: decompose any inline footnote markers into clean base text +
+      // a separately-listed footnote block so raw \f...\f* markup is not fed
+      // to the model (and echoed back into the target). The output contract
+      // (translate the line keeping [n] markers, then one [n] line per
+      // footnote) rides in the SYSTEM prompt — inside `Source:` it contradicts
+      // the "final source line only" output rule and the model emits nothing.
+      // No-footnote cells pass through unchanged. Runs on the EFFECTIVE
+      // source (SUB-28): for text cells that IS `original`; media transcripts
+      // carry no USFM markers and pass through.
+      const prepared = prepareFootnotesForPrompt(sourceText)
+
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        sourceText,
+        sourceText: prepared.promptSource,
         examples: compressedExamples,
         rules,
         validatedPairs,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
         precedingContext,
+        ...(prepared.footnoteCount > 0 && {
+          systemAddendum: buildFootnoteInstruction(prepared.footnoteCount),
+          preSourceBlock: prepared.footnoteBlock,
+        }),
       })
       const result = await complete({
         settings: generationSettings, session,
@@ -305,12 +327,37 @@ export function useCompletion(
         rule_count: (rules ?? []).filter((r) => r.enabled).length,
         regenerate: Boolean(opts?.regenerate),
       })
+      // Reassemble the model's [n]-form reply into real \f...\f* markers so
+      // the committed target carries actual footnotes, not placeholder text.
+      let finalText = result
+      if (prepared.footnoteCount > 0) {
+        const rein = reintegrateFootnotes(result, prepared.notes)
+        if (rein.missingNoteLines.length || rein.appendedCallers.length) {
+          console.warn(
+            `[completeSingle] footnote reply degraded for cell ${cell.id}: ` +
+            `missing note lines [${rein.missingNoteLines.join(", ")}], ` +
+            `appended callers [${rein.appendedCallers.join(", ")}]`,
+          )
+        }
+        finalText = rein.text ?? ""
+      }
+      // D11 trust-killer guard, single-cell edition (mirrors completeParagraph):
+      // an empty draft — the model returned nothing, or the footnote reply had
+      // no translated base — is flagged and NEVER committed, and we resolve
+      // false so the sparkle flow does not show its "Saved" confirmation.
+      if (!finalText.trim()) {
+        console.warn(`[completeSingle] empty draft from model (not committed): ${cell.id}`)
+        setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+        setCompleting((p) => new Map(p).set(cell.id, "error"))
+        setErrors((p) => new Map(p).set(cell.id, "The model returned no translation — nothing was saved"))
+        return false
+      }
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.
       const llmAuthor = modelName
       await commitCompletedCell?.(
         cell,
-        result,
+        finalText,
         llmAuthor,
         draftProvenance(
           "single",
@@ -320,17 +367,22 @@ export function useCompletion(
       )
       setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
       setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
+      return true
     } catch (err) {
       // AbortError: the user stopped the run — clear state without persisting
       // an error entry (no stuck spinner, no error badge on the cell).
       if (err instanceof DOMException && err.name === "AbortError") {
         setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
-        return
+        return false
       }
+      // AQU-670: a commit/enqueue failure lands here (commitCompletedCell
+      // rethrows after reverting its optimistic patch). Record the error and
+      // report failure so the caller does not show a "Saved" confirmation.
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
+      return false
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, search, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
 
@@ -542,21 +594,38 @@ export function useCompletion(
         for (let i = 0; i < chunk.length; i++) {
           const cell = chunk[i]
           const text = filledText.get(i + 1)
-          if (text !== undefined) {
+          // D11: a present-but-empty <vN></vN> is "no emitted content" just
+          // like a missing tag — send it to the per-cell fallback instead of
+          // committing an empty draft.
+          if (text !== undefined && text.trim()) {
             if (commitCompletedCell) {
-              await commitCompletedCell(
-                cell,
-                text,
-                llmAuthor,
-                draftProvenance(
-                  "batch",
-                  uniqueExampleIds(
-                    passages.flatMap((passage) => passage.cells.map((example) => example.cellId)),
-                    batchValidatedPairs.map((example) => example.cellId),
+              try {
+                await commitCompletedCell(
+                  cell,
+                  text,
+                  llmAuthor,
+                  draftProvenance(
+                    "batch",
+                    uniqueExampleIds(
+                      passages.flatMap((passage) => passage.cells.map((example) => example.cellId)),
+                      batchValidatedPairs.map((example) => example.cellId),
+                    ),
+                    corpusCells.filter((candidate) => candidate.status === "validated").length,
                   ),
-                  corpusCells.filter((candidate) => candidate.status === "validated").length,
-                ),
-              )
+                )
+              } catch (err) {
+                // AQU-670: this cell's draft failed to queue. commitCompletedCell
+                // has already reverted its optimistic patch, so the drafted text
+                // won't linger; mark the cell errored (not done) and continue the
+                // run so one failed enqueue doesn't abandon the rest of the batch.
+                if (err instanceof DOMException && err.name === "AbortError") throw err
+                posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+                setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
+                setCompleting((p) => new Map(p).set(cell.id, "error"))
+                setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
+                incrementBatchCompletionFailed(runId, 1)
+                continue
+              }
             }
             // AQU-235 fix: after await, re-check — another Start could have
             // superseded us during the commit. If so, do not increment or clear.
@@ -602,10 +671,13 @@ export function useCompletion(
           // AQU-235 fix: thread the batch signal into completeSingle so it is
           // visible to Stop during a batch. getBatchCompletionSignal(runId)
           // returns an already-aborted signal if this run has been superseded.
-          await completeSingle(cell, getBatchCompletionSignal(runId))
-          // Only increment if the run is still live after the await.
+          const committed = await completeSingle(cell, getBatchCompletionSignal(runId))
+          // Only count if the run is still live after the await — and count it
+          // where it actually landed: a fallback that failed (empty draft,
+          // enqueue rejection) must not inflate the "done" tally.
           if (!isBatchCompletionCancelled(runId)) {
-            incrementBatchCompletionDone(runId)
+            if (committed) incrementBatchCompletionDone(runId)
+            else incrementBatchCompletionFailed(runId, 1)
           }
         }
       } else {

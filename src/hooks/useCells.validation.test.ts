@@ -52,3 +52,29 @@ describe("classifyValidators via buildCellData — 5-state validation", () => {
     expect(cell.validationStatus).toBe("full-others")
   })
 })
+
+describe("buildCellData decodes entity-laden plain values (AQU-674)", () => {
+  it("decodes literal HTML entities in migrated target/source value at the read boundary", () => {
+    // Existing migrated Algerian data carries literal `&nbsp;` in `cells.value`
+    // (pre-fix migration stripped tags without decoding). The read boundary
+    // must decode so the plain-text render surface shows clean spacing.
+    const cell = buildCellData(
+      "c1",
+      makeSource("In&nbsp;the&nbsp;beginning"),
+      makeTarget("فِي&nbsp;ٱلْبَدْءِ"),
+      FILE_ID,
+      "alice",
+      REQUIRED,
+      undefined,
+    )
+    expect(cell.translated).toBe("فِي ٱلْبَدْءِ")
+    expect(cell.original).toBe("In the beginning")
+    expect(cell.translated).not.toMatch(/&[a-z]+;/i)
+  })
+
+  it("does not over-decode a legitimate literal ampersand", () => {
+    const cell = buildCellData("c1", makeSource("R&D"), makeTarget("Moses & Aaron"), FILE_ID, "alice", REQUIRED, undefined)
+    expect(cell.translated).toBe("Moses & Aaron")
+    expect(cell.original).toBe("R&D")
+  })
+})

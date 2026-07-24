@@ -240,6 +240,15 @@ interface ExportDialogProps {
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
   getToken: (fileId: string) => Promise<string | null>
+  /**
+   * AQU-654: count of outstanding (non-waived) LQA/validation "health"
+   * infractions on the active file. Export NEVER hard-blocks on these — the
+   * only export gate is org policy (`canExport`). When there are outstanding
+   * infractions we surface a calm, non-blocking note so users understand the
+   * flags won't stop the download (the reported bug was users believing these
+   * "HTML/validation health errors" blocked export). Defaults to 0.
+   */
+  outstandingInfractionCount?: number
 }
 
 export function ExportDialog({
@@ -258,6 +267,7 @@ export function ExportDialog({
   targetLang = "",
   ttsSettings,
   getToken,
+  outstandingInfractionCount = 0,
 }: ExportDialogProps) {
   // The file's own format is the default export — "give me my file back".
   // Types without a 1:1 native exporter (ebible, obs, audio, video, sdbh, …)
@@ -711,6 +721,27 @@ export function ExportDialog({
           </div>
         ) : (
         <>
+        {/* AQU-654: outstanding validation/health flags NEVER block export.
+            Export is a basic, must-not-fail function — the only gate is org
+            policy (handled above). When the active file still has flagged
+            infractions, reassure the user (calmly, not as an error) that they
+            can download now and resolve the flags whenever they like. */}
+        {outstandingInfractionCount > 0 && (
+          <div
+            role="note"
+            aria-label="Validation flags do not block export"
+            data-testid="export-nonblocking-health-note"
+            className="flex items-start gap-2 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground"
+          >
+            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            <span>
+              This file has {outstandingInfractionCount} outstanding validation{" "}
+              {outstandingInfractionCount === 1 ? "flag" : "flags"} (terminology, HTML/markup,
+              punctuation, etc.). These <strong>won't block your export</strong> — download now
+              and resolve them anytime.
+            </span>
+          </div>
+        )}
         {/* Primary action: download the file back in its own format. */}
         {nativeOption && (
           <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-accent/30 px-3 py-3">

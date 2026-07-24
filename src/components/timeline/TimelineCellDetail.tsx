@@ -1,15 +1,16 @@
-// Bottom detail pane for the selected timeline clip. A focused surface — source
-// (read), an editable target that commits on blur, plus speaker/camera/timecode
-// metadata. Deliberately NOT the full editor row: that component takes ~40 props
-// and reusing it would couple the timeline to the entire editor. Same intent
-// (read + edit a clip from the timeline) with a fraction of the surface.
+// Bottom detail pane for the selected timeline clip. Source (read, plus a play
+// control when the clip's source is audio) and an editable target that reaches
+// parity with the main cell editor by mounting the SHARED `TranslatedEditor`
+// rather than a stripped-down textarea (AQU-659). Reusing the editor gives the
+// media pane rich text, footnotes, terminology chips, and violation blots for
+// free, and its commits persist identically to the main table.
 //
 // AQU-646 round 3: the target card carries the text view's cell actions
 // (AI translate, regenerate, record/upload audio, play generated voice,
 // footnote, comments, history) via the optional `detailActions` bundle — when
 // absent the pane renders exactly as before (read-only surfaces, tests).
 
-import { useEffect, useState } from "react"
+import { useRef, useState } from "react"
 import {
   History as HistoryIcon,
   Loader2,
@@ -18,14 +19,18 @@ import {
   NotebookPen,
   RefreshCw,
   Sparkles,
+  VolumeX,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fmtClock } from "./format"
+import { TimelineSourceAudio } from "./TimelineSourceAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { GenerateOverwriteDialog } from "@/components/GenerateOverwriteDialog"
 import { AddFootnoteDialog } from "@/components/footnotes/AddFootnoteDialog"
 import { CellTtsButton } from "@/components/CellTtsButton"
 import { CellAudioUploadButton } from "@/components/CellAudioUploadButton"
+import { TranslatedEditor, type TranslatedEditorHandle } from "@/components/TranslatedEditor"
+import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { effectiveSourceText } from "@/lib/cell-text"
@@ -33,6 +38,9 @@ import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replac
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import type { Concept } from "@/lib/terminology/types"
+import type { RuleInfraction } from "@/lib/parsers/types"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 /** The text view's cell-action bundle, drilled from ProjectWorkspace as one
  *  object (the EditorActionsContext exists for row-memo stability across
@@ -66,12 +74,25 @@ export interface TimelineDetailActions {
 export interface TimelineCellDetailProps {
   cell: CellData | null
   editable: boolean
-  onCommitTarget(cellId: string, value: string): void
+  /** Emits a target commit. `valueHtml` carries the rich-text form so media
+   *  edits persist identically to the main table (footnotes, marks, blots). */
+  onCommitTarget(cellId: string, value: string, valueHtml?: string): void
   /** AQU-646: transcribe this clip's audio into source text (media segments).
    *  When absent the Transcribe affordance is hidden (read-only surfaces). */
   onTranscribe?(cell: CellData): void
   /** AQU-646 round 3: when absent, no action row renders (back-compat). */
   detailActions?: TimelineDetailActions
+  /** Needed to resolve/stream the clip's source audio. When absent (focused
+   *  unit tests), the source-audio control is simply not mounted. */
+  project?: ProjectRecord
+  /** Active managed terminology concepts — drives the in-editor term chips. */
+  terminologyConcepts?: Concept[]
+  /** Rule infractions for the selected cell — drives the violation blots. */
+  infractions?: RuleInfraction[]
+  /** The selected clip's stored recording is permanently gone (404). Shows a
+   *  calm, non-retryable badge — matches the transport/waveform copy so the
+   *  three surfaces agree. */
+  audioMissing?: boolean
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -115,15 +136,23 @@ function ActionIconButton({
   )
 }
 
-export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscribe, detailActions }: TimelineCellDetailProps) {
-  const [draft, setDraft] = useState("")
+export function TimelineCellDetail({
+  cell,
+  editable,
+  onCommitTarget,
+  onTranscribe,
+  detailActions,
+  project,
+  terminologyConcepts,
+  infractions,
+  audioMissing,
+}: TimelineCellDetailProps) {
   const [footnoteOpen, setFootnoteOpen] = useState(false)
   const [overwriteOpen, setOverwriteOpen] = useState(false)
+  /** The shared editor owns the target's content; footnote insertion goes
+   *  through it so the marker lands at the caret with rich-text intact. */
+  const editorRef = useRef<TranslatedEditorHandle | null>(null)
   const transcribeStatus = useTranscribeStatus(cell?.selectedAudioId)
-  useEffect(() => {
-    setDraft(cell?.translated ?? "")
-  }, [cell?.id, cell?.translated])
-
   if (!cell) {
     return (
       <div
@@ -146,6 +175,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
   // ── Action-row derivations (mirror the text rail's gates) ─────────────────
   const selectedAttachment = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAttachment && !selectedAttachment.isDeleted)
+  const hasSourceAudio = Boolean(project && hasAudio)
   // SUB-29: the mic/upload gate counts recorded TAKES, not the imported source
   // clip that squats in every section's recording slot (audioId provenance:
   // takes are seeded with the cellId). Text cells behave exactly as before.
@@ -156,6 +186,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
   const preview = detailActions?.previews.get(cell.id)
   const isValidated = cell.status === "validated"
   const openComments = detailActions?.openCommentCounts?.get(cell.id) ?? 0
+  const hasTranslated = (cell.translated ?? "").trim() !== ""
 
   const startCompletion = () => {
     const actions = detailActions
@@ -164,7 +195,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
       actions.onAiSetupNeeded()
       return
     }
-    if (draft.trim()) {
+    if (hasTranslated) {
       // Same confirm policy as the text rail: validated cells always confirm;
       // non-validated respect the AQU-591 "don't ask again" opt-out.
       if (!isValidated && getSkipReplaceConfirm()) {
@@ -199,6 +230,16 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
           </Pill>
         )}
       </div>
+      {audioMissing && (
+        <div
+          data-testid="tl-detail-audio-missing"
+          role="status"
+          className="mb-2.5 flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground"
+        >
+          <VolumeX className="h-3.5 w-3.5 shrink-0" />
+          <span>{MISSING_AUDIO_MESSAGE}</span>
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-border bg-card p-2.5">
           <div className="mb-1 flex items-center justify-between gap-2">
@@ -234,6 +275,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
           <div data-testid="tl-detail-source" className="text-sm leading-snug text-foreground">
             {cell.transcription || cell.original || "—"}
           </div>
+          {hasSourceAudio && project && <TimelineSourceAudio project={project} cell={cell} />}
         </div>
         <div className="rounded-lg border border-border bg-card p-2.5">
           <div className="mb-1 flex items-center justify-between gap-2">
@@ -259,7 +301,7 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
                     />
                   </ActionIconButton>
                 )}
-                {editable && !detailActions.isAnonymous && !isValidated && draft.trim() !== "" && (
+                {editable && !detailActions.isAnonymous && !isValidated && hasTranslated && (
                   <ActionIconButton
                     label="Regenerate translation"
                     testId="tl-detail-regenerate"
@@ -342,21 +384,40 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
               {completingState === "searching" ? "Finding examples…" : "Generating…"}
             </div>
           )}
-          <textarea
+          {/* Streaming preview — the chunk-by-chunk draft renders beside the
+              editor (same pattern as the text view's overlay); the editor
+              re-hydrates from the committed cell when the stream lands. */}
+          {busy && preview != null && preview !== "" && (
+            <div
+              data-testid="tl-detail-preview"
+              className="mb-1 rounded-md border border-dashed border-border bg-muted/30 px-2 py-1 text-sm text-muted-foreground"
+            >
+              {preview}
+            </div>
+          )}
+          <div
             data-testid="tl-detail-target"
-            value={busy ? (preview ?? draft) : draft}
-            disabled={!editable || busy}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => {
-              if (editable && draft !== (cell.translated ?? "")) onCommitTarget(cell.id, draft)
-            }}
-            rows={2}
             className={cn(
-              "w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground outline-none",
-              "focus:ring-2 focus:ring-sky-500/40 disabled:cursor-not-allowed disabled:opacity-60",
+              "rounded-md border border-border bg-background px-2 py-1 text-sm focus-within:ring-2 focus-within:ring-sky-500/40",
+              !editable && "opacity-60",
             )}
-            placeholder={editable ? "Translation…" : ""}
-          />
+          >
+            <TranslatedEditor
+              ref={editorRef}
+              cellId={cell.id}
+              initialPlain={cell.translated ?? ""}
+              initialHtml={cell.translatedHtml}
+              editable={editable}
+              compactHeight
+              placeholder={editable ? "Translation…" : ""}
+              ariaLabel="Clip translation"
+              terminologyConcepts={terminologyConcepts}
+              infractions={infractions}
+              onCommit={(snapshot) => {
+                if (editable) onCommitTarget(cell.id, snapshot.value, snapshot.valueHtml)
+              }}
+            />
+          </div>
         </div>
       </div>
       {detailActions && (
@@ -376,12 +437,13 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
             defaults={{ caller: "+", ref: defaultFootnoteRef(cell), text: "", markerStyle: "numbered" }}
             onOpenChange={setFootnoteOpen}
             onAdd={(value) => {
-              // The pane's target is a plain textarea (no rich-text caret) —
-              // append the marker at the end, same as the text view's fallback.
+              // Insert at the editor's caret (rich text intact) — its commit
+              // pipeline persists the change. If the editor isn't ready,
+              // append to the committed text, same as the text view's fallback.
               const marker = createUsfmFootnoteMarker(value)
-              const next = `${draft}${marker}`
-              setDraft(next)
-              onCommitTarget(cell.id, next)
+              if (!editorRef.current?.insertFootnoteMarker(marker)) {
+                onCommitTarget(cell.id, `${cell.translated ?? ""}${marker}`)
+              }
               setFootnoteOpen(false)
             }}
           />

@@ -58,7 +58,12 @@ import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
-import { computeRailPinned } from "@/lib/editor/cell-rail-pin"
+import {
+  computeRailPinned,
+  isRailFocusPinned,
+  railFocusOwnerOnBlur,
+  railFocusOwnerOnFocus,
+} from "@/lib/editor/cell-rail-pin"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
@@ -125,13 +130,12 @@ import {
   resolveTextDirection,
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
+import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
-import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
-import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
@@ -609,7 +613,7 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   onCompleteBatch: (cells: CellData[]) => void
   /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
    *  `cellId` as one model call. Omit to keep the rail button hidden
@@ -771,6 +775,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     setChapterNavigationSelection(null)
   }, [])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
+  // AQU-669: the single, exclusive cell whose action rail is focus-pinned. At
+  // most one cell is ever the "focused cell", so the rail pin is derived from
+  // `focusedRailCellId === cell.id` rather than each row's own local
+  // focus-within flag. When focus moves to another cell the new focus-in
+  // overwrites this id, which structurally un-pins the previous row even if its
+  // focus-out never fired (across TipTap/ProseMirror surfaces or re-rendered
+  // rows) — so stale rails can no longer accumulate. See cell-rail-pin.ts.
+  const [focusedRailCellId, setFocusedRailCellId] = useState<string | null>(null)
+  const handleRowFocusPin = useCallback((cellId: string) => {
+    setFocusedRailCellId((cur) => railFocusOwnerOnFocus(cur, cellId))
+  }, [])
+  const handleRowFocusRelease = useCallback((cellId: string) => {
+    // Only clear when this row is still the recorded owner: a newer focus has
+    // already overwritten the id, and an out-of-order focus-out from the row we
+    // just left must not wipe it.
+    setFocusedRailCellId((cur) => railFocusOwnerOnBlur(cur, cellId))
+  }, [])
   // Mirror ref so the imperative handle (getCurrentIndex) reads current
   // values without widening its dependency array — same pattern as
   // displayCellsRef below.
@@ -837,6 +858,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (displayCellIds.includes(activeEditorCellId)) return
     setActiveEditorCellId(null)
   }, [activeEditorCellId, displayCellIds])
+
+  // AQU-669: drop the focus pin if its cell scrolls out of the list / lane —
+  // a pin can't belong to a row that no longer renders.
+  useEffect(() => {
+    if (!focusedRailCellId) return
+    if (displayCellIds.includes(focusedRailCellId)) return
+    setFocusedRailCellId(null)
+  }, [focusedRailCellId, displayCellIds])
 
   const handleActivateEditor = useCallback((cellId: string) => {
     setActiveEditorCellId(cellId)
@@ -1661,6 +1690,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           project={project}
           cell={cell}
           isEditorActive={activeEditorCellId === cell.id}
+          isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
+          onRowFocusPin={handleRowFocusPin}
+          onRowFocusRelease={handleRowFocusRelease}
           onActivateEditor={handleActivateEditor}
           onDeactivateEditor={handleDeactivateEditor}
           isStaleSource={staleCellIds?.has(cell.id) ?? false}
@@ -1753,6 +1785,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     activeCueIndex,
     activeEditorCellId,
+    focusedRailCellId,
+    handleRowFocusPin,
+    handleRowFocusRelease,
     activeLane,
     audioByCellId,
     audioLens,
@@ -2100,6 +2135,14 @@ interface MemoizedRowProps {
   project: ProjectRecord
   cell: CellData
   isEditorActive: boolean
+  /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
+   *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
+   *  focus-out on some other row can never keep its rail revealed. */
+  isRowFocused: boolean
+  /** AQU-669: called when focus enters this row — sets the exclusive owner. */
+  onRowFocusPin: (cellId: string) => void
+  /** AQU-669: called when focus leaves this row — clears the owner if still ours. */
+  onRowFocusRelease: (cellId: string) => void
   onActivateEditor: (cellId: string) => void
   onDeactivateEditor: (cellId: string) => void
   username: string
@@ -2142,7 +2185,9 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  // AQU-670: resolves whether the draft actually committed — the rail's
+  // "Saved" confirmation reads it (matches the top-level props contract).
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
@@ -2247,6 +2292,9 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceFontSize,
     targetFontSize,
     isEditorActive,
+    isRowFocused,
+    onRowFocusPin,
+    onRowFocusRelease,
     onActivateEditor,
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
@@ -2357,6 +2405,9 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         project={project}
         cell={cell}
         isEditorActive={isEditorActive}
+        isRowFocused={isRowFocused}
+        onRowFocusPin={onRowFocusPin}
+        onRowFocusRelease={onRowFocusRelease}
         onActivateEditor={onActivateEditor}
         onDeactivateEditor={onDeactivateEditor}
         username={username}
@@ -2452,6 +2503,11 @@ interface EditorRowProps {
   project: ProjectRecord
   cell: CellData
   isEditorActive: boolean
+  /** AQU-669: this row is the single exclusive focus-pin owner. */
+  isRowFocused: boolean
+  /** AQU-669: report focus entering / leaving this row to the exclusive owner. */
+  onRowFocusPin: (cellId: string) => void
+  onRowFocusRelease: (cellId: string) => void
   onActivateEditor: (cellId: string) => void
   onDeactivateEditor: (cellId: string) => void
   username: string
@@ -2504,7 +2560,8 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  // AQU-670: resolves whether the draft actually committed — see above.
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
   onCompleteParagraph?: (cellId: string) => void
   /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
@@ -3372,7 +3429,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 }
 
 function EditorRow({
-  project, cell, isEditorActive, onActivateEditor, onDeactivateEditor,
+  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onActivateEditor, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
@@ -3428,6 +3485,13 @@ function EditorRow({
   }, [remoteCellPresence])
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
+  // AQU-664: hover ("wave over") a violation blot → preview its rule
+  // explanation. Separate from the click path (openRuleId) so a light,
+  // non-interactive popover appears on hover and dismisses on mouse-out.
+  const [hoveredRule, setHoveredRule] = useState<{ ruleId: string; anchor: ViolationAnchor } | null>(null)
+  // AQU-664: live editor text, published on a short debounce by TranslatedEditor
+  // so terminology blots recompute off the live buffer (not the ~1.2s commit).
+  const [liveTargetText, setLiveTargetText] = useState<string | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
@@ -3562,9 +3626,23 @@ function EditorRow({
 
   useEffect(() => {
     if (!localTargetDraft) return
-    if ((cell.translated ?? "") !== localTargetDraft.value) return
-    setLocalTargetDraft(null)
-  }, [cell.translated, localTargetDraft])
+    // Normal case: the authoritative value now carries our just-committed draft
+    // (server projection or optimistic echo) — drop the local hold.
+    if ((cell.translated ?? "") === localTargetDraft.value) {
+      setLocalTargetDraft(null)
+      return
+    }
+    // AQU-667 masking fix: an authoritative AI draft (sparkle / batch) landed
+    // whose value differs from our stale local hold. Previously the hold was
+    // only cleared on exact equality, so if a human edit's round-trip hadn't
+    // landed when the prediction arrived the values never converged: the row
+    // kept showing the OLD text indefinitely and a later keystroke committed
+    // that old text over the AI draft. The AI draft is the newer truth — clear
+    // the hold so the row (and the editor hydrating from it) shows the prediction.
+    if (cell.aiDrafted) {
+      setLocalTargetDraft(null)
+    }
+  }, [cell.translated, cell.aiDrafted, localTargetDraft])
 
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
@@ -3587,6 +3665,31 @@ function EditorRow({
   const mergedInfractions = useMemo(
     () => [...cellInfractions, ...waivedInfractions],
     [cellInfractions, waivedInfractions],
+  )
+
+  // AQU-664: terminology-only rules, extracted from the shared ruleMap. Used to
+  // recompute term violations off the live editor buffer so the inline blot
+  // lights up as-you-type instead of after the ~1.2s commit-idle debounce.
+  const enabledTermRules = useMemo(() => selectTermRules(ruleMap.values()), [ruleMap])
+
+  // Live terminology infractions computed from the un-committed buffer. Only
+  // active while this cell is being edited and a live snapshot has arrived;
+  // otherwise null so the committed (health-derived) infractions are used.
+  const liveTermInfractions = useMemo<RuleInfraction[] | null>(() => {
+    if (!isEditorActive || liveTargetText === null) return null
+    return computeLiveTermInfractions(cell, liveTargetText, enabledTermRules)
+  }, [isEditorActive, liveTargetText, enabledTermRules, cell])
+
+  // Infractions that drive the inline blot decorations. While editing, the
+  // committed `term:` infractions (which lag by a commit cycle) are replaced by
+  // the live ones so the terminology blot tracks the buffer; non-terminology
+  // infractions keep the committed cadence.
+  const blotInfractions = useMemo(
+    () =>
+      liveTermInfractions === null
+        ? mergedInfractions
+        : mergeBlotInfractions(mergedInfractions, liveTermInfractions),
+    [mergedInfractions, liveTermInfractions],
   )
 
   const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
@@ -3789,8 +3892,13 @@ function EditorRow({
   // then re-focus the cell editor (the new text is now visible there) and show
   // a brief "Saved" confirmation.
   const completeSingleAndReturn = useCallback(async () => {
-    await onCompleteSingle(cell)
+    const saved = await onCompleteSingle(cell)
     onActivateEditor(cell.id)
+    // AQU-670: only confirm "Saved" when the draft actually committed. On a
+    // failed enqueue completeSingle resolves `false` and records the error
+    // (shown inline via the `error` line); showing "Saved" as well would give
+    // the translator directly contradictory signals for a draft that was lost.
+    if (!saved) return
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
     setShowSaved(true)
     savedTimerRef.current = setTimeout(() => {
@@ -4063,22 +4171,6 @@ function EditorRow({
     document.addEventListener("selectionchange", handleSelectionChange)
     return () => document.removeEventListener("selectionchange", handleSelectionChange)
   }, [sourceSelection, showAddConceptDialog])
-
-  // Slice 4: advisory pre-acceptance terminology warnings for the AI copilot.
-  // Computed against the completion text (the streaming preview while loading,
-  // otherwise the committed target text) versus the cell's source and the
-  // project's active concepts. ADVISORY ONLY — never gates accept/commit.
-  // Recomputes naturally as the preview streams in and as the committed text /
-  // BT verdict changes on later renders.
-  const preAcceptanceWarnings = useMemo(() => {
-    const completionText = isLoading ? (completionPreview ?? "") : (visibleTranslated ?? "")
-    if (!completionText.trim()) return []
-    return detectPreAcceptanceWarnings(
-      completionText,
-      cell.original ?? "",
-      terminologyConcepts,
-    )
-  }, [isLoading, completionPreview, visibleTranslated, cell.original, terminologyConcepts])
 
   // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
@@ -4444,7 +4536,12 @@ function EditorRow({
   // hovered. Do not add a per-row sticky selection latch here: visited rows
   // would accumulate visible rails.
   const [isHovering, setIsHovering] = useState(false)
-  const [hasFocusWithin, setHasFocusWithin] = useState(false)
+  // AQU-669: focus-within is no longer per-row local state (which went stale
+  // when a focus-out failed to fire and left the rail pinned forever). It's the
+  // single exclusive owner threaded from the table: this row has focus iff it
+  // is the `focusedRailCellId`. Focusing another cell overwrites that id and
+  // deterministically un-pins this one.
+  const hasFocusWithin = isRowFocused
   // AQU-354: does a rail control specifically hold focus? Used to pin the rail
   // open (an in-progress interaction must never be idle-collapsed).
   const [railHasFocus, setRailHasFocus] = useState(false)
@@ -4595,14 +4692,19 @@ function EditorRow({
     setIsHovering(false)
   }
   const handleRowFocusCapture = () => {
-    setHasFocusWithin(true)
+    // AQU-669: claim the exclusive focus pin for this cell. Because the table
+    // holds a single owner, this simultaneously releases whichever row was
+    // pinned before — no reliance on the previous row's focus-out.
+    onRowFocusPin(cell.id)
     // AQU-354: focusing anything in the row re-summons an idle-collapsed rail.
     registerRailActivity()
   }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
     if (next && rowRef.current?.contains(next)) return
-    setHasFocusWithin(false)
+    // AQU-669: focus left the row entirely — relinquish the pin (only if this
+    // row still holds it; a newer focus may already own it).
+    onRowFocusRelease(cell.id)
     // FRO-248: clear source-text selection when focus leaves this row so the
     // "Add to termbase" toolbar never floats over a different row's content.
     capturedSelectionRef.current = null
@@ -4646,11 +4748,26 @@ function EditorRow({
   // and a detached anchor makes the popover fall back to the viewport origin —
   // so snapshot the rect and anchor to a virtual element instead.
   const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
+    // AQU-664: clicking commits to the full (waive-capable) popover — clear any
+    // transient hover preview so the two don't stack.
+    setHoveredRule(null)
     setExpanded(true)
     setExpansionTab("issues")
     setOpenRuleId(ruleId)
     const rect = anchor.getBoundingClientRect()
     setOpenRuleAnchor({ getBoundingClientRect: () => rect })
+  }, [])
+
+  // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
+  // rule explanation; mouse-out clears it. Snapshotting mirrors openInlineRule
+  // (the blot node can detach on re-render before the popover positions).
+  const handleRuleHover = useCallback((ruleId: string | null, anchor: HTMLElement | null) => {
+    if (!ruleId || !anchor) {
+      setHoveredRule(null)
+      return
+    }
+    const rect = anchor.getBoundingClientRect()
+    setHoveredRule({ ruleId, anchor: { getBoundingClientRect: () => rect } })
   }, [])
 
   const isMultiSelected = useIsSelected(cell.id)
@@ -5184,6 +5301,9 @@ function EditorRow({
                     cellId={cell.id}
                     initialPlain={visibleTranslated}
                     initialHtml={visibleTranslatedHtml}
+                    // AQU-667: only authoritative when we're not masking it with a
+                    // local human draft — then `visibleTranslated` IS cell.translated.
+                    aiDrafted={!localTargetDraft && cell.aiDrafted}
                     onCommit={handleEditorCommit}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
@@ -5198,10 +5318,12 @@ function EditorRow({
                     compactHeight={hasInlineFootnotes}
                     editable={editable && !isLoading}
                     heldByLabel={lockHolderLabel}
-                    infractions={mergedInfractions}
+                    infractions={blotInfractions}
                     ruleSeverity={ruleSeverity}
                     waivedRuleIds={waivedRuleIds}
                     onRuleClick={openInlineRule}
+                    onRuleHover={handleRuleHover}
+                    onLiveTextChange={setLiveTargetText}
                     audioTimings={cellAudioTimings}
                     audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
                     onSeekToTime={hasAudio ? audioController.seek : undefined}
@@ -5365,10 +5487,10 @@ function EditorRow({
                 compact
               />
             )}
-            {/* Slice 4: advisory terminology warning band for the copilot
-                completion. Renders nothing when there are no warnings; never
-                blocks accept/commit. */}
-            <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
+            {/* AQU-664: terminology violations surface solely via the inline
+                `violation-blot-term` decoration in the editor — the amber
+                advisory band was removed so a forbidden rendering shows one
+                signal (the blot), not two. */}
             {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
             {/* FRO-297: polite live region for transient inline feedback that
                 is NOT already assertive (FRO-274 write-failure banners use
@@ -5575,7 +5697,7 @@ function EditorRow({
                       return
                     }
                     if (isCompletionAvailable) {
-                      onCompleteSingle(cell, { regenerate: true })
+                      void onCompleteSingle(cell, { regenerate: true })
                     }
                   }}
                   disabled={
@@ -6366,6 +6488,31 @@ function EditorRow({
             onWaive={handleWaive}
             onUnwaive={handleUnwaive}
           />
+        )
+      })()}
+
+      {/* AQU-664: hover ("wave over") preview of a violation blot's rule
+          explanation. Non-interactive and separate from the click popover — it
+          appears on mouse-in and dismisses on mouse-out (see handleRuleHover /
+          TranslatedEditor's blot hover handlers). Suppressed while the click
+          popover is open so the two never stack. */}
+      {hoveredRule && !openRuleId && (() => {
+        const inf = blotInfractions.find((i) => i.ruleId === hoveredRule.ruleId)
+        const rule = ruleMap.get(hoveredRule.ruleId)
+        if (!inf || !rule) return null
+        return (
+          <Popover open>
+            <PopoverContent
+              anchor={hoveredRule.anchor}
+              sideOffset={6}
+              initialFocus={false}
+              finalFocus={false}
+              className="pointer-events-none w-72 space-y-1 p-3 text-sm"
+            >
+              <div className="font-medium">{rule.name}</div>
+              <p className="text-xs text-muted-foreground">{inf.message}</p>
+            </PopoverContent>
+          </Popover>
         )
       })()}
 

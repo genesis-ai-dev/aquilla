@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
@@ -66,6 +66,49 @@ describe("TimelineEditor", () => {
     fireEvent.click(screen.getByLabelText("Zoom in"))
     const after = parseFloat(screen.getByTestId("tl-card-d1").style.width)
     expect(after).toBeGreaterThan(before)
+  })
+
+  // ── SUB-12: ⌘/ctrl-wheel zoom on the scroll container ─────────────────────
+
+  it("ctrl+wheel zooms in/out and clamps; plain wheel does not zoom", async () => {
+    render(
+      <TimelineEditor
+        fileId="wheelfile"
+        coreMediaUrl={null}
+        editable
+        cells={[cell({ id: "d1", original: "x", medium: "media", startTime: 0, endTime: 2 })]}
+        onRetime={() => {}}
+        onCommitTarget={() => {}}
+      />,
+    )
+    const scroll = screen.getByTestId("tl-scroll")
+    const width = () => parseFloat(screen.getByTestId("tl-card-d1").style.width)
+    // happy-dom's synthesized WheelEvent doesn't carry modifier keys, so build
+    // the event by hand — same shape the native listener sees in a browser.
+    const sendWheel = (init: { deltaY: number; ctrlKey?: boolean; metaKey?: boolean }) => {
+      const ev = new Event("wheel", { bubbles: true, cancelable: true })
+      Object.assign(ev, { clientX: 0, ...init })
+      fireEvent(scroll, ev)
+    }
+
+    const before = width()
+    // Plain wheel: scroll, not zoom.
+    sendWheel({ deltaY: -100 })
+    expect(width()).toBe(before)
+
+    // ctrl+wheel up = zoom in (cards widen). The zoom eases toward its target
+    // over rAF frames, so assertions wait for the glide to make progress.
+    sendWheel({ deltaY: -100, ctrlKey: true })
+    const zoomedIn = width()
+    expect(zoomedIn).toBeGreaterThan(before)
+
+    // meta+wheel down = zoom out (applied by the glide loop).
+    sendWheel({ deltaY: 100, metaKey: true })
+    await waitFor(() => expect(width()).toBeLessThan(zoomedIn))
+
+    // Clamp: hammering zoom-out bottoms out at ZOOM_MIN instead of vanishing.
+    for (let i = 0; i < 40; i++) sendWheel({ deltaY: 100, ctrlKey: true })
+    await waitFor(() => expect(width()).toBeGreaterThan(0))
   })
 
   it("shows the video preview only when a core media url is linked", () => {

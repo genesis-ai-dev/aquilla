@@ -18,6 +18,7 @@ import {
   hasAnyPlayableAudio, pauseQueue, resumeQueue, seekQueueToTime, setQueueRate, setQueueVolume,
   skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
 } from "@/lib/audio/play-queue"
+import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellData } from "@/hooks/useCells"
@@ -33,6 +34,10 @@ interface Props {
   settings: ProjectTtsSettings | undefined
   /** Scroll a line into view when the queue advances to it. */
   onActiveCell?: (cellId: string) => void
+  /** The highlighted section (e.g. selected on the Dialogue timeline). When
+   *  set, pressing Play starts from this section instead of the file's start
+   *  (AQU-666). */
+  startCellId?: string | null
 }
 
 function fmtTime(s: number): string {
@@ -42,7 +47,7 @@ function fmtTime(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`
 }
 
-export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings, onActiveCell }: Props) {
+export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings, onActiveCell, startCellId }: Props) {
   const queue = useQueueState()
   const { currentTime, duration, rate, volume } = useQueueProgress()
 
@@ -75,16 +80,35 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
   const isPlaying = queue.kind === "playing"
   const isLoading = queue.kind === "loading"
 
-  const startAt = useCallback((from: number) => {
+  const startAt = useCallback((from: number, explicit = false) => {
     if (!session?.jwt) return
-    startQueue({ cells, projectId, session, onCellChange: (_, cellId) => onActiveCell?.(cellId) }, from)
+    startQueue({ cells, projectId, session, onCellChange: (_, cellId) => onActiveCell?.(cellId) }, from, explicit)
   }, [cells, projectId, session, onActiveCell])
 
   const onPlayPause = useCallback(() => {
     if (isPlaying) { pauseQueue(); return }
     if (queue.kind === "paused") { void resumeQueue(); return }
-    startAt(0)
-  }, [isPlaying, queue.kind, startAt])
+    // Start from the highlighted section when one is selected, else the top of
+    // the file (AQU-666). A selected start is "explicit": if that clip's audio
+    // is missing, surface it there instead of skipping to a neighbour (AQU-660);
+    // plain play-all keeps skipping forward past a missing clip.
+    const from = startCellId ? cells.findIndex((c) => c.id === startCellId) : -1
+    startAt(from >= 0 ? from : 0, from >= 0)
+  }, [isPlaying, queue.kind, startAt, cells, startCellId])
+
+  // Spacebar toggles play/pause while the Audio-lens bar is mounted (this bar
+  // only renders in the audio lens, so the binding is naturally scoped to it).
+  // The predicate ignores the key when the user is typing or a control is
+  // focused, so editing a line or clicking a button keeps Space's normal effect.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!spacebarShouldToggle(e) || !canPlay) return
+      e.preventDefault()
+      onPlayPause()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [canPlay, onPlayPause])
 
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 

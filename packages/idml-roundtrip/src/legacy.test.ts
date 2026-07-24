@@ -133,6 +133,97 @@ describe("upgradeLegacyIdmlMetadata", () => {
     expect(result.locator.storyId).toBeUndefined()
   })
 
+  it("upgrades a producer-valid cell that omits a declared structural apostrophe slot", () => {
+    const apostropheBlock = [
+      '<ParagraphStyleRange Self="p1">',
+      "<Content>Zmluvné</Content><Content>ʼ</Content><Content>dejiny</Content>",
+      "</ParagraphStyleRange>",
+    ].join("")
+    const apostropheHtml = [
+      '<p class="indesign-paragraph" data-paragraph-style="ParagraphStyle/Body" data-story-id="u1" data-segment-count="3">',
+      '<span class="idml-segment" data-segment-index="0" data-character-style="CharacterStyle/Bold">Zmluvné</span>',
+      '<span class="idml-eoc" data-eoc="1" aria-hidden="true"></span>',
+      '<span class="idml-segment" data-segment-index="2" data-character-style="CharacterStyle/Bold">dejiny</span>',
+      "</p>",
+    ].join("")
+    const input = legacyInput({ valueHtml: apostropheHtml })
+    const structure = (input.metadata as {
+      data: { idmlStructure: Record<string, unknown> }
+    }).data.idmlStructure
+    structure.contentSegments = ["Zmluvné", "ʼ", "dejiny"]
+    structure.contentSegmentCount = 3
+    structure.contentSegmentBreakBefore = [false, false, false]
+    structure.structuralApostropheSegmentIndexes = [1]
+    structure.sourceBlockXml = apostropheBlock
+
+    const result = upgradeLegacyIdmlMetadata(input)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.locator.slotIndexes).toEqual([0, 2])
+    expect(result.locator.part).toBe(0)
+    expect(result.metadata).toMatchObject({
+      slotCount: 2,
+      editableSlotIndexes: [0, 1],
+    })
+    expect(result.sourceHtml).toContain('data-idml-slot="0"')
+    expect(result.sourceHtml).toContain('data-idml-slot="1"')
+    expect(result.sourceHtml).not.toContain("ʼ")
+  })
+
+  it("upgrades producer-valid sliced cells using global slot indexes and relationship parts", () => {
+    const slicedBlock = [
+      '<ParagraphStyleRange Self="p1">',
+      "<Content>zero</Content><Br/><Content>one</Content><Content>two</Content>",
+      "</ParagraphStyleRange>",
+    ].join("")
+    const makeSlice = (
+      part: number,
+      segmentIndex: number,
+      text: string,
+      breakBefore: boolean,
+    ): Record<string, unknown> => {
+      const boundary = breakBefore
+        ? '<br class="idml-eoc" data-eoc="1" />'
+        : ""
+      const html = [
+        '<p class="indesign-paragraph" data-paragraph-style="ParagraphStyle/Body" data-story-id="u1" data-segment-count="3">',
+        boundary,
+        `<span class="idml-segment" data-segment-index="${segmentIndex}" data-character-style="CharacterStyle/Plain">${text}</span>`,
+        "</p>",
+      ].join("")
+      const input = legacyInput({ valueHtml: html })
+      const metadata = input.metadata as {
+        data: {
+          idmlStructure: Record<string, unknown>
+          relationships: Record<string, unknown>
+        }
+      }
+      metadata.data.idmlStructure.contentSegments = ["zero", "one", "two"]
+      metadata.data.idmlStructure.contentSegmentCount = 3
+      metadata.data.idmlStructure.contentSegmentBreakBefore = [false, true, false]
+      metadata.data.idmlStructure.sourceBlockXml = slicedBlock
+      metadata.data.relationships.segmentIndex = part
+      metadata.data.relationships.totalSegments = 2
+      return input
+    }
+
+    const first = upgradeLegacyIdmlMetadata(makeSlice(0, 0, "zero", false))
+    const secondInput = makeSlice(1, 1, "one", false)
+    const secondHtml = secondInput.valueHtml as string
+    secondInput.valueHtml = secondHtml.replace(
+      "</p>",
+      '<span class="idml-eoc" data-eoc="1" aria-hidden="true"></span><span class="idml-segment" data-segment-index="2" data-character-style="CharacterStyle/Plain">two</span></p>',
+    )
+    const second = upgradeLegacyIdmlMetadata(secondInput)
+
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+    if (!first.ok || !second.ok) return
+    expect(first.locator).toMatchObject({ part: 0, slotIndexes: [0] })
+    expect(second.locator).toMatchObject({ part: 1, slotIndexes: [1, 2] })
+    expect(second.metadata.editableSlotIndexes).toEqual([0, 1])
+  })
+
   it("passes through a valid v2 contract after validating it", () => {
     const upgraded = upgradeLegacyIdmlMetadata(legacyInput())
     expect(upgraded.ok).toBe(true)

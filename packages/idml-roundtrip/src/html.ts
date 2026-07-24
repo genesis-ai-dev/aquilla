@@ -121,13 +121,28 @@ function codePointFromEntity(body: string): string | undefined {
   }
   if (
     !Number.isInteger(value)
-    || value <= 0
-    || value > 0x10ffff
-    || (value >= 0xd800 && value <= 0xdfff)
+    || !isXml10CodePoint(value)
   ) {
     return undefined
   }
   return String.fromCodePoint(value)
+}
+
+function isXml10CodePoint(value: number): boolean {
+  return value === 0x09
+    || value === 0x0a
+    || value === 0x0d
+    || (value >= 0x20 && value <= 0xd7ff)
+    || (value >= 0xe000 && value <= 0xfffd)
+    || (value >= 0x10000 && value <= 0x10ffff)
+}
+
+function isXml10Text(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)
+    if (codePoint === undefined || !isXml10CodePoint(codePoint)) return false
+  }
+  return true
 }
 
 export function decodeStrictHtmlText(value: string): string | undefined {
@@ -148,6 +163,7 @@ export function decodeStrictHtmlText(value: string): string | undefined {
       apos: "'",
       gt: ">",
       lt: "<",
+      nbsp: "\u00a0",
       quot: "\"",
     }
     const decoded = named[entity] ?? codePointFromEntity(entity)
@@ -155,7 +171,7 @@ export function decodeStrictHtmlText(value: string): string | undefined {
     result += decoded
     cursor = semicolon + 1
   }
-  return result
+  return isXml10Text(result) ? result : undefined
 }
 
 export function escapeIdmlHtmlText(value: string): string {
@@ -243,9 +259,10 @@ function tokenizeHtml(html: string): readonly HtmlToken[] | undefined {
     }
     const tagEnd = findTagEnd(html, tagStart)
     if (tagEnd < 0) return undefined
-    let body = html.slice(tagStart + 1, tagEnd).trim()
+    let body = html.slice(tagStart + 1, tagEnd)
     if (
       body.length === 0
+      || /[\t\n\f\r ]/.test(body[0] ?? "")
       || body.startsWith("!")
       || body.startsWith("?")
     ) {
@@ -253,10 +270,13 @@ function tokenizeHtml(html: string): readonly HtmlToken[] | undefined {
     }
 
     if (body.startsWith("/")) {
-      body = body.slice(1).trim()
+      body = body.slice(1)
+      if (/[\t\n\f\r ]/.test(body[0] ?? "")) return undefined
+      body = body.trimEnd()
       if (!/^[A-Za-z][A-Za-z0-9:-]*$/.test(body)) return undefined
       tokens.push({ type: "close", name: body.toLowerCase() })
     } else {
+      body = body.trimEnd()
       const selfClosing = body.endsWith("/")
       if (selfClosing) body = body.slice(0, -1).trimEnd()
       const nameMatch = /^[A-Za-z][A-Za-z0-9:-]*/.exec(body)
@@ -697,7 +717,17 @@ function parseAnchorDocument(html: string, metadata: IdmlFormatMetadataV2): Pars
 }
 
 function validateMetadata(metadata: IdmlFormatMetadataV2): readonly IdmlDiagnostic[] {
-  const rawVersion = (metadata as { readonly version?: unknown }).version
+  if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return [diagnostic("ANCHOR_INVALID", "IDML metadata must be an object")]
+  }
+  const candidate = metadata as unknown as {
+    readonly version?: unknown
+    readonly slotCount?: unknown
+    readonly editableSlotIndexes?: unknown
+    readonly protectedTokenCount?: unknown
+    readonly anchorSequenceHash?: unknown
+  }
+  const rawVersion = candidate.version
   if (typeof rawVersion !== "number" || rawVersion !== 2) {
     return [diagnostic(
       typeof rawVersion === "number" && rawVersion > 2
@@ -706,19 +736,36 @@ function validateMetadata(metadata: IdmlFormatMetadataV2): readonly IdmlDiagnost
       `Unsupported IDML metadata version ${String(rawVersion)}`,
     )]
   }
-  if (!Number.isSafeInteger(metadata.slotCount) || metadata.slotCount < 0) {
+  if (
+    !Number.isSafeInteger(candidate.slotCount)
+    || typeof candidate.slotCount !== "number"
+    || candidate.slotCount < 0
+  ) {
     return [diagnostic("ANCHOR_INVALID", "IDML slot count is invalid")]
   }
-  if (!Number.isSafeInteger(metadata.protectedTokenCount) || metadata.protectedTokenCount < 0) {
+  if (
+    !Number.isSafeInteger(candidate.protectedTokenCount)
+    || typeof candidate.protectedTokenCount !== "number"
+    || candidate.protectedTokenCount < 0
+  ) {
     return [diagnostic("ANCHOR_INVALID", "IDML protected token count is invalid")]
+  }
+  if (!Array.isArray(candidate.editableSlotIndexes)) {
+    return [diagnostic("ANCHOR_INVALID", "IDML editable slot indexes are invalid")]
+  }
+  if (
+    typeof candidate.anchorSequenceHash !== "string"
+    || !/^[a-f0-9]{64}$/.test(candidate.anchorSequenceHash)
+  ) {
+    return [diagnostic("ANCHOR_INVALID", "IDML anchor sequence hash is invalid")]
   }
   const seen = new Set<number>()
   let previousIndex = -1
-  for (const index of metadata.editableSlotIndexes) {
+  for (const index of candidate.editableSlotIndexes) {
     if (
       !Number.isSafeInteger(index)
       || index < 0
-      || index >= metadata.slotCount
+      || index >= candidate.slotCount
       || seen.has(index)
       || index <= previousIndex
     ) {

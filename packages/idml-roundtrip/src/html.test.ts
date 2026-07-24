@@ -151,6 +151,74 @@ describe("validateIdmlTranslation", () => {
     })
   })
 
+  it("accepts DOM-serialized non-breaking spaces without changing the text", () => {
+    const unit = makeUnit([{
+      index: 0,
+      text: "A\u00a0B",
+      characterStyleId: "CharacterStyle/Body",
+      editable: true,
+    }])
+    const sourceHtml = renderIdmlUnitHtml(unit)
+    const targetHtml = sourceHtml.replace("A\u00a0B", "A&nbsp;B")
+
+    expect(validateIdmlTranslation(sourceHtml, targetHtml, unit.metadata)).toEqual({
+      valid: true,
+      diagnostics: [],
+      slots: ["A\u00a0B"],
+    })
+  })
+
+  it.each([
+    ["spaced opening tag", (html: string) => html.replace("<span", "< span")],
+    ["spaced closing tag", (html: string) => html.replace("</span>", "</ span>")],
+    ["spaced line-break tag", (html: string) => html.replace("<br ", "< br ")],
+  ])("rejects browser-invalid %s syntax", (_label, mutate) => {
+    const unit = makeUnit(mixedSlots, mixedTokens)
+    const sourceHtml = renderIdmlUnitHtml(unit)
+    const result = validateIdmlTranslation(sourceHtml, mutate(sourceHtml), unit.metadata)
+
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics[0]?.code).toBe("ANCHOR_INVALID")
+  })
+
+  it.each([
+    ["literal C0 control", "\u0001"],
+    ["numeric C0 entity", "&#1;"],
+    ["noncharacter U+FFFE", "\ufffe"],
+    ["noncharacter U+FFFF", "\uffff"],
+  ])("rejects XML-forbidden slot text: %s", (_label, replacement) => {
+    const unit = makeUnit(mixedSlots)
+    const sourceHtml = renderIdmlUnitHtml(unit)
+    const targetHtml = sourceHtml.replace("Bold &amp; &lt;β&gt;", replacement)
+    const result = validateIdmlTranslation(sourceHtml, targetHtml, unit.metadata)
+
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics[0]?.code).toBe("ANCHOR_INVALID")
+  })
+
+  it.each([
+    null,
+    { version: 2 },
+    { version: 2, slotCount: 1, editableSlotIndexes: undefined, protectedTokenCount: 0, anchorSequenceHash: "a".repeat(64) },
+    { version: 2, slotCount: 1, editableSlotIndexes: [], protectedTokenCount: 0, anchorSequenceHash: "not-a-hash" },
+  ])("fails closed for malformed runtime metadata %#", (metadata) => {
+    const unit = makeUnit(mixedSlots)
+    const sourceHtml = renderIdmlUnitHtml(unit)
+
+    expect(() => validateIdmlTranslation(
+      sourceHtml,
+      sourceHtml,
+      metadata as unknown as IdmlFormatMetadataV2,
+    )).not.toThrow()
+    const result = validateIdmlTranslation(
+      sourceHtml,
+      sourceHtml,
+      metadata as unknown as IdmlFormatMetadataV2,
+    )
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics[0]?.code).toBe("ANCHOR_INVALID")
+  })
+
   it.each([
     ["missing", (html: string) => html.replace(/<span data-idml-slot="1"[\s\S]*?<\/span>/, ""), "ANCHOR_MISSING"],
     ["duplicated", (html: string) => html.replace("</p>", `${html.match(/<span data-idml-slot="1"[\s\S]*?<\/span>/)?.[0] ?? ""}</p>`), "ANCHOR_DUPLICATED"],

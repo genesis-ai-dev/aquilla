@@ -33,11 +33,12 @@
 
 | ID | Title | Status | Owns | Notes |
 | --- | --- | --- | --- | --- |
-| AQU-704-A | Protected HTML and legacy upgrade | Ready | `html.ts`, `legacy.ts`, focused tests | Exact anchor identity/order |
-| AQU-704-B | Defensive UCF/ZIP inspection | Ready | `archive.ts`, focused tests | Central-directory safety + UCF |
+| AQU-704-A | Protected HTML and legacy upgrade | Merged | `html.ts`, `legacy.ts`, focused tests | 40 focused tests; exact identity/order |
+| AQU-704-B | Defensive UCF/ZIP inspection | Merged | `archive.ts`, focused tests | 22 tests; central/local safety + UCF |
 | AQU-704-C | XML parse and surgical export | Ready | `xml.ts`, `engine.ts`, focused tests | Stable paths + verbatim replacement |
 | AQU-704-I | Integration fixtures and gates | Active | package config, shared fixtures, orchestration | Root orchestrator |
 
 ## §4 Merge log
 
-Append each verified worker merge with date, branch, SHA, build/test result, and remaining traces.
+- 2026-07-24 · AQU-704-B · `codex/aqu-704-archive` · `5c4e72eb` · package build ✅ · archive tests 22/22 ✅ · no open trace.
+- 2026-07-24 · AQU-704-A · `codex/aqu-704-html` · `6afcab61` · package build ✅ · HTML/legacy tests 40/40 ✅; combined package 62/62 ✅ · no open trace.

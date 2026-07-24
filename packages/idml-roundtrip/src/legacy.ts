@@ -76,6 +76,14 @@ function uniqueDefined(values: readonly (string | undefined)[]): string | undefi
   return defined.every((value) => value === defined[0]) ? defined[0] : null
 }
 
+function uniqueNonNegativeIntegers(
+  values: readonly (number | undefined)[],
+): number | undefined | null {
+  const defined = values.filter((value): value is number => value !== undefined)
+  if (defined.length === 0) return undefined
+  return defined.every((value) => value === defined[0]) ? defined[0] : null
+}
+
 function stringArray(value: unknown): readonly string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? value
@@ -359,6 +367,23 @@ function sameNumbers(left: readonly number[], right: readonly number[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
+function expectedUnsplitSlotIndexes(
+  segmentCount: number,
+  omittedIndexes: readonly number[],
+): readonly number[] {
+  const omitted = new Set(omittedIndexes)
+  return Array.from({ length: segmentCount }, (_, index) => index)
+    .filter((index) => !omitted.has(index))
+}
+
+function localBreaks(
+  parsed: NonNullable<ReturnType<typeof parseLegacySegmentIndexHtml>>,
+): readonly boolean[] {
+  return parsed.slots.map((slot, localIndex) => (
+    localIndex > 0 && parsed.breakBefore[slot.index] === true
+  ))
+}
+
 function legacyScope(value: unknown): IdmlScope | undefined {
   return typeof value === "string" && IDML_SCOPES.has(value as IdmlScope)
     ? value as IdmlScope
@@ -404,15 +429,18 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
   if (
     !parsedSource
     || parsedSource.segmentCount !== contentSegmentCount
-    || parsedSource.slots.length !== contentSegmentCount
-    || parsedSource.slots.some((slot, index) => slot.index !== index)
+    || parsedSource.slots.length === 0
+    || parsedSource.slots.some((
+      slot,
+      index,
+    ) => slot.index >= contentSegmentCount || (index > 0 && slot.index <= parsedSource.slots[index - 1]!.index))
   ) {
     return rejected(
       "ANCHOR_INVALID",
-      "Legacy IDML source HTML must contain each segment index exactly once in document order",
+      "Legacy IDML source HTML must contain a non-empty, ordered subset of its segment indexes",
     )
   }
-  if (parsedSource.slots.some((slot, index) => slot.text !== contentSegments[index])) {
+  if (parsedSource.slots.some((slot) => slot.text !== contentSegments[slot.index])) {
     return rejected(
       "ANCHOR_INVALID",
       "Legacy IDML source HTML does not exactly match idmlStructure.contentSegments",
@@ -434,7 +462,10 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
   if (
     !storedBreakBefore
     || storedBreakBefore.length !== contentSegmentCount
-    || storedBreakBefore.some((value, index) => value !== parsedSource.breakBefore[index])
+    || parsedSource.slots.some((
+      slot,
+      localIndex,
+    ) => localIndex > 0 && storedBreakBefore[slot.index] !== parsedSource.breakBefore[slot.index])
   ) {
     return rejected(
       "ANCHOR_INVALID",
@@ -443,6 +474,37 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
   }
 
   const relationships = legacyRelationships(input)
+  const relationshipPart = nonNegativeInteger(relationships?.segmentIndex)
+  const structurePart = nonNegativeInteger(structure.part)
+  const part = uniqueNonNegativeIntegers([structurePart, relationshipPart])
+  if (part === null) {
+    return rejected("LOCATOR_DUPLICATED", "Legacy IDML cell part identifiers disagree")
+  }
+  const totalParts = nonNegativeInteger(relationships?.totalSegments)
+  if (totalParts !== undefined && ((part ?? 0) >= totalParts || totalParts === 0)) {
+    return rejected("LOCATOR_MISSING", "Legacy IDML cell part is outside its declared part count")
+  }
+  const structuralApostropheIndexes = numberArray(structure.structuralApostropheSegmentIndexes) ?? []
+  if (
+    structuralApostropheIndexes.some((index) => index >= contentSegmentCount)
+    || new Set(structuralApostropheIndexes).size !== structuralApostropheIndexes.length
+  ) {
+    return rejected("ANCHOR_INVALID", "Legacy IDML structural-apostrophe indexes are invalid")
+  }
+  const slotIndexes = parsedSource.slots.map((slot) => slot.index)
+  if (
+    relationshipPart === undefined
+    && totalParts === undefined
+    && !sameNumbers(
+      slotIndexes,
+      expectedUnsplitSlotIndexes(contentSegmentCount, structuralApostropheIndexes),
+    )
+  ) {
+    return rejected(
+      "ANCHOR_INVALID",
+      "An unsplit legacy IDML cell omitted a segment that was not declared structural",
+    )
+  }
   const storyId = uniqueDefined([
     nonEmptyString(structure.storyId),
     nonEmptyString(valueAt(input, "metadata", "storyId")),
@@ -480,8 +542,6 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
   if (typeof sourceBlockHash !== "string") return sourceBlockHash
 
   const scope = legacyScope(structure.scope) ?? "story-paragraph"
-  const part = nonNegativeInteger(structure.part) ?? 0
-  const slotIndexes = parsedSource.slots.map((slot) => slot.index)
   const elementPath = paragraphId
     ? `/Story/ParagraphStyleRange[@Self="${paragraphId}"]`
     : `/Story/ParagraphStyleRange[${(paragraphOrder ?? 0) + 1}]`
@@ -492,18 +552,18 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
     elementPath,
     ...(paragraphId ? { elementId: paragraphId } : {}),
     scope,
-    part,
+    part: part ?? 0,
     slotIndexes,
     sourceBlockHash,
   }
 
-  const slots: readonly IdmlTextSlot[] = parsedSource.slots.map((slot) => ({
-    index: slot.index,
+  const slots: readonly IdmlTextSlot[] = parsedSource.slots.map((slot, localIndex) => ({
+    index: localIndex,
     text: slot.text,
     characterStyleId: slot.characterStyleId,
     editable: true,
   }))
-  const breaks = storedBreakBefore
+  const breaks = localBreaks(parsedSource)
   const protectedTokens: readonly IdmlProtectedToken[] = breaks.flatMap((hasBreak, position) => (
     hasBreak
       ? [{
@@ -517,7 +577,7 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
   const metadata: IdmlFormatMetadataV2 = {
     version: 2,
     slotCount: slots.length,
-    editableSlotIndexes: slotIndexes,
+    editableSlotIndexes: slots.map((slot) => slot.index),
     protectedTokenCount: protectedTokens.length,
     anchorSequenceHash: computeIdmlAnchorSequenceHash(slots, protectedTokens),
   }
@@ -536,7 +596,10 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
         slot,
         index,
       ) => slot.characterStyleId !== slots[index]?.characterStyleId)
-      || parsedTarget.breakBefore.some((value, index) => value !== breaks[index])
+      || !sameNumbers(
+        localBreaks(parsedTarget).map((value) => value ? 1 : 0),
+        breaks.map((value) => value ? 1 : 0),
+      )
       || parsedTarget.paragraphStyle !== parsedSource.paragraphStyle
       || parsedTarget.storyId !== parsedSource.storyId
     ) {
@@ -545,8 +608,8 @@ export function upgradeLegacyIdmlMetadata(input: unknown): LegacyIdmlUpgradeResu
         "Legacy IDML target HTML changed segment identity, order, style, or structural breaks",
       )
     }
-    const targetSlots: readonly IdmlTextSlot[] = parsedTarget.slots.map((slot) => ({
-      index: slot.index,
+    const targetSlots: readonly IdmlTextSlot[] = parsedTarget.slots.map((slot, localIndex) => ({
+      index: localIndex,
       text: slot.text,
       characterStyleId: slot.characterStyleId,
       editable: true,

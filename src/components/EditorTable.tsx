@@ -4292,8 +4292,12 @@ function EditorRow({
 
   const handleTranscribe = useCallback(async () => {
     if (!cell.selectedAudioId) return
-    void transcribeCell({ cell, session: rowSession, projectId: project.id, language: project.targetLanguage })
-  }, [cell, rowSession, project.id, project.targetLanguage])
+    // AQU-646: the ASR language must match the AUDIO. Imported media segments
+    // are SOURCE speech (→ sourceLanguage); recorded takes voice the TARGET
+    // text (→ targetLanguage). Mapping to a Whisper tag happens downstream.
+    const language = cell.medium === "media" ? project.sourceLanguage : project.targetLanguage
+    void transcribeCell({ cell, session: rowSession, projectId: project.id, language })
+  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage])
 
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const authoritativeSelfValidated = cell.activeValidators.includes(username)
@@ -5085,7 +5089,14 @@ function EditorRow({
               <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
             ) : (
               <UsfmSourceText
-                text={sourceDraft?.value ?? cell.original}
+                // AQU-646: an imported media segment's stored `value` is the
+                // filename; once transcribed, the ASR transcript IS the source
+                // text users translate. Non-media cells are unaffected.
+                text={
+                  cell.medium === "media" && cell.transcription?.trim()
+                    ? cell.transcription
+                    : (sourceDraft?.value ?? cell.original)
+                }
                 highlights={highlights}
                 ranges={sourceRanges}
                 showEvidence={examplesExpanded}

@@ -127,23 +127,38 @@ export interface TranscribeAllArgs {
   cells: CellData[]
   projectId: string
   session: FrontierSession | null
+  /** AQU-646: language of SOURCE speech (imported media segments). */
+  sourceLanguage?: string
+  /** Language of TARGET speech (recorded takes). Falls back to `language`. */
+  targetLanguage?: string
+  /** @deprecated single-language callers; used as targetLanguage fallback. */
   language?: string
 }
 
 /**
- * Run ASR on every cell that has a recording but no timings yet.
+ * AQU-646: a cell needs transcription when it has a recording and either
+ * (media segment) no transcript text yet, or (recorded take) no word timings
+ * for that recording. Shared by runTranscribeAll and the workspace menu count.
+ */
+export function needsTranscription(c: CellData): boolean {
+  if (!c.selectedAudioId) return false
+  if (c.medium === "media") return !c.transcription?.trim()
+  const existingTimings = c.audioTimings?.[c.selectedAudioId]
+  return !existingTimings || existingTimings.length === 0
+}
+
+/**
+ * Run ASR on every cell that needs it (see `needsTranscription`).
  * Uses the same per-cell `transcribeCell` path the per-cell badge uses.
  */
 export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
-  const { cells, projectId, session, language } = args
+  const { cells, projectId, session } = args
+  const targetLang = args.targetLanguage ?? args.language
 
-  // Target: cells with a recording but no existing timings for that recording.
   const targets = cells.filter((c) => {
-    if (!c.selectedAudioId) return false
-    const existingTimings = c.audioTimings?.[c.selectedAudioId]
-    if (existingTimings && existingTimings.length > 0) return false
+    if (!needsTranscription(c)) return false
     // Skip cells already being transcribed.
-    const st = getTranscribeStatus(c.selectedAudioId)
+    const st = getTranscribeStatus(c.selectedAudioId!)
     if (st.kind === "loading" || st.kind === "transcribing") return false
     return true
   })
@@ -152,11 +167,23 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
 
   _transcribeCancelFlag = false
 
-  await runBatch(targets, (cell) => transcribeCell({ cell, session, projectId, language }), {
-    kind: "transcribe",
-    isCancelled: () => _transcribeCancelFlag,
-    onItemDone: () => { /* per-cell badge handles its own state */ },
-  })
+  await runBatch(
+    targets,
+    (cell) =>
+      transcribeCell({
+        cell,
+        session,
+        projectId,
+        // AQU-646: language follows the audio — media segments are source
+        // speech, recorded takes voice the target text.
+        language: cell.medium === "media" ? (args.sourceLanguage ?? targetLang) : targetLang,
+      }),
+    {
+      kind: "transcribe",
+      isCancelled: () => _transcribeCancelFlag,
+      onItemDone: () => { /* per-cell badge handles its own state */ },
+    },
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +197,12 @@ export interface SynthAllArgs {
   username: string
 }
 
+/** AQU-646: a cell needs synthesis when it has translated text but no
+ *  generated voice yet. Shared by runSynthAll and the workspace menu count. */
+export function needsSynthesis(c: CellData): boolean {
+  return Boolean(c.translated?.trim()) && !c.selectedGeneratedVoiceAudioId
+}
+
 /**
  * Generate TTS voice for every cell that has translated text but no generated
  * voice attachment yet. Uses the same `generateCellVoice` path the per-cell
@@ -180,8 +213,7 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
 
   // Target: cells with translated text but no generated voice audio.
   const targets = cells.filter((c) => {
-    if (!c.translated?.trim()) return false
-    if (c.selectedGeneratedVoiceAudioId) return false
+    if (!needsSynthesis(c)) return false
     // Skip cells already being synthesized.
     const st = getTtsStatus(ttsStatusKey(c.id))
     if (st.kind === "loading" || st.kind === "synthesizing") return false

@@ -7,6 +7,7 @@
 
 import { requestAiModelConsent, WHISPER_MODEL, AiModelConsentDeniedError } from "./ai-consent"
 import { alignChunks } from "./timings"
+import { whisperLanguageFromTag } from "./language"
 import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import { setTranscribeStatus } from "./transcribe-status"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
@@ -38,6 +39,9 @@ export interface TranscriptionOptions {
   language?: string
   model?: string
   onProgress?: (p: TranscriptionProgress) => void
+  /** AQU-646: transcribe only this window of the clip (shared imported clip →
+   *  per-cell segment). Absent = whole clip (recorded takes). */
+  trim?: PcmTrimWindow
 }
 
 const WHISPER_SAMPLE_RATE = 16000
@@ -62,7 +66,31 @@ async function getWorker(): Promise<Worker> {
   return workerPromise
 }
 
-export async function audioBytesToWhisperPcm(bytes: Uint8Array): Promise<Float32Array> {
+/** AQU-646: a trim window (ms) selecting one segment of a shared clip. */
+export interface PcmTrimWindow {
+  trimStartMs?: number | null
+  trimEndMs?: number | null
+}
+
+/**
+ * AQU-646: slice a 16 kHz mono PCM buffer to a trim window. Exported for
+ * tests. Out-of-range/absent edges clamp to the clip bounds; an inverted or
+ * empty window returns the full clip (defensive — better a long transcript
+ * than none).
+ */
+export function slicePcmToTrim(pcm: Float32Array, trim?: PcmTrimWindow): Float32Array {
+  const startMs = trim?.trimStartMs ?? null
+  const endMs = trim?.trimEndMs ?? null
+  if (startMs == null && endMs == null) return pcm
+  const start = Math.max(0, Math.min(pcm.length, Math.round(((startMs ?? 0) / 1000) * WHISPER_SAMPLE_RATE)))
+  const end = endMs == null
+    ? pcm.length
+    : Math.max(0, Math.min(pcm.length, Math.round((endMs / 1000) * WHISPER_SAMPLE_RATE)))
+  if (end <= start) return pcm
+  return pcm.slice(start, end)
+}
+
+export async function audioBytesToWhisperPcm(bytes: Uint8Array, trim?: PcmTrimWindow): Promise<Float32Array> {
   if (!AudioCtxCtor) throw new Error("Web Audio API unavailable")
   const copy = new Uint8Array(bytes.byteLength)
   copy.set(bytes)
@@ -76,7 +104,7 @@ export async function audioBytesToWhisperPcm(bytes: Uint8Array): Promise<Float32
   }
 
   if (buffer.sampleRate === WHISPER_SAMPLE_RATE && buffer.numberOfChannels === 1) {
-    return buffer.getChannelData(0).slice(0)
+    return slicePcmToTrim(buffer.getChannelData(0).slice(0), trim)
   }
 
   const targetLen = Math.ceil(buffer.duration * WHISPER_SAMPLE_RATE)
@@ -86,7 +114,7 @@ export async function audioBytesToWhisperPcm(bytes: Uint8Array): Promise<Float32
   src.connect(offline.destination)
   src.start()
   const rendered = await offline.startRendering()
-  return rendered.getChannelData(0).slice(0)
+  return slicePcmToTrim(rendered.getChannelData(0).slice(0), trim)
 }
 
 /**
@@ -99,7 +127,7 @@ export async function transcribeAudio(
 ): Promise<TranscriptionResult> {
   const consented = await requestAiModelConsent(WHISPER_MODEL)
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
-  const pcm = await audioBytesToWhisperPcm(bytes)
+  const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
   const worker = await getWorker()
   const requestId = `t-${++workerSeq}`
 
@@ -230,8 +258,18 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
 
     setTranscribeStatus(audioId, { kind: "transcribing" })
 
+    // AQU-646: imported media segments share one clip — transcribe only this
+    // cell's trim window. Recorded takes have no trims (whole clip). And route
+    // the language through the Whisper tag mapper (raw project language names
+    // were being fed to transformers.js verbatim; unmapped → auto-detect).
+    const isMediaSegment = cell.medium === "media"
+    const trim = isMediaSegment
+      ? { trimStartMs: attachment?.trimStartMs ?? null, trimEndMs: attachment?.trimEndMs ?? null }
+      : undefined
+
     const result = await transcribeAudioImpl(bytes, {
-      language,
+      language: whisperLanguageFromTag(language) ?? undefined,
+      trim,
       onProgress: (p) => {
         setTranscribeStatus(audioId, {
           kind: "loading",
@@ -252,8 +290,11 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // them. start/end must be char offsets into the cell's plain text — the
     // karaoke decoration maps them against the TipTap doc, so align against
     // cell.translated (transcript offsets as fallback when counts mismatch).
-    if (result.chunks.length > 0) {
-      const timings = alignChunks(result.chunks, cell.translated)
+    const transcriptText = result.text.trim()
+    if (result.chunks.length > 0 || (isMediaSegment && transcriptText)) {
+      // AQU-646: for media segments align timings against the transcript itself
+      // (there's no target text yet — the transcript IS the text karaoke maps).
+      const timings = alignChunks(result.chunks, isMediaSegment ? transcriptText : cell.translated)
       // Signed-out transcribes (cache hit) have no session — the emit queues
       // to the local outbox and can throw a role-gate error, so swallow it:
       // transcription itself succeeded, and the timings re-emit on a manual
@@ -266,6 +307,18 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         url: attachmentUrl,
         slot: "recording",
         timings,
+        // Preserve attachment fields the projection UPSERT would otherwise
+        // null out (excluded.* overwrite) — the trim window is load-bearing
+        // for imported segments (defines the cell's slice of the shared clip).
+        ...(attachment?.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
+        ...(attachment?.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
+        ...(attachment?.durationMs != null ? { durationMs: attachment.durationMs } : {}),
+        ...(attachment?.voiceId ? { voiceId: attachment.voiceId } : {}),
+        ...(attachment?.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
+        // AQU-646: media segments carry the transcript — the server lands it on
+        // the SOURCE cell's `transcription` (translatable source text). Never
+        // sent for recorded takes (target audio must not write source text).
+        ...(isMediaSegment && transcriptText ? { transcription: transcriptText } : {}),
         author: session?.username ?? "local",
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)

@@ -59,6 +59,11 @@ export interface CodexCellAttachment {
   voiceId?: string;
   referenceAudioId?: string;
   durationMs?: number;
+  /** AQU-646: non-destructive playback trim window into the clip, in ms.
+   *  Imported media segments share one clip; the trim identifies this cell's
+   *  slice (transcription must decode only this window, not the whole file). */
+  trimStartMs?: number;
+  trimEndMs?: number;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character

@@ -121,6 +121,7 @@ function validMemberPath(value: unknown): string | undefined {
   if (typeof value !== "string" || !/^[^\\\u0000-\u001f]+$/.test(value)) return undefined
   if (
     value.startsWith("/")
+    || /^[A-Za-z]:/.test(value)
     || value.split("/").some((component) => component === "" || component === "." || component === "..")
   ) {
     return undefined
@@ -229,6 +230,9 @@ function parseLocator(candidate: UnknownRecord): IdmlLocator | undefined {
     || !IDML_SCOPES.has(scope as IdmlScope)
     || part === undefined
     || !slotIndexes
+    || slotIndexes.some((index, position) => (
+      index >= (slotIndexes[position + 1] ?? Number.POSITIVE_INFINITY)
+    ))
     || !sourceBlockHash
   ) {
     return undefined
@@ -352,11 +356,19 @@ function resolveLegacyMemberPath(
   structure: UnknownRecord,
   storyId: string | undefined,
 ): string | undefined {
-  const explicit = uniqueDefined([
-    validMemberPath(structure.memberPath),
-    validMemberPath(input.memberPath),
-    validMemberPath(valueAt(input, "sourceLocator", "memberPath")),
-  ])
+  const candidates = [
+    structure.memberPath,
+    input.memberPath,
+    valueAt(input, "sourceLocator", "memberPath"),
+  ]
+  if (candidates.some((candidate) => (
+    candidate !== undefined
+    && candidate !== null
+    && validMemberPath(candidate) === undefined
+  ))) {
+    return undefined
+  }
+  const explicit = uniqueDefined(candidates.map(validMemberPath))
   if (explicit === null) return undefined
   if (explicit) return explicit
   return storyId && /^[A-Za-z0-9_.:-]+$/.test(storyId)

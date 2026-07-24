@@ -139,6 +139,23 @@ describe("upgradeLegacyIdmlMetadata", () => {
     expect(result.locator.storyId).toBeUndefined()
   })
 
+  it.each([
+    "/Stories/Story_u1.xml",
+    "C:/Stories/Story_u1.xml",
+    "C:Stories/Story_u1.xml",
+    "Stories/../Story_u1.xml",
+  ])("rejects unsafe legacy member path %s", (memberPath) => {
+    const input = legacyInput()
+    const metadata = input.metadata as {
+      data: { idmlStructure: Record<string, unknown> }
+    }
+    metadata.data.idmlStructure.memberPath = memberPath
+
+    const result = upgradeLegacyIdmlMetadata(input)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.diagnostics[0]?.code).toBe("LOCATOR_MISSING")
+  })
+
   it("upgrades a producer-valid cell that omits a declared structural apostrophe slot", () => {
     const apostropheBlock = [
       '<ParagraphStyleRange Self="p1" AppliedParagraphStyle="ParagraphStyle/Body">',
@@ -236,6 +253,25 @@ describe("upgradeLegacyIdmlMetadata", () => {
     if (!upgraded.ok) return
 
     expect(upgradeLegacyIdmlMetadata(upgraded)).toEqual(upgraded)
+  })
+
+  it.each([
+    [[1, 0], "reordered"],
+    [[0, 0], "duplicated"],
+  ])("rejects v2 passthrough metadata with %s slot indexes", (slotIndexes) => {
+    const upgraded = upgradeLegacyIdmlMetadata(legacyInput())
+    expect(upgraded.ok).toBe(true)
+    if (!upgraded.ok) return
+
+    const result = upgradeLegacyIdmlMetadata({
+      ...upgraded,
+      locator: {
+        ...upgraded.locator,
+        slotIndexes,
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.diagnostics[0]?.code).toBe("LOCATOR_MISSING")
   })
 
   it.each([

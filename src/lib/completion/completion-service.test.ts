@@ -1067,6 +1067,61 @@ describe("buildParagraphPrompt", () => {
     expect(sys.content).not.toContain("{sourceLanguage}")
     expect(sys.content).not.toContain("{targetLanguage}")
   })
+
+  // Coordinator adjudication (p1-paragraph-ui-wiring): a validated cell
+  // skipped mid-group must not leave a silent gap — it renders IN POSITION
+  // as a locked reference segment (source + its existing committed target),
+  // never as a `<c id>` tag, so drafted neighbors don't read as artificially
+  // contiguous.
+  describe("locked segments (validated cells rendered in position)", () => {
+    it("renders a locked cell's source + committed target in position, without a <c id> tag for it", () => {
+      const ID_C = "cccc-cccc"
+      const [, user] = buildParagraphPrompt({
+        sourceLanguage: "English", targetLanguage: "French",
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        cells: [
+          { cellId: ID_A, source: "Verse one source" },
+          { cellId: ID_B, source: "Verse two source", lockedTarget: "Verse two committed target" },
+          { cellId: ID_C, source: "Verse three source" },
+        ],
+        examples: [],
+      })
+      // Locked cell renders in position, marked, with its committed target —
+      // and is NOT wrapped in a <c id> tag.
+      expect(user.content).toContain(
+        "Verse two source [already translated — do not output: Verse two committed target]",
+      )
+      expect(user.content).not.toContain(`<c id="${ID_B}">`)
+      // Its neighbors are still individually tagged as usual.
+      expect(user.content).toContain(`<c id="${ID_A}">Verse one source</c>`)
+      expect(user.content).toContain(`<c id="${ID_C}">Verse three source</c>`)
+      // Order is preserved: A's tag, then the locked marker, then C's tag.
+      const c = user.content
+      expect(c.indexOf(`<c id="${ID_A}">`))
+        .toBeLessThan(c.indexOf("Verse two committed target"))
+      expect(c.indexOf("Verse two committed target"))
+        .toBeLessThan(c.indexOf(`<c id="${ID_C}">`))
+    })
+
+    it("adds a system-prompt instruction not to tag or re-translate locked segments, only when one is present", () => {
+      const [sysWithLocked] = buildParagraphPrompt({
+        sourceLanguage: "English", targetLanguage: "French",
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        cells: [{ cellId: ID_A, source: "test", lockedTarget: "déjà" }],
+        examples: [],
+      })
+      expect(sysWithLocked.content).toContain("already translated")
+      expect(sysWithLocked.content.toLowerCase()).toContain("do not")
+
+      const [sysWithoutLocked] = buildParagraphPrompt({
+        sourceLanguage: "English", targetLanguage: "French",
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+        cells: [{ cellId: ID_A, source: "test" }],
+        examples: [],
+      })
+      expect(sysWithoutLocked.content).not.toContain("already translated")
+    })
+  })
 })
 
 describe("activeProjectIdFromPath", () => {

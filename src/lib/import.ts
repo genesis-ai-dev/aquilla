@@ -1222,6 +1222,7 @@ export function buildBulkCellsWithSpeakers(
     const metadata = {
       ...(str.metadata ?? {}),
       aquillaImport: aquillaImportMetadata(normalizedFile, unit),
+      ...(str.paragraphStart ? { paragraphStart: true } : {}),
     }
     cells.push({
       id: uuidv7(),
@@ -1923,7 +1924,7 @@ export async function importParatextAsTarget(
         group: cell.ref,
         globalReferences: [cell.ref],
         type: cell.type,
-        ...(cell.paragraphStart ? { paragraphStart: true } : {}),
+        ...(cell.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
       }))
       const normalized = normalizeTranslatableStrings(strings, {
         fileName: bookPlan.displayName,

@@ -15,6 +15,7 @@ export const ORG_SETTINGS_SECTIONS = [
   "roster",
   "assignment",
   "providers",
+  "monday",
 ] as const
 export type OrgSettingsSection = (typeof ORG_SETTINGS_SECTIONS)[number]
 
@@ -24,6 +25,7 @@ export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   roster: "Roster & progress visibility",
   assignment: "Assignment authority",
   providers: "AI provider keys",
+  monday: "Monday.com",
 }
 
 export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, string> = {
@@ -36,4 +38,6 @@ export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, strin
     "Whether members below project lead may claim work for themselves. Leads and maintainers can always assign.",
   providers:
     "Org-level keys act as a baseline for everyone in this organization. Projects or individuals can override with their own.",
+  monday:
+    "Connect this organization's Monday.com account. Projects can then link a board and push progress automatically.",
 }

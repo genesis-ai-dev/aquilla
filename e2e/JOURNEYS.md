@@ -38,6 +38,7 @@
 | AI          | Sparkle on a footnoted source commits translated base + reintegrated `\f…\f*` footnote (never an empty "Saved") | `e2e/specs/ai/completion-footnote.spec.ts` (spec-local mock LLM) | |
 | AI          | Sparkle in a secondary target lane commits into that lane only — survives reload, default lane untouched | `e2e/specs/ai/completion-lane.spec.ts` (spec-local mock LLM) | |
 | AI          | Rapid sparkle sequences (regenerate, edit-then-sparkle, lane repeats) never dead-letter as stale siblings | `e2e/specs/ai/completion-races.spec.ts` (spec-local mock LLM) | |
+| AI          | Paragraph pilcrow button drafts all cells of a paragraph as one unit (mock LLM) | `e2e/specs/ai/paragraph-draft.smoke.spec.ts` | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
 | Editor      | Import dialog escalates an unsupported container to the isolated parser, previews normalized source/target units, then commits through ImportService | `e2e/specs/agent-import.spec.ts` (container-gated with `AGENT_SANDBOX_E2E=1`) | |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |

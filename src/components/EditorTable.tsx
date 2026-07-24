@@ -13,6 +13,8 @@ import {
   Languages,
   Archive,
   Lock,
+  Pilcrow,
+  PilcrowRight,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -32,6 +34,7 @@ import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
+import { deriveParagraphs } from "@/lib/parsers/paragraphs"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
@@ -604,6 +607,10 @@ interface EditorTableProps {
   previews: Map<string, string>
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   onCompleteBatch: (cells: CellData[]) => void
+  /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
+   *  `cellId` as one model call. Omit to keep the rail button hidden
+   *  (legacy/prop-less callers render unchanged). */
+  onCompleteParagraph?: (cellId: string) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
   rules?: TranslationRule[]
@@ -699,7 +706,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
-  onCompleteSingle, onCompleteBatch, healthMap,
+  onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
@@ -1437,6 +1444,50 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion, displayCellIds])
 
+  // p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): paragraph group
+  // info, keyed by the group's start cell id — drives the "Draft paragraph"
+  // rail button's visibility/label/dialog copy and its in-flight guard. Only
+  // start cells (the only ones the button can render on) need an entry, but
+  // deriveParagraphs needs the full ordered per-file cell list to find file/
+  // paragraph boundaries, so this walks displayCellIds once, same idiom as
+  // sequentialNumberByCellId above. Legacy imports (no paragraphStart flags
+  // anywhere) still produce one group per file — harmless, since the rail
+  // button is separately gated on `cell.paragraphStart === true`, which never
+  // holds for those cells.
+  //
+  // `draftableCount` excludes already-validated cells (the same `status ===
+  // "validated"` signal completeParagraph's skip logic uses — kept
+  // consistent so the dialog's "N of M" copy never lies) — see AQU
+  // (coordinator adjudication) review of the original "Draft this paragraph?
+  // N cells…" copy, which used the full group size even when some cells
+  // were validated and would be skipped.
+  //
+  // `memberIds` is every cell id in the group (including the start cell
+  // itself) — used ONLY by MemoizedRow to derive a per-row `groupInFlight`
+  // boolean from the `completing` map (any member cell mid-draft ⇒ the
+  // button disables/pulses, and a click can't re-fire while a previous
+  // click's fan-out is still running).
+  const paragraphGroupInfoByCellId = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => {
+      const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
+      const orderedCells: { id: string; fileId: string; paragraphStart?: boolean }[] = []
+      for (const id of displayCellIds) {
+        const view = cellStore.getCellView(id)
+        if (!view) continue
+        orderedCells.push({ id: view.id, fileId: view.fileId, paragraphStart: view.paragraphStart })
+      }
+      for (const group of deriveParagraphs(orderedCells)) {
+        if (group.length <= 1) continue
+        let draftableCount = 0
+        for (const id of group) {
+          if (cellStore.getCellView(id)?.status !== "validated") draftableCount++
+        }
+        map.set(group[0], { size: group.length, draftableCount, memberIds: group })
+      }
+      return map
+    }),
+  [cellStore, cellStoreVersion, displayCellIds])
+
   const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
     ? chapterNavigationSelection.label
     : null
@@ -1568,18 +1619,46 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         {(cell) => {
           const untimedInTimeLens = isTimeOrdered && !hasTiming(cell)
           const footnoteOffsets = cellStore.getFootnoteOffsets(cell.id)
+          // AQU: paragraph-boundary visuals (p1-paragraph-ui-wiring). Only the
+          // FIRST cell of a paragraph carries paragraphStart; the file header
+          // already delimits the first paragraph of a file, so suppress the
+          // extra rule/pilcrow there to avoid a stray line at the top of every
+          // file. "First of file" is derived from the previous row's cached
+          // fileId (no new subscription — a synchronous cellStore getter,
+          // same idiom as footnoteOffsets above).
+          const isFirstOfFile = index === 0
+            || cellStore.getCellView(displayCellIds[index - 1])?.fileId !== cell.fileId
+          const showParagraphBoundary = cell.paragraphStart === true && !isFirstOfFile
+          // p1-paragraph-ui-wiring (Task 3): only paragraph-start cells carry
+          // group info; every other row gets undefined so its rail button
+          // gate (paragraphGroupSize !== undefined) resolves false.
+          const paragraphGroupInfo = cell.paragraphStart === true
+            ? paragraphGroupInfoByCellId.get(cell.id)
+            : undefined
           return (
       <div
         data-cell-id={cell.id}
         data-index={index}
         data-untimed={untimedInTimeLens ? "true" : undefined}
+        data-paragraph-start={showParagraphBoundary ? "true" : undefined}
         aria-label={untimedInTimeLens ? "No specific timing — ordered by sequence" : undefined}
-        className={cn("relative", untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70")}
+        className={cn(
+          "relative",
+          untimedInTimeLens && "border-l-2 border-dashed border-amber-400/70",
+          showParagraphBoundary && "mt-3",
+        )}
       >
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
             no timing
           </span>
+        )}
+        {showParagraphBoundary && (
+          <div className={`grid ${gridCols} border-t border-border/60`}>
+            <div className="flex items-center justify-center py-1" title="New paragraph">
+              <Pilcrow className="h-3 w-3 text-muted-foreground" />
+            </div>
+          </div>
         )}
         <MemoizedRow
           key={cell.id}
@@ -1619,6 +1698,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           infractions={infractions}
           ruleMap={ruleMap}
           onCompleteSingle={onCompleteSingle}
+          onCompleteParagraph={onCompleteParagraph}
+          paragraphGroupSize={paragraphGroupInfo?.size}
+          paragraphDraftableCount={paragraphGroupInfo?.draftableCount}
+          paragraphGroupMemberIds={paragraphGroupInfo?.memberIds}
           isBacktranslationConfigured={isBacktranslationConfigured}
           backtranslating={backtranslating}
           backtranslationErrors={backtranslationErrors}
@@ -1695,6 +1778,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     cellsWithRemoteChange,
     checkLockHolder,
     completing,
+    displayCellIds,
     errors,
     examples,
     footnotePanelActive,
@@ -1731,6 +1815,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onCellCommitted,
     onClaimCell,
     onCompleteSingle,
+    onCompleteParagraph,
+    paragraphGroupInfoByCellId,
     onFootnoteCreated,
     onJumpToCell,
     onOpenAudioSetup,
@@ -2074,7 +2160,24 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
+  onCompleteParagraph?: (cellId: string) => void
+  /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
+   *  `cell.paragraphStart === true` (computed by the parent from the ordered
+   *  cell list). undefined ⇒ not a paragraph start, or a 1-cell group. */
+  paragraphGroupSize?: number
+  /** p1-paragraph-ui-wiring (coordinator follow-up): non-validated cell count
+   *  in this cell's paragraph group — drives the confirm dialog's truthful
+   *  "N of M" copy and the button's hide-when-nothing-to-draft gate. Set
+   *  alongside `paragraphGroupSize`. */
+  paragraphDraftableCount?: number
+  /** p1-paragraph-ui-wiring (coordinator follow-up): every cell id in this
+   *  cell's paragraph group (including itself) — MemoizedRow-only, used to
+   *  derive `paragraphGroupInFlight` from the `completing` map. Never
+   *  forwarded to EditorRow (which gets the derived boolean instead, keeping
+   *  its prop surface a stable scalar). */
+  paragraphGroupMemberIds?: string[]
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2168,7 +2271,8 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onActivateEditor,
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
-    ruleMap, onCompleteSingle,
+    ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
+    paragraphDraftableCount, paragraphGroupMemberIds,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
@@ -2205,6 +2309,23 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 
   const completingState = completing.get(cellId)
   const isLoading = completingState === "searching" || completingState === "generating"
+  // p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
+  // this row's paragraph group is ACTIVELY completing — not just this row's
+  // own (a validated start cell never gets one post-skip, so relying on
+  // `isLoading` alone would let a second click re-fire completeParagraph
+  // mid-fan-out). Only paragraph-start rows with a >1-cell group carry
+  // `paragraphGroupMemberIds`; every other row's guard is trivially false.
+  // Matches `isLoading`'s value check above (searching/generating only) —
+  // presence alone is wrong: a stuck "error" entry (none of useCompletion's
+  // three catch paths clear it) would otherwise permanently disable/pulse
+  // the button for that group.
+  const paragraphGroupInFlight = useMemo(
+    () => paragraphGroupMemberIds?.some((id) => {
+      const state = completing.get(id)
+      return state === "searching" || state === "generating"
+    }) ?? false,
+    [paragraphGroupMemberIds, completing],
+  )
   // Streaming preview text — populated chunk-by-chunk by useCompletion's
   // onChunk handler. We surface it in the target column so the user sees
   // tokens arrive in real time instead of waiting for the LLM to finish
@@ -2283,6 +2404,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         waivedInfractions={waivedInfractions}
         ruleMap={ruleMap}
         onCompleteSingle={onCompleteSingle}
+        onCompleteParagraph={onCompleteParagraph}
+        paragraphGroupSize={paragraphGroupSize}
+        paragraphDraftableCount={paragraphDraftableCount}
+        paragraphGroupInFlight={paragraphGroupInFlight}
         isBacktranslationConfigured={isBacktranslationConfigured}
         isBacktranslating={isBacktranslating}
         backtranslationError={backtranslationError}
@@ -2408,7 +2533,20 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  /** p1-paragraph-ui-wiring: draft the whole paragraph group. Omit to hide the rail button. */
+  onCompleteParagraph?: (cellId: string) => void
+  /** p1-paragraph-ui-wiring: this cell's paragraph group size — set ONLY when
+   *  `cell.paragraphStart === true`. undefined ⇒ not a start, or a 1-cell group. */
+  paragraphGroupSize?: number
+  /** p1-paragraph-ui-wiring (coordinator follow-up): non-validated cell count
+   *  in the group — drives the confirm dialog's truthful "N of M" copy and
+   *  the button's hide-when-nothing-to-draft gate. */
+  paragraphDraftableCount?: number
+  /** p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
+   *  the group has an in-flight completion — disables the button and blocks
+   *  a duplicate `completeParagraph` call mid-fan-out. */
+  paragraphGroupInFlight?: boolean
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -3292,6 +3430,7 @@ function EditorRow({
   cellExamples, highlights, error, health,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
+  onCompleteParagraph, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   getStatisticalBt,
   getFootnoteDetails,
@@ -3405,6 +3544,11 @@ function EditorRow({
   // cell. True = dialog is open; clicking Confirm calls onCompleteSingle,
   // clicking Cancel discards the pending action (nothing committed).
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
+  // p1-paragraph-ui-wiring (Task 3): confirm dialog shown before drafting an
+  // entire paragraph group as one unit — always confirms (no "don't ask
+  // again" opt-out exists for this multi-cell action, unlike the single-cell
+  // Replace confirm above).
+  const [showParagraphConfirm, setShowParagraphConfirm] = useState(false)
   // AQU-618: transient "Saved" confirmation shown after a Replace / AI-generate
   // commit resolves, so the translator can see the change landed instead of
   // being left on the (now-closed) dialog wondering whether it persisted.
@@ -5468,6 +5612,44 @@ function EditorRow({
                 onMouseEnter={onDragEnter}
               />
 
+              {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
+                  the whole paragraph as one model call. ALL of the gates below
+                  must hold for the button to even render (unlike Sparkles,
+                  which stays visible in a disabled/"set up AI" state) — a
+                  paragraph-wide action that can't run yet shouldn't invite a
+                  click. Hidden when: the group is a single cell (the Sparkles
+                  button already covers it), the group has nothing left to
+                  draft (every cell already validated — resolves the silent
+                  no-op), or the parent didn't wire onCompleteParagraph.
+                  `groupBusy` covers BOTH this row's own in-flight state and
+                  any OTHER cell in the group still drafting (a validated
+                  start cell never gets its own `completing` entry, so relying
+                  on `isLoading` alone would let a second click re-fire
+                  completeParagraph mid-fan-out). */}
+              {cell.paragraphStart === true &&
+                editable &&
+                !isAnonymous &&
+                isCompletionConfigured &&
+                isCompletionAvailable &&
+                onCompleteParagraph &&
+                paragraphGroupSize !== undefined &&
+                paragraphGroupSize > 1 &&
+                (paragraphDraftableCount ?? 0) > 0 && (() => {
+                const groupBusy = paragraphGroupInFlight ?? isLoading
+                return (
+                  <RailButton
+                    icon={<PilcrowRight className="h-3.5 w-3.5" />}
+                    tooltip={groupBusy ? "Generating…" : `Draft paragraph (${paragraphGroupSize} cells)`}
+                    onClick={() => {
+                      if (groupBusy) return
+                      setShowParagraphConfirm(true)
+                    }}
+                    disabled={groupBusy}
+                    pulsing={groupBusy}
+                  />
+                )
+              })()}
+
               {/* AQU-620: Regenerate — ask the AI for another iteration of an
                   existing prediction. Shown only for a NON-validated cell that
                   already has a draft (validated cells route through the Sparkles
@@ -6337,6 +6519,23 @@ function EditorRow({
         onCancel={() => setShowGenerateConfirm(false)}
       />
 
+      {/* p1-paragraph-ui-wiring (Task 3): confirm before drafting the whole
+          paragraph group as one unit. Always confirms — no per-preference
+          opt-out exists for this action (unlike the single-cell Replace
+          confirm above). */}
+      {onCompleteParagraph && (
+        <ParagraphDraftConfirmDialog
+          open={showParagraphConfirm}
+          totalCount={paragraphGroupSize ?? 0}
+          draftableCount={paragraphDraftableCount ?? paragraphGroupSize ?? 0}
+          onConfirm={() => {
+            setShowParagraphConfirm(false)
+            onCompleteParagraph(cell.id)
+          }}
+          onCancel={() => setShowParagraphConfirm(false)}
+        />
+      )}
+
       <AddFootnoteDialog
         open={addFootnoteOpen}
         defaults={addFootnoteDefaults}
@@ -6433,6 +6632,63 @@ export function GenerateOverwriteDialog({
           </Button>
           <Button variant="destructive" onClick={() => onConfirm(dontAskAgain)}>
             Replace
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// p1-paragraph-ui-wiring (Task 3) — ParagraphDraftConfirmDialog
+// ---------------------------------------------------------------------------
+// Confirm dialog shown before the "Draft paragraph" rail button fans a single
+// model call out across every cell in the paragraph group. Unlike
+// GenerateOverwriteDialog there is no "don't ask again" opt-out — a bulk,
+// multi-cell action always confirms.
+//
+// Coordinator adjudication: the copy must stay truthful when some of the
+// group is already validated (and therefore skipped, per
+// completeParagraph's skip-validated-cells guard) — it must never claim a
+// count that doesn't match what will actually happen.
+// ---------------------------------------------------------------------------
+
+interface ParagraphDraftConfirmDialogProps {
+  open: boolean
+  /** Full paragraph group size (draftable + already-validated). */
+  totalCount: number
+  /** Non-validated cell count that will actually be sent to the model. */
+  draftableCount: number
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+export function ParagraphDraftConfirmDialog({
+  open,
+  totalCount,
+  draftableCount,
+  onConfirm,
+  onCancel,
+}: ParagraphDraftConfirmDialogProps) {
+  const description = draftableCount === totalCount
+    ? `Draft this paragraph? ${totalCount} cells will be drafted as one unit.`
+    : `Draft this paragraph? ${draftableCount} of ${totalCount} cells will be drafted; already-validated cells are kept as-is.`
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
+      <DialogContent aria-labelledby="paragraph-draft-title" aria-describedby="paragraph-draft-desc">
+        <DialogHeader>
+          <DialogTitle id="paragraph-draft-title">Draft this paragraph?</DialogTitle>
+          <DialogDescription id="paragraph-draft-desc">
+            {description}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={onConfirm}>
+            Draft paragraph
           </Button>
         </DialogFooter>
       </DialogContent>

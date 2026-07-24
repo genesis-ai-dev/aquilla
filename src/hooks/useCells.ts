@@ -120,6 +120,11 @@ export interface CellData {
    * source row — so `buildCellData` prefers the source row's metadata and falls
    * back to the target's. Undefined on legacy/plain cells. */
   metadata?: Record<string, unknown> | null
+  /** D1: true on the first cell of a paragraph block, sourced from the SOURCE
+   *  row's `metadata.paragraphStart`. Absent/undefined on legacy imports and
+   *  continuation cells — drives paragraph grouping (`deriveParagraphs`) and
+   *  the paragraph-draft UI affordance. Never derived from the target row. */
+  paragraphStart?: boolean
   waivers?: import("@/lib/parsers/types").RuleWaiver[]
   /** Most-recent edit timestamp on the target row (ms epoch). Forwarded from
    *  the CellRow projection so consumers like useLivingMemory can sort by
@@ -301,6 +306,10 @@ export function buildCellData(
   // bucket. Undefined when neither side has metadata.
   const metadata = source?.metadata ?? target?.metadata ?? undefined
 
+  // D1 paragraph grouping flag: source-only, strict boolean (metadata is
+  // Record<string, unknown> — non-boolean junk must not leak through as truthy).
+  const paragraphStart = source?.metadata?.paragraphStart === true
+
   return {
     id: cellId,
     fileId,
@@ -332,6 +341,7 @@ export function buildCellData(
     transcription,
     cameraState,
     metadata,
+    paragraphStart: paragraphStart || undefined,
   }
 }
 

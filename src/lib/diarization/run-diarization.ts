@@ -47,6 +47,8 @@ interface Clip {
   /** audioId (no extension) + url, for re-attaching the shared clip per cell. */
   audioId: string
   url: string
+  /** Clip length when the attachment carries it — lets turn tiling reach the clip end. */
+  durationMs?: number
 }
 
 const POLL_INTERVAL_MS = 2500
@@ -58,10 +60,16 @@ export function findFileClip(cells: readonly CellData[]): Clip | null {
     if (c.medium !== "media") continue
     const att = c.attachments
     if (!att) continue
-    const url = (c.selectedAudioId && att[c.selectedAudioId]?.url) || Object.values(att)[0]?.url
+    const entry = (c.selectedAudioId && att[c.selectedAudioId]) || Object.values(att)[0]
+    const url = entry?.url
     const parsed = url ? parseFrontierAudioUrl(url) : null
-    if (parsed) {
-      return { objectName: `${parsed.audioId}.${parsed.ext}`, audioId: parsed.audioId, url }
+    if (parsed && url) {
+      return {
+        objectName: `${parsed.audioId}.${parsed.ext}`,
+        audioId: parsed.audioId,
+        url,
+        ...(entry?.durationMs != null ? { durationMs: entry.durationMs } : {}),
+      }
     }
   }
   return null
@@ -113,7 +121,9 @@ async function applyTurns(
   clip: Clip,
   turns: DiarizationTurn[],
 ): Promise<RunDiarizationResult> {
-  const { segments, speakers } = turnsToSegments(turns)
+  // AQU-646: tile turn timing to the clip length so playback covers inter-turn
+  // audio; trims stay tight (see turnsToSegments doc).
+  const { segments, speakers } = turnsToSegments(turns, clip.durationMs)
 
   // Replace: drop the file's current media cells, then create one per turn.
   for (const c of args.cells) {

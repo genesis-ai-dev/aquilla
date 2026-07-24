@@ -32,6 +32,7 @@ import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -3611,6 +3612,17 @@ export function ProjectWorkspace() {
     return items
   }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, setLens, setDockTab, currentRoleLevel])
 
+  // AQU-646 P0: cells from the store never carry audio attachments — only
+  // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
+  // internally). Workspace-level consumers (transcribe counts/batch, timeline,
+  // seek context) were silently seeing attachment-less cells, so anything
+  // gated on `selectedAudioId` no-oped. Read the per-file audio here once for
+  // the audio lens and merge where needed.
+  const { byCellId: workspaceAudioByCellId } = useFileAudioAttachments(
+    project?.id ?? null,
+    lens === "audio" ? activeFileId : null,
+  )
+
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
   // sharing the exact filters the batch runners use (needsTranscription /
   // needsSynthesis) so the menu count always matches what the run would do.
@@ -3618,7 +3630,7 @@ export function ProjectWorkspace() {
   // version so counts track edits/attaches live.
   const audioCounts = useMemo(() => {
     if (!activeFileId) return { untranscribed: 0, unsynthesized: 0 }
-    const cells = readAtVersion(cellStoreVersion, getActiveCells)
+    const cells = mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
     let untranscribed = 0
     let unsynthesized = 0
     for (const c of cells) {
@@ -3627,7 +3639,7 @@ export function ProjectWorkspace() {
     }
     return { untranscribed, unsynthesized }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cellStoreVersion is the reactivity key for getActiveCells
-  }, [activeFileId, cellStoreVersion, getActiveCells])
+  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -3731,7 +3743,9 @@ export function ProjectWorkspace() {
     },
     runTranscribeAll: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells()
+      // AQU-646 P0: merge attachments in — needsTranscription gates on
+      // selectedAudioId, which raw store cells never carry.
+      const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void runBatchTranscribeAll({
         cells,
         projectId: project.id,
@@ -3744,7 +3758,7 @@ export function ProjectWorkspace() {
     },
     runSynthAll: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells()
+      const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void runBatchSynthAll({
         cells,
         project,
@@ -3753,7 +3767,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, workspaceAudioByCellId])
 
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
@@ -3771,6 +3785,13 @@ export function ProjectWorkspace() {
   const legacyCells = useMemo(
     () => legacyCellsNeeded ? readAtVersion(cellStoreVersion, getActiveCells) : EMPTY_CELL_DATA,
     [cellStoreVersion, getActiveCells, legacyCellsNeeded],
+  )
+
+  // AQU-646 P0: attachment-merged view of the active file's cells for the
+  // timeline + playback seek context (workspaceAudioByCellId read above).
+  const audioMergedCells = useMemo(
+    () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
+    [legacyCells, workspaceAudioByCellId],
   )
 
   const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string, parentId?: string | null) => {
@@ -4837,7 +4858,7 @@ export function ProjectWorkspace() {
             <div className="min-h-0 flex-1">
               {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
                 <TimelineEditor
-                  cells={legacyCells}
+                  cells={audioMergedCells}
                   coreMediaUrl={activeFile.coreMediaUrl ?? null}
                   editable={!isReadOnly}
                   fileId={activeFile.id}

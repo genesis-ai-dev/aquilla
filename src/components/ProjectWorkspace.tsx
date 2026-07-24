@@ -3214,7 +3214,15 @@ export function ProjectWorkspace() {
     void commitTrayFootnoteText(cellId, updated)
   }, [commitTrayFootnoteText, getActiveCell])
 
-  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
+  const {
+    state: checklistState,
+    dismissed: checklistDismissed,
+    dismiss: dismissChecklist,
+    refreshShares: refreshChecklistShares,
+    markInProgress: markChecklistInProgress,
+    clearInProgress: clearChecklistInProgress,
+    wasInProgress: checklistWasInProgress,
+  } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
   // AQU-693: set true while an import launched from the setup checklist's step 1
@@ -3234,6 +3242,40 @@ export function ProjectWorkspace() {
       state: null,
     })
   }, [location.hash, location.pathname, location.search, location.state, navigate])
+
+  // AQU-694: while the drawer is open, record that the user is mid-setup so a
+  // browser refresh can restore it. The temporary hide-behind-import path
+  // (AQU-693) sets checklistOpen=false WITHOUT dismissing, and deliberately does
+  // not clear the flag here — the setup flow is still alive underneath the
+  // import dialog and must survive a mid-import refresh.
+  useEffect(() => {
+    if (checklistOpen && project?.id) markChecklistInProgress()
+  }, [checklistOpen, project?.id, markChecklistInProgress])
+
+  // AQU-694: restore the setup checklist after a browser refresh, but ONLY when
+  // the user was demonstrably mid-setup on this project (the flag above is set
+  // solely by the user opening the drawer). This is not an auto-open: a project
+  // never opened, or one the user dismissed, has no flag and stays closed.
+  // Guarded per-project id so closing the drawer doesn't re-trigger it and a
+  // project switch re-evaluates for the new project.
+  const restoredChecklistForRef = useRef<string | null>(null)
+  useEffect(() => {
+    const pid = project?.id
+    if (!pid) return
+    if (restoredChecklistForRef.current === pid) return
+    restoredChecklistForRef.current = pid
+    if (checklistWasInProgress && !checklistDismissed) {
+      setChecklistOpen(true)
+    }
+  }, [project?.id, checklistWasInProgress, checklistDismissed])
+
+  // AQU-694: finishing every setup step ends the flow — clear the mid-setup flag
+  // so a later refresh does not reopen the (now complete) checklist.
+  useEffect(() => {
+    if (project?.id && checklistState.completedCount >= checklistState.totalCount) {
+      clearChecklistInProgress()
+    }
+  }, [project?.id, checklistState.completedCount, checklistState.totalCount, clearChecklistInProgress])
 
   const handleChecklistOpenChange = useCallback((next: boolean) => {
     setChecklistOpen(next)

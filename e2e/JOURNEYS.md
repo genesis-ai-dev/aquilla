@@ -189,6 +189,7 @@
 | Editor      | Video attachment remove clears saved URL              | `e2e/specs/editor/video-attachment-dialog.smoke.spec.ts`      |   ✅   |
 | Editor      | Setup checklist drawer expands items + skip           | `e2e/specs/editor/setup-checklist.smoke.spec.ts` + `setup-checklist-item-expand.smoke.spec.ts` + `setup-checklist-skip.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist AI models section expand              | `e2e/specs/editor/setup-checklist-ai-models-expand.smoke.spec.ts` |   ✅   |
+| Editor      | Setup checklist survives refresh mid-setup (no auto-open) | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |   ✅   |
 | Editor      | Setup checklist invite creates share link             | `e2e/specs/editor/setup-checklist-invite-create-link.smoke.spec.ts` |   ✅   |
 | Editor      | AI setup dialog opens and configures provider         | `e2e/specs/editor/ai-setup-dialog.smoke.spec.ts` + `ai-setup-dialog-custom-provider.smoke.spec.ts` | ✅ |
 | Editor      | AI completion dialog opens (mock LLM)                 | `e2e/specs/editor/ai-completion-dialog.smoke.spec.ts`         |   ✅   |

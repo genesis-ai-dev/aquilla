@@ -110,6 +110,7 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
 
   // Timeline editor: retiming a cell (move/stretch) is a translator-level edit.
   'cell.retime': ROLE.CONTRIBUTOR,
+  'cell.lane.retime': ROLE.CONTRIBUTOR,
   // Timeline editor: linking a core video to a file — contributor-level, like
   // file.rename (normal editing flow, not a structural change to the inventory).
   'file.video.set': ROLE.CONTRIBUTOR,

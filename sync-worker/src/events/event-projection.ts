@@ -1394,6 +1394,53 @@ case 'cell.audio.attach': {
       return ['cells']
     }
 
+    case 'cell.lane.retime': {
+      // AQU-646 round 6: per-LANE presentation timing, stored as metadata keys
+      // on the source-side row (same JSONB merge discipline as cast.assign —
+      // per-key merges commute, so concurrent cast/lane writes can't clobber
+      // each other). The cell's start_ms/end_ms (the frozen source split) is
+      // NEVER touched here. Per key: number sets, null clears (reset to the
+      // default = follow the source split / section start), undefined no-ops.
+      const p = event.payload as EventPayloads['cell.lane.retime']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.lane.retime event ${event.id} is missing fileId or cellId`)
+      }
+      const laneKeys: Array<[key: string, value: number | null | undefined]> = [
+        ['subtitle_start_ms', p.subtitleStartMs],
+        ['subtitle_end_ms', p.subtitleEndMs],
+        ['target_start_ms', p.targetStartMs],
+      ]
+      for (const [key, value] of laneKeys) {
+        if (value === undefined) continue
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('${key}', ?::bigint)
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(Math.round(value), event.projectId, event.fileId, event.cellId),
+          )
+        } else if (value === null) {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = CASE
+                   WHEN metadata IS NULL THEN NULL
+                   ELSE metadata - '${key}'
+                 END
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(event.projectId, event.fileId, event.cellId),
+          )
+        }
+        // Non-number, non-null values (corrupt replay data) are skipped.
+      }
+      return ['cells']
+    }
+
     case 'cell.retime': {
       // Timeline editor: move/stretch. Updates start_ms/end_ms on BOTH sides
       // (timing is a property of the segment, shared by source + target rows).

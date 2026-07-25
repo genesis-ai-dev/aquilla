@@ -64,6 +64,7 @@ export type OutboxEventKind =
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both sides without moving cells.event_id.
   | "cell.retime"
+  | "cell.lane.retime"
   // Timeline editor: set/clear a file's core video URL (stored in files.meta).
   | "file.video.set"
   // AQU-478: "accept upstream change as-is" (repin). Non-chain-mutating —
@@ -364,6 +365,14 @@ export interface OutboxEventPayloads {
   "cell.retime": {
     startMs: number
     endMs: number
+  }
+  // AQU-646 round 6: per-LANE presentation timing (subtitle span / target-audio
+  // start) merged into source-side metadata. number sets, null clears,
+  // undefined = untouched. Absolute file ms.
+  "cell.lane.retime": {
+    subtitleStartMs?: number | null
+    subtitleEndMs?: number | null
+    targetStartMs?: number | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).
   "file.video.set": {

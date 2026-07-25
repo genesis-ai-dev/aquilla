@@ -62,6 +62,7 @@ const REQUIRED_ROLE: Record<string, number> = {
 
   // Timeline editor (mirrors server).
   "cell.retime": ROLE.CONTRIBUTOR,
+  "cell.lane.retime": ROLE.CONTRIBUTOR,
   "file.video.set": ROLE.CONTRIBUTOR,
 
   // AQU-478: repin ("accept upstream change as-is") — same authority bar

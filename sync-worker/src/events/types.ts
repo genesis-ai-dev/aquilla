@@ -85,6 +85,7 @@ export type EventKind =
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both the source and target rows without moving cells.event_id.
   | 'cell.retime'
+  | 'cell.lane.retime'
   // Timeline editor: set/clear a file's core video URL (timeline preview master
   // clock), stored in files.meta JSON. Non-chain-mutating; file-level.
   | 'file.video.set'
@@ -504,6 +505,15 @@ export interface EventPayloads {
   'cell.retime': {
     startMs: number
     endMs: number
+  }
+  // AQU-646 round 6: per-LANE presentation timing (subtitle span / target-audio
+  // start), merged into the source-side cell's metadata JSONB. The frozen
+  // source split (start_ms/end_ms) is untouched. Per key: number sets (absolute
+  // file ms), null clears back to the default, undefined = not provided.
+  'cell.lane.retime': {
+    subtitleStartMs?: number | null
+    subtitleEndMs?: number | null
+    targetStartMs?: number | null
   }
   // Set/clear a file's core video URL (timeline preview master clock), stored
   // in files.meta JSON; null clears it. File-level.

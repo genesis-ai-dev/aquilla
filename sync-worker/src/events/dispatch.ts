@@ -158,6 +158,7 @@ export function dispatchEvent(
     case 'cell.backtranslation.set':
     case 'cast.assign':
     case 'cell.retime':
+    case 'cell.lane.retime':
     case 'source.cell.mirror':
     case 'file.mirror':
     case 'link.cursor.advance':

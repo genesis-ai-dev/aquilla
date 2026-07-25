@@ -496,6 +496,48 @@ export async function emitCellRetime(input: CellRetimeInput): Promise<string> {
   return eventId
 }
 
+export interface CellLaneRetimeInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** Subtitle span, absolute file ms. null clears (back to the source split). */
+  subtitleStartMs?: number | null
+  subtitleEndMs?: number | null
+  /** Target-audio (dub) start, absolute file ms. null clears (section start). */
+  targetStartMs?: number | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.lane.retime` — per-lane presentation timing (AQU-646 round 6).
+ *  The frozen source split (start_ms/end_ms) is never touched; provided keys
+ *  merge into the source-side cell's metadata (null deletes a key). Throws
+ *  when called with no timing key at all. */
+export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<string> {
+  if (
+    input.subtitleStartMs === undefined &&
+    input.subtitleEndMs === undefined &&
+    input.targetStartMs === undefined
+  ) {
+    throw new Error("emitCellLaneRetime: at least one timing key is required")
+  }
+  const { eventId } = await enqueueEvent({
+    kind: "cell.lane.retime",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      ...(input.subtitleStartMs !== undefined ? { subtitleStartMs: input.subtitleStartMs } : {}),
+      ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: input.subtitleEndMs } : {}),
+      ...(input.targetStartMs !== undefined ? { targetStartMs: input.targetStartMs } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileVideoSetInput {
   projectId: string
   fileId: string

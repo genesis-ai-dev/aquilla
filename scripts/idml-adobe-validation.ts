@@ -32,6 +32,16 @@ interface PreparedGate {
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2)
+  if (
+    command === "help"
+    || command === "--help"
+    || command === "-h"
+    || rest.includes("--help")
+    || rest.includes("-h")
+  ) {
+    usage(false)
+    return
+  }
   const options = parseOptions(rest)
   if (!command) {
     usage()
@@ -263,14 +273,16 @@ function toCamelCase(value: string): string {
   return value.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
 }
 
-function usage(): void {
-  console.error([
+function usage(asError = true): void {
+  const message = [
     "Usage:",
     "  pnpm idml:adobe prepare-corpus --output-dir <dir> [--corpus-manifest <manifest.json>] [--preflight-profile <name>] [--browser-gate passed|failed] [--migration-gate passed|failed]",
     "  pnpm idml:adobe prepare-desktop --manifest <manifest.json> --output-dir <dir>",
     "  pnpm idml:adobe run-server --manifest <manifest.json> --output-dir <dir> --sample-client <path> [--host localhost:12345]",
     "  pnpm idml:adobe finalize --manifest <manifest.json> --output-dir <dir>",
-  ].join("\n"))
+  ].join("\n")
+  if (asError) console.error(message)
+  else console.log(message)
 }
 
 main().catch((error) => {

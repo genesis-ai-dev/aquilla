@@ -191,6 +191,33 @@ export async function runIdmlCorpusConformance(
     ),
     "Computed variables must remain protected and diagnosed",
   )
+  requireDeepEqual(
+    feature.diagnostics
+      .filter((entry) => entry.code === "UNSUPPORTED_CONSTRUCT")
+      .map((entry) => ({
+        message: entry.message,
+        unsupportedDisposition: entry.details?.unsupportedDisposition,
+        constructKind: entry.details?.constructKind,
+      })),
+    [
+      {
+        message: "Unknown inline IDML element <Mystery> was preserved as a protected token",
+        unsupportedDisposition: "preserved-nonliteral",
+        constructKind: "unknown-inline-element",
+      },
+      {
+        message: "Computed text variable TextVariable/Page was preserved",
+        unsupportedDisposition: "preserved-nonliteral",
+        constructKind: "computed-text-variable",
+      },
+      {
+        message: "Computed text variable TextVariable/Date was preserved",
+        unsupportedDisposition: "preserved-nonliteral",
+        constructKind: "computed-text-variable",
+      },
+    ],
+    "Feature fixture unsupported diagnostics changed classification",
+  )
   requireEqual(unit(feature, "p-table-outer").locator.scope, "table-cell", "Outer table lost scope")
   requireEqual(unit(feature, "p-table-inner").locator.scope, "table-cell", "Nested table lost scope")
   requireEqual(unit(feature, "p-footnote").sourceText, "foot&note", "Entity semantics changed")

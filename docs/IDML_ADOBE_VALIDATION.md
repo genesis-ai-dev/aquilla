@@ -39,7 +39,8 @@ original artifact used to produce it.
         "translated": 3,
         "missing": 0,
         "rejected": 0,
-        "unsupported": 0
+        "unsupportedLiteral": 0,
+        "preservedUnsupported": 0
       }
     }
   ]
@@ -47,9 +48,30 @@ original artifact used to produce it.
 ```
 
 Every fixture must have a unique stable ID. Do not omit a fixture because it
-fails. `unsupported` is an error for the native gate; unknown constructs may be
-preserved and diagnosed during experimental use, but native evidence cannot
-contain a silent skip.
+fails. `unsupportedLiteral` is a native-gate error because it means literal
+user text could not be proven translatable. `preservedUnsupported` records
+computed or unknown nonliteral structures that were preserved byte-for-byte;
+it produces a warning and does not by itself fail the gate. Missing
+classification is always counted as `unsupportedLiteral`. Legacy manifests
+with the old undifferentiated `unsupported` field remain fail-closed and treat
+the entire count as literal.
+
+The generated feature-rich fixture has exactly three preserved, nonliteral
+diagnostics:
+
+All three use diagnostic code `UNSUPPORTED_CONSTRUCT`.
+
+| Construct | Classification | Why |
+| --- | --- | --- |
+| `<Mystery Self="unknown-inline"/>` in `Stories/Story_main.xml` | Unknown self-closing inline token | It has no text children; the complete element remains protected and unchanged. |
+| `TextVariable/Page`, `VariableType="PageNumberType"` in `Resources/TextVariables.xml` | Computed page-number variable | Its `<Contents>1</Contents>` is a computed example value, not authored literal text. |
+| `TextVariable/Date`, `VariableType="ModificationDateType"` in `Resources/TextVariables.xml` | Computed modification-date variable | Its `<Contents>2024-01-01</Contents>` is computed, not authored literal text. |
+
+The neighboring `TextVariable/Custom` definition is literal and is emitted as
+an editable `custom-variable` translation unit. Thus the fixture has zero
+unsupported literal constructs. Non-self-closing unknown inline elements and
+markup embedded inside a literal `<Content>` slot remain conservatively
+blocking unless the engine can prove they contain no user-authored text.
 
 The Adobe-side script records no story text or translated text. It records:
 
@@ -111,9 +133,9 @@ only way to record `not-run`. A custom corpus manifest or preflight profile may
 be selected with `--corpus-manifest` and `--preflight-profile`.
 
 Corpus preparation does not run Adobe, does not alter the committed fixture
-sources, and does not claim native fidelity. Preserve any nonzero
-`exportReport.unsupported` count: the final native gate must fail rather than
-silently hiding a construct the engine diagnosed.
+sources, and does not claim native fidelity. It preserves both diagnostic
+counts in the manifest: `unsupportedLiteral` remains blocking, while
+`preservedUnsupported` remains visible in the final report as a warning.
 
 ## Automated InDesign Server gate
 

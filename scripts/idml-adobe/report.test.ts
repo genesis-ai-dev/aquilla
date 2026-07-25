@@ -23,6 +23,8 @@ describe("Adobe IDML structural gate", () => {
       fixtureCount: 1,
       passedFixtureCount: 1,
       silentSkips: 0,
+      unsupportedLiteral: 0,
+      preservedUnsupported: 0,
       anchorLossCases: 0,
       mappingFailures: 0,
     })
@@ -56,7 +58,8 @@ describe("Adobe IDML structural gate", () => {
       translated: 1,
       missing: 1,
       rejected: 1,
-      unsupported: 2,
+      unsupportedLiteral: 2,
+      preservedUnsupported: 0,
     }
     const report = buildAdobeGateReport(
       dirtyManifest,
@@ -71,6 +74,53 @@ describe("Adobe IDML structural gate", () => {
       "MIGRATION_GATE_FAILED",
       "SILENT_SKIP",
     ]))
+  })
+
+  it("reports preserved nonliteral diagnostics without treating them as silent skips", () => {
+    const value = manifest()
+    value.fixtures[0]!.exportReport = {
+      translated: 1,
+      missing: 0,
+      rejected: 0,
+      unsupportedLiteral: 0,
+      preservedUnsupported: 3,
+    }
+    const report = buildAdobeGateReport(
+      value,
+      rawReport(metrics(), metrics(), metrics()),
+    )
+
+    expect(report).toMatchObject({
+      status: "passed",
+      silentSkips: 0,
+      unsupportedLiteral: 0,
+      preservedUnsupported: 3,
+      passedFixtureCount: 1,
+    })
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      code: "PRESERVED_UNSUPPORTED",
+      severity: "warning",
+    }))
+  })
+
+  it("treats legacy undifferentiated unsupported counts as blocking literal skips", () => {
+    const value = manifest()
+    value.fixtures[0]!.exportReport = {
+      translated: 1,
+      missing: 0,
+      rejected: 0,
+      unsupported: 2,
+    }
+    const report = buildAdobeGateReport(
+      value,
+      rawReport(metrics(), metrics(), metrics()),
+    )
+    expect(report).toMatchObject({
+      status: "failed",
+      silentSkips: 2,
+      unsupportedLiteral: 2,
+      preservedUnsupported: 0,
+    })
   })
 
   it("fails incomplete or dirty Adobe observations even when the process returned", () => {
@@ -120,6 +170,28 @@ describe("Adobe IDML structural gate", () => {
     value.fixtures[0]!.sourceSha256 = "not-a-sha"
     expect(() => assertManifest(value)).toThrow(/invalid or duplicate fixture/i)
   })
+
+  it("rejects partial or mixed unsupported-count classifications", () => {
+    const partial = manifest()
+    partial.fixtures[0]!.exportReport = {
+      translated: 1,
+      missing: 0,
+      rejected: 0,
+      unsupportedLiteral: 0,
+    }
+    expect(() => assertManifest(partial)).toThrow(/invalid or duplicate fixture/i)
+
+    const mixed = manifest()
+    mixed.fixtures[0]!.exportReport = {
+      translated: 1,
+      missing: 0,
+      rejected: 0,
+      unsupported: 0,
+      unsupportedLiteral: 0,
+      preservedUnsupported: 0,
+    }
+    expect(() => assertManifest(mixed)).toThrow(/invalid or duplicate fixture/i)
+  })
 })
 
 function manifest(): AdobeGateManifest {
@@ -134,7 +206,13 @@ function manifest(): AdobeGateManifest {
       source: "source.idml",
       candidate: "candidate.idml",
       allowReflow: true,
-      exportReport: { translated: 1, missing: 0, rejected: 0, unsupported: 0 },
+      exportReport: {
+        translated: 1,
+        missing: 0,
+        rejected: 0,
+        unsupportedLiteral: 0,
+        preservedUnsupported: 0,
+      },
     }],
   }
 }

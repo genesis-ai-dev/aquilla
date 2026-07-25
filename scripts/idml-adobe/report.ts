@@ -14,7 +14,13 @@ export interface AdobeFixtureManifestEntry {
     translated: number
     missing: number
     rejected: number
-    unsupported: number
+    /**
+     * Legacy manifests treated every unsupported diagnostic as blocking.
+     * New producers must emit the split counts below instead.
+     */
+    unsupported?: number
+    unsupportedLiteral?: number
+    preservedUnsupported?: number
   }
 }
 
@@ -131,7 +137,7 @@ export type AdobeGateFailureCode =
 
 export interface AdobeGateFinding {
   fixtureId?: string
-  code: AdobeGateFailureCode | "REFLOW_OR_OVERSET"
+  code: AdobeGateFailureCode | "REFLOW_OR_OVERSET" | "PRESERVED_UNSUPPORTED"
   severity: "error" | "warning"
   detail: string
 }
@@ -147,6 +153,8 @@ export interface AdobeGateReport {
   fixtureCount: number
   passedFixtureCount: number
   silentSkips: number
+  unsupportedLiteral: number
+  preservedUnsupported: number
   anchorLossCases: number
   mappingFailures: number
   findings: AdobeGateFinding[]
@@ -187,6 +195,8 @@ export function buildAdobeGateReport(
   const completed = Date.parse(raw.completedAt)
   const findings: AdobeGateFinding[] = []
   let silentSkips = 0
+  let unsupportedLiteral = 0
+  let preservedUnsupported = 0
   let anchorLossCases = 0
   let mappingFailures = 0
   let passedFixtureCount = 0
@@ -281,14 +291,34 @@ export function buildAdobeGateReport(
     const exportReport = expected.exportReport
     if (exportReport) {
       const missing = exportReport.missing + exportReport.rejected
-      const skipped = exportReport.unsupported
+      // Old manifests remain fail-closed: their undifferentiated count is
+      // treated as unsupported literal content, never as safely preserved.
+      const blockingUnsupported = exportReport.unsupportedLiteral
+        ?? exportReport.unsupported
+        ?? 0
+      const preserved = exportReport.preservedUnsupported ?? 0
       mappingFailures += missing
-      silentSkips += skipped
+      unsupportedLiteral += blockingUnsupported
+      preservedUnsupported += preserved
+      silentSkips += blockingUnsupported
       if (missing > 0) {
         fixtureFindings.push(error(expected.id, "STRUCTURE_CHANGED", `Exporter reported ${missing} mapping failure(s).`))
       }
-      if (skipped > 0) {
-        fixtureFindings.push(error(expected.id, "SILENT_SKIP", `Exporter reported ${skipped} unsupported unit(s).`))
+      if (blockingUnsupported > 0) {
+        fixtureFindings.push(error(
+          expected.id,
+          "SILENT_SKIP",
+          `Exporter reported ${blockingUnsupported} unsupported literal construct(s).`,
+        ))
+      }
+      if (preserved > 0) {
+        fixtureFindings.push({
+          fixtureId: expected.id,
+          code: "PRESERVED_UNSUPPORTED",
+          severity: "warning",
+          detail:
+            `Exporter preserved ${preserved} computed or unknown nonliteral construct(s) unchanged.`,
+        })
       }
     }
 
@@ -317,6 +347,8 @@ export function buildAdobeGateReport(
     fixtureCount: manifest.fixtures.length,
     passedFixtureCount,
     silentSkips,
+    unsupportedLiteral,
+    preservedUnsupported,
     anchorLossCases,
     mappingFailures,
     findings,
@@ -380,8 +412,24 @@ export function assertManifest(value: AdobeGateManifest): void {
 function validExportCounts(
   report: NonNullable<AdobeFixtureManifestEntry["exportReport"]>,
 ): boolean {
-  return [report.translated, report.missing, report.rejected, report.unsupported]
-    .every((value) => Number.isSafeInteger(value) && value >= 0)
+  const baseCountsValid = [report.translated, report.missing, report.rejected]
+    .every(nonnegativeSafeInteger)
+  if (!baseCountsValid) return false
+  const hasLegacy = report.unsupported !== undefined
+  const hasSplit = (
+    report.unsupportedLiteral !== undefined
+    || report.preservedUnsupported !== undefined
+  )
+  if (hasLegacy === hasSplit) return false
+  if (hasLegacy) return nonnegativeSafeInteger(report.unsupported)
+  return (
+    nonnegativeSafeInteger(report.unsupportedLiteral)
+    && nonnegativeSafeInteger(report.preservedUnsupported)
+  )
+}
+
+function nonnegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0
 }
 
 export function assertRawReport(value: AdobeRawReport): void {

@@ -17,7 +17,8 @@
         "translated": 0,
         "missing": 0,
         "rejected": 0,
-        "unsupported": 0
+        "unsupportedLiteral": 0,
+        "preservedUnsupported": 0
       }
     }
   ]

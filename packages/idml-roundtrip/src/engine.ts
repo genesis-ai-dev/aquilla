@@ -800,6 +800,11 @@ async function parseIdmlInternal(
             "UNSUPPORTED_CONSTRUCT",
             `Computed text variable ${getAttribute(variable, "Self") ?? "(unnamed)"} was preserved`,
             member.inspection.path,
+            undefined,
+            {
+              unsupportedDisposition: "preserved-nonliteral",
+              constructKind: "computed-text-variable",
+            },
           ),
         )
         continue
@@ -1030,6 +1035,8 @@ async function extractParagraphUnit(
           details: {
             elementPath: elementPath(paragraph),
             protectedTokenCount: tokens.length,
+            unsupportedDisposition: "preserved-nonliteral",
+            constructKind: "protected-only-paragraph",
           },
         },
       ],
@@ -1183,6 +1190,11 @@ function extractProtectedTokens(
               "UNSUPPORTED_CONSTRUCT",
               "Markup inside an IDML Content slot was locked and preserved",
               memberPath,
+              undefined,
+              {
+                unsupportedDisposition: "unsupported-literal",
+                constructKind: "opaque-content-markup",
+              },
             ),
           )
         }
@@ -1203,6 +1215,14 @@ function extractProtectedTokens(
               "UNSUPPORTED_CONSTRUCT",
               `Unknown inline IDML element <${child.name}> was preserved as a protected token`,
               memberPath,
+              undefined,
+              {
+                unsupportedDisposition: child.selfClosing
+                  ? "preserved-nonliteral"
+                  : "unsupported-literal",
+                constructKind: "unknown-inline-element",
+                xmlName: child.name,
+              },
             ),
           )
         }
@@ -1934,6 +1954,7 @@ function diagnostic(
   message: string,
   memberPath?: string,
   unitId?: string,
+  details?: IdmlDiagnostic["details"],
 ): IdmlDiagnostic {
   return {
     code,
@@ -1941,6 +1962,7 @@ function diagnostic(
     message,
     ...(memberPath ? { memberPath } : {}),
     ...(unitId ? { unitId } : {}),
+    ...(details ? { details } : {}),
   }
 }
 

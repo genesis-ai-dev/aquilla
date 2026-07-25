@@ -16,6 +16,7 @@ import {
   parseIdml,
   validateExport,
   validateIdmlTranslation,
+  type IdmlDiagnostic,
   type IdmlFormatMetadataV2,
   type IdmlTranslation,
 } from "@aquilla/idml-roundtrip"
@@ -147,6 +148,17 @@ export async function prepareAdobeCorpus(
         + exportDiagnostics.map((diagnostic) => diagnostic.code).join(", "),
       )
     }
+    const unsupported = classifyUnsupportedDiagnostics(exported.report.warnings)
+    if (
+      unsupported.unsupportedLiteral + unsupported.preservedUnsupported
+      !== exported.report.unsupported
+    ) {
+      throw new Error(
+        `Unsupported diagnostic classification drifted for ${input.fixture.path}: `
+        + `${exported.report.unsupported} reported, `
+        + `${unsupported.unsupportedLiteral + unsupported.preservedUnsupported} classified.`,
+      )
+    }
 
     const candidatePath = resolve(candidateDirectory, `${input.id}.candidate.idml`)
     await writeFileAtomic(candidatePath, exported.bytes)
@@ -161,7 +173,8 @@ export async function prepareAdobeCorpus(
         translated: exported.report.translated,
         missing: exported.report.missing,
         rejected: exported.report.rejected,
-        unsupported: exported.report.unsupported,
+        unsupportedLiteral: unsupported.unsupportedLiteral,
+        preservedUnsupported: unsupported.preservedUnsupported,
       },
     })
   }
@@ -224,6 +237,25 @@ export function deterministicTargetHtml(
   }
   const marker = `[AQUILLA-ADOBE:${fixtureIdValue}:${String(unitOrder).padStart(4, "0")}] `
   return `${sourceHtml.slice(0, contentStart)}${marker}${sourceHtml.slice(contentStart)}`
+}
+
+export function classifyUnsupportedDiagnostics(
+  diagnostics: readonly IdmlDiagnostic[],
+): { unsupportedLiteral: number; preservedUnsupported: number } {
+  let unsupportedLiteral = 0
+  let preservedUnsupported = 0
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.code !== "UNSUPPORTED_CONSTRUCT") continue
+    if (diagnostic.details?.unsupportedDisposition === "preserved-nonliteral") {
+      preservedUnsupported += 1
+    } else {
+      // Missing or future classifications remain blocking. A producer must
+      // prove that a diagnostic is nonliteral before the Adobe gate may treat
+      // it as preservation rather than a silent text skip.
+      unsupportedLiteral += 1
+    }
+  }
+  return { unsupportedLiteral, preservedUnsupported }
 }
 
 function parseCorpusManifest(value: unknown): CorpusManifest {

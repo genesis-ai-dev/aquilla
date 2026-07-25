@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import { readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, resolve } from "node:path"
@@ -9,6 +10,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest"
 
 import {
+  classifyUnsupportedDiagnostics,
   deterministicTargetHtml,
   prepareAdobeCorpus,
 } from "./prepare-corpus"
@@ -59,6 +61,7 @@ describe("Adobe corpus preparation", () => {
         translated: parsedSource.units.length,
         missing: 0,
         rejected: 0,
+        unsupportedLiteral: 0,
       })
       expect(fixture.sourceSha256).toMatch(/^[0-9a-f]{64}$/)
       expect(fixture.candidateSha256).toMatch(/^[0-9a-f]{64}$/)
@@ -70,6 +73,22 @@ describe("Adobe corpus preparation", () => {
         )
       }
     }
+    expect(prepared.manifest.fixtures).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "feature-rich",
+        exportReport: expect.objectContaining({
+          unsupportedLiteral: 0,
+          preservedUnsupported: 3,
+        }),
+      }),
+      expect.objectContaining({
+        id: "biblica-profile",
+        exportReport: expect.objectContaining({
+          unsupportedLiteral: 0,
+          preservedUnsupported: 0,
+        }),
+      }),
+    ]))
   })
 
   it("produces byte-identical candidates and manifest on a repeated run", async () => {
@@ -135,6 +154,37 @@ describe("Adobe corpus preparation", () => {
     expect(
       target.match(/data-idml-(?:slot|token)=/g),
     ).toEqual(unit.sourceHtml.match(/data-idml-(?:slot|token)=/g))
+  })
+
+  it("keeps unclassified unsupported diagnostics fail-closed", () => {
+    expect(classifyUnsupportedDiagnostics([
+      {
+        code: "UNSUPPORTED_CONSTRUCT",
+        severity: "warning",
+        message: "future unsupported construct",
+      },
+      {
+        code: "UNSUPPORTED_CONSTRUCT",
+        severity: "warning",
+        message: "proven computed construct",
+        details: { unsupportedDisposition: "preserved-nonliteral" },
+      },
+    ])).toEqual({
+      unsupportedLiteral: 1,
+      preservedUnsupported: 1,
+    })
+  })
+
+  it("prints command help without requiring a value for --help", () => {
+    const repositoryRoot = resolve(import.meta.dirname, "../..")
+    const result = spawnSync(
+      "pnpm",
+      ["idml:adobe", "prepare-corpus", "--help"],
+      { cwd: repositoryRoot, encoding: "utf8" },
+    )
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain("pnpm idml:adobe prepare-corpus")
+    expect(result.stderr).not.toContain("requires a value")
   })
 })
 

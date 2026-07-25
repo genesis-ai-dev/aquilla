@@ -52,6 +52,20 @@ describe("IDML structural parser", () => {
       expect.objectContaining({
         code: "UNSUPPORTED_CONSTRUCT",
         message: expect.stringContaining("Computed"),
+        details: expect.objectContaining({
+          unsupportedDisposition: "preserved-nonliteral",
+          constructKind: "computed-text-variable",
+        }),
+      }),
+    )
+    expect(outer.diagnostics).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("Unknown inline IDML element <Mystery>"),
+        details: expect.objectContaining({
+          unsupportedDisposition: "preserved-nonliteral",
+          constructKind: "unknown-inline-element",
+          xmlName: "Mystery",
+        }),
       }),
     )
 
@@ -129,6 +143,10 @@ describe("IDML structural parser", () => {
       expect.objectContaining({
         memberPath: "Resources/TextVariables.xml",
         message: expect.stringContaining("TextVariable/Page"),
+        details: expect.objectContaining({
+          unsupportedDisposition: "preserved-nonliteral",
+          constructKind: "computed-text-variable",
+        }),
       }),
     ])
   })
@@ -148,6 +166,8 @@ describe("IDML structural parser", () => {
         details: {
           elementPath: "/idPkg:Story[1]/Story[1]/ParagraphStyleRange[1]",
           protectedTokenCount: 2,
+          unsupportedDisposition: "preserved-nonliteral",
+          constructKind: "protected-only-paragraph",
         },
       }),
     )
@@ -314,6 +334,15 @@ describe("strict surgical IDML export", () => {
     expect(unit.slots[0]).toMatchObject({ text: "leftright", editable: false })
     expect(unit.protectedTokens).toContainEqual(
       expect.objectContaining({ kind: "unknown", position: 0 }),
+    )
+    expect(unit.diagnostics).toContainEqual(
+      expect.objectContaining({
+        message: "Markup inside an IDML Content slot was locked and preserved",
+        details: expect.objectContaining({
+          unsupportedDisposition: "unsupported-literal",
+          constructKind: "opaque-content-markup",
+        }),
+      }),
     )
     const exported = await exportIdml(
       bytes,

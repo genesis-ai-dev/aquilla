@@ -97,6 +97,8 @@ function passingReport(): AdobeGateReport {
     fixtureCount: 3,
     passedFixtureCount: 3,
     silentSkips: 0,
+    unsupportedLiteral: 0,
+    preservedUnsupported: 2,
     anchorLossCases: 0,
     mappingFailures: 0,
     findings: [],

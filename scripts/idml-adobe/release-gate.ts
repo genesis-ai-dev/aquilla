@@ -61,6 +61,9 @@ export async function assertIdmlReleaseGate(
     || report.fixtureCount <= 0
     || report.fixtureCount !== report.passedFixtureCount
     || report.silentSkips !== 0
+    || report.unsupportedLiteral !== 0
+    || !Number.isSafeInteger(report.preservedUnsupported)
+    || report.preservedUnsupported < 0
     || report.anchorLossCases !== 0
     || report.mappingFailures !== 0
     || !Array.isArray(report.findings)

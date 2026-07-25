@@ -243,7 +243,8 @@ spans** (a checkpoint boundary), never mid-step:
 
 | input | mechanism | effect on the run |
 |---|---|---|
-| validate / edit a cell | existing events, no new UI | next spans retrieve it as an example; affected approved scene briefs are marked stale for re-construal |
+| validate / edit a target cell | existing events, no new UI | example pool improves for later spans (no staleness — see re-work tiers below) |
+| source-side change (edit/insert/re-import) | existing events | span's brief marked stale instantly; re-construal per the debounce policy below |
 | edit / reject a scene brief | `scene_briefs` review routes | agent re-runs construe for that span before drafting it (or re-drafts if already staged) |
 | free-text direction ("keep the register formal in dialogue") | steering entry, appended to a `contextual_steering` table (10KB cap, provenance) | injected into construe + draft prompts for subsequent spans, displayed as an active-direction chip |
 | reject a staged draft with reason | changeset reject + note | reason attaches as a constraint if the span re-enters the redraft loop |
@@ -253,6 +254,57 @@ Between spans the workflow does one cheap read: new steering rows + newly-valida
 woken by `waitForEvent()` when steering arrives (this is also how "usually just on" works
 without burning tokens while idle — the run parks when the file is converged and wakes on
 change: new source cells, an edit invalidating a span, or a steering entry).
+
+### Staleness and re-work policy
+
+Two clocks, deliberately decoupled: **marking is instant, re-work is debounced.** Stale
+marking is pure code (an event inside an approved span sets `stale_since`/`stale_reason`
+on its scene brief and pushes a `contextual.scene` frame so the badge appears immediately);
+re-work costs tokens, so it waits. The user can always collapse the wait.
+
+Re-work is **tiered by what actually changed** — not every change dirties the construal:
+
+| tier | trigger | work |
+|---|---|---|
+| example-refresh | target-side only (validation, target edit) | none on the brief — the source situation didn't change; the improved example pool simply feeds later drafting |
+| re-verify | adjacent span's brief changed (this brief's expansion consumed it) | cheap fast-tier check: "does the neighbor's new construal contradict this one?" — escalate to re-construe only on contradiction |
+| re-construe | source-side change inside the span (edit, insert, delete, re-import) | construe re-runs **with the prior construal + the diff as input**; round 1 asks whether the change alters the construal, so unchanged scenes close in one mid-tier call |
+| re-draft | brief changed after cells were staged | affected staged changesets are already `plan_stale` by precondition; span re-enters at `draft` |
+
+**Scenarios** (the policy, exercised):
+
+1. **Translator typing inside a span.** First commit marks the brief stale instantly;
+   every further event resets a **long debounce** (default 10 min of quiet, tunable in the
+   run settings). While any cell in the span holds an active focus lease, the agent never
+   re-drafts it — the lease system is already the "human is here" signal; the agent
+   respects it like any collaborator. After the quiet period the span enters the re-work
+   queue at normal priority.
+2. **Reviewer validates twenty cells.** Example-refresh tier: no staleness, no
+   re-construal. The next spans the run reaches simply retrieve better examples; cells
+   previously skipped by quorum may be re-attempted with the richer pool.
+3. **Source re-import touches the span.** Immediate stale + the staged changesets covering
+   it go `plan_stale` on their own preconditions. Highest autonomous priority: this is the
+   one tier that jumps the debounce (the drafts on screen are provably against dead
+   source), re-construing with the diff-aware prior.
+4. **User clicks "Update now" on the stale badge.** A `refresh_span` steering entry jumps
+   the queue; a parked or paused run wakes for that one span (bounded wake — process it,
+   re-park). Manual trigger always wins over any debounce or budget slice.
+5. **Stale span left alone.** It runs eventually on its own: the parked run's wake-ups
+   include a maintenance sweep processing stale spans oldest-first under a **maintenance
+   budget slice** (default ≤20% of the run's daily units) so re-work can never starve
+   fresh drafting — and vice versa: fresh drafting can't indefinitely defer maintenance,
+   because the sweep runs at every wake before the run re-parks.
+6. **Cascade guard.** A re-construal that *changes* a brief marks only its **one-hop
+   neighbors** (spans whose expansion consumed it) as re-verify tier — never auto
+   re-construe, never transitive. A contradiction found by re-verify escalates that one
+   neighbor, which may in turn mark *its* neighbors — so a genuine meaning shift ripples
+   hop by hop with a model check gating each hop, while a cosmetic change dies at radius 1.
+   (Same instinct as AD-14's per-hop decay: influence fades with distance from the change.)
+
+Priority order in the queue, highest first: user-triggered → source-dead spans (scenario
+3) → spans blocking untranslated cells → re-verify checks → stale-but-fully-translated
+spans. Every deferral is visible: the stale badge shows *why* it's waiting ("editing in
+progress", "queued behind 3 spans", "maintenance window").
 
 **Identity and budget.** A detached run cannot ride the user's ephemeral JWT. The instance
 runs under a **project-scoped stored authorization** (the credential model the external
@@ -293,6 +345,8 @@ CREATE TABLE scene_briefs (
   status TEXT NOT NULL DEFAULT 'proposed'
     CHECK (status IN ('proposed','approved','rejected','archived')),
   human_edited INTEGER NOT NULL DEFAULT 0,
+  stale_since TEXT,                     -- instant marker; NULL = fresh
+  stale_reason TEXT,                    -- 'source-edit' | 'neighbor-change' | 'endpoint-tombstoned' | ...
   provenance JSONB,                     -- {runId, spanSeedSource, closureRounds, windowCellIds}
   created_by TEXT, reviewed_by TEXT,
   version INTEGER NOT NULL DEFAULT 1,

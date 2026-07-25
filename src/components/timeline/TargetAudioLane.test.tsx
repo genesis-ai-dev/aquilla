@@ -274,3 +274,42 @@ describe("TargetAudioLane — kinds", () => {
     expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-kind", "generated")
   })
 })
+
+// Round 8b (Sam): a corner mic button on every chip — record without the trip
+// to the detail pane. It must never trigger the chip's own click (seek) or
+// start a drag.
+describe("TargetAudioLane — corner record button (round 8b)", () => {
+  it("opens the recording modal for THAT cell and selects it, without seeking", () => {
+    const onOpenRecording = vi.fn()
+    const onSelect = vi.fn()
+    const onSeek = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({}, 4000)]}
+        onSelect={onSelect}
+        onSeek={onSeek}
+        onOpenRecording={onOpenRecording}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-target-c1-record"))
+    expect(onOpenRecording).toHaveBeenCalledWith("c1")
+    expect(onSelect).toHaveBeenCalledWith("c1")
+    expect(onSeek).not.toHaveBeenCalled()
+  })
+
+  it("hidden when the lane is read-only or no handler is wired", () => {
+    const { rerender } = render(
+      <TargetAudioLane {...base} items={[item({}, 4000)]} editable={false} onOpenRecording={vi.fn()} />,
+    )
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+    rerender(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+  })
+
+  it("hidden on chips too narrow to host it", () => {
+    // 0.5s at 40 px/s = 20px < the 28px floor.
+    render(<TargetAudioLane {...base} items={[item({}, 500)]} onOpenRecording={vi.fn()} />)
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+  })
+})

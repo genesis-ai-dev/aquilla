@@ -46,6 +46,8 @@ export interface TargetAudioLaneProps {
   /** Round 7: trim a chip — the COMPLETE desired trim state (both keys
    *  resolved; undefined clears a key back to the clip edge). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  /** Round 8b: corner mic button — opens the recording modal on this cell. */
+  onOpenRecording?(cellId: string): void
 }
 
 type ChipDragMode = "move" | "resize-l" | "resize-r"
@@ -69,6 +71,7 @@ function TargetAudioChip({
   onSeek,
   onRetimeTarget,
   onTrimTarget,
+  onOpenRecording,
 }: {
   chip: ChipGeometry
   nextChipStartSec: number | null
@@ -82,6 +85,7 @@ function TargetAudioChip({
   onSeek?(id: string): void
   onRetimeTarget?(cellId: string, anchorSec: number): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  onOpenRecording?(cellId: string): void
 }) {
   const { cell } = chip.item
   const { geom, section } = chip
@@ -225,6 +229,34 @@ function TargetAudioChip({
         </span>
       )}
       <Icon className="h-3.5 w-3.5 shrink-0" />
+      {/* Round 8b (Sam): record right from the chip — opens this cell's
+          recording modal (takes and all) without a trip to the detail pane.
+          Inset from the right edge so it never fights the trim handle. */}
+      {editable && onOpenRecording && secToPx(geom.end - geom.start, pxPerSec) >= 28 && (
+        <span
+          role="button"
+          tabIndex={0}
+          title="Record audio for this line"
+          data-testid={`tl-target-${cell.id}-record`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onSelect(cell.id)
+            onOpenRecording(cell.id)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+              e.stopPropagation()
+              onSelect(cell.id)
+              onOpenRecording(cell.id)
+            }
+          }}
+          className="absolute right-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
+        >
+          <Mic className="h-2.5 w-2.5" />
+        </span>
+      )}
       {canResize && (
         <span
           aria-hidden
@@ -251,6 +283,7 @@ export function TargetAudioLane({
   onSeek,
   onRetimeTarget,
   onTrimTarget,
+  onOpenRecording,
 }: TargetAudioLaneProps) {
   // Resolve every chip first — overflow needs the NEXT chip's start, and
   // snapping needs neighbors' effective edges.
@@ -298,6 +331,7 @@ export function TargetAudioLane({
             onSeek={onSeek}
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
+            onOpenRecording={onOpenRecording}
           />
         ) : null,
       )}

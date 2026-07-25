@@ -529,6 +529,7 @@ export function TimelineEditor({
               onSeek={laneProps.onSeek}
               onRetimeTarget={onRetimeTarget}
               onTrimTarget={onTrimTarget}
+              onOpenRecording={detailActions?.onOpenRecording}
             />
             {untimed.length > 0 && (
               <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">

@@ -8,6 +8,7 @@ import { useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { activeTargetForCell, sourceClipAudioForCell } from "./track-audio"
+import { effectiveAttachmentDurationMs, targetDueSec } from "@/lib/timeline/lane-timing"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { audioMimeForExt } from "./mime"
@@ -129,6 +130,10 @@ let targetAudio: HTMLAudioElement | null = null
 let targetUrl: string | null = null
 let targetCellId: string | null = null
 let targetSeq = 0
+/** Round 6: a dub whose start (target_start_ms) lies AHEAD of the clock —
+ *  armed here, fired by the master's ontimeupdate when the clock crosses it.
+ *  Invariant: non-null iff the last applied overlay plan was "arm". */
+let pendingDub: { cellId: string; dueSec: number } | null = null
 
 // AQU-646: mutable current-segment state, readable by the element handlers.
 // With seamless same-clip advance the element OUTLIVES the cell it was opened
@@ -162,6 +167,10 @@ function disposeTargetOverlay(): void {
 }
 
 function disposeCurrent(): void {
+  // Everything resets with the master element — including any armed dub.
+  // (disposeTargetOverlay alone deliberately does NOT clear pendingDub: a
+  // previous dub ending is unrelated to the next section's armed one.)
+  pendingDub = null
   disposeTargetOverlay()
   if (currentAudio) {
     currentAudio.pause()
@@ -455,20 +464,25 @@ export function planAdvance(
 export type TargetOverlayPlan =
   | { kind: "keep" }
   | { kind: "silence" }
-  | { kind: "fire"; cellId: string; audioId: string; url: string }
+  | { kind: "fire"; cellId: string; audioId: string; url: string; startAtSec: number }
+  | { kind: "arm"; cellId: string; dueSec: number; overlay: "keep" | "silence" }
 
 /**
- * What the dub overlay should do when the master clock lands on `index`.
- * `reason` distinguishes natural ADVANCE (an overhanging clip may ring
- * through a dub-less neighbor) from a SEEK (always cuts; entering a dubbed
- * section re-cues its clip from the top). The double-fire guard covers
- * take-only sections, where the MASTER already plays the take itself.
+ * What the dub overlay should do when the master clock is at `masterSec` on
+ * `index`. `reason` distinguishes natural ADVANCE (an overhanging clip may
+ * ring through a dub-less neighbor) from a SEEK (always cuts; landing inside
+ * a dub joins it mid-clip via `startAtSec`). Round 6: a dub whose start
+ * (target_start_ms, default = section start) is still AHEAD returns "arm" —
+ * the tick fires it on crossing; one already fully in the past stays silent.
+ * The double-fire guard covers take-only sections, where the MASTER plays
+ * the take itself.
  */
 export function planTargetOverlay(
   cells: CellData[],
   index: number,
   playingTargetCellId: string | null,
   reason: "advance" | "seek",
+  masterSec: number,
 ): TargetOverlayPlan {
   const cell = cells[index]
   const target = cell ? activeTargetForCell(cell) : null
@@ -476,17 +490,40 @@ export function planTargetOverlay(
     return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   }
   if (reason === "advance" && playingTargetCellId === cell.id) return { kind: "keep" }
-  return { kind: "fire", cellId: cell.id, audioId: target.audioId, url: target.url }
+  const dueSec = targetDueSec(cell) ?? cell.startTime ?? 0
+  if (masterSec < dueSec) {
+    return { kind: "arm", cellId: cell.id, dueSec, overlay: reason === "seek" ? "silence" : "keep" }
+  }
+  const startAtSec = masterSec - dueSec
+  const effMs = effectiveAttachmentDurationMs(cell.attachments?.[target.audioId])
+  if (effMs != null && startAtSec >= effMs / 1000) {
+    // The dub's audible extent already passed — nothing (new) to sound.
+    return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
+  }
+  return { kind: "fire", cellId: cell.id, audioId: target.audioId, url: target.url, startAtSec }
 }
 
 /** Execute an overlay plan. Overlay failures are non-fatal — a dub that can't
- *  load just doesn't sound; the master keeps the clock. */
+ *  load just doesn't sound; the master keeps the clock. Every applied plan
+ *  overwrites `pendingDub` (the arm invariant). */
 function applyTargetOverlay(plan: TargetOverlayPlan): void {
-  if (plan.kind === "keep") return
+  if (plan.kind === "keep") {
+    pendingDub = null
+    return
+  }
   if (plan.kind === "silence") {
+    pendingDub = null
     disposeTargetOverlay()
     return
   }
+  if (plan.kind === "arm") {
+    // The dub's start is ahead of the clock — the tick fires it. An armed
+    // "keep" lets an overhanging previous dub ring until this one is due.
+    pendingDub = { cellId: plan.cellId, dueSec: plan.dueSec }
+    if (plan.overlay === "silence") disposeTargetOverlay()
+    return
+  }
+  pendingDub = null
   const ctx = activeContext
   if (!ctx) return
   const cell = ctx.cells.find((c) => c.id === plan.cellId)
@@ -494,6 +531,7 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
   disposeTargetOverlay()
   const seq = targetSeq
   targetCellId = plan.cellId
+  const startAtSec = plan.startAtSec
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
@@ -512,6 +550,16 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
     audio.playbackRate = progress.rate
     audio.volume = progress.volume
     audio.muted = !audibility.target
+    if (startAtSec > 0.05) {
+      // A seek landed mid-dub — join the clip at the offset, not the top.
+      // Safari rejects pre-metadata seeks (same trick as the master's
+      // pendingStartSeconds).
+      audio.onloadedmetadata = () => {
+        if (seq !== targetSeq) return
+        const d = audio.duration
+        audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtSec, d)) : startAtSec
+      }
+    }
     audio.onended = () => { if (seq === targetSeq) disposeTargetOverlay() }
     audio.onerror = () => { if (seq === targetSeq) disposeTargetOverlay() }
     if (currentAudio && !currentAudio.paused) {
@@ -521,8 +569,16 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
 }
 
 /** Make `index` the current cell WITHOUT touching the audio element's source —
- *  the seamless-advance/seek primitive for cells sharing one clip. */
-function adoptCell(index: number, seekTo: number | undefined, overlayReason: "advance" | "seek"): void {
+ *  the seamless-advance/seek primitive for cells sharing one clip.
+ *  `overlayAtSec`: where the master clock WILL be — callers that adopt before
+ *  their element seek lands must pass the intended seconds, or the overlay
+ *  plans off a stale position. */
+function adoptCell(
+  index: number,
+  seekTo: number | undefined,
+  overlayReason: "advance" | "seek",
+  overlayAtSec?: number,
+): void {
   const ctx = activeContext
   const audio = currentAudio
   if (!ctx || !audio) return
@@ -536,7 +592,9 @@ function adoptCell(index: number, seekTo: number | undefined, overlayReason: "ad
     audio.currentTime = seekTo
     setProgress({ currentTime: seekTo })
   }
-  applyTargetOverlay(planTargetOverlay(ctx.cells, index, targetCellId, overlayReason))
+  applyTargetOverlay(
+    planTargetOverlay(ctx.cells, index, targetCellId, overlayReason, overlayAtSec ?? seekTo ?? audio.currentTime),
+  )
 }
 
 async function playAt(index: number, opts: { atSeconds?: number; autoplay?: boolean } = {}): Promise<void> {
@@ -566,7 +624,9 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   // already has open (imported media file) — adopt it in place instead of
   // disposing + recreating. No boundary hiccup; cross-cell scrubs are instant.
   if (currentAudio && currentAttachmentUrl === playable.url) {
-    adoptCell(index, undefined, "seek")
+    // The element seek happens AFTER adoption — hand the overlay the intended
+    // position so it doesn't plan off the pre-seek clock.
+    adoptCell(index, undefined, "seek", opts.atSeconds ?? trimWindowForCell(cell)?.start)
     const at = opts.atSeconds ?? currentTrim?.start
     if (at != null && currentAudio) {
       currentAudio.currentTime = at
@@ -645,6 +705,14 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   }
   audio.ontimeupdate = () => {
     if (seq !== currentSeq) return
+    // Round 6: an ARMED dub fires the moment the clock crosses its start.
+    // Checked BEFORE the window-end advance — a due within one ~250ms tick of
+    // the section end would otherwise be dropped by the advance's replan.
+    if (pendingDub && audio.currentTime >= pendingDub.dueSec) {
+      applyTargetOverlay(
+        planTargetOverlay(activeContext?.cells ?? [], currentIndex, targetCellId, "advance", audio.currentTime),
+      )
+    }
     // A media segment's window ends before the shared clip does — treat
     // reaching the window end as this cell's "ended" and advance.
     if (currentTrim && audio.currentTime >= currentTrim.end) {
@@ -694,6 +762,11 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
           currentUrl = url
           audio.src = url
           await audio.play()
+          // Round 6: the src swap reset the element's position — re-derive
+          // the dub/arm state for wherever the clock actually is now.
+          applyTargetOverlay(
+            planTargetOverlay(activeContext?.cells ?? [], currentIndex, targetCellId, "seek", audio.currentTime),
+          )
         } catch (e) {
           if (seq !== currentSeq) return
           setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
@@ -705,9 +778,11 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   }
 
   // Fresh element = everything reset (disposeCurrent killed any overlay) —
-  // fire this cell's dub if it has one. Cued-not-playing elements just cue it
-  // too (the executor only starts it when the master is playing).
-  applyTargetOverlay(planTargetOverlay(ctx.cells, index, targetCellId, "seek"))
+  // fire or arm this cell's dub. Cued-not-playing elements just cue it too
+  // (the executor only starts it when the master is playing).
+  applyTargetOverlay(
+    planTargetOverlay(ctx.cells, index, targetCellId, "seek", opts.atSeconds ?? currentTrim?.start ?? 0),
+  )
 
   if (!autoplay) {
     // AQU-646 cue-without-play: element loaded + positioned, transport shows
@@ -760,13 +835,15 @@ export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}):
   }
   if (plan.kind === "element") {
     seekQueue(plan.seconds)
-    // Same cell, new position — re-cue its dub from the top (round 5).
-    applyTargetOverlay(planTargetOverlay(ctx.cells, plan.index, targetCellId, "seek"))
+    // Same cell, new position — re-derive the dub for it (join mid-clip,
+    // re-arm ahead of it, or cut).
+    applyTargetOverlay(planTargetOverlay(ctx.cells, plan.index, targetCellId, "seek", plan.seconds))
     syncPlayState(wantPlay)
     return
   }
   if (plan.kind === "seamless") {
-    adoptCell(plan.index, undefined, "seek")
+    // Adoption precedes the element seek — pass the intended seconds.
+    adoptCell(plan.index, undefined, "seek", plan.seconds)
     seekQueue(plan.seconds)
     syncPlayState(wantPlay)
     return
@@ -844,6 +921,14 @@ export function skipBack(): void {
  *  to reflect the new attachments on the next advance. */
 export function updateQueueCells(cells: CellData[]): void {
   if (activeContext) activeContext.cells = cells
+  // Round 6: an armed dub's due time is a snapshot — refresh it if the chip
+  // was dragged while we were waiting on it.
+  if (pendingDub) {
+    const cellId = pendingDub.cellId
+    const cell = cells.find((c) => c.id === cellId)
+    const due = cell ? targetDueSec(cell) : null
+    if (due != null) pendingDub = { cellId, dueSec: due }
+  }
 }
 
 /** Whether any cell in the list has playable audio. Drives the bar's

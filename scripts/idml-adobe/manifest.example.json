@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": 2,
+  "sourceCommit": "0000000000000000000000000000000000000000",
+  "preflightProfile": "Aquilla IDML Production",
+  "gates": {
+    "browser": "not-run",
+    "migration": "not-run"
+  },
+  "fixtures": [
+    {
+      "id": "mixed-character-runs",
+      "source": "../../fixtures/idml/source/mixed-character-runs.idml",
+      "candidate": "../../fixtures/idml/exports/mixed-character-runs.idml",
+      "allowReflow": true,
+      "exportReport": {
+        "translated": 0,
+        "missing": 0,
+        "rejected": 0,
+        "unsupported": 0
+      }
+    }
+  ]
+}

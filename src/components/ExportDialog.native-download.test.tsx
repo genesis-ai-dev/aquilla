@@ -27,12 +27,16 @@ vi.mock("@/lib/export/exporters/pptx", () => ({
 vi.mock("@/lib/export/exporters/idml", () => ({
   exportIdml: vi.fn(),
 }))
+vi.mock("@/lib/posthog", () => ({
+  default: { capture: vi.fn() },
+}))
 
 import { downloadBlob } from "@/lib/export/export-service"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { fetchSourceSidecar } from "@/lib/sync/source-export"
 import { exportPptx } from "@/lib/export/exporters/pptx"
 import { exportIdml } from "@/lib/export/exporters/idml"
+import posthog from "@/lib/posthog"
 
 const mockDownload = vi.mocked(downloadBlob)
 const mockProjectCells = vi.mocked(useProjectCells)
@@ -137,6 +141,14 @@ describe("ExportDialog — native download is the primary action", () => {
     const status = await screen.findByRole("status")
     expect(status).toHaveTextContent(/Protected IDML anchor 2 was reordered/i)
     expect(mockDownload).not.toHaveBeenCalled()
+    expect(posthog.capture).toHaveBeenCalledWith(
+      "idml export blocked",
+      expect.not.objectContaining({
+        file_name: expect.anything(),
+        source: expect.anything(),
+        target: expect.anything(),
+      }),
+    )
 
     fireEvent.click(screen.getByRole("button", { name: /Download original unchanged/i }))
     expect(mockDownload).toHaveBeenCalledTimes(1)
@@ -145,6 +157,61 @@ describe("ExportDialog — native download is the primary action", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Repair by re-importing/i }))
     expect(onReimport).toHaveBeenCalledTimes(1)
+  })
+
+  it("idml success records aggregate-only release telemetry", async () => {
+    const idmlCell = cell("c1", "translated")
+    idmlCell.metadata = {
+      idml: {
+        version: 2,
+        editableSlotIndexes: [0, 1],
+        protectedTokenCount: 1,
+      },
+    }
+    mockSidecar.mockResolvedValue(new Uint8Array([80, 75, 3, 4]).buffer)
+    mockExportIdml.mockResolvedValue({
+      blob: new Blob(["idml"]),
+      report: {
+        translated: 1,
+        unchanged: 0,
+        missing: 0,
+        rejected: 0,
+        unsupported: 0,
+        changedMemberPaths: ["Stories/private.xml"],
+        originalByteLength: 4,
+        exportedByteLength: 8,
+        sizeDelta: 4,
+        warnings: [],
+      },
+      diagnostics: [],
+    })
+
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        cells={[idmlCell]}
+        activeFileName="layout.idml"
+        activeFileType="idml"
+        projectFiles={[{ id: "f1", name: "layout.idml", type: "idml" }]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Download layout\.idml/i }))
+
+    await waitFor(() => expect(posthog.capture).toHaveBeenCalledWith(
+      "idml export completed",
+      expect.objectContaining({
+        profile_version: 2,
+        unit_count: 1,
+        editable_slot_count: 2,
+        protected_token_count: 1,
+        mapping_failures: 0,
+        export_size_delta: 4,
+      }),
+    ))
+    const telemetry = vi.mocked(posthog.capture).mock.calls.find(
+      ([event]) => event === "idml export completed",
+    )?.[1]
+    expect(JSON.stringify(telemetry)).not.toContain("Stories/private.xml")
   })
 
   it("canExport=false: shows the permission gate with a help link instead of export controls", () => {

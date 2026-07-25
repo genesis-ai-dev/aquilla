@@ -57,6 +57,13 @@ import { injectSdbhXml } from "@/lib/parsers/sdbh"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
+import posthog from "@/lib/posthog"
+import {
+  CURRENT_IDML_FORMAT_COPY,
+  idmlFormatCopy,
+  idmlOrgEligible,
+} from "@/lib/idml/release-gate"
+import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 
 export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
@@ -69,7 +76,7 @@ interface FormatOption {
   lossy: boolean
 }
 
-const FORMAT_OPTIONS: FormatOption[] = [
+const BASE_FORMAT_OPTIONS: FormatOption[] = [
   {
     id: "usfm",
     label: "USFM",
@@ -99,9 +106,9 @@ const FORMAT_OPTIONS: FormatOption[] = [
     // IDML v2 export remains experimental until the Adobe validation gate.
     // Only shown for files imported as .idml (activeFileType).
     id: "idml",
-    label: "InDesign IDML (experimental)",
+    label: CURRENT_IDML_FORMAT_COPY.label,
     ext: ".idml",
-    description: "Protected translations are written only into their original text slots while the rest of the IDML package stays unchanged. Export is blocked if any locator or protected anchor cannot be proven. Adobe-native fidelity is not claimed until the automated InDesign gate passes.",
+    description: CURRENT_IDML_FORMAT_COPY.description,
     lossy: false,
   },
   {
@@ -250,6 +257,8 @@ interface ExportDialogProps {
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
   getToken: (fileId: string) => Promise<string | null>
+  /** Organization identifier used for internal/beta rollout allowlists. */
+  orgId?: string
   /** Opens the import flow when an IDML locator or anchor needs repair. */
   onReimport?: () => void
   /**
@@ -279,6 +288,7 @@ export function ExportDialog({
   targetLang = "",
   ttsSettings,
   getToken,
+  orgId,
   onReimport,
   outstandingInfractionCount = 0,
 }: ExportDialogProps) {
@@ -286,7 +296,15 @@ export function ExportDialog({
   // Types without a 1:1 native exporter (ebible, obs, audio, video, sdbh, …)
   // have no primary download; the format list opens instead.
   const nativeFormatId = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
-  const nativeOption = nativeFormatId ? FORMAT_OPTIONS.find((f) => f.id === nativeFormatId)! : null
+  const effectiveIdmlCopy = idmlOrgEligible(orgId, import.meta.env)
+    ? CURRENT_IDML_FORMAT_COPY
+    : idmlFormatCopy({})
+  const formatOptions = useMemo(() => BASE_FORMAT_OPTIONS.map((option) => (
+    option.id === "idml"
+      ? { ...option, label: effectiveIdmlCopy.label, description: effectiveIdmlCopy.description }
+      : option
+  )), [effectiveIdmlCopy.description, effectiveIdmlCopy.label])
+  const nativeOption = nativeFormatId ? formatOptions.find((f) => f.id === nativeFormatId)! : null
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
@@ -365,7 +383,7 @@ export function ExportDialog({
     downloadName: string
   } | null>(null)
 
-  const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!
+  const selectedFormat = formatOptions.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
 
   // AQU-439: Voice filter — collect distinct voice names from metadata.cast_name.
@@ -447,7 +465,7 @@ export function ExportDialog({
     // and always targets the current file; the footer Export button uses the
     // selected radio format + scope.
     const fmt = overrideFormat ?? format
-    const fmtOption = FORMAT_OPTIONS.find((f) => f.id === fmt)!
+    const fmtOption = formatOptions.find((f) => f.id === fmt)!
     const runScope: ExportScope = overrideFormat
       ? "file"
       : fmt === "sdbh-xml"
@@ -459,6 +477,7 @@ export function ExportDialog({
     setFidelityWarnings([])
     setIdmlRecovery(null)
     let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
+    let idmlTelemetryStartedAt: number | null = null
     try {
       if (fmt === "usfm") {
         if (runScope === "project") {
@@ -538,6 +557,7 @@ export function ExportDialog({
         ])
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.pptx${note}` })
       } else if (fmt === "idml") {
+        idmlTelemetryStartedAt = performance.now()
         // IDML v2 export is fail-closed: the shared engine proves every
         // translated locator and protected anchor before changing package bytes.
         setStatus({ kind: "busy", msg: "Fetching original document…" })
@@ -547,6 +567,12 @@ export function ExportDialog({
         setStatus({ kind: "busy", msg: "Validating protected translations…" })
         const { exportIdml } = await import("@/lib/export/exporters/idml")
         const result = await exportIdml(rawBytes, cells)
+        posthog.capture("idml export completed", idmlTelemetryProperties({
+          cells,
+          report: result.report,
+          diagnostics: result.diagnostics,
+          durationMs: performance.now() - idmlTelemetryStartedAt,
+        }))
         downloadBlob(result.blob, `${baseName}.idml`)
         const note = result.report.translated === 0
           ? " (no translations — original bytes returned unchanged)"
@@ -693,6 +719,17 @@ export function ExportDialog({
       }
     } catch (e) {
       if (recoverableIdmlOriginal) setIdmlRecovery(recoverableIdmlOriginal)
+      if (idmlTelemetryStartedAt !== null) {
+        posthog.capture("idml export blocked", idmlTelemetryProperties({
+          cells,
+          diagnostics: (
+            e && typeof e === "object" && Array.isArray((e as { diagnostics?: unknown }).diagnostics)
+              ? (e as { diagnostics: [] }).diagnostics
+              : []
+          ),
+          durationMs: performance.now() - idmlTelemetryStartedAt,
+        }))
+      }
       setStatus({ kind: "error", msg: (e as Error).message || "Export failed." })
     }
   }
@@ -833,7 +870,7 @@ export function ExportDialog({
             className="flex flex-col gap-0.5"
             aria-label="Export format"
           >
-            {FORMAT_OPTIONS.filter((f) => {
+            {formatOptions.filter((f) => {
               if (f.id === "usfm") return activeFileType === "usfm"
               if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
               if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports

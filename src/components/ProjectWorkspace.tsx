@@ -5673,6 +5673,7 @@ export function ProjectWorkspace() {
           targetLang={activeLane}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
+          orgId={projectOrg?.id.toString()}
           onReimport={() => {
             setExportOpen(false)
             setImportOpen(true)

@@ -6,7 +6,7 @@ import {
   chipOverflowState,
   effectiveAttachmentDurationMs,
   subtitleSpanSec,
-  targetChipSpanSec,
+  targetChipGeom,
   targetDueSec,
 } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
@@ -60,29 +60,52 @@ describe("subtitleSpanSec", () => {
   })
 })
 
-describe("targetChipSpanSec", () => {
+describe("targetChipGeom — clip-zero anchored (round 7)", () => {
   it("default position with a known duration", () => {
-    expect(targetChipSpanSec(cell({}), { durationMs: 4000 })).toEqual({ start: 10, end: 14, usingFallback: false })
+    expect(targetChipGeom(cell({}), { durationMs: 4000 })).toEqual({
+      anchor: 10, start: 10, end: 14,
+      trimStartSec: 0, trimEndSec: null, durationSec: 4, usingFallback: false,
+    })
   })
   it("moved chip (target_start_ms) keeps the recording's length", () => {
-    expect(
-      targetChipSpanSec(cell({ metadata: { target_start_ms: 12000 } }), { durationMs: 4000 }),
-    ).toEqual({ start: 12, end: 16, usingFallback: false })
+    const g = targetChipGeom(cell({ metadata: { target_start_ms: 12000 } }), { durationMs: 4000 })
+    expect(g).toMatchObject({ anchor: 12, start: 12, end: 16 })
+  })
+  it("a HEAD trim moves only the left edge — the remaining audio stays put", () => {
+    const g = targetChipGeom(cell({}), { durationMs: 4000, trimStartMs: 1500 })
+    expect(g).toMatchObject({ anchor: 10, start: 11.5, end: 14, trimStartSec: 1.5 })
+  })
+  it("a TAIL trim moves only the right edge", () => {
+    const g = targetChipGeom(cell({}), { durationMs: 4000, trimEndMs: 3000 })
+    expect(g).toMatchObject({ anchor: 10, start: 10, end: 13, trimEndSec: 3 })
+  })
+  it("head + tail trims compose; moving preserves the trimmed length", () => {
+    const g = targetChipGeom(
+      cell({ metadata: { target_start_ms: 12000 } }),
+      { durationMs: 4000, trimStartMs: 1000, trimEndMs: 3500 },
+    )
+    expect(g).toMatchObject({ anchor: 12, start: 13, end: 15.5 })
   })
   it("unknown duration falls back to the section width, flagged", () => {
-    expect(targetChipSpanSec(cell({}), undefined)).toEqual({ start: 10, end: 20, usingFallback: true })
+    const g = targetChipGeom(cell({}), undefined)
+    expect(g).toMatchObject({ start: 10, end: 20, usingFallback: true, durationSec: null })
   })
   it("null without section timing", () => {
-    expect(targetChipSpanSec(cell({ startTime: undefined }), { durationMs: 1000 })).toBeNull()
+    expect(targetChipGeom(cell({ startTime: undefined }), { durationMs: 1000 })).toBeNull()
   })
 })
 
-describe("targetDueSec", () => {
+describe("targetDueSec — trim-aware (round 7)", () => {
   it("defaults to the section start", () => {
     expect(targetDueSec(cell({}))).toBe(10)
   })
   it("honors target_start_ms", () => {
     expect(targetDueSec(cell({ metadata: { target_start_ms: 13250 } }))).toBe(13.25)
+  })
+  it("a head-trimmed dub is due at its AUDIBLE start", () => {
+    expect(
+      targetDueSec(cell({ metadata: { target_start_ms: 12000 } }), { durationMs: 4000, trimStartMs: 500 }),
+    ).toBe(12.5)
   })
 })
 
@@ -96,8 +119,8 @@ describe("chipOverflowState", () => {
   it("meaningfully past → soft", () => {
     expect(chipOverflowState(21, 20, null)).toBe("soft")
   })
-  it("reaching the next chip → cutoff, even when the next chip starts late", () => {
-    expect(chipOverflowState(24, 20, 23)).toBe("cutoff")
+  it("reaching the next chip → overlap (both will sound), even when the next chip starts late", () => {
+    expect(chipOverflowState(24, 20, 23)).toBe("overlap")
     // Not yet touching the next chip → still just soft.
     expect(chipOverflowState(22, 20, 23)).toBe("soft")
   })

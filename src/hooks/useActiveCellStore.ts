@@ -785,6 +785,50 @@ export class CellStore {
     this.emit([cellId])
   }
 
+  // Round 7 (AQU-646): optimistic TIMING/metadata patch — chip moves and
+  // subtitle retimes apply instantly instead of snapping back for the
+  // flush+revalidate round-trip. Mirrors the projections' shapes: startMs/
+  // endMs land on BOTH side rows (cell.retime writes both), metadata keys
+  // merge/delete on the SOURCE row (cell.lane.retime). Unlike value edits
+  // there is NO persistent shadow: every timing write is immediately followed
+  // by an awaited flush + revalidate in the SAME handler, so the confirming
+  // fetch always arrives next; the freshness floor stamped here makes
+  // mergeProtectedRows keep these rows through any CONCURRENT stale fetch.
+  applyOptimisticCellTiming(
+    cellId: string,
+    patch: { startMs?: number; endMs?: number; metadata?: Record<string, number | null> },
+  ): void {
+    const source = this.sourceById.get(cellId)
+    const target = this.targetById.get(cellId)
+    if (!source && !target) return
+    const seq = ++this.writeSeq
+    this.freshnessFloors.set(cellId, seq)
+    if (source) {
+      const next = { ...source }
+      if (patch.startMs !== undefined) next.startMs = patch.startMs
+      if (patch.endMs !== undefined) next.endMs = patch.endMs
+      if (patch.metadata) {
+        const meta: Record<string, unknown> = { ...(source.metadata ?? {}) }
+        for (const [key, value] of Object.entries(patch.metadata)) {
+          if (value === null) delete meta[key]
+          else meta[key] = value
+        }
+        next.metadata = meta
+      }
+      this.sourceById.set(cellId, next)
+    }
+    if (target) {
+      const next = { ...target }
+      if (patch.startMs !== undefined) next.startMs = patch.startMs
+      if (patch.endMs !== undefined) next.endMs = patch.endMs
+      this.targetById.set(cellId, next)
+    }
+    this.rebuildDerivedIndexes()
+    this.bumpCells([cellId])
+    this.fileVersion++
+    this.emit([cellId])
+  }
+
   /** Bulk version of applyOptimisticTargetEdit. Stamps optimistic shadows for
    *  every cell in the batch and rebuilds derived indexes + emits ONCE at the
    *  end, instead of once per cell (O(N) not O(N²)). Used by the bulk-import
@@ -1102,6 +1146,11 @@ export interface UseActiveCellStoreResult {
   applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
   /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
+  /** Round 7: optimistic TIMING/metadata patch — see CellStore.applyOptimisticCellTiming. */
+  applyOptimisticCellTiming: (
+    cellId: string,
+    patch: { startMs?: number; endMs?: number; metadata?: Record<string, number | null> },
+  ) => void
   isLoading: boolean
   isError: boolean
 }
@@ -1439,6 +1488,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     store.applyOptimisticTargetEdits(patches)
   }, [store])
 
+  const applyOptimisticCellTiming = useCallback(
+    (cellId: string, patch: { startMs?: number; endMs?: number; metadata?: Record<string, number | null> }) => {
+      store.applyOptimisticCellTiming(cellId, patch)
+    },
+    [store],
+  )
+
   useEffect(() => {
     if (typeof window === "undefined") return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1478,7 +1534,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, isLoading, isError }
+  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, isLoading, isError }
 }
 
 /**

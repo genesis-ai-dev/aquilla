@@ -1008,6 +1008,7 @@ export function ProjectWorkspace() {
     revalidateCell,
     applyOptimisticTargetEdit,
     applyOptimisticTargetEdits,
+    applyOptimisticCellTiming,
     isLoading: cellsLoading,
   } = useActiveCellStore({
     projectId: project?.id ?? null,
@@ -1449,29 +1450,34 @@ export function ProjectWorkspace() {
     async (cellId: string, startSec: number, endSec: number) => {
       if (!project?.id || !activeFileId) return
       const cell = getActiveCells().find((c) => c.id === cellId)
+      const startMs = Math.round(startSec * 1000)
+      const endMs = Math.round(endSec * 1000)
       if (cell?.medium === "media") {
+        // Round 7: apply instantly — no snap-back while the event round-trips.
+        applyOptimisticCellTiming(cellId, { metadata: { subtitle_start_ms: startMs, subtitle_end_ms: endMs } })
         await emitCellLaneRetime({
           projectId: project.id,
           fileId: activeFileId,
           cellId,
-          subtitleStartMs: Math.round(startSec * 1000),
-          subtitleEndMs: Math.round(endSec * 1000),
+          subtitleStartMs: startMs,
+          subtitleEndMs: endMs,
           author: currentUsername,
         })
       } else {
+        applyOptimisticCellTiming(cellId, { startMs, endMs })
         await emitCellRetime({
           projectId: project.id,
           fileId: activeFileId,
           cellId,
-          startMs: Math.round(startSec * 1000),
-          endMs: Math.round(endSec * 1000),
+          startMs,
+          endMs,
           author: currentUsername,
         })
       }
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getActiveCells, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
   )
 
   // Round 6 (SUB-38): assign a voice/character from a source card's picker.
@@ -1497,21 +1503,24 @@ export function ProjectWorkspace() {
     [tts.settings, handleTimelineAssignVoice],
   )
 
-  // Round 6: move a section's dub chip → target_start_ms (absolute file ms).
+  // Round 6: move a section's dub chip → target_start_ms (the clip-zero
+  // anchor, absolute file ms). Round 7: applied optimistically first.
   const handleRetimeTarget = useCallback(
-    async (cellId: string, startSec: number) => {
+    async (cellId: string, anchorSec: number) => {
       if (!project?.id || !activeFileId) return
+      const targetStartMs = Math.round(anchorSec * 1000)
+      applyOptimisticCellTiming(cellId, { metadata: { target_start_ms: targetStartMs } })
       await emitCellLaneRetime({
         projectId: project.id,
         fileId: activeFileId,
         cellId,
-        targetStartMs: Math.round(startSec * 1000),
+        targetStartMs,
         author: currentUsername,
       })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
   )
 
   // Timeline editor detail pane: commit a target edit (same path as the table).

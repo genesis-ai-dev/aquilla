@@ -61,45 +61,86 @@ export function subtitleSpanSec(cell: CellData): SpanSec | null {
   return base
 }
 
-/**
- * Where a section's dub chip sits and how long it is. Start = target_start_ms
- * (default: the section start); length = the recording's effective duration,
- * falling back to the section span when unknown (legacy takes without
- * durationMs) — `usingFallback` marks that case for the UI.
- */
-export function targetChipSpanSec(
-  cell: CellData,
-  att: Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs"> | undefined,
-): (SpanSec & { usingFallback: boolean }) | null {
-  const section = sectionSpanSec(cell)
-  if (!section) return null
-  const startMs = metaNumber(cell.metadata, "target_start_ms")
-  const start = startMs != null ? startMs / 1000 : section.start
-  const durMs = effectiveAttachmentDurationMs(att)
-  if (durMs == null) {
-    return { start, end: start + (section.end - section.start), usingFallback: true }
-  }
-  return { start, end: start + durMs / 1000, usingFallback: false }
+/** A dub chip can't be trimmed shorter than this (matches card MIN_DUR_SEC). */
+export const MIN_TARGET_LEN_SEC = 0.2
+
+export interface TargetChipGeom {
+  /** File-second where the CLIP'S SAMPLE ZERO sits (= target_start_ms; the
+   *  round-7 formalization — playback always cued clips relative to this). */
+  anchor: number
+  /** Audible start on the file timeline = anchor + trimStart. */
+  start: number
+  /** Audible end = anchor + (trimEnd ?? duration); section-width fallback. */
+  end: number
+  trimStartSec: number
+  trimEndSec: number | null
+  durationSec: number | null
+  usingFallback: boolean
 }
 
-/** When (file seconds) a section's dub is due to fire during playback. */
-export function targetDueSec(cell: CellData): number | null {
-  const startMs = metaNumber(cell.metadata, "target_start_ms")
-  if (startMs != null) return startMs / 1000
-  return sectionSpanSec(cell)?.start ?? null
+/**
+ * Where a section's dub chip sits and how long it is — CLIP-ZERO ANCHORED
+ * (round 7): moving the chip changes only the anchor; trimming the head moves
+ * only the left edge (the remaining audio stays put in time, like a DAW
+ * region); trimming the tail moves only the right edge. Length falls back to
+ * the section span when the recording's duration is unknown (legacy takes) —
+ * `usingFallback` marks that case for the UI (movable, not trimmable).
+ * Note: takes that were cropped in the voice panel BEFORE round 7 now draw
+ * shifted right by their head-trim — the audio itself is unchanged.
+ */
+export function targetChipGeom(
+  cell: CellData,
+  att: Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs"> | undefined,
+): TargetChipGeom | null {
+  const section = sectionSpanSec(cell)
+  if (!section) return null
+  const anchorMs = metaNumber(cell.metadata, "target_start_ms")
+  const anchor = anchorMs != null ? anchorMs / 1000 : section.start
+  const trimStartSec =
+    att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
+      ? att.trimStartMs / 1000
+      : 0
+  const durationSec =
+    att?.durationMs != null && Number.isFinite(att.durationMs) && att.durationMs > 0
+      ? att.durationMs / 1000
+      : null
+  const trimEndSec =
+    att?.trimEndMs != null && Number.isFinite(att.trimEndMs) && att.trimEndMs / 1000 > trimStartSec
+      ? att.trimEndMs / 1000
+      : null
+  const audibleEndOnClip = trimEndSec ?? durationSec
+  const start = anchor + trimStartSec
+  if (audibleEndOnClip == null) {
+    return {
+      anchor, start, end: start + (section.end - section.start),
+      trimStartSec, trimEndSec: null, durationSec: null, usingFallback: true,
+    }
+  }
+  return {
+    anchor, start, end: anchor + audibleEndOnClip,
+    trimStartSec, trimEndSec, durationSec, usingFallback: false,
+  }
+}
+
+/** When (file seconds) a section's dub is due to fire = its AUDIBLE start. */
+export function targetDueSec(
+  cell: CellData,
+  att?: Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs">,
+): number | null {
+  return targetChipGeom(cell, att)?.start ?? null
 }
 
 /**
  * How worried the UI should be about a chip's tail: "soft" when it runs
- * meaningfully past its section's end, "cutoff" when it reaches the NEXT
- * section's chip — that dub will audibly cut this one off.
+ * meaningfully past its section's end, "overlap" when it reaches the NEXT
+ * section's chip — both dubs will sound through the overlap (round 7).
  */
 export function chipOverflowState(
   chipEndSec: number,
   sectionEndSec: number,
   nextChipStartSec: number | null,
-): "none" | "soft" | "cutoff" {
-  if (nextChipStartSec != null && chipEndSec > nextChipStartSec) return "cutoff"
+): "none" | "soft" | "overlap" {
+  if (nextChipStartSec != null && chipEndSec > nextChipStartSec) return "overlap"
   if (chipEndSec > sectionEndSec + OVERFLOW_SOFT_SEC) return "soft"
   return "none"
 }

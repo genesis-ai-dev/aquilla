@@ -226,6 +226,22 @@ describe("TimelineEditor", () => {
     }),
   ]
 
+  it("SUB-37: the Untimed row exists only when something is untimed", () => {
+    const { rerender } = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+    )
+    expect(screen.queryByText("Untimed")).toBeNull()
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[...mediaCells, cell({ id: "u9", original: "Loose line", medium: "text" })]}
+        onRetime={() => {}} onCommitTarget={() => {}}
+      />,
+    )
+    expect(screen.getByText("Untimed")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-untimed-u9")).toBeInTheDocument()
+  })
+
   it("renames the lane headers to Subtitles / Source audio / Target audio", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,

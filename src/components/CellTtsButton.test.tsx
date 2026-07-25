@@ -59,6 +59,14 @@ describe("CellTtsButton — round 5 (AQU-646)", () => {
     expect(btn.getAttribute("aria-label")).toBe("Translate this line first to generate voice")
   })
 
+  it("SUB-35: the READY state is visibly tinted; the disabled state is washed out", () => {
+    const { unmount } = render(<CellTtsButton cellId="c1" text="Hello there" projectTtsSettings={{}} />)
+    expect(screen.getByRole("button").className).toContain("text-sky-600")
+    unmount()
+    render(<CellTtsButton cellId="c1" text="" projectTtsSettings={{}} />)
+    expect(screen.getByRole("button").className).toContain("text-muted-foreground/40")
+  })
+
   it("the built-in Narrator follows the PROJECT engine — OmniVoice default, no pinned Gemini", () => {
     // Fresh project: no custom voices, no provider set → resolved engine must
     // be the OmniVoice default (previously the Narrator preset forced Gemini

@@ -318,7 +318,12 @@ export function CellTtsButton({
             ? "text-primary"
             : isLoadingModel
               ? "text-amber-600 dark:text-amber-400"
-              : "text-muted-foreground/50 hover:text-foreground",
+              : noText || disabled
+                // SUB-35: can't-run state stays washed out…
+                ? "text-muted-foreground/40"
+                // …but READY must look ready — the old muted/50 idle tint made a
+                // working button read as disabled.
+                : "text-sky-600 hover:text-sky-500 dark:text-sky-400",
         isSynthesizing && "animate-pulse",
       )}
     >

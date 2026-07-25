@@ -418,10 +418,14 @@ export function TimelineEditor({
           <LaneLabel name="Subtitles" sub="text · reading" dot="bg-zinc-400 dark:bg-zinc-600" />
           <LaneLabel name="Source audio" sub="original speech" dot="bg-sky-600" trailing={speakerToggle("source", "source audio")} />
           <LaneLabel name="Target audio" sub="takes · generated" dot="bg-emerald-600" trailing={speakerToggle("target", "target audio")} />
-          <div className="flex h-12 flex-col justify-center px-3">
-            <span className="text-xs font-semibold text-foreground">Untimed</span>
-            <span className="text-[10px] text-muted-foreground">no timecode</span>
-          </div>
+          {/* SUB-37: the untimed parking strip only exists when something is
+              actually untimed — an always-on empty row read as a mystery. */}
+          {untimed.length > 0 && (
+            <div className="flex h-12 flex-col justify-center px-3">
+              <span className="text-xs font-semibold text-foreground">Untimed</span>
+              <span className="text-[10px] text-muted-foreground">no timecode yet</span>
+            </div>
+          )}
         </div>
         <div
           ref={scrollRef}
@@ -450,11 +454,9 @@ export function TimelineEditor({
               onSelect={setSelectedId}
               onSeek={laneProps.onSeek}
             />
-            <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
-              {untimed.length === 0 ? (
-                <span className="text-[10px] text-muted-foreground">No untimed clips.</span>
-              ) : (
-                untimed.map((c) => (
+            {untimed.length > 0 && (
+              <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
+                {untimed.map((c) => (
                   <button
                     key={c.id}
                     type="button"
@@ -467,9 +469,9 @@ export function TimelineEditor({
                   >
                     {(c.original || c.transcription || c.cellLabel || "untimed").slice(0, 36)}
                   </button>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
             <TimelinePlayhead
               currentSec={clock.currentSec}
               pxPerSec={pxPerSec}

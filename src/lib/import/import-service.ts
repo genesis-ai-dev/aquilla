@@ -76,7 +76,7 @@ function profileId(fileType: FileType): string {
     case "pptx":
       return `builtin:ooxml-${fileType}`
     case "idml":
-      return "builtin:idml"
+      return "builtin:idml-roundtrip"
     case "vtt":
     case "srt":
       return `builtin:subtitle-${fileType}`
@@ -157,7 +157,7 @@ export class ImportService<Context extends ImportServiceContext, Reference> {
           : result.rawSourceFormat === "usx"
             ? "builtin:usx-to-usfm"
             : profileId(fileType),
-        profileVersion: "1",
+        profileVersion: fileType === "idml" ? "2" : "1",
         ...(result.importRecipe ? {
           deterministic: false,
           fidelity: "content-only" as const,

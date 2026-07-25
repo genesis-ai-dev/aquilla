@@ -1,3 +1,5 @@
+import type { ImportSourceLocator } from "../../../shared/import-contract"
+
 export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
 export type CellType =
@@ -19,6 +21,9 @@ export interface TranslatableString {
   original: string
   originalHtml?: string
   translated: string
+  /** Rich target initialized by format-aware parsers. IDML uses this for its
+   * protected empty slot anchors even before any translated words exist. */
+  translatedHtml?: string
   context: string
   group: string
   /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). */
@@ -55,6 +60,8 @@ export interface TranslatableString {
   metadata?: Record<string, unknown>
   type: CellType
   sourceLocation?: SourceLocation
+  /** Exact format locator when a package-block locator would lose identity. */
+  sourceLocator?: ImportSourceLocator
 }
 
 /** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */

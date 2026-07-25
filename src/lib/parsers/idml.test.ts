@@ -1,197 +1,128 @@
-import { describe, it, expect } from "vitest"
+import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
+import {
+  parseIdml,
+  validateIdmlTranslation,
+  type IdmlFormatMetadataV2,
+} from "@aquilla/idml-roundtrip"
 import { extractIdmlStrings } from "./idml"
 
-const IDPKG = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
+const MIME = "application/vnd.adobe.indesign-idml-package"
+const STORY = "Stories/Story_u1.xml"
+const IDPKG = "http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"
 
-function storyXml(inner: string, self = "u100"): string {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<idPkg:Story ${IDPKG} DOMVersion="18.0">
-  <Story Self="${self}">${inner}</Story>
-</idPkg:Story>`
-}
-
-function designmapXml(storySrcs: string[]): string {
-  const stories = storySrcs.map((src) => `<idPkg:Story src="${src}"/>`).join("\n  ")
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Document ${IDPKG} DOMVersion="18.0" Self="d">
-  ${stories}
-</Document>`
-}
-
-function psr(inner: string, style = "ParagraphStyle/$ID/NormalParagraphStyle"): string {
-  return `<ParagraphStyleRange AppliedParagraphStyle="${style}">${inner}</ParagraphStyleRange>`
-}
-
-function csr(inner: string, attrs = ""): string {
-  return `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]"${attrs ? ` ${attrs}` : ""}>${inner}</CharacterStyleRange>`
-}
-
-async function makeIdml(stories: Record<string, string>): Promise<ArrayBuffer> {
+async function makeIdmlParagraph(paragraphInner: string): Promise<ArrayBuffer> {
   const zip = new JSZip()
-  zip.file("mimetype", "application/vnd.adobe.indesign-idml-package")
-  zip.file("designmap.xml", designmapXml(Object.keys(stories)))
-  for (const [src, inner] of Object.entries(stories)) {
-    zip.file(src, storyXml(inner))
-  }
-  return zip.generateAsync({ type: "arraybuffer" })
+  zip.file("mimetype", MIME, { compression: "STORE" })
+  zip.file(
+    "designmap.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>`
+      + `<Document xmlns:idPkg="${IDPKG}"><idPkg:Story src="${STORY}"/></Document>`,
+  )
+  zip.file(
+    STORY,
+    `<?xml version="1.0" encoding="UTF-8"?>`
+      + `<idPkg:Story xmlns:idPkg="${IDPKG}"><Story Self="u1">`
+      + `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Body">`
+      + paragraphInner
+      + `</ParagraphStyleRange>`
+      + `</Story></idPkg:Story>`,
+  )
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
 }
 
-describe("extractIdmlStrings", () => {
-  it("extracts plain paragraph text", async () => {
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml": psr(csr("<Content>Hello world</Content>")),
+function makeIdml(content: string): Promise<ArrayBuffer> {
+  return makeIdmlParagraph(
+    `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain">`
+      + `<Content>${content}</Content>`
+      + `</CharacterStyleRange>`,
+  )
+}
+
+describe("IDML v2 parser adapter", () => {
+  it("maps a real shared-engine unit to one protected Aquilla cell", async () => {
+    const source = `${"Long source paragraph. ".repeat(30)}&amp; final`
+    const buffer = await makeIdml(source)
+    const parsed = await parseIdml(buffer)
+    const strings = await extractIdmlStrings(
+      buffer,
+      async () => parsed,
+    )
+
+    expect(strings).toHaveLength(1)
+    const [cell] = strings
+    expect(cell.id).toBe(parsed.units[0].id)
+    expect(cell.original.length).toBeGreaterThan(200)
+    expect(cell.original).toContain("& final")
+    expect(cell.paragraphStart).toBe(true)
+    expect(cell.sourceLocator).toMatchObject({
+      kind: "idml",
+      memberPath: STORY,
+      scope: "story-paragraph",
+      part: 0,
+      slotIndexes: [0],
     })
-    const result = await extractIdmlStrings(buffer)
-    expect(result).toHaveLength(1)
-    expect(result[0].original).toBe("Hello world")
-    expect(result[0].context).toBe("Paragraph")
-    expect(result[0].type).toBe("text")
-    expect(result[0].translated).toBe("")
-    expect(result[0].paragraphStart).toBe(true)
-  })
-
-  it("detects heading styles and uses the style leaf as context", async () => {
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml": psr(
-        csr("<Content>Chapter One</Content>"),
-        "ParagraphStyle/Heading 1",
-      ),
+    expect(cell.metadata?.idml).toMatchObject({
+      version: 2,
+      slotCount: 1,
+      editableSlotIndexes: [0],
     })
-    const result = await extractIdmlStrings(buffer)
-    expect(result[0].context).toBe("Heading 1")
-    expect(result[0].type).toBe("heading")
+    expect(cell.originalHtml).toContain('data-idml-slot="0"')
+    expect(cell.originalHtml).toContain("Long source paragraph")
+    expect(cell.translatedHtml).toContain('data-idml-slot="0"')
+    expect(cell.translatedHtml).not.toContain("Long source paragraph")
+    expect(validateIdmlTranslation(
+      cell.originalHtml!,
+      cell.translatedHtml!,
+      cell.metadata!.idml as IdmlFormatMetadataV2,
+    ).valid).toBe(true)
   })
 
-  it("decodes percent-encoded style names", async () => {
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml": psr(
-        csr("<Content>Intro</Content>"),
-        "ParagraphStyle/Body%3aFirst",
-      ),
-    })
-    const result = await extractIdmlStrings(buffer)
-    expect(result[0].context).toBe("Body:First")
+  it("initializes every mixed-style target slot empty with style identity intact", async () => {
+    const buffer = await makeIdmlParagraph(
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain">`
+        + `<Content>Regular </Content></CharacterStyleRange>`
+        + `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold">`
+        + `<Content>bold</Content></CharacterStyleRange>`,
+    )
+    const strings = await extractIdmlStrings(
+      buffer,
+      (bytes, profile) => parseIdml(bytes, profile),
+    )
+    const [cell] = strings
+
+    expect(cell.metadata?.idml).toMatchObject({ slotCount: 2, editableSlotIndexes: [0, 1] })
+    expect(cell.translated).toBe("")
+    expect(cell.translatedHtml).toContain('data-idml-character-style="CharacterStyle/Plain"')
+    expect(cell.translatedHtml).toContain('data-idml-character-style="CharacterStyle/Bold"')
+    expect(cell.translatedHtml).not.toContain("Regular")
+    expect(cell.translatedHtml).not.toContain("bold")
+    expect(validateIdmlTranslation(
+      cell.originalHtml!,
+      cell.translatedHtml!,
+      cell.metadata!.idml as IdmlFormatMetadataV2,
+    ).valid).toBe(true)
   })
 
-  it("concatenates character ranges and captures formatting as originalHtml", async () => {
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml": psr(
-        csr("<Content>Normal </Content>")
-        + csr("<Content>bold</Content>", 'FontStyle="Bold"')
-        + csr("<Content> text</Content>"),
-      ),
-    })
-    const result = await extractIdmlStrings(buffer)
-    expect(result[0].original).toBe("Normal bold text")
-    expect(result[0].originalHtml).toBe("Normal <b>bold</b> text")
-  })
+  it("forwards the selected semantic profile to the injectable executor", async () => {
+    let receivedProfile: string | undefined
+    const result = await extractIdmlStrings(
+      new Uint8Array([1]).buffer,
+      async (_bytes, profile) => {
+        receivedProfile = profile
+        return { units: [], manifest: {
+          version: 2,
+          sourceSha256: "a".repeat(64),
+          profile,
+          members: [],
+          unitLocators: [],
+          diagnostics: [],
+        }, diagnostics: [] }
+      },
+      "biblica",
+    )
 
-  it("maps italic FontStyle and Underline attribute", async () => {
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml": psr(
-        csr("<Content>italic</Content>", 'FontStyle="Italic"')
-        + csr("<Content>under</Content>", 'Underline="true"'),
-      ),
-    })
-    const result = await extractIdmlStrings(buffer)
-    expect(result[0].originalHtml).toBe("<i>italic</i><u>under</u>")
-  })
-
-  it("turns an inner <Br/> into a newline and drops the trailing one", async () => {
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml": psr(
-        csr("<Content>line one</Content><Br/><Content>line two</Content><Br/>"),
-      ),
-    })
-    const result = await extractIdmlStrings(buffer)
-    expect(result[0].original).toBe("line one\nline two")
-  })
-
-  it("skips empty paragraphs but keeps blockPath indices aligned", async () => {
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml":
-        psr(csr("<Content>First</Content>"))
-        + psr(csr("<Br/>"))
-        + psr(csr("<Content>Third</Content>")),
-    })
-    const result = await extractIdmlStrings(buffer)
-    expect(result).toHaveLength(2)
-    expect(result[0].sourceLocation).toEqual({
-      file: "Stories/Story_u100.xml",
-      blockPath: "ParagraphStyleRange[1]",
-    })
-    expect(result[1].sourceLocation).toEqual({
-      file: "Stories/Story_u100.xml",
-      blockPath: "ParagraphStyleRange[3]",
-    })
-  })
-
-  it("orders stories by designmap, not by zip entry name", async () => {
-    const zip = new JSZip()
-    zip.file("mimetype", "application/vnd.adobe.indesign-idml-package")
-    zip.file("designmap.xml", designmapXml([
-      "Stories/Story_u900.xml",
-      "Stories/Story_u100.xml",
-    ]))
-    zip.file("Stories/Story_u100.xml", storyXml(psr(csr("<Content>Second</Content>"))))
-    zip.file("Stories/Story_u900.xml", storyXml(psr(csr("<Content>First</Content>")), "u900"))
-    const buffer = await zip.generateAsync({ type: "arraybuffer" })
-
-    const result = await extractIdmlStrings(buffer)
-    expect(result.map((s) => s.original)).toEqual(["First", "Second"])
-  })
-
-  it("still imports stories the designmap does not reference", async () => {
-    const zip = new JSZip()
-    zip.file("designmap.xml", designmapXml(["Stories/Story_u100.xml"]))
-    zip.file("Stories/Story_u100.xml", storyXml(psr(csr("<Content>Listed</Content>"))))
-    zip.file("Stories/Story_u200.xml", storyXml(psr(csr("<Content>Orphan</Content>")), "u200"))
-    const buffer = await zip.generateAsync({ type: "arraybuffer" })
-
-    const result = await extractIdmlStrings(buffer)
-    expect(result.map((s) => s.original)).toEqual(["Listed", "Orphan"])
-  })
-
-  it("skips footnote paragraphs nested inside a paragraph", async () => {
-    const footnote = `<Footnote>${psr(csr("<Content>Footnote text</Content>"))}</Footnote>`
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml": psr(
-        csr(`<Content>Body text</Content>${footnote}`),
-      ),
-    })
-    const result = await extractIdmlStrings(buffer)
-    expect(result).toHaveLength(1)
-    expect(result[0].original).toBe("Body text")
-  })
-
-  it("splits long paragraphs into segments sharing one sourceLocation", async () => {
-    const sentence = "This sentence is repeated to exceed the segment limit. "
-    const buffer = await makeIdml({
-      "Stories/Story_u100.xml": psr(csr(`<Content>${sentence.repeat(8).trim()}</Content>`)),
-    })
-    const result = await extractIdmlStrings(buffer)
-    expect(result.length).toBeGreaterThan(1)
-    const groups = new Set(result.map((s) => s.group))
-    expect(groups.size).toBe(1)
-    for (const s of result) {
-      expect(s.sourceLocation).toEqual({
-        file: "Stories/Story_u100.xml",
-        blockPath: "ParagraphStyleRange[1]",
-      })
-    }
-    expect(result[0].paragraphStart).toBe(true)
-    expect(result[1].paragraphStart).toBeUndefined()
-  })
-
-  it("throws on an archive without stories", async () => {
-    const zip = new JSZip()
-    zip.file("designmap.xml", designmapXml([]))
-    const buffer = await zip.generateAsync({ type: "arraybuffer" })
-    await expect(extractIdmlStrings(buffer)).rejects.toThrow(/does not contain any stories/)
-  })
-
-  it("rejects an empty file", async () => {
-    await expect(extractIdmlStrings(new ArrayBuffer(0))).rejects.toThrow(/empty/)
+    expect(result).toEqual([])
+    expect(receivedProfile).toBe("biblica")
   })
 })

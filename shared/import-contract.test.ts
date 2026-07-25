@@ -49,7 +49,12 @@ describe("source artifact format registry", () => {
       .filter(([, descriptor]) => descriptor.defaultFidelity === "native")
       .map(([format]) => format)
       .sort()
-    expect(native).toEqual(["docx", "idml", "pptx", "usfm"])
+    expect(native).toEqual(["docx", "pptx", "usfm"])
+    expect(sourceArtifactDescriptor("idml")).toEqual({
+      extension: "idml",
+      contentType: "application/vnd.adobe.indesign-idml-package",
+      defaultFidelity: "content-only",
+    })
     expect(sourceArtifactDescriptor("future-vendor-format")).toEqual({
       extension: "bin",
       contentType: "application/octet-stream",

@@ -112,6 +112,7 @@ describe('POST /import — server_seq is race-safe', () => {
           cellId: 'unit-1',
           parentId: sourceEventId,
           value: 'Bonjour',
+          valueHtml: '<p>Bonjour</p>',
           targetLang: 'fr-CA',
         }],
       }),
@@ -123,6 +124,8 @@ describe('POST /import — server_seq is race-safe', () => {
         ['source', '', 'Hello'],
         ['target', 'fr-CA', 'Bonjour'],
       ]))
+    expect((await rows<any>('cells')).find((cell) => cell.side === 'target')?.value_html)
+      .toBe('<p>Bonjour</p>')
 
     const publish = new Request('https://worker/import', {
       method: 'POST',

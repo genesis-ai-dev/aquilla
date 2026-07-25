@@ -91,6 +91,7 @@
     "neon:refresh-dev": "pnpm neon:refresh:dev"
   },
   "dependencies": {
+    "@aquilla/idml-roundtrip": "workspace:2.0.0",
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@huggingface/transformers": "^4.2.0",

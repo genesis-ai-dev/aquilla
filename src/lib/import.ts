@@ -38,7 +38,6 @@ import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
 import {
   enqueueTargetCommitBatch,
-  enqueueTargetCommits,
   bulkUploadMorphRows,
   publishStagedImport,
   reconcileSourceImport,
@@ -1295,8 +1294,13 @@ export async function emitParsedFile(
   const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
     fileName: result.name,
     fileType,
-    profileId: fileType === "usfm" ? "builtin:usfm-lossless" : `builtin:${fileType}`,
-    profileVersion: "1",
+    profileId: fileType === "usfm"
+      ? "builtin:usfm-lossless"
+      : fileType === "idml"
+        ? "builtin:idml-roundtrip"
+        : `builtin:${fileType}`,
+    profileVersion: fileType === "idml" ? "2" : "1",
+    ...(result.roundTripFidelity ? { fidelity: result.roundTripFidelity } : {}),
   })
 
   // Chain cells via anchorCellId: the first cell's anchor is null (genesis —
@@ -1308,8 +1312,15 @@ export async function emitParsedFile(
   })
   const targets: TargetCommit[] = cells.flatMap((cell, index) => {
     const value = result.strings[index]?.translated
-    return value
-      ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
+    const valueHtml = result.strings[index]?.translatedHtml
+    return value || valueHtml
+      ? [{
+          id: uuidv7(),
+          cellId: cell.cellId,
+          parentId: cell.id,
+          value: value ?? "",
+          ...(valueHtml !== undefined ? { valueHtml } : {}),
+        }]
       : []
   })
 
@@ -1351,38 +1362,6 @@ export async function emitParsedFile(
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
   })
-
-  // AQU-638: bilingual imports (CSV/TSV column mapping, TMX, XLIFF, csv-bilingual)
-  // carry target text on each parsed string. bulkUploadSource seeds only the
-  // SOURCE side, so without this the mapped/paired target column silently
-  // vanishes — source cells populate, targets stay empty. Emit one
-  // target.cell.commit per non-empty translation, chained on the freshly-minted
-  // source cell event id (AD-9 staleness pin). `cells[i]` is 1:1 with
-  // `result.strings[i]` — buildBulkCellsWithSpeakers emits exactly one cell per
-  // string in order and never skips. Source-only formats leave `translated`
-  // empty/undefined, so no target commits are emitted for them.
-  const targetCommits: TargetCommit[] = []
-  for (let i = 0; i < cells.length; i++) {
-    const translated = result.strings[i]?.translated?.trim()
-    if (translated) {
-      targetCommits.push({
-        id: uuidv7(),
-        cellId: cells[i].cellId,
-        parentId: cells[i].id,
-        value: translated,
-      })
-    }
-  }
-  if (targetCommits.length > 0) {
-    await enqueueTargetCommits({
-      projectId: ctx.projectId,
-      fileId,
-      author: ctx.author,
-      commits: targetCommits,
-      getToken: ctx.getToken,
-      signal: ctx.signal,
-    })
-  }
 
   return {
     ref: {
@@ -2175,10 +2154,20 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
     }
     case "idml": {
-      const buffer = await file.arrayBuffer()
-      const strings = await extractIdmlStrings(buffer)
+      // The strict worker client transfers (detaches) its input without a
+      // hidden copy. Re-read the File after parsing so the preserved recovery
+      // artifact never shares/detaches the worker's parse buffer.
+      const parseBuffer = await file.arrayBuffer()
+      const strings = await extractIdmlStrings(parseBuffer)
+      const sourceBuffer = await file.arrayBuffer()
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
-      return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "idml" }]
+      return [{
+        name: file.name,
+        strings,
+        rawBytes: sourceBuffer,
+        rawSourceFormat: "idml",
+        roundTripFidelity: "content-only",
+      }]
     }
     case "xlsx":
       throw new Error("XLSX files import through spreadsheet column mapping")

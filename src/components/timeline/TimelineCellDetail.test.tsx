@@ -316,3 +316,66 @@ describe("TimelineCellDetail — SUB-29 mic gate + error message", () => {
     )
   })
 })
+
+// ── Round 8: the voice/character picker lives under the SOURCE card ──
+
+describe("TimelineCellDetail — source-card voice picker (round 8)", () => {
+  const voiceSettings = {
+    voices: [
+      { id: "v-narrator", name: "Narrator", color: "#111" },
+      { id: "v-marta", name: "Marta", color: "#222" },
+    ],
+    defaultVoiceId: "v-narrator",
+    castAssignments: {},
+  }
+
+  it("renders under the source with the resolved voice; picking assigns to THIS cell", () => {
+    const onAssignVoice = vi.fn()
+    render(
+      <TimelineCellDetail
+        cell={timedCell({ metadata: { cast_name: "Speaker 1" } } as Partial<CellData>)}
+        editable
+        onCommitTarget={() => {}}
+        detailActions={makeActions({ projectTtsSettings: voiceSettings, onAssignVoice })}
+      />,
+    )
+    const trigger = screen.getByTestId("tl-detail-voice")
+    expect(trigger).toHaveTextContent("Narrator")
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByText("Marta"))
+    expect(onAssignVoice).toHaveBeenCalledTimes(1)
+    const [assignedCell, voiceId, opts] = onAssignVoice.mock.calls[0] as [CellData, string, { applyToSpeaker?: boolean }]
+    expect(assignedCell.id).toBe("c1")
+    expect(voiceId).toBe("v-marta")
+    expect(opts.applyToSpeaker).toBe(false)
+  })
+
+  it("the apply-to-all-«speaker»-lines toggle rides the assignment", () => {
+    const onAssignVoice = vi.fn()
+    render(
+      <TimelineCellDetail
+        cell={timedCell({ metadata: { cast_name: "Speaker 1" } } as Partial<CellData>)}
+        editable
+        onCommitTarget={() => {}}
+        detailActions={makeActions({ projectTtsSettings: voiceSettings, onAssignVoice })}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-detail-voice"))
+    fireEvent.click(screen.getByTestId("tl-detail-voice-all"))
+    fireEvent.click(screen.getByText("Marta"))
+    const [, , opts] = onAssignVoice.mock.calls[0] as [CellData, string, { applyToSpeaker?: boolean }]
+    expect(opts.applyToSpeaker).toBe(true)
+  })
+
+  it("absent without an assign callback (read-only surfaces) and on text cells", () => {
+    render(
+      <TimelineCellDetail
+        cell={timedCell()}
+        editable
+        onCommitTarget={() => {}}
+        detailActions={makeActions({ projectTtsSettings: voiceSettings })}
+      />,
+    )
+    expect(screen.queryByTestId("tl-detail-voice")).toBeNull()
+  })
+})

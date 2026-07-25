@@ -21,7 +21,6 @@ import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
-import type { TimelineVoiceControl } from "./TimelineCard"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineCellDetail, type TimelineDetailActions } from "./TimelineCellDetail"
@@ -48,8 +47,6 @@ export interface TimelineEditorProps {
    *  paused→resume, idle→start). The editor claims the app-wide audio
    *  shortcut while mounted so a last-played single cell can't steal Space. */
   onTogglePlay?(): void
-  /** Round 6 (SUB-38): the source cards' voice/character picker wiring. */
-  voiceControl?: TimelineVoiceControl
   onCommitTarget(cellId: string, value: string): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
@@ -122,7 +119,6 @@ export function TimelineEditor({
   onRetimeTarget,
   onTrimTarget,
   onTogglePlay,
-  voiceControl,
   onCommitTarget,
   onLinkVideo,
   onTranscribe,
@@ -519,9 +515,8 @@ export function TimelineEditor({
           <div className="relative" style={{ width: `${trackWidthPx}px` }}>
             <TimelineRuler durationSec={durationSec} pxPerSec={pxPerSec} onScrub={seekTo} />
             <TimelineLane cells={subtitle} variant="subtitle" retimable snapEnabled={snapOn} {...laneProps} />
-            {/* Round 6: the source split is FROZEN at import — never retimable.
-                Its cards carry the voice/character picker (SUB-38). */}
-            <TimelineLane cells={dialogue} variant="dialogue" retimable={false} voiceControl={editable ? voiceControl : undefined} {...laneProps} />
+            {/* Round 6: the source split is FROZEN at import — never retimable. */}
+            <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
             <TargetAudioLane
               items={targetItems}
               pxPerSec={pxPerSec}

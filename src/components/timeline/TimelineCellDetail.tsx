@@ -26,6 +26,11 @@ import { GenerateOverwriteDialog } from "@/components/GenerateOverwriteDialog"
 import { AddFootnoteDialog } from "@/components/footnotes/AddFootnoteDialog"
 import { CellTtsButton } from "@/components/CellTtsButton"
 import { CellAudioUploadButton } from "@/components/CellAudioUploadButton"
+import { ChevronsUpDown } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
+import { VoicePickerContent } from "@/components/voice/VoiceCombobox"
+import { getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { effectiveSourceText } from "@/lib/cell-text"
@@ -60,6 +65,9 @@ export interface TimelineDetailActions {
   targetLanguage?: string
   projectTtsSettings?: ProjectTtsSettings
   username: string
+  /** Round 8 (per Sam): the voice/character picker under the SOURCE card.
+   *  Pure assignment — never auto-synthesizes. */
+  onAssignVoice?(cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }): void
 }
 
 export interface TimelineCellDetailProps {
@@ -118,6 +126,9 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
   const [draft, setDraft] = useState("")
   const [footnoteOpen, setFootnoteOpen] = useState(false)
   const [overwriteOpen, setOverwriteOpen] = useState(false)
+  // Round 8: the source card's voice picker (popover + apply-to-speaker).
+  const [voiceOpen, setVoiceOpen] = useState(false)
+  const [applyToSpeaker, setApplyToSpeaker] = useState(false)
   const transcribeStatus = useTranscribeStatus(cell?.selectedAudioId)
   useEffect(() => {
     setDraft(cell?.translated ?? "")
@@ -135,6 +146,11 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
   }
 
   const isDialogue = (cell.medium ?? "text") === "media"
+  // Round 8: which voice/character reads this line (picker under the source).
+  const sourceVoice =
+    isDialogue && detailActions?.onAssignVoice
+      ? resolveCastVoice(detailActions.projectTtsSettings, cell.id, cell.ttsSettings?.voiceId)
+      : null
   const start = cell.startTime ?? 0
   const end = cell.endTime ?? start
   const castName =
@@ -226,6 +242,52 @@ export function TimelineCellDetail({ cell, editable, onCommitTarget, onTranscrib
           <div data-testid="tl-detail-source" className="text-sm leading-snug text-foreground">
             {cell.transcription || cell.original || "—"}
           </div>
+          {/* Round 8 (per Sam): the voice/character picker lives HERE — under
+              the source, bottom-left — not on the timeline chips. */}
+          {isDialogue && detailActions?.onAssignVoice && sourceVoice && (
+            <div className="mt-2 flex items-center justify-start">
+              <Popover open={voiceOpen} onOpenChange={setVoiceOpen}>
+                <PopoverTrigger
+                  render={
+                    <button
+                      type="button"
+                      data-testid="tl-detail-voice"
+                      title={castName ? `${castName} — voiced by ${sourceVoice.name}` : `Voiced by ${sourceVoice.name}`}
+                      aria-label={`Voice: ${sourceVoice.name}. Choose a voice`}
+                      className="flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-background px-1.5 py-1 text-[11px] font-medium text-foreground/80 hover:bg-muted"
+                    >
+                      <VoiceAvatar voice={sourceVoice} size={16} />
+                      <span className="max-w-[18ch] truncate">{castName ? `${castName} · ${sourceVoice.name}` : sourceVoice.name}</span>
+                      <ChevronsUpDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    </button>
+                  }
+                />
+                <PopoverContent align="start" side="top" className="w-60 p-2">
+                  <VoicePickerContent
+                    voices={getVoiceLibrary(detailActions.projectTtsSettings)}
+                    activeId={sourceVoice.id}
+                    onPick={(voiceId) => {
+                      detailActions.onAssignVoice?.(cell, voiceId, { applyToSpeaker })
+                      setVoiceOpen(false)
+                    }}
+                    footer={
+                      castName ? (
+                        <label className="mt-1.5 flex cursor-pointer items-center gap-2 border-t border-border pt-1.5 text-xs text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            data-testid="tl-detail-voice-all"
+                            checked={applyToSpeaker}
+                            onChange={(e) => setApplyToSpeaker(e.target.checked)}
+                          />
+                          Apply to all «{castName}» lines
+                        </label>
+                      ) : undefined
+                    }
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
         </div>
         <div className="rounded-lg border border-border bg-card p-2.5">
           <div className="mb-1 flex items-center justify-between gap-2">

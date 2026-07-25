@@ -1541,10 +1541,6 @@ export function ProjectWorkspace() {
     },
     [tts, getActiveCells],
   )
-  const timelineVoiceControl = useMemo(
-    () => ({ settings: tts.settings, onAssign: handleTimelineAssignVoice }),
-    [tts.settings, handleTimelineAssignVoice],
-  )
 
   // Round 6: move a section's dub chip → target_start_ms (the clip-zero
   // anchor, absolute file ms). Round 7: applied optimistically first.
@@ -3283,11 +3279,14 @@ export function ProjectWorkspace() {
     projectId: project.id,
     sourceLanguage: project.sourceLanguage,
     targetLanguage: project.targetLanguage,
-    projectTtsSettings: project.ttsSettings,
+    // Round 8: the pane's voice picker reads the LIVE tts settings (cast
+    // assignments update through tts.settings, not the project snapshot).
+    projectTtsSettings: tts.settings,
     username: currentUsername,
+    onAssignVoice: handleTimelineAssignVoice,
   } : null, [project, isConfigured, isCompletionAvailable, frontierSession, completing, previews, errors,
     handleCompleteSingle, handleAiSetupNeeded, handleOpenComments, handleOpenHistory,
-    handleOpenRecording, liveCellOpenCommentCount, currentUsername])
+    handleOpenRecording, liveCellOpenCommentCount, tts.settings, handleTimelineAssignVoice, currentUsername])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -5120,7 +5119,6 @@ export function ProjectWorkspace() {
                   onRetimeTarget={handleRetimeTarget}
                   onTrimTarget={handleTrimTarget}
                   onTogglePlay={handleTimelineTogglePlay}
-                  voiceControl={timelineVoiceControl}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
                   onSeekToTime={handleTimelineSeekToTime}

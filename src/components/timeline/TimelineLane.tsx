@@ -8,7 +8,7 @@
 
 import { isVisible } from "@/lib/timeline/scale"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
-import { TimelineCard, type TimelineVoiceControl } from "./TimelineCard"
+import { TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
 
 export interface TimelineLaneProps {
@@ -28,8 +28,6 @@ export interface TimelineLaneProps {
   onRetime(id: string, startSec: number, endSec: number): void
   /** AQU-646: clean click on a card navigates playback to it. */
   onSeek?(id: string): void
-  /** Round 6 (SUB-38): the dialogue lane's per-card voice picker wiring. */
-  voiceControl?: TimelineVoiceControl
 }
 
 export function TimelineLane({
@@ -45,7 +43,6 @@ export function TimelineLane({
   onSelect,
   onRetime,
   onSeek,
-  voiceControl,
 }: TimelineLaneProps) {
   const spanOf = (c: CellData): { start: number; end: number } => {
     if (variant === "subtitle") {
@@ -95,7 +92,6 @@ export function TimelineLane({
           onSelect={onSelect}
           onRetime={onRetime}
           onSeek={onSeek}
-          voiceControl={voiceControl}
         />
       ))}
     </div>

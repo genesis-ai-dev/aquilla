@@ -16,19 +16,8 @@ import { secToPx, pxToSec, clampRange } from "@/lib/timeline/scale"
 import { subtitleMirrorText } from "@/lib/timeline/lanes"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
-import { getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
-import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
-import { VoicePickerContent } from "@/components/voice/VoiceCombobox"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { fmtClock } from "./format"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectTtsSettings } from "@/lib/parsers/types"
-
-/** Round 6 (SUB-38): the source card's voice/character picker wiring. */
-export interface TimelineVoiceControl {
-  settings: ProjectTtsSettings | undefined
-  onAssign(cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }): void
-}
 
 const MIN_DUR_SEC = 0.2
 
@@ -54,9 +43,6 @@ export interface TimelineCardProps {
    *  moved the pointer >3px is a retime, not a seek). Optional — read-only
    *  surfaces select without seeking. */
   onSeek?(cellId: string): void
-  /** Round 6 (SUB-38): when set, dialogue cards grow a hover-revealed voice
-   *  picker in the bottom-left meta row. */
-  voiceControl?: TimelineVoiceControl
 }
 
 export function TimelineCard({
@@ -71,7 +57,6 @@ export function TimelineCard({
   onSelect,
   onRetime,
   onSeek,
-  voiceControl,
 }: TimelineCardProps) {
   // Round 6: a subtitle card on a media cell shows its INDEPENDENT span.
   const laneSpan = variant === "subtitle" ? subtitleSpanSec(cell) : null
@@ -155,15 +140,6 @@ export function TimelineCard({
       ? (cell.metadata.cast_name as string)
       : null
 
-  // Round 6 (SUB-38): the source card's voice picker — which character reads
-  // this line. Hover/selected-revealed to keep cards clean.
-  const [voiceOpen, setVoiceOpen] = useState(false)
-  const [applyToSpeaker, setApplyToSpeaker] = useState(false)
-  const showVoicePicker = isDialogue && voiceControl != null
-  const cardVoice = showVoicePicker
-    ? resolveCastVoice(voiceControl.settings, cell.id, cell.ttsSettings?.voiceId)
-    : null
-
   return (
     <div
       data-testid={`tl-card-${cell.id}`}
@@ -214,61 +190,7 @@ export function TimelineCard({
             cam {cell.cameraState}
           </span>
         )}
-        {showVoicePicker && cardVoice ? (
-          <Popover open={voiceOpen} onOpenChange={setVoiceOpen}>
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  data-testid={`tl-voice-${cell.id}`}
-                  title={castName ? `${castName} — voiced by ${cardVoice.name}` : `Voiced by ${cardVoice.name}`}
-                  aria-label={`Voice: ${cardVoice.name}. Choose a voice`}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  className={cn(
-                    "flex min-w-0 items-center gap-1 rounded-full border border-border/60 bg-background/70 px-1 py-px transition-opacity hover:bg-muted",
-                    voiceOpen || selected ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100",
-                  )}
-                >
-                  <VoiceAvatar voice={cardVoice} size={12} />
-                  <span className="max-w-[9ch] truncate font-medium text-foreground/80">
-                    {castName ?? cardVoice.name}
-                  </span>
-                </button>
-              }
-            />
-            <PopoverContent
-              align="start"
-              side="top"
-              className="w-60 p-2"
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <VoicePickerContent
-                voices={getVoiceLibrary(voiceControl.settings)}
-                activeId={cardVoice.id}
-                onPick={(voiceId) => {
-                  voiceControl.onAssign(cell, voiceId, { applyToSpeaker })
-                  setVoiceOpen(false)
-                }}
-                footer={
-                  castName ? (
-                    <label className="mt-1.5 flex cursor-pointer items-center gap-2 border-t border-border pt-1.5 text-xs text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        data-testid={`tl-voice-all-${cell.id}`}
-                        checked={applyToSpeaker}
-                        onChange={(e) => setApplyToSpeaker(e.target.checked)}
-                      />
-                      Apply to all «{castName}» lines
-                    </label>
-                  ) : undefined
-                }
-              />
-            </PopoverContent>
-          </Popover>
-        ) : (
-          castName && <span className="font-medium text-foreground/80">{castName}</span>
-        )}
+        {castName && <span className="font-medium text-foreground/80">{castName}</span>}
         <span className="font-mono tabular-nums">
           {fmtClock(startSec, true)}–{fmtClock(endSec, true)}
         </span>

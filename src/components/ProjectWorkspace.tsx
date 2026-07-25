@@ -49,7 +49,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue, getQueueState, seekQueueToTime, startQueueAtTime } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, startQueueAtTime, pauseQueue, resumeQueue } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -4004,6 +4004,24 @@ export function ProjectWorkspace() {
     )
   }, [project?.id, audioMergedCells, frontierSession])
 
+  // Round 7 (SUB-44): Space in the media lens — the transport bar's 3-state
+  // toggle against the QUEUE: playing → pause, paused → resume, idle → start
+  // cued-at-zero-then-play (so Space from cold plays from the beginning).
+  const handleTimelineTogglePlay = useCallback(() => {
+    if (!project?.id) return
+    const qs = getQueueState()
+    const activeForThisFile =
+      (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
+      audioMergedCells.some((c) => c.id === qs.cellId)
+    if (activeForThisFile) {
+      if (qs.kind === "playing") pauseQueue()
+      else void resumeQueue()
+      return
+    }
+    if (!frontierSession?.jwt) return
+    startQueueAtTime({ cells: audioMergedCells, projectId: project.id, session: frontierSession }, 0, { play: true })
+  }, [project?.id, audioMergedCells, frontierSession])
+
   const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string, parentId?: string | null) => {
     if (cellId && committedEventId) {
       rememberPendingTargetCommit(cellId, committedEventId, parentId ?? null)
@@ -5101,6 +5119,7 @@ export function ProjectWorkspace() {
                   onRetimeSubtitle={handleRetimeSubtitle}
                   onRetimeTarget={handleRetimeTarget}
                   onTrimTarget={handleTrimTarget}
+                  onTogglePlay={handleTimelineTogglePlay}
                   voiceControl={timelineVoiceControl}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}

@@ -18,6 +18,19 @@ vi.mock("@/lib/audio/play-queue", () => ({
     lastAudibility = a
   },
 }))
+// Round 7: the editor claims the app-wide audio shortcut while mounted.
+const pushOverride = vi.fn()
+const releaseOverride = vi.fn()
+vi.mock("@/lib/audio/audio-coordinator", () => ({
+  pushAudioShortcutOverride: () => {
+    pushOverride()
+    return releaseOverride
+  },
+  isInEditableContext: (target: EventTarget | null) => {
+    const el = target as HTMLElement | null
+    return Boolean(el && typeof el.tagName === "string" && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"))
+  },
+}))
 // The detail pane's audio components need session/query providers — out of
 // scope here (covered by TimelineCellDetail.test.tsx with the same mocks).
 vi.mock("@/components/CellTtsButton", () => ({
@@ -157,6 +170,48 @@ describe("TimelineEditor", () => {
     fireEvent.click(screen.getByTestId("tl-untimed-u1"))
     expect(onSeekToTime).not.toHaveBeenCalled()
     expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Untimed")
+  })
+
+  // ── Round 7 (SUB-44): transport keys ──
+
+  it("Space toggles queue playback; typing is never hijacked", () => {
+    const onTogglePlay = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onTogglePlay={onTogglePlay}
+      />,
+    )
+    fireEvent.keyDown(document.body, { key: " " })
+    expect(onTogglePlay).toHaveBeenCalledTimes(1)
+    const input = document.createElement("input")
+    document.body.appendChild(input)
+    fireEvent.keyDown(input, { key: " " })
+    expect(onTogglePlay).toHaveBeenCalledTimes(1)
+    input.remove()
+  })
+
+  it("Cmd/Ctrl+Enter returns playback to the very beginning", () => {
+    const onSeekToTime = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+      />,
+    )
+    fireEvent.keyDown(document.body, { key: "Enter", metaKey: true })
+    expect(onSeekToTime).toHaveBeenCalledWith(0)
+  })
+
+  it("claims the app-wide audio shortcut for its lifetime", () => {
+    pushOverride.mockClear()
+    releaseOverride.mockClear()
+    const { unmount } = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+    )
+    expect(pushOverride).toHaveBeenCalled()
+    unmount()
+    expect(releaseOverride).toHaveBeenCalled()
   })
 
   it("round 6: the snap magnet is on by default, toggles, and persists globally", () => {

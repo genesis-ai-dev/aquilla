@@ -16,6 +16,7 @@ import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeli
 // Round 5 exception: the per-track speaker buttons drive setQueueAudibility
 // directly — muting is a pure element-level concern with no workspace state.
 import { useQueueProgress, useQueueState, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
+import { isInEditableContext, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { TimelineRuler } from "./TimelineRuler"
@@ -43,6 +44,10 @@ export interface TimelineEditorProps {
   onRetimeTarget?(cellId: string, anchorSec: number): void
   /** Round 7: trim a dub chip — complete trim state (undefined clears). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
+  /** Round 7 (SUB-44): Space — toggle queue playback (playing→pause,
+   *  paused→resume, idle→start). The editor claims the app-wide audio
+   *  shortcut while mounted so a last-played single cell can't steal Space. */
+  onTogglePlay?(): void
   /** Round 6 (SUB-38): the source cards' voice/character picker wiring. */
   voiceControl?: TimelineVoiceControl
   onCommitTarget(cellId: string, value: string): void
@@ -116,6 +121,7 @@ export function TimelineEditor({
   onRetimeSubtitle,
   onRetimeTarget,
   onTrimTarget,
+  onTogglePlay,
   voiceControl,
   onCommitTarget,
   onLinkVideo,
@@ -184,6 +190,42 @@ export function TimelineEditor({
   useEffect(() => {
     setQueueAudibility(audibility)
   }, [audibility])
+
+  // Round 7 (SUB-44): transport keys while the timeline is on screen.
+  // Space = play/pause the QUEUE; Cmd/Ctrl+Enter = back to the very start.
+  // The editor claims the app-wide audio shortcut for its lifetime so the
+  // global handler (which may target a last-played single cell) yields.
+  const onTogglePlayRef = useRef(onTogglePlay)
+  onTogglePlayRef.current = onTogglePlay
+  const onSeekToTimeRef = useRef(onSeekToTime)
+  onSeekToTimeRef.current = onSeekToTime
+  useEffect(() => {
+    const releaseOverride = pushAudioShortcutOverride()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isInEditableContext(e.target)) return
+      if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault() // keep Space from scrolling the page
+        onTogglePlayRef.current?.()
+        return
+      }
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+        e.preventDefault()
+        onSeekToTimeRef.current?.(0)
+        const el = scrollRef.current
+        if (el) {
+          lastProgrammaticScrollAt.current = performance.now()
+          el.scrollLeft = 0
+          setScrollLeft(0)
+        }
+        setFollow(true)
+      }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("keydown", onKeyDown)
+      releaseOverride()
+    }
+  }, [])
 
   function toggleTrackAudible(track: keyof TrackAudibility) {
     setAudibility((prev) => {

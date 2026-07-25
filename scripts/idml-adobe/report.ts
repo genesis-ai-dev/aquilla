@@ -7,6 +7,8 @@ export interface AdobeFixtureManifestEntry {
   id: string
   source: string
   candidate: string
+  sourceSha256?: string
+  candidateSha256?: string
   allowReflow?: boolean
   exportReport?: {
     translated: number
@@ -35,9 +37,12 @@ export interface AdobeDocumentMetrics {
   layerCount: number
   storyCount: number
   footnoteCount: number
+  endnoteCount: number
   noteCount: number
   tableCount: number
   hyperlinkCount: number
+  textVariableCount: number
+  crossReferenceCount: number
   pageItems: Array<{
     id: number
     type: string
@@ -68,6 +73,15 @@ export interface AdobeDocumentMetrics {
     id: number
     status: string
     type: string
+  }>
+  textVariables: Array<{
+    name: string
+    type: string
+  }>
+  crossReferences: Array<{
+    name: string
+    type: string
+    format: string
   }>
   layers: Array<{ id: number; name: string }>
   masterSpreads: Array<{ id: number; name: string; pageCount: number }>
@@ -146,14 +160,19 @@ const STRUCTURAL_KEYS: Array<keyof AdobeDocumentMetrics> = [
   "layerCount",
   "storyCount",
   "footnoteCount",
+  "endnoteCount",
   "noteCount",
   "tableCount",
   "hyperlinkCount",
+  "textVariableCount",
+  "crossReferenceCount",
   "pageItems",
   "tables",
   "paragraphAssignments",
   "characterAssignments",
   "links",
+  "textVariables",
+  "crossReferences",
   "layers",
   "masterSpreads",
 ]
@@ -345,6 +364,11 @@ export function assertManifest(value: AdobeGateManifest): void {
       || !fixture.source
       || !fixture.candidate
       || ids.has(fixture.id)
+      || (fixture.sourceSha256 !== undefined && !/^[0-9a-f]{64}$/i.test(fixture.sourceSha256))
+      || (
+        fixture.candidateSha256 !== undefined
+        && !/^[0-9a-f]{64}$/i.test(fixture.candidateSha256)
+      )
       || (fixture.exportReport && !validExportCounts(fixture.exportReport))
     ) {
       throw new Error(`Adobe gate manifest contains an invalid or duplicate fixture ${fixture.id}.`)

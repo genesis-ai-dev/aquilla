@@ -53,11 +53,13 @@ contain a silent skip.
 
 The Adobe-side script records no story text or translated text. It records:
 
-- page, spread, master, layer, story, table, link, hyperlink, footnote, and note
-  counts;
+- page, spread, master, layer, story, table, link, hyperlink, footnote, endnote,
+  note, text-variable, and cross-reference counts;
 - page-item IDs, types, geometry, object styles, layers, and parent pages;
 - table dimensions and style assignments;
 - paragraph and character style assignments;
+- text-variable names/types and cross-reference names/types/formats, without
+  source or translated content;
 - overset story IDs;
 - typed errors, preflight results, produced IDML/PDF sizes, Adobe version, and
   duration.
@@ -65,6 +67,53 @@ The Adobe-side script records no story text or translated text. It records:
 Product analytics use a narrower allowlist: v2 profile/construct counts, typed
 failure codes, mapping failures, size delta, and duration. Member paths,
 locators, file names, source HTML, translated HTML, and text are never sent.
+
+## Prepare the committed corpus
+
+Run corpus preparation from a clean tracked worktree at the exact commit being
+validated:
+
+```sh
+pnpm idml:adobe prepare-corpus \
+  --output-dir artifacts/idml/adobe-corpus
+```
+
+The command reads every entry under `valid` in
+`packages/idml-roundtrip/fixtures/manifest.json`; it never relies on a
+hand-maintained fixture list. For each fixture it:
+
+1. verifies the committed source SHA-256;
+2. parses the IDML with the v2 generic profile;
+3. adds a stable translation marker inside each unit's first editable slot;
+4. validates the exact protected-anchor sequence;
+5. performs a strict export and requires every unit to be translated;
+6. runs `validateExport` against the parse-time source manifest;
+7. writes `candidates/*.candidate.idml` and `adobe-manifest.json`.
+
+The candidate bytes and manifest are deterministic for a given source commit.
+The manifest contains source and candidate SHA-256 values, and the Adobe
+materialization step rechecks them before running InDesign. Corpus preparation
+also rejects tracked worktree changes so the evidence cannot claim a commit
+that did not produce it.
+
+Browser and migration gates default to `not-run`. Set either gate only after
+the corresponding producer/consumer suite has actually passed:
+
+```sh
+pnpm idml:adobe prepare-corpus \
+  --output-dir artifacts/idml/adobe-corpus \
+  --browser-gate passed \
+  --migration-gate passed
+```
+
+The only explicit gate values are `passed` and `failed`; omitting a flag is the
+only way to record `not-run`. A custom corpus manifest or preflight profile may
+be selected with `--corpus-manifest` and `--preflight-profile`.
+
+Corpus preparation does not run Adobe, does not alter the committed fixture
+sources, and does not claim native fidelity. Preserve any nonzero
+`exportReport.unsupported` count: the final native gate must fail rather than
+silently hiding a construct the engine diagnosed.
 
 ## Automated InDesign Server gate
 
@@ -79,7 +128,7 @@ Run:
 
 ```sh
 pnpm idml:adobe run-server \
-  --manifest artifacts/idml/adobe-manifest.json \
+  --manifest artifacts/idml/adobe-corpus/adobe-manifest.json \
   --output-dir artifacts/idml/adobe-results \
   --sample-client "/path/to/sampleclient" \
   --host localhost:12345

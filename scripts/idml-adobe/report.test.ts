@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  assertManifest,
   buildAdobeGateReport,
   structuralDifferences,
   type AdobeDocumentMetrics,
@@ -95,6 +96,30 @@ describe("Adobe IDML structural gate", () => {
     })
     expect(structuralDifferences(before, after)).toEqual([])
   })
+
+  it("detects endnote, text-variable, and cross-reference inventory loss", () => {
+    const before = metrics()
+    const after = metrics({
+      endnoteCount: 0,
+      textVariableCount: 1,
+      crossReferenceCount: 0,
+      textVariables: beforeTextVariables().slice(0, 1),
+      crossReferences: [],
+    })
+    expect(structuralDifferences(before, after)).toEqual(expect.arrayContaining([
+      "endnoteCount",
+      "textVariableCount",
+      "crossReferenceCount",
+      "textVariables",
+      "crossReferences",
+    ]))
+  })
+
+  it("rejects malformed optional source and candidate content digests", () => {
+    const value = manifest()
+    value.fixtures[0]!.sourceSha256 = "not-a-sha"
+    expect(() => assertManifest(value)).toThrow(/invalid or duplicate fixture/i)
+  })
 })
 
 function manifest(): AdobeGateManifest {
@@ -152,9 +177,12 @@ function metrics(overrides: Partial<AdobeDocumentMetrics> = {}): AdobeDocumentMe
     layerCount: 2,
     storyCount: 1,
     footnoteCount: 1,
+    endnoteCount: 1,
     noteCount: 1,
     tableCount: 1,
     hyperlinkCount: 1,
+    textVariableCount: 2,
+    crossReferenceCount: 1,
     pageItems: [{
       id: 10,
       type: "TextFrame",
@@ -174,9 +202,22 @@ function metrics(overrides: Partial<AdobeDocumentMetrics> = {}): AdobeDocumentMe
     paragraphAssignments: [{ storyId: 42, index: 0, style: "Body" }],
     characterAssignments: [{ storyId: 42, index: 0, style: "Bold" }],
     links: [{ id: 50, status: "NORMAL", type: "JPEG" }],
+    textVariables: beforeTextVariables(),
+    crossReferences: [{
+      name: "Section link",
+      type: "CrossReferenceSource",
+      format: "Full paragraph",
+    }],
     layers: [{ id: 20, name: "Text" }, { id: 21, name: "Assets" }],
     masterSpreads: [{ id: 60, name: "A-Master", pageCount: 2 }],
     oversetStoryIds: [],
     ...overrides,
   }
+}
+
+function beforeTextVariables(): AdobeDocumentMetrics["textVariables"] {
+  return [
+    { name: "Running header", type: "CUSTOM_TEXT_TYPE" },
+    { name: "Page number", type: "MATCH_PARAGRAPH_STYLE_TYPE" },
+  ]
 }

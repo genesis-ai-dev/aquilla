@@ -9,9 +9,18 @@ import {
   type AdobeGateManifest,
   type AdobeRawReport,
 } from "./idml-adobe/report"
+import {
+  prepareAdobeCorpus,
+  resolveCleanGitCommit,
+} from "./idml-adobe/prepare-corpus"
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
+const REPOSITORY_ROOT = resolve(SCRIPT_DIR, "..")
 const VALIDATOR = resolve(SCRIPT_DIR, "idml-adobe/validate.idjs")
+const DEFAULT_CORPUS_MANIFEST = resolve(
+  REPOSITORY_ROOT,
+  "packages/idml-roundtrip/fixtures/manifest.json",
+)
 
 interface PreparedGate {
   manifest: AdobeGateManifest
@@ -24,7 +33,38 @@ interface PreparedGate {
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2)
   const options = parseOptions(rest)
-  if (!command || !options.manifest || !options.outputDir) {
+  if (!command) {
+    usage()
+    process.exitCode = 2
+    return
+  }
+  if (command === "prepare-corpus") {
+    if (!options.outputDir) {
+      usage()
+      process.exitCode = 2
+      return
+    }
+    const sourceCommit = await resolveCleanGitCommit(REPOSITORY_ROOT)
+    const preparedCorpus = await prepareAdobeCorpus({
+      corpusManifestPath: options.corpusManifest ?? DEFAULT_CORPUS_MANIFEST,
+      outputDirectory: options.outputDir,
+      sourceCommit,
+      ...(options.preflightProfile
+        ? { preflightProfile: options.preflightProfile }
+        : {}),
+      ...(options.browserGate ? { browserGate: options.browserGate } : {}),
+      ...(options.migrationGate ? { migrationGate: options.migrationGate } : {}),
+    })
+    console.log(`Prepared ${preparedCorpus.manifest.fixtures.length} Adobe corpus candidate(s).`)
+    console.log(`Manifest: ${preparedCorpus.manifestPath}`)
+    console.log(`Source commit: ${preparedCorpus.manifest.sourceCommit}`)
+    console.log(
+      `Producer gates: browser=${preparedCorpus.manifest.gates.browser}, `
+      + `migration=${preparedCorpus.manifest.gates.migration}`,
+    )
+    return
+  }
+  if (!options.manifest || !options.outputDir) {
     usage()
     process.exitCode = 2
     return
@@ -74,6 +114,20 @@ async function prepare(
   await mkdir(outputDir, { recursive: true })
   const manifest = JSON.parse(await readFile(absoluteManifest, "utf8")) as AdobeGateManifest
   assertManifest(manifest)
+  for (const fixture of manifest.fixtures) {
+    await assertFixtureDigest(
+      absoluteFrom(manifestDirectory, fixture.source),
+      fixture.sourceSha256,
+      fixture.id,
+      "source",
+    )
+    await assertFixtureDigest(
+      absoluteFrom(manifestDirectory, fixture.candidate),
+      fixture.candidateSha256,
+      fixture.id,
+      "candidate",
+    )
+  }
 
   const materialized = {
     ...manifest,
@@ -165,6 +219,10 @@ function parseOptions(args: string[]): Record<string, string | undefined> & {
   outputDir?: string
   sampleClient?: string
   host?: string
+  corpusManifest?: string
+  preflightProfile?: string
+  browserGate?: string
+  migrationGate?: string
 } {
   const options: Record<string, string> = {}
   for (let index = 0; index < args.length; index += 1) {
@@ -186,6 +244,21 @@ function safeId(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]+/g, "-")
 }
 
+async function assertFixtureDigest(
+  path: string,
+  expected: string | undefined,
+  fixtureId: string,
+  kind: "source" | "candidate",
+): Promise<void> {
+  if (!expected) return
+  const actual = await sha256File(path)
+  if (actual.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error(
+      `Adobe fixture ${fixtureId} ${kind} SHA-256 does not match its manifest.`,
+    )
+  }
+}
+
 function toCamelCase(value: string): string {
   return value.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
 }
@@ -193,6 +266,7 @@ function toCamelCase(value: string): string {
 function usage(): void {
   console.error([
     "Usage:",
+    "  pnpm idml:adobe prepare-corpus --output-dir <dir> [--corpus-manifest <manifest.json>] [--preflight-profile <name>] [--browser-gate passed|failed] [--migration-gate passed|failed]",
     "  pnpm idml:adobe prepare-desktop --manifest <manifest.json> --output-dir <dir>",
     "  pnpm idml:adobe run-server --manifest <manifest.json> --output-dir <dir> --sample-client <path> [--host localhost:12345]",
     "  pnpm idml:adobe finalize --manifest <manifest.json> --output-dir <dir>",

@@ -160,6 +160,7 @@ function documentMetrics(document) {
   const characterAssignments = []
   const oversetStoryIds = []
   let footnoteCount = 0
+  let endnoteCount = 0
   let noteCount = 0
   const stories = document.stories
   for (let storyIndex = 0; storyIndex < collectionLength(stories); storyIndex += 1) {
@@ -168,6 +169,7 @@ function documentMetrics(document) {
     const storyId = safeNumber(story.id)
     if (story.overflows === true) oversetStoryIds.push(storyId)
     footnoteCount += collectionLength(story.footnotes)
+    endnoteCount += collectionLength(story.endnoteRanges)
     noteCount += collectionLength(story.notes)
     const storyTables = story.tables
     for (let index = 0; index < collectionLength(storyTables); index += 1) {
@@ -205,6 +207,15 @@ function documentMetrics(document) {
     status: safeString(link?.status),
     type: safeString(link?.linkType),
   }))
+  const textVariables = mapCollection(document.textVariables, (variable) => ({
+    name: safeString(variable?.name),
+    type: safeString(variable?.variableType),
+  }))
+  const crossReferences = mapCollection(document.crossReferenceSources, (source) => ({
+    name: safeString(source?.name),
+    type: safeString(source?.constructorName || source?.constructor?.name),
+    format: safeName(source?.appliedFormat),
+  }))
   const layers = mapCollection(document.layers, (layer) => ({
     id: safeNumber(layer?.id),
     name: safeString(layer?.name),
@@ -222,14 +233,19 @@ function documentMetrics(document) {
     layerCount: collectionLength(document.layers),
     storyCount: collectionLength(document.stories),
     footnoteCount,
+    endnoteCount,
     noteCount,
     tableCount: tables.length,
     hyperlinkCount: collectionLength(document.hyperlinks),
+    textVariableCount: textVariables.length,
+    crossReferenceCount: crossReferences.length,
     pageItems,
     tables,
     paragraphAssignments,
     characterAssignments,
     links,
+    textVariables,
+    crossReferences,
     layers,
     masterSpreads,
     oversetStoryIds,

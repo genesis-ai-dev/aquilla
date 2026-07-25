@@ -76,6 +76,7 @@ export function injectOptimisticAudioAttachment(
   cellId: string,
   attachment: AudioAttachmentOut,
 ): void {
+  recordShadow(fileId, cellId, attachment)
   optimisticByFile.get(fileId)?.forEach((cb) => {
     try {
       cb(cellId, attachment)
@@ -83,4 +84,47 @@ export function injectOptimisticAudioAttachment(
       // a failing listener must not block the others
     }
   })
+}
+
+// ── Shadow registry (round 8d) ────────────────────────────────────────────
+// Injections are retained MODULE-LEVEL, not per hook instance: a reader that
+// mounts AFTER the inject (e.g. the recording modal opened right after an
+// upload) must still see the attachment on its first fetch — the outbox
+// flusher posts on a ~5s timer, so that fetch reads pre-projection state.
+// Readers re-apply unconfirmed shadows over every fetch and prune confirmed/
+// expired ones (see useFileAudioAttachments.shadowConfirmed).
+
+export interface OptimisticShadow {
+  att: AudioAttachmentOut
+  appliedAt: number
+  /** Only the NEWEST shadow per slot claims the slot's selection — an older
+   *  select superseded by a later one must never resurrect it. */
+  claimsSelection: boolean
+}
+
+const shadowsByFile = new Map<string, Map<string, OptimisticShadow[]>>()
+
+function recordShadow(fileId: string, cellId: string, att: AudioAttachmentOut): void {
+  let byCell = shadowsByFile.get(fileId)
+  if (!byCell) {
+    byCell = new Map()
+    shadowsByFile.set(fileId, byCell)
+  }
+  const shadows = byCell.get(cellId) ?? []
+  byCell.set(cellId, [
+    ...shadows
+      .filter((s) => s.att.audioId !== att.audioId || s.att.slot !== att.slot)
+      .map((s) => (s.att.slot === att.slot ? { ...s, claimsSelection: false } : s)),
+    { att, appliedAt: Date.now(), claimsSelection: true },
+  ])
+}
+
+/** The live shadow map for a file (cellId → shadows). Readers may prune it. */
+export function getOptimisticShadows(fileId: string): Map<string, OptimisticShadow[]> {
+  return shadowsByFile.get(fileId) ?? new Map()
+}
+
+/** Drop every shadow for a file (used by tests). */
+export function clearOptimisticShadows(fileId: string): void {
+  shadowsByFile.delete(fileId)
 }

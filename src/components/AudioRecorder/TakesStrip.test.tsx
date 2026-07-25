@@ -262,3 +262,114 @@ describe("TakesStrip — stable names (round 8)", () => {
     expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "b", label: "Take 2" }))
   })
 })
+
+// ── Round 8c: TTS results are TAKES — one list, either kind circleable ──
+
+const genTake = (id: string, durationMs = 3000, label: string | null = null): AudioAttachmentOut =>
+  ({ ...take(id, durationMs), slot: "generatedVoice", voiceId: "v1", label })
+
+const SOURCE_CLIP: AudioAttachmentOut = {
+  ...take("audio-f1-100-clip.mp3", 30000), // fileId-seeded — the imported clip
+}
+
+describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
+  beforeEach(() => {
+    emitSelect.mockClear()
+    injectOptimistic.mockClear()
+  })
+
+  it("marks the generated take active when the recording slot holds the source clip", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav", 3000, "Take 2")]}
+        selectedAudioId={SOURCE_CLIP.audioId} // source ≠ a take → TTS sounds
+        selectedGeneratedAudioId="audio-c1-2-g.wav"
+        sourceClip={SOURCE_CLIP}
+      />,
+    )
+    const row = screen.getByTestId("take-row-audio-c1-2-g.wav")
+    expect(row.className).toContain("border-violet-500/60")
+    // The recorded take is NOT circled even though takes exist.
+    expect(screen.getByTestId("take-row-audio-c1-1-t.webm").className).not.toContain("emerald-500/60")
+  })
+
+  it("a recorded take holding the slot shadows the generated selection (playback order)", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav")]}
+        selectedAudioId="audio-c1-1-t.webm"
+        selectedGeneratedAudioId="audio-c1-2-g.wav"
+        sourceClip={SOURCE_CLIP}
+      />,
+    )
+    expect(screen.getByTestId("take-row-audio-c1-1-t.webm").className).toContain("border-emerald-500/60")
+    expect(screen.getByTestId("take-row-audio-c1-2-g.wav").className).not.toContain("border-violet-500/60")
+  })
+
+  it("activating a TTS take selects the generated slot AND hands the recording slot to the source clip", async () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav")]}
+        selectedAudioId="audio-c1-1-t.webm" // a recorded take holds the slot
+        selectedGeneratedAudioId={null}
+        sourceClip={SOURCE_CLIP}
+      />,
+    )
+    const useButtons = screen.getAllByRole("button", { name: "Use this take" })
+    fireEvent.click(useButtons[useButtons.length - 1]) // the TTS row
+    await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(2))
+    expect(emitSelect).toHaveBeenNthCalledWith(1,
+      expect.objectContaining({ audioId: "audio-c1-2-g.wav", slot: "generatedVoice" }))
+    expect(emitSelect).toHaveBeenNthCalledWith(2,
+      expect.objectContaining({ audioId: SOURCE_CLIP.audioId, slot: "recording" }))
+    expect(injectOptimistic).toHaveBeenCalledWith("f1", "c1", expect.objectContaining({ audioId: "audio-c1-2-g.wav" }))
+    expect(injectOptimistic).toHaveBeenCalledWith("f1", "c1", expect.objectContaining({ audioId: SOURCE_CLIP.audioId }))
+  })
+
+  it("activating a TTS take when the source already holds the slot emits ONE select", async () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[genTake("audio-c1-2-g.wav")]}
+        selectedAudioId={SOURCE_CLIP.audioId}
+        selectedGeneratedAudioId={null}
+        sourceClip={SOURCE_CLIP}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Use this take" }))
+    await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(1))
+    expect(emitSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ audioId: "audio-c1-2-g.wav", slot: "generatedVoice" }))
+  })
+
+  it("activating a RECORDED take stays a single recording-slot select", async () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav")]}
+        selectedAudioId={SOURCE_CLIP.audioId}
+        selectedGeneratedAudioId="audio-c1-2-g.wav"
+        sourceClip={SOURCE_CLIP}
+      />,
+    )
+    fireEvent.click(screen.getAllByRole("button", { name: "Use this take" })[0])
+    await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(1))
+    expect(emitSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ audioId: "audio-c1-1-t.webm", slot: "recording" }))
+  })
+
+  it("generated rows show the sparkle and never offer denoise", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav", 3000, "Take 2")]}
+        selectedAudioId="audio-c1-1-t.webm"
+        sourceClip={SOURCE_CLIP}
+      />,
+    )
+    expect(screen.getAllByRole("button", { name: /Remove noise/ }).length).toBe(1) // recorded row only
+  })
+})

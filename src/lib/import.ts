@@ -1648,11 +1648,33 @@ export function probeMediaDurationMs(file: Blob): Promise<number> {
 export async function probeDurationMsSafe(blob: Blob, timeoutMs = 3000): Promise<number | undefined> {
   try {
     return await Promise.race([
-      probeMediaDurationMs(blob),
+      // MediaRecorder webm blobs carry NO duration header (Chrome writes no
+      // Cues element), so the metadata probe sees Infinity and rejects — every
+      // mic take then attached without a length and its chip fell back to
+      // section width. Decoding the samples is authoritative; takes are short
+      // so the cost is negligible.
+      probeMediaDurationMs(blob).catch(() => decodeDurationMs(blob)),
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), timeoutMs)),
     ])
   } catch {
     return undefined
+  }
+}
+
+/** Exact duration by decoding the samples. Throws when the platform can't. */
+async function decodeDurationMs(blob: Blob): Promise<number> {
+  const AC: typeof AudioContext | undefined =
+    typeof window !== "undefined"
+      ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      : undefined
+  if (!AC) throw new Error("no AudioContext")
+  const ctx = new AC()
+  try {
+    const audio = await ctx.decodeAudioData(await blob.arrayBuffer())
+    if (!(audio.duration > 0)) throw new Error("empty decode")
+    return audio.duration * 1000
+  } finally {
+    void ctx.close?.()
   }
 }
 

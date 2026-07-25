@@ -6,7 +6,7 @@
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Bird, Check, Pause, Pencil, Play, RotateCcw, Trash2 } from "lucide-react"
+import { Bird, Check, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -41,13 +41,30 @@ interface Props {
   projectId: string
   fileId: string
   cellId: string
+  /** Recorded AND generated (TTS) takes — one list (round 8c). */
   takes: AudioAttachmentOut[]
+  /** RAW recording-slot selection (may be the source clip — not in `takes`). */
   selectedAudioId: string | null
+  /** RAW generated-slot selection. */
+  selectedGeneratedAudioId?: string | null
+  /** The source clip — activating a TTS take hands the recording slot back to
+   *  it so the generated audio can sound (playback prefers a recorded take). */
+  sourceClip?: AudioAttachmentOut | null
   author: string
   session: FrontierSession | null
 }
 
-export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, author, session }: Props) {
+export function TakesStrip({
+  projectId,
+  fileId,
+  cellId,
+  takes,
+  selectedAudioId,
+  selectedGeneratedAudioId = null,
+  sourceClip = null,
+  author,
+  session,
+}: Props) {
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -61,12 +78,21 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const urlRef = useRef<string | null>(null)
 
+  // The take that actually SOUNDS, mirroring playback's preference order: a
+  // recorded take holding the recording slot wins; otherwise the selected
+  // generated (TTS) take. When the slot holds the source clip (not a take),
+  // it falls through to the generated selection.
+  const activeTakeId =
+    takes.some((t) => t.audioId === selectedAudioId && t.slot === "recording")
+      ? selectedAudioId
+      : (selectedGeneratedAudioId ?? null)
+
   // Clear optimistic override once the server-confirmed prop catches up.
   useEffect(() => {
-    if (optimisticSelectedId !== null && selectedAudioId === optimisticSelectedId) {
+    if (optimisticSelectedId !== null && activeTakeId === optimisticSelectedId) {
       setOptimisticSelectedId(null)
     }
-  }, [selectedAudioId, optimisticSelectedId])
+  }, [activeTakeId, optimisticSelectedId])
 
   const stopPlayback = useCallback(() => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
@@ -106,20 +132,33 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
 
   const circle = useCallback(async (audioId: string) => {
     // Effective selected = optimistic override if in-flight, else server value.
-    const effectiveSelected = optimisticSelectedId ?? selectedAudioId
+    const effectiveSelected = optimisticSelectedId ?? activeTakeId
     if (audioId === effectiveSelected) return
     // Optimistic: show selection immediately (user's latest intent wins).
     setOptimisticSelectedId(audioId)
     latestCircleRef.current = audioId
     setBusyId(audioId)
     // Round 7 (SUB-39): push the selection through the optimistic attachment
-    // bus too — the merged cells flip selectedAudioId (with the take's real
+    // bus too — the merged cells flip the selection (with the take's real
     // durationMs/trims) instantly, so the timeline chip swaps and resizes with
     // zero round-trip. Previously only this strip's local checkmark moved.
     const take = takes.find((t) => t.audioId === audioId)
+    const slot = take?.slot === "generatedVoice" ? "generatedVoice" : "recording"
     if (take) injectOptimisticAudioAttachment(fileId, cellId, take)
+    // Round 8c: a generated take only sounds when no recorded take holds the
+    // recording slot — hand that slot back to the source clip alongside.
+    const displaceToSource =
+      slot === "generatedVoice" &&
+      sourceClip != null &&
+      takes.some((t) => t.audioId === selectedAudioId && t.slot === "recording")
+    if (displaceToSource) injectOptimisticAudioAttachment(fileId, cellId, sourceClip)
     try {
-      await emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot: "recording", author })
+      await emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot, author })
+      if (displaceToSource) {
+        await emitCellAudioSelect({
+          projectId, fileId, cellId, audioId: sourceClip.audioId, slot: "recording", author,
+        })
+      }
       notifyAudioAttachmentsChanged(fileId)
     } catch {
       // Only revert optimistic state if this is still the latest click.
@@ -129,7 +168,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [optimisticSelectedId, selectedAudioId, takes, projectId, fileId, cellId, author])
+  }, [optimisticSelectedId, activeTakeId, selectedAudioId, sourceClip, takes, projectId, fileId, cellId, author])
 
   const remove = useCallback(async (audioId: string) => {
     setBusyId(audioId)
@@ -270,8 +309,9 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
       <div className="flex flex-col gap-1">
         {ordered.map(({ att, isCleaned }) => {
           // Use optimistic override while in-flight; fall back to server value.
-          const effectiveSelectedId = optimisticSelectedId ?? selectedAudioId
+          const effectiveSelectedId = optimisticSelectedId ?? activeTakeId
           const isCircled = att.audioId === effectiveSelectedId
+          const isGenerated = att.slot === "generatedVoice"
           const isPlaying = att.audioId === playingId
           const isLoading = att.audioId === loadingId
           const isBusy = att.audioId === busyId
@@ -289,7 +329,9 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
               className={cn(
                 "flex w-full items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
                 isCircled
-                  ? "border-emerald-500/60 bg-emerald-500/10"
+                  ? isGenerated
+                    ? "border-violet-500/60 bg-violet-500/10"
+                    : "border-emerald-500/60 bg-emerald-500/10"
                   : isCleaned
                     ? "border-emerald-500/30 bg-emerald-500/5"
                     : "border-border bg-muted/30",
@@ -311,6 +353,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
               </AppTooltip>
               <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
+                {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
                 {renamingId === att.audioId ? (
                   <input
                     autoFocus
@@ -354,7 +397,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                   </>
                 )}
               </span>
-              {!isCleaned && (
+              {!isCleaned && !isGenerated && (
                 <AppTooltip content="Remove noise (adds a cleaned take)">
                   <Button
                     type="button"
@@ -394,7 +437,11 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                   aria-label={isCircled ? "Active take" : "Use this take"}
                   className={cn(
                     "rounded-full hover:bg-background",
-                    isCircled ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60",
+                    isCircled
+                      ? isGenerated
+                        ? "text-violet-600 dark:text-violet-400"
+                        : "text-emerald-600 dark:text-emerald-400"
+                      : "text-muted-foreground/60",
                   )}
                 >
                   {isBusy ? <Spinner className="size-3.5" /> : <Check className="h-3.5 w-3.5" />}

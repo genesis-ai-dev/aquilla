@@ -15,7 +15,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
-import { subscribeAudioAttachments, subscribeOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
+import {
+  getOptimisticShadows,
+  subscribeAudioAttachments,
+  subscribeOptimisticAudioAttachment,
+} from "@/lib/audio/audio-attachments-bus"
 import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { CellData } from "@/hooks/useCells"
@@ -95,20 +99,12 @@ export function useFileAudioAttachments(
   const [byCellId, setByCellId] = useState<Map<string, CellAudioEntry>>(EMPTY)
   const [isLoading, setIsLoading] = useState(false)
   const generationRef = useRef(0)
-  // Round 8: retained optimistic injections (see header). Keyed by cellId.
-  // `claimsSelection` is true only for the NEWEST shadow per slot — a select
-  // superseded by a later one keeps its attachment visible but must never
-  // resurrect its selection after the newer shadow confirms and drops.
-  const shadowsRef = useRef<
-    Map<string, Array<{ att: AudioAttachmentOut; appliedAt: number; claimsSelection: boolean }>>
-  >(new Map())
 
   const doFetch = useCallback(async () => {
     // No project/file, or auth not ready yet → nothing to read. Gating on `jwt`
     // here (rather than only inside getToken) makes it a real dependency, so the
     // fetch re-runs the moment the session lands on a cold reload.
     if (!projectId || !fileId || !jwt) {
-      shadowsRef.current.clear()
       setByCellId(EMPTY)
       return
     }
@@ -124,19 +120,22 @@ export function useFileAudioAttachments(
       if (gen !== generationRef.current) return // a newer fetch superseded us
       const map = new Map(Object.entries(res.cells))
       // Round 8: re-apply unconfirmed shadows over the server payload — a
-      // fetch that raced the outbox flush must not revert a local action.
+      // fetch that raced the outbox flush must not revert a local action. The
+      // registry is MODULE-LEVEL (round 8d) so a reader mounted after the
+      // inject still sees it; pruning here is idempotent across readers.
       const now = Date.now()
-      for (const [cellId, shadows] of shadowsRef.current) {
+      const registry = getOptimisticShadows(fileId)
+      for (const [cellId, shadows] of registry) {
         const live = shadows.filter(
           (s) =>
             now - s.appliedAt < SHADOW_TTL_MS &&
             !shadowConfirmed(map.get(cellId), s.att, s.claimsSelection),
         )
         if (live.length === 0) {
-          shadowsRef.current.delete(cellId)
+          registry.delete(cellId)
           continue
         }
-        shadowsRef.current.set(cellId, live)
+        registry.set(cellId, live)
         let entry = map.get(cellId)
         for (const s of live) entry = applyShadow(entry, s.att, s.claimsSelection)
         map.set(cellId, entry as CellAudioEntry)
@@ -164,19 +163,12 @@ export function useFileAudioAttachments(
   }, [fileId, doFetch])
 
   // Optimistic injections: a local producer (recording / TTS / take select /
-  // trim) just changed an attachment. Merge into state at once AND retain a
-  // shadow so subsequent fetches can't wipe it before the server catches up
-  // (round 8 — see header).
+  // trim) just changed an attachment. The bus records the shadow (module-level
+  // registry, round 8d); here we merge it into live state at once so the UI
+  // moves with zero round-trip.
   useEffect(() => {
     if (!fileId) return
     return subscribeOptimisticAudioAttachment(fileId, (cellId, att) => {
-      const shadows = shadowsRef.current.get(cellId) ?? []
-      shadowsRef.current.set(cellId, [
-        ...shadows
-          .filter((s) => s.att.audioId !== att.audioId || s.att.slot !== att.slot)
-          .map((s) => (s.att.slot === att.slot ? { ...s, claimsSelection: false } : s)),
-        { att, appliedAt: Date.now(), claimsSelection: true },
-      ])
       setByCellId((prev) => {
         const next = new Map(prev)
         next.set(cellId, applyShadow(prev.get(cellId), att, true))

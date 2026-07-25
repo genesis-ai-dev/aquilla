@@ -29,6 +29,21 @@ vi.mock("@/lib/audio/voice-generate-helpers", () => ({
 vi.mock("@/lib/import", () => ({
   probeDurationMsSafe: async () => 1000,
 }))
+const emitAttach = vi.fn(async (..._args: unknown[]) => "evt-attach")
+const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-select")
+vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
+  emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
+  emitCellAudioRemove: vi.fn(async () => "evt"),
+  emitCellAudioRename: vi.fn(async () => "evt"),
+}))
+vi.mock("@/lib/audio/sync-token-fetcher", () => ({
+  audioSyncTokenFetcherForSession: () => async () => "sync-tok",
+}))
+vi.mock("@/lib/audio/upload", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchCellAudio: vi.fn(async () => new ArrayBuffer(8)),
+}))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 
@@ -54,32 +69,110 @@ function renderModal(cell: CellData) {
   )
 }
 
+const att = (audioId: string, over: Record<string, unknown> = {}) => ({
+  audioId, url: `frontier-audio://${audioId}`, slot: "recording", mimeType: "audio/mpeg",
+  voiceId: null, referenceAudioId: null, durationMs: 4000,
+  trimStartMs: null, trimEndMs: null, label: "Take 1", ...over,
+})
+
+function seedEntry(attachments: Record<string, unknown>, selectedAudioId: string | null, selectedGeneratedVoiceAudioId: string | null = null) {
+  attachmentsState.byCellId = new Map([
+    ["c1", { attachments, selectedAudioId, selectedGeneratedVoiceAudioId, audioTimings: {} }],
+  ])
+}
+
 describe("AudioRecordingModal — takes strip contents", () => {
   beforeEach(() => {
     attachmentsState.byCellId = new Map()
   })
 
   it("the imported SOURCE clip (fileId-seeded) never appears as a take", () => {
-    const att = (audioId: string) => ({
-      audioId, url: `frontier-audio://${audioId}`, slot: "recording", mimeType: "audio/mpeg",
-      voiceId: null, referenceAudioId: null, durationMs: 4000,
-      trimStartMs: null, trimEndMs: null, label: "Take 1",
-    })
-    attachmentsState.byCellId = new Map([
-      ["c1", {
-        attachments: {
-          "audio-f1-100-clip.mp3": { ...att("audio-f1-100-clip.mp3"), label: null },
-          "audio-c1-200-take.webm": att("audio-c1-200-take.webm"),
-        },
-        selectedAudioId: "audio-c1-200-take.webm",
-        selectedGeneratedVoiceAudioId: null,
-        audioTimings: {},
-      }],
-    ])
+    seedEntry({
+      "audio-f1-100-clip.mp3": att("audio-f1-100-clip.mp3", { label: null }),
+      "audio-c1-200-take.webm": att("audio-c1-200-take.webm"),
+    }, "audio-c1-200-take.webm")
     renderModal(cellWith("bonjour"))
     expect(screen.getByTestId("take-row-audio-c1-200-take.webm")).toBeInTheDocument()
     expect(screen.queryByTestId("take-row-audio-f1-100-clip.mp3")).toBeNull()
     expect(screen.getByText("Takes (1)")).toBeInTheDocument()
+  })
+
+  it("generated TTS attachments appear as takes alongside recordings (round 8c)", () => {
+    seedEntry({
+      "audio-c1-200-take.webm": att("audio-c1-200-take.webm"),
+      "audio-c1-300-tts.wav": att("audio-c1-300-tts.wav", { slot: "generatedVoice", voiceId: "v1", label: "Take 2" }),
+    }, "audio-c1-200-take.webm")
+    renderModal(cellWith("bonjour"))
+    expect(screen.getByTestId("take-row-audio-c1-200-take.webm")).toBeInTheDocument()
+    expect(screen.getByTestId("take-row-audio-c1-300-tts.wav")).toBeInTheDocument()
+    expect(screen.getByText("Takes (2)")).toBeInTheDocument()
+  })
+})
+
+describe("AudioRecordingModal — durationless-take heal (round 8c)", () => {
+  beforeEach(() => {
+    attachmentsState.byCellId = new Map()
+    emitAttach.mockClear()
+  })
+
+  it("re-attaches the SELECTED webm take with its decoded duration, keeping name and trims", async () => {
+    seedEntry({
+      "audio-c1-200-take.webm": att("audio-c1-200-take.webm", {
+        mimeType: "audio/webm", durationMs: null, label: "Take 1", trimStartMs: 100, trimEndMs: 900,
+      }),
+    }, "audio-c1-200-take.webm")
+    renderModal(cellWith("bonjour"))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
+    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioId: "audio-c1-200-take.webm",
+      slot: "recording",
+      durationMs: 1000, // the mocked probe's decode result
+      label: "Take 1",
+      trimStartMs: 100,
+      trimEndMs: 900,
+    }))
+  })
+
+  it("does nothing when the selected take already has a duration", async () => {
+    seedEntry({ "audio-c1-200-take.webm": att("audio-c1-200-take.webm") }, "audio-c1-200-take.webm")
+    renderModal(cellWith("bonjour"))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(emitAttach).not.toHaveBeenCalled()
+  })
+})
+
+describe("AudioRecordingModal — TTS becomes the sounding take (round 8c)", () => {
+  beforeEach(() => {
+    attachmentsState.byCellId = new Map()
+    generateCellVoice.mockClear()
+    emitSelect.mockClear()
+  })
+
+  it("names the TTS take at birth and hands the recording slot to the source clip", async () => {
+    seedEntry({
+      "audio-f1-100-clip.mp3": att("audio-f1-100-clip.mp3", { label: null }),
+      "audio-c1-200-take.webm": att("audio-c1-200-take.webm"),
+    }, "audio-c1-200-take.webm") // a recorded take holds the slot
+    renderModal(cellWith("bonjour"))
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
+    const [args] = generateCellVoice.mock.calls[0] as unknown as [{ label?: string }]
+    expect(args.label).toBe("Take 2")
+    await waitFor(() => expect(emitSelect).toHaveBeenCalledTimes(1))
+    expect(emitSelect).toHaveBeenCalledWith(expect.objectContaining({
+      audioId: "audio-f1-100-clip.mp3", slot: "recording",
+    }))
+  })
+
+  it("no displacement when the source clip already holds the slot", async () => {
+    seedEntry({
+      "audio-f1-100-clip.mp3": att("audio-f1-100-clip.mp3", { label: null }),
+    }, "audio-f1-100-clip.mp3")
+    renderModal(cellWith("bonjour"))
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(emitSelect).not.toHaveBeenCalled()
   })
 })
 

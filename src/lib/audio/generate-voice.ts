@@ -34,6 +34,8 @@ export interface GenerateAndAttachArgs {
   session: FrontierSession
   /** Frontier username — author of the cell.audio.attach event. */
   username: string
+  /** Round 8c: TTS is a TAKE — its permanent name, set at birth. */
+  label?: string
   diffusionSteps?: number
   onProgress?: SynthOptions["onProgress"]
 }
@@ -84,6 +86,7 @@ export async function generateAndAttachCellVoice(
       mimeType: "audio/wav",
       voiceId: voice.id,
       ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+      ...(args.label ? { label: args.label } : {}),
       author: args.username,
     })
     // Round 8: shadow-inject so the sparkle chip appears at its real length
@@ -96,6 +99,7 @@ export async function generateAndAttachCellVoice(
       voiceId: voice.id,
       referenceAudioId: voice.referenceAudioId ?? null,
       durationMs: Math.round(result.durationSeconds * 1000),
+      label: args.label ?? null,
       trimStartMs: null,
       trimEndMs: null,
     })
@@ -184,6 +188,7 @@ export async function generateAndAttachCellVoice(
     voiceId: voice.id,
     ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
     ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
+    ...(args.label ? { label: args.label } : {}),
     author: args.username,
   })
   // Round 8: shadow-inject (see the omnivoice branch's comment).
@@ -195,6 +200,7 @@ export async function generateAndAttachCellVoice(
     voiceId: voice.id,
     referenceAudioId: voice.referenceAudioId ?? null,
     durationMs: generatedDurationMs ?? null,
+    label: args.label ?? null,
     trimStartMs: null,
     trimEndMs: null,
   })

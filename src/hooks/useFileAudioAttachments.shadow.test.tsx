@@ -21,7 +21,7 @@ vi.mock("@/lib/sync/cell-audio-read", () => ({
 }))
 
 import { useFileAudioAttachments } from "./useFileAudioAttachments"
-import { injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
+import { clearOptimisticShadows, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 
 const LONG: AudioAttachmentOut = {
   audioId: "audio-c1-100-long.webm", url: "frontier-audio://long", slot: "recording",
@@ -61,6 +61,17 @@ const serverShortSelected = (): { cells: Record<string, CellAudioEntry> } => ({
 describe("useFileAudioAttachments — optimistic shadows (round 8)", () => {
   beforeEach(() => {
     fetchMock.mockReset()
+    clearOptimisticShadows("f1") // the registry is module-level (round 8d)
+  })
+
+  it("a reader mounted AFTER the inject still sees the shadow on its first fetch (round 8d)", async () => {
+    // The recording modal opened right after an upload: the inject fired
+    // before its hook existed, and its first fetch reads pre-flush state.
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT))
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = renderHook(() => useFileAudioAttachments("p1", "f1"))
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+    expect(result.current.byCellId.get("c1")?.selectedAudioId).toBe(SHORT.audioId)
   })
 
   it("a STALE refetch does not revert an injected take selection (the chip-revert bug)", async () => {

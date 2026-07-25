@@ -25,9 +25,9 @@ import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
-import { audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
+import { audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioSelect } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
@@ -82,7 +82,9 @@ export function AudioRecordingModal({
   const audioEntry = activeCell ? byCellId.get(activeCell.id) : undefined
   const recordingTakes = useMemo(
     () => Object.values(audioEntry?.attachments ?? {})
-      .filter((a) => a.slot === "recording")
+      // Round 8c (Sam): generated TTS is a TAKE too — one list, recorded and
+      // synthesized side by side, any of them circleable.
+      .filter((a) => a.slot === "recording" || a.slot === "generatedVoice")
       // The imported SOURCE clip rides the recording slot too (fileId-seeded,
       // per SUB-29 provenance) but is not a take — keep it out of the strip so
       // it can't be listed, named "Take 1", or deleted from here. The Source
@@ -91,6 +93,59 @@ export function AudioRecordingModal({
       .sort((a, b) => a.audioId.localeCompare(b.audioId)),
     [audioEntry, activeCell?.fileId],
   )
+  // The source clip itself — the recording slot's "no take" state. Activating
+  // a TTS take hands the slot back to it so the generated audio can sound.
+  const sourceClip = useMemo(
+    () => Object.values(audioEntry?.attachments ?? {})
+      .find((a) => a.slot === "recording" && audioIdSeededWith(a.audioId, activeCell?.fileId ?? "")) ?? null,
+    [audioEntry, activeCell?.fileId],
+  )
+
+  // Round 8c: takes recorded before the webm-duration fix attached without a
+  // durationMs (Chrome writes no duration header into MediaRecorder blobs), so
+  // their chips still fall back to section width. Heal the SELECTED take once
+  // per modal visit: fetch its bytes, decode the real length, re-attach with
+  // it (re-attach re-selects, which is a no-op here — and COALESCE keeps the
+  // name, while passing the trims keeps them).
+  const healTriedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!open || !session?.jwt || !activeCell) return
+    const sel = audioEntry?.selectedAudioId
+    if (!sel || healTriedRef.current.has(sel)) return
+    const take = recordingTakes.find((t) => t.audioId === sel && t.slot === "recording")
+    if (!take || take.durationMs != null) return
+    healTriedRef.current.add(sel)
+    const cell = activeCell
+    void (async () => {
+      try {
+        const frontier = parseFrontierAudioUrl(take.url)
+        if (!frontier) return
+        const bytes = await fetchCellAudio({
+          projectId: project.id, fileId: cell.fileId,
+          audioId: frontier.audioId, ext: frontier.ext,
+          getSyncToken: audioSyncTokenFetcherForSession(session),
+        })
+        const durationMs = await probeDurationMsSafe(
+          new Blob([bytes as BlobPart], { type: take.mimeType ?? "audio/webm" }),
+        )
+        if (durationMs == null) return
+        await emitCellAudioAttach({
+          projectId: project.id, fileId: cell.fileId, cellId: cell.id,
+          audioId: take.audioId, url: take.url, slot: "recording",
+          mimeType: take.mimeType ?? undefined,
+          durationMs: Math.round(durationMs),
+          label: take.label ?? undefined,
+          trimStartMs: take.trimStartMs ?? undefined,
+          trimEndMs: take.trimEndMs ?? undefined,
+          author: username,
+        })
+        injectOptimisticAudioAttachment(cell.fileId, cell.id, { ...take, durationMs: Math.round(durationMs) })
+        notifyAudioAttachmentsChanged(cell.fileId)
+      } catch {
+        /* best-effort — the take simply keeps its fallback-width chip */
+      }
+    })()
+  }, [open, session, activeCell, audioEntry?.selectedAudioId, recordingTakes, project.id, username])
 
   // Whenever the user switches cells, reset the capture state so the new cell
   // opens fresh.
@@ -196,12 +251,30 @@ export function AudioRecordingModal({
     setTtsBusy(true)
     setTtsDone(false)
     try {
-      const ok = await generateCellVoice({ project, cell: activeCell, session, username })
-      if (ok) setTtsDone(true)
+      // Round 8c: the TTS take is born with its permanent name like any take.
+      const ok = await generateCellVoice({
+        project, cell: activeCell, session, username,
+        label: nextTakeLabel(recordingTakes),
+      })
+      if (ok) {
+        setTtsDone(true)
+        // You asked for this voice — make it the one that sounds. A recorded
+        // take holding the recording slot would shadow it, so hand the slot
+        // back to the source clip (the "no take" state).
+        const recSel = audioEntry?.selectedAudioId
+        if (recSel && audioIdSeededWith(recSel, activeCell.id) && sourceClip) {
+          injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip)
+          await emitCellAudioSelect({
+            projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
+            audioId: sourceClip.audioId, slot: "recording", author: username,
+          })
+          notifyAudioAttachmentsChanged(activeCell.fileId)
+        }
+      }
     } finally {
       setTtsBusy(false)
     }
-  }, [activeCell, session, ttsBusy, project, username])
+  }, [activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip])
 
   const save = useCallback(async () => {
     if (recorder.state.kind !== "stopped") return
@@ -537,6 +610,8 @@ export function AudioRecordingModal({
             cellId={activeCell.id}
             takes={recordingTakes}
             selectedAudioId={audioEntry?.selectedAudioId ?? null}
+            selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+            sourceClip={sourceClip}
             author={username}
             session={session ?? null}
           />
@@ -587,9 +662,9 @@ export function AudioRecordingModal({
           {(displayPhase === "idle" || displayPhase === "error") && (
             <>
               {/* Round 8: a clear re-record vs REGENERATE choice — durable TTS
-                  right where recording lives. The result lands in the
-                  generated-voice slot (the sparkle chip on the Target track),
-                  so it deliberately doesn't join the recorded-takes list. */}
+                  right where recording lives. Round 8c: the result is a TAKE —
+                  it joins the list below (sparkle row) and becomes the one
+                  that sounds. */}
               <AppTooltip
                 content={
                   !activeCell?.translated?.trim()

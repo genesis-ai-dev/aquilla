@@ -15,7 +15,7 @@ import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
-import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeCellTts } from "@/lib/sync/tts"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -85,6 +85,19 @@ export async function generateAndAttachCellVoice(
       voiceId: voice.id,
       ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
       author: args.username,
+    })
+    // Round 8: shadow-inject so the sparkle chip appears at its real length
+    // instantly — the notify's refetch would otherwise read pre-flush state.
+    injectOptimisticAudioAttachment(args.fileId, args.cellId, {
+      audioId: result.objectName,
+      url: result.url,
+      slot: "generatedVoice",
+      mimeType: "audio/wav",
+      voiceId: voice.id,
+      referenceAudioId: voice.referenceAudioId ?? null,
+      durationMs: Math.round(result.durationSeconds * 1000),
+      trimStartMs: null,
+      trimEndMs: null,
     })
     notifyAudioAttachmentsChanged(args.fileId)
     const bytes = await fetchCellAudio({
@@ -172,6 +185,18 @@ export async function generateAndAttachCellVoice(
     ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
     ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
     author: args.username,
+  })
+  // Round 8: shadow-inject (see the omnivoice branch's comment).
+  injectOptimisticAudioAttachment(args.fileId, args.cellId, {
+    audioId: objectName,
+    url,
+    slot: "generatedVoice",
+    mimeType: "audio/wav",
+    voiceId: voice.id,
+    referenceAudioId: voice.referenceAudioId ?? null,
+    durationMs: generatedDurationMs ?? null,
+    trimStartMs: null,
+    trimEndMs: null,
   })
   notifyAudioAttachmentsChanged(args.fileId)
 

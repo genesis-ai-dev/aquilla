@@ -2,15 +2,52 @@
 // effect (no React Query), matching useCellValidators. Subscribes to the
 // audio-attachments bus so a local emit (recording / TTS / clone) refetches
 // without prop-drilling a revalidate callback.
+//
+// Round 8 (SUB-39 root fix): optimistic injections are retained as SHADOWS
+// and re-applied over every fetch until the SERVER read confirms them. The
+// outbox flusher posts events on a ~5s timer, so a refetch poked right after
+// an emit reads PRE-projection state — without shadows it wholesale-wiped a
+// just-injected selection (the take-select chip visibly reverted). A shadow
+// is confirmed (dropped) when the server entry carries the attachment, the
+// slot's selection points at it, and its trims match; a 30s TTL bounds the
+// stale window if an emit genuinely fails.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
 import { subscribeAudioAttachments, subscribeOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
 import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
-import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
+
+const SHADOW_TTL_MS = 30_000
+
+function emptyEntry(): CellAudioEntry {
+  return { attachments: {}, selectedAudioId: null, selectedGeneratedVoiceAudioId: null, audioTimings: {} }
+}
+
+function applyShadow(entry: CellAudioEntry | undefined, att: AudioAttachmentOut): CellAudioEntry {
+  const base = entry ?? emptyEntry()
+  return {
+    ...base,
+    attachments: { ...base.attachments, [att.audioId]: att },
+    ...(att.slot === "recording"
+      ? { selectedAudioId: att.audioId }
+      : { selectedGeneratedVoiceAudioId: att.audioId }),
+  }
+}
+
+function shadowConfirmed(entry: CellAudioEntry | undefined, att: AudioAttachmentOut): boolean {
+  if (!entry) return false
+  const server = entry.attachments[att.audioId]
+  if (!server) return false
+  const selected = att.slot === "recording" ? entry.selectedAudioId : entry.selectedGeneratedVoiceAudioId
+  if (selected !== att.audioId) return false
+  if ((server.trimStartMs ?? null) !== (att.trimStartMs ?? null)) return false
+  if ((server.trimEndMs ?? null) !== (att.trimEndMs ?? null)) return false
+  return true
+}
 
 export interface UseFileAudioAttachmentsResult {
   byCellId: Map<string, CellAudioEntry>
@@ -43,12 +80,15 @@ export function useFileAudioAttachments(
   const [byCellId, setByCellId] = useState<Map<string, CellAudioEntry>>(EMPTY)
   const [isLoading, setIsLoading] = useState(false)
   const generationRef = useRef(0)
+  // Round 8: retained optimistic injections (see header). Keyed by cellId.
+  const shadowsRef = useRef<Map<string, Array<{ att: AudioAttachmentOut; appliedAt: number }>>>(new Map())
 
   const doFetch = useCallback(async () => {
     // No project/file, or auth not ready yet → nothing to read. Gating on `jwt`
     // here (rather than only inside getToken) makes it a real dependency, so the
     // fetch re-runs the moment the session lands on a cold reload.
     if (!projectId || !fileId || !jwt) {
+      shadowsRef.current.clear()
       setByCellId(EMPTY)
       return
     }
@@ -62,7 +102,24 @@ export function useFileAudioAttachments(
       }
       const res = await fetchFileAudioAttachments(projectId, fileId, token)
       if (gen !== generationRef.current) return // a newer fetch superseded us
-      setByCellId(new Map(Object.entries(res.cells)))
+      const map = new Map(Object.entries(res.cells))
+      // Round 8: re-apply unconfirmed shadows over the server payload — a
+      // fetch that raced the outbox flush must not revert a local action.
+      const now = Date.now()
+      for (const [cellId, shadows] of shadowsRef.current) {
+        const live = shadows.filter(
+          (s) => now - s.appliedAt < SHADOW_TTL_MS && !shadowConfirmed(map.get(cellId), s.att),
+        )
+        if (live.length === 0) {
+          shadowsRef.current.delete(cellId)
+          continue
+        }
+        shadowsRef.current.set(cellId, live)
+        let entry = map.get(cellId)
+        for (const s of live) entry = applyShadow(entry, s.att)
+        map.set(cellId, entry as CellAudioEntry)
+      }
+      setByCellId(map)
     } catch {
       // Read failures degrade to "no attachments" — playback shows nothing
       // rather than the editor crashing. The next poke retries.
@@ -84,28 +141,21 @@ export function useFileAudioAttachments(
     })
   }, [fileId, doFetch])
 
-  // Optimistic injections: a local producer (recording / TTS) just created an
-  // attachment. Merge it into the cell's entry so `hasAudio` flips at once,
-  // preserving the other slot + existing clips. The next doFetch wholesale-
-  // replaces this with server truth.
+  // Optimistic injections: a local producer (recording / TTS / take select /
+  // trim) just changed an attachment. Merge into state at once AND retain a
+  // shadow so subsequent fetches can't wipe it before the server catches up
+  // (round 8 — see header).
   useEffect(() => {
     if (!fileId) return
     return subscribeOptimisticAudioAttachment(fileId, (cellId, att) => {
+      const shadows = shadowsRef.current.get(cellId) ?? []
+      shadowsRef.current.set(cellId, [
+        ...shadows.filter((s) => s.att.audioId !== att.audioId || s.att.slot !== att.slot),
+        { att, appliedAt: Date.now() },
+      ])
       setByCellId((prev) => {
-        const base: CellAudioEntry = prev.get(cellId) ?? {
-          attachments: {},
-          selectedAudioId: null,
-          selectedGeneratedVoiceAudioId: null,
-          audioTimings: {},
-        }
         const next = new Map(prev)
-        next.set(cellId, {
-          ...base,
-          attachments: { ...base.attachments, [att.audioId]: att },
-          ...(att.slot === "recording"
-            ? { selectedAudioId: att.audioId }
-            : { selectedGeneratedVoiceAudioId: att.audioId }),
-        })
+        next.set(cellId, applyShadow(prev.get(cellId), att))
         return next
       })
     })

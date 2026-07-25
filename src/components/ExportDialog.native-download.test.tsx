@@ -24,16 +24,21 @@ vi.mock("@/lib/sync/source-export", () => ({
 vi.mock("@/lib/export/exporters/pptx", () => ({
   exportPptx: vi.fn(),
 }))
+vi.mock("@/lib/export/exporters/idml", () => ({
+  exportIdml: vi.fn(),
+}))
 
 import { downloadBlob } from "@/lib/export/export-service"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { fetchSourceSidecar } from "@/lib/sync/source-export"
 import { exportPptx } from "@/lib/export/exporters/pptx"
+import { exportIdml } from "@/lib/export/exporters/idml"
 
 const mockDownload = vi.mocked(downloadBlob)
 const mockProjectCells = vi.mocked(useProjectCells)
 const mockSidecar = vi.mocked(fetchSourceSidecar)
 const mockExportPptx = vi.mocked(exportPptx)
+const mockExportIdml = vi.mocked(exportIdml)
 
 function cell(id: string, translated: string): CellData {
   return {
@@ -109,6 +114,37 @@ describe("ExportDialog — native download is the primary action", () => {
     // The conversion section is expanded so the user still has options.
     // (Exact name — "Advanced export formats" is a separate radiogroup.)
     expect(screen.getByRole("radiogroup", { name: "Export format" })).toBeVisible()
+  })
+
+  it("idml mapping failure: blocks translated download and offers the exact original plus re-import", async () => {
+    const original = new Uint8Array([80, 75, 3, 4, 73, 68, 77, 76]).buffer
+    const onReimport = vi.fn()
+    mockSidecar.mockResolvedValue(original)
+    mockExportIdml.mockRejectedValue(new Error("Protected IDML anchor 2 was reordered."))
+
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        activeFileName="layout.idml"
+        activeFileType="idml"
+        projectFiles={[{ id: "f1", name: "layout.idml", type: "idml" }]}
+        onReimport={onReimport}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Download layout\.idml/i }))
+
+    const status = await screen.findByRole("status")
+    expect(status).toHaveTextContent(/Protected IDML anchor 2 was reordered/i)
+    expect(mockDownload).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: /Download original unchanged/i }))
+    expect(mockDownload).toHaveBeenCalledTimes(1)
+    expect(mockDownload.mock.calls[0]?.[1]).toBe("layout-original.idml")
+    expect(await mockDownload.mock.calls[0]?.[0].arrayBuffer()).toEqual(original)
+
+    fireEvent.click(screen.getByRole("button", { name: /Repair by re-importing/i }))
+    expect(onReimport).toHaveBeenCalledTimes(1)
   })
 
   it("canExport=false: shows the permission gate with a help link instead of export controls", () => {

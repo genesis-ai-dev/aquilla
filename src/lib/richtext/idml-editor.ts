@@ -41,6 +41,53 @@ interface IdmlGuardOptions {
   onRejected: (diagnostic: IdmlDiagnostic) => void
 }
 
+/**
+ * Returns a valid text-selection position inside an editable protected slot.
+ * Empty inline slots have no ordinary text position for ProseMirror's click
+ * resolver to discover, so callers may optionally name the clicked slot.
+ */
+export function idmlEditableSlotPosition(
+  doc: ProseMirrorNode,
+  requestedSlot?: number,
+): number | null {
+  let firstEditable: number | null = null
+  let requested: number | null = null
+  doc.descendants((node, position) => {
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (node.attrs.editable !== true) return false
+    const contentPosition = position + 1
+    firstEditable ??= contentPosition
+    if (
+      requestedSlot !== undefined
+      && node.attrs.slot === requestedSlot
+    ) {
+      requested = contentPosition
+    }
+    return false
+  })
+  return requested ?? firstEditable
+}
+
+export function isEditableIdmlSelection(selection: {
+  $from: { depth: number; node: (depth: number) => ProseMirrorNode }
+  $to: { depth: number; node: (depth: number) => ProseMirrorNode }
+}): boolean {
+  const editableSlotAt = (
+    resolved: { depth: number; node: (depth: number) => ProseMirrorNode },
+  ): ProseMirrorNode | null => {
+    for (let depth = resolved.depth; depth >= 0; depth -= 1) {
+      const node = resolved.node(depth)
+      if (node.type.name === IDML_SLOT_NODE_NAME) {
+        return node.attrs.editable === true ? node : null
+      }
+    }
+    return null
+  }
+  const fromSlot = editableSlotAt(selection.$from)
+  const toSlot = editableSlotAt(selection.$to)
+  return fromSlot !== null && fromSlot === toSlot
+}
+
 const IdmlDocument = TiptapNode.create({
   name: "doc",
   topNode: true,
@@ -240,6 +287,8 @@ const IdmlParagraph = TiptapNode.create({
 
 const IdmlSlot = TiptapNode.create({
   name: IDML_SLOT_NODE_NAME,
+  priority: 1_000,
+  group: "inline",
   inline: true,
   content: "(text | hardBreak)*",
   marks: "",
@@ -319,6 +368,8 @@ const IdmlSlot = TiptapNode.create({
 
 const IdmlToken = TiptapNode.create({
   name: IDML_TOKEN_NODE_NAME,
+  priority: 1_000,
+  group: "inline",
   inline: true,
   atom: true,
   selectable: false,

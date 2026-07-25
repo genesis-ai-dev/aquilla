@@ -47,6 +47,129 @@ function positionOf(editor: Editor, name: string): number {
 afterEach(cleanup)
 
 describe("TranslatedEditor — protected IDML mode", () => {
+  it("places the caret inside an empty protected slot when the editor is activated", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-empty-activation"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.click(surface)
+    })
+    expect(editor.state.selection.$from.parent.type.name).toBe("idmlSlot")
+    expect(editor.state.selection.$from.parent.attrs.editable).toBe(true)
+
+    act(() => {
+      for (const character of "Translated") {
+        fireEvent.keyDown(surface, { key: character })
+      }
+      fireEvent.click(surface.querySelector("span[data-idml-slot=\"1\"]")!)
+      fireEvent.keyDown(surface, { key: "B" })
+      fireEvent.blur(surface)
+    })
+    expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({
+      value: "Translated\tB",
+      valueHtml: expect.stringMatching(/>Translated<\/span>.*>B<\/span>/),
+    }))
+    const committed = onCommit.mock.calls[0][0] as { valueHtml: string }
+    expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  it("pastes Unicode and line breaks into an empty slot without importing clipboard markup", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-empty-paste"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.paste(surface, {
+        clipboardData: {
+          types: ["text/html", "text/plain"],
+          files: [],
+          items: [],
+          getData: (type: string) => type === "text/html"
+            ? "<script>bad()</script><strong>漢字</strong><br>नमस्ते"
+            : "漢字\r\nनमस्ते",
+        },
+      })
+      fireEvent.blur(surface)
+    })
+
+    const slotElement = surface.querySelector("span[data-idml-slot=\"0\"]")
+    expect(slotElement?.textContent).toBe("漢字नमस्ते")
+    expect(slotElement?.querySelector("br")).toBeTruthy()
+    expect(slotElement?.querySelector("strong, script")).toBeNull()
+    const committed = onCommit.mock.calls[0]?.[0] as { valueHtml: string } | undefined
+    expect(committed?.valueHtml).toContain("漢字<br>नमस्ते")
+    expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  it("replaces in-progress IME composition text instead of duplicating it", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-ime"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.compositionStart(surface)
+      fireEvent(surface, new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: "漢",
+        inputType: "insertCompositionText",
+      }))
+      fireEvent(surface, new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        data: "漢字",
+        inputType: "insertCompositionText",
+      }))
+      fireEvent.compositionEnd(surface, { data: "漢字" })
+      fireEvent.blur(surface)
+    })
+
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("漢字")
+    const committed = onCommit.mock.calls[0]?.[0] as { valueHtml: string } | undefined
+    expect(committed?.valueHtml).toContain(">漢字</span>")
+    expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
+  })
+
   it("keeps Enter inside the current slot and commits validator-approved HTML", async () => {
     const onCommit = vi.fn()
     const onEscapeToGrid = vi.fn()

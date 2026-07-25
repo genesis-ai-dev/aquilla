@@ -19,7 +19,7 @@
 
 import { useEditor, EditorContent, type Editor as TiptapEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
+import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
@@ -35,8 +35,10 @@ import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
+  idmlEditableSlotPosition,
   idmlDiagnosticMessage,
   idmlEditorExtensions,
+  isEditableIdmlSelection,
   prepareIdmlEditorContent,
   serializeIdmlEditorDocument,
   type IdmlEditorConfiguration,
@@ -126,6 +128,40 @@ export interface FootnoteInsertionAnchor {
   previewText?: string
   previewBefore?: string
   previewAfter?: string
+}
+
+interface IdmlInsertedRange {
+  from: number
+  to: number
+}
+
+function replaceIdmlSelectionWithPlainText(
+  view: EditorView,
+  text: string,
+  requestedRange?: IdmlInsertedRange,
+): IdmlInsertedRange | null {
+  const selection = view.state.selection
+  const fallbackPosition = idmlEditableSlotPosition(view.state.doc)
+  const from = requestedRange?.from
+    ?? (isEditableIdmlSelection(selection) ? selection.from : fallbackPosition)
+  const to = requestedRange?.to
+    ?? (isEditableIdmlSelection(selection) ? selection.to : fallbackPosition)
+  if (from === null || to === null) return null
+
+  const normalized = text.replace(/\r\n?/g, "\n")
+  const lines = normalized.split("\n")
+  const nodes = lines.flatMap((line, index) => [
+    ...(line.length > 0 ? [view.state.schema.text(line)] : []),
+    ...(index < lines.length - 1 && view.state.schema.nodes.hardBreak
+      ? [view.state.schema.nodes.hardBreak.create()]
+      : []),
+  ])
+  const replacement = Fragment.fromArray(nodes)
+  const transaction = nodes.length > 0
+    ? view.state.tr.replaceWith(from, to, replacement)
+    : view.state.tr.delete(from, to)
+  view.dispatch(transaction.scrollIntoView())
+  return { from, to: from + replacement.size }
 }
 
 export interface TranslatedEditorHandle {
@@ -298,6 +334,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
   const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
+  const idmlCompositionRangeRef = useRef<IdmlInsertedRange | null>(null)
   useEffect(() => {
     pendingFootnoteDeleteRef.current = pendingFootnoteDelete
   }, [pendingFootnoteDelete])
@@ -540,6 +577,22 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       transformPastedHTML(html: string) {
         return idmlContext ? sanitizeIdmlEditorHtml(html) : sanitizeEditorHtml(html)
       },
+      handleTextInput(view, _from, _to, text) {
+        if (!idmlContext) return false
+        replaceIdmlSelectionWithPlainText(view, text)
+        return true
+      },
+      handlePaste(view, event, slice) {
+        if (!idmlContext) return false
+        // IDML accepts only literal text and bare line breaks inside a slot.
+        // Rich clipboard markup, including forged data-idml-* attributes, is
+        // deliberately discarded before the transaction reaches the guards.
+        const plainText = event.clipboardData?.getData("text/plain")
+          ?? slice.content.textBetween(0, slice.content.size, "\n")
+        event.preventDefault()
+        replaceIdmlSelectionWithPlainText(view, plainText)
+        return true
+      },
       handleDoubleClick(view, pos, event) {
         const didSelect = selectVisibleWord(view, pos)
         if (!didSelect) return false
@@ -549,7 +602,87 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         })
         return true
       },
+      handleClick(view, _pos, event) {
+        if (!idmlContext) return false
+        const target = event.target instanceof HTMLElement
+          ? event.target.closest<HTMLElement>("[data-idml-slot]")
+          : null
+        const clickedSlot = target?.getAttribute("data-idml-slot")
+        const requestedSlot = clickedSlot !== null && clickedSlot !== undefined
+          ? Number(clickedSlot)
+          : undefined
+        const selectedSlot = view.state.selection.$from.parent.type.name === "idmlSlot"
+          ? Number(view.state.selection.$from.parent.attrs.slot)
+          : undefined
+        if (
+          requestedSlot !== undefined
+          && requestedSlot === selectedSlot
+          && isEditableIdmlSelection(view.state.selection)
+        ) return false
+        const position = idmlEditableSlotPosition(
+          view.state.doc,
+          Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+        )
+        if (position === null) return false
+        view.dispatch(
+          view.state.tr
+            .setSelection(TextSelection.create(view.state.doc, position))
+            .scrollIntoView(),
+        )
+        view.focus()
+        event.preventDefault()
+        return true
+      },
       handleDOMEvents: {
+        click(view, event) {
+          if (!idmlContext) return false
+          const target = event.target instanceof HTMLElement
+            ? event.target.closest<HTMLElement>("[data-idml-slot]")
+            : null
+          if (!target || target.textContent !== "") return false
+          const requestedSlot = Number(target.getAttribute("data-idml-slot"))
+          const position = idmlEditableSlotPosition(
+            view.state.doc,
+            Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+          )
+          if (position === null) return true
+          event.preventDefault()
+          view.dispatch(
+            view.state.tr
+              .setSelection(TextSelection.create(view.state.doc, position))
+              .scrollIntoView(),
+          )
+          view.focus()
+          return true
+        },
+        compositionstart(view) {
+          if (!idmlContext) return false
+          const selection = view.state.selection
+          const position = idmlEditableSlotPosition(view.state.doc)
+          idmlCompositionRangeRef.current = isEditableIdmlSelection(selection)
+            ? { from: selection.from, to: selection.to }
+            : position === null
+              ? null
+              : { from: position, to: position }
+          return false
+        },
+        beforeinput(view, event) {
+          if (!idmlContext) return false
+          const inputEvent = event as InputEvent
+          if (inputEvent.inputType !== "insertCompositionText") return false
+          inputEvent.preventDefault()
+          const range = replaceIdmlSelectionWithPlainText(
+            view,
+            inputEvent.data ?? "",
+            idmlCompositionRangeRef.current ?? undefined,
+          )
+          idmlCompositionRangeRef.current = range
+          return true
+        },
+        compositionend() {
+          idmlCompositionRangeRef.current = null
+          return false
+        },
         mouseover(view, event) {
           const target = event.target as HTMLElement | null
           const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
@@ -625,6 +758,18 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // pending idle edits are flushed before focus moves to the row.
           view.dom.blur()
           onEscapeToGridRef.current?.()
+          return true
+        }
+        if (
+          idmlContext
+          && event.key.length === 1
+          && !event.metaKey
+          && !event.altKey
+          && !event.ctrlKey
+          && !event.isComposing
+        ) {
+          event.preventDefault()
+          replaceIdmlSelectionWithPlainText(view, event.key)
           return true
         }
         const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
@@ -763,6 +908,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     },
     onFocus({ editor }) {
       applyEditorDirection(editor)
+      if (idmlContext && !isEditableIdmlSelection(editor.state.selection)) {
+        const position = idmlEditableSlotPosition(editor.state.doc)
+        if (position !== null) editor.commands.setTextSelection(position)
+      }
       onFocus?.()
       publishSelection(editor)
     },

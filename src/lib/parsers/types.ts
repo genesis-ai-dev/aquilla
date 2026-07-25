@@ -620,6 +620,9 @@ export interface WeightedExample {
 export interface CellHistoryEntry {
   timestamp: string
   value: string
+  /** Rich target/source snapshot for formats whose structural HTML is part of
+   *  the round-trip contract (IDML v2) and for ordinary rich-text history. */
+  valueHtml?: string
   source: "human" | "llm"
   author: string
   validated: boolean

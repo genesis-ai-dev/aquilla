@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
+import { createHash } from "node:crypto"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
@@ -140,6 +141,41 @@ function makeEmptyTargetStore(cellId: string): CellStore {
   return store
 }
 
+function makeEmptyIdmlTargetStore(cellId: string): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: project.id,
+    fileId: "file-1",
+    username: "tester",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  const sourceHtml = '<p data-idml-version="2"><span data-idml-slot="0" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot">hello</span></p>'
+  const targetHtml = '<p data-idml-version="2"><span data-idml-slot="0" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot"></span></p>'
+  const metadata = {
+    idml: {
+      version: 2,
+      slotCount: 1,
+      editableSlotIndexes: [0],
+      protectedTokenCount: 0,
+      anchorSequenceHash: createHash("sha256")
+        .update("slot:0:editable:CharacterStyle/Body")
+        .digest("hex"),
+    },
+  }
+  const rows = makeRows(cellId)
+  for (const row of rows) {
+    row.metadata = metadata
+    if (row.side === "source") row.valueHtml = sourceHtml
+    else {
+      row.value = ""
+      row.valueHtml = targetHtml
+    }
+  }
+  store.replaceRows(rows, { full: true, maxServerSeq: 1 })
+  return store
+}
+
 function renderTable(
   actions: Partial<EditorActionsContextValue>,
   completing: Map<string, string> = new Map(),
@@ -249,6 +285,42 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     // resolves — proving the flow returns the user to the cell with a signal
     // that the change landed (the strand-after-Replace bug this fixes).
     expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+
+  it("keeps AI drafting enabled for protected IDML cells", async () => {
+    const onCompleteSingle = vi.fn().mockResolvedValue(true)
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={makeEmptyIdmlTargetStore("idml-cell")}
+            username="tester"
+            isCompletionConfigured={true}
+            isCompletionAvailable={true}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={onCompleteSingle}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+
+    const sparkle = await screen.findByRole("button", { name: "Translate with AI" })
+    expect(sparkle).toBeEnabled()
+    fireEvent.click(sparkle)
+    await waitFor(() => expect(onCompleteSingle).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "idml-cell" }),
+    ))
   })
 
   // AQU-618 regression, dialog path: a NON-empty target routes the sparkle

@@ -173,6 +173,9 @@ import {
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
+import { normalizeProtectedCompletion } from "@/lib/idml/completion"
+import { hasIdmlMetadata, replaceProtectedIdmlText } from "@/lib/idml/protected-html"
+import { hasIdmlCellMetadata } from "@/lib/richtext/idml-editor"
 import { addConcept } from "@/lib/terminology/store"
 import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
@@ -1866,6 +1869,10 @@ export function ProjectWorkspace() {
     // cleared the pending entry, so at least one of the two is always fresh.
     const liveCell = getActiveCell(cell.id)
     const commitCell = liveCell ?? cell
+    // IDML v2 model output is protected HTML, not plain text. Validate the
+    // exact slot/token sequence before any optimistic mutation or event is
+    // created; ordinary formats pass through unchanged.
+    const completed = normalizeProtectedCompletion(commitCell, text)
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise
@@ -1876,7 +1883,11 @@ export function ProjectWorkspace() {
     // bounce) chains a *revert* event with the pre-gen text onto the
     // gen — producing the "two events at 5:08, second one identical to
     // 2:28" history pattern.
-    applyOptimisticTargetEdit(cell.id, { value: text, aiDrafted: true })
+    applyOptimisticTargetEdit(cell.id, {
+      value: completed.value,
+      ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+      aiDrafted: true,
+    })
     // RACE-3/QW-2: use the pending event id for this cell (last AI-completion
     // commit we enqueued) as parentId, falling back to the projection value.
     // This prevents a second rapid completion commit from becoming a sibling
@@ -1905,7 +1916,8 @@ export function ProjectWorkspace() {
           cellId: cell.id,
           parentId,
           sourceEventId: sourceEventIdPin,
-          value: text,
+          value: completed.value,
+          ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
           author,
           targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
           // FRO-292: tag AI-generated commits so the server projection can
@@ -2012,7 +2024,22 @@ export function ProjectWorkspace() {
     if (!project?.id || !historyCellId) return
     const cell = getActiveCell(historyCellId)
     if (!cell) return
-    applyOptimisticTargetEdit(cell.id, { value: entry.value })
+    let promoted = entry.valueHtml !== undefined
+      ? { value: entry.value, valueHtml: entry.valueHtml }
+      : { value: entry.value, valueHtml: undefined }
+    if (hasIdmlCellMetadata(cell.metadata)) {
+      try {
+        const normalized = normalizeProtectedCompletion(cell, entry.valueHtml ?? entry.value)
+        promoted = { value: normalized.value, valueHtml: normalized.valueHtml }
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "This IDML history entry cannot be restored safely.")
+        return
+      }
+    }
+    applyOptimisticTargetEdit(cell.id, {
+      value: promoted.value,
+      ...(promoted.valueHtml !== undefined ? { valueHtml: promoted.valueHtml } : {}),
+    })
     const parentId = resolveTargetCommitParentId(cell)
     const eventId = await emitTargetCellCommit({
       projectId: project.id,
@@ -2021,7 +2048,8 @@ export function ProjectWorkspace() {
       // parentId must be the current chain head so AD-2 makes this the winner.
       parentId,
       sourceEventId: cell.sourceEventId ?? null,
-      value: entry.value,
+      value: promoted.value,
+      ...(promoted.valueHtml !== undefined ? { valueHtml: promoted.valueHtml } : {}),
       author: currentUsername,
       targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
     })
@@ -3733,11 +3761,43 @@ export function ProjectWorkspace() {
   // keeps own writes authoritative), then one outbox flush for the batch.
   const handleReplaceAll = useCallback(async (payload: ReplaceAllPayload) => {
     if (!project?.id || isReadOnly) return
+    const prepared: Array<{
+      cell: CellData
+      value: string
+      valueHtml?: string
+    }> = []
+    // Preflight every IDML replacement before emitting any event so one
+    // cross-slot or stale-anchor failure cannot leave a partially changed
+    // selection.
+    try {
+      for (const diff of payload.diffs) {
+        const cell = getActiveCell(diff.cellId)
+        if (!cell) continue
+        if (hasIdmlMetadata(cell)) {
+          const snapshot = replaceProtectedIdmlText(
+            cell,
+            payload.findQuery,
+            payload.replaceQuery,
+            diff.after,
+          )
+          prepared.push({ cell, ...snapshot })
+        } else {
+          prepared.push({ cell, value: diff.after })
+        }
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Protected IDML replacement was blocked.")
+      return
+    }
     const touched: string[] = []
-    for (const diff of payload.diffs) {
-      const cell = getActiveCell(diff.cellId)
-      if (!cell) continue
-      if (cell.fileId === activeFileId) applyOptimisticTargetEdit(cell.id, { value: diff.after })
+    for (const replacement of prepared) {
+      const { cell } = replacement
+      if (cell.fileId === activeFileId) {
+        applyOptimisticTargetEdit(cell.id, {
+          value: replacement.value,
+          ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
+        })
+      }
       const parentId = resolveTargetCommitParentId(cell)
       const eventId = await emitTargetCellCommit({
         projectId: project.id,
@@ -3745,7 +3805,8 @@ export function ProjectWorkspace() {
         cellId: cell.id,
         parentId,
         sourceEventId: cell.sourceEventId ?? null,
-        value: diff.after,
+        value: replacement.value,
+        ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
         author: currentUsername,
         targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
         searchQuery: payload.findQuery,
@@ -5612,6 +5673,10 @@ export function ProjectWorkspace() {
           targetLang={activeLane}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
+          onReimport={() => {
+            setExportOpen(false)
+            setImportOpen(true)
+          }}
           outstandingInfractionCount={activeFileInfractionCount}
         />
       </Suspense>

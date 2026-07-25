@@ -164,7 +164,6 @@ import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
 import {
-  hasIdmlCellMetadata,
   resolveIdmlEditorConfiguration,
   validateIdmlEditorCommit,
 } from "@/lib/richtext/idml-editor"
@@ -772,7 +771,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
   const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
-  const [idmlBatchError, setIdmlBatchError] = useState<string | null>(null)
   const [chapterNavigationSelection, setChapterNavigationSelection] = useState<{
     fileId: string | null
     label: string
@@ -1378,14 +1376,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (isDragging.current && dragCells.current.size > 1) {
       const selectedIds = displayCellIdsRef.current.filter((id) => dragCells.current.has(id))
       const selected = cellStore.getCellsByIds(selectedIds)
-      if (selected.some((cell) => hasIdmlCellMetadata(cell.metadata))) {
-        setIdmlBatchError(
-          "Batch AI drafting is disabled for selections containing protected IDML cells.",
-        )
-      } else {
-        setIdmlBatchError(null)
-        onCompleteBatch(selected)
-      }
+      onCompleteBatch(selected)
     }
     isDragging.current = false
     dragCells.current = new Set()
@@ -1892,23 +1883,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             {readOnlyLabel}
-          </div>
-        )}
-        {idmlBatchError && (
-          <div
-            role="alert"
-            className="flex items-center justify-between gap-2 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive"
-          >
-            <span>{idmlBatchError}</span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Dismiss IDML batch warning"
-              onClick={() => setIdmlBatchError(null)}
-            >
-              ✕
-            </Button>
           </div>
         )}
         {chapterNavigationItems.length > 0 && activeChapterLabel && (
@@ -3935,12 +3909,6 @@ function EditorRow({
   // then re-focus the cell editor (the new text is now visible there) and show
   // a brief "Saved" confirmation.
   const completeSingleAndReturn = useCallback(async () => {
-    if (idmlConfiguration) {
-      setWriteError(
-        "AI drafting for protected IDML cells is disabled until the model returns the exact formatting-anchor sequence.",
-      )
-      return
-    }
     const saved = await onCompleteSingle(cell)
     onActivateEditor(cell.id)
     // AQU-670: only confirm "Saved" when the draft actually committed. On a
@@ -3954,7 +3922,7 @@ function EditorRow({
       setShowSaved(false)
       savedTimerRef.current = null
     }, 2400)
-  }, [onCompleteSingle, cell, onActivateEditor, idmlConfiguration])
+  }, [onCompleteSingle, cell, onActivateEditor])
 
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
@@ -5629,9 +5597,7 @@ function EditorRow({
               <RailButton
                 icon={<Sparkles className="h-3.5 w-3.5" />}
                 tooltip={
-                  idmlConfiguration
-                    ? "AI drafting for IDML requires protected-anchor support"
-                    : isAnonymous
+                  isAnonymous
                     ? "Sign in for AI translations"
                     : !editable
                       ? "Read-only (imported from git)"
@@ -5679,8 +5645,7 @@ function EditorRow({
                   !isCompletionAvailable ||
                   !editable ||
                   isAnonymous ||
-                  isLoading ||
-                  Boolean(idmlConfiguration)
+                  isLoading
                 }
                 pulsing={isLoading}
                 onMouseDown={onDragStart}
@@ -5702,7 +5667,6 @@ function EditorRow({
                   on `isLoading` alone would let a second click re-fire
                   completeParagraph mid-fan-out). */}
               {cell.paragraphStart === true &&
-                !idmlConfiguration &&
                 editable &&
                 !isAnonymous &&
                 isCompletionConfigured &&
@@ -5733,7 +5697,7 @@ function EditorRow({
                   Regenerate raises the sampling temperature (useCompletion) so
                   the new candidate differs, and overwrites the current draft
                   (last-write-wins; the prior text stays in cell history). */}
-              {!idmlConfiguration && editable && !isAnonymous && cell.status !== "validated" && visibleTranslated.trim() && (
+              {editable && !isAnonymous && cell.status !== "validated" && visibleTranslated.trim() && (
                 <RailButton
                   icon={<RefreshCw className="h-3.5 w-3.5" />}
                   tooltip={
@@ -6599,7 +6563,7 @@ function EditorRow({
           paragraph group as one unit. Always confirms — no per-preference
           opt-out exists for this action (unlike the single-cell Replace
           confirm above). */}
-      {onCompleteParagraph && !idmlConfiguration && (
+      {onCompleteParagraph && (
         <ParagraphDraftConfirmDialog
           open={showParagraphConfirm}
           totalCount={paragraphGroupSize ?? 0}

@@ -4,16 +4,6 @@ import { injectFootnoteSpans } from "@/lib/richtext/usfm-plain-text"
 
 const ALLOWED_TAGS = ["b", "strong", "i", "em", "u", "s", "strike", "del", "code", "p", "br", "span"]
 const ALLOWED_ATTR = ["data-usfm-footnote"]
-const IDML_ALLOWED_TAGS = ["p", "br", "span"]
-const IDML_ALLOWED_ATTR = [
-  "data-idml-version",
-  "data-idml-slot",
-  "data-idml-character-style",
-  "data-idml-protected",
-  "data-idml-token",
-  "data-idml-token-kind",
-  "contenteditable",
-]
 
 export interface ReadOnlyRichTextOptions {
   footnoteNumberOffset?: number
@@ -46,16 +36,60 @@ export function sanitizeEditorHtml(html: string): string {
  */
 export function sanitizeIdmlEditorHtml(html: string): string {
   if (!html) return ""
-  const safe = DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: IDML_ALLOWED_TAGS,
-    ALLOWED_ATTR: IDML_ALLOWED_ATTR,
-    ALLOW_ARIA_ATTR: false,
-    ALLOW_DATA_ATTR: false,
-  })
-  if (typeof document === "undefined") return safe
-
+  if (typeof document === "undefined") {
+    // The protected schema requires an exact attribute allowlist. DOMPurify's
+    // broad ALLOW_DATA_ATTR switch would admit arbitrary data-* attributes,
+    // so environments without a DOM fail closed to inert text. The browser
+    // editor path below reconstructs only the canonical IDML attributes.
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: [],
+      ALLOW_ARIA_ATTR: false,
+      ALLOW_DATA_ATTR: false,
+      KEEP_CONTENT: true,
+    })
+  }
   const template = document.createElement("template")
-  template.innerHTML = safe
+  template.innerHTML = html
+  const dropContents = new Set([
+    "SCRIPT",
+    "STYLE",
+    "IFRAME",
+    "OBJECT",
+    "EMBED",
+    "SVG",
+    "MATH",
+    "TEMPLATE",
+    "NOSCRIPT",
+  ])
+  const cleanChildren = (parent: ParentNode) => {
+    for (const node of [...parent.childNodes]) {
+      if (node.nodeType === Node.COMMENT_NODE) {
+        node.remove()
+        continue
+      }
+      if (!(node instanceof HTMLElement)) continue
+      if (dropContents.has(node.tagName)) {
+        node.remove()
+        continue
+      }
+      cleanChildren(node)
+
+      const protectedKind = node.getAttribute("data-idml-protected")
+      const isParagraph = node.tagName === "P"
+      const isSlot = node.tagName === "SPAN" && protectedKind === "slot"
+      const isToken = (
+        (node.tagName === "SPAN" || node.tagName === "BR")
+        && protectedKind === "token"
+      )
+      const isBareBreak = node.tagName === "BR" && protectedKind === null
+      if (!isParagraph && !isSlot && !isToken && !isBareBreak) {
+        node.replaceWith(...node.childNodes)
+      }
+    }
+  }
+  cleanChildren(template.content)
+
   for (const element of template.content.querySelectorAll<HTMLElement>("*")) {
     const allowed = new Set<string>()
     const protectedKind = element.getAttribute("data-idml-protected")

@@ -96,12 +96,12 @@ const FORMAT_OPTIONS: FormatOption[] = [
     lossy: false,
   },
   {
-    // IDML round-trip export with story/paragraph structure preserved.
+    // IDML v2 export remains experimental until the Adobe validation gate.
     // Only shown for files imported as .idml (activeFileType).
     id: "idml",
-    label: "InDesign (.idml)",
+    label: "InDesign IDML (experimental)",
     ext: ".idml",
-    description: "Translations injected back into the original InDesign document. Story/paragraph structure, styles, and footnotes are preserved; mixed per-run formatting inside a translated paragraph keeps the first run's styling. Requires the original file's stored bytes (re-import older files to enable).",
+    description: "Protected translations are written only into their original text slots while the rest of the IDML package stays unchanged. Export is blocked if any locator or protected anchor cannot be proven. Adobe-native fidelity is not claimed until the automated InDesign gate passes.",
     lossy: false,
   },
   {
@@ -250,6 +250,8 @@ interface ExportDialogProps {
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
   getToken: (fileId: string) => Promise<string | null>
+  /** Opens the import flow when an IDML locator or anchor needs repair. */
+  onReimport?: () => void
   /**
    * AQU-654: count of outstanding (non-waived) LQA/validation "health"
    * infractions on the active file. Export NEVER hard-blocks on these — the
@@ -277,6 +279,7 @@ export function ExportDialog({
   targetLang = "",
   ttsSettings,
   getToken,
+  onReimport,
   outstandingInfractionCount = 0,
 }: ExportDialogProps) {
   // The file's own format is the default export — "give me my file back".
@@ -357,6 +360,10 @@ export function ExportDialog({
   // Inline-style fidelity report for the last export (parity run: users must
   // see when formatting could not be carried into edited translations).
   const [fidelityWarnings, setFidelityWarnings] = useState<ExportFidelityWarning[]>([])
+  const [idmlRecovery, setIdmlRecovery] = useState<{
+    bytes: ArrayBuffer
+    downloadName: string
+  } | null>(null)
 
   const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
@@ -450,6 +457,8 @@ export function ExportDialog({
           : scope
     setStatus({ kind: "busy", msg: "Exporting…" })
     setFidelityWarnings([])
+    setIdmlRecovery(null)
+    let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
     try {
       if (fmt === "usfm") {
         if (runScope === "project") {
@@ -529,27 +538,19 @@ export function ExportDialog({
         ])
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.pptx${note}` })
       } else if (fmt === "idml") {
-        // IDML round-trip export: fetch the raw IDML side-car from the server,
-        // then inject translations client-side (JSZip, surgical string splice),
-        // mirroring the DOCX/PPTX paths above.
+        // IDML v2 export is fail-closed: the shared engine proves every
+        // translated locator and protected anchor before changing package bytes.
         setStatus({ kind: "busy", msg: "Fetching original document…" })
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
-        setStatus({ kind: "busy", msg: "Injecting translations…" })
+        const baseName = buildExportStem(false)
+        recoverableIdmlOriginal = { bytes: rawBytes.slice(0), downloadName: `${baseName}-original.idml` }
+        setStatus({ kind: "busy", msg: "Validating protected translations…" })
         const { exportIdml } = await import("@/lib/export/exporters/idml")
         const result = await exportIdml(rawBytes, cells)
-        const baseName = buildExportStem(false)
         downloadBlob(result.blob, `${baseName}.idml`)
-        const note = result.injected === 0
-          ? " (no translations to inject — download original structure)"
-          : ` (${result.injected} paragraph${result.injected === 1 ? "" : "s"} translated)`
-        setFidelityWarnings([
-          ...result.warnings.map((w) => ({
-            kind: "inline-style-simplified" as const,
-            segment: w.segment,
-            detail: w.detail,
-          })),
-          ...collectInlineStyleWarnings(cells),
-        ])
+        const note = result.report.translated === 0
+          ? " (no translations — original bytes returned unchanged)"
+          : ` (${result.report.translated} paragraph${result.report.translated === 1 ? "" : "s"} translated)`
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.idml${note}` })
       } else if (fmt === "audio-by-character") {
         setStatus({ kind: "busy", msg: "Decoding audio…" })
@@ -691,6 +692,7 @@ export function ExportDialog({
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}${ext}` })
       }
     } catch (e) {
+      if (recoverableIdmlOriginal) setIdmlRecovery(recoverableIdmlOriginal)
       setStatus({ kind: "error", msg: (e as Error).message || "Export failed." })
     }
   }
@@ -699,6 +701,7 @@ export function ExportDialog({
     if (!next) {
       setStatus({ kind: "idle" })
       setFidelityWarnings([])
+      setIdmlRecovery(null)
     }
     onOpenChange(next)
   }
@@ -1159,6 +1162,37 @@ export function ExportDialog({
             )}
             <span className="flex flex-col gap-1">
               <span>{status.msg}</span>
+              {status.kind === "error" && idmlRecovery && (
+                <span className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      downloadBlob(
+                        new Blob([idmlRecovery.bytes], {
+                          type: "application/vnd.adobe.indesign-idml-package",
+                        }),
+                        idmlRecovery.downloadName,
+                      )
+                    }}
+                  >
+                    Download original unchanged
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      handleOpenChange(false)
+                      onReimport?.()
+                    }}
+                    disabled={!onReimport}
+                  >
+                    Repair by re-importing
+                  </Button>
+                </span>
+              )}
               {status.kind === "ok-lossy" && (
                 <span className="flex items-start gap-1 text-amber-600 dark:text-amber-400 text-xs font-medium">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />

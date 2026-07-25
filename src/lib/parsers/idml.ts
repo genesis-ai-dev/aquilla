@@ -1,15 +1,25 @@
 import {
   renderIdmlUnitHtml,
   type IdmlParseResult,
+  type IdmlProgress,
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
-import { parseIdmlInWorker } from "@/lib/idml/idml-worker-client"
+import {
+  parseIdmlInWorker,
+  type IdmlWorkerCallOptions,
+} from "@/lib/idml/idml-worker-client"
 import type { TranslatableString } from "./types"
 
 export type IdmlParseExecutor = (
   bytes: ArrayBuffer,
   profile: "generic" | "biblica",
+  options?: IdmlWorkerCallOptions,
 ) => Promise<IdmlParseResult>
+
+export interface IdmlImportParseOptions {
+  signal?: AbortSignal
+  onProgress?: (progress: IdmlProgress) => void
+}
 
 function scopeLabel(scope: IdmlTranslationUnit["locator"]["scope"]): string {
   switch (scope) {
@@ -82,7 +92,8 @@ export async function extractIdmlStrings(
   buffer: ArrayBuffer,
   parse: IdmlParseExecutor = parseIdmlInWorker,
   profile: "generic" | "biblica" = "generic",
+  options?: IdmlImportParseOptions,
 ): Promise<TranslatableString[]> {
-  const result = await parse(buffer, profile)
+  const result = await parse(buffer, profile, options)
   return result.units.map(toTranslatableString)
 }

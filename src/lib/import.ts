@@ -16,6 +16,7 @@
 // source blobs in R2; the future re-parse path fetches from R2.
 
 import { v7 as uuidv7 } from "uuid"
+import type { IdmlProgress } from "@aquilla/idml-roundtrip"
 import { proxyOrigin } from "./net/resource-proxy"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType } from "./parsers/types"
@@ -479,7 +480,9 @@ export interface ImportContext {
 type PrepareImportContext = Pick<
   ImportContext,
   "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal"
->
+> & {
+  onIdmlProgress?: (progress: IdmlProgress) => void
+}
 
 function preparedParsedFile(
   file: File,
@@ -653,7 +656,17 @@ export async function prepareImportFile(
     if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
       if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml") {
-        return preparedParsedFile(file, extensionType, await parseFile(file, extensionType))
+        return preparedParsedFile(
+          file,
+          extensionType,
+          await parseFile(
+            file,
+            extensionType,
+            extensionType === "idml"
+              ? { signal: ctx.signal, onIdmlProgress: ctx.onIdmlProgress }
+              : undefined,
+          ),
+        )
       }
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)
@@ -704,6 +717,11 @@ export async function prepareImportFile(
       }
       return prepared
     } catch (error) {
+      // IDML is an opaque UCF/ZIP package with a strict, versioned parser.
+      // Never flatten or execute generated parser code against it: doing so
+      // discards its source-artifact and locator contract and can only produce
+      // a non-round-trippable "custom" import.
+      if (extensionType === "idml") throw error
       if (!ctx.identityToken) throw error
       return prepareSandboxImport(file, { ...ctx, identityToken: ctx.identityToken }, error)
     }
@@ -2083,7 +2101,16 @@ function withExactSourceArtifact(
   return normalized
 }
 
-export async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
+export interface ParseFileOptions {
+  signal?: AbortSignal
+  onIdmlProgress?: (progress: IdmlProgress) => void
+}
+
+export async function parseFile(
+  file: File,
+  fileType: FileType,
+  options?: ParseFileOptions,
+): Promise<ImportResult[]> {
   switch (fileType) {
     case "txt":
     case "md":
@@ -2158,7 +2185,15 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       // hidden copy. Re-read the File after parsing so the preserved recovery
       // artifact never shares/detaches the worker's parse buffer.
       const parseBuffer = await file.arrayBuffer()
-      const strings = await extractIdmlStrings(parseBuffer)
+      const strings = await extractIdmlStrings(
+        parseBuffer,
+        undefined,
+        "generic",
+        {
+          signal: options?.signal,
+          onProgress: options?.onIdmlProgress,
+        },
+      )
       const sourceBuffer = await file.arrayBuffer()
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{

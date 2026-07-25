@@ -89,6 +89,89 @@ describe("IDML structural parser", () => {
     ])
   })
 
+  it("orders spread and master-spread story references before unreferenced stories", async () => {
+    const story = (storyId: string, paragraphId: string) =>
+      `<?xml version="1.0"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="${storyId}"><ParagraphStyleRange Self="${paragraphId}"><CharacterStyleRange><Content>${storyId}</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const parsed = await parseIdml(
+      await makeIdml({
+        "designmap.xml": `<?xml version="1.0"?><idPkg:DesignMap xmlns:idPkg="urn:test"><idPkg:MasterSpread src="MasterSpreads/MasterSpread_first.xml"/><idPkg:Spread src="Spreads/Spread_second.xml"/></idPkg:DesignMap>`,
+        "MasterSpreads/MasterSpread_first.xml":
+          `<?xml version="1.0"?><idPkg:MasterSpread xmlns:idPkg="urn:test"><TextFrame ParentStory="master"/></idPkg:MasterSpread>`,
+        "Spreads/Spread_second.xml":
+          `<?xml version="1.0"?><idPkg:Spread xmlns:idPkg="urn:test"><TextFrame ParentStory="spread"/></idPkg:Spread>`,
+        "Stories/Story_u1.xml": null,
+        "Stories/Story_u3.xml": null,
+        "Stories/Story_u9.xml": null,
+        "Stories/Story_z.xml": story("master", "pmaster-order"),
+        "Stories/Story_y.xml": story("spread", "pspread-order"),
+        "Stories/Story_a.xml": story("remaining", "premaining-order"),
+      }),
+    )
+
+    expect(parsed.units.map((unit) => unit.locator.elementId)).toEqual([
+      "pmaster-order",
+      "pspread-order",
+      "premaining-order",
+      "TextVariable/Custom",
+    ])
+  })
+
+  it("keeps unknown non-self-closing containers opaque while traversing known literal wrappers", async () => {
+    const story = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="popaque"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>before</Content><HyperlinkTextSource Self="link"><Content>linked</Content></HyperlinkTextSource><FutureContainer Self="future"><Content>must stay locked</Content></FutureContainer><Content>after</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const bytes = await makeIdml({ "Stories/Story_u1.xml": story })
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "popaque")
+
+    expect(unit.slots.map((slot) => slot.text)).toEqual(["before", "linked", "after"])
+    expect(unit.slots.some((slot) => slot.text.includes("must stay locked"))).toBe(false)
+    expect(unit.protectedTokens).toContainEqual(
+      expect.objectContaining({ kind: "unknown", xmlName: "FutureContainer", position: 2 }),
+    )
+    expect(unit.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: "UNSUPPORTED_CONSTRUCT",
+        details: expect.objectContaining({
+          unsupportedDisposition: "unsupported-literal",
+          constructKind: "unknown-inline-element",
+          xmlName: "FutureContainer",
+        }),
+      }),
+    )
+
+    const targetHtml = unit.sourceHtml
+      .replace(">before<", ">avant<")
+      .replace(">linked<", ">lié<")
+      .replace(">after<", ">après<")
+    const exported = await exportIdml(bytes, [translationFor(unit, targetHtml)], { strict: true })
+    const exportedStory = await memberText(exported.bytes, "Stories/Story_u1.xml")
+    expect(exportedStory).toContain(
+      '<FutureContainer Self="future"><Content>must stay locked</Content></FutureContainer>',
+    )
+    expect(exportedStory).toContain("<Content>avant</Content>")
+    expect(exportedStory).toContain("<Content>lié</Content>")
+    expect(exportedStory).toContain("<Content>après</Content>")
+  })
+
+  it("does not manufacture units for paragraphs nested inside unknown containers", async () => {
+    const story = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><FutureContainer><ParagraphStyleRange Self="pfuture"><CharacterStyleRange><Content>future literal</Content></CharacterStyleRange></ParagraphStyleRange></FutureContainer><ParagraphStyleRange Self="pknown"><CharacterStyleRange><Content>known literal</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const parsed = await parseIdml(await makeIdml({ "Stories/Story_u1.xml": story }))
+
+    expect(parsed.units.some((unit) => unit.locator.elementId === "pfuture")).toBe(false)
+    expect(unitById(parsed.units, "pknown").sourceText).toBe("known literal")
+    expect(parsed.diagnostics).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("FutureContainer"),
+        details: expect.objectContaining({
+          unsupportedDisposition: "unsupported-literal",
+          constructKind: "unknown-container",
+          xmlName: "FutureContainer",
+        }),
+      }),
+    )
+  })
+
   it("models literal tabs as protected boundaries between editable virtual slots", async () => {
     const tabStory = `<?xml version="1.0" encoding="UTF-8"?>
 <idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="ptab"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>before\tmiddle\t\tend</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`

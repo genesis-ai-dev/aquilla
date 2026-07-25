@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import JSZip from "jszip"
 import {
   parseIdml,
@@ -124,5 +124,38 @@ describe("IDML v2 parser adapter", () => {
 
     expect(result).toEqual([])
     expect(receivedProfile).toBe("biblica")
+  })
+
+  it("forwards cancellation and progress to the worker executor", async () => {
+    const controller = new AbortController()
+    const onProgress = vi.fn()
+    let receivedOptions: Parameters<
+      NonNullable<Parameters<typeof extractIdmlStrings>[1]>
+    >[2]
+
+    await extractIdmlStrings(
+      new Uint8Array([1]).buffer,
+      async (_bytes, profile, options) => {
+        receivedOptions = options
+        options?.onProgress?.({ phase: "parse", completed: 1, total: 1 })
+        return {
+          units: [],
+          manifest: {
+            version: 2,
+            sourceSha256: "a".repeat(64),
+            profile,
+            members: [],
+            unitLocators: [],
+            diagnostics: [],
+          },
+          diagnostics: [],
+        }
+      },
+      "generic",
+      { signal: controller.signal, onProgress },
+    )
+
+    expect(receivedOptions?.signal).toBe(controller.signal)
+    expect(onProgress).toHaveBeenCalledWith({ phase: "parse", completed: 1, total: 1 })
   })
 })

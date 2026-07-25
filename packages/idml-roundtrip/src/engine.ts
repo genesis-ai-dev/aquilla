@@ -43,7 +43,27 @@ import type { XmlDocument, XmlElement } from "./xml.js"
 const IDML_MIMETYPE = "application/vnd.adobe.indesign-idml-package"
 const DEFAULT_CHARACTER_STYLE = "CharacterStyle/$ID/[No character style]"
 const STORY_MEMBER_PATTERN = /^Stories\/[^/]+\.xml$/i
+const LAYOUT_MEMBER_PATTERN = /^(?:MasterSpreads|Spreads)\/[^/]+\.xml$/i
 const XML_MEMBER_PATTERN = /\.xml$/i
+const TRANSPARENT_LITERAL_CONTAINERS: ReadonlySet<string> = new Set([
+  "CharacterStyleRange",
+  "HyperlinkTextSource",
+  "HyperlinkTextDestination",
+  "XMLElement",
+  "HiddenText",
+  "Condition",
+])
+const SUPPORTED_PARAGRAPH_ANCESTORS: ReadonlySet<string> = new Set([
+  "ParagraphStyleRange",
+  ...TRANSPARENT_LITERAL_CONTAINERS,
+  "Table",
+  "Cell",
+  "Footnote",
+  "Endnote",
+  "EndnoteRange",
+  "Note",
+  "NoteRange",
+])
 const IDML_SCOPES: ReadonlySet<IdmlScope> = new Set([
   "story-paragraph",
   "table-cell",
@@ -752,6 +772,24 @@ async function parseIdmlInternal(
       member.xml.root,
       (element) => element.localName === "ParagraphStyleRange",
     )) {
+      const opaqueAncestor = opaqueParagraphAncestor(paragraph)
+      if (opaqueAncestor) {
+        diagnostics.push(
+          diagnostic(
+            "UNSUPPORTED_CONSTRUCT",
+            `Unknown IDML container <${opaqueAncestor.name}> was preserved as opaque content`,
+            memberPath,
+            undefined,
+            {
+              elementPath: elementPath(opaqueAncestor),
+              unsupportedDisposition: "unsupported-literal",
+              constructKind: "unknown-container",
+              xmlName: opaqueAncestor.name,
+            },
+          ),
+        )
+        continue
+      }
       paragraphTasks.push({ memberPath, document: member.xml, paragraph })
     }
   }
@@ -945,30 +983,87 @@ function discoverStoryMembers(
 ): string[] {
   const ordered: string[] = []
   const seen = new Set<string>()
+  const orderedLayoutMembers: string[] = []
+  const seenLayoutMembers = new Set<string>()
   for (const element of elementDescendants(
     designmap.root,
-    (candidate) => candidate.localName === "Story",
+    (candidate) =>
+      candidate.localName === "Story" ||
+      candidate.localName === "Spread" ||
+      candidate.localName === "MasterSpread",
   )) {
     const rawSource = getAttribute(element, "src")
     if (!rawSource) continue
     const source = rawSource.replace(/^\.\//, "")
-    if (!STORY_MEMBER_PATTERN.test(source)) continue
-    if (!loaded.members.has(source)) {
-      diagnostics.push(
-        diagnostic("MISSING_STORY", `designmap.xml references missing story ${source}`, source),
-      )
+    if (LAYOUT_MEMBER_PATTERN.test(source)) {
+      if (loaded.members.has(source) && !seenLayoutMembers.has(source)) {
+        seenLayoutMembers.add(source)
+        orderedLayoutMembers.push(source)
+      }
       continue
     }
-    if (!seen.has(source)) {
-      seen.add(source)
-      ordered.push(source)
+    if (!STORY_MEMBER_PATTERN.test(source)) continue
+    addStoryMember(source, loaded, diagnostics, ordered, seen)
+  }
+
+  const storyPathsById = new Map<string, string[]>()
+  for (const [memberPath, member] of loaded.members) {
+    if (!STORY_MEMBER_PATTERN.test(memberPath) || !member.xml) continue
+    const storyIds = new Set(
+      elementDescendants(
+        member.xml.root,
+        (element) => element.localName === "Story" && Boolean(getAttribute(element, "Self")),
+      ).map((element) => getAttribute(element, "Self")!),
+    )
+    for (const storyId of storyIds) {
+      const paths = storyPathsById.get(storyId) ?? []
+      paths.push(memberPath)
+      storyPathsById.set(storyId, paths)
     }
   }
+
+  const remainingLayoutMembers = [...loaded.members.keys()]
+    .filter((memberPath) =>
+      LAYOUT_MEMBER_PATTERN.test(memberPath) && !seenLayoutMembers.has(memberPath),
+    )
+    .sort(codeUnitCompare)
+  for (const layoutPath of [...orderedLayoutMembers, ...remainingLayoutMembers]) {
+    const layout = loaded.members.get(layoutPath)?.xml
+    if (!layout) continue
+    for (const element of elementDescendants(
+      layout.root,
+      (candidate) => Boolean(getAttribute(candidate, "ParentStory")),
+    )) {
+      const storyId = getAttribute(element, "ParentStory")!
+      const paths = storyPathsById.get(storyId)
+      if (paths?.length !== 1) continue
+      addStoryMember(paths[0]!, loaded, diagnostics, ordered, seen)
+    }
+  }
+
   const remaining = [...loaded.members.keys()]
     .filter((memberPath) => STORY_MEMBER_PATTERN.test(memberPath) && !seen.has(memberPath))
     .sort(codeUnitCompare)
   ordered.push(...remaining)
   return ordered
+}
+
+function addStoryMember(
+  source: string,
+  loaded: LoadedPackage,
+  diagnostics: IdmlDiagnostic[],
+  ordered: string[],
+  seen: Set<string>,
+): void {
+  if (!loaded.members.has(source)) {
+    diagnostics.push(
+      diagnostic("MISSING_STORY", `designmap.xml references missing story ${source}`, source),
+    )
+    return
+  }
+  if (seen.has(source)) return
+  seen.add(source)
+  ordered.push(source)
 }
 
 function buildStoryContext(loaded: LoadedPackage): StoryContext {
@@ -1142,7 +1237,7 @@ function extractSlotElements(
         )
         continue
       }
-      visit(child)
+      if (TRANSPARENT_LITERAL_CONTAINERS.has(child.localName)) visit(child)
     }
   }
   visit(paragraphOrVariable)
@@ -1391,16 +1486,36 @@ function protectedTokenKind(element: XmlElement): IdmlProtectedTokenKind | null 
     case "HiddenText":
     case "Condition":
     case "Properties":
+    case "Table":
+    case "Cell":
+    case "Footnote":
+    case "Endnote":
+    case "EndnoteRange":
+    case "Note":
+    case "NoteRange":
       return null
     default:
-      return nearestAncestor(element, (ancestor) => ancestor.localName === "CharacterStyleRange")
-        ? "unknown"
-        : null
+      return "unknown"
   }
 }
 
 function isOpaqueToken(kind: IdmlProtectedTokenKind | null): boolean {
-  return kind === "variable" || kind === "cross-reference" || kind === "inline-object"
+  return (
+    kind === "variable" ||
+    kind === "cross-reference" ||
+    kind === "inline-object" ||
+    kind === "unknown"
+  )
+}
+
+function opaqueParagraphAncestor(paragraph: XmlElement): XmlElement | null {
+  let ancestor = paragraph.parent
+  while (ancestor) {
+    if (ancestor.localName === "Story") return null
+    if (!SUPPORTED_PARAGRAPH_ANCESTORS.has(ancestor.localName)) return ancestor
+    ancestor = ancestor.parent
+  }
+  return null
 }
 
 function paragraphScope(paragraph: XmlElement, storyContext: StoryContext): IdmlScope {

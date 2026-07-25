@@ -1018,6 +1018,21 @@ function fileExts(list: File[]): string {
   return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
 }
 
+function idmlParsePhase(
+  fileName: string,
+  progress: { phase: string; completed: number; total: number },
+): string {
+  const action = progress.phase === "inspect"
+    ? "Checking"
+    : progress.phase === "unpack"
+      ? "Opening"
+      : "Reading"
+  const count = progress.total > 1
+    ? ` (${Math.min(progress.completed, progress.total)}/${progress.total})`
+    : ""
+  return `${action} ${fileName}${count}…`
+}
+
 function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -1124,6 +1139,9 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               sourceLanguage,
               targetLanguage,
               signal: parseController.signal,
+              onIdmlProgress: (progress) => {
+                setPhase(idmlParsePhase(file.name, progress))
+              },
             })
             preparedByFile.set(file, prepared)
             allParsedResults.push(...prepared.results)

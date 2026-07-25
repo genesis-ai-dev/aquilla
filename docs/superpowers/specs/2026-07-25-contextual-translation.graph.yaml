@@ -2,8 +2,9 @@
 # Lint: python3 scripts/graph_lint.py docs/superpowers/specs/2026-07-25-contextual-translation.graph.yaml
 # (lint script lives in the graph-engineering skill bundle, not this repo)
 #
-# One graph instance == ONE SPAN of one file. The client run-store (play/pause FAB)
-# sequences spans; pause is honored between spans, cancel aborts the in-flight span.
+# One graph instance == ONE SPAN of one file. A durable Cloudflare Workflow instance
+# (one per project/file/lane run) sequences spans, reading the steering channel between
+# spans; the play/pause FAB is a transport control on the instance, not a client loop.
 # Non-discourse files (json-i18n, po, properties, csv without scripture content) are
 # routed to the existing plain batch drafter BEFORE this graph starts — see design doc.
 
@@ -13,7 +14,7 @@ success_criteria:
   - "Every untranslated cell in the span has either a staged draft or an explicit skip reason in the run report"
   - "Every staged draft carries sceneBriefId + promptVersion + exampleIds provenance and passed quorum"
   - "The scene brief's ambiguity register lists what must stay open; no accepted draft resolves a registered ambiguity"
-  - "Nothing is committed without the existing human approval gate (AgentProposal -> applyStagedEvents)"
+  - "Nothing is committed without human approval (persisted changesets, ask mode, precondition-checked commit)"
 
 budget:
   # Worst case per span, all loops at max and the deep panel engaged.
@@ -177,8 +178,8 @@ nodes:
     decision: "Stage accepted commits through the emit-stage perimeter"
     in: [DRAFT]
     out: STAGED
-    # stageEvents() — role floors, staleness pre-check, ai_suggestion/agent_run_id provenance,
-    # sceneBriefId in AiDraftProvenance (mode: "contextual"). Human gate unchanged.
+    # Persisted changeset (ask mode): preconditions + digest + sceneBriefId provenance
+    # (mode: "contextual"). Human reviews on their own schedule; the run works ahead.
 
   - id: report
     kind: code

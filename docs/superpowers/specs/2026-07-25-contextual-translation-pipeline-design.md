@@ -20,13 +20,19 @@ architecture derived from a contextual model of translation:
   predicts: altered social force, **resolved ambiguity** (over-clarification — imposing an
   interpretation is as much a failure as an error), and unnatural target wording.
 
-Everything exits through the existing safety perimeter: `stageEvents()` provenance + role
-floors + staleness checks, the in-memory `AgentProposal` human approval gate, and the
-outbox. **The pipeline never commits anything.**
+Everything exits through the existing safety perimeter: staged with provenance, role
+floors, and staleness preconditions, gated by **persisted changesets** a human reviews on
+their own schedule. **The pipeline never commits anything.**
 
-A floating **play/pause pill** in the editor drives the run over the open file, span by
-span: play starts/resumes, pause stops *between* spans (in-flight span finishes), cancel
-aborts.
+The run is **autonomous and long-lived**: press play once and the agent works the file
+continuously — through tab closes, overnight, until done — staging drafts as it goes. What
+streams to the UI is **steps and outcomes** (scene construed, span drafted, votes, staged),
+never model token output or reasoning. The human expert is not an operator but a
+**steering input**: validations, edits, comments, and direct instructions land in a
+steering channel the agent reads between spans, and each one makes the agent better
+(validated cells become examples; corrected briefs re-scope future construals). A floating
+**play/pause pill** in the editor is the transport control and live status readout for
+that run; pause suspends the durable run itself, not a client loop.
 
 ## 2. Scope-check verdict
 
@@ -188,40 +194,83 @@ Bread-and-butter span (2 construe rounds, low risk, no redraft): construe 10 + s
 ~65% of worst-case cost — exactly what the router exists to gate. Per-file cost = spans ×
 this; the FAB surfaces running cost and the run inherits the agent-route credit guard.
 
-## 8. Execution architecture
+## 8. Execution architecture — durable, autonomous, steerable
 
-**No new job machinery.** The repo has no queues/alarms/job tables, and a page reload kills
-an SSE run. So the durable unit is small: **one span-batch = one SSE request** to a new
-deterministic orchestrator route, and the **client run-store is the sequencer**:
+The product intent is an **always-on agent**: play once, the run outlives the browser, the
+human injects direction while it works. That rules out the client as sequencer and makes
+**Cloudflare Workflows** the execution engine — the repo's first durable-execution surface,
+and a deliberate one:
+
+- **One Workflow instance per (project, file, targetLang) run.** Each graph node executes
+  inside `step.do()` with a retry policy; the step-result cache *is* crash recovery (a
+  restart replays cached node outputs and resumes at the first incomplete step — the same
+  semantics §6's loops assume, now platform-enforced).
+- **Pause/resume are instance operations.** The FAB's pause calls the Workflows API
+  `pause()` on the instance; play calls `resume()` (or creates an instance). No in-flight
+  span is aborted; the instance parks at the next step boundary. Cancel = `terminate()`.
+- **The graph stays code-orchestrated** inside the workflow: routers branch in code, quorum
+  is counted in code, loops carry their three stops. The Workflow adds durability, not
+  judgment. Node implementations are **plain async functions with serializable in/out**
+  (guaranteed by the typed edge schemas) so they are testable without the Workflows
+  runtime, and so vitest covers them in `happy-dom` like everything else.
+
+**Progress channel: the project DO, not SSE.** A detached run has no request to stream
+over. Each step completion POSTs a compact outcome event to the existing `ProjectSync` DO
+(same pattern as `settings-changed` notify), which broadcasts to connected clients:
 
 ```
-POST /api/v1/ai/contextual/run   (auth-worker, sibling of /ai/agent/run)
-  body: { projectId, fileId, targetLang, spanSeeds?: [...], maxSpans: 3 }
-  SSE frames (additive AgentFrame variants — old reducers ignore unknown types):
-    run_start · progress · scene.construed {sceneBrief} · span.drafted {cells}
-    · verify.votes {votes} · proposal (existing frame!) · usage · budget · done
+contextual.run.state   {runId, fileId, status: running|paused|done|failed, done, total}
+contextual.scene       {runId, sceneBriefId, spanLabel, ambiguityCount}
+contextual.span        {runId, spanLabel, staged, skipped, verdictSummary}
 ```
 
-The route is **code-orchestrated** (the graph above is the program, not a prompt): it
-reuses `selectCellPairs`/`orderPairs`, `executeExamples`, `lintDraft`, and exits through
-`stageEvents` — same dedicated-PG-connection pattern as `agent.ts` (the request-scoped shim
-closes before the stream ends), same credit guard before the stream opens, same
-`agent_runs` accounting. Drafts stage with `mode: "contextual"` and `sceneBriefId` added to
-`AiDraftProvenance`; the client applies accepted rows via the **unchanged**
-proposal → working-set → `applyStagedEvents` path. `maxSpans: 3` per request is the
-`draft`-tool checkpoint idiom: the `done` frame reports `remainingSpans`, and the client
-issues the next request — which is precisely where pause lives.
+Outcomes only — **never token deltas, never model reasoning**. A client that was closed
+missed nothing: state is reconstructable from rows (`scene_briefs`, staged drafts,
+`agent_runs` accounting); the DO feed is a live view, not the record.
 
-**Why not inside the existing agent loop?** The conversational agent stays able to invoke
-this (a `/contextual` slash command → same route), but the pipeline itself is
-deterministic: routers branch in code, quorum is counted in code, and budget/latency are
-predictable — none of which survive being delegated to a model orchestrator.
+**Persisted proposals (the gate moves from System A to System B).** With no client
+guaranteed present, in-memory `AgentProposal` frames can't carry the human gate. Staged
+drafts become **persisted changesets** — reusing the existing `changesets` machinery
+(preconditions, digest, `staged → committing → committed`, staleness on commit) with
+`autonomy_mode: 'ask'`. The agent **works ahead without waiting**: drafting span N+1 is
+never blocked on approval of span N (approval affects only what's *committed*, and
+freshly-validated cells feed forward as examples whenever approval does happen). The
+review surface is the working set fed from persisted changesets instead of frames — the
+per-row accept/edit/reject UX is unchanged.
 
-**Crash/pause semantics.** Completed spans have persisted scene briefs (DB) and delivered
-proposals (client store, localStorage when not streaming). A reload mid-span loses only
-that span's in-flight work; play resumes from the first span without an approved brief +
-staged drafts. Pause never aborts in-flight work; cancel aborts via the store's
-AbortController.
+**Steering channel.** The human stimulates the agent; the agent reads steering **between
+spans** (a checkpoint boundary), never mid-step:
+
+| input | mechanism | effect on the run |
+|---|---|---|
+| validate / edit a cell | existing events, no new UI | next spans retrieve it as an example; affected approved scene briefs are marked stale for re-construal |
+| edit / reject a scene brief | `scene_briefs` review routes | agent re-runs construe for that span before drafting it (or re-drafts if already staged) |
+| free-text direction ("keep the register formal in dialogue") | steering entry, appended to a `contextual_steering` table (10KB cap, provenance) | injected into construe + draft prompts for subsequent spans, displayed as an active-direction chip |
+| reject a staged draft with reason | changeset reject + note | reason attaches as a constraint if the span re-enters the redraft loop |
+
+Between spans the workflow does one cheap read: new steering rows + newly-validated cells
++ brief reviews since the last checkpoint. Nothing polls; a paused or finished run is
+woken by `waitForEvent()` when steering arrives (this is also how "usually just on" works
+without burning tokens while idle — the run parks when the file is converged and wakes on
+change: new source cells, an edit invalidating a span, or a steering entry).
+
+**Identity and budget.** A detached run cannot ride the user's ephemeral JWT. The instance
+runs under a **project-scoped stored authorization** (the credential model the external
+Agent API already defines), snapshotting the initiating user + role; role floors are
+re-evaluated at stage time by `stageEvents` as always, and the run self-suspends (status
+`paused`, reason surfaced) if the initiator loses the role mid-run. Credit/budget guards
+run per span, not per request: daily caps from the existing `runAiGuard`/credit-guard
+plumbing, plus the per-span unit cap from §7 — an always-on agent's failure mode is a
+quiet money leak, so `budget` outcomes go on the DO feed and the pill.
+
+**Dev/test.** `wrangler dev` runs Workflows locally; `dev-stack.ts` gains the binding and
+points model calls at the existing mock OpenRouter. Node functions unit-test without the
+runtime; one e2e drives play → steering injection → pause → resume → review.
+
+**Why not inside the existing conversational agent loop?** It remains a *client* of this
+system (a `/contextual` slash command can start or steer a run), but the pipeline is
+deterministic code — budget, latency, and auditability don't survive delegation to a
+model orchestrator.
 
 ## 9. Scene-brief storage
 
@@ -291,19 +340,30 @@ ring-foreground/10`), not a circle — it must show state:
   ("Reading context…", "Drafting…", "Checking…") — `ui-jargon-guard.test.ts` bans spec
   jargon. Clicking the span label calls
   `EditorScrollContext.requestScrollToSection(spanLabel, fileId)`.
-- **Pausing:** pause is *requested* → "Finishing this passage…" until the in-flight span's
-  request settles; then paused state shows `Play` (resume) + an X (cancel/dismiss).
+- **Pausing:** pause is *requested* (instance `pause()`) → "Finishing this passage…" until
+  the workflow parks at its next step boundary; then paused state shows `Play` (resume) +
+  an X (terminate). Closing the tab changes nothing — the run continues; the pill simply
+  re-attaches to live state on return.
+- **Parked (converged):** when the file is done and the run is waiting on change, the pill
+  shows a quiet "Watching for changes" state — the always-on posture made visible.
 - **Finished with failures:** retained summary (batch-completion's `finished: true`
   pattern), red accent, dismiss via X.
 
-**Store.** New `src/lib/contextual/run-store.ts`, modeled line-for-line on
-`batch-completion.ts` but **separate** (so a contextual run and a "Translate all" run
-cannot supersede each other): monotonic `runId` guard on every mutator, AbortController for
-cancel, **`paused` as a distinct state from `cancelled`** (pause does not abort in-flight
-work), retain-on-failure summary. Split hooks (`useContextualRunState` /
-`useContextualRunProgress`) à la `play-queue` so per-token updates don't re-render the pill
-chrome. The driver loop: `while (spans remain && !paused && !cancelled) { POST /contextual/run
-(maxSpans: 3); consume frames → store + proposals }`.
+**Store.** New `src/lib/contextual/run-store.ts` — same module pub-sub +
+`useSyncExternalStore` idiom as `batch-completion.ts`, but it is a **mirror, not a
+driver**: state hydrates from a `GET /contextual/runs?fileId=` snapshot and updates from
+`contextual.*` DO frames on the existing project WebSocket; play/pause/terminate are
+transport commands (`POST /contextual/runs`, `.../:runId/pause|resume|terminate`).
+`paused` stays distinct from `terminated`. Split hooks (`useContextualRunState` /
+`useContextualRunProgress`) à la `play-queue` so frequent progress frames don't re-render
+the pill chrome. Step outcomes also append to the agent dock's timeline (the existing
+`TimelineItem` surface) so the "streaming steps and outcomes" feed has a full-height home;
+the pill is the always-visible summary of the same store.
+
+**Steering input.** The composer already exists — the agent dock. A new "direct the run"
+affordance posts a `contextual_steering` entry (and the `/contextual` slash command does
+the same from chat); active directions render as dismissible chips above the dock
+timeline. Cell edits, validations, and scene-brief reviews steer implicitly with no new UI.
 
 **Gate.** Author `src/lib/features/flags.ts` (the registry `ProjectRecord.experimentalFlags`
 already forward-references): `contextualTranslation: { label, description, default: false }`,
@@ -336,10 +396,13 @@ one eval-set re-run.
 
 ## 12. Out of scope (explicitly)
 
-- Any auto-commit / auto-validate path — the human gate is a design invariant, not a phase.
-- Server-side pause/resume machinery (queues, DO alarms) — the span-checkpoint idiom makes
-  it unnecessary at this scale; revisit only if spans routinely exceed request limits.
-- Replacing single-cell sparkle drafting or the external Agent API changeset surface.
+- Any auto-commit / auto-validate path — the human gate is a design invariant, not a
+  phase. Autonomy means the agent *works ahead* unattended; it never means commits land
+  without a human decision.
+- Replacing single-cell sparkle drafting; the external Agent API surface is *reused*
+  (changesets, credential model), not replaced.
+- Multi-file / whole-project runs in v1 — one instance per file keeps blast radius,
+  budget, and the review queue legible; a project-level "play all" is a later composition.
 - Wiring the dead `contextSize` setting — it stays dead until this ships; then it can be
   repurposed as the analyzer's *initial* window / roam budget, with its existing UI.
 - Cross-file scene briefs (a scene spanning two files) — registered as a known limitation.

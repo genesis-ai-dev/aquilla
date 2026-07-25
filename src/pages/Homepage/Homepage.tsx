@@ -9,6 +9,13 @@ import { BetaBar } from "./BetaBar"
 import { useMarketingShell } from "./useMarketingShell"
 import "./homepage.css"
 
+// Help/documentation site (help.aquilla.app). Configurable at build time with
+// the same default HelpMenu uses, so the marketing front door and the in-app
+// help affordance always point at the same docs. (AQU-702)
+const DOCS_URL =
+  (import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
+  "https://help.aquilla.app"
+
 export function Homepage() {
   const brand = useBrand()
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -63,6 +70,7 @@ export function Homepage() {
             <a className="aq-nav-link" href="#languages">Languages</a>
             <a className="aq-nav-link" href="#quality">Quality</a>
             <a className="aq-nav-link" href="#pricing">Pricing</a>
+            <a className="aq-nav-link" href={DOCS_URL}>Docs</a>
           </div>
           <div className="aq-nav-cta">
             <AppTooltip content={theme === "dark" ? "Light mode" : "Dark mode"}>
@@ -517,6 +525,11 @@ export function Homepage() {
                 <a href={appHref}>Open app</a>
                 <a href="/onboarding">Sign up free</a>
                 <a href="#pricing">Enterprise</a>
+              </div>
+              <div className="aq-footer-col">
+                <h5>Resources</h5>
+                <a href={DOCS_URL}>Help &amp; docs</a>
+                <a href="mailto:hello@aquilla.app">Contact us</a>
               </div>
             </div>
           </div>

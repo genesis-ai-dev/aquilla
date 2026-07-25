@@ -1,0 +1,216 @@
+# Contextual-translation pipeline — graph spec (graph-engineering skill format).
+# Lint: python3 scripts/graph_lint.py docs/superpowers/specs/2026-07-25-contextual-translation.graph.yaml
+# (lint script lives in the graph-engineering skill bundle, not this repo)
+#
+# One graph instance == ONE SPAN of one file. The client run-store (play/pause FAB)
+# sequences spans; pause is honored between spans, cancel aborts the in-flight span.
+# Non-discourse files (json-i18n, po, properties, csv without scripture content) are
+# routed to the existing plain batch drafter BEFORE this graph starts — see design doc.
+
+task_type: "Contextually translate one span of a discourse file: construe its scene, draft target cells from the construal, verify fidelity, stage for human approval"
+codebase: "genesis-ai-dev/aquilla — React SPA + CF Workers; agent loop in auth-worker/src/lib/agent, drafting in src/lib/completion, event perimeter emit-stage.ts"
+success_criteria:
+  - "Every untranslated cell in the span has either a staged draft or an explicit skip reason in the run report"
+  - "Every staged draft carries sceneBriefId + promptVersion + exampleIds provenance and passed quorum"
+  - "The scene brief's ambiguity register lists what must stay open; no accepted draft resolves a registered ambiguity"
+  - "Nothing is committed without the existing human approval gate (AgentProposal -> applyStagedEvents)"
+
+budget:
+  # Worst case per span, all loops at max and the deep panel engaged.
+  # Bread-and-butter spans (closed in 2 construe rounds, low risk, no redraft) cost ~17 units.
+  tier_weights: { fast: 1, mid: 5, deep: 25 }
+  max_units: 200
+  max_model_calls: 24
+
+schemas:
+  SCOPE:       [projectId, fileId, targetLang, orderedCellIds, untranslatedCellIds, fileKind]
+  SPAN_SEED:   [id, fileId, anchorCellId, startCellId, endCellId, seedSource]
+  WINDOW:      [spanId, cellIds, precedingBriefIds, layerAboveRefs]
+  CONSTRUAL:   [spanId, situation, participants, tenor, moves, closed, openQuestions, evidenceCellIds]
+  SCENE_BRIEF: [id, spanId, startCellId, endCellId, l2Construal, l1Summary, ambiguityRegister, provenance]
+  DRAFT:       [spanId, sceneBriefId, cells, exampleIds, promptVersion]
+  FLAGS:       [spanId, cellId, ruleId, message]
+  RISK:        [spanId, level, reasons, sourceFindingIds]
+  VOTE:        [spanId, verifier, approve, cellVerdicts, reason]
+  STAGED:      [proposalId, spanId, stagedCellIds, verdicts]
+  REPORT:      [fileId, spansProcessed, cellsStaged, cellsSkipped, ambiguities, incomplete]
+
+nodes:
+  - id: scope
+    kind: code
+    decision: "Resolve the file's ordered cell pairs with translation status"
+    in: []
+    out: SCOPE
+    # selectCellPairs + orderPairs + statusOf (auth-worker/src/lib/agent/tools/select-cells.ts)
+
+  - id: segment
+    kind: code
+    after: [scope]
+    decision: "Derive candidate span seeds from parser structure"
+    in: [SCOPE]
+    out: SPAN_SEED
+    # section labels, paragraphStart flags, cue timing gaps — seeds only, never trusted boundaries
+
+  - id: construe
+    kind: model
+    tier: mid
+    after: [segment]
+    decision: "Construe the situation the current window enacts"
+    in: [SPAN_SEED, WINDOW]
+    out: CONSTRUAL
+    # Emits closed:true when another increment of context would not change the construal,
+    # else openQuestions drive expand_window. Fixpoint test, not a confidence guess.
+
+  - id: expand_window
+    kind: code
+    after: [construe]
+    decision: "Widen the context window per the construal's open questions"
+    in: [CONSTRUAL]
+    out: WINDOW
+    # Backward first via adjacent APPROVED scene briefs (compressed context), forward via raw
+    # cells, then one layer up (file/project brief). Pass-through when construal is closed.
+
+  - id: register
+    kind: code
+    after: [expand_window]
+    decision: "Move still-open questions into the ambiguity register at loop exit"
+    in: [CONSTRUAL]
+    out: CONSTRUAL
+    # The two-exits rule: closed-with-open-questions is a SUCCESS (genuine ambiguity,
+    # preserved); budget-exhausted-unclosed marks the span incomplete for a human.
+
+  - id: summarize
+    kind: model
+    tier: fast
+    after: [register]
+    decision: "Compress the construal into an L1 scene brief within the char budget"
+    in: [CONSTRUAL]
+    out: SCENE_BRIEF
+    # Mirrors brief-generator.ts L1 discipline: stated budget + hard truncation (1600 chars)
+
+  - id: persist
+    kind: code
+    after: [summarize]
+    decision: "Upsert the scene brief row with proposed status"
+    in: [SCENE_BRIEF]
+    out: SCENE_BRIEF
+    # scene_briefs table (new), keyed {fileId, startCellId, endCellId, targetLang}
+
+  - id: draft
+    kind: model
+    tier: mid
+    after: [persist]
+    decision: "Perform the span into the target language from the scene brief"
+    in: [SCENE_BRIEF, SCOPE]
+    out: DRAFT
+    # Prompt order: system + project L1 brief + SCENE brief (L1) + ambiguity register as
+    # hard constraints + rules; user msg: validated examples + preceding validated targets +
+    # paragraph protocol (<c id> tagged cells). The performer works from the brief, not
+    # wording-by-wording — target-language idioms are explicitly licensed.
+
+  - id: lint_rules
+    kind: code
+    after: [draft]
+    decision: "Run deterministic project rule checks over the drafted cells"
+    in: [DRAFT]
+    out: FLAGS
+    # loadLintRules/lintDraft — same checks emit-stage runs, surfaced before verification
+
+  - id: route_risk
+    kind: router
+    tier: fast
+    after: [lint_rules]
+    decision: "Send high-risk spans to the verifier panel"
+    on: level
+    in: [DRAFT, FLAGS]
+    out: RISK
+    branches:
+      high: [verify_force, verify_ambiguity, verify_naturalness]
+      default: [verify_ambiguity]
+    # Risk classification reads: ambiguity-register size, lint flag count, retrieval support
+    # (validated-example coverage), span closure history. Code branches on the level field.
+    # Low-risk spans still get the ambiguity verifier — over-clarification is the failure
+    # mode this whole design exists to prevent, so it is never skipped.
+
+  - id: verify_force
+    kind: verifier
+    tier: deep
+    independent: true
+    after: [route_risk]
+    stance: "Find a move whose social force the draft alters"
+    in: [SCENE_BRIEF, DRAFT]
+    out: VOTE
+
+  - id: verify_ambiguity
+    kind: verifier
+    tier: deep
+    independent: true
+    after: [route_risk]
+    stance: "Find where the draft resolves an ambiguity the register marks as preserved"
+    in: [SCENE_BRIEF, DRAFT]
+    out: VOTE
+
+  - id: verify_naturalness
+    kind: verifier
+    tier: mid
+    independent: true
+    after: [route_risk]
+    stance: "Find target wording no native speaker would use in this situation"
+    in: [SCENE_BRIEF, DRAFT]
+    out: VOTE
+    # mid tier: naturalness is pattern-shaped judgment; force/ambiguity are contested judgment
+
+  - id: quorum
+    kind: code
+    after: [verify_force, verify_ambiguity, verify_naturalness]
+    decision: "Accept a cell draft on two of three approvals"
+    in: [VOTE]
+    out: DRAFT
+    # Per-cell verdicts. verify_ambiguity carries a veto on registered-ambiguity violations
+    # regardless of the other votes (counted in code). Rejected cells feed the redraft loop
+    # once, with the losing verdicts attached as constraints; twice-rejected cells are
+    # dropped to the report as skipped-with-reason, never staged.
+
+  - id: stage
+    kind: code
+    after: [quorum]
+    decision: "Stage accepted commits through the emit-stage perimeter"
+    in: [DRAFT]
+    out: STAGED
+    # stageEvents() — role floors, staleness pre-check, ai_suggestion/agent_run_id provenance,
+    # sceneBriefId in AiDraftProvenance (mode: "contextual"). Human gate unchanged.
+
+  - id: report
+    kind: code
+    after: [stage]
+    decision: "Aggregate span outcomes into the run report"
+    in: [STAGED, FLAGS]
+    out: REPORT
+    terminal: true
+    # Coverage is explicit: staged, skipped (with reasons), incomplete spans, ambiguity count.
+    # No silent caps — anything dropped is named here.
+
+barriers:
+  - at: quorum
+    requires: [verify_force, verify_ambiguity, verify_naturalness]
+    min_success: 2
+    mandatory: [verify_ambiguity]
+    on_partial: retry
+    retries: 1
+    # verify_ambiguity is mandatory because preserving registered ambiguity is the design's
+    # distinctive guarantee; a run where that verifier failed cannot claim it.
+
+loops:
+  - id: scene_closure
+    nodes: [construe, expand_window]
+    dedupe_against: seen
+    stop: { dry_rounds: 1, max_iterations: 6, max_units: 40 }
+    # dry round == construal unchanged by the last expansion (the fixpoint). Budget exit
+    # marks the span incomplete — surfaced in report, never silently closed.
+
+  - id: redraft
+    nodes: [draft, lint_rules, route_risk, verify_force, verify_ambiguity, verify_naturalness, quorum]
+    dedupe_against: seen
+    stop: { dry_rounds: 1, max_iterations: 2, max_units: 90 }
+    # One redraft attempt per span. Verifier rejections are constraints on the retry, not
+    # suggestions to "improve"; a second rejection ships as skipped, not as a worse draft.

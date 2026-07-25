@@ -42,6 +42,7 @@ export type EventKind =
   | 'cell.audio.attach'
   | 'cell.audio.select'
   | 'cell.audio.remove'
+  | 'cell.audio.rename'
   // Audio validation (reviewer-level). Non-chain-mutating — approves/withdraws
   // approval of a cell's selected clip; does not move cells.event_id. Distinct
   // from cell.validate, which is text-side (cells.validated / cell_validators).
@@ -312,6 +313,8 @@ export interface EventPayloads {
     voiceId?: string
     referenceAudioId?: string
     durationMs?: number
+    /** AQU-646 round 8: the take's PERMANENT display name ("Take 3"). */
+    label?: string
     /** Non-destructive playback trim window into the clip, in ms. */
     trimStartMs?: number
     trimEndMs?: number
@@ -329,6 +332,12 @@ export interface EventPayloads {
   'cell.audio.select': {
     audioId: string
     slot: 'recording' | 'generatedVoice'
+  }
+  // AQU-646 round 8: rename a take — label only, deliberately NOT a
+  // re-attach (which would also re-select the clip). null clears.
+  'cell.audio.rename': {
+    audioId: string
+    label: string | null
   }
   'cell.audio.remove': {
     audioId: string

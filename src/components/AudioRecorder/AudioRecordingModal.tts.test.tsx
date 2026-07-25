@@ -21,7 +21,7 @@ vi.mock("@/hooks/useFileAudioAttachments", () => ({
   useFileAudioAttachments: () => ({ byCellId: new Map(), isLoading: false, revalidate: vi.fn() }),
   mergeCellsWithAudio: (cells: unknown[]) => cells,
 }))
-const generateCellVoice = vi.fn(async () => true)
+const generateCellVoice = vi.fn(async (..._args: unknown[]) => true)
 vi.mock("@/lib/audio/voice-generate-helpers", () => ({
   generateCellVoice: (...args: unknown[]) => generateCellVoice(...args),
 }))
@@ -69,7 +69,7 @@ describe("AudioRecordingModal — Generate TTS (round 8)", () => {
     expect(btn).toBeEnabled()
     fireEvent.click(btn)
     await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
-    const [args] = generateCellVoice.mock.calls[0] as [{ project: ProjectRecord; cell: CellData; username: string }]
+    const [args] = generateCellVoice.mock.calls[0] as unknown as [{ project: ProjectRecord; cell: CellData; username: string }]
     expect(args.project.id).toBe("p1")
     expect(args.cell.id).toBe("c1")
     expect(args.username).toBe("sam")

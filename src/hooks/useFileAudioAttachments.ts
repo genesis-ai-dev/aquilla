@@ -46,6 +46,9 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, att: AudioAttachment
   if (selected !== att.audioId) return false
   if ((server.trimStartMs ?? null) !== (att.trimStartMs ?? null)) return false
   if ((server.trimEndMs ?? null) !== (att.trimEndMs ?? null)) return false
+  // Label compared only when the shadow explicitly carries one (round 8) —
+  // trim re-injects omit it and the server keeps the existing name.
+  if (att.label !== undefined && (server.label ?? null) !== att.label) return false
   return true
 }
 

@@ -23,7 +23,7 @@ import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
-import { TakesStrip } from "./TakesStrip"
+import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -233,6 +233,8 @@ export function AudioRecordingModal({
       // Round 6: record the take's duration so its Target-track chip renders
       // at the recording's real length. Best-effort — undefined = today's null.
       const takeDurationMs = await probeDurationMsSafe(blob)
+      // Round 8: takes are BORN with their permanent name — never renumbered.
+      const takeLabel = nextTakeLabel(recordingTakes)
       try {
         await emitCellAudioAttach({
           projectId: project.id,
@@ -243,6 +245,7 @@ export function AudioRecordingModal({
           slot: "recording",
           mimeType: blob.type || undefined,
           durationMs: takeDurationMs,
+          label: takeLabel,
           author: username,
         })
       } catch (emitErr) {
@@ -270,6 +273,7 @@ export function AudioRecordingModal({
         voiceId: null,
         referenceAudioId: null,
         durationMs: takeDurationMs ?? null,
+        label: takeLabel,
         trimStartMs: null,
         trimEndMs: null,
       })

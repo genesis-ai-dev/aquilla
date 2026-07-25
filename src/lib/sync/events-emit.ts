@@ -402,6 +402,9 @@ export interface CellAudioAttachInput {
   voiceId?: string
   referenceAudioId?: string
   durationMs?: number
+  /** AQU-646 round 8: the take's PERMANENT display name ("Take 3"). Omitted
+   *  on re-attaches (trim persists) — the projection keeps the existing one. */
+  label?: string
   /** Non-destructive playback trim window into the clip, in ms. */
   trimStartMs?: number
   trimEndMs?: number
@@ -434,11 +437,38 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.referenceAudioId !== undefined ? { referenceAudioId: input.referenceAudioId } : {}),
       ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.label !== undefined ? { label: input.label } : {}),
       ...(input.trimStartMs !== undefined ? { trimStartMs: input.trimStartMs } : {}),
       ...(input.trimEndMs !== undefined ? { trimEndMs: input.trimEndMs } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
     },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioRenameInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The take's new permanent name; null clears back to unnamed. */
+  label: string | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `cell.audio.rename` — label only; never touches selection/trims. */
+export async function emitCellAudioRename(input: CellAudioRenameInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.rename",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, label: input.label },
     clientTs: input.clientTs,
   })
   return eventId

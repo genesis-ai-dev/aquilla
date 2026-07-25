@@ -909,9 +909,9 @@ case 'cell.audio.attach': {
           .prepare(
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
-              voice_id, reference_audio_id, duration_ms, trim_start_ms, trim_end_ms,
+              voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
               timings_json, selected, deleted, event_id, created_ts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
@@ -919,6 +919,7 @@ case 'cell.audio.attach': {
               voice_id           = excluded.voice_id,
               reference_audio_id = excluded.reference_audio_id,
               duration_ms        = excluded.duration_ms,
+              label              = COALESCE(excluded.label, cell_audio.label),
               trim_start_ms      = excluded.trim_start_ms,
               trim_end_ms        = excluded.trim_end_ms,
               timings_json       = excluded.timings_json,
@@ -937,6 +938,9 @@ case 'cell.audio.attach': {
             p.voiceId ?? null,
             p.referenceAudioId ?? null,
             p.durationMs ?? null,
+            // AQU-646 round 8: a take's permanent name. Re-attaches without a
+            // label (trim persists) keep the existing one (COALESCE above).
+            p.label ?? null,
             p.trimStartMs ?? null,
             p.trimEndMs ?? null,
             p.timings ? JSON.stringify(p.timings) : null,
@@ -984,6 +988,25 @@ case 'cell.audio.attach': {
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
           )
           .bind(event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.audio.rename': {
+      // AQU-646 round 8: label-only rename — deliberately NOT a re-attach
+      // (which would also re-select the clip). Selection, trims, timings,
+      // everything else untouched. null clears back to unnamed.
+      const p = event.payload as EventPayloads['cell.audio.rename']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.rename event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET label = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(p.label, event.projectId, event.fileId, event.cellId, p.audioId),
       )
       return ['cell_audio']
     }

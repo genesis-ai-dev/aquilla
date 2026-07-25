@@ -9,6 +9,10 @@ export interface AudioAttachmentOut {
   voiceId: string | null
   referenceAudioId: string | null
   durationMs: number | null
+  /** AQU-646 round 8: the take's PERMANENT display name ("Take 3" or a user
+   *  rename). Never derived from list position; null on legacy takes until
+   *  the strip backfills. */
+  label?: string | null
   /** Non-destructive playback trim window into the clip, in ms (null = clip edge). */
   trimStartMs: number | null
   trimEndMs: number | null

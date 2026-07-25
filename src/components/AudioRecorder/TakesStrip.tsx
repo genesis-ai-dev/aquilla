@@ -1,10 +1,12 @@
-// Take management for a single cell's recording slot. Lists every recorded
-// take, lets the user audition each, circle the keeper (the active clip in the
-// "recording" slot), and delete rejects. Self-contained: resolves frontier
-// audio URLs to playable blobs and emits cell.audio.select / cell.audio.remove.
+// Take management for a single cell's recording slot: a LIST of rows (round
+// 8), one per take — name, length, audition, circle the keeper, delete.
+// Names are PERMANENT identities ("Take 3" stays "Take 3" when "Take 2"
+// dies; auto-names are placeholders users can rename, persisted via
+// cell.audio.rename). Self-contained: resolves frontier audio URLs to
+// playable blobs and emits cell.audio.select / .remove / .rename.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Bird, Check, Pause, Play, RotateCcw, Trash2 } from "lucide-react"
+import { Bird, Check, Pause, Pencil, Play, RotateCcw, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -13,8 +15,27 @@ import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
-import { emitCellAudioSelect, emitCellAudioRemove } from "@/lib/sync/events-emit"
+import { emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+
+/** "Take 7" → 7; anything else → null. */
+function parseTakeNumber(label: string | null | undefined): number | null {
+  const m = label?.match(/^Take (\d+)$/)
+  return m ? Number(m[1]) : null
+}
+
+/** The next fresh take name for a cell, given its current takes' labels. */
+export function nextTakeLabel(takes: Array<Pick<AudioAttachmentOut, "label">>): string {
+  let max = 0
+  for (const t of takes) {
+    const n = parseTakeNumber(t.label)
+    if (n != null && n > max) max = n
+  }
+  // Unlabeled legacy takes still occupy numbers once backfilled; count them
+  // in so a fresh recording never collides with a pending backfill.
+  const unlabeled = takes.filter((t) => !t.label).length
+  return `Take ${Math.max(max, unlabeled) + 1}`
+}
 
 interface Props {
   projectId: string
@@ -145,18 +166,94 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
     }
   }, [session, denoisingId, projectId, fileId, cellId, author])
 
-  // Cleaned (dn-) takes pinned above originals; originals keep 1-based "Take N"
-  // numbering among themselves.
+  // Round 8: names are PERSISTED (att.label) — never derived from position.
+  // Strip-local overrides show a rename/backfill instantly (a bus inject
+  // would also flip selection — attach semantics — so renames stay local
+  // until the server read confirms).
+  const [labelOverrides, setLabelOverrides] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    setLabelOverrides((prev) => {
+      if (prev.size === 0) return prev
+      const next = new Map(prev)
+      let changed = false
+      for (const t of takes) {
+        const o = next.get(t.audioId)
+        if (o != null && t.label === o) {
+          next.delete(t.audioId)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [takes])
+  const displayLabel = useCallback(
+    (att: AudioAttachmentOut): string =>
+      labelOverrides.get(att.audioId) ??
+      att.label ??
+      (isDenoisedAudioId(att.audioId) ? "Cleaned" : "Take"),
+    [labelOverrides],
+  )
+
+  // Inline rename (pencil → input; Enter/blur commits, Esc cancels).
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState("")
+  const commitRename = useCallback(
+    async (att: AudioAttachmentOut) => {
+      const label = renameDraft.trim()
+      setRenamingId(null)
+      if (!label || label === displayLabel(att)) return
+      setLabelOverrides((prev) => new Map(prev).set(att.audioId, label))
+      try {
+        await emitCellAudioRename({ projectId, fileId, cellId, audioId: att.audioId, label, author })
+        notifyAudioAttachmentsChanged(fileId)
+      } catch {
+        setLabelOverrides((prev) => {
+          const next = new Map(prev)
+          next.delete(att.audioId)
+          return next
+        })
+      }
+    },
+    [renameDraft, displayLabel, projectId, fileId, cellId, author],
+  )
+
+  // Legacy takes recorded before labels existed: backfill "Take N" ONCE (by
+  // the takes' stable id/order), after which every name is permanent.
+  const backfilledRef = useRef(false)
+  useEffect(() => {
+    if (backfilledRef.current || !session?.jwt) return
+    const unlabeled = takes.filter((t) => !t.label && !isDenoisedAudioId(t.audioId) && !labelOverrides.has(t.audioId))
+    if (unlabeled.length === 0) return
+    backfilledRef.current = true
+    let n = 0
+    for (const t of takes) {
+      const parsed = parseTakeNumber(t.label)
+      if (parsed != null && parsed > n) n = parsed
+    }
+    const sorted = [...unlabeled].sort((a, b) => a.audioId.localeCompare(b.audioId))
+    void (async () => {
+      for (const t of sorted) {
+        n += 1
+        const label = `Take ${n}`
+        setLabelOverrides((prev) => new Map(prev).set(t.audioId, label))
+        try {
+          await emitCellAudioRename({ projectId, fileId, cellId, audioId: t.audioId, label, author })
+        } catch {
+          /* backfill is best-effort; next mount retries */
+        }
+      }
+      notifyAudioAttachmentsChanged(fileId)
+    })()
+  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author])
+
+  // Cleaned (dn-) takes pinned above originals; stable id order within groups.
   const ordered = useMemo(() => {
     const byId = (a: AudioAttachmentOut, b: AudioAttachmentOut) => a.audioId.localeCompare(b.audioId)
     const cleaned = takes.filter((t) => isDenoisedAudioId(t.audioId)).sort(byId)
     const originals = takes.filter((t) => !isDenoisedAudioId(t.audioId)).sort(byId)
-    const number = new Map<string, number>()
-    originals.forEach((t, i) => number.set(t.audioId, i + 1))
     return [...cleaned, ...originals].map((att) => ({
       att,
       isCleaned: isDenoisedAudioId(att.audioId),
-      label: isDenoisedAudioId(att.audioId) ? "Cleaned" : `Take ${number.get(att.audioId)}`,
     }))
   }, [takes])
 
@@ -169,8 +266,9 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
       <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
         Takes ({takes.length})
       </div>
-      <div className="flex flex-wrap gap-1.5">
-        {ordered.map(({ att, isCleaned, label }) => {
+      {/* Round 8: rows, not chips — one take per line, name first. */}
+      <div className="flex flex-col gap-1">
+        {ordered.map(({ att, isCleaned }) => {
           // Use optimistic override while in-flight; fall back to server value.
           const effectiveSelectedId = optimisticSelectedId ?? selectedAudioId
           const isCircled = att.audioId === effectiveSelectedId
@@ -187,8 +285,9 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
           return (
             <div
               key={att.audioId}
+              data-testid={`take-row-${att.audioId}`}
               className={cn(
-                "flex items-center gap-1 rounded-full border py-0.5 pl-1 pr-1.5 text-xs transition-colors",
+                "flex w-full items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
                 isCircled
                   ? "border-emerald-500/60 bg-emerald-500/10"
                   : isCleaned
@@ -210,11 +309,49 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                     : <Play className="h-3.5 w-3.5" />}
                 </Button>
               </AppTooltip>
-              <span className="inline-flex items-center gap-1 tabular-nums">
-                {isCleaned && <Bird className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />}
-                {label}
-                {att.durationMs != null && (
-                  <span className="ml-1 text-muted-foreground/70">{(att.durationMs / 1000).toFixed(1)}s</span>
+              <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
+                {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
+                {renamingId === att.audioId ? (
+                  <input
+                    autoFocus
+                    data-testid={`take-rename-${att.audioId}`}
+                    value={renameDraft}
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onBlur={() => void commitRename(att)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        void commitRename(att)
+                      } else if (e.key === "Escape") {
+                        setRenamingId(null)
+                      }
+                    }}
+                    className="w-full min-w-0 rounded border border-border bg-background px-1 py-0.5 text-xs"
+                  />
+                ) : (
+                  <>
+                    <span data-testid={`take-label-${att.audioId}`} className="truncate font-medium">
+                      {displayLabel(att)}
+                    </span>
+                    {att.durationMs != null && (
+                      <span className="shrink-0 text-muted-foreground/70">{(att.durationMs / 1000).toFixed(1)}s</span>
+                    )}
+                    <AppTooltip content="Rename take">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => {
+                          setRenameDraft(displayLabel(att))
+                          setRenamingId(att.audioId)
+                        }}
+                        aria-label="Rename take"
+                        className="rounded-full text-muted-foreground/40 hover:bg-background hover:text-foreground"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    </AppTooltip>
+                  </>
                 )}
               </span>
               {!isCleaned && (

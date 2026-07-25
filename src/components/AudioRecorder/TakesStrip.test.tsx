@@ -9,12 +9,14 @@ import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-1")
 const emitRemove = vi.fn(async (..._args: unknown[]) => "evt-2")
+const emitRename = vi.fn(async (..._args: unknown[]) => "evt-3")
 const notify = vi.fn((..._args: unknown[]) => {})
 const injectOptimistic = vi.fn((..._args: unknown[]) => {})
 
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
   emitCellAudioRemove: (...args: unknown[]) => emitRemove(...args),
+  emitCellAudioRename: (...args: unknown[]) => emitRename(...args),
 }))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: (...args: unknown[]) => notify(...args),
@@ -43,13 +45,16 @@ describe("TakesStrip", () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it("lists every take with a 1-based label and duration", () => {
+  it("lists every take with its (backfilled) name and duration", async () => {
     render(
       <TakesStrip {...common} takes={[take("a", 1500), take("b", 2300)]} selectedAudioId="b" />,
     )
     expect(screen.getByText("Takes (2)")).toBeTruthy()
-    expect(screen.getByText(/Take 1/)).toBeTruthy()
-    expect(screen.getByText(/Take 2/)).toBeTruthy()
+    // Round 8: legacy unlabeled takes get names via the async backfill.
+    await waitFor(() => {
+      expect(screen.getByText(/Take 1/)).toBeTruthy()
+      expect(screen.getByText(/Take 2/)).toBeTruthy()
+    })
     expect(screen.getByText("1.5s")).toBeTruthy()
     expect(screen.getByText("2.3s")).toBeTruthy()
   })
@@ -205,5 +210,55 @@ describe("TakesStrip", () => {
       />,
     )
     expect(screen.queryByRole("button", { name: "Revert to the original recording" })).toBeNull()
+  })
+})
+
+// ── Round 8: rows with STABLE, renamable names ──
+
+const namedTake = (id: string, label: string | null, durationMs = 1000): AudioAttachmentOut =>
+  ({ ...take(id, durationMs), label })
+
+describe("TakesStrip — stable names (round 8)", () => {
+  beforeEach(() => emitRename.mockClear())
+
+  it("renders persisted labels verbatim — deleting a take never renumbers the rest", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("a", "Take 1"), namedTake("c", "Take 3")]} // Take 2 was deleted
+        selectedAudioId="a"
+      />,
+    )
+    expect(screen.getByTestId("take-label-a")).toHaveTextContent("Take 1")
+    expect(screen.getByTestId("take-label-c")).toHaveTextContent("Take 3")
+    expect(screen.queryByText("Take 2")).toBeNull()
+  })
+
+  it("takes render as ROWS (one per line), not chips", () => {
+    render(
+      <TakesStrip {...common} takes={[namedTake("a", "Take 1"), namedTake("b", "Take 2")]} selectedAudioId="a" />,
+    )
+    expect(screen.getByTestId("take-row-a")).toBeInTheDocument()
+    expect(screen.getByTestId("take-row-b")).toBeInTheDocument()
+  })
+
+  it("renaming commits cell.audio.rename and shows the new name instantly", async () => {
+    render(<TakesStrip {...common} takes={[namedTake("a", "Take 1")]} selectedAudioId="a" />)
+    fireEvent.click(screen.getByRole("button", { name: "Rename take" }))
+    const input = screen.getByTestId("take-rename-a")
+    fireEvent.change(input, { target: { value: "Best whisper" } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() => expect(emitRename).toHaveBeenCalledTimes(1))
+    expect(emitRename).toHaveBeenCalledWith(
+      expect.objectContaining({ audioId: "a", label: "Best whisper", cellId: "c1" }),
+    )
+    expect(screen.getByTestId("take-label-a")).toHaveTextContent("Best whisper")
+  })
+
+  it("legacy unlabeled takes are backfilled ONCE with sequential names", async () => {
+    render(<TakesStrip {...common} takes={[take("a", 1000), take("b", 1000)]} selectedAudioId="a" />)
+    await waitFor(() => expect(emitRename).toHaveBeenCalledTimes(2))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "a", label: "Take 1" }))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "b", label: "Take 2" }))
   })
 })

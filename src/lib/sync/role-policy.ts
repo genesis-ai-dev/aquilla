@@ -43,6 +43,7 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.attach": ROLE.CONTRIBUTOR,
   "cell.audio.select": ROLE.CONTRIBUTOR,
   "cell.audio.remove": ROLE.CONTRIBUTOR,
+  "cell.audio.rename": ROLE.CONTRIBUTOR,
 
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,

@@ -38,6 +38,7 @@ export type OutboxEventKind =
   | "cell.audio.attach"
   | "cell.audio.select"
   | "cell.audio.remove"
+  | "cell.audio.rename"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
   // File lifecycle.
@@ -250,6 +251,8 @@ export interface OutboxEventPayloads {
     voiceId?: string
     referenceAudioId?: string
     durationMs?: number
+    /** AQU-646 round 8: the take's permanent display name. */
+    label?: string
     /** Non-destructive playback trim window into the clip, in ms. */
     trimStartMs?: number
     trimEndMs?: number
@@ -264,6 +267,11 @@ export interface OutboxEventPayloads {
   }
   "cell.audio.remove": {
     audioId: string
+  }
+  // AQU-646 round 8: rename a take — label only, never selection/trims.
+  "cell.audio.rename": {
+    audioId: string
+    label: string | null
   }
 
   /**

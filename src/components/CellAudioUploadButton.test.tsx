@@ -39,6 +39,12 @@ vi.mock("@/lib/audio/sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: () => async () => "sync-tok",
 }))
 
+// Round 6: the duration probe never resolves under happy-dom (media metadata
+// doesn't load) — stub it so the attach proceeds immediately with a duration.
+vi.mock("@/lib/import", () => ({
+  probeDurationMsSafe: async () => 2500,
+}))
+
 const markProjectHasAudioDataSoon = vi.fn()
 vi.mock("@/lib/audio/project-audio-state", () => ({
   markProjectHasAudioDataSoon: (...args: unknown[]) => markProjectHasAudioDataSoon(...args),

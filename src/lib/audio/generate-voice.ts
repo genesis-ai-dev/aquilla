@@ -16,6 +16,7 @@ import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeCellTts } from "@/lib/sync/tts"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -155,7 +156,10 @@ export async function generateAndAttachCellVoice(
 
   // 3. Attach durably (generatedVoice slot). The bus poke surfaces it via the
   // per-file read; the WS broadcast does the same for collaborators.
+  // Round 6: probe the clip's duration so its Target-track chip renders at
+  // the generated audio's real length (best-effort).
   const objectName = `${audioId}.${ext}`
+  const generatedDurationMs = await probeDurationMsSafe(playable)
   await emitCellAudioAttach({
     projectId: args.projectId,
     fileId: args.fileId,
@@ -166,6 +170,7 @@ export async function generateAndAttachCellVoice(
     mimeType: "audio/wav",
     voiceId: voice.id,
     ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+    ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
     author: args.username,
   })
   notifyAudioAttachmentsChanged(args.fileId)

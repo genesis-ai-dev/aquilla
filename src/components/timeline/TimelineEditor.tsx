@@ -109,6 +109,7 @@ export function TimelineEditor({
   editable,
   fileId,
   onRetimeSubtitle,
+  onRetimeTarget,
   onCommitTarget,
   onLinkVideo,
   onTranscribe,
@@ -217,7 +218,7 @@ export function TimelineEditor({
     () =>
       dialogue.flatMap((c) => {
         const target = activeTargetForCell(c)
-        return target ? [{ cell: c, kind: target.kind }] : []
+        return target ? [{ cell: c, kind: target.kind, audioId: target.audioId }] : []
       }),
     [dialogue],
   )
@@ -477,8 +478,11 @@ export function TimelineEditor({
               viewStartSec={viewStartSec}
               viewEndSec={viewEndSec}
               selectedId={selectedId}
+              editable={editable}
+              snapEnabled={snapOn}
               onSelect={setSelectedId}
               onSeek={laneProps.onSeek}
+              onRetimeTarget={onRetimeTarget}
             />
             {untimed.length > 0 && (
               <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">

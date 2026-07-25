@@ -18,6 +18,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
+import { probeDurationMsSafe } from "@/lib/import"
 import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
@@ -208,6 +209,9 @@ export function AudioRecordingModal({
       const savedAudioId = result.audioId
       setTranscribeStatus(savedAudioId, { kind: "idle" })
       markProjectHasAudioDataSoon(project.id)
+      // Round 6: record the take's duration so its Target-track chip renders
+      // at the recording's real length. Best-effort — undefined = today's null.
+      const takeDurationMs = await probeDurationMsSafe(blob)
       try {
         await emitCellAudioAttach({
           projectId: project.id,
@@ -217,6 +221,7 @@ export function AudioRecordingModal({
           url: result.url,
           slot: "recording",
           mimeType: blob.type || undefined,
+          durationMs: takeDurationMs,
           author: username,
         })
       } catch (emitErr) {
@@ -243,7 +248,7 @@ export function AudioRecordingModal({
         mimeType: blob.type || null,
         voiceId: null,
         referenceAudioId: null,
-        durationMs: null,
+        durationMs: takeDurationMs ?? null,
         trimStartMs: null,
         trimEndMs: null,
       })

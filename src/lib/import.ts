@@ -1618,7 +1618,7 @@ async function decodeAudioFile(
  * Rejects on failure; callers treat that as "unknown timing" (the segment is
  * flagged untimed, never given synthetic timecodes).
  */
-export function probeMediaDurationMs(file: File): Promise<number> {
+export function probeMediaDurationMs(file: Blob): Promise<number> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file)
     const isVideo = file.type.startsWith("video/")
@@ -1637,6 +1637,23 @@ export function probeMediaDurationMs(file: File): Promise<number> {
     }
     el.src = url
   })
+}
+
+/**
+ * Round 6: best-effort duration probe for attach-time metadata. Races the
+ * probe against a timeout (happy-dom never fires loadedmetadata; a corrupt
+ * blob must not block the attach) and degrades to undefined — the attachment
+ * simply carries no durationMs, exactly today's behavior.
+ */
+export async function probeDurationMsSafe(blob: Blob, timeoutMs = 3000): Promise<number | undefined> {
+  try {
+    return await Promise.race([
+      probeMediaDurationMs(blob),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), timeoutMs)),
+    ])
+  } catch {
+    return undefined
+  }
 }
 
 export interface ParatextImportProgress {

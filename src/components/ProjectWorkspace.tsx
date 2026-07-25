@@ -1474,6 +1474,29 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile, revalidateCells],
   )
 
+  // Round 6 (SUB-38): assign a voice/character from a source card's picker.
+  // PURE assignment (no auto-synthesis — generation stays an explicit act);
+  // the apply-to-speaker option covers every line sharing the diarized name.
+  const handleTimelineAssignVoice = useCallback(
+    (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) => {
+      const castName =
+        cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
+      if (opts?.applyToSpeaker && castName) {
+        const ids = getActiveCells()
+          .filter((c) => c.metadata && (c.metadata.cast_name as unknown) === castName)
+          .map((c) => c.id)
+        tts.assignCells(ids.length > 0 ? ids : [cell.id], voiceId)
+        return
+      }
+      tts.assignCells([cell.id], voiceId)
+    },
+    [tts, getActiveCells],
+  )
+  const timelineVoiceControl = useMemo(
+    () => ({ settings: tts.settings, onAssign: handleTimelineAssignVoice }),
+    [tts.settings, handleTimelineAssignVoice],
+  )
+
   // Round 6: move a section's dub chip → target_start_ms (absolute file ms).
   const handleRetimeTarget = useCallback(
     async (cellId: string, startSec: number) => {
@@ -5025,6 +5048,7 @@ export function ProjectWorkspace() {
                   fileId={activeFile.id}
                   onRetimeSubtitle={handleRetimeSubtitle}
                   onRetimeTarget={handleRetimeTarget}
+                  voiceControl={timelineVoiceControl}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
                   onSeekToTime={handleTimelineSeekToTime}

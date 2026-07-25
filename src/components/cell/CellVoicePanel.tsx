@@ -15,25 +15,18 @@
 // play-queue, so each line gets an independent scrubber + volume; the app-wide
 // audio-coordinator still guarantees only one source plays at a time.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import {
-  Check, ChevronsUpDown, Pause, Play, Search, UserPlus, Volume2, VolumeX,
-} from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
+import { Pause, Play, UserPlus, Volume2, VolumeX } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { useVoiceRecency, touchVoice } from "@/lib/store/voice-recency"
 import { CropButton } from "./CropEditor"
+import { VoiceCombobox } from "@/components/voice/VoiceCombobox"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -459,87 +452,5 @@ export function CellVoicePanel({
   )
 }
 
-/** The cast combobox: a single trigger showing the active voice that opens a
- *  searchable list of the whole cast. Picking one (re)voices the line instantly
- *  — same one-click action as before, just collapsed so a large cast (60+
- *  voices) stays usable. The active voice spins while voicing. */
-function VoiceCombobox({
-  voices, active, busy, onPick,
-}: {
-  voices: Voice[]
-  active: Voice
-  busy: boolean
-  onPick: (voiceId: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return q ? voices.filter((v) => v.name.toLowerCase().includes(q)) : voices
-  }, [voices, query])
-  // Forget the search between openings so the next open starts on the full cast.
-  useEffect(() => {
-    if (!open) setQuery("")
-  }, [open])
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            disabled={busy}
-            title="Choose a voice"
-            aria-label={`Voice: ${active.name}. Choose a voice`}
-            className="w-full justify-start gap-1.5"
-          >
-            <span className="relative shrink-0">
-              <VoiceAvatar voice={active} size={18} />
-              {busy && (
-                <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
-                  <Spinner className="h-3 w-3" />
-                </span>
-              )}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
-            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </Button>
-        }
-      />
-      <PopoverContent align="start" side="top" className="w-60 p-2">
-        <InputGroup className="mb-1.5">
-          <InputGroupAddon>
-            <Search />
-          </InputGroupAddon>
-          <InputGroupInput
-            type="text"
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search voices…"
-          />
-        </InputGroup>
-        <div className="max-h-56 space-y-0.5 overflow-y-auto">
-          {filtered.length === 0 ? (
-            <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">No matches</p>
-          ) : (
-            filtered.map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                disabled={busy}
-                onClick={() => { onPick(v.id); setOpen(false) }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
-              >
-                <VoiceAvatar voice={v} size={20} />
-                <span className="min-w-0 flex-1 truncate">{v.name}</span>
-                {v.id === active.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-              </button>
-            ))
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
+// Round 6: VoiceCombobox moved to src/components/voice/VoiceCombobox.tsx so
+// the timeline's source cards can reuse the picker (SUB-38).

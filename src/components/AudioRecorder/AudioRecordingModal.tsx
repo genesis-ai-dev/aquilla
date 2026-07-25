@@ -8,7 +8,7 @@
 // preview/retake step between stop and upload.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Mic, Play, Square, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
+import { ChevronLeft, ChevronRight, Mic, Play, Sparkles, Square, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -19,6 +19,7 @@ import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { probeDurationMsSafe } from "@/lib/import"
+import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
@@ -176,6 +177,26 @@ export function AudioRecordingModal({
     // Immediately start the next take — user already signalled intent.
     setTimeout(startFlow, 0)
   }, [recorder, previewUrl, startFlow])
+
+  // Round 8: durable TTS from the recording surface — the clear "regenerate"
+  // counterpart to re-recording. Uses the project engine + this cell's
+  // assigned voice; the result attaches to the generated-voice slot.
+  const [ttsBusy, setTtsBusy] = useState(false)
+  const [ttsDone, setTtsDone] = useState(false)
+  useEffect(() => {
+    setTtsDone(false)
+  }, [activeCellId])
+  const generateTts = useCallback(async () => {
+    if (!activeCell || !session || ttsBusy) return
+    setTtsBusy(true)
+    setTtsDone(false)
+    try {
+      const ok = await generateCellVoice({ project, cell: activeCell, session, username })
+      if (ok) setTtsDone(true)
+    } finally {
+      setTtsBusy(false)
+    }
+  }, [activeCell, session, ttsBusy, project, username])
 
   const save = useCallback(async () => {
     if (recorder.state.kind !== "stopped") return
@@ -555,9 +576,43 @@ export function AudioRecordingModal({
           )}
 
           {(displayPhase === "idle" || displayPhase === "error") && (
-            <Button size="sm" onClick={startFlow}>
-              <Play className="mr-1 h-4 w-4" /> Start
-            </Button>
+            <>
+              {/* Round 8: a clear re-record vs REGENERATE choice — durable TTS
+                  right where recording lives. The result lands in the
+                  generated-voice slot (the sparkle chip on the Target track),
+                  so it deliberately doesn't join the recorded-takes list. */}
+              <AppTooltip
+                content={
+                  !activeCell?.translated?.trim()
+                    ? "Translate this line first to generate voice"
+                    : ttsDone
+                      ? "Voice generated — it plays on the Target track"
+                      : "Generate this line's voice with the project's engine"
+                }
+              >
+                <span className="inline-flex">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="rec-generate-tts"
+                    disabled={!activeCell?.translated?.trim() || ttsBusy}
+                    onClick={() => void generateTts()}
+                  >
+                    {ttsBusy ? (
+                      <Spinner className="mr-1 size-4" />
+                    ) : ttsDone ? (
+                      <Check className="mr-1 h-4 w-4 text-emerald-500" />
+                    ) : (
+                      <Sparkles className="mr-1 h-4 w-4" />
+                    )}
+                    Generate TTS
+                  </Button>
+                </span>
+              </AppTooltip>
+              <Button size="sm" onClick={startFlow}>
+                <Play className="mr-1 h-4 w-4" /> Start
+              </Button>
+            </>
           )}
 
           {displayPhase === "counting" && (

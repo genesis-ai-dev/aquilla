@@ -1,0 +1,40 @@
+{
+  "locator": {
+    "kind": "idml",
+    "memberPath": "Stories/Story_main.xml",
+    "storyId": "story-main",
+    "elementPath": "/idPkg:Story[1]/Story[1]/ParagraphStyleRange[1]",
+    "elementId": "p-mixed",
+    "scope": "story-paragraph",
+    "part": 0,
+    "slotIndexes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "sourceBlockHash": "b69e43700a9cc3bac78d48888deedc8577baa99f56c096894f5288a065f85442"
+  },
+  "metadata": {
+    "version": 2,
+    "slotCount": 8,
+    "editableSlotIndexes": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "protectedTokenCount": 8,
+    "anchorSequenceHash": "e79b5d5a9366578adff297e4f2609642a3a64cdd5ffb24607d5613e6dfd47af0"
+  },
+  "sourceHtml": "<p data-idml-version=\"2\"><span data-idml-slot=\"0\" data-idml-character-style=\"CharacterStyle/Bold\" data-idml-protected=\"slot\">  Bold &amp; preserved  </span><span data-idml-slot=\"1\" data-idml-character-style=\"CharacterStyle/Bold\" data-idml-protected=\"slot\">ثُمَّ RTL</span><span data-idml-slot=\"2\" data-idml-character-style=\"CharacterStyle/Italic\" data-idml-protected=\"slot\">漢字とかな</span><br data-idml-token=\"0\" data-idml-token-kind=\"br\" data-idml-protected=\"token\" contenteditable=\"false\"><span data-idml-slot=\"3\" data-idml-character-style=\"CharacterStyle/Italic\" data-idml-protected=\"slot\">क्‍षेत्र é</span><span data-idml-token=\"1\" data-idml-token-kind=\"cross-reference\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-token=\"2\" data-idml-token-kind=\"variable\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-token=\"3\" data-idml-token-kind=\"inline-object\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-token=\"4\" data-idml-token-kind=\"unknown\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-slot=\"4\" data-idml-character-style=\"CharacterStyle/Italic\" data-idml-protected=\"slot\"></span><span data-idml-slot=\"5\" data-idml-character-style=\"CharacterStyle/Underline\" data-idml-protected=\"slot\">one</span><span data-idml-token=\"5\" data-idml-token-kind=\"tab\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-slot=\"6\" data-idml-character-style=\"CharacterStyle/Underline\" data-idml-protected=\"slot\">two</span><span data-idml-token=\"6\" data-idml-token-kind=\"tab\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-slot=\"7\" data-idml-character-style=\"CharacterStyle/Underline\" data-idml-protected=\"slot\"></span><span data-idml-token=\"7\" data-idml-token-kind=\"inline-object\" data-idml-protected=\"token\" contenteditable=\"false\"></span></p>",
+  "targetHtml": "<p data-idml-version=\"2\"><span data-idml-slot=\"0\" data-idml-character-style=\"CharacterStyle/Bold\" data-idml-protected=\"slot\">  Bold &amp; preserved  </span><span data-idml-slot=\"1\" data-idml-character-style=\"CharacterStyle/Bold\" data-idml-protected=\"slot\">ثُمَّ RTL</span><span data-idml-slot=\"2\" data-idml-character-style=\"CharacterStyle/Italic\" data-idml-protected=\"slot\">translated CJK</span><br data-idml-token=\"0\" data-idml-token-kind=\"br\" data-idml-protected=\"token\" contenteditable=\"false\"><span data-idml-slot=\"3\" data-idml-character-style=\"CharacterStyle/Italic\" data-idml-protected=\"slot\">क्‍षेत्र é</span><span data-idml-token=\"1\" data-idml-token-kind=\"cross-reference\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-token=\"2\" data-idml-token-kind=\"variable\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-token=\"3\" data-idml-token-kind=\"inline-object\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-token=\"4\" data-idml-token-kind=\"unknown\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-slot=\"4\" data-idml-character-style=\"CharacterStyle/Italic\" data-idml-protected=\"slot\"></span><span data-idml-slot=\"5\" data-idml-character-style=\"CharacterStyle/Underline\" data-idml-protected=\"slot\">one</span><span data-idml-token=\"5\" data-idml-token-kind=\"tab\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-slot=\"6\" data-idml-character-style=\"CharacterStyle/Underline\" data-idml-protected=\"slot\">two</span><span data-idml-token=\"6\" data-idml-token-kind=\"tab\" data-idml-protected=\"token\" contenteditable=\"false\"></span><span data-idml-slot=\"7\" data-idml-character-style=\"CharacterStyle/Underline\" data-idml-protected=\"slot\"></span><span data-idml-token=\"7\" data-idml-token-kind=\"inline-object\" data-idml-protected=\"token\" contenteditable=\"false\"></span></p>"
+}

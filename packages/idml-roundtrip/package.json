@@ -22,16 +22,24 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run --config vitest.config.ts",
+    "test": "pnpm run fixtures:check && pnpm run test:unit && pnpm run test:conformance:browser",
+    "test:unit": "vitest run --config vitest.config.ts",
+    "test:conformance:node": "vitest run --config vitest.config.ts src/conformance/corpus.node.test.ts",
+    "test:conformance:browser": "tsx scripts/run-browser-conformance.ts",
     "test:watch": "vitest --config vitest.config.ts",
+    "fixtures:generate": "tsx scripts/generate-corpus.ts",
+    "fixtures:check": "tsx scripts/generate-corpus.ts --check",
     "prepack": "pnpm run build && pnpm run test"
   },
   "dependencies": {
     "jszip": "3.10.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
     "typescript": "~7.0.2",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10"
   },
   "publishConfig": {

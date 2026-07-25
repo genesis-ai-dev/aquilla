@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
+import {
+  exportIdml,
+  parseIdml,
+  type IdmlFormatMetadataV2,
+  type IdmlLocator,
+  type IdmlTranslation,
+} from "@aquilla/idml-roundtrip"
 import { buildEventProjectionStmts } from "../../../sync-worker/src/events/event-projection"
+import { makeIdml } from "../../../packages/idml-roundtrip/src/test-helpers/idml-fixture"
 import type { CodexCell, CodexNotebookFile } from "../codex-editor/types"
 import {
   buildIdmlMetadataPatchEvents,
@@ -165,5 +173,74 @@ describe("IDML metadata backfill events", () => {
     expect(recorded[0]!.args[0]).toContain('"version":2')
     expect(recorded[0]!.args[1]).toContain('data-idml-slot="0"')
     expect(recorded[1]!.args[0]).toContain('data-idml-slot="0"')
+  })
+
+  it("exports migrated Codex metadata identically to direct web import metadata", async () => {
+    const storyXml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<idPkg:Story xmlns:idPkg="urn:adobe:ns:indesign/idml/1.0/packaging">',
+      '<Story Self="u1">',
+      sourceBlockXml,
+      "</Story>",
+      "</idPkg:Story>",
+    ].join("")
+    const designmapXml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<idPkg:DesignMap xmlns:idPkg="urn:adobe:ns:indesign/idml/1.0/packaging">',
+      '<idPkg:Story src="Stories/Story_u1.xml"/>',
+      "</idPkg:DesignMap>",
+    ].join("")
+    const original = await makeIdml({
+      "designmap.xml": designmapXml,
+      "Stories/Story_u1.xml": storyXml,
+      "Stories/Story_u3.xml": null,
+      "Stories/Story_u9.xml": null,
+      "Resources/TextVariables.xml": null,
+    })
+    const direct = await parseIdml(original)
+    expect(direct.units).toHaveLength(1)
+    const directUnit = direct.units[0]!
+    const directTargetHtml = directUnit.sourceHtml.replace(">Hello<", ">Bonjour<")
+    const directTranslation: IdmlTranslation = {
+      unitId: directUnit.id,
+      locator: directUnit.locator,
+      metadata: directUnit.metadata,
+      sourceHtml: directUnit.sourceHtml,
+      targetHtml: directTargetHtml,
+    }
+
+    const target = legacyCell(sourceHtml.replace(">Hello</span>", ">Bonjour</span>"))
+    const produced = buildIdmlMetadataPatchEvents(
+      { source: notebook(legacyCell()), target: notebook(target) },
+      {
+        projectId: "project-1",
+        fileId: "file-1",
+        author: "legacy-import",
+        clientTs: 0,
+      },
+    )
+    expect(produced.readiness).toBe("native-ready")
+    const patch = produced.events[0]!
+    const payload = patch.payload as {
+      metadata: {
+        idml: IdmlFormatMetadataV2
+        aquillaImport: { sourceLocator: IdmlLocator }
+      }
+      valueHtml: string
+      targetHtml: string
+    }
+    const migratedTranslation: IdmlTranslation = {
+      unitId: directUnit.id,
+      locator: payload.metadata.aquillaImport.sourceLocator,
+      metadata: payload.metadata.idml,
+      sourceHtml: payload.valueHtml,
+      targetHtml: payload.targetHtml,
+    }
+
+    const directExport = await exportIdml(original, [directTranslation], { strict: true })
+    const migratedExport = await exportIdml(original, [migratedTranslation], { strict: true })
+    expect(migratedExport.report).toEqual(directExport.report)
+    expect(migratedExport.bytes).toEqual(directExport.bytes)
+    expect((await parseIdml(migratedExport.bytes)).units[0]!.sourceText).toBe("Bonjour")
   })
 })

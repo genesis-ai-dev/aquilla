@@ -17,8 +17,9 @@ vi.mock("@/hooks/useAudioRecorder", () => ({
     reset: vi.fn(),
   }),
 }))
+const attachmentsState = vi.hoisted(() => ({ byCellId: new Map<string, unknown>() }))
 vi.mock("@/hooks/useFileAudioAttachments", () => ({
-  useFileAudioAttachments: () => ({ byCellId: new Map(), isLoading: false, revalidate: vi.fn() }),
+  useFileAudioAttachments: () => ({ byCellId: attachmentsState.byCellId, isLoading: false, revalidate: vi.fn() }),
   mergeCellsWithAudio: (cells: unknown[]) => cells,
 }))
 const generateCellVoice = vi.fn(async (..._args: unknown[]) => true)
@@ -52,6 +53,35 @@ function renderModal(cell: CellData) {
     />,
   )
 }
+
+describe("AudioRecordingModal — takes strip contents", () => {
+  beforeEach(() => {
+    attachmentsState.byCellId = new Map()
+  })
+
+  it("the imported SOURCE clip (fileId-seeded) never appears as a take", () => {
+    const att = (audioId: string) => ({
+      audioId, url: `frontier-audio://${audioId}`, slot: "recording", mimeType: "audio/mpeg",
+      voiceId: null, referenceAudioId: null, durationMs: 4000,
+      trimStartMs: null, trimEndMs: null, label: "Take 1",
+    })
+    attachmentsState.byCellId = new Map([
+      ["c1", {
+        attachments: {
+          "audio-f1-100-clip.mp3": { ...att("audio-f1-100-clip.mp3"), label: null },
+          "audio-c1-200-take.webm": att("audio-c1-200-take.webm"),
+        },
+        selectedAudioId: "audio-c1-200-take.webm",
+        selectedGeneratedVoiceAudioId: null,
+        audioTimings: {},
+      }],
+    ])
+    renderModal(cellWith("bonjour"))
+    expect(screen.getByTestId("take-row-audio-c1-200-take.webm")).toBeInTheDocument()
+    expect(screen.queryByTestId("take-row-audio-f1-100-clip.mp3")).toBeNull()
+    expect(screen.getByText("Takes (1)")).toBeInTheDocument()
+  })
+})
 
 describe("AudioRecordingModal — Generate TTS (round 8)", () => {
   beforeEach(() => generateCellVoice.mockClear())

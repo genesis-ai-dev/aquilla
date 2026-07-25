@@ -25,7 +25,7 @@ import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
-import { buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
+import { audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
@@ -83,8 +83,13 @@ export function AudioRecordingModal({
   const recordingTakes = useMemo(
     () => Object.values(audioEntry?.attachments ?? {})
       .filter((a) => a.slot === "recording")
+      // The imported SOURCE clip rides the recording slot too (fileId-seeded,
+      // per SUB-29 provenance) but is not a take — keep it out of the strip so
+      // it can't be listed, named "Take 1", or deleted from here. The Source
+      // audio track owns it.
+      .filter((a) => !audioIdSeededWith(a.audioId, activeCell?.fileId ?? ""))
       .sort((a, b) => a.audioId.localeCompare(b.audioId)),
-    [audioEntry],
+    [audioEntry, activeCell?.fileId],
   )
 
   // Whenever the user switches cells, reset the capture state so the new cell

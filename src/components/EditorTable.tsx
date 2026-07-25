@@ -163,6 +163,11 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
+import {
+  hasIdmlCellMetadata,
+  resolveIdmlEditorConfiguration,
+  validateIdmlEditorCommit,
+} from "@/lib/richtext/idml-editor"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 import {
   useCellPresence,
@@ -767,6 +772,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0)
   const [viewableIndexes, setViewableIndexes] = useState<number[]>([])
   const [chapterVisibleIndex, setChapterVisibleIndex] = useState<number | null>(null)
+  const [idmlBatchError, setIdmlBatchError] = useState<string | null>(null)
   const [chapterNavigationSelection, setChapterNavigationSelection] = useState<{
     fileId: string | null
     label: string
@@ -1372,7 +1378,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (isDragging.current && dragCells.current.size > 1) {
       const selectedIds = displayCellIdsRef.current.filter((id) => dragCells.current.has(id))
       const selected = cellStore.getCellsByIds(selectedIds)
-      onCompleteBatch(selected)
+      if (selected.some((cell) => hasIdmlCellMetadata(cell.metadata))) {
+        setIdmlBatchError(
+          "Batch AI drafting is disabled for selections containing protected IDML cells.",
+        )
+      } else {
+        setIdmlBatchError(null)
+        onCompleteBatch(selected)
+      }
     }
     isDragging.current = false
     dragCells.current = new Set()
@@ -1879,6 +1892,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 flex-shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             {readOnlyLabel}
+          </div>
+        )}
+        {idmlBatchError && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-2 border-b bg-destructive/10 px-4 py-2 text-xs text-destructive"
+          >
+            <span>{idmlBatchError}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Dismiss IDML batch warning"
+              onClick={() => setIdmlBatchError(null)}
+            >
+              ✕
+            </Button>
           </div>
         )}
         {chapterNavigationItems.length > 0 && activeChapterLabel && (
@@ -3577,6 +3607,14 @@ function EditorRow({
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
+  const idmlConfiguration = useMemo(
+    () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
+    [cell.metadata, cell.originalHtml],
+  )
+  const canEditSourceForCell = canEditSource && !idmlConfiguration
+  const sourceReadOnlyReasonForCell = idmlConfiguration
+    ? "IDML source text is protected because changing it would invalidate the original package locator."
+    : sourceReadOnlyReason
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const sourceCellDirection = useMemo(
@@ -3798,6 +3836,11 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
       return
     }
+    const idmlCommitError = validateIdmlEditorCommit(idmlConfiguration, valueHtml)
+    if (idmlCommitError) {
+      setWriteError(idmlCommitError)
+      return
+    }
     // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
     // signature (`status original translated`) shifts and `useHealth` re-runs
     // `checkRulesForCell` for this one cell on the next render — no other
@@ -3881,7 +3924,7 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder, idmlConfiguration])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -3892,6 +3935,12 @@ function EditorRow({
   // then re-focus the cell editor (the new text is now visible there) and show
   // a brief "Saved" confirmation.
   const completeSingleAndReturn = useCallback(async () => {
+    if (idmlConfiguration) {
+      setWriteError(
+        "AI drafting for protected IDML cells is disabled until the model returns the exact formatting-anchor sequence.",
+      )
+      return
+    }
     const saved = await onCompleteSingle(cell)
     onActivateEditor(cell.id)
     // AQU-670: only confirm "Saved" when the draft actually committed. On a
@@ -3905,7 +3954,7 @@ function EditorRow({
       setShowSaved(false)
       savedTimerRef.current = null
     }, 2400)
-  }, [onCompleteSingle, cell, onActivateEditor])
+  }, [onCompleteSingle, cell, onActivateEditor, idmlConfiguration])
 
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
@@ -3918,7 +3967,7 @@ function EditorRow({
   // PROJECT_LEAD floor and the live-mode mirror lock; `enqueueEvent` also mirrors
   // the role floor client-side (InsufficientRoleError).
   const handleSourceCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
-    if (!canEditSource || !project.id) return
+    if (!canEditSourceForCell || !project.id) return
     // Belt-and-suspenders role-mirror (canEditSource already encodes ≥500), in
     // case a role downgrade hasn't propagated to the capability yet.
     if (!canPerform("source.cell.commit", project.syncRole?.level ?? null)) {
@@ -3947,7 +3996,7 @@ function EditorRow({
       setWriteError(msg)
       setSourceDraft(null)
     })
-  }, [canEditSource, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
+  }, [canEditSourceForCell, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
 
   // Reconcile the pending source head against the projection — the mirror of
   // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
@@ -3977,13 +4026,13 @@ function EditorRow({
   // — the user kept typing into a void. Closing is bounded loss (only the text
   // since the flip moment); the writeError banner says WHY so it isn't silent.
   useEffect(() => {
-    if (!sourceEditing || canEditSource) return
+    if (!sourceEditing || canEditSourceForCell) return
     setSourceEditing(false)
     setWriteError(
-      sourceReadOnlyReason ??
+      sourceReadOnlyReasonForCell ??
         "Source editing is no longer available on this project — the source editor was closed.",
     )
-  }, [sourceEditing, canEditSource, sourceReadOnlyReason])
+  }, [sourceEditing, canEditSourceForCell, sourceReadOnlyReasonForCell])
 
   // Focus the inline source editor when entering edit mode (mirrors the target
   // editor's focus effect, but scoped to the source column so it can't grab the
@@ -5165,7 +5214,7 @@ function EditorRow({
               {/* Source-edit affordance (project_lead+, non-live projects). Emits
                   source.cell.commit — the template-owner correction that propagates
                   downstream. Read-only source stays the default; editing is explicit. */}
-              {canEditSource ? (
+              {canEditSourceForCell ? (
                 <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
                   <button
                     type="button"
@@ -5182,11 +5231,11 @@ function EditorRow({
                     <Pencil className="h-3 w-3" />
                   </button>
                 </AppTooltip>
-              ) : sourceReadOnlyReason ? (
+              ) : sourceReadOnlyReasonForCell ? (
                 // Force-locked source lane (DCS pin): keep an explained
                 // affordance where the pencil would be instead of letting it
                 // silently vanish (AQU-615 review nit).
-                <AppTooltip content={sourceReadOnlyReason} className="max-w-xs">
+                <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
                   <span
                     aria-label="Source is locked"
                     className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
@@ -5301,6 +5350,8 @@ function EditorRow({
                     cellId={cell.id}
                     initialPlain={visibleTranslated}
                     initialHtml={visibleTranslatedHtml}
+                    idmlConfiguration={idmlConfiguration}
+                    onIdmlValidationError={setWriteError}
                     // AQU-667: only authoritative when we're not masking it with a
                     // local human draft — then `visibleTranslated` IS cell.translated.
                     aiDrafted={!localTargetDraft && cell.aiDrafted}
@@ -5578,7 +5629,9 @@ function EditorRow({
               <RailButton
                 icon={<Sparkles className="h-3.5 w-3.5" />}
                 tooltip={
-                  isAnonymous
+                  idmlConfiguration
+                    ? "AI drafting for IDML requires protected-anchor support"
+                    : isAnonymous
                     ? "Sign in for AI translations"
                     : !editable
                       ? "Read-only (imported from git)"
@@ -5626,7 +5679,8 @@ function EditorRow({
                   !isCompletionAvailable ||
                   !editable ||
                   isAnonymous ||
-                  isLoading
+                  isLoading ||
+                  Boolean(idmlConfiguration)
                 }
                 pulsing={isLoading}
                 onMouseDown={onDragStart}
@@ -5648,6 +5702,7 @@ function EditorRow({
                   on `isLoading` alone would let a second click re-fire
                   completeParagraph mid-fan-out). */}
               {cell.paragraphStart === true &&
+                !idmlConfiguration &&
                 editable &&
                 !isAnonymous &&
                 isCompletionConfigured &&
@@ -5678,7 +5733,7 @@ function EditorRow({
                   Regenerate raises the sampling temperature (useCompletion) so
                   the new candidate differs, and overwrites the current draft
                   (last-write-wins; the prior text stays in cell history). */}
-              {editable && !isAnonymous && cell.status !== "validated" && visibleTranslated.trim() && (
+              {!idmlConfiguration && editable && !isAnonymous && cell.status !== "validated" && visibleTranslated.trim() && (
                 <RailButton
                   icon={<RefreshCw className="h-3.5 w-3.5" />}
                   tooltip={
@@ -6544,7 +6599,7 @@ function EditorRow({
           paragraph group as one unit. Always confirms — no per-preference
           opt-out exists for this action (unlike the single-cell Replace
           confirm above). */}
-      {onCompleteParagraph && (
+      {onCompleteParagraph && !idmlConfiguration && (
         <ParagraphDraftConfirmDialog
           open={showParagraphConfirm}
           totalCount={paragraphGroupSize ?? 0}

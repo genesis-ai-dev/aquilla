@@ -4,6 +4,16 @@ import { injectFootnoteSpans } from "@/lib/richtext/usfm-plain-text"
 
 const ALLOWED_TAGS = ["b", "strong", "i", "em", "u", "s", "strike", "del", "code", "p", "br", "span"]
 const ALLOWED_ATTR = ["data-usfm-footnote"]
+const IDML_ALLOWED_TAGS = ["p", "br", "span"]
+const IDML_ALLOWED_ATTR = [
+  "data-idml-version",
+  "data-idml-slot",
+  "data-idml-character-style",
+  "data-idml-protected",
+  "data-idml-token",
+  "data-idml-token-kind",
+  "contenteditable",
+]
 
 export interface ReadOnlyRichTextOptions {
   footnoteNumberOffset?: number
@@ -22,7 +32,56 @@ export function sanitizeEditorHtml(html: string): string {
   return DOMPurify.sanitize(injectFootnoteSpans(html), {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
+    ALLOW_ARIA_ATTR: false,
+    ALLOW_DATA_ATTR: false,
   })
+}
+
+/**
+ * The IDML editor accepts only the canonical protected-anchor vocabulary.
+ * Keep this separate from the general rich-text sanitizer: allowing IDML data
+ * attributes globally would turn ordinary spans into misleading pseudo
+ * anchors, while allowing formatting tags inside an IDML slot would violate
+ * the surgical-export contract.
+ */
+export function sanitizeIdmlEditorHtml(html: string): string {
+  if (!html) return ""
+  const safe = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: IDML_ALLOWED_TAGS,
+    ALLOWED_ATTR: IDML_ALLOWED_ATTR,
+    ALLOW_ARIA_ATTR: false,
+    ALLOW_DATA_ATTR: false,
+  })
+  if (typeof document === "undefined") return safe
+
+  const template = document.createElement("template")
+  template.innerHTML = safe
+  for (const element of template.content.querySelectorAll<HTMLElement>("*")) {
+    const allowed = new Set<string>()
+    const protectedKind = element.getAttribute("data-idml-protected")
+    if (element.tagName === "P" && element.hasAttribute("data-idml-version")) {
+      allowed.add("data-idml-version")
+    } else if (element.tagName === "SPAN" && protectedKind === "slot") {
+      allowed.add("data-idml-slot")
+      allowed.add("data-idml-character-style")
+      allowed.add("data-idml-protected")
+      if (element.getAttribute("contenteditable") === "false") allowed.add("contenteditable")
+    } else if (
+      (element.tagName === "SPAN" || element.tagName === "BR")
+      && protectedKind === "token"
+    ) {
+      allowed.add("data-idml-token")
+      allowed.add("data-idml-token-kind")
+      allowed.add("data-idml-protected")
+      allowed.add("contenteditable")
+    }
+    for (const attribute of [...element.attributes]) {
+      if (!allowed.has(attribute.name)) element.removeAttribute(attribute.name)
+    }
+  }
+  const container = document.createElement("div")
+  container.append(template.content.cloneNode(true))
+  return container.innerHTML
 }
 
 export function hasMeaningfulRichText(html: string | undefined): boolean {

@@ -24,7 +24,8 @@
 
     /* Path aliases */
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@aquilla/idml-roundtrip": ["./packages/idml-roundtrip/src/index.ts"]
     }
   },
   "include": ["src"]

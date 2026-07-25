@@ -27,23 +27,35 @@ function emptyEntry(): CellAudioEntry {
   return { attachments: {}, selectedAudioId: null, selectedGeneratedVoiceAudioId: null, audioTimings: {} }
 }
 
-function applyShadow(entry: CellAudioEntry | undefined, att: AudioAttachmentOut): CellAudioEntry {
+function applyShadow(
+  entry: CellAudioEntry | undefined,
+  att: AudioAttachmentOut,
+  claimsSelection: boolean,
+): CellAudioEntry {
   const base = entry ?? emptyEntry()
   return {
     ...base,
     attachments: { ...base.attachments, [att.audioId]: att },
-    ...(att.slot === "recording"
-      ? { selectedAudioId: att.audioId }
-      : { selectedGeneratedVoiceAudioId: att.audioId }),
+    ...(claimsSelection
+      ? att.slot === "recording"
+        ? { selectedAudioId: att.audioId }
+        : { selectedGeneratedVoiceAudioId: att.audioId }
+      : {}),
   }
 }
 
-function shadowConfirmed(entry: CellAudioEntry | undefined, att: AudioAttachmentOut): boolean {
+function shadowConfirmed(
+  entry: CellAudioEntry | undefined,
+  att: AudioAttachmentOut,
+  claimsSelection: boolean,
+): boolean {
   if (!entry) return false
   const server = entry.attachments[att.audioId]
   if (!server) return false
-  const selected = att.slot === "recording" ? entry.selectedAudioId : entry.selectedGeneratedVoiceAudioId
-  if (selected !== att.audioId) return false
+  if (claimsSelection) {
+    const selected = att.slot === "recording" ? entry.selectedAudioId : entry.selectedGeneratedVoiceAudioId
+    if (selected !== att.audioId) return false
+  }
   if ((server.trimStartMs ?? null) !== (att.trimStartMs ?? null)) return false
   if ((server.trimEndMs ?? null) !== (att.trimEndMs ?? null)) return false
   // Label compared only when the shadow explicitly carries one (round 8) —
@@ -84,7 +96,12 @@ export function useFileAudioAttachments(
   const [isLoading, setIsLoading] = useState(false)
   const generationRef = useRef(0)
   // Round 8: retained optimistic injections (see header). Keyed by cellId.
-  const shadowsRef = useRef<Map<string, Array<{ att: AudioAttachmentOut; appliedAt: number }>>>(new Map())
+  // `claimsSelection` is true only for the NEWEST shadow per slot — a select
+  // superseded by a later one keeps its attachment visible but must never
+  // resurrect its selection after the newer shadow confirms and drops.
+  const shadowsRef = useRef<
+    Map<string, Array<{ att: AudioAttachmentOut; appliedAt: number; claimsSelection: boolean }>>
+  >(new Map())
 
   const doFetch = useCallback(async () => {
     // No project/file, or auth not ready yet → nothing to read. Gating on `jwt`
@@ -111,7 +128,9 @@ export function useFileAudioAttachments(
       const now = Date.now()
       for (const [cellId, shadows] of shadowsRef.current) {
         const live = shadows.filter(
-          (s) => now - s.appliedAt < SHADOW_TTL_MS && !shadowConfirmed(map.get(cellId), s.att),
+          (s) =>
+            now - s.appliedAt < SHADOW_TTL_MS &&
+            !shadowConfirmed(map.get(cellId), s.att, s.claimsSelection),
         )
         if (live.length === 0) {
           shadowsRef.current.delete(cellId)
@@ -119,7 +138,7 @@ export function useFileAudioAttachments(
         }
         shadowsRef.current.set(cellId, live)
         let entry = map.get(cellId)
-        for (const s of live) entry = applyShadow(entry, s.att)
+        for (const s of live) entry = applyShadow(entry, s.att, s.claimsSelection)
         map.set(cellId, entry as CellAudioEntry)
       }
       setByCellId(map)
@@ -153,12 +172,14 @@ export function useFileAudioAttachments(
     return subscribeOptimisticAudioAttachment(fileId, (cellId, att) => {
       const shadows = shadowsRef.current.get(cellId) ?? []
       shadowsRef.current.set(cellId, [
-        ...shadows.filter((s) => s.att.audioId !== att.audioId || s.att.slot !== att.slot),
-        { att, appliedAt: Date.now() },
+        ...shadows
+          .filter((s) => s.att.audioId !== att.audioId || s.att.slot !== att.slot)
+          .map((s) => (s.att.slot === att.slot ? { ...s, claimsSelection: false } : s)),
+        { att, appliedAt: Date.now(), claimsSelection: true },
       ])
       setByCellId((prev) => {
         const next = new Map(prev)
-        next.set(cellId, applyShadow(prev.get(cellId), att))
+        next.set(cellId, applyShadow(prev.get(cellId), att, true))
         return next
       })
     })

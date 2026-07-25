@@ -15,7 +15,7 @@ describe("generateAndAttachCellVoice routing", () => {
       ttsStatusKey: (s: string) => s,
     }))
     vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
-    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
     vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
     vi.doMock("./upload", () => ({
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),

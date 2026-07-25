@@ -135,6 +135,31 @@ describe("useFileAudioAttachments — optimistic shadows (round 8)", () => {
     expect(entry?.selectedAudioId).toBe(LONG.audioId)
   })
 
+  it("a SUPERSEDED select shadow never resurrects after the newer one confirms (A→B revert bug)", async () => {
+    // Browser-verified failure mode: select LONG, then select SHORT. The
+    // confirming fetch drops SHORT's shadow — but LONG's (unconfirmable: the
+    // user superseded it) must not re-apply its selection claim.
+    fetchMock.mockResolvedValue(serverShortSelected())
+    const { result } = renderHook(() => useFileAudioAttachments("p1", "f1"))
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    act(() => injectOptimisticAudioAttachment("f1", "c1", LONG))
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT))
+    expect(result.current.byCellId.get("c1")?.selectedAudioId).toBe(SHORT.audioId)
+
+    // Flusher posted both selects in order → server truth = SHORT selected.
+    // SHORT's shadow confirms and drops; LONG's lingers but claims nothing.
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(result.current.byCellId.get("c1")?.selectedAudioId).toBe(SHORT.audioId)
+    // And again (LONG's shadow must not become the slot's claimer once alone).
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(result.current.byCellId.get("c1")?.selectedAudioId).toBe(SHORT.audioId)
+  })
+
   it("trim-bearing shadows only confirm when the server carries the same trims", async () => {
     const TRIMMED: AudioAttachmentOut = { ...LONG, trimStartMs: 500, trimEndMs: 4000 }
     fetchMock.mockResolvedValue(serverLongSelected()) // server has null trims

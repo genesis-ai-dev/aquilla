@@ -8,7 +8,7 @@ import { useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { activeTargetForCell, sourceClipAudioForCell } from "./track-audio"
-import { effectiveAttachmentDurationMs, targetDueSec } from "@/lib/timeline/lane-timing"
+import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { audioMimeForExt } from "./mime"
@@ -97,7 +97,7 @@ const audibilityListeners = new Set<() => void>()
 export function setQueueAudibility(next: TrackAudibility): void {
   audibility = { source: Boolean(next.source), target: Boolean(next.target) }
   if (currentAudio) currentAudio.muted = !audibility.source
-  if (targetAudio) targetAudio.muted = !audibility.target
+  for (const e of overlayPool) if (e.element) e.element.muted = !audibility.target
   for (const l of audibilityListeners) l()
 }
 
@@ -120,19 +120,37 @@ let currentAudio: HTMLAudioElement | null = null
 let currentUrl: string | null = null
 let currentSeq = 0
 
-// ── Target-audio overlay element (round 5) ──────────────────────────────────
-// A second element that fires a section's dub (take or generated voice) when
-// the master clock enters that section. One overlay at a time; clips play in
-// full from 0 (a take's clock has nothing to do with file time); a newly-due
-// clip cuts an overhanging previous one.
+// ── Target-audio overlay pool (rounds 5-7) ──────────────────────────────────
+// Dub elements that fire as the master clock crosses each chip's audible
+// start. Round 7: a bounded POOL instead of a single element — an overlong
+// dub rings to its natural end WHILE the next one starts on time ("both
+// sound"; the timeline draws the same overlap). Entries die at their natural
+// end, at their trim end-stop, on error, on eviction (oldest, at the cap),
+// or when their cell re-fires (replacement — no echo).
 
-let targetAudio: HTMLAudioElement | null = null
-let targetUrl: string | null = null
-let targetCellId: string | null = null
-let targetSeq = 0
-/** Round 6: a dub whose start (target_start_ms) lies AHEAD of the clock —
- *  armed here, fired by the master's ontimeupdate when the clock crosses it.
- *  Invariant: non-null iff the last applied overlay plan was "arm". */
+interface OverlayEntry {
+  cellId: string
+  audioId: string
+  /** Null while the src resolves — the entry exists from the synchronous
+   *  moment of fire so membership doubles as the re-entry guard. */
+  element: HTMLAudioElement | null
+  /** Object URL to revoke (blob playback only). */
+  url: string | null
+  /** Trim end on the CLIP's clock; null = play to natural end. */
+  stopAtClipSec: number | null
+}
+
+const overlayPool: OverlayEntry[] = []
+/** Realistic dialogue overlap is ≤2; one slack slot. Oldest-evicted. */
+const MAX_OVERLAYS = 3
+
+function soundingCellIds(): ReadonlySet<string> {
+  return new Set(overlayPool.map((e) => e.cellId))
+}
+
+/** Round 6: a dub whose start lies AHEAD of the clock — armed here, fired by
+ *  the master's ontimeupdate when the clock crosses it. Invariant: non-null
+ *  iff the last applied overlay plan was "arm". */
 let pendingDub: { cellId: string; dueSec: number } | null = null
 
 // AQU-646: mutable current-segment state, readable by the element handlers.
@@ -152,26 +170,35 @@ const coordinatorController: ActiveAudioController = {
   pause: () => { currentAudio?.pause() },
 }
 
-function disposeTargetOverlay(): void {
-  targetSeq++
-  if (targetAudio) {
-    targetAudio.pause()
-    targetAudio.src = ""
-    targetAudio = null
+function removeOverlayEntry(entry: OverlayEntry): void {
+  const i = overlayPool.indexOf(entry)
+  if (i >= 0) overlayPool.splice(i, 1)
+  const el = entry.element
+  if (el) {
+    el.onended = null
+    el.onerror = null
+    el.ontimeupdate = null
+    el.onloadedmetadata = null
+    el.pause()
+    el.src = ""
+    entry.element = null
   }
-  if (targetUrl) {
-    URL.revokeObjectURL(targetUrl)
-    targetUrl = null
+  if (entry.url) {
+    URL.revokeObjectURL(entry.url)
+    entry.url = null
   }
-  targetCellId = null
+}
+
+function disposeAllOverlays(): void {
+  while (overlayPool.length > 0) removeOverlayEntry(overlayPool[overlayPool.length - 1])
 }
 
 function disposeCurrent(): void {
   // Everything resets with the master element — including any armed dub.
-  // (disposeTargetOverlay alone deliberately does NOT clear pendingDub: a
+  // (Overlay removal alone deliberately does NOT clear pendingDub: a
   // previous dub ending is unrelated to the next section's armed one.)
   pendingDub = null
-  disposeTargetOverlay()
+  disposeAllOverlays()
   if (currentAudio) {
     currentAudio.pause()
     currentAudio.src = ""
@@ -201,7 +228,7 @@ function seekQueue(seconds: number): void {
 /** Set playback speed for the queue (applies live + to subsequent tracks). */
 export function setQueueRate(rate: number): void {
   if (currentAudio) currentAudio.playbackRate = rate
-  if (targetAudio) targetAudio.playbackRate = rate
+  for (const e of overlayPool) if (e.element) e.element.playbackRate = rate
   setProgress({ rate })
 }
 
@@ -209,7 +236,7 @@ export function setQueueRate(rate: number): void {
 export function setQueueVolume(vol: number): void {
   const v = Math.max(0, Math.min(1, vol))
   if (currentAudio) currentAudio.volume = v
-  if (targetAudio) targetAudio.volume = v
+  for (const e of overlayPool) if (e.element) e.element.volume = v
   setProgress({ volume: v })
 }
 
@@ -464,23 +491,35 @@ export function planAdvance(
 export type TargetOverlayPlan =
   | { kind: "keep" }
   | { kind: "silence" }
-  | { kind: "fire"; cellId: string; audioId: string; url: string; startAtSec: number }
+  | {
+      kind: "fire"
+      cellId: string
+      audioId: string
+      url: string
+      /** Where to join the CLIP (its own clock): trimStart + progress-into-dub. */
+      startAtClipSec: number
+      /** Trim end on the clip's clock; null = play to natural end. */
+      stopAtClipSec: number | null
+      /** Seek semantics: clear the pool first (an earlier section's
+       *  overhanging tail does NOT resurrect on seek — documented rule). */
+      exclusive: boolean
+    }
   | { kind: "arm"; cellId: string; dueSec: number; overlay: "keep" | "silence" }
 
 /**
- * What the dub overlay should do when the master clock is at `masterSec` on
- * `index`. `reason` distinguishes natural ADVANCE (an overhanging clip may
- * ring through a dub-less neighbor) from a SEEK (always cuts; landing inside
- * a dub joins it mid-clip via `startAtSec`). Round 6: a dub whose start
- * (target_start_ms, default = section start) is still AHEAD returns "arm" —
- * the tick fires it on crossing; one already fully in the past stays silent.
- * The double-fire guard covers take-only sections, where the MASTER plays
- * the take itself.
+ * What the dub overlay pool should do when the master clock is at `masterSec`
+ * on `index`. ADVANCE is additive — an overhanging previous dub keeps ringing
+ * while (round 7: "both sound") a newly-due one fires on top. SEEK is
+ * exclusive — only the landing section's dub sounds, joined mid-clip. A dub
+ * whose audible start (anchor + trimStart) is still AHEAD returns "arm" (the
+ * tick fires it on crossing); one fully in the past stays silent. The
+ * `sounding` membership guard covers both the in-flight and playing states;
+ * take-only sections never fire (the MASTER plays the take itself).
  */
 export function planTargetOverlay(
   cells: CellData[],
   index: number,
-  playingTargetCellId: string | null,
+  sounding: ReadonlySet<string>,
   reason: "advance" | "seek",
   masterSec: number,
 ): TargetOverlayPlan {
@@ -489,18 +528,29 @@ export function planTargetOverlay(
   if (!cell || !target || !sourceClipAudioForCell(cell)) {
     return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   }
-  if (reason === "advance" && playingTargetCellId === cell.id) return { kind: "keep" }
-  const dueSec = targetDueSec(cell) ?? cell.startTime ?? 0
+  if (reason === "advance" && sounding.has(cell.id)) return { kind: "keep" }
+  const att = cell.attachments?.[target.audioId]
+  const geom = targetChipGeom(cell, att)
+  const dueSec = geom?.start ?? cell.startTime ?? 0
   if (masterSec < dueSec) {
     return { kind: "arm", cellId: cell.id, dueSec, overlay: reason === "seek" ? "silence" : "keep" }
   }
-  const startAtSec = masterSec - dueSec
-  const effMs = effectiveAttachmentDurationMs(cell.attachments?.[target.audioId])
-  if (effMs != null && startAtSec >= effMs / 1000) {
+  const intoDubSec = masterSec - dueSec
+  const effMs = effectiveAttachmentDurationMs(att)
+  if (effMs != null && intoDubSec >= effMs / 1000) {
     // The dub's audible extent already passed — nothing (new) to sound.
     return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   }
-  return { kind: "fire", cellId: cell.id, audioId: target.audioId, url: target.url, startAtSec }
+  const trimStartSec = geom?.trimStartSec ?? 0
+  return {
+    kind: "fire",
+    cellId: cell.id,
+    audioId: target.audioId,
+    url: target.url,
+    startAtClipSec: trimStartSec + intoDubSec,
+    stopAtClipSec: geom?.trimEndSec ?? null,
+    exclusive: reason === "seek",
+  }
 }
 
 /** Execute an overlay plan. Overlay failures are non-fatal — a dub that can't
@@ -513,14 +563,14 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
   }
   if (plan.kind === "silence") {
     pendingDub = null
-    disposeTargetOverlay()
+    disposeAllOverlays()
     return
   }
   if (plan.kind === "arm") {
     // The dub's start is ahead of the clock — the tick fires it. An armed
     // "keep" lets an overhanging previous dub ring until this one is due.
     pendingDub = { cellId: plan.cellId, dueSec: plan.dueSec }
-    if (plan.overlay === "silence") disposeTargetOverlay()
+    if (plan.overlay === "silence") disposeAllOverlays()
     return
   }
   pendingDub = null
@@ -528,40 +578,62 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
   if (!ctx) return
   const cell = ctx.cells.find((c) => c.id === plan.cellId)
   if (!cell) return
-  disposeTargetOverlay()
-  const seq = targetSeq
-  targetCellId = plan.cellId
-  const startAtSec = plan.startAtSec
+  // Seek semantics: only the landing section's dub sounds.
+  if (plan.exclusive) disposeAllOverlays()
+  // Re-firing a cell replaces its own entry — never an echo.
+  const prior = overlayPool.find((e) => e.cellId === plan.cellId)
+  if (prior) removeOverlayEntry(prior)
+  // Bounded pool: evict the OLDEST ringing dub at the cap.
+  while (overlayPool.length >= MAX_OVERLAYS) removeOverlayEntry(overlayPool[0])
+  const entry: OverlayEntry = {
+    cellId: plan.cellId,
+    audioId: plan.audioId,
+    element: null,
+    url: null,
+    stopAtClipSec: plan.stopAtClipSec,
+  }
+  overlayPool.push(entry)
+  const startAtClipSec = plan.startAtClipSec
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
       resolved = await resolveAudioSrc(plan.url, ctx.projectId, cell.fileId, ctx.session)
     } catch {
-      if (seq === targetSeq) targetCellId = null
+      removeOverlayEntry(entry)
       return
     }
-    if (seq !== targetSeq) {
+    if (!overlayPool.includes(entry)) {
+      // Evicted/replaced/cleared while resolving.
       if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
       return
     }
     const audio = new Audio(resolved.src)
-    targetAudio = audio
-    targetUrl = resolved.objectUrl
+    entry.element = audio
+    entry.url = resolved.objectUrl
     audio.playbackRate = progress.rate
     audio.volume = progress.volume
     audio.muted = !audibility.target
-    if (startAtSec > 0.05) {
-      // A seek landed mid-dub — join the clip at the offset, not the top.
-      // Safari rejects pre-metadata seeks (same trick as the master's
+    if (startAtClipSec > 0.05) {
+      // Join the clip at the offset (trim head and/or mid-dub seek). Safari
+      // rejects pre-metadata seeks (same trick as the master's
       // pendingStartSeconds).
       audio.onloadedmetadata = () => {
-        if (seq !== targetSeq) return
+        if (!overlayPool.includes(entry)) return
         const d = audio.duration
-        audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtSec, d)) : startAtSec
+        audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtClipSec, d)) : startAtClipSec
       }
     }
-    audio.onended = () => { if (seq === targetSeq) disposeTargetOverlay() }
-    audio.onerror = () => { if (seq === targetSeq) disposeTargetOverlay() }
+    audio.onended = () => removeOverlayEntry(entry)
+    audio.onerror = () => removeOverlayEntry(entry)
+    if (entry.stopAtClipSec != null) {
+      // Pool entries own their trim end-stop (~250ms timeupdate slop; pause
+      // immediately at the threshold to bound it).
+      audio.ontimeupdate = () => {
+        if (entry.stopAtClipSec != null && audio.currentTime >= entry.stopAtClipSec) {
+          removeOverlayEntry(entry)
+        }
+      }
+    }
     if (currentAudio && !currentAudio.paused) {
       void audio.play().catch(() => { /* user-driven, ignore */ })
     }
@@ -593,7 +665,7 @@ function adoptCell(
     setProgress({ currentTime: seekTo })
   }
   applyTargetOverlay(
-    planTargetOverlay(ctx.cells, index, targetCellId, overlayReason, overlayAtSec ?? seekTo ?? audio.currentTime),
+    planTargetOverlay(ctx.cells, index, soundingCellIds(), overlayReason, overlayAtSec ?? seekTo ?? audio.currentTime),
   )
 }
 
@@ -710,7 +782,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     // the section end would otherwise be dropped by the advance's replan.
     if (pendingDub && audio.currentTime >= pendingDub.dueSec) {
       applyTargetOverlay(
-        planTargetOverlay(activeContext?.cells ?? [], currentIndex, targetCellId, "advance", audio.currentTime),
+        planTargetOverlay(activeContext?.cells ?? [], currentIndex, soundingCellIds(), "advance", audio.currentTime),
       )
     }
     // A media segment's window ends before the shared clip does — treat
@@ -729,13 +801,15 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   audio.onplay = () => {
     if (seq !== currentSeq) return
     setActiveAudio(coordinatorController)
-    // The dub overlay rides the master's transport (round 5).
-    void targetAudio?.play().catch(() => { /* user-driven, ignore */ })
+    // The dub overlays ride the master's transport (rounds 5-7).
+    for (const e of overlayPool) {
+      if (e.element) void e.element.play().catch(() => { /* user-driven, ignore */ })
+    }
     setState({ kind: "playing", ...stateCell() })
   }
   audio.onpause = () => {
     if (seq !== currentSeq) return
-    targetAudio?.pause()
+    for (const e of overlayPool) e.element?.pause()
     if (audio.ended) return
     setState({ kind: "paused", ...stateCell() })
   }
@@ -765,7 +839,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
           // Round 6: the src swap reset the element's position — re-derive
           // the dub/arm state for wherever the clock actually is now.
           applyTargetOverlay(
-            planTargetOverlay(activeContext?.cells ?? [], currentIndex, targetCellId, "seek", audio.currentTime),
+            planTargetOverlay(activeContext?.cells ?? [], currentIndex, soundingCellIds(), "seek", audio.currentTime),
           )
         } catch (e) {
           if (seq !== currentSeq) return
@@ -781,7 +855,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   // fire or arm this cell's dub. Cued-not-playing elements just cue it too
   // (the executor only starts it when the master is playing).
   applyTargetOverlay(
-    planTargetOverlay(ctx.cells, index, targetCellId, "seek", opts.atSeconds ?? currentTrim?.start ?? 0),
+    planTargetOverlay(ctx.cells, index, soundingCellIds(), "seek", opts.atSeconds ?? currentTrim?.start ?? 0),
   )
 
   if (!autoplay) {
@@ -837,7 +911,7 @@ export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}):
     seekQueue(plan.seconds)
     // Same cell, new position — re-derive the dub for it (join mid-clip,
     // re-arm ahead of it, or cut).
-    applyTargetOverlay(planTargetOverlay(ctx.cells, plan.index, targetCellId, "seek", plan.seconds))
+    applyTargetOverlay(planTargetOverlay(ctx.cells, plan.index, soundingCellIds(), "seek", plan.seconds))
     syncPlayState(wantPlay)
     return
   }
@@ -921,12 +995,13 @@ export function skipBack(): void {
  *  to reflect the new attachments on the next advance. */
 export function updateQueueCells(cells: CellData[]): void {
   if (activeContext) activeContext.cells = cells
-  // Round 6: an armed dub's due time is a snapshot — refresh it if the chip
-  // was dragged while we were waiting on it.
+  // Round 6/7: an armed dub's due time is a snapshot — refresh it (trim-aware)
+  // if the chip was dragged or trimmed while we were waiting on it.
   if (pendingDub) {
     const cellId = pendingDub.cellId
     const cell = cells.find((c) => c.id === cellId)
-    const due = cell ? targetDueSec(cell) : null
+    const target = cell ? activeTargetForCell(cell) : null
+    const due = cell ? targetDueSec(cell, target ? cell.attachments?.[target.audioId] : undefined) : null
     if (due != null) pendingDub = { cellId, dueSec: due }
   }
 }

@@ -1,11 +1,15 @@
-// Round 5 (AQU-646): the dub-overlay planner. The master element owns the
-// clock (source clip, windowed); planTargetOverlay decides what the second
-// element does when the master lands on a cell — fire that cell's dub, keep
-// an overhanging clip ringing, or fall silent.
+// Rounds 5-7 (AQU-646): the dub-overlay planner. The master element owns the
+// clock (source clip, windowed); planTargetOverlay decides what the overlay
+// POOL does when the master lands on a cell — fire that cell's dub (ADDITIVE
+// on advance: an overhanging previous dub keeps ringing, "both sound";
+// EXCLUSIVE on seek), keep, arm ahead of a moved chip, or fall silent.
 
 import { describe, expect, it } from "vitest"
 import { planTargetOverlay } from "./play-queue"
 import type { CellData } from "@/hooks/useCells"
+
+const NONE: ReadonlySet<string> = new Set()
+const sounding = (...ids: string[]): ReadonlySet<string> => new Set(ids)
 
 const CLIP = "frontier-audio://clip-1.mp3"
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -68,61 +72,64 @@ const takeOnlyCell = (startTime: number, endTime: number): CellData => {
 }
 
 describe("planTargetOverlay", () => {
-  it("fires a dubbed section's take on advance, from the top", () => {
+  it("fires a dubbed section's take on advance, from the top, ADDITIVELY", () => {
     const cells = [sourceCell(0, 10), dubbedCell(10, 20)]
-    const plan = planTargetOverlay(cells, 1, null, "advance", 10)
+    const plan = planTargetOverlay(cells, 1, NONE, "advance", 10)
     expect(plan.kind).toBe("fire")
     expect(plan.kind === "fire" && plan.cellId).toBe(cells[1].id)
     expect(plan.kind === "fire" && plan.audioId).toBe(cells[1].selectedAudioId)
-    expect(plan.kind === "fire" && plan.startAtSec).toBe(0)
+    expect(plan.kind === "fire" && plan.startAtClipSec).toBe(0)
+    expect(plan.kind === "fire" && plan.exclusive).toBe(false)
   })
 
   it("fires a section's generated voice when no take is selected", () => {
     const cells = [generatedCell(0, 10)]
-    const plan = planTargetOverlay(cells, 0, null, "advance", 0)
+    const plan = planTargetOverlay(cells, 0, NONE, "advance", 0)
     expect(plan.kind).toBe("fire")
     expect(plan.kind === "fire" && plan.audioId).toBe(cells[0].selectedGeneratedVoiceAudioId)
   })
 
   it("a dub-less section on ADVANCE keeps an overhanging clip ringing", () => {
     const cells = [dubbedCell(0, 10), sourceCell(10, 20)]
-    expect(planTargetOverlay(cells, 1, cells[0].id, "advance", 10)).toEqual({ kind: "keep" })
+    expect(planTargetOverlay(cells, 1, sounding(cells[0].id), "advance", 10)).toEqual({ kind: "keep" })
   })
 
   it("a dub-less section on SEEK cuts to silence", () => {
     const cells = [dubbedCell(0, 10), sourceCell(10, 20)]
-    expect(planTargetOverlay(cells, 1, cells[0].id, "seek", 15)).toEqual({ kind: "silence" })
+    expect(planTargetOverlay(cells, 1, sounding(cells[0].id), "seek", 15)).toEqual({ kind: "silence" })
   })
 
-  it("advancing within the already-firing cell keeps it (no restart)", () => {
+  it("advancing within an already-sounding cell keeps it (no restart)", () => {
     const cells = [dubbedCell(0, 10)]
-    expect(planTargetOverlay(cells, 0, cells[0].id, "advance", 3)).toEqual({ kind: "keep" })
+    expect(planTargetOverlay(cells, 0, sounding(cells[0].id), "advance", 3)).toEqual({ kind: "keep" })
   })
 
-  it("seeking into the already-firing cell re-joins it at the offset", () => {
+  it("seeking into an already-sounding cell re-joins it at the offset, exclusively", () => {
     const cells = [dubbedCell(0, 10)]
-    const plan = planTargetOverlay(cells, 0, cells[0].id, "seek", 4)
+    const plan = planTargetOverlay(cells, 0, sounding(cells[0].id), "seek", 4)
     expect(plan.kind).toBe("fire")
-    expect(plan.kind === "fire" && plan.startAtSec).toBe(4)
+    expect(plan.kind === "fire" && plan.startAtClipSec).toBe(4)
+    expect(plan.kind === "fire" && plan.exclusive).toBe(true)
   })
 
-  it("a newly-due dub fires even while a previous one rings (the fire cuts it)", () => {
+  it("ROUND 7: a newly-due dub fires WHILE a previous one rings — both sound (non-exclusive)", () => {
     const cells = [dubbedCell(0, 10), dubbedCell(10, 20)]
-    const plan = planTargetOverlay(cells, 1, cells[0].id, "advance", 10)
+    const plan = planTargetOverlay(cells, 1, sounding(cells[0].id), "advance", 10)
     expect(plan.kind).toBe("fire")
     expect(plan.kind === "fire" && plan.cellId).toBe(cells[1].id)
+    expect(plan.kind === "fire" && plan.exclusive).toBe(false)
   })
 
   it("take-ONLY section never fires the overlay — the master plays the take (double-fire guard)", () => {
     const cells = [takeOnlyCell(0, 10)]
-    expect(planTargetOverlay(cells, 0, null, "advance", 0)).toEqual({ kind: "keep" })
-    expect(planTargetOverlay(cells, 0, null, "seek", 5)).toEqual({ kind: "silence" })
+    expect(planTargetOverlay(cells, 0, NONE, "advance", 0)).toEqual({ kind: "keep" })
+    expect(planTargetOverlay(cells, 0, NONE, "seek", 5)).toEqual({ kind: "silence" })
   })
 
   it("out-of-range index → keep on advance, silence on seek", () => {
     const cells = [sourceCell(0, 10)]
-    expect(planTargetOverlay(cells, 5, null, "advance", 0)).toEqual({ kind: "keep" })
-    expect(planTargetOverlay(cells, 5, null, "seek", 0)).toEqual({ kind: "silence" })
+    expect(planTargetOverlay(cells, 5, NONE, "advance", 0)).toEqual({ kind: "keep" })
+    expect(planTargetOverlay(cells, 5, NONE, "seek", 0)).toEqual({ kind: "silence" })
   })
 })
 
@@ -144,38 +151,83 @@ const movedDubCell = (startTime: number, endTime: number, chipStartMs: number, d
 describe("planTargetOverlay — offset-aware (round 6)", () => {
   it("clock BEFORE the chip's start → arm (keep on advance, silence on seek)", () => {
     const cells = [movedDubCell(10, 20, 14000)]
-    expect(planTargetOverlay(cells, 0, null, "advance", 10)).toEqual({
+    expect(planTargetOverlay(cells, 0, NONE, "advance", 10)).toEqual({
       kind: "arm", cellId: cells[0].id, dueSec: 14, overlay: "keep",
     })
-    expect(planTargetOverlay(cells, 0, null, "seek", 11)).toEqual({
+    expect(planTargetOverlay(cells, 0, NONE, "seek", 11)).toEqual({
       kind: "arm", cellId: cells[0].id, dueSec: 14, overlay: "silence",
     })
   })
 
   it("clock AT the chip's start → fire from the top", () => {
     const cells = [movedDubCell(10, 20, 14000)]
-    const plan = planTargetOverlay(cells, 0, null, "advance", 14)
+    const plan = planTargetOverlay(cells, 0, NONE, "advance", 14)
     expect(plan.kind).toBe("fire")
-    expect(plan.kind === "fire" && plan.startAtSec).toBe(0)
+    expect(plan.kind === "fire" && plan.startAtClipSec).toBe(0)
   })
 
-  it("seek landing INSIDE the chip → join mid-clip", () => {
+  it("seek landing INSIDE the chip → join mid-clip, exclusive", () => {
     const cells = [movedDubCell(10, 20, 14000, 5000)]
-    const plan = planTargetOverlay(cells, 0, null, "seek", 16.5)
+    const plan = planTargetOverlay(cells, 0, NONE, "seek", 16.5)
     expect(plan.kind).toBe("fire")
-    expect(plan.kind === "fire" && plan.startAtSec).toBeCloseTo(2.5)
+    expect(plan.kind === "fire" && plan.startAtClipSec).toBeCloseTo(2.5)
+    expect(plan.kind === "fire" && plan.exclusive).toBe(true)
   })
 
   it("clock past the chip's audible END → nothing new sounds (keep/silence)", () => {
     const cells = [movedDubCell(10, 20, 12000, 3000)] // chip [12, 15]
-    expect(planTargetOverlay(cells, 0, null, "advance", 16)).toEqual({ kind: "keep" })
-    expect(planTargetOverlay(cells, 0, null, "seek", 16)).toEqual({ kind: "silence" })
+    expect(planTargetOverlay(cells, 0, NONE, "advance", 16)).toEqual({ kind: "keep" })
+    expect(planTargetOverlay(cells, 0, NONE, "seek", 16)).toEqual({ kind: "silence" })
   })
 
   it("unknown duration never suppresses a past-due fire (length can't be judged)", () => {
     const cells = [movedDubCell(10, 20, 12000)] // no durationMs
-    const plan = planTargetOverlay(cells, 0, null, "seek", 19)
+    const plan = planTargetOverlay(cells, 0, NONE, "seek", 19)
     expect(plan.kind).toBe("fire")
-    expect(plan.kind === "fire" && plan.startAtSec).toBe(7)
+    expect(plan.kind === "fire" && plan.startAtClipSec).toBe(7)
+  })
+})
+
+// ── Round 7: TRIMMED chips — due/cue/stop are trim-aware ──
+
+const trimmedDubCell = (
+  startTime: number,
+  endTime: number,
+  anchorMs: number,
+  durationMs: number,
+  trims: { trimStartMs?: number; trimEndMs?: number },
+): CellData => {
+  const base = movedDubCell(startTime, endTime, anchorMs, durationMs)
+  const takeId = base.selectedAudioId as string
+  return {
+    ...base,
+    attachments: {
+      ...(base.attachments ?? {}),
+      [takeId]: { ...(base.attachments?.[takeId] ?? {}), ...trims },
+    },
+  } as CellData
+}
+
+describe("planTargetOverlay — trim-aware (round 7)", () => {
+  it("a head-trimmed dub is due at its AUDIBLE start and cues at trimStart", () => {
+    const cells = [trimmedDubCell(10, 20, 12000, 5000, { trimStartMs: 1000 })] // audible [13, 17]
+    expect(planTargetOverlay(cells, 0, NONE, "advance", 12.5)).toMatchObject({ kind: "arm", dueSec: 13 })
+    const plan = planTargetOverlay(cells, 0, NONE, "advance", 13)
+    expect(plan.kind).toBe("fire")
+    expect(plan.kind === "fire" && plan.startAtClipSec).toBeCloseTo(1) // trimStart on the clip clock
+  })
+
+  it("a tail-trimmed dub carries its stop point and suppresses past it", () => {
+    const cells = [trimmedDubCell(10, 20, 12000, 5000, { trimEndMs: 3000 })] // audible [12, 15]
+    const plan = planTargetOverlay(cells, 0, NONE, "advance", 12)
+    expect(plan.kind === "fire" && plan.stopAtClipSec).toBe(3)
+    expect(planTargetOverlay(cells, 0, NONE, "seek", 15.5)).toEqual({ kind: "silence" })
+  })
+
+  it("a mid-dub seek on a head-trimmed chip joins at trimStart + progress", () => {
+    const cells = [trimmedDubCell(10, 20, 12000, 5000, { trimStartMs: 1000 })] // audible starts 13
+    const plan = planTargetOverlay(cells, 0, NONE, "seek", 14.5)
+    expect(plan.kind).toBe("fire")
+    expect(plan.kind === "fire" && plan.startAtClipSec).toBeCloseTo(2.5) // 1 + 1.5
   })
 })

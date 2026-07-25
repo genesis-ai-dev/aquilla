@@ -73,7 +73,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { transcribeCell } from "@/lib/audio/transcribe"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
 import {
@@ -81,7 +81,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioAttach, emitFileVideoSet } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor, type TimelineDetailActions } from "@/components/timeline/TimelineEditor"
@@ -1478,6 +1478,49 @@ export function ProjectWorkspace() {
       revalidateCells()
     },
     [project?.id, activeFileId, currentUsername, getActiveCells, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+  )
+
+  // Round 7: trim a dub chip (edge drag) — re-attach the take with the new
+  // trims. Order matters: optimistic inject first (instant chip width), then
+  // the durable event, then flush BEFORE the bus notify so the refetch can't
+  // read pre-projection state and flash the old trim back.
+  const handleTrimTarget = useCallback(
+    async (cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }) => {
+      if (!project?.id || !activeFileId) return
+      const cell = getActiveCells().find((c) => c.id === cellId)
+      const att = cell?.attachments?.[audioId]
+      if (!cell || !att) return
+      const slot = audioId === cell.selectedAudioId ? "recording" : "generatedVoice"
+      injectOptimisticAudioAttachment(activeFileId, cellId, {
+        audioId,
+        url: att.url,
+        slot,
+        mimeType: att.type ?? null,
+        voiceId: att.voiceId ?? null,
+        referenceAudioId: att.referenceAudioId ?? null,
+        durationMs: att.durationMs ?? null,
+        trimStartMs: trims.trimStartMs ?? null,
+        trimEndMs: trims.trimEndMs ?? null,
+      })
+      await emitCellAudioAttach({
+        projectId: project.id,
+        fileId: activeFileId,
+        cellId,
+        audioId,
+        url: att.url,
+        slot,
+        ...(att.type ? { mimeType: att.type } : {}),
+        ...(att.voiceId ? { voiceId: att.voiceId } : {}),
+        ...(att.referenceAudioId ? { referenceAudioId: att.referenceAudioId } : {}),
+        ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
+        trimStartMs: trims.trimStartMs,
+        trimEndMs: trims.trimEndMs,
+        author: currentUsername,
+      })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(activeFileId)
+    },
+    [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile],
   )
 
   // Round 6 (SUB-38): assign a voice/character from a source card's picker.
@@ -5057,6 +5100,7 @@ export function ProjectWorkspace() {
                   fileId={activeFile.id}
                   onRetimeSubtitle={handleRetimeSubtitle}
                   onRetimeTarget={handleRetimeTarget}
+                  onTrimTarget={handleTrimTarget}
                   voiceControl={timelineVoiceControl}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}

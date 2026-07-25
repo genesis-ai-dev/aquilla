@@ -32,7 +32,7 @@ import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -295,6 +295,19 @@ export function CellVoicePanel({
     const att = cell.attachments?.[playableId]
     if (!att) return
     const slot = playableId === cell.selectedAudioId ? "recording" : "generatedVoice"
+    // Round 7: overlay the new trims onto the merged cells instantly so the
+    // timeline chip resizes without waiting on flush + refetch.
+    injectOptimisticAudioAttachment(cell.fileId, cell.id, {
+      audioId: playableId,
+      url: att.url,
+      slot,
+      mimeType: att.type ?? null,
+      voiceId: att.voiceId ?? null,
+      referenceAudioId: att.referenceAudioId ?? null,
+      durationMs: att.durationMs ?? null,
+      trimStartMs: start != null ? Math.round(start * 1000) : null,
+      trimEndMs: end != null ? Math.round(end * 1000) : null,
+    })
     void emitCellAudioAttach({
       projectId,
       fileId: cell.fileId,

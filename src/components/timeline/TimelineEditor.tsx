@@ -39,8 +39,10 @@ export interface TimelineEditorProps {
    *  split is frozen at import. Media cells get an independent subtitle span;
    *  text cells' own timing IS their subtitle timing (the workspace routes). */
   onRetimeSubtitle(cellId: string, startSec: number, endSec: number): void
-  /** Round 6: move a section's dub chip — its start on the file timeline. */
-  onRetimeTarget?(cellId: string, startSec: number): void
+  /** Round 6/7: move a section's dub chip — its clip-zero anchor (file sec). */
+  onRetimeTarget?(cellId: string, anchorSec: number): void
+  /** Round 7: trim a dub chip — complete trim state (undefined clears). */
+  onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   /** Round 6 (SUB-38): the source cards' voice/character picker wiring. */
   voiceControl?: TimelineVoiceControl
   onCommitTarget(cellId: string, value: string): void
@@ -113,6 +115,7 @@ export function TimelineEditor({
   fileId,
   onRetimeSubtitle,
   onRetimeTarget,
+  onTrimTarget,
   voiceControl,
   onCommitTarget,
   onLinkVideo,
@@ -488,6 +491,7 @@ export function TimelineEditor({
               onSelect={setSelectedId}
               onSeek={laneProps.onSeek}
               onRetimeTarget={onRetimeTarget}
+              onTrimTarget={onTrimTarget}
             />
             {untimed.length > 0 && (
               <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">

@@ -10,6 +10,7 @@ import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-1")
 const emitRemove = vi.fn(async (..._args: unknown[]) => "evt-2")
 const notify = vi.fn((..._args: unknown[]) => {})
+const injectOptimistic = vi.fn((..._args: unknown[]) => {})
 
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
@@ -17,6 +18,7 @@ vi.mock("@/lib/sync/events-emit", () => ({
 }))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: (...args: unknown[]) => notify(...args),
+  injectOptimisticAudioAttachment: (...args: unknown[]) => injectOptimistic(...args),
 }))
 
 import { TakesStrip } from "./TakesStrip"
@@ -65,6 +67,13 @@ describe("TakesStrip", () => {
       expect.objectContaining({ projectId: "p1", fileId: "f1", cellId: "c1", audioId: "a", slot: "recording", author: "dir" }),
     )
     expect(notify).toHaveBeenCalledWith("f1")
+    // Round 7 (SUB-39): selection also rides the optimistic attachment bus so
+    // the timeline chip swaps + resizes with zero round-trip.
+    expect(injectOptimistic).toHaveBeenCalledWith(
+      "f1",
+      "c1",
+      expect.objectContaining({ audioId: "a" }),
+    )
   })
 
   it("shows the take as selected immediately (optimistic) before the server round-trip resolves", async () => {

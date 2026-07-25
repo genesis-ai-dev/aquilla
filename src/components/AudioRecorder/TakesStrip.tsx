@@ -14,7 +14,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { emitCellAudioSelect, emitCellAudioRemove } from "@/lib/sync/events-emit"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 
 interface Props {
   projectId: string
@@ -91,6 +91,12 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
     setOptimisticSelectedId(audioId)
     latestCircleRef.current = audioId
     setBusyId(audioId)
+    // Round 7 (SUB-39): push the selection through the optimistic attachment
+    // bus too — the merged cells flip selectedAudioId (with the take's real
+    // durationMs/trims) instantly, so the timeline chip swaps and resizes with
+    // zero round-trip. Previously only this strip's local checkmark moved.
+    const take = takes.find((t) => t.audioId === audioId)
+    if (take) injectOptimisticAudioAttachment(fileId, cellId, take)
     try {
       await emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot: "recording", author })
       notifyAudioAttachmentsChanged(fileId)
@@ -102,7 +108,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [optimisticSelectedId, selectedAudioId, projectId, fileId, cellId, author])
+  }, [optimisticSelectedId, selectedAudioId, takes, projectId, fileId, cellId, author])
 
   const remove = useCallback(async (audioId: string) => {
     setBusyId(audioId)

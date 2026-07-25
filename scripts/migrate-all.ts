@@ -53,6 +53,11 @@ import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
+import { classifyIdmlPair, isIdmlPair } from "../src/lib/migrate/idml"
+import {
+  copyGitlabIdmlOriginal,
+  resolveGitlabIdmlOriginal,
+} from "./lib/idml-migration-artifacts"
 
 const SYNC = process.env.SYNC_BASE ?? "https://api.aquilla.app/sync"
 const INGEST_CHUNK = 2500
@@ -439,11 +444,23 @@ async function doProject(
     }
   }
   const speakerCount = new Set(pairs.flatMap((x) => collectSpeakers(x)).map((s) => s.speaker)).size
+  const idmlPlans = pairs
+    .filter(isIdmlPair)
+    .map((pair) => {
+      const original = resolveGitlabIdmlOriginal(dir, pair)
+      return { pair, original, readiness: classifyIdmlPair(pair, Boolean(original)) }
+    })
 
   console.log(
     `  → aquilla ${projectId}  org_id=${org.id}${team ? ` team_id=${team.id}` : " (no team)"}  files=${pairs.length} events=${events.length} characters=${speakerCount}`,
   )
   if (!args.apply) {
+    for (const plan of idmlPlans) {
+      console.log(
+        `  [idml] ${plan.pair.name}: ${plan.readiness}`
+        + (plan.original ? ` ← ${plan.original.relativePath}` : " (missing pointers/originals attachment)"),
+      )
+    }
     console.log("  [dry-run] no writes")
     return
   }
@@ -463,6 +480,24 @@ async function doProject(
     console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total (${existing.size} already in D1)`)
   }
   await ingest(projectId, newEvents, args.eventsOnly)
+  for (const plan of idmlPlans) {
+    if (!plan.original) {
+      console.warn(
+        `  ! ${plan.pair.name}: needs-artifact; expected matching Git LFS pointer under `
+        + `.project/attachments/pointers/originals`,
+      )
+      continue
+    }
+    const fileId = fileIdFor(String(p.id), plan.pair.relPath)
+    await copyGitlabIdmlOriginal({
+      syncBase: SYNC,
+      secret: process.env.SYNC_SECRET_KEY!,
+      projectId,
+      fileId,
+      original: plan.original,
+    })
+    console.log(`  source artifact: ${plan.pair.name} ← ${plan.original.relativePath} (${plan.readiness})`)
+  }
   // Deferred file-counters: recompute them once now that all cells are projected.
   if (!args.eventsOnly) await finalizeCounters(projectId)
   let voices = 0

@@ -27,6 +27,11 @@ import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import { randomUUID } from "node:crypto"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
+import { classifyIdmlPair, isIdmlPair } from "../src/lib/migrate/idml"
+import {
+  resolveLocalIdmlOriginal,
+  uploadLocalIdmlOriginal,
+} from "./lib/idml-migration-artifacts"
 
 const AUTH = process.env.AUTH_BASE ?? "http://127.0.0.1:8788"
 const SYNC = process.env.SYNC_BASE ?? "http://127.0.0.1:8789"
@@ -334,6 +339,35 @@ async function main() {
 
   console.log("Ingesting events…")
   await ingest(aquillaProjectId, events, secret)
+
+  // IDML originals are immutable export skeletons. Resolve only an exact or
+  // otherwise unambiguous file under attachments/files/originals; a missing or
+  // ambiguous artifact is reported and never guessed.
+  for (const pair of pairs) {
+    if (!isIdmlPair(pair)) continue
+    const fileId = fileIdFor(legacyKey, pair.relPath)
+    const original = resolveLocalIdmlOriginal(dir, pair)
+    const readiness = classifyIdmlPair(pair, Boolean(original))
+    if (!original) {
+      console.warn(
+        `  ! ${pair.name}: ${readiness}; expected the matching .idml under `
+        + `.project/attachments/files/originals`,
+      )
+      continue
+    }
+    if (readiness !== "native-ready") {
+      console.warn(`  ! ${pair.name}: ${readiness}; original preserved but export remains unavailable`)
+    }
+    const syncToken = await mintSyncToken(token, aquillaProjectId, fileId)
+    await uploadLocalIdmlOriginal({
+      syncBase: SYNC,
+      projectId: aquillaProjectId,
+      fileId,
+      token: syncToken,
+      original,
+    })
+    console.log(`  source artifact: ${pair.name} ← ${original.relativePath} (${readiness})`)
+  }
 
   if (args.audio) {
     console.log("Uploading audio (heavier pass)…")

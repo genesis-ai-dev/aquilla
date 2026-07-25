@@ -208,6 +208,49 @@ describe('buildEventProjectionStmts — source.cell.commit', () => {
   })
 })
 
+describe('buildEventProjectionStmts — source.cell.metadata.patch', () => {
+  it('merges v2 metadata and canonical HTML without advancing the source text chain', () => {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent(
+        'source.cell.metadata.patch',
+        {
+          version: 1,
+          metadata: { idml: { version: 2, slotCount: 1 } },
+          valueHtml: '<p data-idml-version="2"></p>',
+          targetHtml: '<p data-idml-version="2">target</p>',
+        },
+        { schemaVersion: 2 },
+      ),
+      stmts,
+    )
+    expect(stmts).toHaveLength(2)
+    expect(recorded[0].sql).toContain("COALESCE(metadata, '{}'::jsonb) ||")
+    expect(recorded[0].sql).toContain("side = 'source'")
+    expect(recorded[0].sql).not.toContain('event_id')
+    expect(recorded[0].args).toEqual([
+      JSON.stringify({ idml: { version: 2, slotCount: 1 } }),
+      '<p data-idml-version="2"></p>',
+      '<p data-idml-version="2"></p>',
+      'proj-1',
+      'file-a',
+      'cell-1',
+    ])
+    expect(recorded[1].sql).toContain("side = 'target'")
+  })
+
+  it('rejects unversioned metadata patches instead of guessing', () => {
+    const { db } = makeD1Stub()
+    expect(() => buildEventProjectionStmts(
+      db,
+      makeEvent('source.cell.metadata.patch', { version: 1, metadata: {} }),
+      [],
+    )).toThrow(/schemaVersion 2/)
+  })
+})
+
 describe('buildEventProjectionStmts — *.cell.delete', () => {
   it('emits a DELETE FROM cells scoped to the event side', () => {
     const { db, recorded } = makeD1Stub()
@@ -749,6 +792,7 @@ describe('isChainMutatingKind', () => {
     'source.cell.commit': true,
     'source.cell.delete': true,
     'source.cell.reorder': true,
+    'source.cell.metadata.patch': false,
     'target.cell.create': true,
     'target.cell.commit': true,
     'target.cell.delete': true,

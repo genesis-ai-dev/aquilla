@@ -8,6 +8,7 @@
   ],
   "compilerOptions": {
     "paths": {
+      "@aquilla/idml-roundtrip": ["./packages/idml-roundtrip/src/index.ts"],
       "@/*": ["./src/*"]
     }
   }

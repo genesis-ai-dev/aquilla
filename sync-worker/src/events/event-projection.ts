@@ -468,6 +468,52 @@ export function buildEventProjectionStmts(
       return ['cells', 'files']
     }
 
+    case 'source.cell.metadata.patch': {
+      const p = event.payload as EventPayloads['source.cell.metadata.patch']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      if (event.schemaVersion !== 2 || p.version !== 1) {
+        throw new Error(
+          `${event.kind} event ${event.id} requires event schemaVersion 2 and payload version 1`,
+        )
+      }
+      if (!p.metadata || typeof p.metadata !== 'object' || Array.isArray(p.metadata)) {
+        throw new Error(`${event.kind} event ${event.id} has invalid metadata`)
+      }
+      const metadataJson = JSON.stringify(p.metadata)
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells SET
+               metadata = (COALESCE(metadata, '{}'::jsonb) || ?::text::jsonb),
+               value_html = CASE WHEN ?::text IS NULL THEN value_html ELSE ?::text END
+             WHERE project_id = ? AND file_id = ? AND cell_id = ?
+               AND side = 'source' AND target_lang = ''`,
+          )
+          .bind(
+            metadataJson,
+            p.valueHtml ?? null,
+            p.valueHtml ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+          ),
+      )
+      if (p.targetHtml !== undefined) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET value_html = ?
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND side = 'target' AND target_lang = ''`,
+            )
+            .bind(p.targetHtml, event.projectId, event.fileId, event.cellId),
+        )
+      }
+      return ['cells']
+    }
+
     case 'source.cell.commit':
     case 'target.cell.commit': {
       const p = event.payload as EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit']

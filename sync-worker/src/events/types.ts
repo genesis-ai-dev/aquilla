@@ -25,6 +25,8 @@ export type EventKind =
   | 'source.cell.commit'
   | 'source.cell.delete'
   | 'source.cell.reorder'
+  // Versioned, metadata-only backfill. Does not advance the source text chain.
+  | 'source.cell.metadata.patch'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -165,6 +167,16 @@ export interface EventPayloads {
   'source.cell.delete': Record<string, never>
   'source.cell.reorder': {
     anchorCellId: string | null
+  }
+  'source.cell.metadata.patch': {
+    /** Payload contract version; v1 is the only supported patch shape. */
+    version: 1
+    /** Shallow JSON merge into cells.metadata. Existing unrelated keys survive. */
+    metadata: Record<string, unknown>
+    /** Optional canonical protected source HTML produced by the v2 upgrader. */
+    valueHtml?: string
+    /** Optional canonical current target HTML; text/history stay untouched. */
+    targetHtml?: string
   }
 
   // ── Target-side ────────────────────────────────────────────────────────

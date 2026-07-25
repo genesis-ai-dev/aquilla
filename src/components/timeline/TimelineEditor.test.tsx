@@ -42,7 +42,7 @@ describe("TimelineEditor", () => {
           cell({ id: "d1", original: "Dia line", medium: "media", startTime: 1, endTime: 4 }),
           cell({ id: "u1", original: "Untimed line", medium: "text" }), // no timing
         ]}
-        onRetime={() => {}}
+        onRetimeSubtitle={() => {}}
         onCommitTarget={() => {}}
       />,
     )
@@ -67,7 +67,7 @@ describe("TimelineEditor", () => {
         coreMediaUrl={null}
         editable
         cells={[cell({ id: "d1", original: "x", medium: "media", startTime: 0, endTime: 2 })]}
-        onRetime={() => {}}
+        onRetimeSubtitle={() => {}}
         onCommitTarget={() => {}}
       />,
     )
@@ -79,7 +79,7 @@ describe("TimelineEditor", () => {
 
   it("shows the video preview only when a core media url is linked", () => {
     const { rerender } = render(
-      <TimelineEditor fileId="f2" coreMediaUrl={null} editable cells={[]} onRetime={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f2" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
     )
     expect(screen.queryByTestId("tl-video")).toBeNull()
     rerender(
@@ -88,7 +88,7 @@ describe("TimelineEditor", () => {
         coreMediaUrl="https://cdn/v.mp4"
         editable
         cells={[]}
-        onRetime={() => {}}
+        onRetimeSubtitle={() => {}}
         onCommitTarget={() => {}}
       />,
     )
@@ -107,7 +107,7 @@ describe("TimelineEditor", () => {
     mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
     try {
       render(
-        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
       )
       const playhead = screen.getByTestId("tl-playhead")
       // 12s at the default 38 px/s zoom.
@@ -123,7 +123,7 @@ describe("TimelineEditor", () => {
     mockProgress = { currentTime: 12, duration: 20, rate: 1, volume: 1 }
     try {
       render(
-        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
       )
       expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBe(0)
     } finally {
@@ -137,7 +137,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetime={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
       />,
     )
     fireEvent.click(screen.getByTestId("tl-card-m2"))
@@ -151,7 +151,7 @@ describe("TimelineEditor", () => {
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable
         cells={[...mediaCells, cell({ id: "u1", original: "Untimed", medium: "text" })]}
-        onRetime={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
       />,
     )
     fireEvent.click(screen.getByTestId("tl-untimed-u1"))
@@ -159,9 +159,22 @@ describe("TimelineEditor", () => {
     expect(screen.getByTestId("tl-detail-source")).toHaveTextContent("Untimed")
   })
 
+  it("round 6: the snap magnet is on by default, toggles, and persists globally", () => {
+    localStorage.removeItem("codex:timelineSnap")
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
+    )
+    const btn = screen.getByTestId("tl-snap-toggle")
+    expect(btn).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(btn)
+    expect(btn).toHaveAttribute("aria-pressed", "false")
+    expect(localStorage.getItem("codex:timelineSnap")).toBe("off")
+    localStorage.removeItem("codex:timelineSnap")
+  })
+
   it("renders the follow toggle, pressed by default, and it toggles", () => {
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
     )
     const btn = screen.getByLabelText("Follow playhead")
     expect(btn).toHaveAttribute("aria-pressed", "true")
@@ -176,7 +189,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetime={() => {}} onCommitTarget={() => {}}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
         onSeekToTime={onSeekToTime} initialSelectedCellId="m2"
       />,
     )
@@ -189,7 +202,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetime={() => {}} onCommitTarget={() => {}}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
         initialSelectedCellId="m1" onSelectedCellChange={onSelectedCellChange}
       />,
     )
@@ -228,14 +241,14 @@ describe("TimelineEditor", () => {
 
   it("SUB-37: the Untimed row exists only when something is untimed", () => {
     const { rerender } = render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
     )
     expect(screen.queryByText("Untimed")).toBeNull()
     rerender(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable
         cells={[...mediaCells, cell({ id: "u9", original: "Loose line", medium: "text" })]}
-        onRetime={() => {}} onCommitTarget={() => {}}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
       />,
     )
     expect(screen.getByText("Untimed")).toBeInTheDocument()
@@ -244,7 +257,7 @@ describe("TimelineEditor", () => {
 
   it("renames the lane headers to Subtitles / Source audio / Target audio", () => {
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
     )
     expect(screen.getByText("Subtitles")).toBeInTheDocument()
     expect(screen.getByText("Source audio")).toBeInTheDocument()
@@ -253,7 +266,7 @@ describe("TimelineEditor", () => {
 
   it("shows a Target-track chip only for sections with dub audio, kinded and positioned at the section", () => {
     render(
-      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={dubbedCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={dubbedCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
     )
     // m1 has only the source clip — no chip.
     expect(screen.queryByTestId("tl-target-m1")).toBeNull()
@@ -271,7 +284,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={dubbedCells}
-        onRetime={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onSeekToTime={onSeekToTime}
       />,
     )
     fireEvent.click(screen.getByTestId("tl-target-m2"))
@@ -283,7 +296,7 @@ describe("TimelineEditor", () => {
     localStorage.removeItem("codex:timelineAudibility:spkfile")
     lastAudibility = null
     render(
-      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
     )
     // Mount pushes the default (both audible).
     expect(lastAudibility).toEqual({ source: true, target: true })
@@ -305,7 +318,7 @@ describe("TimelineEditor", () => {
     localStorage.setItem("codex:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
     lastAudibility = null
     render(
-      <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetime={() => {}} onCommitTarget={() => {}} />,
+      <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} onCommitTarget={() => {}} />,
     )
     expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
     expect(lastAudibility).toEqual({ source: false, target: true })
@@ -315,7 +328,7 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
-        onRetime={() => {}} onCommitTarget={() => {}}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
         initialSelectedCellId="m1"
         detailActions={{
           isCompletionConfigured: true, isCompletionAvailable: true, isAnonymous: false,

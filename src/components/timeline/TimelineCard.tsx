@@ -1,13 +1,21 @@
 // A single timeline clip. Positioned by time; drag the body to move and drag
 // the edge grips to stretch start/end. Commits once on pointer-up via onRetime
-// (seconds); the parent converts to ms and emits cell.retime. Hand-rolled with
+// (seconds); the parent converts to ms and emits. Hand-rolled with
 // window-level pointer listeners (robust when the pointer leaves the card, and
 // testable under happy-dom). Read-only files disable drag but still select.
+//
+// Round 6 (SUB-36): the SOURCE row is frozen (`retimable=false` — no grips,
+// no move); a subtitle card on a MEDIA cell renders/edits its independent
+// subtitle span (metadata) rather than the source split; drags snap to
+// neighboring edges when snapping is on — preview and commit run through the
+// same seconds-domain transform, so what you see is what lands.
 
 import { useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { secToPx, pxToSec, clampRange } from "@/lib/timeline/scale"
 import { subtitleMirrorText } from "@/lib/timeline/lanes"
+import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
+import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { fmtClock } from "./format"
 import type { CellData } from "@/hooks/useCells"
 
@@ -23,6 +31,11 @@ export interface TimelineCardProps {
   variant: "subtitle" | "dialogue"
   selected: boolean
   editable: boolean
+  /** Round 6: whether this LANE allows retiming at all (the source row never
+   *  does — its split is frozen at import). */
+  retimable: boolean
+  /** Round 6: edge snapping — candidate edge seconds from the lane. */
+  snap?: { enabled: boolean; candidates: number[] }
   onSelect(cellId: string): void
   /** Final bounds in seconds, fired once on pointer-up. */
   onRetime(cellId: string, startSec: number, endSec: number): void
@@ -39,31 +52,50 @@ export function TimelineCard({
   variant,
   selected,
   editable,
+  retimable,
+  snap,
   onSelect,
   onRetime,
   onSeek,
 }: TimelineCardProps) {
-  const startSec = cell.startTime ?? 0
-  const endSec = cell.endTime ?? startSec + MIN_DUR_SEC
+  // Round 6: a subtitle card on a media cell shows its INDEPENDENT span.
+  const laneSpan = variant === "subtitle" ? subtitleSpanSec(cell) : null
+  const startSec = laneSpan?.start ?? cell.startTime ?? 0
+  const endSec = laneSpan?.end ?? cell.endTime ?? startSec + MIN_DUR_SEC
   const [drag, setDrag] = useState<{ mode: DragMode; dx: number } | null>(null)
   // Set while a drag gesture moved the pointer — the click event that closes a
   // drag must not also yank playback to the clip's start.
   const movedRef = useRef(false)
+  const canRetime = editable && retimable
+
+  // The one span transform shared by drag PREVIEW and COMMIT (snap included).
+  function proposeSpan(mode: DragMode, dxSec: number): { start: number; end: number } {
+    let ns = startSec
+    let ne = endSec
+    if (mode === "move") {
+      ns += dxSec
+      ne += dxSec
+    } else if (mode === "resize-l") ns += dxSec
+    else ne += dxSec
+    if (snap?.enabled) {
+      const snapped = snapSpan({ start: ns, end: ne }, mode, snap.candidates, SNAP_THRESHOLD_PX / pxPerSec)
+      return { start: snapped.start, end: snapped.end }
+    }
+    return { start: ns, end: ne }
+  }
 
   // Live preview geometry while dragging; committed values come from props.
   let left = secToPx(startSec - laneStartSec, pxPerSec)
   let width = secToPx(endSec - startSec, pxPerSec)
   if (drag) {
-    if (drag.mode === "move") left += drag.dx
-    else if (drag.mode === "resize-l") {
-      left += drag.dx
-      width -= drag.dx
-    } else width += drag.dx
+    const s = proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec))
+    left = secToPx(s.start - laneStartSec, pxPerSec)
+    width = secToPx(s.end - s.start, pxPerSec)
   }
   width = Math.max(width, secToPx(MIN_DUR_SEC, pxPerSec))
 
   function beginDrag(mode: DragMode, e: React.PointerEvent) {
-    if (!editable) return
+    if (!canRetime) return
     e.stopPropagation()
     const startX = e.clientX
     try {
@@ -81,15 +113,8 @@ export function TimelineCard({
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       setDrag(null)
-      const dSec = pxToSec(ev.clientX - startX, pxPerSec)
-      let ns = startSec
-      let ne = endSec
-      if (mode === "move") {
-        ns = startSec + dSec
-        ne = endSec + dSec
-      } else if (mode === "resize-l") ns = startSec + dSec
-      else ne = endSec + dSec
-      const clamped = clampRange(ns, ne, MIN_DUR_SEC)
+      const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
+      const clamped = clampRange(s.start, s.end, MIN_DUR_SEC)
       if (clamped.startSec !== startSec || clamped.endSec !== endSec) {
         onRetime(cell.id, clamped.startSec, clamped.endSec)
       }
@@ -142,7 +167,7 @@ export function TimelineCard({
           isDialogue ? "bg-sky-600" : "bg-zinc-400 dark:bg-zinc-600",
         )}
       />
-      {editable && (
+      {canRetime && (
         <span
           aria-hidden
           onPointerDown={(e) => beginDrag("resize-l", e)}
@@ -170,7 +195,7 @@ export function TimelineCard({
           {fmtClock(startSec, true)}–{fmtClock(endSec, true)}
         </span>
       </div>
-      {editable && (
+      {canRetime && (
         <span
           aria-hidden
           onPointerDown={(e) => beginDrag("resize-r", e)}

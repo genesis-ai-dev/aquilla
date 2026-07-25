@@ -5,7 +5,7 @@
 // preview (the remote host serves Range — no streaming work needed here).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Film, LocateFixed, Minus, Plus, Volume2, VolumeX } from "lucide-react"
+import { Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { timelineBounds } from "@/lib/timeline/derive"
@@ -17,6 +17,7 @@ import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeli
 // directly — muting is a pure element-level concern with no workspace state.
 import { useQueueProgress, useQueueState, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
+import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
@@ -33,7 +34,12 @@ export interface TimelineEditorProps {
   editable: boolean
   /** Used to scope the persisted zoom preference. */
   fileId: string
-  onRetime(cellId: string, startSec: number, endSec: number): void
+  /** Round 6 (SUB-36): retiming exists ONLY on the subtitle row — the source
+   *  split is frozen at import. Media cells get an independent subtitle span;
+   *  text cells' own timing IS their subtitle timing (the workspace routes). */
+  onRetimeSubtitle(cellId: string, startSec: number, endSec: number): void
+  /** Round 6: move a section's dub chip — its start on the file timeline. */
+  onRetimeTarget?(cellId: string, startSec: number): void
   onCommitTarget(cellId: string, value: string): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
@@ -102,7 +108,7 @@ export function TimelineEditor({
   coreMediaUrl,
   editable,
   fileId,
-  onRetime,
+  onRetimeSubtitle,
   onCommitTarget,
   onLinkVideo,
   onTranscribe,
@@ -113,6 +119,7 @@ export function TimelineEditor({
 }: TimelineEditorProps) {
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
+  const [snapOn, setSnapOn] = useState(loadSnapEnabled)
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
   const [selectedId, setSelectedId] = useState<string | null>(() => initialSelectedCellId ?? null)
@@ -318,7 +325,7 @@ export function TimelineEditor({
     selectedId,
     editable,
     onSelect: setSelectedId,
-    onRetime,
+    onRetime: onRetimeSubtitle,
     // Clean card click → navigate playback to the clip's start (both lanes;
     // untimed chips have no timecode to seek to).
     onSeek: (cellId: string) => {
@@ -335,6 +342,24 @@ export function TimelineEditor({
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">Timeline</span>
         <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-label="Snap to neighboring edges"
+            aria-pressed={snapOn}
+            title={snapOn ? "Snapping on — edges magnet to neighbors" : "Snapping off"}
+            data-testid="tl-snap-toggle"
+            onClick={() => {
+              const next = !snapOn
+              setSnapOn(next)
+              saveSnapEnabled(next)
+            }}
+            className={cn(
+              "inline-flex items-center rounded-md border border-border px-1.5 py-1",
+              snapOn ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
+            )}
+          >
+            <Magnet className="h-3.5 w-3.5" />
+          </button>
           <button
             type="button"
             aria-label="Follow playhead"
@@ -443,8 +468,9 @@ export function TimelineEditor({
         >
           <div className="relative" style={{ width: `${trackWidthPx}px` }}>
             <TimelineRuler durationSec={durationSec} pxPerSec={pxPerSec} onScrub={seekTo} />
-            <TimelineLane cells={subtitle} variant="subtitle" {...laneProps} />
-            <TimelineLane cells={dialogue} variant="dialogue" {...laneProps} />
+            <TimelineLane cells={subtitle} variant="subtitle" retimable snapEnabled={snapOn} {...laneProps} />
+            {/* Round 6: the source split is FROZEN at import — never retimable. */}
+            <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
             <TargetAudioLane
               items={targetItems}
               pxPerSec={pxPerSec}

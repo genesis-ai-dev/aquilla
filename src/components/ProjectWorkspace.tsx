@@ -81,7 +81,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitFileVideoSet } from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor, type TimelineDetailActions } from "@/components/timeline/TimelineEditor"
@@ -1441,16 +1441,48 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
 
-  // Timeline editor: move/stretch a clip → cell.retime (timing on both sides).
-  const handleRetime = useCallback(
+  // Timeline editor, round 6 (SUB-36): retiming exists only on the SUBTITLE
+  // row. A TEXT cell's own timing IS its subtitle timing → cell.retime as
+  // before; a MEDIA cell keeps its frozen source split and gets an
+  // independent subtitle span in metadata → cell.lane.retime.
+  const handleRetimeSubtitle = useCallback(
     async (cellId: string, startSec: number, endSec: number) => {
       if (!project?.id || !activeFileId) return
-      await emitCellRetime({
+      const cell = getActiveCells().find((c) => c.id === cellId)
+      if (cell?.medium === "media") {
+        await emitCellLaneRetime({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId,
+          subtitleStartMs: Math.round(startSec * 1000),
+          subtitleEndMs: Math.round(endSec * 1000),
+          author: currentUsername,
+        })
+      } else {
+        await emitCellRetime({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId,
+          startMs: Math.round(startSec * 1000),
+          endMs: Math.round(endSec * 1000),
+          author: currentUsername,
+        })
+      }
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+    },
+    [project?.id, activeFileId, currentUsername, getActiveCells, getTokenForProjectFile, revalidateCells],
+  )
+
+  // Round 6: move a section's dub chip → target_start_ms (absolute file ms).
+  const handleRetimeTarget = useCallback(
+    async (cellId: string, startSec: number) => {
+      if (!project?.id || !activeFileId) return
+      await emitCellLaneRetime({
         projectId: project.id,
         fileId: activeFileId,
         cellId,
-        startMs: Math.round(startSec * 1000),
-        endMs: Math.round(endSec * 1000),
+        targetStartMs: Math.round(startSec * 1000),
         author: currentUsername,
       })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -4991,7 +5023,8 @@ export function ProjectWorkspace() {
                   coreMediaUrl={activeFile.coreMediaUrl ?? null}
                   editable={!isReadOnly}
                   fileId={activeFile.id}
-                  onRetime={handleRetime}
+                  onRetimeSubtitle={handleRetimeSubtitle}
+                  onRetimeTarget={handleRetimeTarget}
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
                   onSeekToTime={handleTimelineSeekToTime}

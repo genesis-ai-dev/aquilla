@@ -15,10 +15,11 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { name: `Contextual ${Date.now()}` })
 
-  // Enable the device-local flag through the Experimental settings section.
+  // Enable the device-local flag through the Experimental settings section
+  // (the settings surface renders one section at a time via its side nav).
   await alice.goto(`/project/${seeded.projectId}/settings`)
+  await alice.getByRole("link", { name: /Experimental/ }).click()
   const flagSwitch = alice.locator("#experimental-contextualTranslation")
-  await flagSwitch.scrollIntoViewIfNeeded()
   await expect(flagSwitch).toBeVisible()
   await flagSwitch.click()
   await expect(flagSwitch).toHaveAttribute("data-checked", /.*/)

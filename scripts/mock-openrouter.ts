@@ -96,10 +96,77 @@ WHERE s.project_id = :project AND s.side = 'source' AND f.name = 'Ruth'
   AND t.value <> ''
 ORDER BY s.canonical_ref`
 
+// ── Contextual pipeline nodes (auth-worker/src/lib/contextual/*) ────────────
+// Each node's system prompt carries a routing marker ([[ctx:construe]],
+// [[ctx:summarize]], [[ctx:draft]], [[ctx:verify:<stance>]]) so the mock can
+// return a VALID canned JSON body per node without sniffing prompt copy.
+
+/** Cell ids referenced as "[<id>]" in the construe window block. */
+function extractBracketIds(text: string): string[] {
+  const ids: string[] = []
+  for (const m of text.matchAll(/^\[([^\]]+)\]/gm)) ids.push(m[1])
+  return ids
+}
+
+/** Numbered lines "N. text" (draft input / verifier draft block). */
+function extractNumberedLines(text: string): { i: number; body: string }[] {
+  const out: { i: number; body: string }[] = []
+  for (const line of text.split("\n")) {
+    const m = line.match(/^(\d+)\.\s*(?:\[[^\]]*\]\s*)?(.*)$/)
+    if (m) out.push({ i: Number(m[1]), body: m[2].trim() })
+  }
+  return out
+}
+
+function contextualMockResponse(marker: string, userText: string) {
+  if (marker.startsWith("construe")) {
+    // Closed minimal construal echoing the window's cell ids as evidence.
+    return respond(JSON.stringify({
+      situation: "A mock narrator relates the span's events to the reader.",
+      participants: ["narrator", "reader"],
+      tenor: "neutral, informative",
+      moves: ["relate", "conclude"],
+      closed: true,
+      openQuestions: [],
+      evidenceCellIds: extractBracketIds(userText),
+    }))
+  }
+  if (marker.startsWith("summarize")) {
+    return respond("Mock scene brief: a narrator relates the span's events to the reader in a neutral, informative tenor.")
+  }
+  if (marker.startsWith("draft")) {
+    const lines = extractNumberedLines(userText)
+    return respond(JSON.stringify(lines.map(({ i, body }) => ({ i, t: `MOCK ${body}` }))))
+  }
+  if (marker.startsWith("verify")) {
+    const count = Number(userText.match(/Verify these (\d+) drafted cells/)?.[1] ?? 0)
+    const cells = Array.from({ length: count }, (_, idx) => ({ i: idx + 1, approve: true }))
+    return respond(JSON.stringify({ approve: true, reason: "mock: no failure found", cells }))
+  }
+  return respond(`[mock] unknown contextual marker: ${marker}`)
+}
+
 export function scriptMockResponse(messages: ChatMessage[]) {
-  const lastUserIndex = messages.findLastIndex((message) => message.role === "user")
+  // (Manual reverse scan — .findLastIndex needs lib es2023, which the
+  // auth-worker tsconfig, whose tests import this module, doesn't target.)
+  let lastUserIndex = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      lastUserIndex = i
+      break
+    }
+  }
   const lastUser = lastUserIndex >= 0 ? messages[lastUserIndex]?.content ?? "" : ""
   const userText = typeof lastUser === "string" ? lastUser : ""
+
+  // Contextual pipeline node? Route on the [[ctx:*]] system-prompt marker
+  // (server-owned contract — adversarial file content cannot select this).
+  for (const message of messages) {
+    if (message.role !== "system" || typeof message.content !== "string") continue
+    const ctx = message.content.match(/\[\[ctx:([a-z:]+)\]\]/)
+    if (ctx) return contextualMockResponse(ctx[1], userText)
+  }
+
   const importerSystemPrompt = messages.some((message) =>
     message.role === "system"
       && typeof message.content === "string"

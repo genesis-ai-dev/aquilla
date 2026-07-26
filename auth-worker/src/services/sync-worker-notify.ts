@@ -68,3 +68,35 @@ export async function notifySyncWorkerOfProjectSettingsChange(
     console.warn(`sync-worker settings notification failed for ${projectId}:`, err)
   }
 }
+
+/**
+ * Contextual-pipeline progress fan-out (design §8, slice D1): forward one
+ * `contextual.*` frame to the sync-worker so the per-project DO can broadcast
+ * it to connected editors (the pill's live progress). Frame shapes mirror
+ * src/lib/contextual/run-store.ts (contextual.run.state / contextual.scene /
+ * contextual.span). Best-effort by contract — the correctness path is the
+ * snapshot endpoint (GET …/contextual/runs) on reconnect; a failure here must
+ * never fail the tick.
+ */
+export async function notifySyncWorkerOfContextualActivity(
+  env: Pick<Env, "SYNC_WORKER_URL" | "SYNC_SECRET_KEY">,
+  projectId: string,
+  frame: { type: string },
+): Promise<void> {
+  if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) return
+  try {
+    await fetch(
+      `${env.SYNC_WORKER_URL.replace(/\/$/, "")}/admin/projects/${encodeURIComponent(projectId)}/contextual-activity`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(frame),
+      },
+    )
+  } catch (err) {
+    console.warn(`sync-worker contextual notification failed for ${projectId}:`, err)
+  }
+}

@@ -87,7 +87,8 @@ function performerSystemPrompt(deps: PerformSpanDeps): string {
       ? `\nActive directions from the human team (honour them):\n${deps.steeringDirections.map((d) => `- ${d}`).join("\n")}\n`
       : ""
 
-  return `${pair} You are the PERFORMER in a two-role translation pipeline: an analyzer has already construed the scene below. Work from the scene brief — translate the scene's moves, not word by word. Target-language idioms are explicitly licensed where they carry the same move with the same social force.
+  // [[ctx:draft]] routes the scripted e2e mock (scripts/mock-openrouter.ts).
+  return `[[ctx:draft]] ${pair} You are the PERFORMER in a two-role translation pipeline: an analyzer has already construed the scene below. Work from the scene brief — translate the scene's moves, not word by word. Target-language idioms are explicitly licensed where they carry the same move with the same social force.
 ${deps.projectBriefL1 ? `\nProject brief (honour it): ${deps.projectBriefL1}\n` : ""}
 Scene brief: ${deps.sceneBrief.l1Summary}
 ${registerBlock}${rulesBlock}${steeringBlock}

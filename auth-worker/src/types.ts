@@ -112,6 +112,12 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
+   *  Default: anthropic/claude-haiku-4-5. */
+  CONTEXTUAL_FAST_MODEL?: string
+  /** Contextual pipeline deep-tier (verifier) model override. Default: the
+   *  resolved draft (mid) model. */
+  CONTEXTUAL_DEEP_MODEL?: string
   /** Injected by index.ts (never configured): raw Postgres connection string
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string

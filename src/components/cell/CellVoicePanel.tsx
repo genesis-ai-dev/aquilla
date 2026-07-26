@@ -296,19 +296,9 @@ export function CellVoicePanel({
     if (!att) return
     const slot = playableId === cell.selectedAudioId ? "recording" : "generatedVoice"
     // Round 7: overlay the new trims onto the merged cells instantly so the
-    // timeline chip resizes without waiting on flush + refetch.
-    injectOptimisticAudioAttachment(cell.fileId, cell.id, {
-      audioId: playableId,
-      url: att.url,
-      slot,
-      mimeType: att.type ?? null,
-      voiceId: att.voiceId ?? null,
-      referenceAudioId: att.referenceAudioId ?? null,
-      durationMs: att.durationMs ?? null,
-      trimStartMs: start != null ? Math.round(start * 1000) : null,
-      trimEndMs: end != null ? Math.round(end * 1000) : null,
-    })
-    void emitCellAudioAttach({
+    // timeline chip resizes without waiting on flush + refetch. SUB-48: the
+    // overlay rides the emit promise so it lives exactly as long as the event.
+    const trimP = emitCellAudioAttach({
       projectId,
       fileId: cell.fileId,
       cellId: cell.id,
@@ -323,6 +313,18 @@ export function CellVoicePanel({
       trimEndMs: end != null ? Math.round(end * 1000) : undefined,
       author: username,
     })
+    injectOptimisticAudioAttachment(cell.fileId, cell.id, {
+      audioId: playableId,
+      url: att.url,
+      slot,
+      mimeType: att.type ?? null,
+      voiceId: att.voiceId ?? null,
+      referenceAudioId: att.referenceAudioId ?? null,
+      durationMs: att.durationMs ?? null,
+      trimStartMs: start != null ? Math.round(start * 1000) : null,
+      trimEndMs: end != null ? Math.round(end * 1000) : null,
+    }, trimP)
+    void trimP
     notifyAudioAttachmentsChanged(cell.fileId)
   }, [playableId, isSourceClip, cell.attachments, cell.selectedAudioId, cell.id, cell.fileId, projectId, username])
 

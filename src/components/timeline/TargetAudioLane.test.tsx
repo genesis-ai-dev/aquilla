@@ -313,3 +313,113 @@ describe("TargetAudioLane — corner record button (round 8b)", () => {
     expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// SUB-48 — honest geometry: nothing is buried, nothing lies about its length,
+// and a queued clip says it is still saving.
+// ---------------------------------------------------------------------------
+
+describe("TargetAudioLane — buried chips stay reachable (SUB-48)", () => {
+  // Sam's exact repro: a long take, then another long take, then a short one.
+  // The third chip sat entirely underneath the second and could not be clicked.
+  const longLongShort = () => [
+    item({ startTime: 10, endTime: 20 }, 20_000, "c1"), // 10 → 30, buries c2
+    item({ startTime: 20, endTime: 30 } as Partial<CellData>, 20_000, "c2"), // 20 → 40, buries c3
+    item({ startTime: 30, endTime: 40 } as Partial<CellData>, 2_000, "c3"), // 30 → 32
+  ]
+
+  it("an overlong chip is PAINTED up to the next chip, not over it", () => {
+    render(<TargetAudioLane {...base} items={longLongShort()} />)
+    // c1 runs to 30s but c2 starts at 20s → painted 10s wide, not 20s.
+    expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(10 * 40)
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-truncated", "true")
+  })
+
+  it("every chip in the long/long/short pile has real estate of its own", () => {
+    render(<TargetAudioLane {...base} items={longLongShort()} />)
+    const left = (id: string) => parseFloat(screen.getByTestId(id).style.left)
+    const width = (id: string) => parseFloat(screen.getByTestId(id).style.width)
+    // No chip's painted box swallows the next chip's start.
+    expect(left("tl-target-c1") + width("tl-target-c1")).toBeLessThanOrEqual(left("tl-target-c2") + 0.5)
+    expect(left("tl-target-c2") + width("tl-target-c2")).toBeLessThanOrEqual(left("tl-target-c3") + 0.5)
+    // …and the short one that used to be completely hidden has width to click.
+    expect(width("tl-target-c3")).toBeGreaterThan(10)
+  })
+
+  it("the truncated edge carries a runs-over marker toned by the collision", () => {
+    render(<TargetAudioLane {...base} items={longLongShort()} />)
+    const marker = screen.getByTestId("tl-target-c1-overflow")
+    expect(marker).toBeInTheDocument()
+    // c1 overlaps the next dub outright → red, not amber.
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-overflow", "overlap")
+    expect(marker.className).toContain("red")
+  })
+
+  it("engaging with a chip restores its full length over the neighbour", () => {
+    render(<TargetAudioLane {...base} items={longLongShort()} selectedId="c1" />)
+    // Selected → paints its true 20s span again (so trim handles sit on the
+    // real edge), and rides above the chips it covers.
+    expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(20 * 40)
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-truncated")
+  })
+
+  it("hovering restores full length too, then releases it", () => {
+    render(<TargetAudioLane {...base} items={longLongShort()} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerEnter(chip)
+    expect(parseFloat(chip.style.width)).toBeCloseTo(20 * 40)
+    fireEvent.pointerLeave(chip)
+    expect(parseFloat(chip.style.width)).toBeCloseTo(10 * 40)
+  })
+
+  it("a chip with no chip after it is never truncated", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 20_000)]} />)
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-truncated")
+    expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(20 * 40)
+  })
+})
+
+describe("TargetAudioLane — unknown length is visible (SUB-48)", () => {
+  it("a clip with no measured duration is dashed and marked, not silently section-width", () => {
+    render(<TargetAudioLane {...base} items={[item()]} />) // no durationMs
+    const chip = screen.getByTestId("tl-target-c1")
+    expect(chip).toHaveAttribute("data-unknown-length", "true")
+    expect(chip.className).toContain("border-dashed")
+    expect(screen.getByTestId("tl-target-c1-unknown-length")).toBeInTheDocument()
+  })
+
+  it("a measured clip carries none of that", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    expect(chip).not.toHaveAttribute("data-unknown-length")
+    expect(chip.className).not.toContain("border-dashed")
+    expect(screen.queryByTestId("tl-target-c1-unknown-length")).toBeNull()
+  })
+})
+
+describe("TargetAudioLane — saving indicator (SUB-48)", () => {
+  function pendingItem(): TargetAudioItem {
+    const it = item({}, 4000)
+    const takeId = it.audioId
+    const cell = {
+      ...it.cell,
+      attachments: {
+        ...it.cell.attachments,
+        [takeId]: { ...it.cell.attachments![takeId], pendingSync: true },
+      },
+    } as unknown as CellData
+    return { ...it, cell }
+  }
+
+  it("a clip whose event is still queued shows the saving glyph", () => {
+    render(<TargetAudioLane {...base} items={[pendingItem()]} />)
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-pending-sync", "true")
+    expect(screen.getByTestId("tl-target-c1-saving")).toBeInTheDocument()
+  })
+
+  it("a synced clip shows nothing extra", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-pending-sync")
+    expect(screen.queryByTestId("tl-target-c1-saving")).toBeNull()
+  })
+})

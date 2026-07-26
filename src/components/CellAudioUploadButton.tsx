@@ -90,8 +90,9 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
       // Round 6: carry the upload's duration so its Target-track chip renders
       // at the recording's real length. Best-effort.
       const uploadDurationMs = await probeDurationMsSafe(file)
+      let attachEventId: string
       try {
-        await emitCellAudioAttach({
+        attachEventId = await emitCellAudioAttach({
           projectId,
           fileId,
           cellId,
@@ -126,7 +127,7 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
         durationMs: uploadDurationMs ?? null,
         trimStartMs: null,
         trimEndMs: null,
-      })
+      }, attachEventId)
       notifyAudioAttachmentsChanged(fileId)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

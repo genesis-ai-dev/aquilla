@@ -83,6 +83,12 @@ export function DenoiseButton(props: Props) {
       // Optimistically re-select the original by re-injecting its attachment
       // (a recording-slot injection also flips selectedAudioId), so the UI
       // reverts instantly; the emitted select is reconciled by the next read.
+      const revertP = emitCellAudioSelect({
+        projectId, fileId, cellId,
+        audioId: referenceAudioId,
+        slot: "recording",
+        author,
+      })
       if (originalUrl) {
         injectOptimisticAudioAttachment(fileId, cellId, {
           audioId: referenceAudioId,
@@ -94,14 +100,9 @@ export function DenoiseButton(props: Props) {
           durationMs: originalDurationMs,
           trimStartMs: null,
           trimEndMs: null,
-        })
+        }, revertP)
       }
-      await emitCellAudioSelect({
-        projectId, fileId, cellId,
-        audioId: referenceAudioId,
-        slot: "recording",
-        author,
-      })
+      await revertP
       notifyAudioAttachmentsChanged(fileId)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

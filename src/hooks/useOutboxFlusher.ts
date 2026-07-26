@@ -69,7 +69,8 @@ export interface UseOutboxFlusherOptions {
 export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   pendingCount: number
   failureStreak: number
-  refreshPending: () => Promise<void>
+  /** Re-reads the queue sizes; resolves with the total (pending + failed). */
+  refreshPending: () => Promise<number>
   /** F6: increments whenever a flush returns stale-sibling dead-letters.
    *  Caller should surface "Some changes were rejected — newer edits won." */
   staleSiblingCount: number
@@ -112,10 +113,16 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   const wakeRef = useRef<(() => void) | null>(null)
   const tickRef = useRef<(() => void) | null>(null)
 
+  // Last observed queue size, so an outbox notification can tell "new work
+  // arrived" (wake) from "a record was acked / stamped / quarantined" (don't).
+  const lastTotalRef = useRef(0)
+
   const refreshPending = useCallback(async () => {
     const [total, failedN] = await Promise.all([outboxPendingCount(), outboxFailedCount()])
     setPending(total)
     setFailed(failedN)
+    lastTotalRef.current = total
+    return total
   }, [])
 
   const flushNow = useCallback(() => {
@@ -133,7 +140,23 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     // Without this, the count only updates inside the flush cycle — and the
     // flush cycle short-circuits while offline, so a backlog of edits would
     // pile up in IDB invisibly.
-    const unsub = subscribeToOutbox(() => void refreshPending())
+    const unsub = subscribeToOutbox(() => {
+      const before = lastTotalRef.current
+      void refreshPending().then((total) => {
+        // SUB-48: new work must not wait out the current sleep. Enqueuing never
+        // used to wake the loop, so an event saved just after a tick sat idle
+        // for a full interval — and up to the 60s backoff cap once failures had
+        // stretched it, which is how a just-recorded take could stay unsent for
+        // minutes. Wake only when the queue GREW: acks, attempt stamps and
+        // quarantines notify too, and waking on those would spin. Deliberately
+        // does NOT reset backoff — new work earns one prompt attempt, not a
+        // reset of the server-protection clock (that stays with flushNow()).
+        if (total > before) {
+          wakeRef.current?.()
+          tickRef.current?.()
+        }
+      })
+    })
     return unsub
   }, [refreshPending, options.enabled])
 

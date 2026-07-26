@@ -1645,7 +1645,7 @@ export function probeMediaDurationMs(file: Blob): Promise<number> {
  * blob must not block the attach) and degrades to undefined — the attachment
  * simply carries no durationMs, exactly today's behavior.
  */
-export async function probeDurationMsSafe(blob: Blob, timeoutMs = 3000): Promise<number | undefined> {
+export async function probeDurationMsSafe(blob: Blob, timeoutMs = 15_000): Promise<number | undefined> {
   try {
     return await Promise.race([
       // MediaRecorder webm blobs carry NO duration header (Chrome writes no

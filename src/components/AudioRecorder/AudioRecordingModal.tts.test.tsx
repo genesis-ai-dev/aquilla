@@ -1,7 +1,7 @@
 // Round 8: the recording modal's Generate-TTS button — the clear
 // "regenerate" counterpart to re-recording, right where recording lives.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -9,12 +9,16 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "sam" }, loading: false }),
 }))
+const recorderState = vi.hoisted(() => ({
+  value: { kind: "idle" } as Record<string, unknown>,
+}))
 vi.mock("@/hooks/useAudioRecorder", () => ({
   useAudioRecorder: () => ({
-    state: { kind: "idle" },
+    state: recorderState.value,
     start: vi.fn(),
     stop: vi.fn(),
     reset: vi.fn(),
+    prewarm: vi.fn(),
   }),
 }))
 const attachmentsState = vi.hoisted(() => ({ byCellId: new Map<string, unknown>() }))
@@ -26,8 +30,15 @@ const generateCellVoice = vi.fn(async (..._args: unknown[]) => true)
 vi.mock("@/lib/audio/voice-generate-helpers", () => ({
   generateCellVoice: (...args: unknown[]) => generateCellVoice(...args),
 }))
+const probeSpy = vi.hoisted(() => vi.fn(async () => 1000))
 vi.mock("@/lib/import", () => ({
-  probeDurationMsSafe: async () => 1000,
+  probeDurationMsSafe: (...args: unknown[]) => probeSpy(...(args as [])),
+}))
+const injectOptimistic = vi.hoisted(() => vi.fn((..._args: unknown[]) => {}))
+vi.mock("@/lib/audio/audio-attachments-bus", () => ({
+  notifyAudioAttachmentsChanged: vi.fn(),
+  injectOptimisticAudioAttachment: (...args: unknown[]) => injectOptimistic(...args),
+  injectOptimisticAudioRemove: vi.fn(),
 }))
 const emitAttach = vi.fn(async (..._args: unknown[]) => "evt-attach")
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-select")
@@ -43,7 +54,18 @@ vi.mock("@/lib/audio/sync-token-fetcher", () => ({
 vi.mock("@/lib/audio/upload", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   fetchCellAudio: vi.fn(async () => new ArrayBuffer(8)),
+  uploadCellAudio: vi.fn(async () => ({
+    audioId: "audio-c1-999-new",
+    ext: "webm",
+    url: "frontier-audio://audio-c1-999-new.webm",
+  })),
+  deleteCellAudio: vi.fn(async () => {}),
 }))
+vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
+vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
+vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
+vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {}) }))
+vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 
@@ -196,5 +218,57 @@ describe("AudioRecordingModal — Generate TTS (round 8)", () => {
     expect(args.project.id).toBe("p1")
     expect(args.cell.id).toBe("c1")
     expect(args.username).toBe("sam")
+  })
+})
+
+describe("AudioRecordingModal — take length comes from the recorder (SUB-48)", () => {
+  beforeEach(() => {
+    attachmentsState.byCellId = new Map()
+    emitAttach.mockClear()
+    injectOptimistic.mockClear()
+    probeSpy.mockClear()
+    recorderState.value = { kind: "idle" }
+  })
+  afterEach(() => {
+    recorderState.value = { kind: "idle" }
+  })
+
+  it("saves with the recorder's measured length and never probes the blob", async () => {
+    // Chrome's MediaRecorder writes NO duration header, so probing a mic take
+    // raced a timeout and long recordings attached with no length at all —
+    // which is why their chips were stuck at section width. The recorder has
+    // timed the take all along; use that.
+    recorderState.value = {
+      kind: "stopped",
+      blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      ext: "webm",
+      durationSec: 12.34,
+    }
+    renderModal(cellWith("bonjour"))
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+
+    await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
+    expect(emitAttach).toHaveBeenCalledWith(
+      expect.objectContaining({ slot: "recording", durationMs: 12_340 }),
+    )
+    // A long take must not depend on decoding succeeding inside a timeout.
+    expect(probeSpy).not.toHaveBeenCalled()
+  })
+
+  it("the optimistic overlay carries that same length, bound to the attach event", async () => {
+    recorderState.value = {
+      kind: "stopped",
+      blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      ext: "webm",
+      durationSec: 6,
+    }
+    renderModal(cellWith("bonjour"))
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+    await waitFor(() => expect(injectOptimistic).toHaveBeenCalled())
+    const call = injectOptimistic.mock.calls.at(-1) as unknown as [string, string, { durationMs: number }, string]
+    expect(call[2].durationMs).toBe(6000)
+    expect(call[3]).toBe("evt-attach") // the id emitCellAudioAttach resolved with
   })
 })

@@ -6,7 +6,7 @@
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Bird, Check, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
+import { Bird, Check, CloudUpload, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -16,7 +16,11 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
-import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import {
+  injectOptimisticAudioAttachment,
+  injectOptimisticAudioRemove,
+  notifyAudioAttachmentsChanged,
+} from "@/lib/audio/audio-attachments-bus"
 
 /** "Take 7" → 7; anything else → null. */
 function parseTakeNumber(label: string | null | undefined): number | null {
@@ -142,22 +146,26 @@ export function TakesStrip({
     // bus too — the merged cells flip the selection (with the take's real
     // durationMs/trims) instantly, so the timeline chip swaps and resizes with
     // zero round-trip. Previously only this strip's local checkmark moved.
+    // SUB-48: the overlay is handed the emit PROMISE, so it paints now and
+    // stays alive for exactly as long as its event sits in the outbox.
     const take = takes.find((t) => t.audioId === audioId)
     const slot = take?.slot === "generatedVoice" ? "generatedVoice" : "recording"
-    if (take) injectOptimisticAudioAttachment(fileId, cellId, take)
     // Round 8c: a generated take only sounds when no recorded take holds the
     // recording slot — hand that slot back to the source clip alongside.
     const displaceToSource =
       slot === "generatedVoice" &&
       sourceClip != null &&
       takes.some((t) => t.audioId === selectedAudioId && t.slot === "recording")
-    if (displaceToSource) injectOptimisticAudioAttachment(fileId, cellId, sourceClip)
     try {
-      await emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot, author })
+      const selectP = emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot, author })
+      if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
+      await selectP
       if (displaceToSource) {
-        await emitCellAudioSelect({
+        const displaceP = emitCellAudioSelect({
           projectId, fileId, cellId, audioId: sourceClip.audioId, slot: "recording", author,
         })
+        injectOptimisticAudioAttachment(fileId, cellId, sourceClip, displaceP)
+        await displaceP
       }
       notifyAudioAttachmentsChanged(fileId)
     } catch {
@@ -174,12 +182,24 @@ export function TakesStrip({
     setBusyId(audioId)
     try {
       if (playingId === audioId) stopPlayback()
-      await emitCellAudioRemove({ projectId, fileId, cellId, audioId, author })
+      // SUB-48: deletes get their own overlay. Without it the take stayed on
+      // screen while its remove sat in the outbox — reading as "it won't
+      // delete" — and any still-queued attach for the same clip painted it
+      // back (injectOptimisticAudioRemove cancels that attach outright).
+      const slot = takes.find((t) => t.audioId === audioId)?.slot === "generatedVoice"
+        ? "generatedVoice"
+        : "recording"
+      const removeP = emitCellAudioRemove({ projectId, fileId, cellId, audioId, author })
+      injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
+      await removeP
       notifyAudioAttachmentsChanged(fileId)
+    } catch {
+      // The overlay drops itself on rejection and pokes a refetch, so the row
+      // reappears from server truth rather than the UI wedging.
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [playingId, stopPlayback, projectId, fileId, cellId, author])
+  }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author])
 
   // On-device noise removal: clean THIS take into a new (denoised) take. The
   // heavy RNNoise/wasm path is dynamically imported so it's only loaded when a
@@ -376,8 +396,27 @@ export function TakesStrip({
                     <span data-testid={`take-label-${att.audioId}`} className="truncate font-medium">
                       {displayLabel(att)}
                     </span>
-                    {att.durationMs != null && (
+                    {att.durationMs != null ? (
                       <span className="shrink-0 text-muted-foreground/70">{(att.durationMs / 1000).toFixed(1)}s</span>
+                    ) : (
+                      // SUB-48: no measured length. Say so — a blank space read
+                      // as "fine" while the chip was quietly section-width.
+                      <span
+                        title="Length unknown — re-record or re-upload to fix"
+                        data-testid={`take-unknown-length-${att.audioId}`}
+                        className="shrink-0 text-muted-foreground/50"
+                      >
+                        ?
+                      </span>
+                    )}
+                    {att.pendingSync && (
+                      <span
+                        title="Saving — kept safe on this device until it syncs"
+                        data-testid={`take-saving-${att.audioId}`}
+                        className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground/70"
+                      >
+                        <CloudUpload className="h-3 w-3 animate-pulse" /> saving…
+                      </span>
                     )}
                     <AppTooltip content="Rename take">
                       <Button

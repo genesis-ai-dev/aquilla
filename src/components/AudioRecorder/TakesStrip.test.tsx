@@ -18,9 +18,11 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioRemove: (...args: unknown[]) => emitRemove(...args),
   emitCellAudioRename: (...args: unknown[]) => emitRename(...args),
 }))
+const injectOptimisticRemove = vi.fn((..._args: unknown[]) => {})
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: (...args: unknown[]) => notify(...args),
   injectOptimisticAudioAttachment: (...args: unknown[]) => injectOptimistic(...args),
+  injectOptimisticAudioRemove: (...args: unknown[]) => injectOptimisticRemove(...args),
 }))
 
 import { TakesStrip } from "./TakesStrip"
@@ -78,6 +80,9 @@ describe("TakesStrip", () => {
       "f1",
       "c1",
       expect.objectContaining({ audioId: "a" }),
+      // SUB-48: bound to the select event, so the overlay lives exactly as
+      // long as that event sits in the outbox.
+      expect.anything(),
     )
   })
 
@@ -156,6 +161,26 @@ describe("TakesStrip", () => {
       expect.objectContaining({ projectId: "p1", fileId: "f1", cellId: "c1", audioId: "a", author: "dir" }),
     )
     expect(notify).toHaveBeenCalledWith("f1")
+  })
+
+  it("deleting hides the take at once via a remove overlay bound to the event (SUB-48)", async () => {
+    // Without this the row/chip stayed put while the remove sat in the outbox
+    // — which read as "it won't delete" — and a still-queued attach for the
+    // same clip could paint it straight back.
+    injectOptimisticRemove.mockClear()
+    render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+    fireEvent.click(screen.getByRole("button", { name: "Delete take" }))
+    await waitFor(() => expect(injectOptimisticRemove).toHaveBeenCalledTimes(1))
+    expect(injectOptimisticRemove).toHaveBeenCalledWith("f1", "c1", "a", "recording", expect.anything())
+  })
+
+  it("deleting a GENERATED take targets the generated slot", async () => {
+    injectOptimisticRemove.mockClear()
+    const gen = { ...take("g", 1000), slot: "generatedVoice" as const }
+    render(<TakesStrip {...common} takes={[gen]} selectedAudioId={null} selectedGeneratedAudioId="g" />)
+    fireEvent.click(screen.getByRole("button", { name: "Delete take" }))
+    await waitFor(() => expect(injectOptimisticRemove).toHaveBeenCalledTimes(1))
+    expect(injectOptimisticRemove).toHaveBeenCalledWith("f1", "c1", "g", "generatedVoice", expect.anything())
   })
 
   // A denoised take carries the `dn-` marker and points at the source it was
@@ -325,8 +350,12 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
       expect.objectContaining({ audioId: "audio-c1-2-g.wav", slot: "generatedVoice" }))
     expect(emitSelect).toHaveBeenNthCalledWith(2,
       expect.objectContaining({ audioId: SOURCE_CLIP.audioId, slot: "recording" }))
-    expect(injectOptimistic).toHaveBeenCalledWith("f1", "c1", expect.objectContaining({ audioId: "audio-c1-2-g.wav" }))
-    expect(injectOptimistic).toHaveBeenCalledWith("f1", "c1", expect.objectContaining({ audioId: SOURCE_CLIP.audioId }))
+    expect(injectOptimistic).toHaveBeenCalledWith(
+      "f1", "c1", expect.objectContaining({ audioId: "audio-c1-2-g.wav" }), expect.anything(),
+    )
+    expect(injectOptimistic).toHaveBeenCalledWith(
+      "f1", "c1", expect.objectContaining({ audioId: SOURCE_CLIP.audioId }), expect.anything(),
+    )
   })
 
   it("activating a TTS take when the source already holds the slot emits ONE select", async () => {

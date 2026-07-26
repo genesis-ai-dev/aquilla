@@ -9,7 +9,7 @@
 // is never clamped.
 
 import { useRef, useState } from "react"
-import { Mic, Sparkles } from "lucide-react"
+import { ChevronsRight, CloudUpload, Mic, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { isVisible, secToPx, pxToSec } from "@/lib/timeline/scale"
 import {
@@ -90,7 +90,10 @@ function TargetAudioChip({
   const { cell } = chip.item
   const { geom, section } = chip
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
+  const [hovered, setHovered] = useState(false)
   const movedRef = useRef(false)
+  // SUB-48: this clip is saved on this device but its event is still queued.
+  const pendingSync = Boolean(cell.attachments?.[chip.item.audioId]?.pendingSync)
 
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
@@ -133,6 +136,18 @@ function TargetAudioChip({
   const span = drag ? proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec)) : { start: geom.start, end: geom.end }
   const overflow = chipOverflowState(span.end, section.end, nextChipStartSec)
   const canMove = editable && Boolean(onRetimeTarget)
+  // SUB-48: a chip that runs past the next dub is PAINTED short so it can
+  // never bury its neighbour (Sam lost a whole take under one). The logical
+  // span is untouched — overflow warnings, trims, snapping and playback all
+  // still use the true end. Engaging with the chip (hover / select / drag)
+  // reveals its full length over the top, which is also when the trim handle
+  // needs to sit on the real edge.
+  const engaged = selected || hovered || drag !== null
+  const paintedEnd =
+    !engaged && nextChipStartSec != null && span.end > nextChipStartSec
+      ? Math.max(span.start, nextChipStartSec)
+      : span.end
+  const truncated = paintedEnd < span.end - 0.0005
   const canResize =
     editable && Boolean(onTrimTarget) && chip.resizable &&
     secToPx(geom.end - geom.start, pxPerSec) >= 24
@@ -179,14 +194,20 @@ function TargetAudioChip({
 
   const Icon = chip.item.kind === "take" ? Mic : Sparkles
   const overflowSec = span.end - section.end
-  const title =
+  const kindTitle = chip.item.kind === "take" ? "Recorded take" : "Generated voice"
+  const title = [
     overflow === "overlap"
       ? "Overlaps the next dub — both will sound"
       : overflow === "soft"
         ? `Runs ${overflowSec.toFixed(1)}s past the section`
-        : chip.item.kind === "take"
-          ? "Recorded take"
-          : "Generated voice"
+        : kindTitle,
+    // SUB-48: never let a guessed width read as a measured one.
+    geom.usingFallback ? "Length unknown — re-record or re-upload to fix" : null,
+    pendingSync ? "Saving — kept safe on this device until it syncs" : null,
+    truncated ? "Drawn short so the next dub stays reachable — hover for full length" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")
 
   return (
     <button
@@ -194,23 +215,33 @@ function TargetAudioChip({
       data-testid={`tl-target-${cell.id}`}
       data-kind={chip.item.kind}
       data-overflow={overflow}
+      {...(geom.usingFallback ? { "data-unknown-length": "true" } : {})}
+      {...(pendingSync ? { "data-pending-sync": "true" } : {})}
+      {...(truncated ? { "data-truncated": "true" } : {})}
       title={title}
       onClick={() => {
         onSelect(cell.id)
         if (!movedRef.current) onSeek?.(cell.id)
         movedRef.current = false
       }}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
       onPointerDown={(e) => beginDrag("move", e)}
       style={{
         left: `${secToPx(span.start, pxPerSec)}px`,
-        width: `${Math.max(10, secToPx(span.end - span.start, pxPerSec))}px`,
-        zIndex: (drag ? 2000 : selected ? 1000 : 0) + paintOrder,
+        width: `${Math.max(10, secToPx(paintedEnd - span.start, pxPerSec))}px`,
+        zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
       }}
       className={cn(
         "group/chip absolute top-2.5 flex h-[46px] touch-none select-none items-center justify-center overflow-hidden rounded-md border",
         chip.item.kind === "take"
           ? "border-emerald-500/60 bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
           : "border-violet-500/60 bg-violet-100/80 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300",
+        // An unmeasurable clip spans its section, so say so rather than
+        // letting a placeholder width pass for the real thing.
+        geom.usingFallback && "border-dashed",
         overflow === "soft" && "border-amber-500 ring-1 ring-amber-400/70",
         overflow === "overlap" && "border-red-500 ring-1 ring-red-500/70",
         canMove && "cursor-grab active:cursor-grabbing",
@@ -229,6 +260,28 @@ function TargetAudioChip({
         </span>
       )}
       <Icon className="h-3.5 w-3.5 shrink-0" />
+      {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
+          the section's width and passing for a measured take. */}
+      {geom.usingFallback && (
+        <span
+          aria-hidden
+          data-testid={`tl-target-${cell.id}-unknown-length`}
+          className="ml-0.5 shrink-0 text-[10px] font-semibold leading-none opacity-70"
+        >
+          ?
+        </span>
+      )}
+      {/* SUB-48: still in the outbox — say so, so a queued take reads as
+          "safe, on its way" rather than mysteriously present. */}
+      {pendingSync && (
+        <span
+          title="Saving — kept safe on this device until it syncs"
+          data-testid={`tl-target-${cell.id}-saving`}
+          className="absolute left-1.5 top-1 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/85 shadow-sm ring-1 ring-border"
+        >
+          <CloudUpload className="h-2.5 w-2.5 animate-pulse" />
+        </span>
+      )}
       {/* Round 8b (Sam): record right from the chip — opens this cell's
           recording modal (takes and all) without a trip to the detail pane.
           Inset from the right edge so it never fights the trim handle. */}
@@ -255,6 +308,23 @@ function TargetAudioChip({
           className="absolute right-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
         >
           <Mic className="h-2.5 w-2.5" />
+        </span>
+      )}
+      {/* SUB-48: the cut edge of a chip drawn short — the audio really does
+          keep going past here, and the amber/red ring still tells you it
+          collides. Hovering restores the full-length paint. */}
+      {truncated && (
+        <span
+          aria-hidden
+          data-testid={`tl-target-${cell.id}-overflow`}
+          className={cn(
+            "absolute inset-y-0 right-0 flex w-[6px] items-center justify-center",
+            overflow === "overlap"
+              ? "bg-red-500/25 text-red-700 dark:text-red-300"
+              : "bg-amber-400/25 text-amber-700 dark:text-amber-300",
+          )}
+        >
+          <ChevronsRight className="h-3 w-3" />
         </span>
       )}
       {canResize && (

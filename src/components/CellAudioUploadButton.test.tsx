@@ -114,6 +114,8 @@ describe("CellAudioUploadButton", () => {
         url: "frontier-audio://audio-cell-1-123-abc.wav",
         slot: "recording",
       }),
+      // SUB-48: the overlay is tied to the attach event that will make it real.
+      expect.anything(),
     )
     expect(notifyAudioAttachmentsChanged).toHaveBeenCalledWith("file-1")
     expect(deleteCellAudio).not.toHaveBeenCalled()

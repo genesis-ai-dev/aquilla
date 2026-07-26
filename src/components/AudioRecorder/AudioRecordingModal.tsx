@@ -129,7 +129,7 @@ export function AudioRecordingModal({
           new Blob([bytes as BlobPart], { type: take.mimeType ?? "audio/webm" }),
         )
         if (durationMs == null) return
-        await emitCellAudioAttach({
+        const healEventId = await emitCellAudioAttach({
           projectId: project.id, fileId: cell.fileId, cellId: cell.id,
           audioId: take.audioId, url: take.url, slot: "recording",
           mimeType: take.mimeType ?? undefined,
@@ -139,7 +139,12 @@ export function AudioRecordingModal({
           trimEndMs: take.trimEndMs ?? undefined,
           author: username,
         })
-        injectOptimisticAudioAttachment(cell.fileId, cell.id, { ...take, durationMs: Math.round(durationMs) })
+        injectOptimisticAudioAttachment(
+          cell.fileId,
+          cell.id,
+          { ...take, durationMs: Math.round(durationMs) },
+          healEventId,
+        )
         notifyAudioAttachmentsChanged(cell.fileId)
       } catch {
         /* best-effort — the take simply keeps its fallback-width chip */
@@ -263,11 +268,12 @@ export function AudioRecordingModal({
         // back to the source clip (the "no take" state).
         const recSel = audioEntry?.selectedAudioId
         if (recSel && audioIdSeededWith(recSel, activeCell.id) && sourceClip) {
-          injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip)
-          await emitCellAudioSelect({
+          const displaceP = emitCellAudioSelect({
             projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
             audioId: sourceClip.audioId, slot: "recording", author: username,
           })
+          injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, sourceClip, displaceP)
+          await displaceP
           notifyAudioAttachmentsChanged(activeCell.fileId)
         }
       }
@@ -284,6 +290,11 @@ export function AudioRecordingModal({
     try {
       const blob = recorder.state.blob
       const ext = recorder.state.ext
+      // SUB-48: the recorder already TIMED this take — use that, never a probe.
+      // Chrome writes no duration header into MediaRecorder webm, so probing
+      // the blob raced a timeout and long takes silently attached with no
+      // length at all, leaving their chips stuck at section width.
+      const takeDurationMs = Math.round(recorder.state.durationSec * 1000)
       const audioId = buildAudioId(activeCell.id)
       // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
       // transcribeCell/useCellAudio look bytes up (audioId+ext of the
@@ -308,13 +319,11 @@ export function AudioRecordingModal({
       const savedAudioId = result.audioId
       setTranscribeStatus(savedAudioId, { kind: "idle" })
       markProjectHasAudioDataSoon(project.id)
-      // Round 6: record the take's duration so its Target-track chip renders
-      // at the recording's real length. Best-effort — undefined = today's null.
-      const takeDurationMs = await probeDurationMsSafe(blob)
       // Round 8: takes are BORN with their permanent name — never renumbered.
       const takeLabel = nextTakeLabel(recordingTakes)
+      let attachEventId: string
       try {
-        await emitCellAudioAttach({
+        attachEventId = await emitCellAudioAttach({
           projectId: project.id,
           fileId: activeCell.fileId,
           cellId: activeCell.id,
@@ -350,11 +359,11 @@ export function AudioRecordingModal({
         mimeType: blob.type || null,
         voiceId: null,
         referenceAudioId: null,
-        durationMs: takeDurationMs ?? null,
+        durationMs: takeDurationMs,
         label: takeLabel,
         trimStartMs: null,
         trimEndMs: null,
-      })
+      }, attachEventId)
       notifyAudioAttachmentsChanged(activeCell.fileId)
       setPhase("saved")
       // Fire Whisper transcription in the background — user gets karaoke as

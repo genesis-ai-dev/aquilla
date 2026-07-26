@@ -16,6 +16,11 @@ export interface AudioAttachmentOut {
   /** Non-destructive playback trim window into the clip, in ms (null = clip edge). */
   trimStartMs: number | null
   trimEndMs: number | null
+  /** SUB-48: set by the optimistic overlay while this clip's event is still
+   *  sitting in the outbox — i.e. saved on this device but not yet at the
+   *  server. Never sent by the server; UI renders a "saving…" hint from it so
+   *  a queued take is visibly safe rather than mysteriously present. */
+  pendingSync?: true
 }
 
 export interface CellAudioEntry {

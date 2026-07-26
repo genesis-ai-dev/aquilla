@@ -64,6 +64,9 @@ export interface CodexCellAttachment {
    *  slice (transcription must decode only this window, not the whole file). */
   trimStartMs?: number;
   trimEndMs?: number;
+  /** SUB-48: this clip's event is still queued locally (saved on this device,
+   *  not yet at the server). Drives the "saving…" hint on chips/rows. */
+  pendingSync?: true;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character

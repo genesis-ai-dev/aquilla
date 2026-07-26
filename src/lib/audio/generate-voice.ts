@@ -75,7 +75,7 @@ export async function generateAndAttachCellVoice(
       },
       getSyncToken,
     )
-    await emitCellAudioAttach({
+    const attachEventId = await emitCellAudioAttach({
       projectId: args.projectId,
       fileId: args.fileId,
       cellId: args.cellId,
@@ -102,7 +102,7 @@ export async function generateAndAttachCellVoice(
       label: args.label ?? null,
       trimStartMs: null,
       trimEndMs: null,
-    })
+    }, attachEventId)
     notifyAudioAttachmentsChanged(args.fileId)
     const bytes = await fetchCellAudio({
       projectId: args.projectId,
@@ -177,7 +177,7 @@ export async function generateAndAttachCellVoice(
   // the generated audio's real length (best-effort).
   const objectName = `${audioId}.${ext}`
   const generatedDurationMs = await probeDurationMsSafe(playable)
-  await emitCellAudioAttach({
+  const attachEventId = await emitCellAudioAttach({
     projectId: args.projectId,
     fileId: args.fileId,
     cellId: args.cellId,
@@ -203,7 +203,7 @@ export async function generateAndAttachCellVoice(
     label: args.label ?? null,
     trimStartMs: null,
     trimEndMs: null,
-  })
+  }, attachEventId)
   notifyAudioAttachmentsChanged(args.fileId)
 
   return { audioId: objectName, url, blob: playable }

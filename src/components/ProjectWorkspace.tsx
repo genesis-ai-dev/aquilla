@@ -1491,18 +1491,7 @@ export function ProjectWorkspace() {
       const att = cell?.attachments?.[audioId]
       if (!cell || !att) return
       const slot = audioId === cell.selectedAudioId ? "recording" : "generatedVoice"
-      injectOptimisticAudioAttachment(activeFileId, cellId, {
-        audioId,
-        url: att.url,
-        slot,
-        mimeType: att.type ?? null,
-        voiceId: att.voiceId ?? null,
-        referenceAudioId: att.referenceAudioId ?? null,
-        durationMs: att.durationMs ?? null,
-        trimStartMs: trims.trimStartMs ?? null,
-        trimEndMs: trims.trimEndMs ?? null,
-      })
-      await emitCellAudioAttach({
+      const trimP = emitCellAudioAttach({
         projectId: project.id,
         fileId: activeFileId,
         cellId,
@@ -1517,6 +1506,18 @@ export function ProjectWorkspace() {
         trimEndMs: trims.trimEndMs,
         author: currentUsername,
       })
+      injectOptimisticAudioAttachment(activeFileId, cellId, {
+        audioId,
+        url: att.url,
+        slot,
+        mimeType: att.type ?? null,
+        voiceId: att.voiceId ?? null,
+        referenceAudioId: att.referenceAudioId ?? null,
+        durationMs: att.durationMs ?? null,
+        trimStartMs: trims.trimStartMs ?? null,
+        trimEndMs: trims.trimEndMs ?? null,
+      }, trimP)
+      await trimP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(activeFileId)
     },

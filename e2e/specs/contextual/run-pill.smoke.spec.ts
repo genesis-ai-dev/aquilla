@@ -19,10 +19,16 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   // (the settings surface renders one section at a time via its side nav).
   await alice.goto(`/project/${seeded.projectId}/settings`)
   await alice.getByRole("link", { name: /Experimental/ }).click()
-  const flagSwitch = alice.locator("#experimental-contextualTranslation")
+  // The section renders one switch per registry flag; base-ui puts the label's
+  // htmlFor id on a hidden checkbox, so target the visible switch role. Only
+  // one flag exists today — scope via the section card to stay future-proof.
+  const flagSwitch = alice
+    .locator("div", { has: alice.getByText("Contextual drafting", { exact: true }) })
+    .getByRole("switch")
+    .last()
   await expect(flagSwitch).toBeVisible()
   await flagSwitch.click()
-  await expect(flagSwitch).toHaveAttribute("data-checked", /.*/)
+  await expect(flagSwitch).toHaveAttribute("data-checked", "")
 
   const ws = await openSeededProject(alice, seeded)
   await ws.waitForEditor()

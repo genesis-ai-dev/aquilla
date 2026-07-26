@@ -33,6 +33,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { isFlagEnabled } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
+import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
 import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
@@ -2839,6 +2840,13 @@ export function ProjectWorkspace() {
               // snapshot and keep row validation UI in sync.
               cellStore.setMaxServerSeq(null)
               revalidateCellsRef.current()
+            } else if (msg.t === "contextual.activity") {
+              // Slice D2: live contextual-run progress. The run-store is a
+              // module store — feed the frame straight in; the pill re-renders
+              // via useSyncExternalStore. Lossy: a missed frame self-heals on
+              // the next attachContextualRun snapshot.
+              if (msg.project !== pid) return
+              applyContextualFrame(msg.frame)
             } else if (msg.t === "link.upstream-changed") {
               // FRO-479: an upstream live-link project committed lane-relevant
               // changes. Refetch staleness immediately; the handler debounces

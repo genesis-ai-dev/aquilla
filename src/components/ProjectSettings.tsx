@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType }
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
-  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines,
+  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, FlaskConical,
 } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
@@ -55,6 +55,7 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
@@ -804,6 +805,7 @@ export function ProjectSettings() {
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
     { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
+    { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -882,6 +884,13 @@ export function ProjectSettings() {
       description: "Post-edit distance and AI usage",
       icon: BarChart3,
       sectionIds: ["section-ai-metrics"],
+    },
+    {
+      id: "experimental",
+      label: "Experimental",
+      description: "Early features, this device only",
+      icon: FlaskConical,
+      sectionIds: ["section-experimental"],
     },
   ]
 
@@ -1750,6 +1759,10 @@ export function ProjectSettings() {
             isCloudProject={isCloudProject}
             onRevalidate={revalidateMetrics}
           />
+        )}
+
+        {sectionsToRender.some((s) => s.id === "section-experimental") && id && (
+          <ExperimentalFlagsSection projectId={id} />
         )}
 
         </main>

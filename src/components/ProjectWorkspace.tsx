@@ -31,6 +31,9 @@ import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCac
 import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { isFlagEnabled } from "@/lib/features/flags"
+import { isDiscourseFile } from "@/lib/contextual/discourse-file"
+import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -4716,6 +4719,16 @@ export function ProjectWorkspace() {
                   onClose={() => setSearchExpandedQuery(null)}
                 />
               </div>
+            )}
+            {/* Contextual drafting pill (flag-gated, discourse files only) —
+                absolute inside this relative wrapper so it vanishes on
+                non-editor surfaces; z-30 = floating-chip layer (AppShell). */}
+            {project && activeFile && isFlagEnabled(project, "contextualTranslation") && isDiscourseFile(activeFile) && (
+              <ContextualRunPillMount
+                projectId={project.id}
+                fileId={activeFile.id}
+                onSetupNeeded={handleAiSetupNeeded}
+              />
             )}
             <div className="min-h-0 flex-1">
               {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (

@@ -226,12 +226,18 @@ contextual.post(
 )
 
 /** Snapshot shape the pill hydrates from (mirrors run-store's expectations). */
-function runSnapshot(run: ContextualRun) {
+function runSnapshot(run: ContextualRun, activeDirections: string[] = []) {
   return {
     runId: run.id,
     fileId: run.fileId,
     status: run.status,
     targetLang: run.targetLang,
+    // Live phase/spanLabel arrive over the DO frame channel; the snapshot only
+    // carries durable state, so these hydrate as null (never undefined — the
+    // SPA run-store types them string | null).
+    phase: null,
+    spanLabel: null,
+    activeDirections,
     done: run.doneSpans,
     total: run.totalSpans,
     failed: run.failedSpans,
@@ -261,10 +267,12 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
     ? await readUnconsumedSteering(c.env.AQUILLA_PG, { projectId, fileId, runId: run.id })
     : []
   const draftCounts = await countDrafts(c.env.AQUILLA_PG, projectId, fileId)
+  const activeDirections = steering.filter((s) => s.kind === "direction").map((s) => s.body)
   return c.json({
     available: true,
-    run: run ? runSnapshot(run) : null,
-    activeDirections: steering.filter((s) => s.kind === "direction").map((s) => s.body),
+    run: run ? runSnapshot(run, activeDirections) : null,
+    // Kept at the top level too for consumers that never look inside `run`.
+    activeDirections,
     draftCounts,
   })
 })

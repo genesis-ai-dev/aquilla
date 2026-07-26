@@ -166,15 +166,19 @@ describe("start + run commands", () => {
 })
 
 describe("steering", () => {
-  it("POSTs /runs/:id/steering with { text }", async () => {
+  it("POSTs the project-scoped steering route with kind/body/runId", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
     await realContextualTransport.start(PROJECT_ID, FILE_ID)
     fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }))
     await sendContextualSteering(RUN.runId, "Prefer shorter sentences")
     const { url, init } = lastRequest()
-    expect(url).toContain(`/runs/${RUN.runId}/steering`)
+    expect(url).toContain(`/projects/${encodeURIComponent(PROJECT_ID)}/contextual/steering`)
     expect(init.method).toBe("POST")
-    expect(JSON.parse(init.body as string)).toEqual({ text: "Prefer shorter sentences" })
+    expect(JSON.parse(init.body as string)).toEqual({
+      kind: "direction",
+      body: "Prefer shorter sentences",
+      runId: RUN.runId,
+    })
   })
 })
 

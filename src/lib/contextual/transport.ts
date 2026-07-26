@@ -148,14 +148,20 @@ export const realContextualTransport: ContextualTransport = {
 /**
  * Free-text steering direction for a live run ("keep the tone formal").
  * Not part of ContextualTransport (the store doesn't sequence steering); the
- * steering UI calls this directly. POST …/runs/:id/steering { text }.
+ * steering UI calls this directly. The server route is project-scoped —
+ * POST …/contextual/steering { kind, body, runId } — and waking a parked run
+ * is its job, not the client's.
  */
 export async function sendContextualSteering(runId: string, text: string): Promise<void> {
   const projectId = projectForRun(runId)
   const jwt = await requireJwt()
   const res = await fetchWithTimeout(
-    `${runsBase(projectId)}/${encodeURIComponent(runId)}/steering`,
-    { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ text }) },
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/steering`,
+    {
+      method: "POST",
+      headers: authHeaders(jwt),
+      body: JSON.stringify({ kind: "direction", body: text, runId }),
+    },
   )
   if (!res.ok) return throwFromResponse(res, "send steering failed")
 }

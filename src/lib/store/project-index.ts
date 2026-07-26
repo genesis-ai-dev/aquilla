@@ -175,6 +175,11 @@ export function mergeServerProjectWithLocalCache(
     ...(local.suggestionsDismissedAt
       ? { suggestionsDismissedAt: local.suggestionsDismissedAt }
       : {}),
+    // Experimental flags are device-local by design (src/lib/features/flags.ts)
+    // — the server record never carries them, so the local overlay wins.
+    ...(local.experimentalFlags !== undefined
+      ? { experimentalFlags: local.experimentalFlags }
+      : {}),
   }
 }
 

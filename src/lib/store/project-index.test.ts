@@ -10,6 +10,7 @@ import {
   restoreProject,
   storeOriginalFile,
   getOriginalFile,
+  mergeServerProjectWithLocalCache,
   _resetDbForTesting,
 } from "./project-index"
 import type { ProjectRecord } from "../parsers/types"
@@ -79,6 +80,21 @@ describe("project-index", () => {
     const retrieved = await getOriginalFile("file1")
     expect(retrieved).toBeDefined()
     expect(new Uint8Array(retrieved!)).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]))
+  })
+})
+
+describe("mergeServerProjectWithLocalCache — device-local overlays", () => {
+  it("carries experimentalFlags from the local record onto the server record", () => {
+    const server = makeProject({ id: "p1" })
+    const local = makeProject({ id: "p1", experimentalFlags: { contextualTranslation: true } })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.experimentalFlags).toEqual({ contextualTranslation: true })
+  })
+
+  it("no local record / no local flags → server record untouched", () => {
+    const server = makeProject({ id: "p1" })
+    expect(mergeServerProjectWithLocalCache(server, undefined).experimentalFlags).toBeUndefined()
+    expect(mergeServerProjectWithLocalCache(server, makeProject({ id: "p1" })).experimentalFlags).toBeUndefined()
   })
 })
 

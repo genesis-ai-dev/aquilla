@@ -23,6 +23,7 @@ import {
   useContextualRunProgress,
   useContextualRunState,
 } from "@/lib/contextual/run-store"
+import { installContextualTransport } from "@/lib/contextual/transport"
 
 interface PillProps {
   projectId: string
@@ -230,6 +231,9 @@ export function ContextualRunPillMount({ projectId, fileId, onSetupNeeded }: {
   const { requestScrollToSection } = useEditorScroll()
 
   useEffect(() => {
+    // Slice D2: swap the run-store's stub transport for the real auth-worker
+    // client before the first snapshot fetch. Idempotent (first call wins).
+    installContextualTransport()
     void attachContextualRun(projectId, fileId)
   }, [projectId, fileId])
 

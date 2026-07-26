@@ -193,13 +193,27 @@ function attachEventBinding(
   )
 }
 
+/**
+ * `pendingSync` is a VIEW flag the reader stamps onto the copy it paints. It
+ * must never be stored on an overlay: callers routinely re-inject an
+ * attachment they read back out of the merged view (the takes strip hands the
+ * take it is displaying straight to `circle`), and a stored flag would keep
+ * claiming "saving…" long after the event was delivered.
+ */
+function withoutViewFlags(att: AudioAttachmentOut): AudioAttachmentOut {
+  if (!att.pendingSync) return att
+  const { pendingSync: _ignored, ...rest } = att
+  return rest
+}
+
 /** Optimistically surface a just-created/selected attachment for one cell. */
 export function injectOptimisticAudioAttachment(
   fileId: string,
   cellId: string,
-  attachment: AudioAttachmentOut,
+  incoming: AudioAttachmentOut,
   eventId?: string | Promise<string>,
 ): void {
+  const attachment = withoutViewFlags(incoming)
   const byCell = cellMap(fileId)
   const list = byCell.get(cellId) ?? []
   const kept = list.filter(

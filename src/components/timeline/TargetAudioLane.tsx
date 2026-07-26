@@ -139,10 +139,12 @@ function TargetAudioChip({
   // SUB-48: a chip that runs past the next dub is PAINTED short so it can
   // never bury its neighbour (Sam lost a whole take under one). The logical
   // span is untouched — overflow warnings, trims, snapping and playback all
-  // still use the true end. Engaging with the chip (hover / select / drag)
-  // reveals its full length over the top, which is also when the trim handle
-  // needs to sit on the real edge.
-  const engaged = selected || hovered || drag !== null
+  // still use the true end. Hovering (or dragging) reveals the full length,
+  // which is exactly when the trim handles appear and must sit on the real
+  // edge. Selection deliberately does NOT expand it: selection is sticky, so
+  // clicking an overlong chip would re-bury the next one for as long as it
+  // stayed selected — the very symptom this fixes.
+  const engaged = hovered || drag !== null
   const paintedEnd =
     // `nextChipStartSec > span.start` matters: a chip dragged to sit BEFORE its
     // predecessor would otherwise clamp to its own start and collapse to a
@@ -197,6 +199,13 @@ function TargetAudioChip({
 
   const Icon = chip.item.kind === "take" ? Mic : Sparkles
   const overflowSec = span.end - section.end
+  const paintedPx = Math.max(10, secToPx(paintedEnd - span.start, pxPerSec))
+  const fullPx = secToPx(geom.end - geom.start, pxPerSec)
+  // Keep the two corner affordances from landing on top of each other: the
+  // saving glyph needs room in the PAINTED box, the mic button appears on
+  // hover (when the chip is full width) and must leave the glyph its corner.
+  const showSaving = pendingSync && paintedPx >= 20
+  const showRecordButton = editable && Boolean(onOpenRecording) && fullPx >= (pendingSync ? 46 : 28)
   const kindTitle = chip.item.kind === "take" ? "Recorded take" : "Generated voice"
   const title = [
     overflow === "overlap"
@@ -276,7 +285,7 @@ function TargetAudioChip({
       )}
       {/* SUB-48: still in the outbox — say so, so a queued take reads as
           "safe, on its way" rather than mysteriously present. */}
-      {pendingSync && (
+      {showSaving && (
         <span
           title="Saving — kept safe on this device until it syncs"
           data-testid={`tl-target-${cell.id}-saving`}
@@ -288,7 +297,7 @@ function TargetAudioChip({
       {/* Round 8b (Sam): record right from the chip — opens this cell's
           recording modal (takes and all) without a trip to the detail pane.
           Inset from the right edge so it never fights the trim handle. */}
-      {editable && onOpenRecording && secToPx(geom.end - geom.start, pxPerSec) >= 28 && (
+      {showRecordButton && onOpenRecording && (
         <span
           role="button"
           tabIndex={0}

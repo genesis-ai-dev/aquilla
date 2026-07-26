@@ -192,6 +192,53 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     }
   })
 
+  it("overlays settling at DIFFERENT times each expire on their own deadline, unpoked", async () => {
+    // Adversarial review caught this: arming the sweep only on a fresh
+    // transition meant two overlays settling seconds apart shared one timer,
+    // and the fetch it triggered saw no new transition — so the younger one
+    // had nothing left to prune it (the outbox subscription is closed once
+    // everything is settled). It would have shown a phantom take indefinitely.
+    vi.useFakeTimers()
+    try {
+      const GEN: AudioAttachmentOut = { ...SHORT, audioId: "audio-c1-300-gen.wav", slot: "generatedVoice" }
+      fetchMock.mockResolvedValue(serverLongSelected()) // confirms neither overlay
+      const { result } = mount()
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+      queued("evt-short")
+      queued("evt-gen")
+      act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-short"))
+      act(() => injectOptimisticAudioAttachment("f1", "c1", GEN, "evt-gen"))
+
+      delivered("evt-short")
+      await act(async () => {
+        await result.current.revalidate()
+      })
+      // …the second one lands five seconds later.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000)
+      })
+      delivered("evt-gen")
+      await act(async () => {
+        await result.current.revalidate()
+      })
+      expect(entryOf(result)?.selectedGeneratedVoiceAudioId).toBe(GEN.audioId)
+
+      // From here on, NOTHING pokes the hook: no user action, no outbox
+      // change, no manual revalidate. Both must still fall away on time.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SETTLED_GRACE_MS + 2_000)
+      })
+      expect(entryOf(result)?.selectedAudioId).toBe(LONG.audioId) // first swept
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SETTLED_GRACE_MS + 2_000)
+      })
+      expect(entryOf(result)?.selectedGeneratedVoiceAudioId).toBeNull() // second too
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("a quarantined event stops the overlay at once — the UI must not keep lying", async () => {
     fetchMock.mockResolvedValue(serverLongSelected())
     const { result } = mount()

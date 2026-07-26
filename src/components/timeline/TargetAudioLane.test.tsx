@@ -355,12 +355,13 @@ describe("TargetAudioLane — buried chips stay reachable (SUB-48)", () => {
     expect(marker.className).toContain("red")
   })
 
-  it("engaging with a chip restores its full length over the neighbour", () => {
+  it("SELECTING an overlong chip must not re-bury the next one (selection is sticky)", () => {
+    // Clicking the long chip is the first thing a user does. If selection
+    // expanded it, the neighbour would sit underneath it for as long as it
+    // stayed selected — reinstating the exact bug this fixes.
     render(<TargetAudioLane {...base} items={longLongShort()} selectedId="c1" />)
-    // Selected → paints its true 20s span again (so trim handles sit on the
-    // real edge), and rides above the chips it covers.
-    expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(20 * 40)
-    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-truncated")
+    expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(10 * 40)
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-truncated", "true")
   })
 
   it("hovering restores full length too, then releases it", () => {
@@ -441,5 +442,38 @@ describe("TargetAudioLane — truncation edge cases (SUB-48)", () => {
     render(<TargetAudioLane {...base} items={[first, second]} />)
     expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-truncated")
     expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(10 * 40)
+  })
+})
+
+describe("TargetAudioLane — corner affordances never collide (SUB-48)", () => {
+  function pendingNarrow(durationMs: number): TargetAudioItem {
+    const it = item({ startTime: 10, endTime: 20 }, durationMs)
+    const cell = {
+      ...it.cell,
+      attachments: {
+        ...it.cell.attachments,
+        [it.audioId]: { ...it.cell.attachments![it.audioId], pendingSync: true },
+      },
+    } as unknown as CellData
+    return { ...it, cell }
+  }
+
+  it("a narrow queued chip hides the mic button rather than stacking it on the saving glyph", () => {
+    // 1s at 40px/s = 40px: wide enough for the mic button's old threshold,
+    // too narrow to hold both it and the saving glyph.
+    render(<TargetAudioLane {...base} items={[pendingNarrow(1000)]} onOpenRecording={vi.fn()} />)
+    expect(screen.getByTestId("tl-target-c1-saving")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+  })
+
+  it("a wide queued chip shows both", () => {
+    render(<TargetAudioLane {...base} items={[pendingNarrow(4000)]} onOpenRecording={vi.fn()} />)
+    expect(screen.getByTestId("tl-target-c1-saving")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
+  })
+
+  it("a not-yet-queued narrow chip keeps the mic button at its normal threshold", () => {
+    render(<TargetAudioLane {...base} items={[item({ startTime: 10, endTime: 20 }, 1000)]} onOpenRecording={vi.fn()} />)
+    expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
   })
 })

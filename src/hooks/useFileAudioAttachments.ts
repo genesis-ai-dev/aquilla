@@ -195,7 +195,7 @@ export function useFileAudioAttachments(
       const now = Date.now()
       const outboxStatus = new Map(outboxRecords.map((r) => [r.id, r.status]))
       const departed = new Set(queuedIds.filter((id) => !outboxStatus.has(id)))
-      const settledAny = markShadowsSettled(fileId, departed, now)
+      markShadowsSettled(fileId, departed, now)
       for (const [cellId, shadows] of registry) {
         const live = shadows.filter((s) => keepShadow(s, map.get(cellId), outboxStatus, now))
         if (live.length === 0) {
@@ -209,11 +209,29 @@ export function useFileAudioAttachments(
         map.set(cellId, entry as CellAudioEntry)
       }
       setByCellId(map)
-      if (settledAny && sweepRef.current === null) {
-        sweepRef.current = setTimeout(() => {
-          sweepRef.current = null
-          void doFetchRef.current?.()
-        }, SETTLED_GRACE_MS + 1000)
+      // Re-arm a sweep for the EARLIEST grace deadline still outstanding.
+      // Arming only on a fresh transition was wrong: two overlays settling a
+      // few seconds apart share one timer, and the fetch it triggers sees no
+      // new transition — so the younger overlay had nothing left to prune it
+      // (the outbox subscription is closed by then, since every overlay is
+      // settled). Recomputing from the survivors is self-healing: each pass
+      // either drops a shadow or schedules the next deadline.
+      let earliestDeadline = Infinity
+      for (const list of registry.values()) {
+        for (const s of list) {
+          if (s.phase === "settled") earliestDeadline = Math.min(earliestDeadline, s.graceStartedAt + SETTLED_GRACE_MS)
+        }
+      }
+      if (sweepRef.current) clearTimeout(sweepRef.current)
+      sweepRef.current = null
+      if (earliestDeadline !== Infinity) {
+        sweepRef.current = setTimeout(
+          () => {
+            sweepRef.current = null
+            void doFetchRef.current?.()
+          },
+          Math.max(250, earliestDeadline - now + 500),
+        )
       }
     } catch {
       // Read failures degrade to "no attachments" — playback shows nothing

@@ -57,7 +57,8 @@ function verifierSystemPrompt(key: VerifierKey, deps: VerifySpanDeps): string {
     deps.sceneBrief.ambiguityRegister.length > 0
       ? `\nAmbiguity register (each item must stay OPEN in the draft):\n${deps.sceneBrief.ambiguityRegister.map((a) => `- [${a.id}] ${a.question}`).join("\n")}\n`
       : "\nAmbiguity register: (empty)\n"
-  return `You are an independent translation verifier. Your single stance: ${STANCES[key].stance}
+  // [[ctx:verify:<stance>]] routes the scripted e2e mock (scripts/mock-openrouter.ts).
+  return `[[ctx:verify:${key}]] You are an independent translation verifier. Your single stance: ${STANCES[key].stance}
 
 Scene brief: ${deps.sceneBrief.l1Summary}
 ${registerBlock}

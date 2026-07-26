@@ -160,7 +160,10 @@ function construeSystemPrompt(steeringDirections?: string[]): string {
     steeringDirections && steeringDirections.length > 0
       ? `\nActive directions from the human team (honour them):\n${steeringDirections.map((d) => `- ${d}`).join("\n")}\n`
       : ""
-  return `You are a discourse analyst. Construe the SITUATION the given span of cells enacts: who is involved, the social relationship (tenor), and the sequence of speech-act moves.
+  // [[ctx:construe]] is a routing marker for the scripted e2e mock
+  // (scripts/mock-openrouter.ts) — it keys canned replies off the node, not
+  // off fragile prompt copy. Harmless to a real model.
+  return `[[ctx:construe]] You are a discourse analyst. Construe the SITUATION the given span of cells enacts: who is involved, the social relationship (tenor), and the sequence of speech-act moves.
 
 Set "closed": true ONLY if reading further context would NOT change your construal (a fixpoint test, not a confidence guess). If context you cannot see could still change it, set "closed": false and list what you need in "openQuestions". Questions that no amount of context could settle are GENUINE ambiguity — keep them in "openQuestions" and still set "closed": true.
 

@@ -50,7 +50,8 @@ export async function summarizeConstrual(deps: {
     return { l1Summary: l2.slice(0, L1_MAX_CHARS), fallback: true }
   }
   const reply = await deps.llm({
-    system: `Compress the following scene construal into a single plain-text scene brief of AT MOST ${L1_MAX_CHARS} characters. Keep: the situation, who is involved and their relationship, the sequence of moves, and every open question verbatim. Drop nothing a translator drafting this scene would need. Output the brief text only — no headings, no JSON, no preamble.`,
+    // [[ctx:summarize]] routes the scripted e2e mock (scripts/mock-openrouter.ts).
+    system: `[[ctx:summarize]] Compress the following scene construal into a single plain-text scene brief of AT MOST ${L1_MAX_CHARS} characters. Keep: the situation, who is involved and their relationship, the sequence of moves, and every open question verbatim. Drop nothing a translator drafting this scene would need. Output the brief text only — no headings, no JSON, no preamble.`,
     user: l2,
     tier: "fast",
     maxTokens: 800,

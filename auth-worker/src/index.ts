@@ -85,6 +85,7 @@ import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
 import agentMemoryRoutes from "./routes/agent-memory"
+import sceneBriefRoutes from "./routes/scene-briefs"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
@@ -226,6 +227,9 @@ app.route("/api/v2/projects", termbaseSubscriptionRoutes)
 // file, doesn't touch projects.ts. Session-JWT authed; agent-channel semantics
 // keyed off the x-aquilla-agent-run header (see routes/agent-memory.ts).
 app.route("/api/v2/projects", agentMemoryRoutes)
+// Scene briefs (contextual translation pipeline §9). Sibling router — same
+// agent-channel semantics as agent-memory (routes/scene-briefs.ts).
+app.route("/api/v2/projects", sceneBriefRoutes)
 // Agent artifact upload — session-JWT attach-file path for the SPA agent
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).

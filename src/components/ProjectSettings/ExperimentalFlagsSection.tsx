@@ -11,9 +11,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import { FLAGS } from "@/lib/features/flags"
-import { getProject, patchProject } from "@/lib/store/project-index"
+import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
-export function ExperimentalFlagsSection({ projectId }: { projectId: string }) {
+export function ExperimentalFlagsSection({
+  projectId,
+  serverProject,
+}: {
+  projectId: string
+  /** Server-hydrated record from the parent's read hook. Used only to upsert
+   *  a real IDB record when this device has never cached the project —
+   *  patchProject is read-then-apply and silently no-ops on a cache miss,
+   *  which would make the toggle a no-op on first visit. */
+  serverProject?: ProjectRecord
+}) {
   const [flags, setFlags] = useState<Record<string, boolean> | undefined>(undefined)
 
   // Seed from IDB directly — the parent's `project` comes from the server
@@ -28,11 +39,17 @@ export function ExperimentalFlagsSection({ projectId }: { projectId: string }) {
 
   const setFlag = useCallback((key: string, value: boolean) => {
     setFlags((prev) => ({ ...prev, [key]: value }))
-    void patchProject(projectId, (latest) => ({
-      ...latest,
-      experimentalFlags: { ...latest.experimentalFlags, [key]: value },
-    }))
-  }, [projectId])
+    void (async () => {
+      const patched = await patchProject(projectId, (latest) => ({
+        ...latest,
+        experimentalFlags: { ...latest.experimentalFlags, [key]: value },
+      }))
+      if (patched || !serverProject) return
+      // Cache miss: seed IDB with the real server record so the flag has a
+      // home. A full record is safe on the Dashboard (it is a real project).
+      await updateProject({ ...serverProject, experimentalFlags: { [key]: value } })
+    })()
+  }, [projectId, serverProject])
 
   return (
     <Card id="section-experimental">

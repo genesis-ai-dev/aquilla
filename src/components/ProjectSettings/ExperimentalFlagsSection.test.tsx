@@ -47,6 +47,22 @@ describe("ExperimentalFlagsSection", () => {
     })
   })
 
+  it("upserts via serverProject when the project was never cached locally", async () => {
+    // Regression (caught by the contextual smoke spec): patchProject is
+    // read-then-apply and silently no-ops on an IDB cache miss, so on a
+    // device that never cached the project the toggle persisted nothing.
+    const server = makeProject({ id: "p-server-only" })
+    render(<ExperimentalFlagsSection projectId="p-server-only" serverProject={server} />)
+    const toggle = await screen.findByRole("switch", { name: "Contextual drafting" })
+    fireEvent.click(toggle)
+    await waitFor(async () => {
+      const stored = await getProject("p-server-only")
+      expect(stored?.experimentalFlags).toEqual({ contextualTranslation: true })
+      expect(stored?.name).toBe("Test Project")
+      expect(isFlagEnabled(stored!, "contextualTranslation")).toBe(true)
+    })
+  })
+
   it("seeds from an already-enabled record", async () => {
     await createProject(makeProject({ experimentalFlags: { contextualTranslation: true } }))
     render(<ExperimentalFlagsSection projectId="p1" />)

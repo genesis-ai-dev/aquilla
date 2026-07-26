@@ -1762,7 +1762,7 @@ export function ProjectSettings() {
         )}
 
         {sectionsToRender.some((s) => s.id === "section-experimental") && id && (
-          <ExperimentalFlagsSection projectId={id} />
+          <ExperimentalFlagsSection projectId={id} serverProject={project ?? undefined} />
         )}
 
         </main>

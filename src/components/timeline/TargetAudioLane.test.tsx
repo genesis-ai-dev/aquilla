@@ -423,3 +423,23 @@ describe("TargetAudioLane — saving indicator (SUB-48)", () => {
     expect(screen.queryByTestId("tl-target-c1-saving")).toBeNull()
   })
 })
+
+describe("TargetAudioLane — truncation edge cases (SUB-48)", () => {
+  it("a chip moved BEFORE its neighbour keeps its full width (no sliver)", () => {
+    // c2 is dragged back to 5s, ahead of c1 at 10s. Clamping c2 to "the next
+    // chip's start" would collapse it to nothing; it buries no one, so it
+    // must draw in full.
+    const moved = item({ startTime: 0, endTime: 40, metadata: { target_start_ms: 5000 } } as Partial<CellData>, 4000, "c2")
+    render(<TargetAudioLane {...base} items={[moved, item({}, 4000)]} />)
+    expect(parseFloat(screen.getByTestId("tl-target-c2").style.width)).toBeCloseTo(4 * 40)
+    expect(screen.getByTestId("tl-target-c2")).not.toHaveAttribute("data-truncated")
+  })
+
+  it("a chip that ends exactly at the next chip's start is not marked truncated", () => {
+    const first = item({ startTime: 10, endTime: 20 }, 10_000, "c1") // 10 → 20
+    const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2") // starts at 20
+    render(<TargetAudioLane {...base} items={[first, second]} />)
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-truncated")
+    expect(parseFloat(screen.getByTestId("tl-target-c1").style.width)).toBeCloseTo(10 * 40)
+  })
+})

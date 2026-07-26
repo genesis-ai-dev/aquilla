@@ -144,8 +144,11 @@ function TargetAudioChip({
   // needs to sit on the real edge.
   const engaged = selected || hovered || drag !== null
   const paintedEnd =
-    !engaged && nextChipStartSec != null && span.end > nextChipStartSec
-      ? Math.max(span.start, nextChipStartSec)
+    // `nextChipStartSec > span.start` matters: a chip dragged to sit BEFORE its
+    // predecessor would otherwise clamp to its own start and collapse to a
+    // sliver. Nothing is buried in that case anyway — it starts first.
+    !engaged && nextChipStartSec != null && nextChipStartSec > span.start && span.end > nextChipStartSec
+      ? nextChipStartSec
       : span.end
   const truncated = paintedEnd < span.end - 0.0005
   const canResize =

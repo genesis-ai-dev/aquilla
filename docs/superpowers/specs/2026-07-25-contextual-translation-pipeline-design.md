@@ -228,6 +228,16 @@ Outcomes only — **never token deltas, never model reasoning**. A client that w
 missed nothing: state is reconstructable from rows (`scene_briefs`, staged drafts,
 `agent_runs` accounting); the DO feed is a live view, not the record.
 
+> **v1 implementation notes (2026-07-26).** Two deliberate narrowings shipped in the first
+> build: (1) the durable engine is a Postgres-backed run row (`contextual_runs`) driven by
+> a one-span-per-tick executor with server-side self-continuation — all state resumable
+> from rows, so the Cloudflare Workflows binding can wrap the same tick function later as
+> a pure scheduler swap (wrangler 3.x local-dev support for Workflows is not yet solid
+> enough to sit under the e2e gate); (2) staged drafts persist in a `contextual_drafts`
+> table reviewed via the existing client apply path, with the full external-changeset
+> (preconditions/digest) migration as follow-up. Neither changes the graph, the human
+> gate, or the frame contract.
+
 **Persisted proposals (the gate moves from System A to System B).** With no client
 guaranteed present, in-memory `AgentProposal` frames can't carry the human gate. Staged
 drafts become **persisted changesets** — reusing the existing `changesets` machinery

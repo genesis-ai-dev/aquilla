@@ -5,7 +5,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ButtonGroup } from "@/components/ui/button-group"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -29,7 +28,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
@@ -2188,6 +2187,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
   const [books, setBooks] = useState<HelloaoBook[] | null>(null)
   const [booksErr, setBooksErr] = useState<string | null>(null)
   const [checkedBooks, setCheckedBooks] = useState<Set<string>>(new Set())
+  const [bookPreset, setBookPreset] = useState<"all" | "OT" | "NT">("all")
 
   const [progress, setProgress] = useState<EBibleProgress | null>(null)
   const [importing, setImporting] = useState(false)
@@ -2234,11 +2234,13 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     setBooks(null)
     setBooksErr(null)
     setCheckedBooks(new Set())
+    setBookPreset("all")
     fetchHelloaoBooks(t.id)
       .then((list) => {
         setBooks(list)
         // Default: everything selected (whole bible).
         setCheckedBooks(new Set(list.map((b) => b.id)))
+        setBookPreset("all")
       })
       .catch((err) => {
         setBooksErr(err instanceof Error ? err.message : String(err))
@@ -2247,6 +2249,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
 
   function applyPreset(preset: "all" | "OT" | "NT") {
     if (!books) return
+    setBookPreset(preset)
     if (preset === "all") {
       setCheckedBooks(new Set(books.map((b) => b.id)))
     } else {
@@ -2328,17 +2331,18 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         ) : (
           <>
             <div className="flex items-center gap-1.5">
-              <ButtonGroup>
-                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("all")}>
-                  Whole bible
-                </Button>
-                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("OT")}>
-                  Old Testament
-                </Button>
-                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("NT")}>
-                  New Testament
-                </Button>
-              </ButtonGroup>
+              <SegmentTabs
+                aria-label="Book selection preset"
+                value={bookPreset}
+                onValueChange={(preset) => {
+                  if (!importing) applyPreset(preset)
+                }}
+                options={[
+                  { value: "all", label: "Whole bible", disabled: importing },
+                  { value: "OT", label: "Old Testament", disabled: importing },
+                  { value: "NT", label: "New Testament", disabled: importing },
+                ]}
+              />
               <span className="ml-auto text-xs text-muted-foreground">
                 {checkedBooks.size} of {books.length} books
               </span>

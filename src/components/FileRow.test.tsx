@@ -29,8 +29,8 @@ const NOOP_PROPS = {
   onEditCancel: vi.fn(),
   onToggleExpand: vi.fn(),
   onSelect: vi.fn(),
-  onOpenMenu: vi.fn(),
   onStartRename: vi.fn(),
+  onMove: vi.fn(),
 }
 
 function renderRow(props: Partial<React.ComponentProps<typeof FileRow>> = {}) {

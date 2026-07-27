@@ -49,7 +49,7 @@ test("sidebar corpus group collapses and expands", async ({ alice }) => {
   const firstFileRow = alice.locator("aside").getByText(/sample/i).first()
   await firstFileRow.click({ button: "right" })
 
-  // Click "Move to corpus…" (shadcn DropdownMenu — role="menuitem").
+  // Click "Move to corpus…" (shadcn ContextMenu — role="menuitem").
   const moveBtn = alice.getByRole("menuitem", { name: /Move to corpus/i })
   await expect(moveBtn).toBeVisible({ timeout: 3_000 })
   await moveBtn.click()

@@ -36,6 +36,9 @@ export interface TimelineCardProps {
   retimable: boolean
   /** Round 6: edge snapping — candidate edge seconds from the lane. */
   snap?: { enabled: boolean; candidates: number[] }
+  /** SUB-53: where this card sits, resolved by the lane's layout. Absent falls
+   *  back to the pre-SUB-53 computation (the dubbing answer). */
+  span?: { start: number; end: number }
   onSelect(cellId: string): void
   /** Final bounds in seconds, fired once on pointer-up. */
   onRetime(cellId: string, startSec: number, endSec: number): void
@@ -54,12 +57,13 @@ export function TimelineCard({
   editable,
   retimable,
   snap,
+  span,
   onSelect,
   onRetime,
   onSeek,
 }: TimelineCardProps) {
   // Round 6: a subtitle card on a media cell shows its INDEPENDENT span.
-  const laneSpan = variant === "subtitle" ? subtitleSpanSec(cell) : null
+  const laneSpan = span ?? (variant === "subtitle" ? subtitleSpanSec(cell) : null)
   const startSec = laneSpan?.start ?? cell.startTime ?? 0
   const endSec = laneSpan?.end ?? cell.endTime ?? startSec + MIN_DUR_SEC
   const [drag, setDrag] = useState<{ mode: DragMode; dx: number } | null>(null)

@@ -299,6 +299,22 @@ export interface CellTtsSettings {
   voiceId?: string
 }
 
+/**
+ * AQU-646 SUB-53: which job the Media lens is for.
+ *
+ * - `"dubbing"` (also the meaning of ABSENT — every project before SUB-53) —
+ *   the translation has to fit inside the original's window. The timeline is
+ *   drawn against the imported file's clock, a dub that runs past its section
+ *   is flagged, and the original plays continuously underneath.
+ * - `"audioFirst"` — the translation IS the deliverable and the original is a
+ *   reference. Verses are laid out end to end, each taking as much room as its
+ *   longer side, so a translation running 2× the original stops reading as a
+ *   misalignment. Nothing about the recordings or the imported file changes:
+ *   the layout is derived (see lib/timeline/programme.ts), so switching back
+ *   reproduces the dubbing view exactly.
+ */
+export type AudioTimingMode = "dubbing" | "audioFirst"
+
 export interface ProjectRecord {
   id: string
   name: string
@@ -394,6 +410,14 @@ export interface ProjectRecord {
   harmonize_min_role?: "project_lead" | "maintainer"
   /** Cached flag — set true when any cell first writes audio. Avoids scanning every file's Y.Doc on load. */
   hasAnyAudioData?: boolean
+  /**
+   * AQU-646 SUB-53: which job the Media lens is for — "dubbing" (the
+   * translation must fit the original's window; absent means this) or
+   * "audioFirst" (the translation is the deliverable, so verses are laid out
+   * end to end at their real lengths). Overlaid from
+   * ProjectWideSettings.audioTimingMode by useProject's overlaySettings.
+   */
+  audioTimingMode?: AudioTimingMode
   /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */
   audioMediaStrategy?: AudioMediaStrategy
   /** Soft-delete marker. When present the project is in Trash; the Dashboard

@@ -29,8 +29,9 @@ import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
-import type { FileReference } from "@/lib/parsers/types"
+import type { AudioTimingMode, FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { resolveAudioTimingMode } from "@/lib/sync/project-settings"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
@@ -49,7 +50,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue, getQueueState, seekQueueToTime, startQueueAtTime, pauseQueue, resumeQueue } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, resumeQueue } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -3982,6 +3983,24 @@ export function ProjectWorkspace() {
     [legacyCells, workspaceAudioByCellId],
   )
 
+  // AQU-646 SUB-53: which job the Media lens is for. Absent means dubbing —
+  // the behaviour every project had before this. Only a maintainer can change
+  // it (the server's floor for writing project settings), so below that the
+  // timeline shows the mode as a plain label instead of a control.
+  const timingMode = resolveAudioTimingMode(project ?? undefined)
+  const canEditTimingMode = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  // The transport speaks file seconds in dubbing and programme seconds in
+  // audio-first, so it has to know which before anything seeks.
+  useEffect(() => {
+    setQueueTimingMode(timingMode)
+  }, [timingMode])
+  const handleChangeTimingMode = useCallback(
+    (mode: AudioTimingMode) => {
+      void patchSettings({ audioTimingMode: mode })
+    },
+    [patchSettings],
+  )
+
   // AQU-646: timeline seeks (ruler click, clean card click) drive the audio
   // queue in file-timeline seconds. Live queue → jump preserving play/pause;
   // idle queue → CUE paused at the position (Sam's decision: clicking while
@@ -5123,6 +5142,8 @@ export function ProjectWorkspace() {
                   onCommitTarget={handleTimelineCommitTarget}
                   onLinkVideo={handleLinkVideo}
                   onSeekToTime={handleTimelineSeekToTime}
+                  timingMode={timingMode}
+                  onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
                   // AQU-646/SUB-29: transcribe from the detail pane — language by
                   // attachment provenance (source segment → source language;
                   // a dub take on a media cell → target language).

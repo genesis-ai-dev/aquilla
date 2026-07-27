@@ -9,6 +9,9 @@ import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { activeTargetForCell, sourceClipAudioForCell } from "./track-audio"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
+import { hasTiming, sortByLens } from "@/lib/timeline/derive"
+import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { audioMimeForExt } from "./mime"
@@ -79,6 +82,8 @@ function subscribeProgress(listener: () => void): () => void {
 export function useQueueProgress(): QueueProgress {
   return useSyncExternalStore(subscribeProgress, () => progress, () => progress)
 }
+
+export function getQueueProgress(): QueueProgress { return progress }
 
 // ── Track audibility (round 5: per-track speaker buttons) ───────────────────
 // The SOURCE track is the master element; the TARGET track is the dub overlay.
@@ -163,6 +168,23 @@ let currentTrim: { start: number; end: number } | null = null
 let currentAttachmentUrl: string | null = null
 /** Seek target applied on loadedmetadata (Safari rejects pre-metadata seeks). */
 let pendingStartSeconds: number | null = null
+
+// ── SUB-53: audio-first transport state ─────────────────────────────────────
+// In DUBBING everything above holds: the imported file is the master and the
+// clock, and dubs ride on top of it. In AUDIO-FIRST the verses are laid out end
+// to end (lib/timeline/programme.ts) and both sides of a verse start together;
+// whichever side is shorter falls silent for the rest of the verse. Rather than
+// a synthetic clock, the LONGER side clocks its own verse — so timing stays
+// sample-accurate and cannot drift. The source side still lives on
+// `currentAudio` and the dub still lives in the overlay pool, so muting, rate,
+// volume and the app-wide audio coordinator all keep working untouched.
+let timingMode: AudioTimingMode = "dubbing"
+let programme: Programme | null = null
+/** Index into `programme.slots` — the verse the transport is on. */
+let progIndex = -1
+/** Set while WE quiet an element mid-verse; its onpause must not report the
+ *  whole programme as paused. */
+let progSuppressPause = 0
 
 const coordinatorController: ActiveAudioController = {
   isPlaying: () => Boolean(currentAudio && !currentAudio.paused),
@@ -339,6 +361,343 @@ async function resolveAudioSrc(
   if (streamUrl) return { src: streamUrl, objectUrl: null, streaming: true, frontier }
   const url = await fetchFullBlobUrl(frontier, projectId, fileId, session)
   return { src: url, objectUrl: url, streaming: false, frontier }
+}
+
+// ── Programme transport (SUB-53, audio-first only) ──────────────────────────
+
+/** True while the audio-first transport is the one running the show. */
+function progRunning(): boolean {
+  return timingMode === "audioFirst" && (state.kind === "playing" || state.kind === "loading")
+}
+
+function progCurrentSlot(): ProgrammeSlot | null {
+  return programme?.slots[progIndex] ?? null
+}
+
+/** Pause an element without reporting the whole programme as paused — this is
+ *  the silence the shorter side plays out for the rest of its verse. */
+function progQuiet(el: HTMLAudioElement | null): void {
+  if (!el || el.paused) return
+  progSuppressPause++
+  el.pause()
+}
+
+function progTargetEntry(): OverlayEntry | null {
+  const slot = progCurrentSlot()
+  if (!slot) return null
+  return overlayPool.find((e) => e.cellId === slot.cellId) ?? null
+}
+
+/**
+ * Which side is actually going to end this verse. Normally the declared one —
+ * but a dub that failed to load hands the job back to the original rather than
+ * stalling the transport; with neither side playable the verse is skipped.
+ */
+function progEffectiveClock(slot: ProgrammeSlot): "source" | "target" | null {
+  if (slot.clock === "target" && !progTargetEntry()) return slot.sourceWindow ? "source" : null
+  return slot.clock
+}
+
+function progStateCell(): { cellIndex: number; cellId: string } {
+  const slot = progCurrentSlot()
+  const cells = activeContext?.cells ?? []
+  const idx = slot ? cells.findIndex((c) => c.id === slot.cellId) : -1
+  return { cellIndex: idx, cellId: slot?.cellId ?? "" }
+}
+
+/** Rebuild the layout from the live cells. Cheap and pure — nothing is stored,
+ *  so a trim or a new take just re-flows on the next call. */
+function progRebuild(): void {
+  const ctx = activeContext
+  if (!ctx || timingMode !== "audioFirst") {
+    programme = null
+    return
+  }
+  // Must match the timeline's own ordering exactly, or the transport and the
+  // drawing would disagree about where a verse is: same filter, same sort.
+  const dialogue = sortByLens(
+    ctx.cells.filter((c) => (c.medium ?? "text") === "media" && hasTiming(c)),
+    "time",
+  )
+  programme = buildProgramme(dialogue)
+  setProgress({ duration: programme.totalSec })
+}
+
+/** The next verse with anything to play, from `from` onward. -1 when done. */
+function progNextPlayable(from: number): number {
+  const slots = programme?.slots ?? []
+  for (let i = Math.max(0, from); i < slots.length; i++) {
+    if (slots[i].sourceWindow || slots[i].targetWindow) return i
+  }
+  return -1
+}
+
+function progPrevPlayable(from: number): number {
+  const slots = programme?.slots ?? []
+  for (let i = Math.min(from, slots.length - 1); i >= 0; i--) {
+    if (slots[i].sourceWindow || slots[i].targetWindow) return i
+  }
+  return -1
+}
+
+function progFinish(): void {
+  progQuiet(currentAudio)
+  disposeAllOverlays()
+  progIndex = -1
+  setState(IDLE)
+}
+
+/** The clocking side reached the end of its verse — on to the next. */
+function progAdvance(): void {
+  const next = progNextPlayable(progIndex + 1)
+  if (next < 0) {
+    progFinish()
+    return
+  }
+  void progPlaySlot(next, null, true)
+}
+
+/** A dub stopped — at its trim end, its natural end, or because it failed. */
+function progOnTargetFinished(entry: OverlayEntry): void {
+  if (timingMode !== "audioFirst") return
+  const slot = progCurrentSlot()
+  // Only the side that was MEANT to clock this verse ends it. A dub that runs
+  // out early just goes quiet while the original finishes.
+  if (!slot || slot.cellId !== entry.cellId || slot.clock !== "target") return
+  progAdvance()
+}
+
+/** Keep the programme clock in step with a dub that is clocking its verse. */
+function progTargetTick(entry: OverlayEntry, audio: HTMLAudioElement): void {
+  const slot = progCurrentSlot()
+  if (!slot || slot.cellId !== entry.cellId) return
+  if (slot.clock !== "target" || !slot.targetWindow) return
+  setProgress({ currentTime: slot.startSec + (audio.currentTime - slot.targetWindow.start) })
+}
+
+/** Open (or re-position) the imported clip for this verse's original. */
+async function progOpenSource(
+  cell: CellData,
+  atClipSec: number,
+  autoplay: boolean,
+): Promise<void> {
+  const ctx = activeContext
+  if (!ctx) return
+  const src = sourceClipAudioForCell(cell) ?? pickPlayableAudio(cell)
+  if (!src) {
+    progQuiet(currentAudio)
+    return
+  }
+  // Every verse is a window into the SAME imported file, so after the first
+  // one this is just a seek — no element churn at a verse boundary.
+  if (currentAudio && currentAttachmentUrl === src.url) {
+    const el = currentAudio
+    el.currentTime = atClipSec
+    if (autoplay && el.paused) {
+      try { await el.play() } catch { /* user-driven, ignore */ }
+    } else if (!autoplay && !el.paused) {
+      progQuiet(el)
+    }
+    return
+  }
+
+  disposeCurrentSourceOnly()
+  const seq = ++currentSeq
+  let resolved: ResolvedAudioSrc
+  try {
+    resolved = await resolveAudioSrc(src.url, ctx.projectId, cell.fileId, ctx.session)
+  } catch (e) {
+    if (seq !== currentSeq) return
+    setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
+    return
+  }
+  if (seq !== currentSeq) {
+    if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+    return
+  }
+
+  const audio = new Audio(resolved.src)
+  currentAudio = audio
+  currentUrl = resolved.objectUrl
+  currentAttachmentUrl = src.url
+  audio.playbackRate = progress.rate
+  audio.volume = progress.volume
+  audio.muted = !audibility.source
+  pendingStartSeconds = atClipSec
+
+  audio.onloadedmetadata = () => {
+    if (seq !== currentSeq) return
+    const target = pendingStartSeconds
+    pendingStartSeconds = null
+    if (target == null) return
+    const d = audio.duration
+    audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(target, d)) : target
+  }
+  audio.ontimeupdate = () => {
+    if (seq !== currentSeq) return
+    const slot = progCurrentSlot()
+    if (!slot?.sourceWindow) return
+    // ~250ms of tick slop, the same tolerance the dubbing path lives with.
+    if (audio.currentTime >= slot.sourceWindow.end) {
+      if (progEffectiveClock(slot) === "source") progAdvance()
+      else {
+        // Going quiet for the rest of the verse. Stamp the clock at exactly
+        // that moment so it can't sit stale until the dub's next tick.
+        setProgress({ currentTime: slot.startSec + slot.sourceLenSec })
+        progQuiet(audio)
+      }
+      return
+    }
+    if (progEffectiveClock(slot) === "source") {
+      setProgress({ currentTime: slot.startSec + (audio.currentTime - slot.sourceWindow.start) })
+    }
+  }
+  audio.onplay = () => {
+    if (seq !== currentSeq) return
+    setActiveAudio(coordinatorController)
+    for (const e of overlayPool) if (e.element) void e.element.play().catch(() => { /* user-driven */ })
+    setState({ kind: "playing", ...progStateCell() })
+  }
+  audio.onpause = () => {
+    if (seq !== currentSeq) return
+    if (progSuppressPause > 0) {
+      progSuppressPause--
+      return
+    }
+    if (audio.ended) return
+    for (const e of overlayPool) e.element?.pause()
+    setState({ kind: "paused", ...progStateCell() })
+  }
+  audio.onended = () => {
+    if (seq !== currentSeq) return
+    const slot = progCurrentSlot()
+    if (slot && progEffectiveClock(slot) === "source") progAdvance()
+  }
+  audio.onerror = () => {
+    if (seq !== currentSeq) return
+    // The original can't be loaded — let the dub carry the verse if it can.
+    const slot = progCurrentSlot()
+    if (slot && !progTargetEntry()) progAdvance()
+  }
+  if (autoplay) {
+    try { await audio.play() } catch { /* user-driven, ignore */ }
+  }
+}
+
+/** Tear down just the source element — the dub pool belongs to the verse. */
+function disposeCurrentSourceOnly(): void {
+  if (currentAudio) {
+    currentAudio.onended = null
+    currentAudio.onerror = null
+    currentAudio.ontimeupdate = null
+    currentAudio.onloadedmetadata = null
+    currentAudio.onplay = null
+    currentAudio.onpause = null
+    currentAudio.pause()
+    currentAudio.src = ""
+    currentAudio = null
+  }
+  if (currentUrl) {
+    URL.revokeObjectURL(currentUrl)
+    currentUrl = null
+  }
+  currentAttachmentUrl = null
+  pendingStartSeconds = null
+}
+
+/**
+ * Play a verse from `atProgrammeSec` (its start when null). Both sides begin
+ * together at the same point in the verse; a side whose audio has already run
+ * out by then simply doesn't sound.
+ */
+async function progPlaySlot(
+  index: number,
+  atProgrammeSec: number | null,
+  autoplay: boolean,
+): Promise<void> {
+  const ctx = activeContext
+  const prog = programme
+  if (!ctx || !prog) return
+  const slot = prog.slots[index]
+  if (!slot) {
+    progFinish()
+    return
+  }
+  const cell = ctx.cells.find((c) => c.id === slot.cellId)
+  if (!cell) {
+    progFinish()
+    return
+  }
+
+  progIndex = index
+  const at = Math.max(
+    slot.startSec,
+    Math.min(atProgrammeSec ?? slot.startSec, slot.startSec + slot.slotLenSec - 0.001),
+  )
+  const into = at - slot.startSec
+
+  // The dub side rides the overlay pool, so the speaker buttons, rate and
+  // volume keep applying to it exactly as they do in dubbing mode.
+  disposeAllOverlays()
+  pendingDub = null
+  const target = slot.targetWindow ? activeTargetForCell(cell) : null
+  if (slot.targetWindow && target && into < slot.targetLenSec) {
+    applyTargetOverlay({
+      kind: "fire",
+      cellId: slot.cellId,
+      audioId: target.audioId,
+      url: target.url,
+      startAtClipSec: slot.targetWindow.start + into,
+      stopAtClipSec: slot.targetWindow.end,
+      exclusive: true,
+    })
+  }
+
+  setProgress({ currentTime: at, duration: prog.totalSec })
+  setState({ kind: autoplay ? "playing" : "paused", ...progStateCell() })
+  ctx.onCellChange?.(progStateCell().cellIndex, slot.cellId)
+
+  if (slot.sourceWindow && into < slot.sourceLenSec) {
+    await progOpenSource(cell, slot.sourceWindow.start + into, autoplay)
+  } else {
+    progQuiet(currentAudio)
+  }
+
+  // Nothing in this verse can end it (both sides already spent, or neither
+  // loadable) — don't sit here in silence.
+  if (autoplay && progIndex === index && progEffectiveClock(slot) == null) progAdvance()
+}
+
+/** Seek on the PROGRAMME clock. Re-opens the landing verse from that point. */
+function progSeekTo(sec: number, wantPlay: boolean): void {
+  const prog = programme
+  if (!prog) return
+  const at = Math.max(0, sec)
+  const slot = slotAtProgrammeSec(prog, at)
+  if (!slot) {
+    // Past the end — land on the last verse's final moment rather than nowhere.
+    const last = progPrevPlayable(prog.slots.length - 1)
+    if (last < 0) return
+    void progPlaySlot(last, prog.slots[last].startSec, wantPlay)
+    return
+  }
+  void progPlaySlot(prog.slots.indexOf(slot), at, wantPlay)
+}
+
+/**
+ * SUB-53: tell the queue which job this project is for. Called from the
+ * workspace whenever the project's mode resolves or changes. A flip changes
+ * what every position MEANS — file seconds vs programme seconds — so the
+ * transport stops rather than carry a stale clock across.
+ */
+export function setQueueTimingMode(mode: AudioTimingMode): void {
+  if (timingMode === mode) return
+  timingMode = mode
+  stopQueue()
+}
+
+export function getQueueTimingMode(): AudioTimingMode {
+  return timingMode
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -600,6 +959,9 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
       resolved = await resolveAudioSrc(plan.url, ctx.projectId, cell.fileId, ctx.session)
     } catch {
       removeOverlayEntry(entry)
+      // SUB-53: in audio-first this dub may have been the one clocking its
+      // verse — hand the job on rather than stall the whole programme.
+      progOnTargetFinished(entry)
       return
     }
     if (!overlayPool.includes(entry)) {
@@ -623,18 +985,30 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
         audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtClipSec, d)) : startAtClipSec
       }
     }
-    audio.onended = () => removeOverlayEntry(entry)
-    audio.onerror = () => removeOverlayEntry(entry)
+    audio.onended = () => {
+      removeOverlayEntry(entry)
+      progOnTargetFinished(entry)
+    }
+    audio.onerror = () => {
+      removeOverlayEntry(entry)
+      progOnTargetFinished(entry)
+    }
     if (entry.stopAtClipSec != null) {
       // Pool entries own their trim end-stop (~250ms timeupdate slop; pause
       // immediately at the threshold to bound it).
       audio.ontimeupdate = () => {
+        // SUB-53: when this dub is the longer side of its verse it also drives
+        // the programme clock (audio-first only; a no-op in dubbing mode).
+        progTargetTick(entry, audio)
         if (entry.stopAtClipSec != null && audio.currentTime >= entry.stopAtClipSec) {
           removeOverlayEntry(entry)
+          progOnTargetFinished(entry)
         }
       }
     }
-    if (currentAudio && !currentAudio.paused) {
+    // SUB-53: in audio-first a verse can be dub-only, so the source element
+    // may legitimately be paused (or absent) while the programme plays.
+    if (progRunning() || (currentAudio && !currentAudio.paused)) {
       void audio.play().catch(() => { /* user-driven, ignore */ })
     }
   })()
@@ -877,6 +1251,19 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
  *  cell with audio if the start index has none). */
 export function startQueue(ctx: PlayContext, fromIndex: number): void {
   activeContext = ctx
+  if (timingMode === "audioFirst") {
+    progRebuild()
+    const cellId = ctx.cells[Math.max(0, fromIndex)]?.id
+    const from = cellId ? (programme?.slots.findIndex((s) => s.cellId === cellId) ?? -1) : 0
+    const start = progNextPlayable(from < 0 ? 0 : from)
+    if (start < 0) {
+      setState(IDLE)
+      disposeCurrent()
+      return
+    }
+    void progPlaySlot(start, null, true)
+    return
+  }
   const start = findNextPlayable(ctx.cells, Math.max(0, fromIndex))
   if (start < 0) {
     setState(IDLE)
@@ -898,6 +1285,12 @@ export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}):
   const ctx = activeContext
   if (!ctx) return
   if (state.kind === "idle" || state.kind === "error") return
+  if (timingMode === "audioFirst") {
+    // SUB-53: `seconds` is a PROGRAMME second here — the ruler, the playhead
+    // and the transport all speak that clock in audio-first.
+    progSeekTo(seconds, opts.play ?? (state.kind === "playing" || state.kind === "loading"))
+    return
+  }
   const idx = state.cellIndex
   const wantPlay = opts.play ?? (state.kind === "playing" || state.kind === "loading")
   const plan = planSeek(ctx.cells, idx, currentAttachmentUrl, Math.max(0, seconds))
@@ -937,6 +1330,11 @@ function syncPlayState(wantPlay: boolean): void {
  *  back to the first playable cell when no window owns the time. */
 export function startQueueAtTime(ctx: PlayContext, seconds: number, opts: { play?: boolean } = {}): void {
   activeContext = ctx
+  if (timingMode === "audioFirst") {
+    progRebuild()
+    progSeekTo(seconds, opts.play ?? true)
+    return
+  }
   const at = Math.max(0, seconds)
   const target = findCellAtTime(ctx.cells, at)
   if (target < 0) {
@@ -953,22 +1351,57 @@ export function startQueueAtTime(ctx: PlayContext, seconds: number, opts: { play
 }
 
 export function pauseQueue(): void {
+  if (timingMode === "audioFirst") {
+    // The source may already be quiet (its part of the verse is over) while
+    // the dub carries on — pause BOTH, then say so once.
+    progQuiet(currentAudio)
+    for (const e of overlayPool) e.element?.pause()
+    if (progIndex >= 0) setState({ kind: "paused", ...progStateCell() })
+    return
+  }
   currentAudio?.pause()
 }
 
 export async function resumeQueue(): Promise<void> {
+  if (timingMode === "audioFirst") {
+    const slot = progCurrentSlot()
+    if (!slot) return
+    // Only the sides that still have audio left in this verse come back. Ask
+    // the ELEMENTS, not the clock — an element's own position is the truth,
+    // and a dub that has finished is already out of the pool.
+    if (currentAudio && slot.sourceWindow && currentAudio.currentTime < slot.sourceWindow.end) {
+      try { await currentAudio.play() } catch { /* user-driven, ignore */ }
+    }
+    for (const e of overlayPool) {
+      if (e.element) void e.element.play().catch(() => { /* user-driven */ })
+    }
+    setState({ kind: "playing", ...progStateCell() })
+    return
+  }
   if (!currentAudio) return
   try { await currentAudio.play() } catch { /* user-driven, ignore */ }
 }
 
 export function stopQueue(): void {
   disposeCurrent()
+  programme = null
+  progIndex = -1
+  progSuppressPause = 0
   setState(IDLE)
   activeContext = null
 }
 
 export function skipForward(): void {
   if (!activeContext) return
+  if (timingMode === "audioFirst") {
+    const next = progNextPlayable(progIndex + 1)
+    if (next < 0) {
+      stopQueue()
+      return
+    }
+    void progPlaySlot(next, null, true)
+    return
+  }
   const cur = state.kind === "playing" || state.kind === "paused" || state.kind === "loading"
     ? state.cellIndex
     : -1
@@ -982,6 +1415,12 @@ export function skipForward(): void {
 
 export function skipBack(): void {
   if (!activeContext) return
+  if (timingMode === "audioFirst") {
+    const prev = progPrevPlayable(progIndex - 1)
+    if (prev < 0) return
+    void progPlaySlot(prev, null, true)
+    return
+  }
   const cur = state.kind === "playing" || state.kind === "paused" || state.kind === "loading"
     ? state.cellIndex
     : -1
@@ -995,6 +1434,17 @@ export function skipBack(): void {
  *  to reflect the new attachments on the next advance. */
 export function updateQueueCells(cells: CellData[]): void {
   if (activeContext) activeContext.cells = cells
+  if (timingMode === "audioFirst") {
+    // SUB-53: a new take or a trim re-flows the layout. Rebuild and keep the
+    // transport on the SAME verse — its slot may well have moved.
+    const onCellId = programme?.slots[progIndex]?.cellId ?? null
+    progRebuild()
+    if (onCellId) {
+      const i = programme?.slots.findIndex((s) => s.cellId === onCellId) ?? -1
+      if (i >= 0) progIndex = i
+    }
+    return
+  }
   // Round 6/7: an armed dub's due time is a snapshot — refresh it (trim-aware)
   // if the chip was dragged or trimmed while we were waiting on it.
   if (pendingDub) {

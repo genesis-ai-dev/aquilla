@@ -429,3 +429,126 @@ describe("TimelineEditor", () => {
     expect(screen.getByTestId("tl-detail-actions")).toBeInTheDocument()
   })
 })
+
+// ── SUB-53: audio-first ─────────────────────────────────────────────────────
+// A translated verse routinely runs much longer than its original. Drawn
+// against the imported file's clock the error accumulates, so by the fourth
+// verse the translation sits under a completely different one. Audio-first
+// gives every verse as much room as its longer side, laid end to end.
+
+describe("TimelineEditor — audio-first mode", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
+  const dubbed = (id: string, start: number, end: number, takeMs?: number): CellData => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return cell({
+      id, medium: "media", startTime: start, endTime: end, original: id,
+      ...(takeMs != null ? { selectedAudioId: takeId } : {}),
+      attachments: {
+        ...(takeMs != null
+          ? { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: takeMs } }
+          : {}),
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+  }
+  // v1: original 6s, translation 11s. v2: original 10s, translation 4s.
+  const verses = [dubbed("v1", 0, 6, 11_000), dubbed("v2", 6, 16, 4_000)]
+
+  const px = (el: Element, key: "left" | "width") => parseFloat((el as HTMLElement).style[key])
+
+  const renderAt = (mode: "dubbing" | "audioFirst", extra: Record<string, unknown> = {}) =>
+    render(
+      <TimelineEditor
+        fileId="af1" coreMediaUrl={null} editable cells={verses}
+        timingMode={mode}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
+        onRetimeTarget={() => {}} onTrimTarget={() => {}}
+        {...extra}
+      />,
+    )
+
+  it("spaces the originals out so a verse begins only after the last one has finished", () => {
+    const { container } = renderAt("audioFirst")
+    const lane = container.querySelector('[data-variant="dialogue"]')!
+    const v1 = lane.querySelector('[data-testid="tl-card-v1"]')!
+    const v2 = lane.querySelector('[data-testid="tl-card-v2"]')!
+    const chip1 = screen.getByTestId("tl-target-v1")
+    // v2's original waits for v1's TRANSLATION, not v1's original.
+    expect(px(v2, "left")).toBeGreaterThanOrEqual(px(chip1, "left") + px(chip1, "width") - 0.5)
+    // …and each original keeps its own real length.
+    expect(px(v1, "width") / px(v2, "width")).toBeCloseTo(6 / 10, 5)
+  })
+
+  it("a verse's two sides share a left edge", () => {
+    const { container } = renderAt("audioFirst")
+    for (const id of ["v1", "v2"]) {
+      const card = container.querySelector(`[data-variant="dialogue"] [data-testid="tl-card-${id}"]`)!
+      expect(px(screen.getByTestId(`tl-target-${id}`), "left")).toBeCloseTo(px(card, "left"), 5)
+    }
+  })
+
+  it("running long stops being a warning, and says how it compares instead", () => {
+    renderAt("audioFirst")
+    const chip = screen.getByTestId("tl-target-v1")
+    expect(chip).toHaveAttribute("data-overflow", "none")
+    expect(chip).toHaveAttribute("data-ratio", (11 / 6).toFixed(2))
+    expect(chip.getAttribute("title")).toMatch(/11\.0s — 1\.8× the original/)
+    // The same take in dubbing mode is still flagged for running past its verse.
+    renderAt("dubbing")
+    expect(screen.getAllByTestId("tl-target-v1")[1]).toHaveAttribute("data-overflow", "overlap")
+  })
+
+  it("chips can still be trimmed but no longer dragged sideways", () => {
+    renderAt("audioFirst")
+    expect(screen.getByTestId("tl-target-v1-handle-l")).toBeInTheDocument()
+    fireEvent.pointerDown(screen.getByTestId("tl-target-v1"), { clientX: 10 })
+    fireEvent.pointerMove(window, { clientX: 200 })
+    fireEvent.pointerUp(window, { clientX: 200 })
+    // Nothing to retime to — position is computed, so the drag is inert.
+    expect(px(screen.getByTestId("tl-target-v1"), "left")).toBe(0)
+  })
+
+  it("hides the snap toggle and shows the mode, switchable only when allowed", () => {
+    const onChange = vi.fn()
+    const { unmount } = renderAt("audioFirst")
+    expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
+    // Read-only without a change handler…
+    expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
+    expect(screen.getByTestId("tl-timing-mode-audioFirst").tagName).toBe("SPAN")
+    expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
+    unmount()
+
+    // …a control when it is there.
+    renderAt("audioFirst", { onChangeTimingMode: onChange })
+    fireEvent.click(screen.getByTestId("tl-timing-mode-dubbing"))
+    expect(onChange).toHaveBeenCalledWith("dubbing")
+  })
+
+  it("hides a linked video and says why — it runs on the original's timing", () => {
+    render(
+      <TimelineEditor
+        fileId="af2" coreMediaUrl="http://v.test/a.mp4" editable cells={verses}
+        timingMode="audioFirst" onRetimeSubtitle={() => {}} onCommitTarget={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("tl-video")).toBeNull()
+    expect(screen.getByTestId("tl-video-hidden-note")).toBeInTheDocument()
+  })
+
+  it("clicking a verse seeks to it on the ASSEMBLED clock, not the file's", () => {
+    const onSeekToTime = vi.fn()
+    const { container } = renderAt("audioFirst", { onSeekToTime })
+    fireEvent.click(container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v2"]')!)
+    // v2 sits at 11s in the assembled passage; in the file it starts at 6s.
+    expect(onSeekToTime).toHaveBeenCalledWith(11)
+  })
+
+  it("dubbing mode is untouched — cards stay where they are in the file", () => {
+    const { container } = renderAt("dubbing")
+    const v2 = container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v2"]')!
+    expect(px(v2, "left")).toBeCloseTo(px(container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v1"]')!, "width"), 5)
+    expect(screen.getByTestId("tl-snap-toggle")).toBeInTheDocument()
+  })
+})

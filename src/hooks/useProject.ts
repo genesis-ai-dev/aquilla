@@ -65,6 +65,9 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("allowSelfValidation", settings.allowSelfValidation)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   assign("draftContext", settings.draftContext)
+  // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
+  // timeline against the imported file's clock or lay the verses out end to end.
+  assign("audioTimingMode", settings.audioTimingMode)
   if (settings.ttsSettings != null) {
     // Server carries voice profiles (no apiKey); keep any device-local apiKey.
     const merged = { ...record.ttsSettings, ...settings.ttsSettings }

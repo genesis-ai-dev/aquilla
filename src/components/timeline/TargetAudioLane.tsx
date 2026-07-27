@@ -20,6 +20,7 @@ import {
 } from "@/lib/timeline/lane-timing"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
+import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 
 export interface TargetAudioItem {
@@ -32,6 +33,9 @@ export interface TargetAudioItem {
 export interface TargetAudioLaneProps {
   /** Already derived + time-sorted (from the dialogue lane). */
   items: TargetAudioItem[]
+  /** SUB-53: resolves chip geometry — the frozen file clock in dubbing mode,
+   *  the laid-out programme in audio-first. Absent = dubbing. */
+  layout?: TimelineLayout
   pxPerSec: number
   viewStartSec: number
   viewEndSec: number
@@ -61,12 +65,17 @@ interface ChipGeometry {
   geom: TargetChipGeom
   section: { start: number; end: number }
   resizable: boolean
+  /** SUB-53: how the translation compares to the original — audio-first shows
+   *  this instead of the amber/red warnings, because running long is the
+   *  expected outcome there, not a defect. Null in dubbing mode. */
+  ratio: number | null
 }
 
 function TargetAudioChip({
   chip,
   nextChipStartSec,
   paintOrder,
+  audioFirst,
   pxPerSec,
   selected,
   editable,
@@ -81,6 +90,9 @@ function TargetAudioChip({
   nextChipStartSec: number | null
   /** Higher paints on top — earlier-start chips cover later ones. */
   paintOrder: number
+  /** SUB-53: verses are laid out end to end, so nothing overlaps and nothing
+   *  "runs long". */
+  audioFirst: boolean
   pxPerSec: number
   selected: boolean
   editable: boolean
@@ -138,7 +150,10 @@ function TargetAudioChip({
   }
 
   const span = drag ? proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec)) : { start: geom.start, end: geom.end }
-  const overflow = chipOverflowState(span.end, section.end, nextChipStartSec)
+  // SUB-53: in audio-first every verse owns its own stretch of the track, so
+  // there is nothing to run past and nothing to collide with — the warnings
+  // would fire on every single line and mean nothing.
+  const overflow = audioFirst ? "none" : chipOverflowState(span.end, section.end, nextChipStartSec)
   const canMove = editable && Boolean(onRetimeTarget)
   // SUB-48: a chip that runs past the next dub is PAINTED short so it can
   // never bury its neighbour (Sam lost a whole take under one). The logical
@@ -153,7 +168,8 @@ function TargetAudioChip({
     // `nextChipStartSec > span.start` matters: a chip dragged to sit BEFORE its
     // predecessor would otherwise clamp to its own start and collapse to a
     // sliver. Nothing is buried in that case anyway — it starts first.
-    !engaged && nextChipStartSec != null && nextChipStartSec > span.start && span.end > nextChipStartSec
+    // SUB-53: inert in audio-first (chips never overlap), but harmless.
+    !audioFirst && !engaged && nextChipStartSec != null && nextChipStartSec > span.start && span.end > nextChipStartSec
       ? nextChipStartSec
       : span.end
   const truncated = paintedEnd < span.end - 0.0005
@@ -211,12 +227,20 @@ function TargetAudioChip({
   const showSaving = pendingSync && paintedPx >= 20
   const showRecordButton = editable && Boolean(onOpenRecording) && fullPx >= (pendingSync ? 46 : 28)
   const kindTitle = chip.item.kind === "take" ? "Recorded take" : "Generated voice"
+  // SUB-53: audio-first says how the two compare instead of warning. Longer is
+  // normal here; shorter is equally unremarkable.
+  const lengthNote =
+    audioFirst && !geom.usingFallback
+      ? `${(span.end - span.start).toFixed(1)}s${chip.ratio != null ? ` — ${chip.ratio.toFixed(1)}× the original` : ""}`
+      : null
   const title = [
     overflow === "overlap"
       ? "Overlaps the next dub — both will sound"
       : overflow === "soft"
         ? `Runs ${overflowSec.toFixed(1)}s past the section`
-        : kindTitle,
+        : lengthNote
+          ? `${kindTitle} · ${lengthNote}`
+          : kindTitle,
     // SUB-48: never let a guessed width read as a measured one.
     geom.usingFallback ? "Length unknown — re-record or re-upload to fix" : null,
     pendingSync ? "Saving — kept safe on this device until it syncs" : null,
@@ -234,6 +258,7 @@ function TargetAudioChip({
       {...(geom.usingFallback ? { "data-unknown-length": "true" } : {})}
       {...(pendingSync ? { "data-pending-sync": "true" } : {})}
       {...(truncated ? { "data-truncated": "true" } : {})}
+      {...(chip.ratio != null ? { "data-ratio": chip.ratio.toFixed(2) } : {})}
       title={title}
       onClick={() => {
         onSelect(cell.id)
@@ -359,6 +384,7 @@ function TargetAudioChip({
 
 export function TargetAudioLane({
   items,
+  layout,
   pxPerSec,
   viewStartSec,
   viewEndSec,
@@ -372,21 +398,31 @@ export function TargetAudioLane({
   onOpenRecording,
   emptyCells,
 }: TargetAudioLaneProps) {
+  const audioFirst = layout?.mode === "audioFirst"
   // Resolve every chip first — overflow needs the NEXT chip's start, and
   // snapping needs neighbors' effective edges.
   const chips: ChipGeometry[] = []
   for (const item of items) {
     const att = item.cell.attachments?.[item.audioId]
-    const geom = targetChipGeom(item.cell, att)
+    const geom = layout ? layout.targetGeom(item.cell, att) : targetChipGeom(item.cell, att)
     const { startTime, endTime } = item.cell
     if (!geom || typeof startTime !== "number" || typeof endTime !== "number") continue
+    const section = layout?.chipSection(item.cell, att) ?? { start: startTime, end: endTime }
+    const slot = layout?.programme?.byCellId.get(item.cell.id) ?? null
     chips.push({
       item,
       geom,
-      section: { start: startTime, end: endTime },
-      // No honest length to trim on fallback chips; take-only sections play
-      // via the MASTER (which ignores dub trims) — a handle there would lie.
-      resizable: !geom.usingFallback && sourceClipAudioForCell(item.cell) != null,
+      section,
+      // No honest length to trim on fallback chips; in DUBBING a take-only
+      // section plays via the MASTER (which ignores dub trims), so a handle
+      // there would lie. Audio-first plays the dub as its own clip, trims and
+      // all, so only the unknown-length case disqualifies it.
+      resizable:
+        !geom.usingFallback && (audioFirst || sourceClipAudioForCell(item.cell) != null),
+      ratio:
+        slot && slot.targetLenSec > 0 && slot.sourceLenSec > 0
+          ? slot.targetLenSec / slot.sourceLenSec
+          : null,
     })
   }
 
@@ -406,12 +442,16 @@ export function TargetAudioLane({
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
-          const { startTime, endTime } = cell
-          if (typeof startTime !== "number" || typeof endTime !== "number") return []
-          if (!isVisible(startTime, endTime, viewStartSec, viewEndSec)) return []
-          const widthPx = secToPx(endTime - startTime, pxPerSec)
+          // SUB-53: an un-dubbed verse's slot is just its original's length,
+          // so the button sits over exactly where the dub will land.
+          const span = layout?.spanFor(cell, "source") ?? null
+          const start = span?.start ?? cell.startTime
+          const end = span?.end ?? cell.endTime
+          if (typeof start !== "number" || typeof end !== "number") return []
+          if (!isVisible(start, end, viewStartSec, viewEndSec)) return []
+          const widthPx = secToPx(end - start, pxPerSec)
           if (widthPx < 24) return [] // no room for a button worth hitting
-          return [{ cell, leftPx: secToPx(startTime, pxPerSec), widthPx }]
+          return [{ cell, leftPx: secToPx(start, pxPerSec), widthPx }]
         })
       : []
 
@@ -449,6 +489,7 @@ export function TargetAudioLane({
             chip={chip}
             nextChipStartSec={chips[i + 1]?.geom.start ?? null}
             paintOrder={chips.length - i}
+            audioFirst={Boolean(audioFirst)}
             pxPerSec={pxPerSec}
             selected={selectedId === chip.item.cell.id}
             editable={editable}

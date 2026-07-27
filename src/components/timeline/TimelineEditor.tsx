@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
-import { timelineBounds } from "@/lib/timeline/derive"
+import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
@@ -26,6 +26,7 @@ import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineCellDetail, type TimelineDetailActions } from "./TimelineCellDetail"
 import { useTimelineClock } from "./useTimelineClock"
 import type { CellData } from "@/hooks/useCells"
+import type { AudioTimingMode } from "@/lib/parsers/types"
 
 export type { TimelineDetailActions } from "./TimelineCellDetail"
 
@@ -65,6 +66,13 @@ export interface TimelineEditorProps {
   initialSelectedCellId?: string | null
   /** AQU-646 round 3 (media→text trace): mirrors every selection change up. */
   onSelectedCellChange?(cellId: string | null): void
+  /** SUB-53: which job this project is for. "dubbing" (the default) draws the
+   *  track against the imported recording's clock; "audioFirst" lays the
+   *  verses out end to end at their real lengths. */
+  timingMode?: AudioTimingMode
+  /** SUB-53: change the project's mode. Absent = the control is read-only
+   *  (the server requires maintainer to write project settings). */
+  onChangeTimingMode?(mode: AudioTimingMode): void
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -126,7 +134,10 @@ export function TimelineEditor({
   detailActions,
   initialSelectedCellId,
   onSelectedCellChange,
+  timingMode = "dubbing",
+  onChangeTimingMode,
 }: TimelineEditorProps) {
+  const audioFirst = timingMode === "audioFirst"
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
   const [snapOn, setSnapOn] = useState(loadSnapEnabled)
@@ -263,6 +274,13 @@ export function TimelineEditor({
   }
 
   const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
+  // SUB-53: the single answer to "where does this go on the track?". Dubbing
+  // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
+  // programme. Everything below reads positions through this.
+  const layout = useMemo<TimelineLayout>(
+    () => buildTimelineLayout(timingMode, cells, dialogue),
+    [timingMode, cells, dialogue],
+  )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   const targetItems = useMemo<TargetAudioItem[]>(
     () =>
@@ -278,8 +296,7 @@ export function TimelineEditor({
     () => dialogue.filter((c) => !activeTargetForCell(c)),
     [dialogue],
   )
-  const bounds = useMemo(() => timelineBounds(cells), [cells])
-  const durationSec = (bounds?.end ?? 0) + 2
+  const durationSec = layout.totalSec
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   const viewStartSec = pxToSec(scrollLeft, pxPerSec)
   // Before the scroll container is measured (viewportPx 0), fall back to the
@@ -351,10 +368,11 @@ export function TimelineEditor({
     const id = initialSelectedCellId
     if (!id) return
     const cell = cells.find((c) => c.id === id)
-    if (!cell || typeof cell.startTime !== "number" || !Number.isFinite(cell.startTime)) return
+    const at = cell ? layout.seekSecFor(cell) : null
+    if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0
-    scrollTrackTo(Math.max(0, secToPx(cell.startTime, pxPerSec) - viewport / 2))
-    seekTo(cell.startTime)
+    scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - viewport / 2))
+    seekTo(at)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only trace consume
   }, [])
 
@@ -376,6 +394,7 @@ export function TimelineEditor({
   }, [follow, queuePlaying, queueProgress.currentTime, pxPerSec, viewportPx, trackWidthPx])
 
   const laneProps = {
+    layout,
     pxPerSec,
     viewStartSec,
     viewEndSec,
@@ -384,12 +403,12 @@ export function TimelineEditor({
     onSelect: setSelectedId,
     onRetime: onRetimeSubtitle,
     // Clean card click → navigate playback to the clip's start (both lanes;
-    // untimed chips have no timecode to seek to).
+    // untimed chips have no timecode to seek to). SUB-53: "the clip's start"
+    // is a programme second in audio-first mode, so the layout resolves it.
     onSeek: (cellId: string) => {
       const cell = cells.find((c) => c.id === cellId)
-      if (cell && typeof cell.startTime === "number" && Number.isFinite(cell.startTime)) {
-        seekTo(cell.startTime)
-      }
+      const at = cell ? layout.seekSecFor(cell) : null
+      if (at != null) seekTo(at)
     },
   }
 
@@ -398,7 +417,55 @@ export function TimelineEditor({
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">Timeline</span>
+        {/* SUB-53: which job this project is for. Audio-first lays the verses
+            out end to end so a translation that runs long stops dragging
+            everything after it out of line. Read-only below maintainer — the
+            server requires that role to write project settings. */}
+        <div
+          data-testid="tl-timing-mode"
+          data-mode={timingMode}
+          className="ml-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
+        >
+          {(
+            [
+              { mode: "dubbing" as const, label: "Original's timing", hint: "The translation is fitted to the original recording's timing." },
+              { mode: "audioFirst" as const, label: "Audio-first", hint: "Each verse takes as much room as its longer side, laid end to end." },
+            ]
+          ).map(({ mode, label, hint }) =>
+            onChangeTimingMode ? (
+              <button
+                key={mode}
+                type="button"
+                data-testid={`tl-timing-mode-${mode}`}
+                aria-pressed={timingMode === mode}
+                title={hint}
+                onClick={() => {
+                  if (timingMode !== mode) onChangeTimingMode(mode)
+                }}
+                className={cn(
+                  "px-2 py-1",
+                  timingMode === mode
+                    ? "bg-sky-100 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                    : "bg-background text-foreground/60 hover:bg-muted",
+                )}
+              >
+                {label}
+              </button>
+            ) : timingMode === mode ? (
+              <span
+                key={mode}
+                data-testid={`tl-timing-mode-${mode}`}
+                title={`${hint} Only a maintainer can change this.`}
+                className="px-2 py-1 text-foreground/70"
+              >
+                {label}
+              </span>
+            ) : null,
+          )}
+        </div>
         <div className="ml-auto flex items-center gap-1.5">
+          {/* SUB-53: nothing to snap to when positions are computed. */}
+          {!audioFirst && (
           <button
             type="button"
             aria-label="Snap to neighboring edges"
@@ -417,6 +484,7 @@ export function TimelineEditor({
           >
             <Magnet className="h-3.5 w-3.5" />
           </button>
+          )}
           <button
             type="button"
             aria-label="Follow playhead"
@@ -479,8 +547,10 @@ export function TimelineEditor({
         </div>
       </div>
 
-      {/* linked-URL video preview (master clock) */}
-      {coreMediaUrl && (
+      {/* linked-URL video preview (master clock). SUB-53: a video runs on the
+          original recording's clock, so it cannot follow a re-flowed track —
+          say so rather than let it drift silently against the audio. */}
+      {coreMediaUrl && !audioFirst && (
         <div className="flex justify-center border-b border-border bg-black">
           <video
             ref={videoRef}
@@ -490,6 +560,14 @@ export function TimelineEditor({
             onTimeUpdate={(e) => clock.setCurrentSec(e.currentTarget.currentTime)}
             className="max-h-[240px] w-auto"
           />
+        </div>
+      )}
+      {coreMediaUrl && audioFirst && (
+        <div
+          data-testid="tl-video-hidden-note"
+          className="border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
+        >
+          The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.
         </div>
       )}
 
@@ -525,20 +603,25 @@ export function TimelineEditor({
         >
           <div className="relative" style={{ width: `${trackWidthPx}px` }}>
             <TimelineRuler durationSec={durationSec} pxPerSec={pxPerSec} onScrub={seekTo} />
-            <TimelineLane cells={subtitle} variant="subtitle" retimable snapEnabled={snapOn} {...laneProps} />
+            {/* SUB-53: a subtitle span is expressed against the original's
+                clock, so it can't be dragged on a re-flowed track. */}
+            <TimelineLane cells={subtitle} variant="subtitle" retimable={!audioFirst} snapEnabled={snapOn} {...laneProps} />
             {/* Round 6: the source split is FROZEN at import — never retimable. */}
             <TimelineLane cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
             <TargetAudioLane
               items={targetItems}
+              layout={layout}
               pxPerSec={pxPerSec}
               viewStartSec={viewStartSec}
               viewEndSec={viewEndSec}
               selectedId={selectedId}
               editable={editable}
-              snapEnabled={snapOn}
+              snapEnabled={snapOn && !audioFirst}
               onSelect={setSelectedId}
               onSeek={laneProps.onSeek}
-              onRetimeTarget={onRetimeTarget}
+              // SUB-53: a chip's position is computed in audio-first, so there
+              // is nothing to drag it to. Trimming stays — and re-flows.
+              onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
               onTrimTarget={onTrimTarget}
               onOpenRecording={detailActions?.onOpenRecording}
               emptyCells={emptyTargets}

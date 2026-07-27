@@ -9,12 +9,16 @@
 import { isVisible } from "@/lib/timeline/scale"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { TimelineCard } from "./TimelineCard"
+import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 
 export interface TimelineLaneProps {
   /** Already lane-filtered + time-sorted (from deriveLanes). */
   cells: CellData[]
   variant: "subtitle" | "dialogue"
+  /** SUB-53: resolves where each card sits — the frozen file clock in dubbing
+   *  mode, the laid-out programme in audio-first. Absent = dubbing. */
+  layout?: TimelineLayout
   pxPerSec: number
   viewStartSec: number
   viewEndSec: number
@@ -33,6 +37,7 @@ export interface TimelineLaneProps {
 export function TimelineLane({
   cells,
   variant,
+  layout,
   pxPerSec,
   viewStartSec,
   viewEndSec,
@@ -45,6 +50,10 @@ export function TimelineLane({
   onSeek,
 }: TimelineLaneProps) {
   const spanOf = (c: CellData): { start: number; end: number } => {
+    if (layout) {
+      const s = layout.spanFor(c, variant === "subtitle" ? "subtitle" : "source")
+      if (s) return s
+    }
     if (variant === "subtitle") {
       const s = subtitleSpanSec(c)
       if (s) return s
@@ -88,6 +97,7 @@ export function TimelineLane({
           selected={selectedId === c.id}
           editable={editable}
           retimable={retimable}
+          span={spanOf(c)}
           snap={retimable ? { enabled: Boolean(snapEnabled), candidates: candidatesFor(c) } : undefined}
           onSelect={onSelect}
           onRetime={onRetime}

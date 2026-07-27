@@ -31,8 +31,9 @@ test("archive a project and restore it", async ({ alice }) => {
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
 
-  // handleArchive() calls navigate("/projects") on success — wait for that redirect.
-  await alice.waitForURL(/\/projects$/, { timeout: 10_000 })
+  // handleArchive() navigates to "/projects", which is a replace-redirect to the
+  // org home. Wait for the settled URL, not the transient one.
+  await alice.waitForURL(new RegExp(`/orgs/${alice.orgId}$`), { timeout: 10_000 })
   // 2. The project should NOT appear in the active projects list.
   await expect(alice.getByText(name).first()).not.toBeVisible({ timeout: 5_000 })
 

@@ -61,7 +61,6 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
   })
 
   await alice.goto("/orgs/all")
-  await alice.waitForLoadState("networkidle")
 
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
     timeout: 10_000,

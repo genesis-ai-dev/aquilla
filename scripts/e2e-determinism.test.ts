@@ -1,7 +1,14 @@
 import { readdirSync, readFileSync } from "node:fs"
+import { mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
+import {
+  authStateFile,
+  readPersistedSession,
+  writePersistedSession,
+} from "../e2e/helpers/auth-state"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -65,5 +72,44 @@ describe("E2E determinism guardrails", () => {
     }
 
     expect(violations).toEqual([])
+  })
+})
+
+describe("E2E auth-state isolation", () => {
+  it("namespaces sidecars by identity-worker origin", () => {
+    const root = path.join(os.tmpdir(), "aquilla-auth-state-paths")
+    const first = authStateFile("alice", "http://127.0.0.1:8787", root)
+    const second = authStateFile("alice", "http://127.0.0.1:8887", root)
+
+    expect(first).not.toBe(second)
+    expect(path.dirname(first)).not.toBe(path.dirname(second))
+  })
+
+  it("never exposes partial JSON during concurrent publication", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "aquilla-auth-state-"))
+    const base = "http://127.0.0.1:8787"
+    const sessions = Array.from({ length: 40 }, (_, index) => ({
+      jwt: `token-${index}-${"x".repeat(16_384)}`,
+      username: "alice",
+      createdAt: new Date(index).toISOString(),
+    }))
+
+    try {
+      await writePersistedSession(sessions[0], base, root)
+      const readers = Array.from({ length: 10 }, async () => {
+        for (let index = 0; index < 80; index++) {
+          const session = await readPersistedSession("alice", base, root)
+          expect(session.username).toBe("alice")
+          expect(session.jwt).toMatch(/^token-\d+-x+$/)
+        }
+      })
+      const writers = sessions.slice(1).map((session) =>
+        writePersistedSession(session, base, root),
+      )
+
+      await Promise.all([...readers, ...writers])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

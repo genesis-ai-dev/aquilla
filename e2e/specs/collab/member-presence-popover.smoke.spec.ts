@@ -21,9 +21,9 @@ test("member presence popover is fully visible above workspace chrome", async ({
   await expect(presenceTrigger).toBeVisible()
   await presenceTrigger.click()
 
-  const popover = alice.locator('[data-slot="popover-content"]', {
-    hasText: "Online (1)",
-  })
+  // The popover no longer repeats the count as a visible title (the trigger
+  // already carries it); its accessible name is the stable hook.
+  const popover = alice.getByLabel("1 online")
   await expect(popover).toBeVisible()
   await expect(popover.getByRole("button", { name: /bob online/i })).toBeVisible()
 

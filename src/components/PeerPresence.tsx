@@ -1,8 +1,7 @@
 import { useState } from "react"
-import { Users } from "lucide-react"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
-import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { ProjectPresencePeer } from "@/lib/sync/presence-store"
 
@@ -50,11 +49,13 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
         />
       </AppTooltip>
 
-      <PopoverContent side="top" align="end" sideOffset={8} className="w-56 gap-0 p-2">
-        <PopoverTitle className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Users className="h-3 w-3" />
-          Online ({peers.length})
-        </PopoverTitle>
+      <PopoverContent
+        side="top"
+        align="end"
+        sideOffset={8}
+        className="w-56 gap-0 p-2"
+        aria-label={`${peers.length} online`}
+      >
         <ul className="flex flex-col gap-1">
           {peers.map((peer) => (
             <li key={peer.peerId}>

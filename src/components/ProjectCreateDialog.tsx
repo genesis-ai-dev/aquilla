@@ -279,6 +279,11 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           id="project-create-form"
           onSubmit={(e) => {
             e.preventDefault()
+            // Guard the Enter-key path too: a disabled submit button already
+            // blocks re-entrant clicks, but implicit form submission can still
+            // fire while a create is in flight. Bail so one dialog pass creates
+            // exactly one project (AQU-711).
+            if (form.state.isSubmitting) return
             void form.handleSubmit()
           }}
           className="contents"
@@ -553,11 +558,20 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           </DialogBody>
 
           <form.Subscribe
-            selector={(state) => state.values.shape}
-            children={(shape) => (
-              <Button type="submit" form="project-create-form" className="h-9 w-full shrink-0">
-                {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-                {form.state.isSubmitting
+            // Track isSubmitting alongside shape: subscribing to shape alone
+            // left the button reading a stale isSubmitting, so it never
+            // disabled or showed the spinner during a slow create and each
+            // extra click created another project (AQU-711).
+            selector={(state) => [state.values.shape, state.isSubmitting] as const}
+            children={([shape, isSubmitting]) => (
+              <Button
+                type="submit"
+                form="project-create-form"
+                disabled={isSubmitting}
+                className="h-9 w-full shrink-0"
+              >
+                {isSubmitting && <Spinner data-icon="inline-start" />}
+                {isSubmitting
                   ? (shape === "linked-target" ? "Creating & linking…" : "Creating…")
                   : (shape === "linked-target" ? "Create & Link" : "Create Project")}
               </Button>

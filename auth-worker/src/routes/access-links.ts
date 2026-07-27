@@ -213,16 +213,25 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
   }
 
   if (!pinOk) {
-    const attempts = link.failed_attempts + 1
-    const lockedUntil =
-      attempts >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOCKOUT_MS).toISOString() : null
+    // [Pen test] Auth & session mgmt (2026-07-27): the previous read-then-write
+    // (SELECT failed_attempts, then UPDATE with the value read earlier) let
+    // concurrent/parallelized guesses race the counter — several requests
+    // could read the same failed_attempts value before any of them committed
+    // the increment, letting more than MAX_FAILED_ATTEMPTS guesses land before
+    // the lockout engaged. The increment and lockout decision now happen in a
+    // single atomic UPDATE, closing that race.
+    const lockIfTripped = new Date(Date.now() + LOCKOUT_MS).toISOString()
     try {
       await c.env.AQUILLA_PG.prepare(
         `UPDATE project_access_links
-            SET failed_attempts = ?, locked_until = ?
+            SET failed_attempts = failed_attempts + 1,
+                locked_until = CASE
+                  WHEN failed_attempts + 1 >= ? THEN ?
+                  ELSE locked_until
+                END
           WHERE token = ?`,
       )
-        .bind(attempts, lockedUntil, token)
+        .bind(MAX_FAILED_ATTEMPTS, lockIfTripped, token)
         .run()
     } catch (err) {
       console.error("[access-links] attempt bump failed:", err)

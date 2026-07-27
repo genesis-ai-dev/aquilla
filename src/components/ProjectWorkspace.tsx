@@ -5793,14 +5793,16 @@ export function ProjectWorkspace() {
         >
           <span className="min-w-0">{transientNotice.message}</span>
           {transientNotice.severity !== "success" && (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               aria-label="Dismiss notice"
               onClick={() => setTransientNotice(null)}
-              className="-mr-1 mt-0.5 shrink-0 rounded p-0.5 opacity-70 transition-opacity hover:opacity-100"
+              className="-mr-1 mt-0.5 shrink-0 opacity-70 transition-opacity hover:opacity-100"
             >
-              <X className="size-3.5" />
-            </button>
+              <X />
+            </Button>
           )}
         </div>
       )}

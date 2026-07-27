@@ -8,7 +8,10 @@
 
 import crypto from "node:crypto"
 
-const sha256hex = (d: crypto.BinaryLike): string => crypto.createHash("sha256").update(d).digest("hex")
+// This helper only hashes the canonical request string. Keeping the input
+// precise avoids Node 26's broader BinaryLike (which includes ArrayBuffer)
+// leaking into Hash.update's narrower overload under TypeScript 7.
+const sha256hex = (data: string): string => crypto.createHash("sha256").update(data).digest("hex")
 const hmac = (key: crypto.BinaryLike, data: string): Buffer => crypto.createHmac("sha256", key).update(data).digest()
 
 /** sha256 of an empty body — used when there is no payload (GET/DELETE/CopyObject). */

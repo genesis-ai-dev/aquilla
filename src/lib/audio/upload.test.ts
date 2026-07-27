@@ -6,10 +6,51 @@
 // the user knows to compress or split the file.
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { uploadCellAudio, MAX_AUDIO_UPLOAD_BYTES } from "./upload"
+import { uploadCellAudio, probeCellAudioPresent, MAX_AUDIO_UPLOAD_BYTES } from "./upload"
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+describe("probeCellAudioPresent", () => {
+  const args = {
+    projectId: "p1", fileId: "f1", audioId: "a1", ext: "webm",
+    getSyncToken: async () => "tok",
+  }
+
+  it("reports 'missing' on a 404 (R2 object gone)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("gone", { status: 404 }))
+    expect(await probeCellAudioPresent(args)).toBe("missing")
+  })
+
+  it("reports 'present' on a 206 partial (ranged GET honored)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("x", { status: 206 }))
+    expect(await probeCellAudioPresent(args)).toBe("present")
+    // Single-byte ranged GET — never pulls the whole object.
+    expect(fetchSpy.mock.calls[0][1]).toMatchObject({ headers: { Range: "bytes=0-0" } })
+  })
+
+  it("reports 'present' on a 200 (Range ignored by server)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("x", { status: 200 }))
+    expect(await probeCellAudioPresent(args)).toBe("present")
+  })
+
+  it("reports 'unknown' on a transient 5xx — never a false 'missing'", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 500 }))
+    expect(await probeCellAudioPresent(args)).toBe("unknown")
+  })
+
+  it("reports 'unknown' on a network error", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
+    expect(await probeCellAudioPresent(args)).toBe("unknown")
+  })
+
+  it("reports 'unknown' without fetching when there is no token", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    expect(await probeCellAudioPresent({ ...args, getSyncToken: async () => null })).toBe("unknown")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe("uploadCellAudio size guard", () => {
@@ -99,5 +140,36 @@ describe("uploadCellAudio size guard", () => {
     expect(fetchFn).toHaveBeenCalledTimes(2)
     expect(fetchFn.mock.calls[0][1]).toMatchObject({ body: blob })
     expect(fetchFn.mock.calls[1][1]).toMatchObject({ body: blob })
+  })
+})
+
+// SUB-29: audioId provenance — the seed embedded at build time distinguishes
+// the imported source clip (fileId seed) from user takes (cellId seed).
+import { audioIdSeededWith, buildAudioId, buildDenoisedAudioId } from "./upload"
+
+describe("audioIdSeededWith", () => {
+  const FILE_ID = "0198f2ab-1111-7000-8000-aaaaaaaaaaaa"
+  const CELL_ID = "0198f2ab-2222-7000-8000-bbbbbbbbbbbb"
+
+  it("recognizes a freshly built id's seed (and rejects the other id)", () => {
+    const takeId = buildAudioId(CELL_ID)
+    expect(audioIdSeededWith(takeId, CELL_ID)).toBe(true)
+    expect(audioIdSeededWith(takeId, FILE_ID)).toBe(false)
+    const sourceId = buildAudioId(FILE_ID)
+    expect(audioIdSeededWith(sourceId, FILE_ID)).toBe(true)
+    expect(audioIdSeededWith(sourceId, CELL_ID)).toBe(false)
+  })
+
+  it("works with an .ext suffix (import stores audioId.ext)", () => {
+    expect(audioIdSeededWith(`${buildAudioId(FILE_ID)}.mp3`, FILE_ID)).toBe(true)
+  })
+
+  it("works for denoised takes (dn- prefix)", () => {
+    expect(audioIdSeededWith(buildDenoisedAudioId(CELL_ID), CELL_ID)).toBe(true)
+  })
+
+  it("is false for missing inputs", () => {
+    expect(audioIdSeededWith(undefined, CELL_ID)).toBe(false)
+    expect(audioIdSeededWith("audio-x-1-2", "")).toBe(false)
   })
 })

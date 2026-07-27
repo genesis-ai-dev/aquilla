@@ -52,6 +52,8 @@ export interface EditCandidate {
   key: string
 }
 
+import { effectiveSourceText } from "@/lib/cell-text"
+
 /** A flat cell shape — subset of CellData to avoid importing the full hook type. */
 export interface MinerCell {
   id?: string
@@ -59,7 +61,14 @@ export interface MinerCell {
   translated: string
   status: "empty" | "unvalidated" | "validated"
   hasPendingEdit?: boolean
+  // SUB-28: media sections mine from their transcript, not the filename.
+  medium?: import("@/lib/sync/cells-read-types").SegmentMedium | null
+  transcription?: string
 }
+
+// SUB-28: every source read below goes through this (transcript for media
+// sections; empty until transcribed, which the trim filters then drop).
+const src = (c: MinerCell): string => effectiveSourceText(c)
 
 // ---------------------------------------------------------------------------
 // Normalisation helpers
@@ -107,18 +116,18 @@ function candidateKey(source: string, target: string): string {
 export function mineRepeatedEdits(cells: MinerCell[]): EditCandidate[] {
   // Only consider cells with actual content
   const usable = cells.filter(
-    (c) => c.original.trim() && c.translated.trim() && c.status !== "empty",
+    (c) => src(c).trim() && c.translated.trim() && c.status !== "empty",
   )
 
   const counts = new Map<string, { count: number; source: string; target: string }>()
 
   for (const cell of usable) {
-    const key = candidateKey(cell.original, cell.translated)
+    const key = candidateKey(src(cell), cell.translated)
     const existing = counts.get(key)
     if (existing) {
       existing.count++
     } else {
-      counts.set(key, { count: 1, source: cell.original.trim(), target: cell.translated.trim() })
+      counts.set(key, { count: 1, source: src(cell).trim(), target: cell.translated.trim() })
     }
   }
 
@@ -148,14 +157,14 @@ export function mineRecentEdits(cells: MinerCell[]): EditCandidate[] {
   let rank = 0
   for (const cell of cells) {
     if (!cell.hasPendingEdit) continue
-    if (!cell.original.trim() || !cell.translated.trim()) continue
+    if (!src(cell).trim() || !cell.translated.trim()) continue
     recent.push({
       kind: "recent",
       evidence: "Recently edited (pending commit)",
       score: 500 - rank, // recent first, descending
-      sourceSample: cell.original.trim(),
+      sourceSample: src(cell).trim(),
       targetSample: cell.translated.trim(),
-      key: candidateKey(cell.original, cell.translated),
+      key: candidateKey(src(cell), cell.translated),
     })
     rank++
   }

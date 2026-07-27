@@ -19,7 +19,7 @@
 
 import { useEditor, EditorContent, type Editor as TiptapEditor } from "@tiptap/react"
 import { BubbleMenu } from "@tiptap/react/menus"
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
+import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { TextSelection, type Transaction } from "@tiptap/pm/state"
 import type { EditorView } from "@tiptap/pm/view"
 import StarterKit from "@tiptap/starter-kit"
@@ -35,11 +35,25 @@ import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
+  idmlEditableSlotPosition,
+  idmlDiagnosticMessage,
+  idmlEditorExtensions,
+  isEditableIdmlSelection,
+  prepareIdmlEditorContent,
+  serializeIdmlEditorDocument,
+  type IdmlEditorConfiguration,
+} from "@/lib/richtext/idml-editor"
+import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
   pmToPlainOffset,
 } from "@/lib/richtext/usfm-plain-text"
-import { prepareEditorContent, sanitizeEditorHtml } from "@/lib/richtext/editor-content"
+import {
+  prepareEditorContent,
+  sanitizeEditorHtml,
+  sanitizeIdmlEditorHtml,
+} from "@/lib/richtext/editor-content"
+import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import type { Concept } from "@/lib/terminology/types"
 import { findActiveTimingIndex } from "@/lib/audio/timings"
@@ -53,6 +67,12 @@ import {
 
 /** Window before a quiet keystroke pause counts as a commit-worthy idle. */
 export const COMMIT_IDLE_MS = 1_200
+/**
+ * AQU-664: much shorter debounce for the live terminology-violation check. The
+ * blot recomputes off the live buffer at this cadence so a forbidden rendering
+ * lights up nearly as-you-type instead of waiting on the commit-idle window.
+ */
+export const LIVE_CHECK_MS = 150
 const PRESENCE_SELECTION_THROTTLE_MS = 120
 export const PRESENCE_DRAFT_IDLE_MS = 650
 export const PRESENCE_WORD_BATCH_SIZE = 2
@@ -110,6 +130,40 @@ export interface FootnoteInsertionAnchor {
   previewAfter?: string
 }
 
+interface IdmlInsertedRange {
+  from: number
+  to: number
+}
+
+function replaceIdmlSelectionWithPlainText(
+  view: EditorView,
+  text: string,
+  requestedRange?: IdmlInsertedRange,
+): IdmlInsertedRange | null {
+  const selection = view.state.selection
+  const fallbackPosition = idmlEditableSlotPosition(view.state.doc)
+  const from = requestedRange?.from
+    ?? (isEditableIdmlSelection(selection) ? selection.from : fallbackPosition)
+  const to = requestedRange?.to
+    ?? (isEditableIdmlSelection(selection) ? selection.to : fallbackPosition)
+  if (from === null || to === null) return null
+
+  const normalized = text.replace(/\r\n?/g, "\n")
+  const lines = normalized.split("\n")
+  const nodes = lines.flatMap((line, index) => [
+    ...(line.length > 0 ? [view.state.schema.text(line)] : []),
+    ...(index < lines.length - 1 && view.state.schema.nodes.hardBreak
+      ? [view.state.schema.nodes.hardBreak.create()]
+      : []),
+  ])
+  const replacement = Fragment.fromArray(nodes)
+  const transaction = nodes.length > 0
+    ? view.state.tr.replaceWith(from, to, replacement)
+    : view.state.tr.delete(from, to)
+  view.dispatch(transaction.scrollIntoView())
+  return { from, to: from + replacement.size }
+}
+
 export interface TranslatedEditorHandle {
   getFootnoteInsertionAnchor: () => FootnoteInsertionAnchor | null
   insertFootnoteMarker: (marker: string, anchor?: FootnoteInsertionAnchor | null, anchorText?: string) => boolean
@@ -126,6 +180,19 @@ interface TranslatedEditorProps {
   /** Initial content. Plain string fallback used when html is absent. */
   initialHtml?: string
   initialPlain: string
+  /** Strict IDML v2 editing contract. Invalid/future metadata is fail-closed. */
+  idmlConfiguration?: IdmlEditorConfiguration | null
+  /** Receives actionable protected-anchor errors for the parent row banner. */
+  onIdmlValidationError?: (message: string | null) => void
+  /**
+   * AQU-667: the current authoritative value is an AI draft (sparkle / batch
+   * "Draft all") that the store — not this editor — produced. When set and the
+   * value changes, the editor absorbs it *even while focused* so the prediction
+   * is visible and a later blur can't commit the pre-draft text over it. A
+   * human's own in-flight edit commits with `aiDrafted=false`, so it keeps the
+   * normal focused-editing / discard-and-reload banner path instead.
+   */
+  aiDrafted?: boolean
   onCommit: (snapshot: TranslatedEditorCommit) => void
   onFocus?: () => void
   onBlur?: () => void
@@ -143,6 +210,19 @@ interface TranslatedEditorProps {
   ruleSeverity?: Map<string, "major" | "minor">
   waivedRuleIds?: Set<string>
   onRuleClick?: (ruleId: string, anchor: HTMLElement) => void
+  /**
+   * AQU-664: hover ("wave over") a violation blot to preview the rule
+   * explanation. Fires with the blot's `data-rule-id` + the blot element on
+   * mouse-in, and `(null, null)` on mouse-out so the caller can dismiss the
+   * popover reliably. Mirrors the footnote-marker hover handlers below.
+   */
+  onRuleHover?: (ruleId: string | null, anchor: HTMLElement | null) => void
+  /**
+   * AQU-664: called on a short debounce with the live editor text (before the
+   * ~1.2s commit-idle debounce fires) so the caller can recompute terminology
+   * violations off the live buffer and surface the inline blot as-you-type.
+   */
+  onLiveTextChange?: (text: string) => void
   audioTimings?: WordTiming[]
   /** Audio playback time in seconds. Drives the karaoke decoration. */
   audioCurrentTime?: number
@@ -199,6 +279,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   cellId,
   initialHtml,
   initialPlain,
+  idmlConfiguration = null,
+  onIdmlValidationError,
+  aiDrafted = false,
   onCommit,
   onFocus,
   onBlur,
@@ -215,6 +298,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   ruleSeverity,
   waivedRuleIds,
   onRuleClick,
+  onRuleHover,
+  onLiveTextChange,
   audioTimings,
   audioCurrentTime,
   onSeekToTime,
@@ -249,6 +334,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
   const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
+  const idmlCompositionRangeRef = useRef<IdmlInsertedRange | null>(null)
   useEffect(() => {
     pendingFootnoteDeleteRef.current = pendingFootnoteDelete
   }, [pendingFootnoteDelete])
@@ -266,20 +352,49 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   const latestTerminologyConceptsRef = useRef<Concept[]>(terminologyConcepts ?? [])
 
+  const preparedIdmlContent = useMemo(
+    () => idmlConfiguration
+      ? prepareIdmlEditorContent(idmlConfiguration, initialHtml, initialPlain)
+      : null,
+    [idmlConfiguration, initialHtml, initialPlain],
+  )
+  const [idmlError, setIdmlError] = useState<string | null>(preparedIdmlContent?.error ?? null)
+  const onIdmlValidationErrorRef = useRef(onIdmlValidationError)
+  useEffect(() => {
+    onIdmlValidationErrorRef.current = onIdmlValidationError
+  }, [onIdmlValidationError])
+  useEffect(() => {
+    setIdmlError(preparedIdmlContent?.error ?? null)
+    if (preparedIdmlContent?.error) {
+      onIdmlValidationErrorRef.current?.(preparedIdmlContent.error)
+    }
+  }, [preparedIdmlContent?.error])
+  const idmlContext = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context
+    : null
+  const idmlEditorKey = idmlConfiguration?.kind === "ready"
+    ? `idml:2:${idmlConfiguration.context.metadata.anchorSequenceHash}:${idmlConfiguration.context.sourceHtml}`
+    : idmlConfiguration?.kind === "error"
+      ? `idml:error:${idmlConfiguration.error}`
+      : "generic"
+
   // Resolve initial content once per cellId — prefer rich HTML, fall back to
   // plain text. Either form may carry raw `\f...\f*` (legacy) or footnote spans
   // (our own serialisation); prepareEditorContent normalises both into the
   // <span data-usfm-footnote> form that parses into footnote nodes.
   const initialContent = useMemo(
-    () => prepareEditorContent(initialHtml, initialPlain),
-    [initialHtml, initialPlain],
+    () => preparedIdmlContent?.html ?? prepareEditorContent(initialHtml, initialPlain),
+    [preparedIdmlContent?.html, initialHtml, initialPlain],
   )
 
-  const isReadOnly = !editable || Boolean(heldByLabel)
+  const isReadOnly = !editable || Boolean(heldByLabel) || Boolean(preparedIdmlContent?.error)
   const isReadOnlyRef = useRef(isReadOnly)
   useEffect(() => { isReadOnlyRef.current = isReadOnly }, [isReadOnly])
 
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // AQU-664: emits live text on a short debounce so terminology blots can be
+  // recomputed off the live buffer, well ahead of the ~1.2s commit-idle path.
+  const liveTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const selectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const presenceDraftIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSelectionKeyRef = useRef<string | null>(null)
@@ -292,10 +407,60 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const pendingCommitRef = useRef<TranslatedEditorCommit | null>(null)
   const onCommitRef = useRef(onCommit)
   useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
+  // AQU-667: mirrors read by the blur handler / re-hydrate effect so both can
+  // reason about "has an authoritative AI draft landed that this editor has not
+  // yet absorbed?" without recreating the editor.
+  const aiDraftedRef = useRef(aiDrafted)
+  useEffect(() => { aiDraftedRef.current = aiDrafted }, [aiDrafted])
+  const initialPlainRef = useRef(initialPlain)
+  useEffect(() => { initialPlainRef.current = initialPlain }, [initialPlain])
+  // The last stored value we hydrated the editor from. Declared here (not next
+  // to its effect) so the blur handler can compare against it: an editor still
+  // holding pre-draft text has NOT absorbed a newer authoritative value while
+  // `initialPlain !== lastHydratedPlainRef`.
+  const lastHydratedPlainRef = useRef(initialPlain)
+  const lastHydratedContentRef = useRef(initialContent)
+  const onLiveTextChangeRef = useRef(onLiveTextChange)
+  useEffect(() => { onLiveTextChangeRef.current = onLiveTextChange }, [onLiveTextChange])
+  const onRuleHoverRef = useRef(onRuleHover)
+  useEffect(() => { onRuleHoverRef.current = onRuleHover }, [onRuleHover])
+  const reportIdmlError = useCallback((message: string) => {
+    setIdmlError(message)
+    onIdmlValidationErrorRef.current?.(message)
+  }, [])
+
+  const snapshotEditor = useCallback((editorInstance: TiptapEditor): TranslatedEditorCommit | null => {
+    const value = editorInstance.getText()
+    if (!idmlContext) return { value, valueHtml: editorInstance.getHTML() }
+    const valueHtml = serializeIdmlEditorDocument(editorInstance.state.doc)
+    if (valueHtml === null) {
+      reportIdmlError("This edit changed the protected IDML document structure. Undo it or re-import the IDML.")
+      return null
+    }
+    const validation = validateIdmlTranslation(
+      idmlContext.sourceHtml,
+      valueHtml,
+      idmlContext.metadata,
+    )
+    if (!validation.valid) {
+      reportIdmlError(idmlDiagnosticMessage(validation.diagnostics[0]))
+      return null
+    }
+    setIdmlError(null)
+    onIdmlValidationErrorRef.current?.(null)
+    return { value, valueHtml }
+  }, [idmlContext, reportIdmlError])
 
   const commitEditorSnapshot = useRef<(reason?: string) => void>(() => undefined)
+  // NOTE on `isDestroyed` guards here and in the effects below: `useEditor`'s
+  // deps are [cellId, idmlEditorKey], so a call site that swaps cell/schema on ONE mounted
+  // instance (the Media details panel) destroys the old editor while the new
+  // one arrives a render later. Effects keyed on other changed deps (content,
+  // readonly, direction) re-run inside that window with the stale DESTROYED
+  // instance from their closure — non-null, but its view/command manager are
+  // gone, so `.commands`/`.view` dereferences crash the workspace boundary.
   const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
-    if (!editorInstance) return
+    if (!editorInstance || editorInstance.isDestroyed) return
     const next = directionModeRef.current === "auto"
       ? detectStrongTextDirection(editorInstance.getText()) ?? textDirectionRef.current
       : textDirectionRef.current
@@ -354,6 +519,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     content: initialContent,
     extensions: [
       StarterKit.configure({
+        ...(idmlContext ? { document: false } : {}),
         heading: false,
         bulletList: false,
         orderedList: false,
@@ -374,6 +540,12 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       createKaraokeExtension(() => latestKaraokeStateRef.current),
       ...(terminologyConcepts !== undefined
         ? [createTerminologyChipExtension(() => latestTerminologyConceptsRef.current)]
+        : []),
+      ...(idmlContext
+        ? idmlEditorExtensions({
+            context: idmlContext,
+            onRejected: (diagnostic) => reportIdmlError(idmlDiagnosticMessage(diagnostic)),
+          })
         : []),
     ],
     editorProps: {
@@ -403,7 +575,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         ),
       },
       transformPastedHTML(html: string) {
-        return sanitizeEditorHtml(html)
+        return idmlContext ? sanitizeIdmlEditorHtml(html) : sanitizeEditorHtml(html)
+      },
+      handleTextInput(view, _from, _to, text) {
+        if (!idmlContext) return false
+        replaceIdmlSelectionWithPlainText(view, text)
+        return true
+      },
+      handlePaste(view, event, slice) {
+        if (!idmlContext) return false
+        // IDML accepts only literal text and bare line breaks inside a slot.
+        // Rich clipboard markup, including forged data-idml-* attributes, is
+        // deliberately discarded before the transaction reaches the guards.
+        const plainText = event.clipboardData?.getData("text/plain")
+          ?? slice.content.textBetween(0, slice.content.size, "\n")
+        event.preventDefault()
+        replaceIdmlSelectionWithPlainText(view, plainText)
+        return true
       },
       handleDoubleClick(view, pos, event) {
         const didSelect = selectVisibleWord(view, pos)
@@ -414,17 +602,111 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         })
         return true
       },
+      handleClick(view, _pos, event) {
+        if (!idmlContext) return false
+        const target = event.target instanceof HTMLElement
+          ? event.target.closest<HTMLElement>("[data-idml-slot]")
+          : null
+        const clickedSlot = target?.getAttribute("data-idml-slot")
+        const requestedSlot = clickedSlot !== null && clickedSlot !== undefined
+          ? Number(clickedSlot)
+          : undefined
+        const selectedSlot = view.state.selection.$from.parent.type.name === "idmlSlot"
+          ? Number(view.state.selection.$from.parent.attrs.slot)
+          : undefined
+        if (
+          requestedSlot !== undefined
+          && requestedSlot === selectedSlot
+          && isEditableIdmlSelection(view.state.selection)
+        ) return false
+        const position = idmlEditableSlotPosition(
+          view.state.doc,
+          Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+        )
+        if (position === null) return false
+        view.dispatch(
+          view.state.tr
+            .setSelection(TextSelection.create(view.state.doc, position))
+            .scrollIntoView(),
+        )
+        view.focus()
+        event.preventDefault()
+        return true
+      },
       handleDOMEvents: {
+        click(view, event) {
+          if (!idmlContext) return false
+          const target = event.target instanceof HTMLElement
+            ? event.target.closest<HTMLElement>("[data-idml-slot]")
+            : null
+          if (!target || target.textContent !== "") return false
+          const requestedSlot = Number(target.getAttribute("data-idml-slot"))
+          const position = idmlEditableSlotPosition(
+            view.state.doc,
+            Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+          )
+          if (position === null) return true
+          event.preventDefault()
+          view.dispatch(
+            view.state.tr
+              .setSelection(TextSelection.create(view.state.doc, position))
+              .scrollIntoView(),
+          )
+          view.focus()
+          return true
+        },
+        compositionstart(view) {
+          if (!idmlContext) return false
+          const selection = view.state.selection
+          const position = idmlEditableSlotPosition(view.state.doc)
+          idmlCompositionRangeRef.current = isEditableIdmlSelection(selection)
+            ? { from: selection.from, to: selection.to }
+            : position === null
+              ? null
+              : { from: position, to: position }
+          return false
+        },
+        beforeinput(view, event) {
+          if (!idmlContext) return false
+          const inputEvent = event as InputEvent
+          if (inputEvent.inputType !== "insertCompositionText") return false
+          inputEvent.preventDefault()
+          const range = replaceIdmlSelectionWithPlainText(
+            view,
+            inputEvent.data ?? "",
+            idmlCompositionRangeRef.current ?? undefined,
+          )
+          idmlCompositionRangeRef.current = range
+          return true
+        },
+        compositionend() {
+          idmlCompositionRangeRef.current = null
+          return false
+        },
         mouseover(view, event) {
           const target = event.target as HTMLElement | null
           const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
-          if (!marker || !view.dom.contains(marker)) return false
-          const index = Number(marker.dataset.footnoteIndex)
-          onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+          if (marker && view.dom.contains(marker)) {
+            const index = Number(marker.dataset.footnoteIndex)
+            onFootnoteHoverRef.current?.(Number.isFinite(index) ? index : null)
+            return false
+          }
+          // AQU-664: hovering a violation blot previews its rule explanation.
+          const blot = target?.closest<HTMLElement>("[data-rule-id]")
+          if (blot && view.dom.contains(blot)) {
+            onRuleHoverRef.current?.(blot.getAttribute("data-rule-id"), blot)
+          }
           return false
         },
         mouseout(view, event) {
           const target = event.target as HTMLElement | null
+          const blot = target?.closest<HTMLElement>("[data-rule-id]")
+          if (blot && view.dom.contains(blot)) {
+            // AQU-664: dismiss the explanation once the pointer leaves the blot
+            // (ignore moves within the same blot's own children).
+            const related = event.relatedTarget as HTMLElement | null
+            if (!related || !blot.contains(related)) onRuleHoverRef.current?.(null, null)
+          }
           const marker = target?.closest<HTMLElement>(".usfm-footnote-marker")
           if (!marker || !view.dom.contains(marker)) return false
           const related = event.relatedTarget as HTMLElement | null
@@ -478,7 +760,45 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           onEscapeToGridRef.current?.()
           return true
         }
+        if (
+          idmlContext
+          && event.key.length === 1
+          && !event.metaKey
+          && !event.altKey
+          && !event.ctrlKey
+          && !event.isComposing
+        ) {
+          event.preventDefault()
+          replaceIdmlSelectionWithPlainText(view, event.key)
+          return true
+        }
         const plain = !event.shiftKey && !event.metaKey && !event.altKey && !event.ctrlKey
+        // An IDML cell represents exactly one InDesign paragraph. Both Enter
+        // variants add a line break inside the current protected text slot;
+        // neither may create another ProseMirror/InDesign paragraph.
+        if (
+          idmlContext
+          && event.key === "Enter"
+          && !event.metaKey
+          && !event.altKey
+          && !event.ctrlKey
+        ) {
+          event.preventDefault()
+          const { selection, schema } = view.state
+          const hardBreak = schema.nodes.hardBreak
+          if (
+            hardBreak
+            && selection.$from.sameParent(selection.$to)
+            && selection.$from.parent.type.name === "idmlSlot"
+          ) {
+            view.dispatch(
+              view.state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView(),
+            )
+          } else {
+            reportIdmlError("Place the caret inside an InDesign text slot before adding a line break.")
+          }
+          return true
+        }
         // AQU-584: plain Enter confirms the edit. Left to StarterKit's default,
         // Enter split the paragraph and left a trailing newline inside the cell
         // (the caret stayed put), which serialized to plain text with an extra
@@ -558,15 +878,27 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       scheduleTypingPresencePublish(editor)
       // Reset idle timer on every keystroke; commit when the user pauses.
       if (idleTimerRef.current !== null) clearTimeout(idleTimerRef.current)
-      const text = editor.getText()
-      const html = editor.getHTML()
-      pendingCommitRef.current = { value: text, valueHtml: html }
+      const snapshot = snapshotEditor(editor)
+      if (!snapshot) {
+        pendingCommitRef.current = null
+        return
+      }
+      const { value: text, valueHtml: html } = snapshot
+      pendingCommitRef.current = snapshot
       idleTimerRef.current = setTimeout(() => {
         pendingCommitRef.current = null
         if (text === lastCommittedRef.current) return
         lastCommittedRef.current = text
         onCommitRef.current({ value: text, valueHtml: html })
       }, COMMIT_IDLE_MS)
+      // AQU-664: publish the live buffer on a much shorter debounce so the
+      // caller can recompute terminology blots off it, well before the commit.
+      if (onLiveTextChangeRef.current) {
+        if (liveTextTimerRef.current !== null) clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = setTimeout(() => {
+          onLiveTextChangeRef.current?.(text)
+        }, LIVE_CHECK_MS)
+      }
     },
     onSelectionUpdate({ editor, transaction }) {
       // A typing transaction also moves the caret; onUpdate owns its batched
@@ -576,6 +908,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     },
     onFocus({ editor }) {
       applyEditorDirection(editor)
+      if (idmlContext && !isEditableIdmlSelection(editor.state.selection)) {
+        const position = idmlEditableSlotPosition(editor.state.doc)
+        if (position !== null) editor.commands.setTextSelection(position)
+      }
       onFocus?.()
       publishSelection(editor)
     },
@@ -594,16 +930,41 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         clearTimeout(idleTimerRef.current)
         idleTimerRef.current = null
       }
-      const text = editor.getText()
-      const html = editor.getHTML()
+      // AQU-664: flush the live buffer immediately on blur (so the blot tracks
+      // the final text without waiting on the debounce) and dismiss any hover
+      // explanation the pointer left behind.
+      if (liveTextTimerRef.current !== null) {
+        clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = null
+      }
+      onLiveTextChangeRef.current?.(editor.getText())
+      onRuleHoverRef.current?.(null, null)
+      const snapshot = snapshotEditor(editor)
       pendingCommitRef.current = null
-      if (text !== lastCommittedRef.current) {
+      if (!snapshot) {
+        onBlur?.()
+        return
+      }
+      const { value: text, valueHtml: html } = snapshot
+      // AQU-667 invariant: a blur must never commit text older than the newest
+      // authoritative draft for this cell. If an AI draft is pending in the
+      // store that this editor has not yet absorbed (its value differs from what
+      // we last hydrated) and the editor still holds the pre-draft text,
+      // committing here would chain a stale/blank revert onto the draft — the
+      // sparkle/batch prediction "randomly doesn't save". Skip: the draft is
+      // already durable in the store + outbox and the re-hydrate effect absorbs
+      // it on the next render.
+      const hasUnabsorbedDraft =
+        aiDraftedRef.current &&
+        initialPlainRef.current !== lastHydratedPlainRef.current &&
+        text !== initialPlainRef.current
+      if (!hasUnabsorbedDraft && text !== lastCommittedRef.current) {
         lastCommittedRef.current = text
         onCommitRef.current({ value: text, valueHtml: html })
       }
       onBlur?.()
     },
-  }, [cellId])
+  }, [cellId, idmlEditorKey])
 
   useEffect(() => {
     applyEditorDirection(editor)
@@ -619,6 +980,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         clearTimeout(presenceDraftIdleTimerRef.current)
         presenceDraftIdleTimerRef.current = null
       }
+      if (liveTextTimerRef.current !== null) {
+        clearTimeout(liveTextTimerRef.current)
+        liveTextTimerRef.current = null
+      }
       lastSelectionKeyRef.current = null
       onSelectionChangeRef.current?.(null)
     }
@@ -630,9 +995,10 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       clearTimeout(idleTimerRef.current)
       idleTimerRef.current = null
     }
-    const text = editor.getText()
-    const html = editor.getHTML()
+    const snapshot = snapshotEditor(editor)
     pendingCommitRef.current = null
+    if (!snapshot) return
+    const { value: text, valueHtml: html } = snapshot
     if (text !== lastCommittedRef.current) {
       lastCommittedRef.current = text
       onCommitRef.current({ value: text, valueHtml: html })
@@ -732,29 +1098,57 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // would misread that load-time normalization as a user edit and emit a
   // phantom revision on the next blur, corrupting files just by opening them.
   // Seed once per editor instance (one editor per cellId). (AQU-216)
-  const lastHydratedPlainRef = useRef(initialPlain)
+  // (`lastHydratedPlainRef` is declared above so the blur handler can read it.)
   useEffect(() => {
     if (!editor) return
     lastCommittedRef.current = editor.getText()
     lastHydratedPlainRef.current = initialPlain
+    lastHydratedContentRef.current = initialContent
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor])
 
-  // Re-hydrate only when the stored value genuinely changes (a remote
-  // event.applied landed while we weren't editing) — keyed on the raw
-  // `initialPlain` so an escaping-only difference never forces a reload. We
-  // never overwrite if the editor is focused — that's what the banner is for.
+  // Re-hydrate only when the stored value genuinely changes — keyed on the raw
+  // `initialPlain` so an escaping-only difference never forces a reload.
+  //
+  // We normally never overwrite a focused editor — that's what the banner is
+  // for. AQU-667 EXCEPTION: an authoritative AI draft (sparkle / batch "Draft
+  // all") can land on this cell *while it is focused*. That draft lives in the
+  // store but is invisible inside the editor, and a later blur would commit the
+  // editor's stale pre-draft text over it (the prediction "randomly doesn't
+  // save"). So when the incoming value is an AI draft, absorb it even while
+  // focused, caret to end so the next keystroke edits the prediction — not the
+  // pre-prediction text. `aiDrafted` is the gate: a human's own in-flight edit
+  // commits with `aiDrafted=false`, so live typing is never yanked out.
   useEffect(() => {
-    if (!editor) return
-    if (editor.isFocused) return
-    if (initialPlain === lastHydratedPlainRef.current) return
+    // isDestroyed: see applyEditorDirection — a stale destroyed instance can
+    // reach this effect when initialPlain changes during an in-place cellId
+    // swap. Skip it; the replacement editor is created with the new
+    // initialContent and this effect re-runs when its identity lands.
+    if (!editor || editor.isDestroyed) return
+    if (
+      initialPlain === lastHydratedPlainRef.current
+      && (!idmlContext || initialContent === lastHydratedContentRef.current)
+    ) return
+    if (editor.isFocused && !aiDrafted) return
+    const wasFocused = editor.isFocused
     lastHydratedPlainRef.current = initialPlain
+    lastHydratedContentRef.current = initialContent
     editor.commands.setContent(initialContent)
+    // Our own hydration must not schedule a phantom commit: clear any idle timer
+    // / pending snapshot the setContent onUpdate may have armed, so a stray
+    // commit can't fire the just-absorbed value back through the write path.
+    if (idleTimerRef.current !== null) {
+      clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    pendingCommitRef.current = null
+    if (wasFocused) editor.commands.focus("end")
     lastCommittedRef.current = editor.getText()
-  }, [editor, initialContent, initialPlain])
+  }, [editor, initialContent, initialPlain, aiDrafted, idmlContext])
 
   useEffect(() => {
-    editor?.setEditable(!isReadOnly)
+    if (!editor || editor.isDestroyed) return
+    editor.setEditable(!isReadOnly)
   }, [editor, isReadOnly])
 
   const [, forceEditorStateUpdate] = useState(0)
@@ -896,7 +1290,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           </button>
         </div>
       )}
-      <BubbleMenu
+      {!idmlConfiguration && <BubbleMenu
         editor={editor}
         shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
         options={{ placement: "top" }}
@@ -967,7 +1361,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             </Button>
           </AppTooltip>
         </div>
-      </BubbleMenu>
+      </BubbleMenu>}
+      {idmlError && (
+        <div
+          role="alert"
+          className="mb-1 rounded-lg border border-destructive/30 bg-destructive/5 px-2 py-1 text-[11px] text-destructive"
+        >
+          {idmlError}
+        </div>
+      )}
       <div
         className={cn(compactHeight ? "" : "h-full")}
         onKeyDownCapture={handleEditorKeyDownCapture}

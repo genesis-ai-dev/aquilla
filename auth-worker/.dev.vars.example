@@ -51,6 +51,20 @@ DEFAULT_LLM_MODEL="anthropic/claude-sonnet-4.5"
 AGENT_SANDBOX_URL=""
 AGENT_SANDBOX_KEY=""
 
+# Monday.com integration (routes/monday.ts). Client id / app id / slug are
+# non-secret ([vars] in wrangler.toml for deploys); client secret + signing
+# secret are secrets (`wrangler secret put MONDAY_CLIENT_SECRET` etc. in
+# deployed envs). Real local values live in the repo-root .env.
+MONDAY_CLIENT_ID=""
+MONDAY_CLIENT_SECRET=""
+MONDAY_SIGNING_SECRET=""
+MONDAY_APP_ID=""
+MONDAY_APP_SLUG=""
+# Must EXACTLY match the redirect URL registered in the Monday Developer
+# Center. Prod default (wrangler.toml) is https://aquilla.app/oauth/callback;
+# for local dev use the local SPA origin:
+MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
+
 # DO NOT put WRANGLER_LOCAL in this file (or in any deployed env). It's
 # injected by `scripts/dev-stack.ts` only and unlocks /__test__/reset and
 # /__dev__/{seed,login} — see routes/dev-seed.ts and routes/test-reset.ts.

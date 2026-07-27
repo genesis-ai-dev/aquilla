@@ -5,6 +5,8 @@
 // the model needs, and turning the model's speaker "turns" into media-segment
 // specs + the distinct speaker set for cast creation. No DOM, no wasm here.
 
+import { tileSegments } from "./tile-segments"
+
 /** Target sample rate sherpa-onnx speaker diarization expects. */
 export const DIARIZATION_SAMPLE_RATE = 16000
 
@@ -53,8 +55,16 @@ export function resampleToMono16k(channel: Float32Array, sampleRate: number): Fl
  * Convert diarizer turns into media-segment specs (one per turn) plus the
  * ascending list of distinct speaker indices (for cast creation). Turns are
  * sorted by start; zero/negative-length turns are dropped. Pure.
+ *
+ * AQU-646 timing/trim split: cell TIMING is tiled (each turn extends to the
+ * next turn's start; first→0, last→clip end when `totalMs` is known) so
+ * playback never skips inter-turn audio. TRIMS stay the tight turn bounds —
+ * they feed voice-reference extraction and Whisper, where padding a speaker's
+ * window with a neighbor's audio would contaminate clone references and bleed
+ * words into the wrong transcript. Gap audio is attributed to the preceding
+ * speaker's cell for playback timing only.
  */
-export function turnsToSegments(turns: readonly DiarizationTurn[]): {
+export function turnsToSegments(turns: readonly DiarizationTurn[], totalMs?: number): {
   segments: DiarizedSegment[]
   speakers: number[]
 } {
@@ -63,11 +73,13 @@ export function turnsToSegments(turns: readonly DiarizationTurn[]): {
     .slice()
     .sort((a, b) => a.startMs - b.startMs)
 
-  const segments: DiarizedSegment[] = valid.map((t) => ({
-    startMs: Math.round(t.startMs),
-    endMs: Math.round(t.endMs),
-    trimStartMs: Math.round(t.startMs),
-    trimEndMs: Math.round(t.endMs),
+  const tight = valid.map((t) => ({ startMs: Math.round(t.startMs), endMs: Math.round(t.endMs) }))
+  const tiled = tileSegments(tight, totalMs)
+  const segments: DiarizedSegment[] = valid.map((t, i) => ({
+    startMs: tiled[i].startMs,
+    endMs: tiled[i].endMs,
+    trimStartMs: tight[i].startMs,
+    trimEndMs: tight[i].endMs,
     speaker: t.speaker,
   }))
 

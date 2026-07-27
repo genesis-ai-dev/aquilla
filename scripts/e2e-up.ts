@@ -94,7 +94,7 @@ async function waitForUrl(url: string, timeoutMs: number): Promise<void> {
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     try {
-      const r = await fetch(url)
+      const r = await fetch(url, { signal: AbortSignal.timeout(2_000) })
       if (r.status < 500) return
     } catch {
       // not yet

@@ -51,6 +51,7 @@
 //   GET  /api/v2/admin/projects    (ADMIN_EMAILS only)
 //   GET  /api/v2/admin/activity    (ADMIN_EMAILS only)
 //   GET  /api/v2/health
+//   POST /api/v2/contact/book-call (public — marketing homepage form)
 //   POST /__test__/reset (WRANGLER_LOCAL only)
 //   POST /__dev__/seed   (WRANGLER_LOCAL only)
 //   POST /__dev__/login  (WRANGLER_LOCAL only)
@@ -86,6 +87,9 @@ import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
 import agentMemoryRoutes from "./routes/agent-memory"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import mondayRoutes from "./routes/monday"
+import contactRoutes from "./routes/contact"
+import { flushDirtyLinks } from "./lib/monday/push"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -180,6 +184,7 @@ app.get("/", (c) =>
       "/api/v2/projects/*",
       "/api/v2/invites/*",
       "/api/v2/admin/*",
+      "/api/v2/contact/book-call",
       "/api/v2/health",
       "/api/v1/chat/completions",
       "/api/v1/chat/ab-feedback",
@@ -233,9 +238,16 @@ app.route("/api/v2/projects", agentArtifactsRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
+// Public contact surface (marketing homepage "book a call" form) — no auth;
+// honeypot + per-IP throttle inside (routes/contact.ts).
+app.route("/api/v2/contact", contactRoutes)
 // AQU-626: per-user deep link + PIN (fresh-browser / diode-zone flow). Mint is
 // project_lead-gated; redeem is public (the link + PIN is the credential).
 app.route("/api/v2/access-links", accessLinksRoutes)
+// Monday.com integration: org OAuth connection + per-project board links +
+// push engine (routes/monday.ts). OAuth callback + inbound webhook routes are
+// deliberately unauthenticated (browser redirect / Monday-signed JWT).
+app.route("/api/v2/monday", mondayRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
@@ -325,4 +337,33 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
   }
 }) as typeof app.fetch
 
-export default app
+// Cron (wrangler.toml [triggers], every 5 minutes): flush Monday board links
+// whose push was debounced (dirty_at set), oldest first, capped at 20 per run.
+// The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
+// builds its own request-scoped Postgres shim the same way.
+const scheduled = async (
+  _controller: ScheduledController,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<void> => {
+  let runEnv = env
+  let shim: ReturnType<typeof makePostgres> | null = null
+  if (!env.AQUILLA_PG) {
+    if (!env.HYPERDRIVE) {
+      console.error("[monday cron] HYPERDRIVE not bound — skipping flush")
+      return
+    }
+    shim = makePostgres(env.HYPERDRIVE.connectionString)
+    runEnv = { ...env, AQUILLA_PG: shim as unknown as AquillaDb, HYPERDRIVE: undefined }
+  }
+  try {
+    const flushed = await flushDirtyLinks(runEnv, 20)
+    if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
+  } finally {
+    if (shim) ctx.waitUntil(shim.close())
+  }
+}
+
+// Keep `export default app` semantics (tests call app.request) while giving
+// the Workers runtime a `scheduled` handler on the same default export.
+export default Object.assign(app, { scheduled })

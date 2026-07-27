@@ -10,6 +10,8 @@
 // Idempotent: both INSERTs are ON CONFLICT DO NOTHING, keyed on the project's
 // deterministic id and (group_id, project_id).
 
+import { secureCompare } from '../lib/secure-compare'
+
 const PATH = '/migrate/project'
 
 export interface MigrateProjectEnv {
@@ -44,7 +46,7 @@ export async function handleMigrateProjectRequest(
   if (new URL(request.url).pathname !== PATH) return null
   if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if ((request.headers.get('Authorization') ?? '') !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

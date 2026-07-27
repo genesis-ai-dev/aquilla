@@ -31,6 +31,7 @@ import {
 import type { EventKind } from './types'
 import { eventQualifiedParentKey } from './chain-claims'
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { secureCompare } from '../lib/secure-compare'
 
 const BATCH_LIMIT = 100
 
@@ -72,7 +73,7 @@ export async function handleRebuildProjectionRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const auth = request.headers.get('Authorization') ?? ''
-  if (auth !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(auth, `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
 
@@ -129,8 +130,24 @@ export async function handleRebuildProjectionRequest(
   let eventsRead = 0
   let eventsProjected = 0
 
+  // Kinds whose projection is built OUTSIDE buildEventProjectionStmts (it
+  // throws for them by design): assignment.* land in the assignments table
+  // via handleAssignmentEvent and project.link-source is handled in
+  // dispatch.ts — neither targets the tables this rebuild wipes
+  // (cells / cell_validators / file_section_progress), so their live
+  // projection is intact and they are simply skipped during replay. Without
+  // this, one assignment event anywhere in the log aborted the whole rebuild
+  // MID-REPLAY, stranding the project on a partially rebuilt projection.
+  const DELEGATED_PROJECTION_KINDS = new Set<string>([
+    'assignment.create',
+    'assignment.reassign',
+    'assignment.unassign',
+    'project.link-source',
+  ])
+
   for (const row of eventRows) {
     eventsRead += 1
+    if (DELEGATED_PROJECTION_KINDS.has(row.kind)) continue
 
     // Strict AD-2 first-child-of-parent for every chain-mutating event,
     // commits included (must match route.ts). We replay in server_seq ASC,

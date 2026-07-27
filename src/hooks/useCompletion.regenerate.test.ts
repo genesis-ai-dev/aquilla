@@ -38,6 +38,10 @@ vi.mock("@/lib/completion/compress-examples", () => ({
   compressExampleSource: (src: string) => src,
   dedupeExamples: (exs: unknown[]) => exs,
   dropPrecedingContextDuplicates: (exs: unknown[]) => exs,
+  // The hook imports this too (AQU-617) — the mock shadows the real module,
+  // so omitting it made completeSingle throw before fetch and every test in
+  // this file fail on empty `bodies`.
+  dropValidatedPairDuplicates: (exs: unknown[]) => exs,
 }))
 
 import type { CompletionSettings } from "@/lib/parsers/types"

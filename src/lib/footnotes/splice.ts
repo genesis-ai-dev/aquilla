@@ -43,7 +43,7 @@ export function spliceFootnoteText(
   if (!fn) return null
 
   // Build updated raw span
-  const updatedRaw = updateFootnoteRaw(fn.raw, fn.caller, newText)
+  const updatedRaw = updateFootnoteRaw(fn.raw, newText)
 
   // Splice into cellText
   return cellText.slice(0, fn.index) + updatedRaw + cellText.slice(fn.index + fn.raw.length)
@@ -87,7 +87,7 @@ const FIRST_TEXT_FIELD_RE = /\\(?:fqa|fq|ft|fk|fl)\s/
  * Multi-field notes (\fq quotations etc.) are collapsed into one \ft on save;
  * that matches the edit UI, which presents the note as a single text blob.
  */
-function updateFootnoteRaw(raw: string, _caller: string, newText: string): string {
+export function updateFootnoteRaw(raw: string, newText: string): string {
   const firstField = FIRST_TEXT_FIELD_RE.exec(raw)
   if (firstField) {
     return `${raw.slice(0, firstField.index)}\\ft ${newText}\\f*`

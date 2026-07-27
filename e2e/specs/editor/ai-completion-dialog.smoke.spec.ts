@@ -4,11 +4,11 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * Run AI completions dialog — ConfirmActionDialog.
  *
- * PrimaryActionButton renders the default workspace action. After importing a
- * file with untranslated cells the default action is "Run AI completions"
- * (isDefault returns true when translated < total).
+ * AQU-661: the workspace actions live in the header ⋯ overflow menu. After
+ * importing a file with untranslated cells, the menu lists "Run AI completions"
+ * (isAvailable when a file is open and the role permits target commits).
  *
- * Clicking the button triggers requiresConfirmation → opens ConfirmActionDialog:
+ * Selecting it triggers requiresConfirmation → opens ConfirmActionDialog:
  *   - DialogTitle "Run completions"
  *   - DialogDescription names the bounded approved-example draft package and review requirement
  *   - checkbox "I understand this change will be attributed to my account."
@@ -22,11 +22,11 @@ test("AI completions dialog opens with acknowledgement checkbox", async ({ alice
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Completions ${Date.now()}` })
   await openSeededProject(alice, seeded)
 
-  // The PrimaryActionButton renders the default action. With all cells
-  // untranslated, "Run AI completions" is the default (isDefault: translated < total).
-  const runBtn = alice.getByRole("button", { name: /Run AI completions/i }).first()
-  await expect(runBtn).toBeVisible({ timeout: 10_000 })
-  await runBtn.click()
+  // AQU-661: open the header ⋯ overflow menu, then pick "Run AI completions".
+  const moreBtn = alice.getByRole("banner").getByRole("button", { name: /^More$/i })
+  await expect(moreBtn).toBeVisible({ timeout: 10_000 })
+  await moreBtn.click()
+  await alice.getByRole("menuitem", { name: /Run AI completions/i }).click()
 
   // ConfirmActionDialog opens as a <Dialog> with aria role "dialog".
   const dialog = alice.getByRole("dialog")

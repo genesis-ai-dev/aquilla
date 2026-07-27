@@ -21,9 +21,10 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: null, loading: false }),
 }))
 
-import { useFileAudioAttachments } from "./useFileAudioAttachments"
+import { useFileAudioAttachments, mergeCellsWithAudio } from "./useFileAudioAttachments"
 import { injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
-import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
+import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import type { CellData } from "@/hooks/useCells"
 
 function recording(audioId: string): AudioAttachmentOut {
   return {
@@ -68,5 +69,36 @@ describe("useFileAudioAttachments — optimistic injection (mic → play after r
       injectOptimisticAudioAttachment("some-other-file", "cell-1", recording("rec-x.webm"))
     })
     expect(result.current.byCellId.get("cell-1")).toBeUndefined()
+  })
+})
+
+// AQU-646: imported segments share ONE clip and only their trim window makes
+// them distinct — mergeCellsWithAudio used to drop trims, leaving transcription
+// unable to address a cell's slice. Guard that they're forwarded.
+describe("mergeCellsWithAudio — trim windows (AQU-646)", () => {
+  it("forwards trimStartMs/trimEndMs onto the cell's attachment", () => {
+    const cell = { id: "cell-1", fileId: "f1" } as CellData
+    const entry: CellAudioEntry = {
+      attachments: { "clip.mp3": { ...recording("clip.mp3"), trimStartMs: 2500, trimEndMs: 7100 } },
+      selectedAudioId: "clip.mp3",
+      selectedGeneratedVoiceAudioId: null,
+      audioTimings: {},
+    }
+    const [merged] = mergeCellsWithAudio([cell], new Map([["cell-1", entry]]))
+    expect(merged.attachments?.["clip.mp3"]?.trimStartMs).toBe(2500)
+    expect(merged.attachments?.["clip.mp3"]?.trimEndMs).toBe(7100)
+  })
+
+  it("omits trim fields when the row has none (recorded takes)", () => {
+    const cell = { id: "cell-2", fileId: "f1" } as CellData
+    const entry: CellAudioEntry = {
+      attachments: { "rec.webm": recording("rec.webm") },
+      selectedAudioId: "rec.webm",
+      selectedGeneratedVoiceAudioId: null,
+      audioTimings: {},
+    }
+    const [merged] = mergeCellsWithAudio([cell], new Map([["cell-2", entry]]))
+    expect(merged.attachments?.["rec.webm"]).not.toHaveProperty("trimStartMs")
+    expect(merged.attachments?.["rec.webm"]).not.toHaveProperty("trimEndMs")
   })
 })

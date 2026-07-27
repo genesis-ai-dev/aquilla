@@ -20,6 +20,7 @@ import type { CellRow } from "@/lib/sync/cells-read-types"
 import { readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
+import { decodeHtmlEntities } from "@/lib/html-entities"
 
 // AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
 // SWARM-TODO(AQU-538): slice 1 adds `targetLang` to `CellRow` in
@@ -119,6 +120,11 @@ export interface CellData {
    * source row — so `buildCellData` prefers the source row's metadata and falls
    * back to the target's. Undefined on legacy/plain cells. */
   metadata?: Record<string, unknown> | null
+  /** D1: true on the first cell of a paragraph block, sourced from the SOURCE
+   *  row's `metadata.paragraphStart`. Absent/undefined on legacy imports and
+   *  continuation cells — drives paragraph grouping (`deriveParagraphs`) and
+   *  the paragraph-draft UI affordance. Never derived from the target row. */
+  paragraphStart?: boolean
   waivers?: import("@/lib/parsers/types").RuleWaiver[]
   /** Most-recent edit timestamp on the target row (ms epoch). Forwarded from
    *  the CellRow projection so consumers like useLivingMemory can sort by
@@ -253,8 +259,14 @@ export function buildCellData(
   requiredValidations: number,
   stats: CellAuditStats | undefined,
 ): CellData {
-  const translated = target?.value ?? ""
-  const original = source?.value ?? ""
+  // Plain-text `value` is a tags-stripped projection of the HTML. Historically
+  // (pre-AQU-674) the migration stripped tags without decoding entities, so
+  // migrated cells carry literal `&nbsp;`/`&amp;`/etc. in `value` — which then
+  // renders verbatim in any non-HTML text surface (e.g. the target read view's
+  // plain fallback). Decode at the read boundary so existing migrated data
+  // displays clean without a data backfill. Decoding clean text is a no-op.
+  const translated = decodeHtmlEntities(target?.value ?? "")
+  const original = decodeHtmlEntities(source?.value ?? "")
 
   const activeValidators = stats?.activeValidators ?? []
   const validationStatus: ValidationStatus =
@@ -294,6 +306,10 @@ export function buildCellData(
   // bucket. Undefined when neither side has metadata.
   const metadata = source?.metadata ?? target?.metadata ?? undefined
 
+  // D1 paragraph grouping flag: source-only, strict boolean (metadata is
+  // Record<string, unknown> — non-boolean junk must not leak through as truthy).
+  const paragraphStart = source?.metadata?.paragraphStart === true
+
   return {
     id: cellId,
     fileId,
@@ -325,6 +341,7 @@ export function buildCellData(
     transcription,
     cameraState,
     metadata,
+    paragraphStart: paragraphStart || undefined,
   }
 }
 

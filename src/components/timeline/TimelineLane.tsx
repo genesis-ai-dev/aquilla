@@ -16,6 +16,8 @@ export interface TimelineLaneProps {
   editable: boolean
   onSelect(id: string): void
   onRetime(id: string, startSec: number, endSec: number): void
+  /** AQU-646: clean click on a card navigates playback to it. */
+  onSeek?(id: string): void
 }
 
 export function TimelineLane({
@@ -28,6 +30,7 @@ export function TimelineLane({
   editable,
   onSelect,
   onRetime,
+  onSeek,
 }: TimelineLaneProps) {
   const visible = cells.filter((c) =>
     isVisible(c.startTime ?? 0, c.endTime ?? c.startTime ?? 0, viewStartSec, viewEndSec),
@@ -45,6 +48,7 @@ export function TimelineLane({
           editable={editable}
           onSelect={onSelect}
           onRetime={onRetime}
+          onSeek={onSeek}
         />
       ))}
     </div>

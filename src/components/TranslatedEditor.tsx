@@ -1295,9 +1295,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         shouldShow={({ editor, from, to }) => editor.isFocused && from !== to}
         options={{ placement: "top" }}
       >
+        {/* `relative z-30`: the row's floating action rail is z-20 and, since
+            round 5 made the mic/upload/TTS buttons permanent rather than
+            appearing only on an empty untranslated line, it is wide enough to
+            reach across this toolbar. Without a higher layer the rail's
+            buttons sit on top and swallow clicks meant for Bold/Inline
+            code/… — a formatting button that simply would not take. */}
         <div
           data-testid="formatting-bubble-menu"
-          className="flex gap-0.5 rounded-lg bg-card p-0.5"
+          className="relative z-30 flex gap-0.5 rounded-lg bg-card p-0.5"
           onMouseDown={handleFormattingToolbarMouseDown}
         >
           <AppTooltip content="Bold (Cmd+B)">

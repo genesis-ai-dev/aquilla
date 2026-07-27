@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import type { ComponentProps } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { ViewSettingsMenu } from "./ViewSettingsMenu"
@@ -19,8 +19,6 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
       lineNumbersEnabled
       sourceDirectionMode="auto"
       targetDirectionMode="auto"
-      sourceTextDirection="ltr"
-      targetTextDirection="rtl"
       sourceAutoDirectionSummary="ltr"
       targetAutoDirectionSummary="rtl"
       cellLabelsEnabled
@@ -34,6 +32,35 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
   return handlers
 }
 
+describe("ViewSettingsMenu popover", () => {
+  it("opens as a popover and toggles line numbers without dismissing", () => {
+    const handlers = renderViewSettings({ lineNumbersEnabled: true })
+
+    fireEvent.click(screen.getByRole("button", { name: "View settings" }))
+
+    const panel = screen.getByTestId("view-settings-popover")
+    expect(panel).toBeTruthy()
+    expect(screen.getByText("Show line numbers")).toBeTruthy()
+    expect(screen.getByText("Show cell labels")).toBeTruthy()
+    expect(screen.getByText("Text Direction")).toBeTruthy()
+    expect(screen.getByText("Font Size")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
+    expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("changes source direction via the tabs", () => {
+    const handlers = renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "View settings" }))
+    const sourceTabs = screen.getByRole("tablist", { name: "Source direction" })
+    fireEvent.click(within(sourceTabs).getByRole("tab", { name: "RTL" }))
+
+    expect(handlers.onSourceDirectionModeChange).toHaveBeenCalledWith("rtl")
+  })
+})
+
 describe("ViewSettingsMenu direction display", () => {
   it("does not show a direction banner when Auto has already applied direction", () => {
     renderViewSettings()
@@ -41,19 +68,19 @@ describe("ViewSettingsMenu direction display", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
-  it("shows mixed target content in the settings menu", () => {
+  it("opens direction tabs without a resolved-direction badge", () => {
     renderViewSettings({ targetAutoDirectionSummary: "mixed" })
 
     fireEvent.click(screen.getByRole("button", { name: "View settings" }))
 
-    expect(screen.getByText("AUTO MIXED")).toBeTruthy()
+    expect(screen.getByRole("tablist", { name: "Target direction" })).toBeTruthy()
+    expect(screen.queryByText("AUTO MIXED")).toBeNull()
     expect(screen.queryByText("Detected right-to-left for target")).toBeNull()
   })
 
   it("warns when target is forced LTR but content is RTL", () => {
     const handlers = renderViewSettings({
       targetDirectionMode: "ltr",
-      targetTextDirection: "ltr",
       targetAutoDirectionSummary: "rtl",
     })
 
@@ -69,7 +96,6 @@ describe("ViewSettingsMenu direction display", () => {
   it("warns when source is forced RTL but content is LTR", () => {
     const handlers = renderViewSettings({
       sourceDirectionMode: "rtl",
-      sourceTextDirection: "rtl",
       sourceAutoDirectionSummary: "ltr",
       targetAutoDirectionSummary: "rtl",
     })
@@ -86,7 +112,6 @@ describe("ViewSettingsMenu direction display", () => {
   it("offers Auto for mixed content under a manual direction", () => {
     const handlers = renderViewSettings({
       targetDirectionMode: "rtl",
-      targetTextDirection: "rtl",
       targetAutoDirectionSummary: "mixed",
     })
 
@@ -104,7 +129,6 @@ describe("ViewSettingsMenu direction display", () => {
   it("does not warn when a manual direction matches the content", () => {
     renderViewSettings({
       targetDirectionMode: "rtl",
-      targetTextDirection: "rtl",
       targetAutoDirectionSummary: "rtl",
     })
 

@@ -5004,8 +5004,6 @@ export function ProjectWorkspace() {
               lineNumbersEnabled={fileMeta.lineNumbersEnabled}
               sourceDirectionMode={fileMeta.sourceDirectionMode}
               targetDirectionMode={fileMeta.targetDirectionMode}
-              sourceTextDirection={fileMeta.sourceTextDirection}
-              targetTextDirection={fileMeta.targetTextDirection}
               sourceAutoDirectionSummary={activeFileDirectionSummary.source}
               targetAutoDirectionSummary={activeFileDirectionSummary.target}
               directionWarningScope={activeFile?.id ?? null}

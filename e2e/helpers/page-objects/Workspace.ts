@@ -263,6 +263,22 @@ export class Workspace {
     return target
   }
 
+  private async commitTargetCellEdit(index: number, text: string): Promise<void> {
+    // Blurring commits immediately. Register the response waiter before the
+    // blur so a fast local worker cannot complete the request first.
+    const committed = this.page.waitForResponse((response) => {
+      if (response.request().method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/events")
+      } catch {
+        return false
+      }
+    }, { timeout: 20_000 })
+    await this.page.locator("aside").click()
+    await committed
+    await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
+  }
+
   /** Click into a cell, type text, blur. Persists on blur per editor design.
    *
    * Cell editable surface is either:
@@ -277,21 +293,14 @@ export class Workspace {
   async editCell(index: number, text: string): Promise<void> {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
-    // Blurring commits immediately. Wait for the authoritative event flush,
-    // rather than sleeping and assuming IDB + outbox + projection complete at
-    // a particular machine speed. This also guarantees a following validation
-    // has the committed editEventId available.
-    const committed = this.page.waitForResponse((response) => {
-      if (response.request().method() !== "POST" || !response.ok()) return false
-      try {
-        return new URL(response.url()).pathname.endsWith("/events")
-      } catch {
-        return false
-      }
-    }, { timeout: 20_000 })
-    await this.page.locator("aside").click() // blur outside editor
-    await committed
-    await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
+    await this.commitTargetCellEdit(index, text)
+  }
+
+  /** Replace the complete target value, then wait for its authoritative commit. */
+  async replaceCell(index: number, text: string): Promise<void> {
+    const target = await this.activateTargetCell(index)
+    await target.fill(text)
+    await this.commitTargetCellEdit(index, text)
   }
 
   async readCell(index: number): Promise<string> {

@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@aquilla/idml-roundtrip':
-        specifier: workspace:2.0.0
+        specifier: workspace:2.0.1
         version: link:packages/idml-roundtrip
       '@base-ui/react':
         specifier: ^1.6.0

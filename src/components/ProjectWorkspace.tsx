@@ -33,6 +33,10 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { isFlagEnabled } from "@/lib/features/flags"
+import { isDiscourseFile } from "@/lib/contextual/discourse-file"
+import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
+import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
@@ -3108,6 +3112,13 @@ export function ProjectWorkspace() {
               // snapshot and keep row validation UI in sync.
               cellStore.setMaxServerSeq(null)
               revalidateCellsRef.current()
+            } else if (msg.t === "contextual.activity") {
+              // Slice D2: live contextual-run progress. The run-store is a
+              // module store — feed the frame straight in; the pill re-renders
+              // via useSyncExternalStore. Lossy: a missed frame self-heals on
+              // the next attachContextualRun snapshot.
+              if (msg.project !== pid) return
+              applyContextualFrame(msg.frame)
             } else if (msg.t === "link.upstream-changed") {
               // FRO-479: an upstream live-link project committed lane-relevant
               // changes. Refetch staleness immediately; the handler debounces
@@ -5316,6 +5327,16 @@ export function ProjectWorkspace() {
                   onClose={() => setSearchExpandedQuery(null)}
                 />
               </div>
+            )}
+            {/* Contextual drafting pill (flag-gated, discourse files only) —
+                absolute inside this relative wrapper so it vanishes on
+                non-editor surfaces; z-30 = floating-chip layer (AppShell). */}
+            {project && activeFile && isFlagEnabled(project, "contextualTranslation") && isDiscourseFile(activeFile) && (
+              <ContextualRunPillMount
+                projectId={project.id}
+                fileId={activeFile.id}
+                onSetupNeeded={handleAiSetupNeeded}
+              />
             )}
             <div className="min-h-0 flex-1">
               {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (

@@ -17,6 +17,7 @@ import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
 import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
+import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
 import { handleMemberActivityReadRequest } from "./events/member-activity-read-route"
@@ -225,6 +226,8 @@ const worker = {
     if (memberRemovedResponse) return memberRemovedResponse
     const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
     if (projectSettingsChangedResponse) return projectSettingsChangedResponse
+    const contextualActivityResponse = await handleContextualActivityRequest(request, env)
+    if (contextualActivityResponse) return contextualActivityResponse
     const rebuildResponse = await handleRebuildProjectionRequest(request, env)
     if (rebuildResponse) return rebuildResponse
     const rebuildFtsResponse = await handleRebuildFtsRequest(request, env)

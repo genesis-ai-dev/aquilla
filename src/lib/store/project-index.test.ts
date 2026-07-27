@@ -83,6 +83,21 @@ describe("project-index", () => {
   })
 })
 
+describe("mergeServerProjectWithLocalCache — device-local overlays", () => {
+  it("carries experimentalFlags from the local record onto the server record", () => {
+    const server = makeProject({ id: "p1" })
+    const local = makeProject({ id: "p1", experimentalFlags: { contextualTranslation: true } })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.experimentalFlags).toEqual({ contextualTranslation: true })
+  })
+
+  it("no local record / no local flags → server record untouched", () => {
+    const server = makeProject({ id: "p1" })
+    expect(mergeServerProjectWithLocalCache(server, undefined).experimentalFlags).toBeUndefined()
+    expect(mergeServerProjectWithLocalCache(server, makeProject({ id: "p1" })).experimentalFlags).toBeUndefined()
+  })
+})
+
 describe("project-index trash", () => {
   const originalFetch = globalThis.fetch
 

@@ -8,6 +8,7 @@
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./project-do-types"
+import type { ContextualFrame } from "./contextual-frames"
 
 /** Default lease in ms. */
 export const PROJECT_DO_DEFAULT_LEASE_MS = 30_000
@@ -123,6 +124,17 @@ export interface ServerLinkUpstreamChanged {
    *  targeted refetch without growing the frame unbounded for big imports. */
   cellIds: string[]
 }
+/**
+ * Slice D2: relay of contextual-pipeline activity (run state / scene / span
+ * progress) to connected clients. REALTIME ONLY — never written to the event
+ * log, never load-bearing; the SPA re-hydrates its mirror from the run
+ * snapshot on file open, this frame just removes the polling latency.
+ */
+export interface ServerContextualActivity {
+  t: "contextual.activity"
+  project: string
+  frame: ContextualFrame
+}
 export type ProjectDoServerMessage =
   | ServerEventApplied
   | ServerEventStale
@@ -134,6 +146,7 @@ export type ProjectDoServerMessage =
   | ServerFileProgressUpdated
   | ServerMemberRemoved
   | ServerLinkUpstreamChanged
+  | ServerContextualActivity
 
 /**
  * Additive `__broadcast` envelope (PERF-8): POST /events batches all of a

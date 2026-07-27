@@ -4,6 +4,7 @@ import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bi
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   DatePicker,
   dateToDeadlineString,
@@ -28,8 +29,13 @@ import {
  * Manager affordance (project_lead+) on the project overview: assign a book or
  * chapter scope to a project member. Collapsed to an "Assign…" button until
  * opened; emits one assignment.create on submit. Book scope = whole file;
- * chapter scope = a real chapter picked from the file's chapter dropdown
- * (the canonical_ref prefix, e.g. "GEN 1", matched server-side via LIKE).
+ * chapter scope = one or more real chapters checked from the file's chapter
+ * list (each the canonical_ref prefix, e.g. "GEN 1", matched server-side via
+ * LIKE). AQU-677: post-editors work contiguous chapter runs, so the chapter
+ * picker is multi-select — every checked chapter lands in a single
+ * assignment.create's `scope[]` (one assignment, one deadline, one progress
+ * bar across the run). Checking none = whole book; the member selector stays
+ * single-select.
  */
 /**
  * AQU-678: the "Book" dropdown must list every book fully spelled out and in
@@ -79,7 +85,7 @@ export function AssignWork({
     isSelfAssignMode && callerUserId != null ? callerUserId : "",
   )
   const [fileId, setFileId] = useState(files[0]?.id ?? "")
-  const [chapter, setChapter] = useState("")
+  const [selectedChapters, setSelectedChapters] = useState<string[]>([])
   const [chapters, setChapters] = useState<string[]>([])
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
@@ -122,17 +128,32 @@ export function AssignWork({
     [members],
   )
 
-  // Load the selected file's chapters for the dropdown; reset the picked
-  // chapter when the file changes so a stale chapter can't leak across books.
+  // Load the selected file's chapters for the picker; clear the checked
+  // chapters when the file changes so stale chapters can't leak across books.
   useEffect(() => {
     if (!open || !fileId) return
     let cancelled = false
-    setChapter("")
+    setSelectedChapters([])
     getFileChapters(jwt, projectId, fileId)
       .then((cs) => { if (!cancelled) setChapters(cs) })
       .catch(() => { if (!cancelled) setChapters([]) })
     return () => { cancelled = true }
   }, [open, fileId, jwt, projectId])
+
+  // Keep the checked chapters in canonical (server-natural-sorted) order
+  // regardless of click order — drives both the scope[] and the label.
+  const orderedChosen = useMemo(
+    () => chapters.filter((ch) => selectedChapters.includes(ch)),
+    [chapters, selectedChapters],
+  )
+  const allChaptersChecked =
+    chapters.length > 0 && orderedChosen.length === chapters.length
+
+  function toggleChapter(ch: string, checked: boolean) {
+    setSelectedChapters((prev) =>
+      checked ? [...prev, ch] : prev.filter((c) => c !== ch),
+    )
+  }
 
   async function submit() {
     if (assigneeId === "") {
@@ -154,11 +175,16 @@ export function AssignWork({
       setError("You can only assign work to yourself.")
       return
     }
+    // AQU-678: label the assignment with the spelled-out canonical book name.
     const fileName = sortedFiles.find((f) => f.id === fileId)?.label ?? "file"
-    const chap = chapter.trim()
-    const scopeKind = chap ? "chapters" : "books"
-    const scope = chap ? [{ fileId, chapter: chap }] : [{ fileId }]
-    const scopeLabel = chap ? `${fileName} · ${chap}` : fileName
+    // AQU-677: zero checked chapters = whole book (unchanged single-book path);
+    // one or more = a single chapters-scope assignment listing every chapter.
+    const chosen = orderedChosen
+    const scopeKind = chosen.length > 0 ? "chapters" : "books"
+    const scope =
+      chosen.length > 0 ? chosen.map((ch) => ({ fileId, chapter: ch })) : [{ fileId }]
+    const scopeLabel =
+      chosen.length > 0 ? `${fileName} · ${chosen.join(", ")}` : fileName
     const deadline = deadlineDate ? dateToDeadlineString(deadlineDate) : ""
     setBusy(true)
     setError(null)
@@ -174,7 +200,7 @@ export function AssignWork({
         scopeLabel,
         deadline: deadline || null,
       })
-      setChapter("")
+      setSelectedChapters([])
       setDeadlineDate(undefined)
       setOpen(false)
       onAssigned?.()
@@ -264,28 +290,56 @@ export function AssignWork({
             </Select>
           </Field>
           <Field>
-            <FieldLabel htmlFor="assign-work-chapter">Chapter</FieldLabel>
-            <Select
-              items={[
-                { value: "", label: "Whole book" },
-                ...chapters.map((ch) => ({ value: ch, label: ch })),
-              ]}
-              value={chapter}
-              onValueChange={(v) => setChapter(v ?? "")}
-              disabled={busy}
-            >
-              <SelectTrigger id="assign-work-chapter" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="">Whole book</SelectItem>
+            <FieldLabel htmlFor="assign-work-chapters">Chapters</FieldLabel>
+            {chapters.length === 0 ? (
+              <FieldDescription>
+                Whole book — this file has no chapters to narrow to.
+              </FieldDescription>
+            ) : (
+              <>
+                <div
+                  className="mb-1 flex items-center justify-between text-xs text-muted-foreground"
+                >
+                  <span>
+                    {orderedChosen.length === 0
+                      ? "Whole book (none checked)"
+                      : `${orderedChosen.length} chapter${orderedChosen.length === 1 ? "" : "s"} selected`}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto px-1 py-0 text-xs"
+                    disabled={busy}
+                    onClick={() =>
+                      setSelectedChapters(allChaptersChecked ? [] : [...chapters])
+                    }
+                  >
+                    {allChaptersChecked ? "Clear all" : "Select all"}
+                  </Button>
+                </div>
+                <div
+                  id="assign-work-chapters"
+                  role="group"
+                  aria-label="Chapters"
+                  className="max-h-40 overflow-y-auto rounded-md border p-2"
+                >
                   {chapters.map((ch) => (
-                    <SelectItem key={ch} value={ch}>{ch}</SelectItem>
+                    <label
+                      key={ch}
+                      className="flex cursor-pointer items-center gap-2 py-1 text-sm"
+                    >
+                      <Checkbox
+                        checked={selectedChapters.includes(ch)}
+                        onCheckedChange={(c) => toggleChapter(ch, c === true)}
+                        disabled={busy}
+                      />
+                      {ch}
+                    </label>
                   ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+                </div>
+              </>
+            )}
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-deadline">Deadline (optional)</FieldLabel>

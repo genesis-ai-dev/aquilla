@@ -100,7 +100,7 @@ describe("AssignWork", () => {
     expect(screen.queryByRole("group", { name: "Assign work" })).not.toBeInTheDocument()
   })
 
-  it("emits a chapter-scope assignment when a chapter is picked from the dropdown", async () => {
+  it("emits a chapter-scope assignment when one chapter is checked", async () => {
     rosterOk()
     mockChapters.mockResolvedValue(["GEN 1", "GEN 2"])
     mockCreate.mockResolvedValue("as-2")
@@ -108,15 +108,9 @@ describe("AssignWork", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
     await pickSelectOption(/^assignee$/i, /^anna$/)
-    // The file's chapters load into the dropdown (alongside "Whole book").
-    const chapterTrigger = screen.getByRole("combobox", { name: /^chapter$/i })
-    fireEvent.click(chapterTrigger)
-    const chapterOption = await screen.findByRole("option", { name: "GEN 1" })
-    expect(screen.getByRole("option", { name: "Whole book" })).toBeInTheDocument()
-    fireEvent.pointerMove(chapterOption)
-    fireEvent.mouseMove(chapterOption)
-    fireEvent.keyDown(chapterOption, { key: "Enter" })
-    await waitFor(() => expect(chapterTrigger.textContent).toContain("GEN 1"))
+    // The file's chapters load into the checkbox picker; click the label text
+    // to toggle the Base UI checkbox (recipe from AssignModal.test.tsx).
+    fireEvent.click(await screen.findByText("GEN 1"))
     fireEvent.click(screen.getByRole("button", { name: "Assign" }))
 
     await waitFor(() =>
@@ -129,6 +123,61 @@ describe("AssignWork", () => {
       ),
     )
     expect(mockChapters).toHaveBeenCalledWith("jwt", "p1", "f1")
+  })
+
+  // AQU-677: multiple chapters → ONE assignment.create whose scope[] lists them
+  // in canonical order (not click order), with a combined label.
+  it("emits a single multi-chapter assignment when several chapters are checked", async () => {
+    rosterOk()
+    mockChapters.mockResolvedValue(["GEN 1", "GEN 2", "GEN 3"])
+    mockCreate.mockResolvedValue("as-3")
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    // Check out of canonical order to prove the scope[] is re-ordered.
+    fireEvent.click(await screen.findByText("GEN 3"))
+    fireEvent.click(screen.getByText("GEN 1"))
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeKind: "chapters",
+          scope: [
+            { fileId: "f1", chapter: "GEN 1" },
+            { fileId: "f1", chapter: "GEN 3" },
+          ],
+          scopeLabel: "John · GEN 1, GEN 3",
+        }),
+      ),
+    )
+    // Exactly one assignment.create — not one per chapter.
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+  })
+
+  // Regression guard: checking none still assigns the whole book.
+  it("assigns the whole book when no chapter is checked", async () => {
+    rosterOk()
+    mockChapters.mockResolvedValue(["GEN 1", "GEN 2"])
+    mockCreate.mockResolvedValue("as-4")
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    // Wait for chapters to load, then assign without checking any.
+    await screen.findByText("GEN 1")
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scopeKind: "books",
+          scope: [{ fileId: "f1" }],
+          scopeLabel: "John",
+        }),
+      ),
+    )
   })
 
   it("surfaces a server rejection (e.g. role too low)", async () => {

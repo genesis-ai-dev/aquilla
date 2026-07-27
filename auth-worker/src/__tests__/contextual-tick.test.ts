@@ -212,6 +212,39 @@ describe("runOneTick", () => {
     expect(secondTick.some((c) => c.system.includes("Prefer short sentences"))).toBe(false)
   })
 
+  it("a direction sent to a span-exhausted run stays queued through the park (not swallowed)", async () => {
+    // Regression (caught by the e2e steering journey): consuming directions at
+    // tick start swallowed any direction sent to a fully-drafted run — the
+    // park-only wake had no span to apply it to. Directions must survive until
+    // a span actually runs.
+    await seedFile()
+    const run = await startRun()
+    // Drain every span so the cursor exhausts and the run parks.
+    for (let i = 0; i < 20; i++) {
+      const r = await runOneTick({ db, runId: run.id, llm: llm() })
+      if (!r.continueRun) break
+    }
+    await appendSteering(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      kind: "direction",
+      body: "Keep the tone formal in dialogue",
+    })
+
+    // Mirror the steering route: wake the parked run, then tick. The wake
+    // tick parks again (no spans) — the direction must remain.
+    const resumed = await resumeRun(db, run.id)
+    expect(resumed.status).toBe("ok")
+    const wake = await runOneTick({ db, runId: run.id, llm: llm() })
+    expect(wake.continueRun).toBe(false)
+    const remaining = await readUnconsumedSteering(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      runId: run.id,
+    })
+    expect(remaining.map((e) => e.body)).toEqual(["Keep the tone formal in dialogue"])
+  })
+
   it("refresh_span marks the target brief stale and re-enqueues that span past the cursor", async () => {
     await seedFile()
     const run = await startRun()

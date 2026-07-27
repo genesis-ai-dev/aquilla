@@ -41,6 +41,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 /** The text view's cell-action bundle, drilled from ProjectWorkspace as one
  *  object (the EditorActionsContext exists for row-memo stability across
@@ -119,20 +120,21 @@ function ActionIconButton({
   children: React.ReactNode
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      data-testid={testId}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60",
-        active ? "text-sky-600 dark:text-sky-400" : "text-foreground/80",
-      )}
-    >
-      {children}
-    </button>
+    <AppTooltip content={label}>
+      <button
+        type="button"
+        aria-label={label}
+        data-testid={testId}
+        onClick={onClick}
+        disabled={disabled}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60",
+          active ? "text-sky-600 dark:text-sky-400" : "text-foreground/80",
+        )}
+      >
+        {children}
+      </button>
+    </AppTooltip>
   )
 }
 

@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils"
 import type { PassageRow } from "@/lib/agent/protocol"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 const ROW_CAP = 12
 
@@ -181,9 +182,11 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
       <div className="divide-y">
         {visible.map((row) => (
           <div key={row.cellId} className="grid grid-cols-[minmax(52px,7rem)_1fr] gap-x-3 px-2 py-1 text-[11px]">
-            <span className="truncate font-mono text-[10px] text-muted-foreground" title={row.ref}>
-              {row.ref ?? "·"}
-            </span>
+            <AppTooltip content={row.ref}>
+              <span className="truncate font-mono text-[10px] text-muted-foreground">
+                {row.ref ?? "·"}
+              </span>
+            </AppTooltip>
             <span className="min-w-0">
               {side !== "target" && (
                 <span dir="auto" className="block whitespace-pre-wrap break-words text-muted-foreground">

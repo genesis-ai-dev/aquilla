@@ -332,9 +332,11 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
       )}
     >
       <div className="flex min-w-0 flex-col items-start gap-1">
-        <span className="max-w-full truncate font-mono text-[10px] text-muted-foreground" title={row.ref}>
-          {row.ref ?? "·"}
-        </span>
+        <AppTooltip content={row.ref}>
+          <span className="max-w-full truncate font-mono text-[10px] text-muted-foreground">
+            {row.ref ?? "·"}
+          </span>
+        </AppTooltip>
         {stateLabel && <span className={cn("text-[10px] font-medium", stateClass)}>{stateLabel}</span>}
         {row.fileId && onJumpToCell && (
           <AppTooltip content="Open in editor">

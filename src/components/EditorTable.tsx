@@ -1697,9 +1697,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {/* Skip the multi-select track so the pilcrow stays in the number
                 gutter, aligned with the line numbers below it. */}
             <div aria-hidden="true" />
-            <div className="flex items-center justify-center py-1" title="New paragraph">
-              <Pilcrow className="h-3 w-3 text-muted-foreground" />
-            </div>
+            <AppTooltip content="New paragraph">
+              <div
+                data-testid="paragraph-boundary-indicator"
+                className="flex items-center justify-center py-1"
+              >
+                <Pilcrow className="h-3 w-3 text-muted-foreground" />
+              </div>
+            </AppTooltip>
           </div>
         )}
         <MemoizedRow

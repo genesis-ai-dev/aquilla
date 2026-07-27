@@ -3952,13 +3952,13 @@ export function ProjectWorkspace() {
     const items = [
       { id: "rules", label: "Rules", icon: Scale,
         onClick: () => navigate(`/project/${projectId}/rules`) },
-      // Pinned below Comments: Terminology is a frequent destination, so it
-      // stays visible; everything else unpinned collapses into "More".
+      { id: "terminology", label: "Terminology", icon: BookOpen,
+        onClick: () => navigate(`/project/${projectId}/terminology`) },
+      // Pinned: Comments carries a live unread count, so it stays visible;
+      // everything unpinned collapses into the sidebar "More" menu.
       { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => navigate(`/project/${projectId}/comments`) },
-      { id: "terminology", label: "Terminology", icon: BookOpen, pinned: true,
-        onClick: () => navigate(`/project/${projectId}/terminology`) },
       { id: "living-memory", label: "Memory", icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
       // AQU-353: this sidebar entry toggles the SAME Text/Audio lens as the

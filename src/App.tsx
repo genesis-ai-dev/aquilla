@@ -28,6 +28,7 @@ import { OutboxProvider } from "@/context/OutboxContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import { Toaster } from "@/components/ui/sonner"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -163,6 +164,7 @@ export default function App() {
         <GlobalAudioShortcuts />
         <VersionBadge />
         <UpdateBanner />
+        <Toaster />
       </SyncingProvider>
     </TooltipProvider>
   )

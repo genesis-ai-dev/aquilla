@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Languages, Sparkles, Wand2, X } from "lucide-react"
+import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
 import { type CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
@@ -84,7 +85,6 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
-  const [toastMsg, setToastMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (selected.size === 0) return
@@ -102,11 +102,6 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [selected.size])
-
-  const showToast = useCallback((msg: string) => {
-    setToastMsg(msg)
-    setTimeout(() => setToastMsg(null), 3000)
-  }, [])
 
   const selectedCells = useMemo(() => {
     return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected))
@@ -224,7 +219,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       const msg = alreadyValidated > 0
         ? `Validated ${validated} cell${validated === 1 ? "" : "s"} (${alreadyValidated} already validated)`
         : `Validated ${validated} cell${validated === 1 ? "" : "s"}`
-      showToast(msg)
+      toast.success(msg)
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
       if (validated > 0) onValidationCommitted?.()
@@ -254,7 +249,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         })
         removed++
       }
-      showToast(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
+      toast.success(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
       // AQU-616: flush now rather than waiting for the periodic flusher.
       if (removed > 0) onValidationCommitted?.()
     } finally {
@@ -275,16 +270,6 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
   if (selectedCells.length === 0) return null
 
   return (
-    <>
-    {toastMsg && (
-      <div
-        role="status"
-        aria-live="polite"
-        className="pointer-events-none fixed bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-lg border bg-card px-4 py-2 text-xs font-medium ring-1 ring-foreground/10"
-      >
-        {toastMsg}
-      </div>
-    )}
     <div
       className={cn(
         "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
@@ -439,6 +424,5 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         </Button>
       </AppTooltip>
     </div>
-    </>
   )
 }

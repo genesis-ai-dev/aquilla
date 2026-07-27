@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Search as SearchIcon, X, ChevronDown, Pencil, BookOpen } from "lucide-react"
+import { toast } from "sonner"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
@@ -69,21 +70,12 @@ export function ExpandableFileList({
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
-  const [exportToast, setExportToast] = useState<{ msg: string; tone: "ok" | "err" } | null>(null)
   const { requestScrollToSection } = useEditorScroll()
 
   useEffect(() => {
     if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
     for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
   }, [activeFileId, expanded, getTokenForFile, projectId])
-
-  // Auto-dismiss the export toast after a few seconds — mirrors the Dashboard
-  // errorToast pattern (no external toast lib in this codebase).
-  useEffect(() => {
-    if (!exportToast) return
-    const t = setTimeout(() => setExportToast(null), 4500)
-    return () => clearTimeout(t)
-  }, [exportToast])
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -268,18 +260,6 @@ export function ExpandableFileList({
           })}
         </div>
       </div>
-      {exportToast && (
-        <div
-          className={cn(
-            "fixed bottom-4 right-4 z-60 max-w-md rounded border px-3 py-2 text-sm shadow-md",
-            exportToast.tone === "err"
-              ? "bg-destructive text-destructive-foreground"
-              : "bg-background text-foreground",
-          )}
-        >
-          {exportToast.msg}
-        </div>
-      )}
     </>
   )
 
@@ -289,7 +269,7 @@ export function ExpandableFileList({
       await downloadSourceFile({
         projectId, fileId: file.id, downloadName: name, getToken: getTokenForFile, targetLang,
       })
-      setExportToast({ msg: `Exported ${name}`, tone: "ok" })
+      toast.success(`Exported ${name}`)
     } catch (err) {
       const msg =
         err instanceof SourceExportError && err.status === 404
@@ -297,7 +277,7 @@ export function ExpandableFileList({
           : err instanceof Error
             ? `Export failed: ${err.message}`
             : "Export failed."
-      setExportToast({ msg, tone: "err" })
+      toast.error(msg)
     }
   }
 

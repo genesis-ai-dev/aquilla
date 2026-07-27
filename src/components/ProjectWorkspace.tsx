@@ -112,7 +112,8 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, X, Mic, Plus } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Mic, Plus } from "lucide-react"
+import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
@@ -414,20 +415,9 @@ export function ProjectWorkspace() {
   // across reloads would need server backing; the in-session state is what the
   // X button and "apply" flows actually need.)
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
-  // Transient bottom-right status notice. Originally the FRO-249/FRO-255
-  // direction-role notice; now shared by any flow that needs a post-action
-  // result confirmation (e.g. the AQU-314 label import). Severity tints follow
-  // the workspace banner idiom (amber warnings, etc.). Only success notices
-  // auto-dismiss (6 s) — error/warning/info stay until the user closes them.
-  const [transientNotice, setTransientNotice] = useState<{
-    message: string
-    severity: "error" | "warning" | "success" | "info"
-  } | null>(null)
-  useEffect(() => {
-    if (transientNotice?.severity !== "success") return
-    const t = setTimeout(() => setTransientNotice(null), 6000)
-    return () => clearTimeout(t)
-  }, [transientNotice])
+  // Transient post-action confirmations (label import, direction-role fallback, …)
+  // go through sonner — see toast.* call sites below.
+
   useEffect(() => {
     optimisticFileIdsRef.current = new Set()
     setOptimisticFiles([])
@@ -3626,7 +3616,9 @@ export function ProjectWorkspace() {
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [project?.files])
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
-  const [undo, setUndo] = useState<{ chosen: RenameSuggestion[] } | null>(null)
+  // Latest project for the suggestion-apply undo toast action (avoids stale closure).
+  const projectForUndoRef = useRef(project)
+  projectForUndoRef.current = project
   // FRO-272: soft-deleted ("Recently deleted") files fetched from the server.
   const [deletedFiles, setDeletedFiles] = useState<FileSummary[]>([])
   const [trashOpen, setTrashOpen] = useState(false)
@@ -3682,7 +3674,7 @@ export function ProjectWorkspace() {
       // returned record is discarded — persistence flows through file.rename.
       renameFile(project, fileId, newName)
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Rename failed")
+      toast.error(e instanceof Error ? e.message : "Rename failed")
       return
     }
     await applyRenames([{ fileId, name: newName.trim() }])
@@ -3814,13 +3806,43 @@ export function ProjectWorkspace() {
         setClientProject(project)
         void updateProject(project)
         refresh()
-        alert(e instanceof Error ? `Rename failed: ${e.message}` : "Rename failed")
+        toast.error(e instanceof Error ? `Rename failed: ${e.message}` : "Rename failed")
         return
       }
     }
     refresh()
-    setUndo({ chosen: effective })
-    setTimeout(() => setUndo((u) => (u?.chosen === effective ? null : u)), 10000)
+    const applied = effective
+    toast("Applied renames.", {
+      duration: 10_000,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          const p = projectForUndoRef.current
+          if (!p) return
+          const reverted = buildUndo(p, applied)
+          setClientProject(reverted)
+          void updateProject(reverted)
+          const undoNameChanges = applied.filter((s) => s.currentName !== s.suggestedName)
+          if (undoNameChanges.length > 0) {
+            void Promise.all(
+              undoNameChanges.map((s) =>
+                emitFileRename({
+                  projectId: p.id,
+                  fileId: s.fileId,
+                  name: s.currentName,
+                  author: currentUsername,
+                }),
+              ),
+            ).then(() => refresh())
+          }
+          setOptimisticRenames((current) => {
+            const next = new Map(current)
+            for (const s of applied) next.delete(s.fileId)
+            return next
+          })
+        },
+      },
+    })
   }, [project, currentUsername, refresh])
 
   const handleApplyOneSuggestion = useCallback(async (fileId: string) => {
@@ -4615,10 +4637,9 @@ export function ProjectWorkspace() {
               `[FRO-249] skipping language seed — role ${roleLevel} is below server floor ${serverFloor}. ` +
               "Mismatch note: EDIT_ROLE_FLOOR in useProjectSettings is PROJECT_LEAD(500) but server requires MAINTAINER(600); tracked for follow-up.",
             )
-            setTransientNotice({
-              message: "Direction applied locally only — saving project-wide needs a maintainer.",
-              severity: "warning",
-            })
+            toast.warning(
+              "Direction applied locally only — saving project-wide needs a maintainer.",
+            )
           }
         }
       }
@@ -5733,22 +5754,19 @@ export function ProjectWorkspace() {
           projectFiles={labelPickerFiles}
           activeFileId={activeFileId}
           onLabelsImported={(r) => {
-            setTransientNotice(
-              r.applied === 0
-                ? {
-                    message: `No labels applied — the CSV doesn't match ${r.fileName}. Re-download the template and try again.`,
-                    severity: "warning",
-                  }
-                : r.unmatched > 0
-                  ? {
-                      message: `Applied ${r.applied} of ${r.applied + r.unmatched} labels to ${r.fileName}.`,
-                      severity: "warning",
-                    }
-                  : {
-                      message: `Applied ${r.applied} label${r.applied !== 1 ? "s" : ""} to ${r.fileName}.`,
-                      severity: "success",
-                    },
-            )
+            if (r.applied === 0) {
+              toast.warning(
+                `No labels applied — the CSV doesn't match ${r.fileName}. Re-download the template and try again.`,
+              )
+            } else if (r.unmatched > 0) {
+              toast.warning(
+                `Applied ${r.applied} of ${r.applied + r.unmatched} labels to ${r.fileName}.`,
+              )
+            } else {
+              toast.success(
+                `Applied ${r.applied} label${r.applied !== 1 ? "s" : ""} to ${r.fileName}.`,
+              )
+            }
           }}
           patchDcsCursor={async (cursor) => {
             // Pin the project to the imported Door43 release (spec §8). Server
@@ -5774,37 +5792,7 @@ export function ProjectWorkspace() {
           />
         </Suspense>
       )}
-      {/* Shared transient result notice (direction-role fallback, label import results, …).
-          Severity tints match the workspace banner idiom (unintrusive 50-tint bg + 200 border).
-          Success auto-dismisses; other severities carry an explicit close button. */}
-      {transientNotice && (
-        <div
-          role="status"
-          aria-live="polite"
-          className={`fixed bottom-4 right-4 z-60 flex max-w-sm items-start gap-2 rounded border px-3 py-2 text-sm shadow-md ${
-            {
-              error: "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200",
-              warning: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200",
-              success: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
-              info: "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200",
-            }[transientNotice.severity]
-          }`}
-        >
-          <span className="min-w-0">{transientNotice.message}</span>
-          {transientNotice.severity !== "success" && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label="Dismiss notice"
-              onClick={() => setTransientNotice(null)}
-              className="-mr-1 mt-0.5 shrink-0 opacity-70 transition-opacity hover:opacity-100"
-            >
-              <X />
-            </Button>
-          )}
-        </div>
-      )}
+      {/* Label-import / direction-role results use sonner (see toast.* above). */}
       <Suspense fallback={null}>
         <ExportDialog
           open={exportOpen}
@@ -5940,36 +5928,6 @@ export function ProjectWorkspace() {
             setMoveTargetId(null)
           }}
         />
-      )}
-      {undo && (
-        <div className="fixed bottom-4 right-4 z-60 flex items-center gap-2 rounded-lg bg-card px-3 py-2 text-sm">
-          <span>Applied renames.</span>
-          <Button size="sm" variant="outline" onClick={() => {
-            if (!project || !undo) return
-            const reverted = buildUndo(project, undo.chosen)
-            setClientProject(reverted)
-            void updateProject(reverted)
-            const nameChanges = undo.chosen.filter((s) => s.currentName !== s.suggestedName)
-            if (nameChanges.length > 0) {
-              void Promise.all(
-                nameChanges.map((s) =>
-                  emitFileRename({
-                    projectId: project.id,
-                    fileId: s.fileId,
-                    name: s.currentName,
-                    author: currentUsername,
-                  }),
-                ),
-              ).then(() => refresh())
-            }
-            setOptimisticRenames((current) => {
-              const next = new Map(current)
-              for (const s of undo.chosen) next.delete(s.fileId)
-              return next
-            })
-            setUndo(null)
-          }}>Undo</Button>
-        </div>
       )}
     </EditorScrollProvider>
   )

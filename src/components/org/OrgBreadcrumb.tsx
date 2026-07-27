@@ -43,8 +43,10 @@ interface Crumb {
 
 function CrumbLink({ crumb }: { crumb: Crumb }) {
   const labelClass = crumb.isRoot
-    ? "block shrink-0 whitespace-nowrap rounded-md px-1.5 py-1"
-    : "block max-w-[clamp(7rem,20vw,18rem)] truncate rounded-md px-1.5 py-1"
+    ? "block shrink-0 cursor-default whitespace-nowrap rounded-md px-1.5 py-1"
+    : "block max-w-[clamp(7rem,20vw,18rem)] cursor-default truncate rounded-md px-1.5 py-1"
+  // Non-root crumbs truncate at 18rem, so the tooltip is the only way to read a
+  // long org or project name in full. Keep it on every variant.
   if (crumb.isCurrent) {
     return (
       <AppTooltip content={crumb.label}>

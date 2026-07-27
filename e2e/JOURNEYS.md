@@ -63,6 +63,7 @@
 | Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
 | Export      | IDML import → protected edit → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
 | Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
+| Marketing   | Homepage "book a call": Google Calendar booking link + contact form → POST /api/v2/contact/book-call → sent state | `e2e/specs/marketing/book-call.smoke.spec.ts` | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
 | Editor      | Formatting loss warning when source has bold/italic   | `e2e/specs/editor/formatting-loss-warning.smoke.spec.ts`      |   ✅   |
 | Editor      | File actions hover menu (rename/delete)               | `e2e/specs/editor/file-actions-button.smoke.spec.ts`          |   ✅   |

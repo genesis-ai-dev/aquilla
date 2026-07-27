@@ -258,7 +258,7 @@ export function ComeAndSeeCaseStudy() {
             <h2 className="aq-display">Scale your translation, <span className="aq-gold-text aq-display-italic">not your team.</span></h2>
             <p>Whether you're reaching into low-resource languages or speeding up the work you already do, Aquilla gives one expert maximum leverage. It's free, and it's live today.</p>
             <div className="aq-cta-actions">
-              <a href="https://calendar.app.google/etybAvBtu7Vm6BDb8" target="_blank" rel="noopener noreferrer" className="aq-btn aq-btn-gold aq-btn-lg">Book a call with our team</a>
+              <a href="https://calendar.app.google/umM8GMgm6d78mZWS9" target="_blank" rel="noopener noreferrer" className="aq-btn aq-btn-gold aq-btn-lg">Book a call with our team</a>
               <a href="/onboarding" className="aq-btn aq-btn-ghost aq-btn-lg">Or start free today</a>
             </div>
           </div>

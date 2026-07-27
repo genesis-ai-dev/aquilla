@@ -64,6 +64,10 @@ export interface Env {
    *  `support@aquilla.app`; that address must be routed to a human in
    *  Cloudflare Email Routing for "a real person reads it" to be true. */
   EMAIL_REPLY_TO?: string
+  /** Team inbox for public contact-form submissions (marketing "book a call"
+   *  form). Must be a routed/verified destination in Cloudflare Email Routing.
+   *  Defaults to joel@frontierrnd.com (routes/contact.ts). */
+  CONTACT_EMAIL?: string
   BASE_URL?: string
 
   /** Public invite link to the community (Discord). When set, the welcome

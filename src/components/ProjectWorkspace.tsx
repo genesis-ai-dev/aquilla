@@ -69,7 +69,6 @@ import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { ResizableVideoPanel } from "./ResizableVideoPanel"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
@@ -4683,6 +4682,7 @@ export function ProjectWorkspace() {
       {/* FRO-308: currentCell for chat panel — derived from focusedCellId */}
       <AppShell
         railCollapsed={dockTab === null}
+        dockStorageKey={projectId}
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
@@ -4700,7 +4700,6 @@ export function ProjectWorkspace() {
         }
         leftDock={
           <LeftDock
-            storageKey={projectId}
             activeTab={dockTab}
             onActiveTabChange={(t) => {
               // While the workbench IS the agent surface, the dock's Agent tab
@@ -5114,20 +5113,6 @@ export function ProjectWorkspace() {
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
             </div>
-            {isSubtitleFile && videoSrc && centerSurface !== "agent" && (
-              <ResizableVideoPanel>
-                {(height) => (
-                  <VideoPlayer
-                    ref={videoPlayerRef}
-                    src={videoSrc}
-                    cues={videoCues}
-                    startOffset={videoStartOffset}
-                    height={height}
-                    onTimeUpdate={setCurrentVideoTime}
-                  />
-                )}
-              </ResizableVideoPanel>
-            )}
             {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
               <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
                 Video file not available on this device. Attach it locally or paste a URL via the Film icon.
@@ -5243,6 +5228,17 @@ export function ProjectWorkspace() {
               </div>
             )}
           </>
+        }
+        resizableTop={
+          isSubtitleFile && videoSrc && centerSurface !== "agent" ? (
+            <VideoPlayer
+              ref={videoPlayerRef}
+              src={videoSrc}
+              cues={videoCues}
+              startOffset={videoStartOffset}
+              onTimeUpdate={setCurrentVideoTime}
+            />
+          ) : undefined
         }
         main={centerSurface === "rules" ? (
           // FRO-194: Rules surface renders inside the shell; shell stays mounted.

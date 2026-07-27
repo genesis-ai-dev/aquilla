@@ -248,26 +248,29 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger
-        render={
-          <AppTooltip
-            content={
-              isConfigured
-                ? "Import rules from a document"
-                : "Configure LLM in settings first"
+      <AppTooltip
+        content={
+          isConfigured
+            ? "Import rules from a document"
+            : "Configure LLM in settings first"
+        }
+      >
+        {/* Span wrapper so the tooltip still receives hover when the button is disabled. */}
+        <span className="inline-flex">
+          <DialogTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!isConfigured}
+              />
             }
           >
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!isConfigured}
-            >
-              <Upload className="mr-1 h-3.5 w-3.5" />
-              Import from doc
-            </Button>
-          </AppTooltip>
-        }
-      />
+            <Upload className="mr-1 h-3.5 w-3.5" />
+            Import from doc
+          </DialogTrigger>
+        </span>
+      </AppTooltip>
 
       <DialogContent className="max-w-2xl">
         <DialogHeader>

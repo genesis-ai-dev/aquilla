@@ -7,7 +7,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * When cells are selected via the selection checkbox, the SelectionBar
  * (aria-label="Selection actions") shows a "Validate N" button.
  * Clicking it emits a validate event for each selected cell.
- * After bulk validation a success toast is shown (role="status").
+ * After bulk validation a success toast is shown (sonner data-sonner-toast).
  *
  * Direct human edits auto-validate. This spec removes that validation, then
  * selects the reviewed cell → clicks "Validate" in the SelectionBar → asserts

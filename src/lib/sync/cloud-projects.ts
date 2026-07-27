@@ -48,6 +48,14 @@ export interface CloudProjectSummary {
    * endpoint may omit (older servers).
    */
   sourceProjectId?: string | null
+  /**
+   * AQU-696: when the caller was granted access to this project (ISO 8601),
+   * from the list endpoint. Drives the "New" badge on newly-shared projects
+   * (new until opened). Optional and nullable: an older worker that omits it,
+   * or an own/creator project with no grant row, degrades to "not new" — never
+   * to "everything is new".
+   */
+  grantedAt?: string | null
   /** AQU-476/478: link mode/consumes/gate/cursor. Only the single-project
    *  endpoint returns these (the list endpoint returns sourceProjectId only —
    *  the picker/settings-detail views are what need the full state). */

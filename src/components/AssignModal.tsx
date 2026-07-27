@@ -56,7 +56,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
-import type { ProjectMember } from "@/lib/frontier/members"
+import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
   createAssignment,
@@ -92,7 +92,12 @@ interface AssignModalProps {
    * (the default lane).
    */
   defaultLane?: string
-  /** Members eligible to be assigned (already fetched by parent). */
+  /**
+   * The project's effective roster (already fetched by parent via
+   * useProjectMembers). This includes people who only reach the project
+   * through an org-wide role (AD-12 max-wins), so the assignee picker filters
+   * it down to project-specific members — see AQU-676 / partitionMembers.
+   */
   members: ProjectMember[]
   /** Current user's role level — used to gate the modal. */
   roleLevel: number
@@ -219,6 +224,17 @@ export function AssignModal({
     { value: "books", label: "Books (files)" },
   ]
 
+  // AQU-676: the assignee picker must list only the project's own members,
+  // never everyone with org-baseline access. Org members inherit access to
+  // every project via AD-12 max-wins, so without this filter a per-team mentor
+  // doing assignments sees (and could assign to) other language teams' people.
+  // partitionMembers (AQU-454) keeps only members with a project-specific path
+  // (override / group / creator); org-baseline-only members drop out.
+  const eligibleMembers = useMemo(
+    () => partitionMembers(members).projectMembers,
+    [members],
+  )
+
   // AQU-497: group the books-scope file list by corpusMarker (real season/
   // testament grouping — see file banner) so a whole season can be selected
   // in one click via the per-group "Select all".
@@ -294,6 +310,19 @@ export function AssignModal({
     setError(null)
     const member = members.find((m) => String(m.userId) === selectedMemberId)
     if (!member) { setError("Select a member."); return }
+
+    // AQU-676 defense-in-depth: org-baseline-only members are not assignable —
+    // only the project's own members. The picker already hides them (see
+    // eligibleMembers), but re-check on submit so a stale/forced selection
+    // can't route an assignment to someone outside the project. Self-assign
+    // mode is exempt: the caller is claiming work for themselves.
+    if (
+      !isSelfAssignMode &&
+      !eligibleMembers.some((m) => m.userId === member.userId)
+    ) {
+      setError("You can only assign work to a project member.")
+      return
+    }
 
     // AQU-496 defense-in-depth: re-check even though the picker is already
     // locked to self in self-assign mode — the server is authoritative and
@@ -401,7 +430,7 @@ export function AssignModal({
       setSubmitting(false)
     }
   }, [
-    members, selectedMemberId, scopeKind, activeFileId, projectFiles,
+    members, eligibleMembers, isSelfAssignMode, selectedMemberId, scopeKind, activeFileId, projectFiles,
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, callerUserId, deadlineDate, groupLabelByFileId,
@@ -422,7 +451,8 @@ export function AssignModal({
         .map((m) => ({ value: String(m.userId), label: `${m.username} (you)` }))
     : [
         { value: "", label: "Select member…" },
-        ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+        // AQU-676: project members only — org-baseline-only people are excluded.
+        ...eligibleMembers.map((m) => ({ value: String(m.userId), label: m.username })),
       ]
 
   return (

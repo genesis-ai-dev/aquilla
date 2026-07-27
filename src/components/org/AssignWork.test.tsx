@@ -2,19 +2,31 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { AssignWork } from "./AssignWork"
 
-vi.mock("@/lib/frontier/orgs", () => ({ listOrgMembers: vi.fn() }))
+// AQU-676: mock only the roster fetch — partitionMembers stays real so the
+// tests exercise the actual project-members-only filter, not a stub of it.
+vi.mock("@/lib/frontier/members", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/frontier/members")>()),
+  fetchProjectRoster: vi.fn(),
+}))
 vi.mock("@/lib/sync/assignments", () => ({ createAssignment: vi.fn(), getFileChapters: vi.fn() }))
 
-import { listOrgMembers } from "@/lib/frontier/orgs"
+import { fetchProjectRoster, type ProjectMember } from "@/lib/frontier/members"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 
-const mockList = vi.mocked(listOrgMembers)
+const mockRoster = vi.mocked(fetchProjectRoster)
 const mockCreate = vi.mocked(createAssignment)
 const mockChapters = vi.mocked(getFileChapters)
 
-const members = [
-  { userId: 2, username: "anna", role: { level: 400, name: "contributor" } },
-] as unknown as Awaited<ReturnType<typeof listOrgMembers>>
+// anna has a project-specific path (direct override); orgbill only reaches the
+// project through his org-wide role, so AQU-676 excludes him from the picker.
+const members: ProjectMember[] = [
+  { userId: 2, username: "anna", role: { level: 400, name: "contributor", source: "override" }, secondarySources: [] },
+  { userId: 9, username: "orgbill", role: { level: 400, name: "contributor", source: "org" }, secondarySources: [] },
+]
+
+function rosterOk(list: ProjectMember[] = members) {
+  mockRoster.mockResolvedValue({ kind: "ok", members: list })
+}
 
 const files = [
   { id: "f1", name: "John" },
@@ -40,7 +52,7 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
 
 function renderAssign(onAssigned = vi.fn()) {
   return render(
-    <AssignWork projectId="p1" files={files} orgId={1} jwt="jwt" author="wendi" onAssigned={onAssigned} />,
+    <AssignWork projectId="p1" files={files} jwt="jwt" author="wendi" onAssigned={onAssigned} />,
   )
 }
 
@@ -57,7 +69,7 @@ describe("AssignWork", () => {
   })
 
   it("opens, loads members, and emits a book-scope assignment.create", async () => {
-    mockList.mockResolvedValue(members)
+    rosterOk()
     mockCreate.mockResolvedValue("as-new")
     const onAssigned = vi.fn()
     renderAssign(onAssigned)
@@ -89,7 +101,7 @@ describe("AssignWork", () => {
   })
 
   it("emits a chapter-scope assignment when a chapter is picked from the dropdown", async () => {
-    mockList.mockResolvedValue(members)
+    rosterOk()
     mockChapters.mockResolvedValue(["GEN 1", "GEN 2"])
     mockCreate.mockResolvedValue("as-2")
     renderAssign()
@@ -120,7 +132,7 @@ describe("AssignWork", () => {
   })
 
   it("surfaces a server rejection (e.g. role too low)", async () => {
-    mockList.mockResolvedValue(members)
+    rosterOk()
     mockCreate.mockRejectedValue(new Error("role too low for assignment.create"))
     renderAssign()
 
@@ -136,6 +148,55 @@ describe("AssignWork", () => {
   })
 })
 
+// ── AQU-678: canonical, fully-spelled-out book dropdown ─────────────────────
+describe("AssignWork — book dropdown canonicalization (AQU-678)", () => {
+  // Files whose `name` is a non-canonical abbreviation but which carry a stable
+  // bookCode. Deliberately supplied out of canonical order and mixing an OT and
+  // NT book so the test proves ordering + spelling both come from the code.
+  const abbreviatedFiles = [
+    { id: "1co", name: "1 Cor", bookCode: "1CO" },
+    { id: "ezk", name: "Ezek", bookCode: "EZK" },
+    { id: "gen", name: "Genesis", bookCode: "GEN" },
+    { id: "notes", name: "Translation Notes" }, // non-book file, no bookCode
+  ]
+
+  it("lists books fully spelled out and in canonical order, book files before non-book files", async () => {
+    rosterOk()
+    render(
+      <AssignWork projectId="p1" files={abbreviatedFiles} jwt="jwt" author="wendi" onAssigned={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    const bookTrigger = screen.getByRole("combobox", { name: /^book$/i })
+    fireEvent.click(bookTrigger)
+
+    const options = await screen.findAllByRole("option")
+    const labels = options.map((o) => o.textContent?.trim())
+    // Genesis (OT) → Ezekiel (OT) → 1 Corinthians (NT) → non-book last;
+    // abbreviations resolved to their canonical spelled-out names.
+    expect(labels).toEqual(["Genesis", "Ezekiel", "1 Corinthians", "Translation Notes"])
+  })
+
+  it("uses the canonical spelled-out name in the emitted scopeLabel", async () => {
+    rosterOk()
+    mockCreate.mockResolvedValue("as-canon")
+    render(
+      <AssignWork projectId="p1" files={abbreviatedFiles} jwt="jwt" author="wendi" onAssigned={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    // Default selection is the first file in prop order ("1 Cor"), whose raw
+    // name is an abbreviation — the emitted scopeLabel must still be canonical.
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ fileId: "1co", scopeLabel: "1 Corinthians" }),
+      ),
+    )
+  })
+})
+
 // ── AQU-496: self-assign carve-out ──────────────────────────────────────────
 describe("AssignWork — self-assign carve-out (AQU-496)", () => {
   function renderSelfAssign(onAssigned = vi.fn()) {
@@ -143,7 +204,6 @@ describe("AssignWork — self-assign carve-out (AQU-496)", () => {
       <AssignWork
         projectId="p1"
         files={files}
-        orgId={1}
         jwt="jwt"
         author="anna"
         roleLevel={400} // ROLE.CONTRIBUTOR — below lead
@@ -155,7 +215,7 @@ describe("AssignWork — self-assign carve-out (AQU-496)", () => {
   }
 
   it("locks the assignee picker to the caller and emits assignment.create for their own userId", async () => {
-    mockList.mockResolvedValue(members)
+    rosterOk()
     mockCreate.mockResolvedValue("as-self")
     const onAssigned = vi.fn()
     renderSelfAssign(onAssigned)
@@ -176,9 +236,37 @@ describe("AssignWork — self-assign carve-out (AQU-496)", () => {
   })
 
   it("shows explanatory copy that self-assignment is on", async () => {
-    mockList.mockResolvedValue(members)
+    rosterOk()
     renderSelfAssign()
     fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
     expect(await screen.findByText(/self-assignment is on/i)).toBeInTheDocument()
+  })
+})
+
+// ── AQU-676: assignee picker lists project members only ─────────────────────
+describe("AssignWork — project-members-only assignee picker (AQU-676)", () => {
+  it("lists project members and excludes org-baseline-only members", async () => {
+    rosterOk() // anna (override) + orgbill (org-baseline only)
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    fireEvent.click(screen.getByRole("combobox", { name: /^assignee$/i }))
+
+    // anna appearing proves the roster has loaded into the popup — only then
+    // is orgbill's absence meaningful.
+    await screen.findByRole("option", { name: /^anna$/ })
+    expect(screen.queryByRole("option", { name: /orgbill/ })).not.toBeInTheDocument()
+  })
+
+  it("fails closed (no assignable members) when org policy hides the roster", async () => {
+    mockRoster.mockResolvedValue({ kind: "roster-hidden" })
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await waitFor(() => expect(mockRoster).toHaveBeenCalledWith("jwt", "p1"))
+    fireEvent.click(screen.getByRole("combobox", { name: /^assignee$/i }))
+
+    await screen.findByRole("option", { name: /select member/i })
+    expect(screen.getAllByRole("option")).toHaveLength(1)
   })
 })

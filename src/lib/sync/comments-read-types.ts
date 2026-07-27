@@ -24,6 +24,14 @@ export interface CommentRecord {
    * parse.
    */
   cellRef?: string | null
+  /**
+   * AQU-692: snapshot of the cell's target text as it stood when this thread
+   * was created (root comments only). Drives the "Translation changed since
+   * this thread was created" badge. `null`/absent = unknown baseline (legacy
+   * thread, git-imported, or an older worker that didn't return the column) —
+   * the UI shows no stale badge in that case.
+   */
+  createdForTranslated?: string | null
 }
 
 export interface CommentsResponse {

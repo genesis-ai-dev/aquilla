@@ -13,10 +13,11 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { prefetchAiModels, useModelStatus } from "@/lib/audio/prefetch"
 import { storeAllFeaturesConsent } from "@/lib/audio/ai-consent"
-import { patchProject } from "@/lib/store/project-index"
+import { patchProject, updateProject } from "@/lib/store/project-index"
 import type { ProjectRecord, ProjectTtsSettings, TtsProvider } from "@/lib/parsers/types"
 import { DEFAULT_MMS_LANGUAGE, DEFAULT_TTS_PROVIDER } from "@/lib/audio/tts-providers"
 import { cn } from "@/lib/utils"
+import { isValidGeminiKey, describeModelDownload } from "./ai-setup-utils"
 
 type VoiceChoice = "none" | TtsProvider
 
@@ -70,12 +71,21 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
     return "none"
   })
   const [geminiKey, setGeminiKey] = useState(project.ttsSettings?.apiKey ?? "")
+  const [geminiError, setGeminiError] = useState<string | null>(null)
+  const [editingKey, setEditingKey] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     setGeminiKey(project.ttsSettings?.apiKey ?? "")
   }, [project.ttsSettings?.apiKey])
+
+  // AQU-701: a Gemini key is "confirmed" once a well-formed key is persisted for
+  // the gemini provider. When confirmed (and not being replaced) the input
+  // collapses to a saved-key summary instead of inviting re-entry.
+  const savedGeminiKey = (project.ttsSettings?.apiKey ?? "").trim()
+  const hasSavedGeminiKey =
+    project.ttsSettings?.provider === "gemini" && isValidGeminiKey(savedGeminiKey)
 
   const totalSizeMb = useMemo(() => {
     let mb = 0
@@ -95,7 +105,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
     (!wantWhisper || whisper.kind === "ready") &&
     (voiceChoice !== "kokoro" || kokoro.kind === "ready") &&
     (voiceChoice !== "mms" || mms.kind === "ready") &&
-    (voiceChoice !== "gemini" || Boolean(geminiKey.trim()))
+    (voiceChoice !== "gemini" || isValidGeminiKey(geminiKey))
 
   async function saveTtsSettings(overrides: Partial<ProjectTtsSettings>) {
     const updated = await patchProject(project.id, (latest) => {
@@ -115,8 +125,42 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
     if (updated) onUpdated(updated)
   }
 
+  // AQU-701: persist the Gemini key only after a format check, and surface a
+  // visible confirmation (collapse) or error — never silently accept input.
+  function commitGeminiKey() {
+    const k = geminiKey.trim()
+    if (!k) {
+      setGeminiError("Enter your Gemini API key, or choose “None — set up later” above.")
+      return
+    }
+    if (!isValidGeminiKey(k)) {
+      setGeminiError("That doesn’t look like a Gemini key — they start with “AIza”. Double-check and paste again.")
+      return
+    }
+    setGeminiError(null)
+    void saveTtsSettings({ provider: "gemini", apiKey: k })
+    setEditingKey(false)
+  }
+
+  // AQU-701: first-class skip — a team that doesn't use voice/transcription can
+  // clear the "not set up" nag; opting back in re-enables the step.
+  async function setSkipped(skip: boolean) {
+    // Server-loaded projects usually have no IDB row (thin client, AD-3), so a
+    // read-then-write patch silently no-ops — seed the row in that case.
+    let next = await patchProject(project.id, (p) => ({ ...p, aiSetupSkipped: skip }))
+    if (!next) {
+      next = { ...project, aiSetupSkipped: skip }
+      await updateProject(next)
+    }
+    onUpdated(next)
+  }
+
   const handleStart = async () => {
     setError(null)
+    if (voiceChoice === "gemini" && !isValidGeminiKey(geminiKey)) {
+      commitGeminiKey()
+      return
+    }
     storeAllFeaturesConsent()
     if (voiceChoice !== "none") {
       await saveTtsSettings({
@@ -194,28 +238,55 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                 hint="Highest quality, promptable voices. Needs a Google AI Studio API key. No local download."
               />
               {voiceChoice === "gemini" && (
-                <div className="ml-6 space-y-1 rounded-md bg-muted/30 p-2">
-                  <FieldLabel htmlFor="setup-gemini-tts-key" className="text-xs">
-                    Gemini API key
-                  </FieldLabel>
-                  <Input
-                    id="setup-gemini-tts-key"
-                    type="password"
-                    value={geminiKey}
-                    onChange={(e) => setGeminiKey(e.target.value)}
-                    onBlur={() =>
-                      void saveTtsSettings({ provider: "gemini", apiKey: geminiKey.trim() || undefined })
-                    }
-                    placeholder="AIza..."
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="font-mono text-sm"
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    Get a key at aistudio.google.com/apikey. Stored locally and sent
-                    directly to Google.
-                  </p>
-                </div>
+                hasSavedGeminiKey && !editingKey ? (
+                  <div className="ml-6 flex items-center justify-between gap-2 rounded-md bg-muted/30 p-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Gemini key saved
+                      <span className="font-mono text-muted-foreground">••••{savedGeminiKey.slice(-4)}</span>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => { setGeminiError(null); setEditingKey(true) }}
+                    >
+                      Replace
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="ml-6 space-y-1 rounded-md bg-muted/30 p-2">
+                    <FieldLabel htmlFor="setup-gemini-tts-key" className="text-xs">
+                      Gemini API key
+                    </FieldLabel>
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        id="setup-gemini-tts-key"
+                        type="password"
+                        value={geminiKey}
+                        onChange={(e) => { setGeminiKey(e.target.value); if (geminiError) setGeminiError(null) }}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitGeminiKey() } }}
+                        onBlur={() => { if (geminiKey.trim()) commitGeminiKey() }}
+                        placeholder="AIza..."
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-invalid={geminiError ? true : undefined}
+                        className="font-mono text-sm"
+                      />
+                      <Button size="sm" className="h-8 shrink-0" onClick={commitGeminiKey}>
+                        Save key
+                      </Button>
+                    </div>
+                    {geminiError ? (
+                      <p className="text-[10px] text-destructive">{geminiError}</p>
+                    ) : (
+                      <p className="text-[10px] text-muted-foreground">
+                        Get a key at aistudio.google.com/apikey. Stored locally and sent
+                        directly to Google.
+                      </p>
+                    )}
+                  </div>
+                )
               )}
               <ModelRadioRow
                 value="kokoro"
@@ -275,6 +346,31 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
       </div>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {project.aiSetupSkipped ? (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+            Voice &amp; transcription skipped for this project.
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={() => void setSkipped(false)}
+          >
+            Set up anyway
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void setSkipped(true)}
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+        >
+          We don’t use voice or transcription — skip this
+        </button>
+      )}
     </div>
   )
 }
@@ -306,7 +402,7 @@ function ModelCheckRow({ checked, onChange, meta, status }: ModelCheckRowProps) 
           <SizeOrStatus meta={meta} status={status} />
         </div>
         <p className="text-xs text-muted-foreground">{meta.blurb}</p>
-        {status.kind === "downloading" && <DownloadBar status={status} />}
+        {status.kind === "downloading" && <DownloadBar status={status} sizeMb={meta.sizeMb} />}
         {status.kind === "error" && (
           <p className="mt-0.5 text-xs text-destructive">{status.message}</p>
         )}
@@ -349,7 +445,7 @@ function ModelRadioRow({ value, meta, status }: ModelRadioRowProps) {
           <SizeOrStatus meta={meta} status={status} />
         </div>
         <p className="text-xs text-muted-foreground">{meta.blurb}</p>
-        {status.kind === "downloading" && <DownloadBar status={status} />}
+        {status.kind === "downloading" && <DownloadBar status={status} sizeMb={meta.sizeMb} />}
         {status.kind === "error" && (
           <p className="mt-0.5 text-xs text-destructive">{status.message}</p>
         )}
@@ -378,10 +474,11 @@ function SizeOrStatus({
     )
   }
   if (status.kind === "downloading") {
+    const { pct } = describeModelDownload(status, meta.sizeMb)
     return (
-      <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+      <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground tabular-nums">
         <Spinner className="h-3 w-3" />
-        downloading
+        {pct !== null ? `${pct}%` : "downloading"}
       </span>
     )
   }
@@ -395,14 +492,24 @@ function SizeOrStatus({
 
 function DownloadBar({
   status,
-}: { status: Extract<ReturnType<typeof useModelStatus>, { kind: "downloading" }> }) {
-  const pct = status.total > 0 ? Math.round((status.loaded / status.total) * 100) : null
+  sizeMb,
+}: {
+  status: Extract<ReturnType<typeof useModelStatus>, { kind: "downloading" }>
+  sizeMb: number
+}) {
+  const { pct, label } = describeModelDownload(status, sizeMb)
   return (
-    <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
-      <div
-        className="h-full bg-primary transition-[width] duration-150"
-        style={{ width: `${pct ?? 8}%` }}
-      />
+    <div className="mt-1 space-y-0.5">
+      <div className="h-1 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full bg-primary transition-[width] duration-150",
+            pct === null && "animate-pulse",
+          )}
+          style={{ width: `${pct ?? 12}%` }}
+        />
+      </div>
+      <p className="text-[10px] text-muted-foreground tabular-nums">{label}</p>
     </div>
   )
 }

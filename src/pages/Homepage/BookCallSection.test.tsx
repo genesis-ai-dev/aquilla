@@ -10,10 +10,13 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { BookCallSection, BOOKING_URL } from "./BookCallSection"
 
 const fetchMock = vi.fn()
+const openMock = vi.fn()
 
 beforeEach(() => {
   fetchMock.mockReset()
+  openMock.mockReset()
   vi.stubGlobal("fetch", fetchMock)
+  vi.stubGlobal("open", openMock)
 })
 
 afterEach(() => {
@@ -49,6 +52,9 @@ describe("BookCallSection", () => {
     await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument())
     expect(screen.getByText(/thanks — we'll be in touch/i)).toBeInTheDocument()
 
+    // Successful leads are sent straight to the booking calendar in a new tab.
+    expect(openMock).toHaveBeenCalledWith(BOOKING_URL, "_blank", "noopener,noreferrer")
+
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toMatch(/\/api\/v2\/contact\/book-call$/)
@@ -73,8 +79,9 @@ describe("BookCallSection", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
     expect(screen.getByRole("alert")).toHaveTextContent(/too many requests/i)
-    // Form is still there for a retry.
+    // Form is still there for a retry, and no booking tab was opened.
     expect(screen.getByRole("button", { name: /send message/i })).toBeInTheDocument()
+    expect(openMock).not.toHaveBeenCalled()
   })
 
   it("shows a generic failure when the network call throws", async () => {

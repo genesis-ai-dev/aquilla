@@ -31,7 +31,7 @@ test("homepage book-a-call: booking link present, form submits through the conta
   const bookingLink = section.getByRole("link", { name: /book a call/i })
   await expect(bookingLink).toHaveAttribute(
     "href",
-    "https://calendar.app.google/etybAvBtu7Vm6BDb8",
+    "https://calendar.app.google/umM8GMgm6d78mZWS9",
   )
   await expect(bookingLink).toHaveAttribute("target", "_blank")
 
@@ -41,18 +41,29 @@ test("homepage book-a-call: booking link present, form submits through the conta
   await section.getByLabel(/organization/i).fill("E2E Harness")
   await section.getByLabel(/hoping to translate/i).fill("Just checking the wiring.")
 
+  // The harness has no outside network — stub the external booking origin so
+  // the popup's navigation commits and its URL is assertable deterministically.
+  await page.context().route("https://calendar.app.google/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<title>booking stub</title>" }),
+  )
+
   const submission = page.waitForResponse(
     (res) => res.url().includes("/api/v2/contact/book-call") && res.request().method() === "POST",
   )
+  // A successful submit also opens the booking calendar in a new tab.
+  const popupPromise = page.context().waitForEvent("page")
   await section.getByRole("button", { name: /send message/i }).click()
 
   const response = await submission
   expect(response.status()).toBe(200)
 
   await expect(section.getByText(/thanks — we'll be in touch/i)).toBeVisible()
-  // The sent state still offers the calendar path.
+  const popup = await popupPromise
+  await popup.waitForURL(/calendar\.app\.google/)
+  await popup.close()
+  // The sent state still offers the calendar path as a fallback link.
   await expect(section.getByRole("link", { name: /grab a time on our calendar/i })).toHaveAttribute(
     "href",
-    "https://calendar.app.google/etybAvBtu7Vm6BDb8",
+    "https://calendar.app.google/umM8GMgm6d78mZWS9",
   )
 })

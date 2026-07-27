@@ -6,7 +6,7 @@
 import { useState, type FormEvent } from "react"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 
-export const BOOKING_URL = "https://calendar.app.google/etybAvBtu7Vm6BDb8"
+export const BOOKING_URL = "https://calendar.app.google/umM8GMgm6d78mZWS9"
 
 type SubmitState = "idle" | "sending" | "sent" | "error"
 
@@ -40,6 +40,10 @@ export function BookCallSection() {
       }
       form.reset()
       setState("sent")
+      // Send successful leads straight to the booking page in a new tab —
+      // the email gives the team the lead either way, and the sent state
+      // keeps a visible calendar link in case a popup blocker eats this.
+      window.open(BOOKING_URL, "_blank", "noopener,noreferrer")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong — please try again.")
       setState("error")
@@ -76,9 +80,10 @@ export function BookCallSection() {
               <IconCheckBig />
               <h3 className="aq-display">Thanks — we'll be in touch.</h3>
               <p>
-                Your message is on its way to the team. Want to skip the wait?{" "}
+                Your message is on its way to the team, and our booking calendar should have
+                opened in a new tab. If it didn't,{" "}
                 <a href={BOOKING_URL} target="_blank" rel="noopener noreferrer">
-                  Grab a time on our calendar
+                  grab a time on our calendar
                 </a>
                 .
               </p>

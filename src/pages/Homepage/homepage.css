@@ -140,6 +140,10 @@
   background-clip: text;
   color: transparent;
 }
+/* background-clip:text clips at the inline box edge, so the last italic
+ * Fraunces glyph's overhang gets cut off (visible on "Book a call"). Extend
+ * the box a hair past the glyph and pull the layout back in. */
+.aq-gold-text.aq-display-italic { padding-right: 0.07em; margin-right: -0.07em; }
 
 /* ── Atmosphere: dawn glow + grain ──────────────────────────────────────── */
 .aq-atmosphere {

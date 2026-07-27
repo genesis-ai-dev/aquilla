@@ -53,11 +53,16 @@ export function RuleDrawer({
       </div>
 
       <div className="flex items-center gap-2 border-b px-3 py-2">
+        {/* The span carries the hover: a disabled button has
+            pointer-events: none, so a tooltip on the button itself never fires
+            and the reason it is disabled stays unreachable. */}
         <AppTooltip content="Autofix is unavailable in this build">
-          <Button size="sm" disabled>
-            <Wand2 className="mr-1 h-3.5 w-3.5" />
-            Try to fix all
-          </Button>
+          <span className="inline-flex">
+            <Button size="sm" disabled>
+              <Wand2 className="mr-1 h-3.5 w-3.5" />
+              Try to fix all
+            </Button>
+          </span>
         </AppTooltip>
         <Button variant="ghost" size="sm" onClick={onAmendRule}>Amend rule</Button>
       </div>
@@ -89,9 +94,11 @@ export function RuleDrawer({
                     <div className="truncate font-medium">{cell!.translated.slice(0, 60)}...</div>
                   </button>
                   <AppTooltip content="Autofix is unavailable in this build">
-                    <Button variant="ghost" size="sm" className="h-6 px-1" disabled aria-label="Autofix unavailable">
-                      <Sparkles className="h-3 w-3" />
-                    </Button>
+                    <span className="inline-flex">
+                      <Button variant="ghost" size="sm" className="h-6 px-1" disabled aria-label="Autofix unavailable">
+                        <Sparkles className="h-3 w-3" />
+                      </Button>
+                    </span>
                   </AppTooltip>
                 </li>
               ))}

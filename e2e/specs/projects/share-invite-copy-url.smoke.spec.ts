@@ -36,7 +36,7 @@ test("share panel Copy URL button shows Copied confirmation", async ({ alice }) 
   await createBtn.click()
 
   // Wait for the URL input + Copy URL button to appear.
-  const copyBtn = dialog.locator('button[title="Copy URL"]').first()
+  const copyBtn = dialog.getByRole("button", { name: "Copy URL" }).first()
   await expect(copyBtn).toBeVisible({ timeout: 10_000 })
 
   // Click Copy URL.

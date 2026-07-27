@@ -4,15 +4,15 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * RuleDrawer — opening via the ?openRule= URL param.
  *
- * RulesPage renders a "Open in editor" Button (title="Opens the editor with
- * this rule's drawer") for each rule. Clicking it navigates to:
+ * RulesPage renders a "Try to fix all" Button for each rule, tooltipped
+ * "Opens the editor with this rule's drawer". Clicking it navigates to:
  *   /project/<id>/editor?openRule=<ruleId>
  *
  * ProjectWorkspace reads `searchParams.get("openRule")` and opens the
  * RuleDrawer panel (w-80 side panel with the rule name as an h3).
  *
- * This spec: creates a rule → clicks the "Opens the editor" button →
- * verifies the RuleDrawer shows the rule name as an h3.
+ * This spec: creates a rule → clicks that button → verifies the RuleDrawer
+ * shows the rule name as an h3.
  */
 test("RuleDrawer opens from rules page button showing rule name", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -40,7 +40,7 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   await expect(alice.getByText(ruleName).first()).toBeVisible({ timeout: 5_000 })
 
   // Click the "Opens the editor with this rule's drawer" button.
-  const openEditorBtn = alice.locator(`button[title="Opens the editor with this rule's drawer"]`).first()
+  const openEditorBtn = alice.getByRole("button", { name: /Try to fix all/i }).first()
   await expect(openEditorBtn).toBeVisible({ timeout: 5_000 })
   await openEditorBtn.click()
 
@@ -49,9 +49,15 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   const drawer = alice.locator("h3").filter({ hasText: ruleName })
   await expect(drawer).toBeVisible({ timeout: 8_000 })
 
+  // The drawer's autofix button is disabled, and the reason lives in an
+  // AppTooltip rather than a native title. A disabled button gets no pointer
+  // events, so the hover target is the span wrapping it.
   const autofixBtn = alice.getByRole("button", { name: /Try to fix all/i }).first()
-  await expect(autofixBtn).toHaveAttribute("title", /Autofix is unavailable in this build/, { timeout: 3_000 })
-  await expect(autofixBtn).toBeDisabled()
+  await expect(autofixBtn).toBeDisabled({ timeout: 3_000 })
+  await autofixBtn.locator("..").hover()
+  await expect(
+    alice.getByRole("tooltip", { name: /Autofix is unavailable in this build/i }),
+  ).toBeVisible({ timeout: 3_000 })
 
   // The "Amend rule" button navigates to /rules?ruleId=...&focus=autofix.
   const amendBtn = alice.getByRole("button", { name: /Amend rule/i })

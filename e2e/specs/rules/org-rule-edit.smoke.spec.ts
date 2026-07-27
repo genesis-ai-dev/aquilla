@@ -44,7 +44,7 @@ test("org rule edit pencil opens and closes inline RuleEditor", async ({ alice }
   await expect(alice.getByText(ruleName)).toBeVisible({ timeout: 5_000 })
 
   // Find the Edit pencil button for the new org rule.
-  const editBtn = alice.locator('button[title="Edit org rule"]').first()
+  const editBtn = alice.getByRole("button", { name: "Edit org rule" }).first()
   await expect(editBtn).toBeVisible({ timeout: 10_000 })
 
   // Click to open inline editor.

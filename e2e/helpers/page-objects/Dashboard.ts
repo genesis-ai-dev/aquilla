@@ -92,10 +92,12 @@ export class Dashboard {
   /** Click a project card by name and wait for the workspace shell to render.
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
-    const workspaceUrl = /\/project\/[^/?#]+(?:[?#].*)?$/
+    // The workspace lives at /project/:id/editor (optionally /file/:fileId).
+    // There is no bare /project/:id route, so this must not stop at the id.
+    const workspaceUrl = /\/project\/[^/?#]+\/editor(?:\/[^?#]*)?(?:[?#].*)?$/
     // A project card now lands on the project Overview (/projects/:id). Enter
-    // the editor workspace (/project/:id/editor) via its "Open project" action when
-    // present (older UIs went straight to the editor).
+    // the editor workspace via its "Open project" action when present (older
+    // UIs went straight to the editor).
     const openInEditor = this.page.getByRole("button", { name: /^Open project$/i })
     if (!(await openInEditor.isVisible({ timeout: 1_000 }).catch(() => false))) {
       await this.page.getByRole("link", { name, exact: true }).click()

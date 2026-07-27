@@ -44,4 +44,18 @@ describe("planUserImport", () => {
     expect(plan.toInsert).toHaveLength(0)
     expect(plan.conflicts[0].reason).toMatch(/missing/)
   })
+
+  it("quarantines every source row sharing a case-insensitive username or email", () => {
+    const plan = planUserImport([
+      { username: "Cleiton", email: "one@example.com", password_hash: "h1" },
+      { username: "cleiton", email: "two@example.com", password_hash: "h2" },
+      { username: "third", email: "TWO@example.com", password_hash: "h3" },
+    ], [])
+
+    expect(plan.toInsert).toEqual([])
+    expect(plan.conflicts).toHaveLength(3)
+    expect(plan.conflicts.every((conflict) =>
+      conflict.reason.includes("duplicate case-insensitive identity"),
+    )).toBe(true)
+  })
 })

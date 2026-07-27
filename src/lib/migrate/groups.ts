@@ -162,7 +162,8 @@ export function planGroupImport(input: GroupImportInput): GroupImportPlan {
     const subs = input.subgroups.filter((s) => s.topLevelId === top.id)
 
     const ownerUserId = pickOwner(topMembers)
-    if (ownerUserId === null) {
+    const orgExists = input.existing.orgUuids.has(orgUuid)
+    if (ownerUserId === null && !orgExists) {
       plan.conflicts.push({
         kind: "no-owner",
         detail: `top-level group "${top.full_path}" (${top.id}) has no resolvable members — org skipped`,
@@ -170,8 +171,14 @@ export function planGroupImport(input: GroupImportInput): GroupImportPlan {
       continue
     }
 
-    if (!input.existing.orgUuids.has(orgUuid)) {
-      plan.orgs.push({ legacyUuid: orgUuid, gitlabId: top.id, name: top.name, ownerUserId })
+    if (!orgExists) {
+      // Guarded above: a new organization always has a resolved owner.
+      plan.orgs.push({
+        legacyUuid: orgUuid,
+        gitlabId: top.id,
+        name: top.name,
+        ownerUserId: ownerUserId!,
+      })
     }
 
     // org_members: top-level members mapped from access; subgroup-only members
@@ -208,6 +215,13 @@ export function planGroupImport(input: GroupImportInput): GroupImportPlan {
     for (const sub of subs) {
       const teamUuid = teamLegacyUuidFor(sub.id)
       if (!input.existing.teamUuids.has(teamUuid)) {
+        if (ownerUserId === null) {
+          plan.conflicts.push({
+            kind: "no-owner",
+            detail: `subgroup "${sub.full_path}" (${sub.id}) is missing in Aquilla and no owner is available`,
+          })
+          continue
+        }
         plan.teams.push({
           legacyUuid: teamUuid,
           orgUuid,

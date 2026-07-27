@@ -41,7 +41,8 @@ test("SelectionBar bulk validate marks selected cells as validated", async ({ al
   await expect(validateBtn).toBeEnabled({ timeout: 3_000 })
   await validateBtn.click()
 
-  // Status toast with validated count.
-  const statusMsg = alice.locator('[role="status"]').filter({ hasText: /Validated/i }).first()
+  // Status toast with validated count (sonner uses data-sonner-toast).
+  const statusMsg = alice.locator("[data-sonner-toast]").filter({ hasText: /Validated/i }).first()
   await expect(statusMsg).toBeVisible({ timeout: 8_000 })
+  await expect(ws.validationToggle(0)).toHaveAttribute("aria-pressed", "true", { timeout: 8_000 })
 })

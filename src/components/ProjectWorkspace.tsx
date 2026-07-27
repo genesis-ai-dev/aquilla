@@ -345,9 +345,10 @@ export function ProjectWorkspace() {
     })
   }, [activeOrgId, isAllOrgs, navigate])
   const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
-  // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
-  // live in IDB; merge them onto the server-fetched record on load and after
-  // each local patch so rename suggestions don't loop on every open.
+  // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
+  // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
+  // load and after each local patch so rename suggestions don't loop on every
+  // open and the voice/transcription skip survives refetches.
   const [clientProject, setClientProject] = useState<ProjectRecord | null>(null)
 
   useEffect(() => {

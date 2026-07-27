@@ -1,10 +1,44 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import {
   deriveChecklistState,
+  deriveAiModelsReady,
   isSetupInProgress,
   markSetupInProgress,
   clearSetupInProgress,
 } from "./useSetupChecklist"
+
+const ready = { kind: "ready" } as const
+const idle = { kind: "idle" } as const
+
+describe("deriveAiModelsReady", () => {
+  // AQU-701 follow-up: Whisper/Kokoro caches are device-global, so their mere
+  // presence must not flip a project's voice step green — that left the step
+  // permanently complete and made the skip link look like it did nothing.
+  it("AQU-701: device-cached models alone do NOT complete the step (no explicit provider)", () => {
+    expect(deriveAiModelsReady(undefined, { kokoro: ready, mms: ready })).toBe(false)
+    expect(deriveAiModelsReady({}, { kokoro: ready, mms: ready })).toBe(false)
+  })
+
+  it("kokoro: explicit choice + cached model completes; a missing cache does not", () => {
+    expect(deriveAiModelsReady({ provider: "kokoro" }, { kokoro: ready, mms: idle })).toBe(true)
+    expect(deriveAiModelsReady({ provider: "kokoro" }, { kokoro: idle, mms: idle })).toBe(false)
+  })
+
+  it("mms: explicit choice + cached model completes; the kokoro cache doesn't count", () => {
+    expect(deriveAiModelsReady({ provider: "mms" }, { kokoro: idle, mms: ready })).toBe(true)
+    expect(deriveAiModelsReady({ provider: "mms" }, { kokoro: ready, mms: idle })).toBe(false)
+  })
+
+  it("gemini: completes on a saved key, never on local caches", () => {
+    expect(deriveAiModelsReady({ provider: "gemini", apiKey: "AIzaExampleKey123456789012" }, { kokoro: idle, mms: idle })).toBe(true)
+    expect(deriveAiModelsReady({ provider: "gemini" }, { kokoro: ready, mms: ready })).toBe(false)
+    expect(deriveAiModelsReady({ provider: "gemini", apiKey: "   " }, { kokoro: ready, mms: ready })).toBe(false)
+  })
+
+  it("hosted omnivoice: the explicit choice alone completes — no download or key needed", () => {
+    expect(deriveAiModelsReady({ provider: "omnivoice" }, { kokoro: idle, mms: idle })).toBe(true)
+  })
+})
 
 describe("deriveChecklistState", () => {
   it("returns all incomplete when project has no settings", () => {

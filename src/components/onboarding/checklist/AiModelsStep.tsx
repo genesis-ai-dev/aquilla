@@ -13,7 +13,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { prefetchAiModels, useModelStatus } from "@/lib/audio/prefetch"
 import { storeAllFeaturesConsent } from "@/lib/audio/ai-consent"
-import { patchProject } from "@/lib/store/project-index"
+import { patchProject, updateProject } from "@/lib/store/project-index"
 import type { ProjectRecord, ProjectTtsSettings, TtsProvider } from "@/lib/parsers/types"
 import { DEFAULT_MMS_LANGUAGE, DEFAULT_TTS_PROVIDER } from "@/lib/audio/tts-providers"
 import { cn } from "@/lib/utils"
@@ -145,8 +145,14 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   // AQU-701: first-class skip — a team that doesn't use voice/transcription can
   // clear the "not set up" nag; opting back in re-enables the step.
   async function setSkipped(skip: boolean) {
-    const updated = await patchProject(project.id, (p) => ({ ...p, aiSetupSkipped: skip }))
-    if (updated) onUpdated(updated)
+    // Server-loaded projects usually have no IDB row (thin client, AD-3), so a
+    // read-then-write patch silently no-ops — seed the row in that case.
+    let next = await patchProject(project.id, (p) => ({ ...p, aiSetupSkipped: skip }))
+    if (!next) {
+      next = { ...project, aiSetupSkipped: skip }
+      await updateProject(next)
+    }
+    onUpdated(next)
   }
 
   const handleStart = async () => {

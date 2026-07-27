@@ -28,11 +28,14 @@ test("AQU-694: checklist reopens after a refresh when the user was mid-setup", a
 
   // Refresh the browser — the drawer must restore itself on load.
   await alice.reload()
-  // Wait for the workspace to rehydrate (chip present) before asserting restore.
-  await expect(alice.getByRole("button", { name: /Setup:/i })).toBeVisible({ timeout: 30_000 })
+  // The restored drawer is a modal sheet that aria-hides the background —
+  // including the Setup chip — so the chip can never be a post-reload
+  // readiness probe here: the faster the restore, the sooner it disappears
+  // from the a11y tree. Wait directly on the outcome (drawer heading), with
+  // the 30s cold-hydration watchdog since this follows a full page load.
   await expect(
     alice.getByRole("heading", { name: /Project setup/i })
-  ).toBeVisible({ timeout: 10_000 })
+  ).toBeVisible({ timeout: 30_000 })
 })
 
 test("AQU-694: no auto-open — a never-opened checklist stays closed after refresh", async ({ alice }) => {

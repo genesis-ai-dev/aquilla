@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react"
-import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
+import type { ProjectRecord, CompletionSettings, ProjectTtsSettings } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { listProjectMembers } from "@/lib/frontier/members"
-import { useModelStatus } from "@/lib/audio/prefetch"
+import { useModelStatus, type ModelPrefetchStatus } from "@/lib/audio/prefetch"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { DEFAULT_TTS_PROVIDER } from "@/lib/audio/tts-providers"
 
 // AQU-694: per-project localStorage key recording that the user is currently
 // *mid-setup* — i.e. they opened the setup checklist for this project and have
@@ -87,6 +86,29 @@ export function deriveChecklistState(
   }
 }
 
+/**
+ * AQU-701 follow-up: whether the project's voice setup is explicitly
+ * configured. Model files cached on this device must NOT, by themselves,
+ * complete the step — Whisper/Kokoro caches are device-global (seeded by any
+ * project or past experiment), which used to leave the step permanently green
+ * and made the skip link look inert. Completion now requires the project's own
+ * `ttsSettings.provider` choice; a local model cache only counts toward the
+ * provider that actually needs it, and a BYOK key only toward gemini.
+ */
+export function deriveAiModelsReady(
+  ttsSettings: ProjectTtsSettings | undefined,
+  models: { kokoro: ModelPrefetchStatus; mms: ModelPrefetchStatus },
+): boolean {
+  const provider = ttsSettings?.provider
+  if (!provider) return false
+  if (provider === "gemini") return Boolean(ttsSettings.apiKey?.trim())
+  if (provider === "kokoro") return models.kokoro.kind === "ready"
+  if (provider === "mms") return models.mms.kind === "ready"
+  // Hosted providers (omnivoice) need no download or key — the explicit
+  // choice alone completes the step.
+  return true
+}
+
 export function useSetupChecklist(project: ProjectRecord | null) {
   const [memberCount, setMemberCount] = useState(0)
   const [dismissed, setDismissed] = useState(false)
@@ -131,17 +153,9 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     return () => { cancelled = true }
   }, [project?.id, session?.jwt, session?.username])
 
-  const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
   const mms = useModelStatus("mms")
-  const ttsProvider = project?.ttsSettings?.provider ?? DEFAULT_TTS_PROVIDER
-  const aiModelsReady =
-    whisper.kind === "ready" &&
-    (ttsProvider === "gemini"
-      ? Boolean(project?.ttsSettings?.apiKey?.trim())
-      : ttsProvider === "mms"
-        ? mms.kind === "ready"
-        : kokoro.kind === "ready")
+  const aiModelsReady = deriveAiModelsReady(project?.ttsSettings, { kokoro, mms })
 
   const state = deriveChecklistState(
     project?.completionSettings,

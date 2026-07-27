@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react"
 
 /**
- * Shared chrome for the standalone marketing pages (/homepage, /beta).
+ * Shared theme chrome for the standalone marketing pages (/homepage, /beta,
+ * the case studies, the unlisted BT landing).
  *
- * Owns the two concerns both pages need identically:
- *  - theme: initial read (saved choice → OS preference → dark), follow the OS
- *    until the visitor explicitly toggles, then persist their choice for the
- *    session (sessionStorage, key `aq-home-theme` — same key the inline
- *    pre-paint script in the *.html entries reads).
- *  - fonts: load the Fraunces display face + Noto faces for the rarer scripts
- *    only while a marketing page is mounted.
+ * Initial read is saved choice → OS preference → dark; the page follows the OS
+ * until the visitor explicitly toggles, then their choice wins for the session
+ * (sessionStorage, key `aq-home-theme` — the same key the inline pre-paint
+ * script in the *.html entries and the prerendered shell's theme stamp read).
+ *
+ * Display/script faces used to be injected here on mount; they now live in each
+ * marketing page's <head> so the prerendered markup paints in its real
+ * typeface. See scripts/prerender-marketing.ts.
  */
 
 /** Saved choice wins; otherwise follow the OS color scheme; else dark. */
@@ -47,29 +49,6 @@ export function useMarketingShell() {
     }
     mq.addEventListener("change", onChange)
     return () => mq.removeEventListener("change", onChange)
-  }, [])
-
-  // Load the Fraunces display face only while a marketing page is mounted.
-  useEffect(() => {
-    const id = "aq-fonts"
-    if (!document.getElementById(id)) {
-      const pre1 = document.createElement("link")
-      pre1.rel = "preconnect"; pre1.href = "https://fonts.googleapis.com"
-      const pre2 = document.createElement("link")
-      pre2.rel = "preconnect"; pre2.href = "https://fonts.gstatic.com"; pre2.crossOrigin = "anonymous"
-      const link = document.createElement("link")
-      link.id = id
-      link.rel = "stylesheet"
-      link.href =
-        "https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..620;1,9..144,300..560&display=swap"
-      // Noto faces for the less-common scripts in the language reel (Coptic,
-      // Geʻez, Tibetan) so they render instead of falling back to tofu boxes.
-      const noto = document.createElement("link")
-      noto.rel = "stylesheet"
-      noto.href =
-        "https://fonts.googleapis.com/css2?family=Noto+Sans+Coptic&family=Noto+Serif+Ethiopic:wght@400..600&family=Noto+Serif+Tibetan:wght@400..600&display=swap"
-      document.head.append(pre1, pre2, link, noto)
-    }
   }, [])
 
   return { theme, toggleTheme }

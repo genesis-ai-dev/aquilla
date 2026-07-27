@@ -563,6 +563,12 @@
 .aq-reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s cubic-bezier(0.22,1,0.36,1), transform 0.7s cubic-bezier(0.22,1,0.36,1); }
 .aq-reveal.in { opacity: 1; transform: none; }
 
+/* The build-time prerendered copy of the page (scripts/prerender-marketing.ts)
+   lives inside #aq-prerender until React mounts and clears #root. Nothing adds
+   `.in` there — an IntersectionObserver needs the JS that is still loading — so
+   pin reveals open, and let the .aq-load intro animations play as usual. */
+#aq-prerender .aq-reveal { opacity: 1; transform: none; }
+
 /* ── Section heads ──────────────────────────────────────────────────────── */
 .aq-head { max-width: 62ch; }
 .aq-head.aq-center { margin-inline: auto; text-align: center; }

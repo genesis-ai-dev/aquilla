@@ -180,12 +180,12 @@ export function TranslationNotesSidebar({
   return (
     <div
       className={cn(
-        "flex h-full w-72 flex-col border-l bg-background text-sm",
+        "flex h-full w-72 flex-col border-l bg-card text-sm",
         className,
       )}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-2">
+      {/* Header — p-2 matches the other side panels' header strip. */}
+      <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">
           <BookOpen className="h-4 w-4 text-muted-foreground" />
           <span>Translation Notes</span>

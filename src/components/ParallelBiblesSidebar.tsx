@@ -250,7 +250,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
     : null
 
   return (
-    <div className={cn("flex h-full w-80 shrink-0 flex-col border-l bg-background text-sm", className)}>
+    <div className={cn("flex h-full w-80 shrink-0 flex-col border-l bg-card text-sm", className)}>
       {/* Header — p-2 matches the other side panels' header strip. */}
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">

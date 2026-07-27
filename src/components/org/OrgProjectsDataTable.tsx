@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ChevronDown, ChevronRight, CircleCheck, FolderOpen, Mic, Sparkles } from "lucide-react"
+import { CircleCheck, FolderOpen, Mic, MoreHorizontal, Sparkles, UserPlus } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import {
   attentionRank,
@@ -24,6 +24,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
 import { AddLanguagePopover } from "./AddLanguagePopover"
@@ -139,31 +146,10 @@ export function OrgProjectsDataTable({
     return projects
   }, [projects, initialLens, tableNow])
 
+  const canAssign = Boolean(jwt && author != null)
+
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
     () => [
-      {
-        id: "expand",
-        enableSorting: false,
-        header: () => <span className="sr-only">Expand languages</span>,
-        cell: ({ row }) => {
-          const isOpen = expanded.has(row.original.id)
-          return (
-            <button
-              type="button"
-              data-testid={`project-lanes-expand-${row.original.id}`}
-              aria-label={isOpen ? "Collapse languages" : "Expand languages"}
-              aria-expanded={isOpen}
-              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleExpand(row.original.id)
-              }}
-            >
-              {isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-            </button>
-          )
-        },
-      },
       {
         accessorKey: "name",
         header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
@@ -334,22 +320,68 @@ export function OrgProjectsDataTable({
           )
         },
       },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => <span className="sr-only">Project actions</span>,
+        cell: ({ row }) => {
+          const p = row.original
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                data-testid={`project-row-actions-${p.id}`}
+                render={
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`More actions for ${p.name}`}
+                    className="text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent
+                align="end"
+                className="min-w-40"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {canAssign && (
+                  <DropdownMenuItem
+                    onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
+                  >
+                    <UserPlus className="size-4" />
+                    Assign work
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={() => navigate(`/project/${p.id}/members`)}
+                >
+                  Add member
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        },
+      },
     ],
     [
       roleByProjectId,
       showOrg,
       tableNow,
-      expanded,
       toggleExpand,
       canAddLanguage,
       defaultLaneLabelByProjectId,
       jwt,
       onLaneAdded,
+      canAssign,
+      navigate,
     ],
   )
 
   const colSpan = columns.length
-  const canAssign = Boolean(jwt && author != null)
 
   const assignProject = assignTarget
     ? projects.find((p) => p.id === assignTarget.projectId) ?? null

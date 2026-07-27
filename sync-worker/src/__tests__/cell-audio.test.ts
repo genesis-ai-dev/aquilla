@@ -141,6 +141,51 @@ describe("cell-audio projection", () => {
     expect(recorded[0].sql).toContain("SET deleted = 1, selected = 0")
     expect(recorded[0].args).toEqual(["p1", "f1", "c1", "audio-z.wav"])
   })
+
+  // AQU-646: transcription rides cell.audio.attach (contributor floor) instead
+  // of source.cell.create (lead floor + full-overwrite UPSERT would clobber
+  // segment fields). The write is CONDITIONAL — attaches without the field
+  // must not touch `cells` at all, so re-attaching a recorded take can never
+  // blank out an existing transcript.
+  it("attach with transcription: additionally updates the SOURCE cell's transcription", () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "clip.mp3",
+        url: "frontier-audio://clip.mp3",
+        slot: "recording",
+        trimStartMs: 1000,
+        trimEndMs: 4000,
+        transcription: "hello imported world",
+      }),
+      stmts,
+    )
+    expect(touches).toEqual(["cell_audio", "cells"])
+    expect(stmts).toHaveLength(3)
+    expect(recorded[2].sql).toContain("UPDATE cells SET transcription = ?")
+    expect(recorded[2].sql).toContain("side = 'source'")
+    expect(recorded[2].args).toEqual(["hello imported world", "p1", "f1", "c1"])
+  })
+
+  it("attach without transcription: cells table is untouched", () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "take.webm",
+        url: "frontier-audio://take.webm",
+        slot: "recording",
+        timings: [{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }],
+      }),
+      stmts,
+    )
+    expect(touches).toEqual(["cell_audio"])
+    expect(stmts).toHaveLength(2)
+    for (const r of recorded) expect(r.sql).not.toContain("UPDATE cells")
+  })
 })
 
 // ── Read route: canned-rows DB stub ───────────────────────────────────────

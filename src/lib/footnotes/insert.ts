@@ -23,7 +23,13 @@ function sanitizeCaller(value: string | undefined): string {
   return withoutMarkers || "+"
 }
 
-function sanitizeFootnoteField(value: string): string {
+/**
+ * Strip marker-breaking content (stray `\f`/`\f*`, bare backslashes) from a
+ * footnote field value while preserving nested character markers
+ * (`\bd`/`\it`/`\ul`). Also used on model-produced note translations before
+ * they are spliced into a rebuilt marker (reintegrate.ts).
+ */
+export function sanitizeFootnoteField(value: string): string {
   const protectedMarkers: string[] = []
   const protectedValue = value
     .replace(/\\(?:bd|it|ul)\*?/g, (marker) => {

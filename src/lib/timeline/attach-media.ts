@@ -11,6 +11,7 @@
 
 import { v7 as uuidv7 } from "uuid"
 import { computeMediaSegmentSpecs } from "@/lib/import"
+import { recordMediaImportSeed, buildMediaSeedCells } from "@/lib/audio/auto-transcribe"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
 import { emitCellAudioAttach, emitSourceCellCreate } from "@/lib/sync/events-emit"
 
@@ -85,6 +86,21 @@ export async function attachMediaFileToTimeline(
     })
     throw err
   }
+
+  // AQU-646: seed the post-attach auto-transcribe (consumed by the workspace
+  // after its flush + revalidate). NOTE this flow attaches WITHOUT the `.ext`
+  // suffix on audioId — the seed mirrors exactly what it emitted.
+  recordMediaImportSeed({
+    fileId: ctx.fileId,
+    cells: buildMediaSeedCells({
+      fileId: ctx.fileId,
+      fileName: file.name,
+      specs,
+      audioId: upload.audioId,
+      url: upload.url,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    }),
+  })
 
   return { segments: specs.length }
 }

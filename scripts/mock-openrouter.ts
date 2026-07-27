@@ -200,6 +200,34 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     }))
   }
 
+  // Monday.com board analyze (auth-worker lib/monday/analyze.ts): the prompt
+  // asks for a "column mapping" proposal in strict JSON. Return a minimal valid
+  // MondayMapping so the AI-configure flow works end-to-end against the mock.
+  if (userText.includes("column mapping")) {
+    // Prefer a real writable column id from the prompt's board-columns JSON so
+    // the server-side clamp keeps the mapping non-empty.
+    const columnsMatch = userText.match(/Board columns: (\[.*?\])\n/s)
+    let columnId = "numbers_1"
+    let columnType = "numbers"
+    try {
+      const cols = JSON.parse(columnsMatch?.[1] ?? "[]") as { id: string; type: string }[]
+      const writable = cols.find((c) => c.type === "numbers" || c.type === "text")
+      if (writable) {
+        columnId = writable.id
+        columnType = writable.type
+      }
+    } catch { /* fall back to the defaults above */ }
+    return respond(JSON.stringify({
+      mapping: {
+        version: 1,
+        itemGranularity: "project",
+        columns: [{ columnId, columnType, metric: "completion_pct" }],
+        notes: "[mock] Mapped project completion to the first writable column.",
+      },
+      summary: "[mock] Maps overall completion % onto the board.",
+    }))
+  }
+
   // Copilot single-cell draft (buildPrompt in completion-service.ts): the user
   // message ends with "Source: <text>\nTranslation:" awaiting the completion.
   // Answer deterministically so the editor sparkle/Replace flow works end-to-end.

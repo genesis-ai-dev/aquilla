@@ -22,7 +22,100 @@ export function sanitizeEditorHtml(html: string): string {
   return DOMPurify.sanitize(injectFootnoteSpans(html), {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
+    ALLOW_ARIA_ATTR: false,
+    ALLOW_DATA_ATTR: false,
   })
+}
+
+/**
+ * The IDML editor accepts only the canonical protected-anchor vocabulary.
+ * Keep this separate from the general rich-text sanitizer: allowing IDML data
+ * attributes globally would turn ordinary spans into misleading pseudo
+ * anchors, while allowing formatting tags inside an IDML slot would violate
+ * the surgical-export contract.
+ */
+export function sanitizeIdmlEditorHtml(html: string): string {
+  if (!html) return ""
+  if (typeof document === "undefined") {
+    // The protected schema requires an exact attribute allowlist. DOMPurify's
+    // broad ALLOW_DATA_ATTR switch would admit arbitrary data-* attributes,
+    // so environments without a DOM fail closed to inert text. The browser
+    // editor path below reconstructs only the canonical IDML attributes.
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: [],
+      ALLOW_ARIA_ATTR: false,
+      ALLOW_DATA_ATTR: false,
+      KEEP_CONTENT: true,
+    })
+  }
+  const template = document.createElement("template")
+  template.innerHTML = html
+  const dropContents = new Set([
+    "SCRIPT",
+    "STYLE",
+    "IFRAME",
+    "OBJECT",
+    "EMBED",
+    "SVG",
+    "MATH",
+    "TEMPLATE",
+    "NOSCRIPT",
+  ])
+  const cleanChildren = (parent: ParentNode) => {
+    for (const node of [...parent.childNodes]) {
+      if (node.nodeType === Node.COMMENT_NODE) {
+        node.remove()
+        continue
+      }
+      if (!(node instanceof HTMLElement)) continue
+      if (dropContents.has(node.tagName)) {
+        node.remove()
+        continue
+      }
+      cleanChildren(node)
+
+      const protectedKind = node.getAttribute("data-idml-protected")
+      const isParagraph = node.tagName === "P"
+      const isSlot = node.tagName === "SPAN" && protectedKind === "slot"
+      const isToken = (
+        (node.tagName === "SPAN" || node.tagName === "BR")
+        && protectedKind === "token"
+      )
+      const isBareBreak = node.tagName === "BR" && protectedKind === null
+      if (!isParagraph && !isSlot && !isToken && !isBareBreak) {
+        node.replaceWith(...node.childNodes)
+      }
+    }
+  }
+  cleanChildren(template.content)
+
+  for (const element of template.content.querySelectorAll<HTMLElement>("*")) {
+    const allowed = new Set<string>()
+    const protectedKind = element.getAttribute("data-idml-protected")
+    if (element.tagName === "P" && element.hasAttribute("data-idml-version")) {
+      allowed.add("data-idml-version")
+    } else if (element.tagName === "SPAN" && protectedKind === "slot") {
+      allowed.add("data-idml-slot")
+      allowed.add("data-idml-character-style")
+      allowed.add("data-idml-protected")
+      if (element.getAttribute("contenteditable") === "false") allowed.add("contenteditable")
+    } else if (
+      (element.tagName === "SPAN" || element.tagName === "BR")
+      && protectedKind === "token"
+    ) {
+      allowed.add("data-idml-token")
+      allowed.add("data-idml-token-kind")
+      allowed.add("data-idml-protected")
+      allowed.add("contenteditable")
+    }
+    for (const attribute of [...element.attributes]) {
+      if (!allowed.has(attribute.name)) element.removeAttribute(attribute.name)
+    }
+  }
+  const container = document.createElement("div")
+  container.append(template.content.cloneNode(true))
+  return container.innerHTML
 }
 
 export function hasMeaningfulRichText(html: string | undefined): boolean {

@@ -98,9 +98,20 @@ export default defineConfig(({ mode }) => ({
     },
   ],
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      // The SPA consumes live workspace source during dev/tests/build, while
+      // external package consumers resolve the published dist exports. A clean
+      // checkout therefore never needs gitignored package output before tests.
+      {
+        find: /^@aquilla\/idml-roundtrip\/worker$/,
+        replacement: path.resolve(__dirname, "./packages/idml-roundtrip/src/worker.ts"),
+      },
+      {
+        find: /^@aquilla\/idml-roundtrip$/,
+        replacement: path.resolve(__dirname, "./packages/idml-roundtrip/src/index.ts"),
+      },
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+    ],
   },
   optimizeDeps: {
     // Shims are injected by vite-plugin-node-polyfills at transform time, so

@@ -458,4 +458,110 @@ describe("completeParagraph (D3)", () => {
     const userMsg = body.messages.find((m: { role: string; content: string }) => m.role === "user")
     expect(userMsg.content).not.toContain("Verse zero source\nTranslation:")
   })
+
+  // Coordinator adjudication (p1-paragraph-ui-wiring, Task 3 follow-up): the
+  // "Draft paragraph" confirm dialog promises "cells already validated are
+  // skipped" — matching the single-cell UI, where Regenerate is hidden once
+  // cell.status === "validated". completeParagraph must honor that: never
+  // commit a validated cell's draft, never error it, and (cleanly achievable
+  // here, per parseParagraphResponse's expectedIds-only reconciliation) never
+  // even ask the model to translate it.
+  it("skips an already-validated cell in the group: never commits it, never errors it, renders it IN POSITION as a locked segment (not a <c id> tag), and expectedIds exclude it (D3 + coordinator adjudication)", async () => {
+    const validatedCell2 = { ...CELL_2, status: "validated", translated: "Verse two ALREADY TRANSLATED" }
+    const cellsWithValidated = [CELL_1, validatedCell2, CELL_3]
+
+    let capturedBody: string | null = null
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+        capturedBody = init.body as string
+        // The model only sees the two non-validated cells — respond to those.
+        const modelResponse = buildModelResponse([
+          { id: "cell-1", text: "Translation one" },
+          { id: "cell-3", text: "Translation three" },
+        ])
+        return {
+          ok: true,
+          json: () => Promise.resolve({ choices: [{ message: { content: modelResponse } }] }),
+          body: null,
+        }
+      }),
+    )
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        cellsWithValidated as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeParagraph("cell-1")
+    })
+
+    // Only cell-1 and cell-3 commit — the validated cell-2 is never touched.
+    expect(commitMock).toHaveBeenCalledTimes(2)
+    const calledIds = commitMock.mock.calls.map((args: unknown[]) => (args[0] as MinimalCell).id)
+    expect(calledIds).not.toContain("cell-2")
+
+    // Skipped (not missing, not errored) — a validated cell being excluded
+    // from the request is not a model failure, so it must not appear in errors.
+    expect(result.current.errors.has("cell-2")).toBe(false)
+
+    // Never even asked the model to translate cell-2 — the paragraph tag for
+    // it must not appear in the outgoing prompt.
+    expect(capturedBody).not.toBeNull()
+    const body = JSON.parse(capturedBody!)
+    const userMsg = body.messages.find((m: { role: string; content: string }) => m.role === "user")
+    expect(userMsg.content).not.toContain(`<c id="cell-2">`)
+
+    // Instead it renders IN POSITION as a locked reference segment — source
+    // text plus its existing committed target, clearly marked — so cell-1
+    // and cell-3's tags don't read as artificially adjacent. (The living-
+    // memory validated-pairs few-shot block may ALSO surface this same
+    // committed pair earlier in the prompt as a reference example — that's
+    // unrelated and expected; isolate the "Source paragraph:" block itself
+    // to check the in-position ordering the locked-segment feature owns.)
+    expect(userMsg.content).toContain(
+      "Verse two source [already translated — do not output: Verse two ALREADY TRANSLATED]",
+    )
+    const liveParagraphBlock = (userMsg.content as string).split("Source paragraph:")[1]
+    expect(liveParagraphBlock).toBeDefined()
+    expect(liveParagraphBlock.indexOf(`<c id="cell-1">`))
+      .toBeLessThan(liveParagraphBlock.indexOf("Verse two ALREADY TRANSLATED"))
+    expect(liveParagraphBlock.indexOf("Verse two ALREADY TRANSLATED"))
+      .toBeLessThan(liveParagraphBlock.indexOf(`<c id="cell-3">`))
+
+    // No stuck pulsing ring on the skipped cell.
+    expect(result.current.completing.has("cell-2")).toBe(false)
+  })
+
+  it("does nothing (no model call, no commits) when every cell in the group is already validated", async () => {
+    const allValidated = ALL_CELLS.map((c) => ({ ...c, status: "validated" }))
+    const fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock, [],
+        allValidated as never, undefined, DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeParagraph("cell-1")
+    })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(commitMock).not.toHaveBeenCalled()
+    expect(result.current.errors.size).toBe(0)
+  })
 })

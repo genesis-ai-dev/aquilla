@@ -25,6 +25,7 @@
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
 import { buildEventInsertStmt } from './event-insert'
 import type { EventKind } from './types'
+import { secureCompare } from '../lib/secure-compare'
 
 // Keep each ingest transaction short so it commits and releases its locks
 // quickly — large batches hold a write transaction open longer and serialise
@@ -42,6 +43,7 @@ export interface MigrateIngestEnv {
  *  route grants in exchange for the service credential. */
 interface IngestEvent {
   id: string
+  schemaVersion?: number
   kind: EventKind
   fileId?: string | null
   cellId?: string | null
@@ -94,7 +96,7 @@ export async function handleMigrateIngestRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const authHeader = request.headers.get('Authorization') ?? ''
-  if (authHeader !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(authHeader, `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) {
@@ -124,9 +126,13 @@ export async function handleMigrateIngestRequest(
     if (typeof e.id !== 'string' || typeof e.kind !== 'string' || typeof e.author !== 'string') {
       return new Response('each event needs string id, kind, author', { status: 400 })
     }
+    const schemaVersion = e.schemaVersion ?? 1
+    if (!Number.isInteger(schemaVersion) || schemaVersion < 1 || schemaVersion > 2) {
+      return new Response(`event ${e.id} has unsupported schemaVersion`, { status: 400 })
+    }
     const event: PersistedEvent = {
       id: e.id,
-      schemaVersion: 1,
+      schemaVersion,
       projectId: body.projectId,
       fileId: e.fileId ?? null,
       cellId: e.cellId ?? null,
@@ -144,7 +150,7 @@ export async function handleMigrateIngestRequest(
     stmts.push(
       buildEventInsertStmt(db, {
         id: event.id,
-        schemaVersion: 1,
+        schemaVersion,
         projectId: event.projectId,
         fileId: event.fileId,
         cellId: event.cellId,

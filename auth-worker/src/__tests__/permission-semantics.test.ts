@@ -12,16 +12,19 @@
  * AD-12 max-wins resolution over four paths:
  *   1. direct project_members row ("override")
  *   2. group_project_grants + group_members ("group")
- *   3. org_members row when project.org_id matches ("org")
+ *   3. org_members row at Maintainer+ when project.org_id matches ("org")
  *   4. projects.created_by === user.id → 700 ("creator")
  *
- * MEMBERSHIP → VISIBILITY RULE (the key answer):
+ * MEMBERSHIP → VISIBILITY RULE (the key answer, updated by AQU-435):
  *   An org member sees EVERY project in that org that they have at least one
- *   grant path on. Being in org_members with any role IS a grant path — it
- *   contributes org.role_level to max-wins on every org-owned project.
- *   Practically: an org-viewer (role 100) sees ALL org projects in GET /api/v2/projects
- *   because the org path fires for each project with role_level=100.
- *   There is NO "added to a team first" prerequisite for basic visibility.
+ *   grant path on — but org membership itself is a grant path ONLY at
+ *   Maintainer (600)+. Org-wide visibility is oversight for managers.
+ *   Practically: a Maintainer/Owner sees ALL org projects in
+ *   GET /api/v2/projects via the org path; a Contributor (or any
+ *   sub-maintainer member) sees NONE of them until they are added to a
+ *   project directly or through a team, or created it themselves.
+ *   (Pre-AQU-435 any org role was a blanket grant path — superseded; see
+ *   org-visibility-floor.test.ts for the full acceptance matrix.)
  *
  * Edit gates enforced at each scope:
  *   - project_lead(500)+ required to add a project member
@@ -62,11 +65,11 @@ async function seedBaseOrg() {
 // ─── Suite 1: Membership → visibility ─────────────────────────────────────
 
 describe("Membership → project visibility (the 'sees all vs. none' question)", () => {
-  it("org-viewer (100) sees all org projects via the org path — no team required", async () => {
+  it("org-maintainer (600) sees all org projects via the org path — no team required", async () => {
     await seedBaseOrg()
-    // Add viewer_member at org level role=100
+    // Add viewer_member at org level role=600 (the AQU-435 floor)
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 600, 1)",
     ).run()
 
     const res = await app.request(
@@ -78,7 +81,7 @@ describe("Membership → project visibility (the 'sees all vs. none' question)",
     const body = (await res.json()) as { projects: { id: string; role: { level: number; source: string } }[] }
     expect(body.projects.length).toBe(1)
     expect(body.projects[0].id).toBe("proj1")
-    expect(body.projects[0].role.level).toBe(100)
+    expect(body.projects[0].role.level).toBe(600)
     expect(body.projects[0].role.source).toBe("org")
   })
 
@@ -94,7 +97,7 @@ describe("Membership → project visibility (the 'sees all vs. none' question)",
     expect(body.projects.length).toBe(0)
   })
 
-  it("org-contributor (400) sees projects and resolves contributor role via org path", async () => {
+  it("org-contributor (400) sees NO org projects — the org path starts at maintainer (AQU-435)", async () => {
     await seedBaseOrg()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)",
@@ -105,8 +108,8 @@ describe("Membership → project visibility (the 'sees all vs. none' question)",
       { headers: authHeader(await jwtFor("viewer_member")) },
       env,
     )
-    const body = (await res.json()) as { projects: { role: { level: number } }[] }
-    expect(body.projects[0].role.level).toBe(400)
+    const body = (await res.json()) as { projects: unknown[] }
+    expect(body.projects.length).toBe(0)
   })
 })
 
@@ -159,9 +162,9 @@ describe("AD-12 max-wins: higher grant wins across all paths", () => {
 
   it("adding a lower direct override does NOT demote an existing higher org grant", async () => {
     await seedBaseOrg()
-    // Org grant at 400
+    // Org grant at 600 (maintainer — at the AQU-435 floor, so it's a live path)
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 600, 1)",
     ).run()
     // Direct override at 100 (lower — must not demote)
     await env.AQUILLA_PG.prepare(
@@ -174,8 +177,8 @@ describe("AD-12 max-wins: higher grant wins across all paths", () => {
       env,
     )
     const body = (await res.json()) as { projects: { role: { level: number } }[] }
-    // Must resolve to 400, not 100
-    expect(body.projects[0].role.level).toBe(400)
+    // Must resolve to 600, not 100
+    expect(body.projects[0].role.level).toBe(600)
   })
 })
 
@@ -184,8 +187,9 @@ describe("AD-12 max-wins: higher grant wins across all paths", () => {
 describe("Revocation: access stops after all grant paths removed", () => {
   it("removing org_members row stops the org path — project 403s if no other path", async () => {
     await seedBaseOrg()
+    // Maintainer (600) — the org path's floor per AQU-435
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 600, 1)",
     ).run()
 
     // Confirm access before revoke
@@ -231,7 +235,8 @@ describe("Revocation: access stops after all grant paths removed", () => {
 
   it("detaching group project stops the group path — project 403s if no other path", async () => {
     await seedBaseOrg()
-    // Only path: group grant, no org_members, no direct
+    // The org viewer (100) row is NOT a path (AQU-435) — the group grant is
+    // the user's only real access.
     await env.AQUILLA_PG.prepare(
       "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 100, 1)",
     ).run()
@@ -265,17 +270,15 @@ describe("Revocation: access stops after all grant paths removed", () => {
       { headers: authHeader(await jwtFor("viewer_member")) },
       env,
     )
-    expect(after.status).toBe(200)
-    const afterBody = (await after.json()) as { role: { level: number; source: string } }
-    // Falls back to org path at 100
-    expect(afterBody.role.level).toBe(100)
-    expect(afterBody.role.source).toBe("org")
+    // No fallback: the sub-maintainer org row is not a grant path (AQU-435).
+    expect(after.status).toBe(403)
   })
 
   it("removing direct project_members row stops the override path — falls back to surviving org path", async () => {
     await seedBaseOrg()
+    // Maintainer (600) org role — a real path that survives the removal
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 200, 1)",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 600, 1)",
     ).run()
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 2, 600, 1)",
@@ -303,7 +306,7 @@ describe("Revocation: access stops after all grant paths removed", () => {
     )
     const afterBody = (await after.json()) as { role: { level: number; source: string } }
     // Falls back to org path
-    expect(afterBody.role.level).toBe(200)
+    expect(afterBody.role.level).toBe(600)
     expect(afterBody.role.source).toBe("org")
   })
 

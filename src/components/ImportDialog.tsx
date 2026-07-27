@@ -814,7 +814,7 @@ type ImportOption = {
 
 const POPULAR_OPTIONS: ImportOption[] = [
   { id: "upload", title: "Upload files", icon: Upload,
-    description: "USFM, DOCX, PPTX, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
+    description: "USFM, DOCX, PPTX, IDML, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
   { id: "ebible", title: "eBible Corpus", hint: "public library", icon: Library,
     description: "Openly-licensed Bible translations, imported directly — no download." },
   { id: "helloao", title: "Bible API", hint: "helloao.org", icon: Globe,
@@ -1018,6 +1018,21 @@ function fileExts(list: File[]): string {
   return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
 }
 
+function idmlParsePhase(
+  fileName: string,
+  progress: { phase: string; completed: number; total: number },
+): string {
+  const action = progress.phase === "inspect"
+    ? "Checking"
+    : progress.phase === "unpack"
+      ? "Opening"
+      : "Reading"
+  const count = progress.total > 1
+    ? ` (${Math.min(progress.completed, progress.total)}/${progress.total})`
+    : ""
+  return `${action} ${fileName}${count}…`
+}
+
 function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -1124,6 +1139,9 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               sourceLanguage,
               targetLanguage,
               signal: parseController.signal,
+              onIdmlProgress: (progress) => {
+                setPhase(idmlParsePhase(file.name, progress))
+              },
             })
             preparedByFile.set(file, prepared)
             allParsedResults.push(...prepared.results)
@@ -1435,7 +1453,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
             <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
-            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, HTML, JSON/ARB, PPTX</p>
+            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)</p>
             <p><span className="font-medium text-foreground/70">Localization</span> — PO/POT, Java properties</p>
             <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT, SBV</p>
             <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>

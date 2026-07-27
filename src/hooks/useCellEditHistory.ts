@@ -110,11 +110,12 @@ function mapEventsToEntries(
   const indexByCommitId = new Map<string, number>()
   for (const e of [...events].reverse()) {
     if (e.kind === "target.cell.commit" || e.kind === "source.cell.commit") {
-      const payload = e.payload as { value?: string } | null
+      const payload = e.payload as { value?: string; valueHtml?: string } | null
       const idx = entries.length
       entries.push({
         timestamp: new Date(e.serverTs).toISOString(),
         value: payload?.value ?? "",
+        ...(payload?.valueHtml !== undefined ? { valueHtml: payload.valueHtml } : {}),
         source: "human",
         author: e.author,
         validated: false,
@@ -141,10 +142,11 @@ function mapOutboxToEntries(records: OutboxRecord[]): CellHistoryEntry[] {
   for (const record of records) {
     const event = record.event
     if (event.kind !== "target.cell.commit" && event.kind !== "source.cell.commit") continue
-    const payload = event.payload as { value?: string; ai_suggestion?: true }
+    const payload = event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
     entries.push({
       timestamp: new Date(event.clientTs || record.enqueuedAt).toISOString(),
       value: payload.value ?? "",
+      ...(payload.valueHtml !== undefined ? { valueHtml: payload.valueHtml } : {}),
       source: payload.ai_suggestion ? "llm" : "human",
       author: event.author,
       validated: false,

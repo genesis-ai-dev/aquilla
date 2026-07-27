@@ -468,6 +468,52 @@ export function buildEventProjectionStmts(
       return ['cells', 'files']
     }
 
+    case 'source.cell.metadata.patch': {
+      const p = event.payload as EventPayloads['source.cell.metadata.patch']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      if (event.schemaVersion !== 2 || p.version !== 1) {
+        throw new Error(
+          `${event.kind} event ${event.id} requires event schemaVersion 2 and payload version 1`,
+        )
+      }
+      if (!p.metadata || typeof p.metadata !== 'object' || Array.isArray(p.metadata)) {
+        throw new Error(`${event.kind} event ${event.id} has invalid metadata`)
+      }
+      const metadataJson = JSON.stringify(p.metadata)
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells SET
+               metadata = (COALESCE(metadata, '{}'::jsonb) || ?::text::jsonb),
+               value_html = CASE WHEN ?::text IS NULL THEN value_html ELSE ?::text END
+             WHERE project_id = ? AND file_id = ? AND cell_id = ?
+               AND side = 'source' AND target_lang = ''`,
+          )
+          .bind(
+            metadataJson,
+            p.valueHtml ?? null,
+            p.valueHtml ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+          ),
+      )
+      if (p.targetHtml !== undefined) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET value_html = ?
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND side = 'target' AND target_lang = ''`,
+            )
+            .bind(p.targetHtml, event.projectId, event.fileId, event.cellId),
+        )
+      }
+      return ['cells']
+    }
+
     case 'source.cell.commit':
     case 'target.cell.commit': {
       const p = event.payload as EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit']
@@ -944,6 +990,23 @@ case 'cell.audio.attach': {
             event.serverTs,
           ),
       )
+      // AQU-646: an attach may carry the ASR transcript of a media segment.
+      // Land it on the SOURCE cell row so imported audio surfaces translatable
+      // source text. Conditional (only when supplied) so ordinary re-attaches
+      // (timings refresh, trims) never clobber an existing transcription, and
+      // scoped to side='source' so a recorded take on a target cell can never
+      // overwrite source text.
+      if (typeof p.transcription === 'string') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells SET transcription = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(p.transcription, event.projectId, event.fileId, event.cellId),
+        )
+        return ['cell_audio', 'cells']
+      }
       return ['cell_audio']
     }
 
@@ -1156,11 +1219,14 @@ case 'cell.audio.attach': {
       stmts.push(
         db
           .prepare(
+            // AQU-692: created_for_translated stores the target-text snapshot
+            // captured on the client at thread-creation time. Null for replies,
+            // non-cell scopes, and legacy events that predate the field.
             `INSERT INTO comments (
               comment_id, project_id, scope_kind, file_id, cell_id,
               parent_comment_id, body, resolved, author_id, author_label,
-              created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL)
+              created_at, updated_at, deleted_at, created_for_translated
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?)
             ON CONFLICT(comment_id) DO NOTHING`,
           )
           .bind(
@@ -1175,6 +1241,7 @@ case 'cell.audio.attach': {
             event.author,
             event.serverTs,
             event.serverTs,
+            p.createdForTranslated ?? null,
           ),
       )
       return ['comments']

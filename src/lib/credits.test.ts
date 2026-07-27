@@ -89,6 +89,17 @@ describe("formatCredits", () => {
     expect(result).not.toContain("cent")
     expect(result).not.toContain("dollar")
   })
+
+  it("never renders 'NaN cr' for non-finite input (AQU-671)", () => {
+    // WHY: a missing/not-yet-loaded/malformed agentCredits value used to reach
+    // Math.round(NaN) → "NaN cr" on the CreditsDial. Non-finite input must
+    // degrade to 0, never leak "NaN" into the UI.
+    expect(formatCredits(NaN)).toBe("0 cr")
+    expect(formatCredits(undefined as unknown as number)).toBe("0 cr")
+    expect(formatCredits(Infinity)).toBe("0 cr")
+    expect(formatCredits(-Infinity)).toBe("0 cr")
+    expect(formatCredits(NaN)).not.toContain("NaN")
+  })
 })
 
 describe("capUsagePct", () => {
@@ -121,5 +132,13 @@ describe("capUsagePct", () => {
 
   it("never returns a negative percentage", () => {
     expect(capUsagePct(-50, 1000)).toBe(0)
+  })
+
+  it("returns 0% for non-finite used (AQU-671 — keeps the ring dasharray finite)", () => {
+    // WHY: the CreditsDial derives its ring strokeDasharray from this pct. A
+    // NaN/undefined spend must not propagate into an invalid SVG dasharray.
+    expect(capUsagePct(NaN, 1000)).toBe(0)
+    expect(capUsagePct(undefined as unknown as number, 1000)).toBe(0)
+    expect(capUsagePct(Infinity, 1000)).toBe(0)
   })
 })

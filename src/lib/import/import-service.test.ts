@@ -81,6 +81,57 @@ describe("ImportService", () => {
     })
   })
 
+  it("versions IDML imports with the shared v2 content-only profile", async () => {
+    const { instance } = service({
+      detectFileType: vi.fn((_name: string): FileType | null => "idml"),
+      parseFile: vi.fn(async () => [{
+        name: "layout.idml",
+        rawSourceFormat: "idml" as const,
+        roundTripFidelity: "content-only" as const,
+        strings: [{
+          id: "idml-unit",
+          original: "Source",
+          originalHtml: '<p data-idml-version="2"></p>',
+          translated: "",
+          translatedHtml: '<p data-idml-version="2"></p>',
+          context: "Paragraph",
+          group: "story",
+          type: "text" as const,
+          sourceLocator: {
+            kind: "idml" as const,
+            memberPath: "Stories/Story_u1.xml",
+            elementPath: "/Story/ParagraphStyleRange[1]",
+            scope: "story-paragraph" as const,
+            part: 0,
+            slotIndexes: [0],
+            sourceBlockHash: "a".repeat(64),
+          },
+          metadata: {
+            idml: {
+              version: 2,
+              slotCount: 1,
+              editableSlotIndexes: [0],
+              protectedTokenCount: 0,
+              anchorSequenceHash: "b".repeat(64),
+            },
+          },
+        }],
+      }]),
+    })
+
+    const result = await instance.importFile(new File(["idml"], "layout.idml"), {})
+
+    expect(result.manifests[0]).toMatchObject({
+      fileType: "idml",
+      profileId: "builtin:idml-roundtrip",
+      profileVersion: "2",
+      deterministic: true,
+      fidelity: "content-only",
+    })
+    expect(result.manifests[0].units[0].sourceLocator.kind).toBe("idml")
+    expect(result.manifests[0].units[0].targetHtml).toContain("data-idml-version")
+  })
+
   it("honours existing whole-file and per-book collision skip decisions", async () => {
     const first = service()
     const skippedFile = await first.instance.importFile(

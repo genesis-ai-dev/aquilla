@@ -32,6 +32,88 @@ async function seedToken(username: string, token: string, expiresAt: string): Pr
 
 const soon = () => new Date(Date.now() + 3600_000).toISOString()
 
+// AQU-675 regression guard. Reported live (Biblica ETT sync 2026-07-16):
+// requesting a reset with an email that has NO account silently created a fresh
+// account for that address (and emailed a reset link to it). The account-
+// recovery request endpoint must never mint an account as a side effect — it
+// looks the user up by email and, on a miss, returns the same generic response
+// without creating a user or a token (so the address still can't sign in, and
+// there's no enumeration oracle). These assertions pin that behavior.
+describe("password reset — request (AQU-675: never creates an account)", () => {
+  it("does not create an account (or mint a reset token) for an unknown email", async () => {
+    const unknown = "aqu675-unknown@example.com"
+
+    // Precondition: no account exists for this address.
+    const before = await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*) AS n FROM users WHERE LOWER(email) = LOWER(?)",
+    )
+      .bind(unknown)
+      .first<{ n: number }>()
+    expect(Number(before!.n)).toBe(0)
+
+    // Anti-enumeration: a generic 200 whether or not the email is registered.
+    const res = await reqJson("/api/v2/auth/password-reset/request", { email: unknown })
+    expect(res.status).toBe(200)
+
+    // The bug: this used to leave a brand-new account behind. It must not.
+    const after = await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*) AS n FROM users WHERE LOWER(email) = LOWER(?)",
+    )
+      .bind(unknown)
+      .first<{ n: number }>()
+    expect(Number(after!.n)).toBe(0)
+
+    // No reset token was minted for the phantom account either — nothing to
+    // email out, so the address never receives a usable reset link.
+    const tokens = await env.AQUILLA_PG.prepare(
+      `SELECT COUNT(*) AS n FROM password_reset_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE LOWER(u.email) = LOWER(?)`,
+    )
+      .bind(unknown)
+      .first<{ n: number }>()
+    expect(Number(tokens!.n)).toBe(0)
+
+    // Observable consequence: the address cannot subsequently sign in without
+    // going through real sign-up (acceptance criterion #1).
+    const login = await reqJson("/api/v2/auth/token", {
+      username: unknown,
+      password: "whatever-pw-9",
+    })
+    expect(login.status).toBe(401)
+  })
+
+  it("mints a reset token for a real account's email without creating any account", async () => {
+    await register("aqu675real", "aqu675real@example.com", "old-password-1")
+
+    const totalBefore = await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*) AS n FROM users",
+    ).first<{ n: number }>()
+
+    const res = await reqJson("/api/v2/auth/password-reset/request", {
+      email: "aqu675real@example.com",
+    })
+    expect(res.status).toBe(200)
+
+    // The real account now has a usable reset token (the link is reachable)...
+    const u = await env.AQUILLA_PG.prepare("SELECT id FROM users WHERE username = ?")
+      .bind("aqu675real")
+      .first<{ id: number }>()
+    const tok = await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*) AS n FROM password_reset_tokens WHERE user_id = ?",
+    )
+      .bind(u!.id)
+      .first<{ n: number }>()
+    expect(Number(tok!.n)).toBeGreaterThanOrEqual(1)
+
+    // ...and no extra account was created as a side effect (criterion #3).
+    const totalAfter = await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*) AS n FROM users",
+    ).first<{ n: number }>()
+    expect(Number(totalAfter!.n)).toBe(Number(totalBefore!.n))
+  })
+})
+
 describe("password reset — verify", () => {
   it("accepts a valid token", async () => {
     await register("ruser", "ruser@example.com", "old-password-1")

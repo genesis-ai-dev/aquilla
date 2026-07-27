@@ -676,6 +676,7 @@ export interface TargetCommit {
    *  target commit at a source's event id wins the target chain slot. */
   parentId: string
   value: string
+  valueHtml?: string
 }
 
 export interface BulkTargetCommitArgs {
@@ -718,6 +719,7 @@ export async function enqueueTargetCommitBatch(args: BulkTargetCommitBatchArgs):
     author: args.author,
     payload: {
       value: commit.value,
+      ...(commit.valueHtml !== undefined ? { valueHtml: commit.valueHtml } : {}),
       sourceEventId: commit.parentId,
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
     },

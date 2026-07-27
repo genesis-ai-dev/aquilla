@@ -125,6 +125,57 @@ describe("self-assign carve-out (AQU-496)", () => {
   })
 })
 
+// ── AQU-676: assignee picker lists project members only ──────────────────────
+describe("project-member-only assignee picker (AQU-676)", () => {
+  // "carol" reaches the project ONLY through an org-wide role (source "org",
+  // no project-specific secondary path) — she must not be assignable. "anna"
+  // and "bob" have a direct project_members override, so they stay.
+  const ORG_ONLY_MEMBER = {
+    userId: 7,
+    username: "carol",
+    role: { level: 400, name: "contributor", source: "org" as const },
+    secondarySources: [],
+  }
+  const MIXED_PROPS = {
+    ...BASE_PROPS,
+    members: [...BASE_PROPS.members, ORG_ONLY_MEMBER],
+  }
+
+  it("omits org-baseline-only members from the assignee options", async () => {
+    render(<AssignModal {...MIXED_PROPS} />)
+    const trigger = screen.getByRole("combobox", { name: /assign to/i })
+    fireEvent.click(trigger)
+    // Project members are pickable…
+    expect(await screen.findByRole("option", { name: /anna/ })).toBeTruthy()
+    expect(screen.getByRole("option", { name: /bob/ })).toBeTruthy()
+    // …but the org-only member never appears as an option.
+    expect(screen.queryByRole("option", { name: /carol/ })).toBeNull()
+  })
+
+  it("still assigns to a legitimate project member end-to-end", async () => {
+    render(<AssignModal {...MIXED_PROPS} />)
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].assigneeUserId).toBe(42)
+  })
+
+  it("keeps a member reachable via a group/creator secondary path even if the winning role is org", async () => {
+    // Winning path is org-wide, but a secondary 'group' grant makes her a
+    // real project member — partitionMembers must keep her.
+    const GROUP_MEMBER = {
+      userId: 8,
+      username: "dora",
+      role: { level: 500, name: "lead", source: "org" as const },
+      secondarySources: [{ source: "group" as const, level: 400, name: "contributor" }],
+    }
+    render(<AssignModal {...BASE_PROPS} members={[GROUP_MEMBER]} />)
+    const trigger = screen.getByRole("combobox", { name: /assign to/i })
+    fireEvent.click(trigger)
+    expect(await screen.findByRole("option", { name: /dora/ })).toBeTruthy()
+  })
+})
+
 // Base UI Select renders a combobox trigger; options live in a portaled
 // popup. Under happy-dom, clicks on options don't commit a selection when the
 // select sits inside a modal Dialog — but hover-highlighting the option and
@@ -307,6 +358,77 @@ describe("chapters scope", () => {
     ])
     expect(args.scopeLabel).toContain("GEN 1")
     expect(args.scopeLabel).toContain("GEN 2")
+  })
+})
+
+// ── AQU-658: launched from a project lane (no active file) ───────────────────
+describe("lane launch — no active file (AQU-658)", () => {
+  const LANE_PROPS = {
+    ...BASE_PROPS,
+    activeFileId: null,
+    selectedCellIds: new Set<string>(),
+  }
+
+  it("defaults to the file-picker (books) scope so 'Assign' never dead-ends on 'No file open.'", async () => {
+    render(<AssignModal {...LANE_PROPS} />)
+    const scopeTrigger = screen.getByRole("combobox", { name: /scope/i })
+    // Default scope is the file picker, not the active-file "verses" scope.
+    expect(scopeTrigger.textContent).toMatch(/books \(files\)/i)
+    // The file list is visible immediately — no need to discover the scope switch.
+    fireEvent.click(screen.getByText("Genesis"))
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockBulkCreate).toHaveBeenCalledTimes(1))
+    expect(mockBulkCreate.mock.calls[0][0].entries.map((e) => e.fileId)).toEqual(["file-1"])
+    // The old bug: submitting produced "No file open." on every path.
+    expect(screen.queryByText(/no file open/i)).toBeNull()
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it("disables the scopes that require an open editor file", async () => {
+    render(<AssignModal {...LANE_PROPS} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /scope/i }))
+    const versesOpt = await screen.findByRole("option", { name: /entire file/i })
+    const chaptersOpt = await screen.findByRole("option", { name: /sections/i })
+    const booksOpt = await screen.findByRole("option", { name: /books \(files\)/i })
+    expect(versesOpt.hasAttribute("data-disabled")).toBe(true)
+    expect(chaptersOpt.hasAttribute("data-disabled")).toBe(true)
+    // The file-picker scope stays enabled — it's the one that works from a lane.
+    expect(booksOpt.hasAttribute("data-disabled")).toBe(false)
+  })
+})
+
+// ── AQU-658: neutral unit copy for non-scripture files ───────────────────────
+describe("non-scripture unit copy (AQU-658)", () => {
+  const DOCX_PROPS = {
+    ...BASE_PROPS,
+    projectFiles: [
+      { id: "file-1", name: "Handbook", type: "docx" as const, createdAt: "2026-01-01T00:00:00Z", cellCount: 10 },
+    ],
+  }
+
+  it("labels the whole-file scope 'Entire file', not 'All verses in file'", () => {
+    render(<AssignModal {...DOCX_PROPS} />)
+    const scopeTrigger = screen.getByRole("combobox", { name: /scope/i })
+    expect(scopeTrigger.textContent).toMatch(/entire file/i)
+    expect(scopeTrigger.textContent).not.toMatch(/verses/i)
+  })
+
+  it("labels the section scope 'Sections', not 'Chapters'", async () => {
+    render(<AssignModal {...DOCX_PROPS} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /scope/i }))
+    expect(await screen.findByRole("option", { name: /sections/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /^chapters$/i })).toBeNull()
+  })
+
+  it("uses a neutral 'segment(s)' confirmation label for a selection on a non-scripture file", async () => {
+    const selectedCellIds = new Set(["cell-a", "cell-b"])
+    render(<AssignModal {...DOCX_PROPS} selectedCellIds={selectedCellIds} />)
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].scopeLabel).toContain("2 segment(s)")
+    expect(mockCreate.mock.calls[0][0].scopeLabel).not.toContain("verse")
   })
 })
 

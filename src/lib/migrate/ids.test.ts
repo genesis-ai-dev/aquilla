@@ -5,6 +5,8 @@ import {
   fileIdFor,
   fileCreateEventId,
   sourceCellCreateEventId,
+  sourceArtifactBindingIdFor,
+  sourceArtifactIdFor,
   targetCommitEventId,
   audioAttachEventId,
   audioSelectEventId,
@@ -52,6 +54,14 @@ describe("migrate deterministic ids", () => {
   it("emits valid v5 UUIDs", () => {
     expect(projectIdFor("k", "local")).toMatch(UUID_RE)
     expect(targetCommitEventId("p", "f", "c", 0)).toMatch(UUID_RE)
+  })
+
+  it("pins source artifact ids to the cross-runtime migration contract", () => {
+    const sha = "ab12cd34" + "0".repeat(56)
+    expect(sourceArtifactIdFor("p1", "f1", sha))
+      .toBe("d8b2d842-2c4f-57d6-b61f-d057edff9ce4")
+    expect(sourceArtifactBindingIdFor("p1", "f1", sha))
+      .toBe("e96365df-b317-5e79-a675-174ea420fefd")
   })
 
   it("audio-select ids are stable, valid, and never collide with audio-attach for the same take", () => {

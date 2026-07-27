@@ -22,9 +22,26 @@ import {
   validateEventId,
 } from "./ids"
 import type { IngestEvent } from "./types"
+import { decodeHtmlEntities } from "../html-entities"
+import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
+import {
+  canonicalIdmlCellMetadata,
+  IDML_PROFILE_ID,
+  IDML_PROFILE_VERSION,
+  isIdmlPair,
+  legacyIdmlStructure,
+  orderedCodexPairCells,
+  upgradeIdmlCell,
+  type IdmlCellProof,
+  type IdmlMigrationAssessment,
+} from "./idml"
 
+// Project HTML down to the plain-text `value`. Strip tags, decode entities
+// (so `&nbsp;` etc. don't survive as literal ASCII in the plain string —
+// AQU-674), then collapse whitespace. Decode before whitespace-collapse so a
+// decoded `&nbsp;` folds into surrounding spaces.
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim()
+  return decodeHtmlEntities(html.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim()
 }
 
 function canonicalRefOf(cell: CodexCell): string | undefined {
@@ -35,6 +52,28 @@ function canonicalRefOf(cell: CodexCell): string | undefined {
   const gr = cell.metadata.data?.globalReferences
   if (gr && gr.length > 0) return gr[0]
   return undefined
+}
+
+// A cell soft-deleted in Codex is retained in the notebook's `cells` array with
+// `metadata.data.deleted === true` (the deletion is recorded as an edit on the
+// `metadata.data.deleted` path — see codex-editor merge/cells resolver). The
+// migration must respect that deletion; recreating the cell is what made deleted
+// paratextual cells reappear in Aquilla (AQU-673). Latest-edit-wins so a
+// delete-then-restore correctly reads as present.
+function isCellDeleted(cell: CodexCell | undefined): boolean {
+  if (!cell) return false
+  let latestTs = -Infinity
+  let latestVal: boolean | undefined
+  for (const e of cell.metadata.edits ?? []) {
+    if (e.editMap?.join(".") !== "metadata.data.deleted") continue
+    const ts = typeof e.timestamp === "number" ? e.timestamp : -Infinity
+    if (ts >= latestTs) {
+      latestTs = ts
+      latestVal = e.value === true
+    }
+  }
+  if (latestVal !== undefined) return latestVal
+  return cell.metadata.data?.deleted === true
 }
 
 function earliestEditTs(cell: CodexCell | undefined): number | undefined {
@@ -74,6 +113,29 @@ export interface MapOptions {
   fallbackAuthor: string
   /** `clientTs` for synthetic events lacking a legacy timestamp. */
   fallbackTs: number
+  /**
+   * Original-byte proof for an IDML pair. Omission is deliberately treated as
+   * needs-artifact; embedded legacy metadata can never self-certify v2.
+   */
+  idmlAssessment?: IdmlMigrationAssessment
+}
+
+function canonicalTargetWithProof(
+  proof: IdmlCellProof | undefined,
+  source: CodexCell | undefined,
+  target: CodexCell | undefined,
+  html: string,
+): string {
+  if (!proof) return html
+  if (target?.value === html && proof.targetHtml !== undefined) return proof.targetHtml
+  const upgraded = upgradeIdmlCell(source, target, html)?.target
+  if (!upgraded?.ok || upgraded.targetHtml === undefined) return html
+  const validation = validateIdmlTranslation(
+    proof.unit.sourceHtml,
+    upgraded.targetHtml,
+    proof.unit.metadata,
+  )
+  return validation.valid ? upgraded.targetHtml : html
 }
 
 /** Map one source/target file pair to its deterministic event stream. */
@@ -81,6 +143,11 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
   const { projectId, projectKey, fallbackAuthor, fallbackTs } = opts
   const fileId = fileIdFor(projectKey, pair.relPath)
   const events: IngestEvent[] = []
+  const idml = isIdmlPair(pair)
+  const idmlAssessment = idml ? opts.idmlAssessment : undefined
+  const idmlReadiness = idml
+    ? idmlAssessment?.readiness ?? "needs-artifact"
+    : "not-idml"
 
   events.push({
     id: fileCreateEventId(projectId, fileId),
@@ -92,29 +159,96 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     clientTs: fallbackTs,
     payload: {
       name: pair.name,
-      fileType: "codex",
+      fileType: idml ? "idml" : "codex",
+      ...(idml
+        ? {
+            kind: "idml",
+            role: "source",
+            importFormat: "idml",
+            parserVersion: `${IDML_PROFILE_ID}@${IDML_PROFILE_VERSION}`,
+            importManifest: {
+              version: 1,
+              profileId: IDML_PROFILE_ID,
+              profileVersion: IDML_PROFILE_VERSION,
+              deterministic: true,
+              fidelity: "content-only",
+              unitCount: idmlAssessment?.manifest?.unitLocators.length ?? 0,
+              ...(idmlAssessment?.sourceSha256
+                ? {
+                    proofStatus: "verified-original-bytes",
+                    proofSourceSha256: idmlAssessment.sourceSha256,
+                  }
+                : {}),
+              warningCounts: idmlReadiness === "native-ready"
+                ? {}
+                : { [idmlReadiness]: 1 },
+            },
+          }
+        : {}),
       ...(opts.sourceLanguage ? { sourceLanguage: opts.sourceLanguage } : {}),
       ...(opts.targetLanguage ? { targetLanguage: opts.targetLanguage } : {}),
     },
   })
 
-  const orderedCells = pair.target?.cells ?? pair.source?.cells ?? []
+  const orderedCells = orderedCodexPairCells(pair)
   const sourceById = new Map<string, CodexCell>()
   for (const c of pair.source?.cells ?? []) sourceById.set(c.metadata.id, c)
   const targetById = new Map<string, CodexCell>()
   for (const c of pair.target?.cells ?? []) targetById.set(c.metadata.id, c)
 
   let prevCellId: string | null = null
-  for (const ordered of orderedCells) {
+  for (let physicalOrder = 0; physicalOrder < orderedCells.length; physicalOrder++) {
+    const ordered = orderedCells[physicalOrder]!
     const cellId = ordered.metadata.id
     const s = sourceById.get(cellId)
     const t = targetById.get(cellId)
+
+    // Skip cells deleted in Codex — do not recreate them, and do not advance the
+    // anchor chain through them, so surviving cells anchor to the prior live
+    // cell (AQU-673).
+    if (isCellDeleted(ordered) || isCellDeleted(t) || isCellDeleted(s)) continue
+
     const anchorCell = s ?? t ?? ordered
 
     // Source text: the paired source value, falling back to the cell's own
     // value (so structural/milestone cells still carry a label on the source
     // side) and finally empty.
-    const srcHtml = s?.value ?? ordered.value ?? ""
+    const proof = idmlAssessment?.readiness === "native-ready"
+      ? idmlAssessment.cells.get(cellId)
+      : undefined
+    const carrier = legacyIdmlStructure(s) || s?.metadata.idml
+      ? s
+      : legacyIdmlStructure(t) || t?.metadata.idml
+        ? t
+        : undefined
+    const srcHtml = proof
+      ? proof.sourceHtml
+      : s?.value ?? ordered.value ?? ""
+    const sourceMetadata = proof && carrier && idmlAssessment?.sourceSha256
+      ? {
+          ...canonicalIdmlCellMetadata(proof.unit, carrier, physicalOrder),
+          idmlMigration: {
+            version: 2,
+            readiness: "native-ready",
+            sourceSha256: idmlAssessment.sourceSha256,
+          },
+        }
+      : carrier
+        ? {
+            legacyCodex: {
+              idmlStructure: legacyIdmlStructure(carrier),
+              ...(carrier.metadata.data?.relationships
+                ? { relationships: carrier.metadata.data.relationships }
+                : {}),
+            },
+            idmlMigration: {
+              version: 2,
+              readiness: idmlReadiness,
+              diagnostics: (idmlAssessment?.diagnostics ?? [])
+                .map(({ code, message }) => ({ code, message })),
+            },
+          }
+        : undefined
     const srcCreateId = sourceCellCreateEventId(projectId, fileId, cellId)
     events.push({
       id: srcCreateId,
@@ -131,6 +265,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
         ...(srcHtml ? { valueHtml: srcHtml } : {}),
         type: anchorCell.metadata.type,
         ...(canonicalRefOf(anchorCell) ? { canonicalRef: canonicalRefOf(anchorCell) } : {}),
+        ...(sourceMetadata ? { metadata: sourceMetadata } : {}),
         // Subtitle cue timing → cells.start_ms/end_ms (legacy seconds → ms).
         ...(typeof anchorCell.metadata.data?.startTime === "number"
           ? { startMs: Math.round(anchorCell.metadata.data.startTime * 1000) }
@@ -152,6 +287,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
       // No value-history. Emit one synthetic commit for a real (non-structural)
       // translation that exists but predates the edit ledger; skip milestones.
       if (t.value && t.value.trim() !== "" && t.metadata.type !== "milestone") {
+        const targetHtml = canonicalTargetWithProof(proof, s, t, t.value)
         events.push({
           id: targetCommitEventId(projectId, fileId, cellId, 0),
           kind: "target.cell.commit",
@@ -160,7 +296,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
           parentId: srcCreateId,
           author: fallbackAuthor,
           clientTs: fallbackTs,
-          payload: { value: stripHtml(t.value), valueHtml: t.value, sourceEventId: srcCreateId },
+          payload: { value: stripHtml(targetHtml), valueHtml: targetHtml, sourceEventId: srcCreateId },
         })
       }
       continue
@@ -172,6 +308,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     let headEdit: EditHistory | undefined
     for (const { e, i } of valueEdits) {
       const html = editValueHtml(e)
+      const targetHtml = canonicalTargetWithProof(proof, s, t, html)
       const id = targetCommitEventId(projectId, fileId, cellId, i)
       events.push({
         id,
@@ -181,7 +318,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
         parentId: parent,
         author: e.author || fallbackAuthor,
         clientTs: typeof e.timestamp === "number" ? e.timestamp : fallbackTs,
-        payload: { value: stripHtml(html), valueHtml: html, sourceEventId: srcCreateId },
+        payload: { value: stripHtml(targetHtml), valueHtml: targetHtml, sourceEventId: srcCreateId },
       })
       parent = id
       headEdit = e
@@ -219,6 +356,7 @@ export function collectSpeakers(
   const cells = pair.target?.cells ?? pair.source?.cells ?? []
   const out: { cellId: string; speaker: string }[] = []
   for (const c of cells) {
+    if (isCellDeleted(c)) continue // deleted cells contribute no cast (AQU-673)
     const speaker = c.metadata.cellLabel?.trim()
     if (speaker) out.push({ cellId: c.metadata.id, speaker })
   }

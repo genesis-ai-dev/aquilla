@@ -11,6 +11,17 @@ export interface MockLLMRequest {
  * A minimal OpenAI-compatible mock LLM server for e2e tests.
  * Responds to POST /v1/chat/completions and GET /v1/models.
  */
+// Matches `<c id="CELLID">TEXT</c>` tags embedded in the OUTGOING request
+// (buildParagraphPrompt encodes the live paragraph's draftable cells this
+// way — see src/lib/completion/paragraph-protocol.ts). Mirrors the parser's
+// own TAG_RE so this generic echo stays in lockstep with the real protocol.
+const REQUEST_TAG_RE = /<c\s+id="([^"]+)">([\s\S]*?)<\/c>/g
+
+interface MockChatBody {
+  stream?: boolean
+  messages?: { content?: string }[]
+}
+
 export class MockLLMServer {
   private server: ReturnType<typeof createServer> | null = null
   private _nextResponse = "Traducción de prueba"
@@ -60,8 +71,8 @@ export class MockLLMServer {
       let body = ""
       req.on("data", (c) => { body += c })
       req.on("end", () => {
-        let parsed: { stream?: boolean } | null = null
-        try { parsed = JSON.parse(body) as { stream?: boolean } } catch {}
+        let parsed: MockChatBody | null = null
+        try { parsed = JSON.parse(body) as MockChatBody } catch {}
         this._requests.push({
           url: req.url!,
           method: req.method!,
@@ -70,6 +81,27 @@ export class MockLLMServer {
         })
 
         const id = "mock-" + Date.now()
+
+        // Paragraph-draft requests (completeParagraph) encode the live
+        // paragraph's cells as `<c id="CELLID">source</c>` tags in the
+        // outgoing prompt (D11 protocol). Echo them back tagged the same
+        // way so parseParagraphResponse can reconcile every expected id —
+        // a static canned string can never do this since cell ids are
+        // minted at import time. Falls back to `_nextResponse` for
+        // non-paragraph (single-cell) completion requests, which don't use
+        // the tag protocol at all.
+        const combinedContent = (parsed?.messages ?? [])
+          .map((m) => m.content ?? "")
+          .join("\n")
+        const requestTags: { id: string; text: string }[] = []
+        REQUEST_TAG_RE.lastIndex = 0
+        let tagMatch: RegExpExecArray | null
+        while ((tagMatch = REQUEST_TAG_RE.exec(combinedContent)) !== null) {
+          requestTags.push({ id: tagMatch[1], text: tagMatch[2] })
+        }
+        const responseText = requestTags.length
+          ? requestTags.map(({ id: cellId, text }) => `<c id="${cellId}">[DRAFT] ${text}</c>`).join("\n")
+          : this._nextResponse
 
         // Custom-provider clients (the AI completion path under test) always
         // request stream:true. Honor it with proper OpenAI-compatible SSE so
@@ -84,7 +116,7 @@ export class MockLLMServer {
           const frame = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`
           res.write(frame({
             id, object: "chat.completion.chunk",
-            choices: [{ index: 0, delta: { role: "assistant", content: this._nextResponse }, finish_reason: null }],
+            choices: [{ index: 0, delta: { role: "assistant", content: responseText }, finish_reason: null }],
           }))
           res.write(frame({
             id, object: "chat.completion.chunk",
@@ -101,7 +133,7 @@ export class MockLLMServer {
           object: "chat.completion",
           choices: [{
             index: 0,
-            message: { role: "assistant", content: this._nextResponse },
+            message: { role: "assistant", content: responseText },
             finish_reason: "stop",
           }],
           usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },

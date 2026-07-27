@@ -11,6 +11,7 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleEventsWriteRequest } from '../events/route'
+import { handleRebuildProjectionRequest } from '../events/rebuild'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
@@ -321,6 +322,217 @@ describe('POST /events — AD-2 first-child-of-parent', () => {
     expect(tables.events).toHaveLength(1)
     expect(tables.cells).toHaveLength(1)
     expect(tables.cells[0].event_id).toBe('evt-create-001')
+  })
+})
+
+// ── AQU-538 lane/side-qualified arbitration in the ROUTE pre-check ──────
+//
+// Regression tests for the PERF-2 batching of the chain-winner pre-check
+// (prefetchChainWinners): it originally arbitrated on the UNQUALIFIED
+// (cell, parent) slot, so a second lane's first commit — which legitimately
+// shares its parent (the source head) with the default lane's first commit —
+// was judged a losing sibling and dead-lettered as stale, and the same for a
+// source correction arriving after a target commit pinned to the same head.
+// The lane invariants were already pinned against isWinningChild
+// (target-lang-lanes.test.ts §3), but the route no longer calls it — these
+// pin them at the wire, where the "sparkle in a lane says Saved but the cell
+// stays empty" bug escaped.
+
+describe('POST /events — lane/side-qualified chain slots (route pre-check)', () => {
+  const srcCreate = () =>
+    sourceCreate({ id: 'evt-src', payload: { cellId: 'cell-1', value: 'source text' } })
+
+  it("two lanes' first commits share the source parent and BOTH project (separate requests)", async () => {
+    const leadToken = await makeToken({ role: 500 })
+    const token = await makeToken()
+    const { db, snapshot } = await makeTestDb()
+
+    await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
+
+    const defaultLane = targetCommit({
+      id: 'evt-default',
+      parentId: 'evt-src',
+      payload: { value: 'English draft', sourceEventId: 'evt-src' },
+    })
+    const r1 = await handleEventsWriteRequest(await makeRequest([defaultLane], token), makeEnv(db))
+    expect(((await r1!.json()) as any).stale).toHaveLength(0)
+
+    const esLane = targetCommit({
+      id: 'evt-es',
+      parentId: 'evt-src',
+      payload: { value: 'Hola draft', sourceEventId: 'evt-src', targetLang: 'es' },
+    })
+    const r2 = await handleEventsWriteRequest(await makeRequest([esLane], token), makeEnv(db))
+    const body2 = (await r2!.json()) as any
+    expect(body2.accepted).toHaveLength(1)
+    // THE regression: this was `stale: [evt-es]` and the lane row never landed.
+    expect(body2.stale).toHaveLength(0)
+
+    const cells = (await snapshot()).cells
+    const targets = cells.filter((c: any) => c.side === 'target')
+    expect(targets.map((c: any) => [c.target_lang, c.value]).sort()).toEqual([
+      ['', 'English draft'],
+      ['es', 'Hola draft'],
+    ])
+    expect(targets.find((c: any) => c.target_lang === 'es')?.event_id).toBe('evt-es')
+  })
+
+  it('a source correction after a target commit on the same parent still projects', async () => {
+    const leadToken = await makeToken({ role: 500 })
+    const token = await makeToken()
+    const { db, snapshot } = await makeTestDb()
+
+    await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
+    await handleEventsWriteRequest(
+      await makeRequest(
+        [targetCommit({ id: 'evt-tgt', parentId: 'evt-src', payload: { value: 'draft', sourceEventId: 'evt-src' } })],
+        token,
+      ),
+      makeEnv(db),
+    )
+
+    const sourceFix: RawEvent<'source.cell.commit'> = {
+      id: 'evt-src-fix',
+      schemaVersion: 1,
+      kind: 'source.cell.commit',
+      projectId: 'proj-a',
+      fileId: 'file-x',
+      cellId: 'cell-1',
+      parentId: 'evt-src',
+      author: 'alice',
+      payload: { value: 'corrected source' },
+      clientTs: 3000,
+    }
+    const r = await handleEventsWriteRequest(await makeRequest([sourceFix], leadToken), makeEnv(db))
+    const body = (await r!.json()) as any
+    expect(body.accepted).toHaveLength(1)
+    expect(body.stale).toHaveLength(0)
+
+    const cells = (await snapshot()).cells
+    const source = cells.find((c: any) => c.side === 'source')
+    expect(source?.value).toBe('corrected source')
+    expect(source?.event_id).toBe('evt-src-fix')
+  })
+
+  it('a broken-period ghost event blocks its slot until a projection rebuild surfaces it and unblocks the chain', async () => {
+    // The unqualified-pre-check era (2026-06-10 → fix) dead-lettered lane
+    // commits: accepted + logged in `events`, but no projection write and no
+    // chain claim. Those ghosts still own their (lane-qualified) slot by the
+    // AD-2 first-in-seq rule, so after the fix a NEW commit chaining on the
+    // (empty) projection head loses to the ghost every time — the user-facing
+    // "draft was outdated ... not saved" loop. The heal is the projection
+    // rebuild: replay projects the ghost, the client revalidates to the real
+    // lane head, and the next commit chains cleanly.
+    const leadToken = await makeToken({ role: 500 })
+    const token = await makeToken()
+    const { db, snapshot } = await makeTestDb()
+
+    await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
+    await handleEventsWriteRequest(
+      await makeRequest(
+        [targetCommit({ id: 'evt-ghost', parentId: 'evt-src', payload: { value: 'ghost draft', targetLang: 'es' } })],
+        token,
+      ),
+      makeEnv(db),
+    )
+    // Reproduce the broken-period artifact: the event row stays, but its
+    // projection row and chain claim never existed.
+    await db.prepare(`DELETE FROM cells WHERE target_lang = 'es'`).run()
+    await db.prepare(`DELETE FROM chain_claims WHERE parent_key LIKE '%@lane:es'`).run()
+
+    // A fresh commit chains on the projection head (the source event, since
+    // the lane looks untranslated) — and loses the slot to the ghost.
+    const retry = targetCommit({
+      id: 'evt-retry',
+      parentId: 'evt-src',
+      payload: { value: 'retry draft', targetLang: 'es' },
+    })
+    const r1 = await handleEventsWriteRequest(await makeRequest([retry], token), makeEnv(db))
+    const body1 = (await r1!.json()) as any
+    expect(body1.stale.map((s: any) => s.id)).toEqual(['evt-retry'])
+    expect((await snapshot()).cells.find((c: any) => c.target_lang === 'es')).toBeUndefined()
+
+    // Realistic log noise: an assignment event whose projection is built by
+    // handleAssignmentEvent, not buildEventProjectionStmts. The rebuild must
+    // SKIP it (regression: it aborted the replay mid-way, stranding the
+    // project on a partially rebuilt projection).
+    const assignmentEvent = {
+      id: 'evt-assign',
+      schemaVersion: 1,
+      kind: 'assignment.create',
+      projectId: 'proj-a',
+      fileId: 'file-x',
+      cellId: null,
+      parentId: null,
+      author: 'alice',
+      payload: {
+        assignmentId: 'as-1',
+        scopeKind: 'books',
+        scope: [{ fileId: 'file-x' }],
+        scopeLabel: 'Sample',
+        assigneeUserId: 1,
+      },
+      clientTs: 4000,
+    }
+    const rAssign = await handleEventsWriteRequest(
+      await makeRequest([assignmentEvent], leadToken),
+      makeEnv(db),
+    )
+    expect(((await rAssign!.json()) as any).accepted).toHaveLength(1)
+
+    // Heal: rebuild replays the log with lane-qualified arbitration and
+    // projects the ghost as the lane head.
+    const rebuildRes = (await handleRebuildProjectionRequest(
+      new Request('https://worker/admin/projects/proj-a/rebuild-projection', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${SECRET}` },
+      }),
+      makeEnv(db) as never,
+    ))!
+    expect(rebuildRes.status).toBe(200)
+    const healed = (await snapshot()).cells.find((c: any) => c.target_lang === 'es')
+    expect(healed?.value).toBe('ghost draft')
+    expect(healed?.event_id).toBe('evt-ghost')
+
+    // The chain is unblocked: the client's revalidate now sees evt-ghost as
+    // the lane head, and a commit chaining on it applies.
+    const next = targetCommit({
+      id: 'evt-next',
+      parentId: 'evt-ghost',
+      payload: { value: 'post-heal draft', targetLang: 'es' },
+    })
+    const r2 = await handleEventsWriteRequest(await makeRequest([next], token), makeEnv(db))
+    expect(((await r2!.json()) as any).stale).toHaveLength(0)
+    expect((await snapshot()).cells.find((c: any) => c.target_lang === 'es')?.value).toBe('post-heal draft')
+  })
+
+  it('a same-lane sibling still loses its slot (AD-2 preserved per lane)', async () => {
+    const leadToken = await makeToken({ role: 500 })
+    const token = await makeToken()
+    const { db, snapshot } = await makeTestDb()
+
+    await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
+    await handleEventsWriteRequest(
+      await makeRequest(
+        [targetCommit({ id: 'evt-es-1', parentId: 'evt-src', payload: { value: 'primero', targetLang: 'es' } })],
+        token,
+      ),
+      makeEnv(db),
+    )
+    const sibling = targetCommit({
+      id: 'evt-es-2',
+      parentId: 'evt-src',
+      payload: { value: 'segundo', targetLang: 'es' },
+    })
+    const r = await handleEventsWriteRequest(await makeRequest([sibling], token), makeEnv(db))
+    const body = (await r!.json()) as any
+    expect(body.accepted).toHaveLength(1)
+    expect(body.stale).toHaveLength(1)
+    expect(body.stale[0].id).toBe('evt-es-2')
+
+    const es = (await snapshot()).cells.find((c: any) => c.side === 'target' && c.target_lang === 'es')
+    expect(es?.value).toBe('primero')
+    expect(es?.event_id).toBe('evt-es-1')
   })
 })
 

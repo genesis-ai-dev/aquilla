@@ -559,7 +559,12 @@ CREATE TABLE comments (
     author_label      TEXT,
     created_at        BIGINT NOT NULL,
     updated_at        BIGINT NOT NULL,
-    deleted_at        BIGINT
+    deleted_at        BIGINT,
+    -- AQU-692: target-text snapshot captured on comment.create for a root
+    -- thread. Drives the "Translation changed since this thread was created"
+    -- badge. NULL = unknown baseline (reply, non-cell scope, or legacy row) →
+    -- never shown as stale.
+    created_for_translated TEXT
 );
 
 -- ─────────────────────────── assignments + misc ─────────────────────────
@@ -1014,6 +1019,58 @@ CREATE TABLE IF NOT EXISTS project_brief_history (
   updated_by text,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (project_id, version)
+);
+
+-- 0069: external integrations (provider-generic; Monday.com first). One OAuth
+-- connection per (org, provider) with AES-GCM-encrypted tokens, one remote
+-- link per (project, provider) (config = per-provider mapping, e.g.
+-- MondayMapping in auth-worker/src/lib/monday/types.ts), and an entity ->
+-- remote-item map for idempotent upserts.
+CREATE TABLE IF NOT EXISTS integration_connections (
+  id TEXT PRIMARY KEY,                -- uuid
+  org_id TEXT NOT NULL,
+  provider TEXT NOT NULL,             -- 'monday' (first of several)
+  account JSONB,                      -- provider identity, e.g. {accountId, accountSlug, userId, userName}
+  access_token_enc TEXT NOT NULL,     -- AES-GCM, base64(iv||ciphertext)
+  refresh_token_enc TEXT,             -- OAuth 2.1 rotating refresh token, same encryption; NULL for legacy non-expiring tokens
+  access_token_expires_at TIMESTAMPTZ,-- from the access-token JWT exp claim; NULL = non-expiring (legacy flow)
+  needs_reauth BOOLEAN NOT NULL DEFAULT FALSE, -- set when refresh fails (revoked/max lifetime); cleared on successful OAuth callback
+  scopes TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (org_id, provider)
+);
+
+CREATE TABLE IF NOT EXISTS integration_links (
+  id TEXT PRIMARY KEY,                -- uuid
+  project_id TEXT NOT NULL,
+  provider TEXT NOT NULL,             -- 'monday'
+  connection_id TEXT NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
+  external_id TEXT NOT NULL,          -- remote container id (Monday: board id)
+  external_name TEXT,                 -- remote container name (Monday: board name)
+  config JSONB NOT NULL,              -- per-provider mapping config (Monday: MondayMapping)
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  webhook_ids JSONB NOT NULL DEFAULT '[]'::jsonb,   -- remote webhook ids we created
+  remote_state JSONB,                 -- cached remote structure (Monday: {fetchedAt, columns, groups})
+  remote_state_stale BOOLEAN NOT NULL DEFAULT FALSE,
+  dirty_at TIMESTAMPTZ,               -- set when progress changed but push was debounced
+  last_pushed_at TIMESTAMPTZ,
+  last_push_status TEXT,              -- 'ok' | 'error'
+  last_push_error TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, provider)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_links_dirty ON integration_links (dirty_at) WHERE dirty_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS integration_item_links (
+  link_id TEXT NOT NULL REFERENCES integration_links(id) ON DELETE CASCADE,
+  entity_kind TEXT NOT NULL,          -- 'project' | 'file'
+  entity_id TEXT NOT NULL,            -- project_id or file_id
+  external_item_id TEXT NOT NULL,     -- remote item id (Monday: item id)
+  PRIMARY KEY (link_id, entity_kind, entity_id)
 );
 
 -- Scene briefs (0070_scene_briefs.sql; contextual translation pipeline §9).

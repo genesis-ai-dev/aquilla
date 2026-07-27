@@ -4,16 +4,40 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
 import "fake-indexeddb/auto"
+import JSZip from "jszip"
+import { parseIdml } from "@aquilla/idml-roundtrip"
 import { importFile, emitParsedFile } from "./import"
 import type { TranslatableString } from "./parsers/types"
+import { extractIdmlStrings } from "./parsers/idml"
+import { normalizeTranslatableStrings } from "./import/normalized-manifest"
 import { peekOutboxBatch, resetOutboxConnectionForTests } from "./sync/outbox"
 
 interface CapturedBody {
   projectId: string
   fileId: string
-  file?: { name: string; role?: string; kind?: string }
-  cells: Array<{ id: string; cellId: string; anchorCellId: string | null; value: string }>
-  targets?: Array<{ id: string; cellId: string; parentId: string; value: string; targetLang?: string }>
+  file?: {
+    name: string
+    role?: string
+    kind?: string
+    parserVersion?: string
+    importManifest?: Record<string, unknown>
+  }
+  cells: Array<{
+    id: string
+    cellId: string
+    anchorCellId: string | null
+    value: string
+    valueHtml?: string
+    metadata?: Record<string, unknown>
+  }>
+  targets?: Array<{
+    id: string
+    cellId: string
+    parentId: string
+    value: string
+    valueHtml?: string
+    targetLang?: string
+  }>
   complete?: boolean
 }
 
@@ -54,6 +78,26 @@ function makeString(id: string, original: string, group: string): TranslatableSt
 }
 
 const getToken = async () => "test-token"
+
+async function makeMinimalIdml(): Promise<ArrayBuffer> {
+  const zip = new JSZip()
+  const mimetype = "application/vnd.adobe.indesign-idml-package"
+  const namespace = "http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"
+  const story = "Stories/Story_u1.xml"
+  zip.file("mimetype", mimetype, { compression: "STORE" })
+  zip.file(
+    "designmap.xml",
+    `<Document xmlns:idPkg="${namespace}"><idPkg:Story src="${story}"/></Document>`,
+  )
+  zip.file(
+    story,
+    `<idPkg:Story xmlns:idPkg="${namespace}"><Story Self="u1">`
+      + `<ParagraphStyleRange><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body">`
+      + `<Content>Original layout text</Content>`
+      + `</CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`,
+  )
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
+}
 
 describe("import — bulk upload", () => {
   it("uploads file.create + N source.cell.create with anchor-chain order", async () => {
@@ -156,15 +200,80 @@ describe("import — bulk upload", () => {
     expect(await peekOutboxBatch(100)).toHaveLength(0)
     expect(captured.at(-1)).toMatchObject({ complete: true, cells: [] })
   })
+
+  it("commits real IDML producer output with v2 locator, metadata, and protected target HTML", async () => {
+    const bytes = await makeMinimalIdml()
+    const strings = await extractIdmlStrings(
+      bytes,
+      (input, profile) => parseIdml(input, profile),
+    )
+    const normalized = normalizeTranslatableStrings(strings, {
+      fileName: "layout.idml",
+      fileType: "idml",
+      profileId: "builtin:idml-roundtrip",
+      profileVersion: "2",
+      fidelity: "content-only",
+    })
+
+    await emitParsedFile(
+      {
+        name: "layout.idml",
+        strings,
+        roundTripFidelity: "content-only",
+      },
+      "idml",
+      { projectId: "p-idml", author: "alice", getToken },
+      normalized,
+    )
+
+    const body = captured[0]
+    expect(body.file).toMatchObject({
+      name: "layout.idml",
+      kind: "idml",
+      parserVersion: "builtin:idml-roundtrip@2",
+      importManifest: {
+        version: 1,
+        profileId: "builtin:idml-roundtrip",
+        profileVersion: "2",
+        fidelity: "content-only",
+      },
+    })
+    expect(body.cells).toHaveLength(1)
+    expect(body.cells[0].value).toBe("Original layout text")
+    expect(body.cells[0].valueHtml).toContain('data-idml-slot="0"')
+    expect(body.cells[0].metadata).toMatchObject({
+      idml: {
+        version: 2,
+        slotCount: 1,
+        editableSlotIndexes: [0],
+      },
+      aquillaImport: {
+        profileId: "builtin:idml-roundtrip",
+        profileVersion: "2",
+        sourceLocator: {
+          kind: "idml",
+          memberPath: "Stories/Story_u1.xml",
+          scope: "story-paragraph",
+          part: 0,
+          slotIndexes: [0],
+        },
+      },
+    })
+    expect(body.targets).toEqual([expect.objectContaining({
+      cellId: body.cells[0].cellId,
+      parentId: body.cells[0].id,
+      value: "",
+      valueHtml: expect.stringContaining('data-idml-slot="0"'),
+    })])
+    expect(body.targets?.[0].valueHtml).not.toContain("Original layout text")
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
+  })
 })
 
-// AQU-638: a bilingual import (source + mapped target column) must land the
-// target text, not just the source. buildBulkCellsWithSpeakers only seeds the
-// source side, so emitParsedFile has to emit target.cell.commit events for any
-// parsed string carrying `translated`. Source cells go over the mocked fetch
-// (bulk /import); target commits are ENQUEUED to the CQRS outbox, so we assert
-// against the outbox rather than the captured HTTP bodies.
-describe("import — bilingual target text (AQU-638)", () => {
+// AQU-638: source and mapped targets are one staged import transaction. Target
+// genesis events travel in the same bulk chunk as their source parents; a
+// second outbox commit would compete for the same chain slot.
+describe("import — atomic bilingual target text (AQU-638)", () => {
   beforeEach(async () => {
     await resetOutboxConnectionForTests()
     await new Promise<void>((resolve, reject) => {
@@ -179,7 +288,7 @@ describe("import — bilingual target text (AQU-638)", () => {
     return { id, original, translated, context: group, group, type: "text" }
   }
 
-  it("emits target.cell.commit for each row with a mapped target, chained on its source cell", async () => {
+  it("pairs every mapped target with its source event in the same bulk request", async () => {
     const { ref } = await emitParsedFile(
       {
         name: "hungarian.csv",
@@ -194,22 +303,18 @@ describe("import — bilingual target text (AQU-638)", () => {
       { projectId: "p-bi", author: "alice", sourceLanguage: "eng", targetLanguage: "hun", getToken },
     )
 
-    const rows = await peekOutboxBatch(100)
-    const commits = rows.filter((r) => r.event.kind === "target.cell.commit")
-    // Two rows carried target text; the empty one must NOT produce a commit.
+    const commits = captured[0].targets ?? []
     expect(commits).toHaveLength(2)
 
-    const byCell = new Map(commits.map((c) => [c.event.cellId, c.event]))
+    const byCell = new Map(commits.map((commit) => [commit.cellId, commit]))
     const first = byCell.get("row-1")!
     expect(first).toBeDefined()
-    expect(first.fileId).toBe(ref.id)
-    expect((first.payload as { value: string }).value).toBe("Templom")
-    // parentId pins the target to its own source cell's event id (AD-9).
-    expect(first.parentId).toBeTruthy()
-    expect((first.payload as { sourceEventId: string }).sourceEventId).toBe(first.parentId)
-
-    expect((byCell.get("row-2")!.payload as { value: string }).value).toBe("Első jelenet")
+    expect(first.value).toBe("Templom")
+    expect(first.parentId).toBe(captured[0].cells.find((cell) => cell.cellId === "row-1")?.id)
+    expect(byCell.get("row-2")!.value).toBe("Első jelenet")
     expect(byCell.has("row-3")).toBe(false)
+    expect(ref.id).toBe(captured[0].fileId)
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 
   it("emits no target commits when no row carries target text (no false fill)", async () => {
@@ -225,7 +330,7 @@ describe("import — bilingual target text (AQU-638)", () => {
       { projectId: "p-mono", author: "alice", getToken },
     )
 
-    const rows = await peekOutboxBatch(100)
-    expect(rows.filter((r) => r.event.kind === "target.cell.commit")).toHaveLength(0)
+    expect(captured[0].targets).toBeUndefined()
+    expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
 })

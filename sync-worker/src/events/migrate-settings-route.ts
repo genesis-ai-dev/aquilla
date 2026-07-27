@@ -12,6 +12,8 @@
 // CLI reads the current settings first, merges cast additions by name, and
 // posts the merged result, so a re-run converges.
 
+import { secureCompare } from '../lib/secure-compare'
+
 const PATH = '/migrate/settings'
 
 export interface MigrateSettingsEnv {
@@ -40,7 +42,7 @@ export async function handleMigrateSettingsRequest(
     return new Response('method not allowed', { status: 405 })
   }
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if ((request.headers.get('Authorization') ?? '') !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

@@ -9,6 +9,8 @@
 // Auth: Authorization: Bearer ${SYNC_SECRET_KEY} — same shared secret used by
 // the projection-rebuild and all other admin endpoints.
 
+import { secureCompare } from '../lib/secure-compare'
+
 const REBUILD_FTS_PATH = /^\/admin\/projects\/([^/]+)\/rebuild-fts$/
 
 export interface RebuildFtsEnv {
@@ -32,7 +34,7 @@ export async function handleRebuildFtsRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const auth = request.headers.get('Authorization') ?? ''
-  if (auth !== `Bearer ${env.SYNC_SECRET_KEY}`) {
+  if (!secureCompare(auth, `Bearer ${env.SYNC_SECRET_KEY}`)) {
     return new Response('unauthorized', { status: 401 })
   }
 

@@ -95,13 +95,11 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   const bobRow = bobWs.cellRow(0)
   await bobRow.scrollIntoViewIfNeeded()
   await bobRow.hover()
-  // A cell with an existing thread replaces "Add comment" with its open
-  // comment count. Either control opens the same drawer.
-  const openComments = bobRow.locator(
-    'button[aria-label="Add comment"], button[aria-label*="open comment" i]',
-  ).first()
-  await expect(openComments).toBeVisible({ timeout: 5_000 })
-  await openComments.click()
+  // Cell 0 already carries alice's comment, so the rail button is relabelled
+  // "1 open comment" and the AQU-599 gutter chip ("1 open comment — open
+  // comments") appears — the original "Add comment" label no longer exists.
+  // Click the always-visible chip (suffix match dodges the rail button).
+  await bobRow.locator('button[aria-label$="open comments"]').click()
 
   const bobDrawer = bob.locator('[data-testid="comments-drawer"]')
   await expect(bobDrawer).toBeVisible({ timeout: 5_000 })

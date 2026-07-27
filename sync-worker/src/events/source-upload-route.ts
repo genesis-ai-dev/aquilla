@@ -19,6 +19,7 @@ import {
   MAX_SOURCE_ARTIFACT_BYTES,
   sourceArtifactDescriptor,
 } from "../../../shared/import-contract"
+import { buildSourceArtifactPersistenceStatements } from "./source-artifact-persistence"
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source$/
 const BINDING_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/source-bindings$/
@@ -398,70 +399,33 @@ export async function handleSourceUploadRequest(
     return withCors(new Response("source size did not match uploaded bytes", { status: 400 }), request)
   }
 
-  const statements: AquillaStatement[] = []
   // The sidecar is the export skeleton, not necessarily the source lane's
   // original. A target-side Paratext import deliberately selects its target
   // USFM skeleton; other target artifacts explicitly send update=false.
-  if (updateSourceSidecar) {
-    statements.push(db.prepare(
-      `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
-       VALUES (?, ?, ?, NULL, ?, ?, ?)
-       ON CONFLICT (file_id) DO UPDATE SET
-         project_id = EXCLUDED.project_id,
-         format     = EXCLUDED.format,
-         raw_source = NULL,
-         r2_key     = EXCLUDED.r2_key,
-         size_bytes = EXCLUDED.size_bytes,
-         created_at = EXCLUDED.created_at`,
-    ).bind(fileId, projectId, format, key, byteLength, Date.now()))
-  }
-  statements.push(
-    db.prepare(
-      `INSERT INTO artifacts (
-         id, project_id, uploaded_by_user_id, credential_id, name, content_type,
-         size_bytes, sha256, r2_key, file_id, kind, metadata
-       ) VALUES (?::uuid, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'source', ?::text::jsonb)
-       ON CONFLICT (id) DO NOTHING`,
-    ).bind(
-      artifactId,
-      projectId,
-      String(auth.claims.userId),
-      artifactName ?? file.name,
-      contentType,
-      byteLength,
-      sha256,
-      key,
-      fileId,
-      JSON.stringify({ origin: 'browser-import', sourceFormat: format }),
-    ),
-    db.prepare(
-      `INSERT INTO artifact_bindings (
-         id, project_id, artifact_id, file_id, binding_role, target_lang,
-         member_path, profile_id, profile_version, fidelity, manifest, recipe
-       ) VALUES (?::uuid, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?::text::jsonb)
-       ON CONFLICT (artifact_id, file_id, binding_role, target_lang, member_path)
-       DO UPDATE SET
-         profile_id = EXCLUDED.profile_id,
-         profile_version = EXCLUDED.profile_version,
-         fidelity = EXCLUDED.fidelity,
-         manifest = EXCLUDED.manifest,
-         recipe = EXCLUDED.recipe,
-         updated_at = now()`,
-    ).bind(
-      crypto.randomUUID(),
-      projectId,
-      artifactId,
-      fileId,
-      bindingRole,
-      headerTargetLang ?? '',
-      memberPath,
-      profileId,
-      profileVersion,
-      fidelity,
-      JSON.stringify(manifest),
-      recipe,
-    ),
-  )
+  const statements = buildSourceArtifactPersistenceStatements(db, {
+    projectId,
+    fileId,
+    artifactId,
+    bindingId: crypto.randomUUID(),
+    uploadedByUserId: String(auth.claims.userId),
+    artifactName: artifactName ?? file.name,
+    contentType,
+    byteLength,
+    sha256,
+    r2Key: key,
+    format,
+    bindingRole,
+    targetLang: headerTargetLang ?? '',
+    memberPath,
+    profileId,
+    profileVersion,
+    fidelity: fidelity as 'native' | 'verified-recipe' | 'content-only' | 'preserved-only',
+    manifest,
+    recipe: recipe ? objectRecord(recipe) : null,
+    origin: 'browser-import',
+    updateSourceSidecar,
+    createdAt: Date.now(),
+  })
   try {
     await db.batch(statements)
   } catch (error) {

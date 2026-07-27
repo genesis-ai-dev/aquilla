@@ -222,6 +222,16 @@ describe("parseFile — parse phase only (no upload)", () => {
       .rejects.toThrow(/appears to be binary/)
   })
 
+  it("never routes a signed-in corrupt IDML package through the generic sandbox", async () => {
+    const fetchMock = vi.mocked(fetch)
+    const file = new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], "corrupt.idml")
+
+    await expect(
+      prepareImportFile(file, { projectId: "p1", identityToken: "identity-token" }),
+    ).rejects.toThrow()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("escalates an unsupported binary to the isolated parser and keeps the exact original for commit", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       classification: {

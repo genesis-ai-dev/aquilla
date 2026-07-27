@@ -43,3 +43,26 @@ describe("trimWindowForCell", () => {
     ).toBeNull()
   })
 })
+
+// SUB-29: a take recorded onto a media cell is its OWN clip — no film-timeline
+// window. The window only applies when the imported source clip is selected.
+describe("trimWindowForCell — attachment provenance (SUB-29)", () => {
+  it("source clip selected (fileId-seeded audioId) → windowed", () => {
+    expect(
+      trimWindowForCell(baseCell({
+        medium: "media", startTime: 2.9, endTime: 5,
+        selectedAudioId: "audio-file-9-1700000000-abcdefgh.mp3",
+      })),
+    ).toEqual({ start: 2.9, end: 5 })
+  })
+
+  it("take selected (cellId-seeded audioId) → plays in full (null window)", () => {
+    expect(
+      trimWindowForCell(baseCell({
+        id: "c1",
+        medium: "media", startTime: 2.9, endTime: 5,
+        selectedAudioId: "audio-c1-1700000000-abcdefgh.webm",
+      })),
+    ).toBeNull()
+  })
+})

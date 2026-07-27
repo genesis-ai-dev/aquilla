@@ -232,6 +232,41 @@ describe("project-index trash", () => {
 })
 
 describe("mergeServerProjectWithLocalCache — client-local overlays", () => {
+  // AQU-695: the server never persists the setup-checklist dismissal; it lives
+  // only in the local IDB record. The merge must carry it through so a project
+  // dismissed on a prior visit still reads dismissed after a reload/navigation.
+  it("carries setupChecklistDismissed from the local cache onto the server record", () => {
+    const server = makeProject({ id: "p1", setupChecklistDismissed: undefined })
+    const local = makeProject({ id: "p1", setupChecklistDismissed: true })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.setupChecklistDismissed).toBe(true)
+  })
+
+  it("does not fabricate a dismissal when the local cache has none (negative case)", () => {
+    const server = makeProject({ id: "p1" })
+    const local = makeProject({ id: "p1" })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.setupChecklistDismissed).toBeUndefined()
+  })
+
+  it("leaves the server record untouched when there is no local cache", () => {
+    const server = makeProject({ id: "p1" })
+    const merged = mergeServerProjectWithLocalCache(server, undefined)
+    expect(merged.setupChecklistDismissed).toBeUndefined()
+  })
+
+  it("carries the local dismissal alongside the existing suggestionsDismissedAt overlay", () => {
+    const server = makeProject({ id: "p1" })
+    const local = makeProject({
+      id: "p1",
+      setupChecklistDismissed: true,
+      suggestionsDismissedAt: "2026-07-24T00:00:00Z",
+    })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.setupChecklistDismissed).toBe(true)
+    expect(merged.suggestionsDismissedAt).toBe("2026-07-24T00:00:00Z")
+  })
+
   it("AQU-701: carries the local aiSetupSkipped flag onto the server record", () => {
     const server = makeProject({ id: "s1" })
     const local = { ...server, aiSetupSkipped: true }

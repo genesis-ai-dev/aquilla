@@ -206,6 +206,16 @@ export async function runIdmlCorpusConformance(
         constructKind: "unknown-inline-element",
       },
       {
+        message: "Processing instruction <?ACE> inside IDML Content was preserved as a protected token",
+        unsupportedDisposition: "preserved-nonliteral",
+        constructKind: "processing-instruction",
+      },
+      {
+        message: "Processing instruction <?ACE> inside IDML Content was preserved as a protected token",
+        unsupportedDisposition: "preserved-nonliteral",
+        constructKind: "processing-instruction",
+      },
+      {
         message: "Computed text variable TextVariable/Page was preserved",
         unsupportedDisposition: "preserved-nonliteral",
         constructKind: "computed-text-variable",
@@ -223,6 +233,31 @@ export async function runIdmlCorpusConformance(
   requireEqual(unit(feature, "p-footnote").sourceText, "foot&note", "Entity semantics changed")
   requireEqual(unit(feature, "p-endnote").locator.scope, "endnote", "Endnote lost scope")
   requireEqual(unit(feature, "p-note").locator.scope, "note", "Note lost scope")
+  const processingInstruction = unit(feature, "p-processing")
+  requireDeepEqual(
+    processingInstruction.slots.map((slot) => ({
+      text: slot.text,
+      editable: slot.editable,
+    })),
+    [
+      { text: "literal text after marker", editable: true },
+      { text: "left", editable: true },
+      { text: "right", editable: true },
+    ],
+    "Processing-instruction literal text was not exposed as editable slots",
+  )
+  requireDeepEqual(
+    processingInstruction.protectedTokens.map((token) => ({
+      kind: token.kind,
+      xmlName: token.xmlName,
+      position: token.position,
+    })),
+    [
+      { kind: "unknown", xmlName: "?ACE", position: 0 },
+      { kind: "unknown", xmlName: "?ACE", position: 2 },
+    ],
+    "Processing instructions were not preserved as protected anchors",
+  )
   requireEqual(unit(feature, "p-anchored").locator.scope, "anchored-story", "Anchor lost scope")
   requireEqual(unit(feature, "p-text-path").locator.scope, "text-path", "Text path lost scope")
   requireEqual(unit(feature, "p-master").locator.scope, "master-story", "Master story lost scope")
@@ -328,6 +363,10 @@ export async function runIdmlCorpusConformance(
     exportedMain.includes("<Content>nested</Content><Br/><Content>cell translated</Content>"),
     "User line break was not surgically encoded inside the original style run",
   )
+  requireCondition(
+    exportedMain.includes("<?ACE 3?>") && exportedMain.includes("<?ACE 7?>"),
+    "Content processing instructions were not preserved during translation",
+  )
   const reparsed = await parseIdml(exported.bytes)
   requireCondition(
     unit(reparsed, "p-mixed").sourceText.includes("translated CJK"),
@@ -347,6 +386,12 @@ export async function runIdmlCorpusConformance(
     unit(reparsed, "p-footnote").sourceText,
     "translated footnote",
     "Footnote translation did not survive re-import",
+  )
+  requireCondition(
+    unit(reparsed, "p-processing").sourceText.includes(
+      "[translated:p-processing] literal text after marker",
+    ),
+    "Processing-instruction literal translation did not survive re-import",
   )
   requireEqual(
     unit(reparsed, "TextVariable/Custom").sourceText,

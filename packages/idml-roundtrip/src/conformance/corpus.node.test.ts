@@ -25,8 +25,8 @@ describe("generated IDML corpus in Node", () => {
       validPackages: 2,
       hostilePackagesRejected: 10,
       metadataContracts: 3,
-      featureUnitCount: 14,
-      translatedUnitCount: 14,
+      featureUnitCount: 15,
+      translatedUnitCount: 15,
       runtime: "node",
     })
   })

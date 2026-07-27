@@ -6,7 +6,7 @@
   "valid": [
     {
       "path": "valid/feature-rich.idml",
-      "sha256": "1892e877962b9723906b4b5cd9c766ac682a3205b9a2285225461e1dc7e58cc2",
+      "sha256": "4eb9e2658a7b90c364f25d21bc52175ccb6f67fc6d24ecef0a6bf21e53a1dad1",
       "profiles": [
         "generic",
         "biblica"
@@ -39,7 +39,7 @@
   "invalid": [
     {
       "path": "invalid/malformed-xml.idml",
-      "sha256": "6e9b87fa69c2bc1427bff2d9250abc1a6ad56687d5ffd9d68a3a997563703ce4",
+      "sha256": "3d72df33b9b8cee4be406cec21c0b709e986fcfa2fabb1dff22c9b8df7a6a681",
       "operation": "parse",
       "errorCode": "MALFORMED_XML"
     },
@@ -51,7 +51,7 @@
     },
     {
       "path": "invalid/corrupt-zip.idml",
-      "sha256": "1323056fcc6da2266efabd495f9b8ee0012db8e7a272ace84e5e47e1989415fb",
+      "sha256": "11af675130ac5d8dcc53f2e61c4655c1cc308ecb238ce3bc023437b1576ed264",
       "operation": "inspect",
       "errorCode": "INVALID_ZIP"
     },

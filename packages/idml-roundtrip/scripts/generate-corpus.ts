@@ -62,6 +62,7 @@ const mainStory = [
   '<Footnote Self="footnote-1"><ParagraphStyleRange Self="p-footnote"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Footnote"><Content>foot&amp;note</Content></CharacterStyleRange></ParagraphStyleRange></Footnote>\r\n',
   '<EndnoteRange Self="endnote-1"><ParagraphStyleRange Self="p-endnote"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Endnote"><Content>endnote</Content></CharacterStyleRange></ParagraphStyleRange></EndnoteRange>\r\n',
   '<Note Self="note-1"><ParagraphStyleRange Self="p-note"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Note"><Content>translator note</Content></CharacterStyleRange></ParagraphStyleRange></Note>\r\n',
+  '<ParagraphStyleRange Self="p-processing"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content><?ACE 3?>literal text after marker</Content><Content>left<?ACE 7?>right</Content></CharacterStyleRange></ParagraphStyleRange>\r\n',
   '<ParagraphStyleRange Self="p-terminator"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>soft</Content><Br/><Content>return&#13;marker</Content></CharacterStyleRange></ParagraphStyleRange>\r\n',
   "</Story>\r\n",
   "</idPkg:Story>\r\n",

@@ -105,6 +105,26 @@ interface SlotElement {
   readonly contentPartCount: number
 }
 
+interface ContentSlotFragment {
+  readonly kind: "slot"
+  readonly text: string
+  readonly encoding: "text" | "cdata"
+}
+
+interface ContentProtectedFragment {
+  readonly kind: "protected"
+  readonly tokenKind: "tab" | "unknown"
+  readonly xmlName: string
+  readonly raw: string
+}
+
+type ContentFragment = ContentSlotFragment | ContentProtectedFragment
+
+interface ContentLayout {
+  readonly opaque: boolean
+  readonly fragments: readonly ContentFragment[]
+}
+
 interface UnitExtraction {
   readonly unit: IdmlTranslationUnit
   readonly slotElements: readonly SlotElement[]
@@ -477,10 +497,10 @@ export async function exportIdml(
         continue
       }
       unitChanged = true
-      const replacement = replacementForSlot(
+      const replacement = replacementForContent(
         member.xml.source,
         contentElement,
-        translatedParts.join("\t"),
+        translatedParts,
         member.inspection.path,
       )
       const memberReplacements = replacementsByMember.get(member.inspection.path) ?? []
@@ -1200,7 +1220,22 @@ async function extractCustomVariableUnit(
       document.source,
     )
   }
-  const protectedTokens = tabTokensForContentSlots(slotElements)
+  const protectedTokens: IdmlProtectedToken[] = []
+  const diagnostics: IdmlDiagnostic[] = []
+  let slotBoundary = 0
+  for (const element of contents) {
+    const structure = extractContentProtectedStructure(
+      element,
+      memberPath,
+      document.source,
+      slotBoundary,
+    )
+    for (const token of structure.tokens) {
+      protectedTokens.push({ ...token, index: protectedTokens.length })
+    }
+    diagnostics.push(...structure.diagnostics)
+    slotBoundary += structure.slotCount
+  }
   const locator = await createLocator(
     document,
     variable,
@@ -1213,7 +1248,7 @@ async function extractCustomVariableUnit(
     order,
     slotElements.map((entry) => entry.slot),
     protectedTokens,
-    [],
+    diagnostics,
   )
   return { unit, slotElements }
 }
@@ -1279,41 +1314,17 @@ function extractProtectedTokens(
       if (child.kind !== "element") continue
       if (child.localName === "ParagraphStyleRange") continue
       if (child.localName === "Content") {
-        const text = contentText(child)
-        if (text.includes("\t") && !contentHasOpaqueMarkup(source, child)) {
-          const parts = text.split("\t")
-          for (let partIndex = 1; partIndex < parts.length; partIndex += 1) {
-            tokens.push({
-              index: tokens.length,
-              kind: "tab",
-              xmlName: child.name,
-              position: slotBoundary + partIndex,
-            })
-          }
-          slotBoundary += parts.length
-        } else {
-          slotBoundary += 1
+        const structure = extractContentProtectedStructure(
+          child,
+          memberPath,
+          source,
+          slotBoundary,
+        )
+        for (const token of structure.tokens) {
+          tokens.push({ ...token, index: tokens.length })
         }
-        if (contentHasOpaqueMarkup(source, child)) {
-          tokens.push({
-            index: tokens.length,
-            kind: "unknown",
-            xmlName: child.name,
-            position: Math.max(0, slotBoundary - 1),
-          })
-          diagnostics.push(
-            diagnostic(
-              "UNSUPPORTED_CONSTRUCT",
-              "Markup inside an IDML Content slot was locked and preserved",
-              memberPath,
-              undefined,
-              {
-                unsupportedDisposition: "unsupported-literal",
-                constructKind: "opaque-content-markup",
-              },
-            ),
-          )
-        }
+        diagnostics.push(...structure.diagnostics)
+        slotBoundary += structure.slotCount
         continue
       }
       if (child.localName === "Properties") continue
@@ -1356,9 +1367,12 @@ function appendContentSlots(
   characterStyleId: string,
   source: string,
 ): void {
-  const text = contentText(element)
-  const opaque = contentHasOpaqueMarkup(source, element)
-  const parts = opaque ? [text] : text.split("\t")
+  const layout = analyzeContentLayout(source, element)
+  const parts = layout.opaque
+    ? [{ kind: "slot", text: contentText(element), encoding: "text" } as const]
+    : layout.fragments.filter(
+        (fragment): fragment is ContentSlotFragment => fragment.kind === "slot",
+      )
   for (let contentPart = 0; contentPart < parts.length; contentPart += 1) {
     slots.push({
       element,
@@ -1366,28 +1380,78 @@ function appendContentSlots(
       contentPartCount: parts.length,
       slot: {
         index: slots.length,
-        text: parts[contentPart] ?? "",
+        text: parts[contentPart]?.text ?? "",
         characterStyleId,
-        editable: !opaque,
+        editable: !layout.opaque,
       },
     })
   }
 }
 
-function tabTokensForContentSlots(
-  slots: readonly SlotElement[],
-): IdmlProtectedToken[] {
+function extractContentProtectedStructure(
+  element: XmlElement,
+  memberPath: string,
+  source: string,
+  slotBoundary: number,
+): {
+  readonly tokens: readonly IdmlProtectedToken[]
+  readonly diagnostics: readonly IdmlDiagnostic[]
+  readonly slotCount: number
+} {
+  const layout = analyzeContentLayout(source, element)
   const tokens: IdmlProtectedToken[] = []
-  for (const binding of slots) {
-    if (binding.contentPart === 0) continue
+  const diagnostics: IdmlDiagnostic[] = []
+  if (layout.opaque) {
+    tokens.push({
+      index: 0,
+      kind: "unknown",
+      xmlName: element.name,
+      position: slotBoundary,
+    })
+    diagnostics.push(
+      diagnostic(
+        "UNSUPPORTED_CONSTRUCT",
+        "Markup inside an IDML Content slot was locked and preserved",
+        memberPath,
+        undefined,
+        {
+          unsupportedDisposition: "unsupported-literal",
+          constructKind: "opaque-content-markup",
+        },
+      ),
+    )
+    return { tokens, diagnostics, slotCount: 1 }
+  }
+
+  let localSlotBoundary = 0
+  for (const fragment of layout.fragments) {
+    if (fragment.kind === "slot") {
+      localSlotBoundary += 1
+      continue
+    }
     tokens.push({
       index: tokens.length,
-      kind: "tab",
-      xmlName: binding.element.name,
-      position: binding.slot.index,
+      kind: fragment.tokenKind,
+      xmlName: fragment.xmlName,
+      position: slotBoundary + localSlotBoundary,
     })
+    if (fragment.tokenKind === "unknown") {
+      diagnostics.push(
+        diagnostic(
+          "UNSUPPORTED_CONSTRUCT",
+          `Processing instruction <${fragment.xmlName}> inside IDML Content was preserved as a protected token`,
+          memberPath,
+          undefined,
+          {
+            unsupportedDisposition: "preserved-nonliteral",
+            constructKind: "processing-instruction",
+            xmlName: fragment.xmlName,
+          },
+        ),
+      )
+    }
   }
-  return tokens
+  return { tokens, diagnostics, slotCount: localSlotBoundary }
 }
 
 function contentText(element: XmlElement): string {
@@ -1398,22 +1462,131 @@ function contentText(element: XmlElement): string {
   return text
 }
 
-function contentHasOpaqueMarkup(source: string, element: XmlElement): boolean {
-  if (element.selfClosing) return false
-  const interior = source.slice(element.openEnd, element.closeStart)
-  return interior.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "").includes("<")
+function analyzeContentLayout(source: string, element: XmlElement): ContentLayout {
+  if (element.selfClosing) {
+    return {
+      opaque: false,
+      fragments: [{ kind: "slot", text: "", encoding: "text" }],
+    }
+  }
+
+  const fragments: ContentFragment[] = []
+  let cursor = element.openEnd
+  for (const child of element.children) {
+    if (child.kind === "element") return opaqueContentLayout(element)
+    const gap = processingInstructionFragments(
+      source.slice(cursor, child.start),
+    )
+    if (!gap) return opaqueContentLayout(element)
+    fragments.push(...gap)
+    appendLiteralFragments(
+      fragments,
+      child.value,
+      child.kind === "cdata" ? "cdata" : "text",
+      element.name,
+    )
+    cursor = child.end
+  }
+  const trailing = processingInstructionFragments(
+    source.slice(cursor, element.closeStart),
+  )
+  if (!trailing) return opaqueContentLayout(element)
+  fragments.push(...trailing)
+  const containsProcessingInstruction = fragments.some(
+    (fragment) => (
+      fragment.kind === "protected" && fragment.tokenKind === "unknown"
+    ),
+  )
+  const literalFragments = fragments.filter(
+    (fragment): fragment is ContentSlotFragment => fragment.kind === "slot",
+  )
+  if (
+    containsProcessingInstruction &&
+    literalFragments.every((fragment) => fragment.text.trim().length === 0)
+  ) {
+    // Keep the established v2 representation for non-literal ACE markers so
+    // reparsing an already-imported document does not invalidate its anchors.
+    return opaqueContentLayout(element)
+  }
+  if (!fragments.some((fragment) => fragment.kind === "slot")) {
+    fragments.push({ kind: "slot", text: "", encoding: "text" })
+  }
+  return { opaque: false, fragments }
+}
+
+function opaqueContentLayout(element: XmlElement): ContentLayout {
+  return {
+    opaque: true,
+    fragments: [{
+      kind: "slot",
+      text: contentText(element),
+      encoding: "text",
+    }],
+  }
+}
+
+function appendLiteralFragments(
+  fragments: ContentFragment[],
+  text: string,
+  encoding: "text" | "cdata",
+  xmlName: string,
+): void {
+  const parts = text.split("\t")
+  for (let index = 0; index < parts.length; index += 1) {
+    if (index > 0) {
+      fragments.push({
+        kind: "protected",
+        tokenKind: "tab",
+        xmlName,
+        raw: "\t",
+      })
+    }
+    fragments.push({
+      kind: "slot",
+      text: parts[index] ?? "",
+      encoding,
+    })
+  }
+}
+
+function processingInstructionFragments(
+  source: string,
+): ContentProtectedFragment[] | null {
+  const fragments: ContentProtectedFragment[] = []
+  let cursor = 0
+  while (cursor < source.length) {
+    if (!source.startsWith("<?", cursor)) return null
+    const end = source.indexOf("?>", cursor + 2)
+    if (end === -1) return null
+    const raw = source.slice(cursor, end + 2)
+    const target = raw.slice(2, -2).match(/^([A-Za-z_:][A-Za-z0-9_.:-]*)/)
+    if (!target?.[1]) return null
+    fragments.push({
+      kind: "protected",
+      tokenKind: "unknown",
+      xmlName: `?${target[1]}`,
+      raw,
+    })
+    cursor = end + 2
+  }
+  return fragments
 }
 
 async function structuralXmlSha256(document: XmlDocument): Promise<string> {
-  return sha256Text(JSON.stringify(structuralXmlElement(document.root)))
+  return sha256Text(JSON.stringify(structuralXmlElement(document.root, document.source)))
 }
 
-function structuralXmlElement(element: XmlElement): unknown {
+function structuralXmlElement(element: XmlElement, source: string): unknown {
   const attributes = [...element.attributes]
     .map((attribute) => [attribute.name, attribute.value] as const)
     .sort((left, right) => codeUnitCompare(left[0], right[0]))
   if (isLiteralTextElement(element)) {
-    return ["literal", element.name, attributes]
+    return [
+      "literal",
+      element.name,
+      attributes,
+      literalMarkupFingerprint(element, source),
+    ]
   }
 
   const significantChildren = element.children.filter(
@@ -1426,7 +1599,7 @@ function structuralXmlElement(element: XmlElement): unknown {
       children.push(["text", child.kind, child.value])
       continue
     }
-    children.push(structuralXmlElement(child))
+    children.push(structuralXmlElement(child, source))
     if (child.localName !== "Content") continue
 
     // A translated slot containing editor line breaks is exported as an
@@ -1449,6 +1622,31 @@ function structuralXmlElement(element: XmlElement): unknown {
     }
   }
   return ["element", element.name, attributes, element.selfClosing, children]
+}
+
+function literalMarkupFingerprint(
+  element: XmlElement,
+  source: string,
+): readonly unknown[] {
+  if (element.selfClosing) return ["self-closing"]
+  const fingerprint: unknown[] = []
+  let cursor = element.openEnd
+  for (const child of element.children) {
+    const gap = source.slice(cursor, child.start)
+    if (gap.length > 0) fingerprint.push(["markup", gap])
+    if (child.kind === "element") {
+      fingerprint.push([
+        "element",
+        source.slice(child.start, child.end),
+      ])
+    } else if (child.kind === "cdata") {
+      fingerprint.push(["cdata"])
+    }
+    cursor = child.end
+  }
+  const trailing = source.slice(cursor, element.closeStart)
+  if (trailing.length > 0) fingerprint.push(["markup", trailing])
+  return fingerprint
 }
 
 function isLiteralTextElement(element: XmlElement): boolean {
@@ -1655,25 +1853,42 @@ function resolveAndVerifyElement(
   return target
 }
 
-function replacementForSlot(
+function replacementForContent(
   source: string,
   element: XmlElement,
-  translatedText: string,
+  translatedParts: readonly string[],
   memberPath: string,
 ): Replacement {
-  const pieces = translatedText.split(/\r\n|\r|\n/)
-  const originalInterior = element.selfClosing
-    ? ""
-    : source.slice(element.openEnd, element.closeStart)
-  const preserveCdata = /^<!\[CDATA\[[\s\S]*\]\]>$/.test(originalInterior)
-  const translatedXml = pieces
-    .map((piece) => {
-      const escaped = escapeXmlText(piece, memberPath)
-      return preserveCdata
-        ? `<![CDATA[${piece.replaceAll("]]>", "]]]]><![CDATA[>")}]]>`
-        : escaped
-    })
-    .join(`</${element.name}><Br/><${element.name}>`)
+  const layout = analyzeContentLayout(source, element)
+  if (layout.opaque) {
+    throw new IdmlError(
+      "EXPORT_REJECTED",
+      `IDML Content markup in ${memberPath} is opaque and cannot be translated`,
+    )
+  }
+  const slotCount = layout.fragments.filter(
+    (fragment) => fragment.kind === "slot",
+  ).length
+  if (slotCount !== translatedParts.length) {
+    throw new IdmlError(
+      "LOCATOR_STALE",
+      `IDML Content slot structure changed in ${memberPath}`,
+    )
+  }
+  let slotIndex = 0
+  const translatedXml = layout.fragments.map((fragment) => {
+    if (fragment.kind === "protected") return fragment.raw
+    const translatedText = translatedParts[slotIndex] ?? ""
+    slotIndex += 1
+    const pieces = translatedText.split(/\r\n|\r|\n/)
+    return pieces
+      .map((piece) => (
+        fragment.encoding === "cdata"
+          ? `<![CDATA[${piece.replaceAll("]]>", "]]]]><![CDATA[>")}]]>`
+          : escapeXmlText(piece, memberPath)
+      ))
+      .join(`</${element.name}><Br/><${element.name}>`)
+  }).join("")
   if (!element.selfClosing) {
     return {
       start: element.openEnd,

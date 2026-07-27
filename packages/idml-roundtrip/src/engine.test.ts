@@ -476,6 +476,126 @@ describe("strict surgical IDML export", () => {
     expect(storyXml).toContain("<Content>translated</Content>")
   })
 
+  it("exposes literal text around Content processing instructions while preserving them as anchors", async () => {
+    const processingInstructionStory = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="ppi"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content><?ACE 3?>Here is how Jerusalem was captured.</Content><Content>left<?ACE 7?>right	end</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const bytes = await makeIdml({
+      "Stories/Story_u1.xml": processingInstructionStory,
+    })
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "ppi")
+
+    expect(unit.slots).toEqual([
+      expect.objectContaining({
+        text: "Here is how Jerusalem was captured.",
+        editable: true,
+      }),
+      expect.objectContaining({ text: "left", editable: true }),
+      expect.objectContaining({ text: "right", editable: true }),
+      expect.objectContaining({ text: "end", editable: true }),
+    ])
+    expect(
+      unit.protectedTokens.map(({ kind, xmlName, position }) => ({
+        kind,
+        xmlName,
+        position,
+      })),
+    ).toEqual([
+      { kind: "unknown", xmlName: "?ACE", position: 0 },
+      { kind: "unknown", xmlName: "?ACE", position: 2 },
+      { kind: "tab", xmlName: "Content", position: 3 },
+    ])
+    expect(unit.diagnostics).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining("<?ACE>"),
+        details: expect.objectContaining({
+          unsupportedDisposition: "preserved-nonliteral",
+          constructKind: "processing-instruction",
+          xmlName: "?ACE",
+        }),
+      }),
+    )
+
+    const targetHtml = unit.sourceHtml
+      .replace(
+        ">Here is how Jerusalem was captured.</span>",
+        ">Voici comment Jérusalem a été prise.<br>Deuxième ligne</span>",
+      )
+      .replace(">left</span>", ">gauche</span>")
+      .replace(">right</span>", ">droite</span>")
+      .replace(">end</span>", ">fin</span>")
+    const exported = await exportIdml(
+      bytes,
+      [translationFor(unit, targetHtml)],
+      { strict: true },
+    )
+    const storyXml = await memberText(exported.bytes, "Stories/Story_u1.xml")
+
+    expect(storyXml).toContain(
+      "<Content><?ACE 3?>Voici comment Jérusalem a été prise.</Content><Br/><Content>Deuxième ligne</Content>",
+    )
+    expect(storyXml).toContain(
+      "<Content>gauche<?ACE 7?>droite\tfin</Content>",
+    )
+    await expect(validateExport(exported.bytes, parsed.manifest)).resolves.toEqual([])
+
+    const withoutProcessingInstruction = await makeIdml({
+      "Stories/Story_u1.xml": storyXml.replace("<?ACE 3?>", ""),
+    })
+    await expect(
+      validateExport(withoutProcessingInstruction, parsed.manifest),
+    ).resolves.toContainEqual(
+      expect.objectContaining({
+        code: "MEMBER_CHANGED",
+        memberPath: "Stories/Story_u1.xml",
+      }),
+    )
+
+    const clearedTargetHtml = unit.sourceHtml
+      .replace(">Here is how Jerusalem was captured.</span>", "></span>")
+      .replace(">left</span>", "></span>")
+      .replace(">right</span>", "></span>")
+      .replace(">end</span>", "></span>")
+    const cleared = await exportIdml(
+      bytes,
+      [translationFor(unit, clearedTargetHtml)],
+      { strict: true },
+    )
+    expect(await memberText(cleared.bytes, "Stories/Story_u1.xml")).toContain(
+      "<Content><?ACE 3?></Content><Content><?ACE 7?>\t</Content>",
+    )
+    await expect(validateExport(cleared.bytes, parsed.manifest)).resolves.toEqual([])
+  })
+
+  it("keeps whitespace-only processing-instruction slots in their established locked shape", async () => {
+    const whitespaceInstructionStory = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="pcompat"><CharacterStyleRange><Content><?ACE 3?> </Content><Content>Visible text</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const parsed = await parseIdml(
+      await makeIdml({ "Stories/Story_u1.xml": whitespaceInstructionStory }),
+    )
+    const unit = unitById(parsed.units, "pcompat")
+
+    expect(unit.slots).toEqual([
+      expect.objectContaining({ text: " ", editable: false }),
+      expect.objectContaining({ text: "Visible text", editable: true }),
+    ])
+    expect(unit.protectedTokens).toContainEqual(
+      expect.objectContaining({
+        kind: "unknown",
+        xmlName: "Content",
+        position: 0,
+      }),
+    )
+    expect(unit.diagnostics).toContainEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          unsupportedDisposition: "unsupported-literal",
+          constructKind: "opaque-content-markup",
+        }),
+      }),
+    )
+  })
+
   it("preserves a Content slot's CDATA representation while replacing its text", async () => {
     const cdataStory = `<?xml version="1.0" encoding="UTF-8"?>
 <idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="pcdata"><CharacterStyleRange><Content><![CDATA[A < B]]></Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`

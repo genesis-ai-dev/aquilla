@@ -21,6 +21,7 @@
 
 import { useMemo } from "react"
 import { Check, X, HelpCircle } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   alignCell,
@@ -136,28 +137,32 @@ function AlignmentRow({
             content={`Confirm: mark "${link.srcToken} -> ${link.tgtToken}" as a correct word-level alignment. Confirmed pairs teach the statistical glosser and improve future back-translations.`}
             className="max-w-xs"
           >
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={onConfirm}
-              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-emerald-500/20 hover:text-emerald-700 dark:hover:text-emerald-300"
+              className="shrink-0 text-muted-foreground hover:bg-emerald-500/20 hover:text-emerald-700 dark:hover:text-emerald-300"
               aria-label={`Confirm alignment: ${link.srcToken} translates as ${link.tgtToken}. This teaches the glosser.`}
             >
-              <Check className="h-3 w-3" />
-            </button>
+              <Check />
+            </Button>
           </AppTooltip>
           {/* AQU-240: tooltip/aria-label explains that invalidating penalizes incorrect suggestions */}
           <AppTooltip
             content={`Reject: mark "${link.srcToken} -> ${link.tgtToken}" as an incorrect alignment. Rejected pairs are penalized so this suggestion won't appear again.`}
             className="max-w-xs"
           >
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={onInvalidate}
-              className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+              className="shrink-0 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
               aria-label={`Reject alignment: ${link.srcToken} does not translate as ${link.tgtToken}. This penalizes the glosser suggestion.`}
             >
-              <X className="h-3 w-3" />
-            </button>
+              <X />
+            </Button>
           </AppTooltip>
         </>
       )}

@@ -99,14 +99,16 @@ export function ModelListEditor({
                 label="Agent"
                 title="Use as the agent model"
               />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => removeModel(id)}
                 aria-label={`Remove ${id}`}
-                className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                className="text-muted-foreground hover:text-destructive"
               >
-                <X className="size-3.5" />
-              </button>
+                <X />
+              </Button>
             </li>
           ))}
         </ul>

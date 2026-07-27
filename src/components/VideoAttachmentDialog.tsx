@@ -142,8 +142,8 @@ export function VideoAttachmentDialog({ open, onOpenChange, current, onSave }: V
                 <p className="text-sm truncate">{currentLabel}</p>
               </div>
               <AppTooltip content="Remove attachment">
-                <Button variant="ghost" size="sm" onClick={handleRemove} aria-label="Remove attachment">
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                <Button variant="ghost" size="icon-sm" onClick={handleRemove} aria-label="Remove attachment">
+                  <Trash2 className="text-destructive" />
                 </Button>
               </AppTooltip>
             </div>

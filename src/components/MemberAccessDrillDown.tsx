@@ -41,6 +41,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
           size="icon-sm"
           onClick={onClose}
           aria-label="Close"
+          className="text-muted-foreground"
         >
           <X />
         </Button>

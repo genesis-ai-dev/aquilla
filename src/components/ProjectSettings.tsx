@@ -1018,9 +1018,8 @@ export function ProjectSettings() {
             <Menu.Trigger
               render={
                 <Button
-                  size="sm"
+                  size="icon-sm"
                   disabled={saving}
-                  className="px-2"
                   aria-label="More save options"
                 >
                   <ChevronDown />

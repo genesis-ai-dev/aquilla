@@ -15,6 +15,7 @@
 
 import { useMemo, useRef, useState } from "react"
 import { BookOpen, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { PassageRow } from "@/lib/agent/protocol"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
@@ -147,24 +148,28 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
         </span>
         {navigable && (
           <span className="flex items-center">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => void navigate(-1)}
               disabled={loading}
               aria-label="Previous chapter"
-              className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+              className="text-muted-foreground"
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <button
+              <ChevronLeft />
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => void navigate(1)}
               disabled={loading}
               aria-label="Next chapter"
-              className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+              className="text-muted-foreground"
             >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+              <ChevronRight />
+            </Button>
           </span>
         )}
         {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-label="Loading chapter" />}

@@ -199,18 +199,20 @@ export function RuleSuggestFromEditsDialog({
             : "Configure LLM in project settings first"
         }
       >
-        <DialogTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!isConfigured}
-            />
-          }
-        >
-          <Sparkles className="mr-1 h-3.5 w-3.5" />
-          Suggest from edits
-        </DialogTrigger>
+        <span className="inline-flex">
+          <DialogTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!isConfigured}
+              />
+            }
+          >
+            <Sparkles className="mr-1 h-3.5 w-3.5" />
+            Suggest from edits
+          </DialogTrigger>
+        </span>
       </AppTooltip>
 
       <DialogContent className="max-w-2xl">

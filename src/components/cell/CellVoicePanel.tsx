@@ -456,9 +456,9 @@ function VoiceCombobox({
   }, [open])
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <AppTooltip content="Choose a voice">
+      <AppTooltip content="Choose a voice">
+        <PopoverTrigger
+          render={
             <Button
               type="button"
               size="xs"
@@ -466,21 +466,21 @@ function VoiceCombobox({
               disabled={busy}
               aria-label={`Voice: ${active.name}. Choose a voice`}
               className="w-full justify-start gap-1.5"
-            >
-              <span className="relative shrink-0">
-                <VoiceAvatar voice={active} size={18} />
-                {busy && (
-                  <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
-                    <Spinner className="h-3 w-3" />
-                  </span>
-                )}
+            />
+          }
+        >
+          <span className="relative shrink-0">
+            <VoiceAvatar voice={active} size={18} />
+            {busy && (
+              <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
+                <Spinner className="h-3 w-3" />
               </span>
-              <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
-              <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            </Button>
-          </AppTooltip>
-        }
-      />
+            )}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </PopoverTrigger>
+      </AppTooltip>
       <PopoverContent align="start" side="top" className="w-60 p-2">
         <InputGroup className="mb-1.5">
           <InputGroupAddon>

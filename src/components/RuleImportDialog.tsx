@@ -255,18 +255,21 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
             : "Configure LLM in settings first"
         }
       >
-        <DialogTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!isConfigured}
-            />
-          }
-        >
-          <Upload className="mr-1 h-3.5 w-3.5" />
-          Import from doc
-        </DialogTrigger>
+        {/* Span wrapper so the tooltip still receives hover when the button is disabled. */}
+        <span className="inline-flex">
+          <DialogTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!isConfigured}
+              />
+            }
+          >
+            <Upload className="mr-1 h-3.5 w-3.5" />
+            Import from doc
+          </DialogTrigger>
+        </span>
       </AppTooltip>
 
       <DialogContent className="max-w-2xl">

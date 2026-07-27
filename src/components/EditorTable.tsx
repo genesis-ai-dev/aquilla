@@ -119,6 +119,7 @@ import {
   resolveTextDirection,
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
+import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
@@ -3294,6 +3295,13 @@ function EditorRow({
   }, [remoteCellPresence])
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
+  // AQU-664: hover ("wave over") a violation blot → preview its rule
+  // explanation. Separate from the click path (openRuleId) so a light,
+  // non-interactive popover appears on hover and dismisses on mouse-out.
+  const [hoveredRule, setHoveredRule] = useState<{ ruleId: string; anchor: ViolationAnchor } | null>(null)
+  // AQU-664: live editor text, published on a short debounce by TranslatedEditor
+  // so terminology blots recompute off the live buffer (not the ~1.2s commit).
+  const [liveTargetText, setLiveTargetText] = useState<string | null>(null)
   const [examplesExpanded, setExamplesExpanded] = useState(false)
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
@@ -3448,6 +3456,31 @@ function EditorRow({
   const mergedInfractions = useMemo(
     () => [...cellInfractions, ...waivedInfractions],
     [cellInfractions, waivedInfractions],
+  )
+
+  // AQU-664: terminology-only rules, extracted from the shared ruleMap. Used to
+  // recompute term violations off the live editor buffer so the inline blot
+  // lights up as-you-type instead of after the ~1.2s commit-idle debounce.
+  const enabledTermRules = useMemo(() => selectTermRules(ruleMap.values()), [ruleMap])
+
+  // Live terminology infractions computed from the un-committed buffer. Only
+  // active while this cell is being edited and a live snapshot has arrived;
+  // otherwise null so the committed (health-derived) infractions are used.
+  const liveTermInfractions = useMemo<RuleInfraction[] | null>(() => {
+    if (!isEditorActive || liveTargetText === null) return null
+    return computeLiveTermInfractions(cell, liveTargetText, enabledTermRules)
+  }, [isEditorActive, liveTargetText, enabledTermRules, cell])
+
+  // Infractions that drive the inline blot decorations. While editing, the
+  // committed `term:` infractions (which lag by a commit cycle) are replaced by
+  // the live ones so the terminology blot tracks the buffer; non-terminology
+  // infractions keep the committed cadence.
+  const blotInfractions = useMemo(
+    () =>
+      liveTermInfractions === null
+        ? mergedInfractions
+        : mergeBlotInfractions(mergedInfractions, liveTermInfractions),
+    [mergedInfractions, liveTermInfractions],
   )
 
   const handleWaive = useCallback((input: { ruleId: string; reason?: string }) => {
@@ -4480,11 +4513,26 @@ function EditorRow({
   // and a detached anchor makes the popover fall back to the viewport origin —
   // so snapshot the rect and anchor to a virtual element instead.
   const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
+    // AQU-664: clicking commits to the full (waive-capable) popover — clear any
+    // transient hover preview so the two don't stack.
+    setHoveredRule(null)
     setExpanded(true)
     setExpansionTab("issues")
     setOpenRuleId(ruleId)
     const rect = anchor.getBoundingClientRect()
     setOpenRuleAnchor({ getBoundingClientRect: () => rect })
+  }, [])
+
+  // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
+  // rule explanation; mouse-out clears it. Snapshotting mirrors openInlineRule
+  // (the blot node can detach on re-render before the popover positions).
+  const handleRuleHover = useCallback((ruleId: string | null, anchor: HTMLElement | null) => {
+    if (!ruleId || !anchor) {
+      setHoveredRule(null)
+      return
+    }
+    const rect = anchor.getBoundingClientRect()
+    setHoveredRule({ ruleId, anchor: { getBoundingClientRect: () => rect } })
   }, [])
 
   const isMultiSelected = useIsSelected(cell.id)
@@ -5028,10 +5076,12 @@ function EditorRow({
               compactHeight={hasInlineFootnotes}
               editable={editable && !isLoading}
               heldByLabel={lockHolderLabel}
-              infractions={mergedInfractions}
+              infractions={blotInfractions}
               ruleSeverity={ruleSeverity}
               waivedRuleIds={waivedRuleIds}
               onRuleClick={openInlineRule}
+              onRuleHover={handleRuleHover}
+              onLiveTextChange={setLiveTargetText}
               audioTimings={cellAudioTimings}
               audioCurrentTime={hasAudio ? audioController.currentTime : undefined}
               onSeekToTime={hasAudio ? audioController.seek : undefined}
@@ -6177,6 +6227,31 @@ function EditorRow({
             onWaive={handleWaive}
             onUnwaive={handleUnwaive}
           />
+        )
+      })()}
+
+      {/* AQU-664: hover ("wave over") preview of a violation blot's rule
+          explanation. Non-interactive and separate from the click popover — it
+          appears on mouse-in and dismisses on mouse-out (see handleRuleHover /
+          TranslatedEditor's blot hover handlers). Suppressed while the click
+          popover is open so the two never stack. */}
+      {hoveredRule && !openRuleId && (() => {
+        const inf = blotInfractions.find((i) => i.ruleId === hoveredRule.ruleId)
+        const rule = ruleMap.get(hoveredRule.ruleId)
+        if (!inf || !rule) return null
+        return (
+          <Popover open>
+            <PopoverContent
+              anchor={hoveredRule.anchor}
+              sideOffset={6}
+              initialFocus={false}
+              finalFocus={false}
+              className="pointer-events-none w-72 space-y-1 p-3 text-sm"
+            >
+              <div className="font-medium">{rule.name}</div>
+              <p className="text-xs text-muted-foreground">{inf.message}</p>
+            </PopoverContent>
+          </Popover>
         )
       })()}
 

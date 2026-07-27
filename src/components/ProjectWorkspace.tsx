@@ -164,6 +164,10 @@ import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import {
+  Select, SelectContent, SelectGroup, SelectItem, SelectSeparator, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { summarizeTextDirections } from "@/lib/text-direction"
@@ -5977,9 +5981,8 @@ export function ProjectWorkspace() {
   )
 }
 
-// Pick from existing corpus markers via a native <select>, with an inline
-// "Other…" option to create a brand-new marker. Replaces the prior free-text
-// input that hid the existing options behind the dialog's backdrop blur (#39).
+// Pick from existing corpus markers via a Select, with a footer
+// "Create a corpus" action that reveals an inline name field.
 // Caller wraps with `key` so internal state resets on each open.
 function MoveToCorpusDialog({
   initialValue, existingMarkers, onClose, onSave,
@@ -5990,38 +5993,72 @@ function MoveToCorpusDialog({
   onSave: (value: string) => void | Promise<void>
 }) {
   const NEW = "__new__"
+  // "Ungrouped" needs a real sentinel rather than "": an empty Select value reads
+  // as "nothing selected", so the trigger would render blank. Mapped back to ""
+  // on save.
+  const UNGROUPED = "__ungrouped__"
   const trimmed = initialValue.trim()
   const initIsNew = trimmed.length > 0 && !existingMarkers.includes(trimmed)
-  const [selection, setSelection] = useState(initIsNew ? NEW : trimmed)
+  const [selection, setSelection] = useState(
+    initIsNew ? NEW : trimmed.length === 0 ? UNGROUPED : trimmed,
+  )
   const [customValue, setCustomValue] = useState(initIsNew ? trimmed : "")
   const isNew = selection === NEW
+  const existingItems = [
+    { value: UNGROUPED, label: "Ungrouped" },
+    ...existingMarkers.map((m) => ({ value: m, label: m })),
+  ]
+  const corpusItems = [
+    ...existingItems,
+    { value: NEW, label: "Create a corpus" },
+  ]
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent className="max-w-sm">
         <DialogHeader><DialogTitle>Move to corpus</DialogTitle></DialogHeader>
-        <select
-          value={selection}
-          onChange={(e) => setSelection(e.target.value)}
-            className="bg-muted w-full rounded px-2 py-1.5 text-sm"
-        >
-          <option value="">Ungrouped</option>
-          {existingMarkers.map((m) => <option key={m} value={m}>{m}</option>)}
-          <option value={NEW}>Other…</option>
-        </select>
-        {isNew && (
-          <input
-            autoFocus
-            value={customValue}
-            onChange={(e) => setCustomValue(e.target.value)}
-            placeholder="New corpus name"
-              className="bg-muted mt-2 w-full rounded px-2 py-1 text-sm"
-          />
-        )}
+        <div className="flex flex-col gap-2">
+          <Select
+            items={corpusItems}
+            value={selection}
+            onValueChange={(v) => { if (v != null) setSelection(v) }}
+          >
+            <SelectTrigger className="w-full" aria-label="Corpus">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {existingItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+                <SelectSeparator />
+                <SelectItem value={NEW}>
+                  <Plus aria-hidden />
+                  Create a corpus
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          {isNew && (
+            <Input
+              autoFocus
+              value={customValue}
+              onChange={(e) => setCustomValue(e.target.value)}
+              placeholder="Corpus name"
+              aria-label="Corpus name"
+            />
+          )}
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button
             disabled={isNew && !customValue.trim()}
-            onClick={() => { void onSave(isNew ? customValue : selection) }}
+            onClick={() => {
+              void onSave(
+                isNew ? customValue : selection === UNGROUPED ? "" : selection,
+              )
+            }}
           >
             Save
           </Button>

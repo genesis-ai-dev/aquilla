@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { pickSelectOption } from "../../helpers/base-ui"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -57,10 +58,10 @@ test("sidebar corpus group can be renamed inline", async ({ alice }) => {
   await expect(dialog.getByRole("heading", { name: /Move to corpus/i })).toBeVisible({
     timeout: 5_000,
   })
-  const select = dialog.locator("select")
-  await select.selectOption({ label: "Other…" })
+  const select = dialog.getByRole("combobox", { name: /Corpus/i })
+  await pickSelectOption(alice, select, "Create a corpus")
 
-  const corpusNameInput = dialog.locator('input[placeholder="New corpus name"]')
+  const corpusNameInput = dialog.getByPlaceholder("Corpus name")
   await expect(corpusNameInput).toBeVisible({ timeout: 3_000 })
   await corpusNameInput.fill("OldName")
 

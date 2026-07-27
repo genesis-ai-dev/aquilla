@@ -260,13 +260,19 @@ function validatedExamples(pairs: CellPair[]): ExamplePair[] {
 
 interface SteeringOutcome {
   directions: string[]
+  /** Entry ids of the directions above — consumed by the caller ONLY when a
+   *  span actually runs. A direction sent to an exhausted run must stay
+   *  queued (visible as a chip) until there is a span for it to shape;
+   *  consuming it on a park-only wake would swallow it with zero effect. */
+  directionIds: string[]
   /** Seeds re-enqueued by refresh_span (appended to the cursor). */
   refreshedSeeds: StoredSpanSeed[]
 }
 
-/** Consume the run's unconsumed steering. Directions inject into runSpan;
- *  refresh_span entries (body = sceneBriefId) mark the brief stale and
- *  re-enqueue the matching span; notes are recorded-for-humans only. */
+/** Read the run's unconsumed steering. refresh_span entries (body =
+ *  sceneBriefId) mark the brief stale, re-enqueue the matching span, and are
+ *  consumed here along with notes (recorded-for-humans only). Directions are
+ *  returned UNCONSUMED — the tick consumes them only when a span runs. */
 async function consumeSteering(
   db: AquillaDb,
   run: ContextualRun,
@@ -278,10 +284,13 @@ async function consumeSteering(
     runId: run.id,
   })
   const directions: string[] = []
+  const directionIds: string[] = []
+  const consumedNow: string[] = []
   const refreshedSeeds: StoredSpanSeed[] = []
   for (const e of entries) {
     if (e.kind === "direction") {
       directions.push(e.body)
+      directionIds.push(e.id)
     } else if (e.kind === "refresh_span") {
       const briefId = e.body.trim()
       const brief = await getSceneBrief(db, briefId)
@@ -292,11 +301,14 @@ async function consumeSteering(
         )
         if (seed) refreshedSeeds.push(seed)
       }
+      consumedNow.push(e.id)
+    } else {
+      // kind === "note": consumed without pipeline effect (a message to humans).
+      consumedNow.push(e.id)
     }
-    // kind === "note": consumed without pipeline effect (a message to humans).
   }
-  await markSteeringConsumed(db, entries.map((e) => e.id))
-  return { directions, refreshedSeeds }
+  if (consumedNow.length > 0) await markSteeringConsumed(db, consumedNow)
+  return { directions, directionIds, refreshedSeeds }
 }
 
 // ── The tick ────────────────────────────────────────────────────────────────
@@ -354,10 +366,18 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   }
 
   if (cursor.nextIndex >= cursor.seeds.length) {
-    // Spans exhausted → parked (steering or resume can wake the run).
+    // Spans exhausted → parked (steering or resume can wake the run). Queued
+    // directions are deliberately NOT consumed here — they stay visible and
+    // apply when a span next exists (refresh, new cells, or re-run).
     const t = await parkRun(db, runId)
     if (t.status === "ok") await notify(runStateFrame(t.run))
     return { continueRun: false, status: t.status === "ok" ? "parked" : run.status }
+  }
+
+  // A span WILL run this tick — the queued directions now take effect, so
+  // consume them (exactly-once across ticks).
+  if (steering.directionIds.length > 0) {
+    await markSteeringConsumed(db, steering.directionIds)
   }
 
   const storedSeed = cursor.seeds[cursor.nextIndex]

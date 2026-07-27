@@ -368,6 +368,16 @@ export async function terminateContextualRun(): Promise<void> {
   }
 }
 
+/**
+ * Optimistic chip for a just-accepted steering direction: the server confirmed
+ * (201) it is queued for the next passage, so it shows immediately; the next
+ * snapshot refresh replaces the whole list (and drops it once consumed).
+ */
+export function noteContextualDirectionQueued(text: string): void {
+  if (_state.activeDirections.includes(text)) return
+  setState({ ..._state, activeDirections: [..._state.activeDirections, text] })
+}
+
 /** Dismiss a retained failed/terminated summary back to idle (keeps availability). */
 export function dismissContextualRunSummary(): void {
   setState({ ...IDLE_STATE, available: _state.available, fileId: _state.fileId })

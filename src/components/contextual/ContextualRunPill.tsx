@@ -24,6 +24,7 @@ import {
   useContextualRunState,
 } from "@/lib/contextual/run-store"
 import { installContextualTransport } from "@/lib/contextual/transport"
+import { ContextualSteering } from "./ContextualSteering"
 
 interface PillProps {
   projectId: string
@@ -55,52 +56,67 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
   const state = useContextualRunState()
   const progress = useContextualRunProgress()
 
-  const { available, status, phase, spanLabel } = state
+  const { available, status, phase, spanLabel, runId, activeDirections } = state
 
-  // Idle (no run) and terminated (run is over, can start fresh) share the
-  // icon-only Play affordance.
+  // "Direct the run" popover — only meaningful while a run exists to steer
+  // (running/pausing/paused/parked); idle, starting, failed and terminated
+  // states have nothing listening for directions. Rendered at ONE stable
+  // position in a single return so status-frame churn (e.g. a steering wake
+  // bouncing parked→running→parked) never unmounts it — an unmount would
+  // close the open popover under the user's cursor and drop half-typed text.
+  const steerable =
+    runId && (status === "running" || status === "pausing" || status === "paused" ||
+      status === "parked" || status === "done")
+  const steer = steerable ? (
+    <ContextualSteering
+      projectId={projectId}
+      fileId={fileId}
+      runId={runId}
+      directions={activeDirections}
+    />
+  ) : null
+
+  let content: React.ReactNode
+  let trailing: React.ReactNode = null
+  let pillClass = PILL_BASE
+  let role: "status" | undefined
+
   if (status === "idle" || status === "terminated") {
-    return (
-      <div className={PILL_BASE} data-testid="contextual-run-pill">
-        <AppTooltip content="Contextual draft">
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Contextual draft"
-            onClick={() => {
-              if (!available) { onSetupNeeded?.(); return }
-              void startContextualRun(projectId, fileId)
-            }}
-          >
-            <Play className="h-3.5 w-3.5" />
-          </Button>
-        </AppTooltip>
-      </div>
+    // Idle (no run) and terminated (run is over, can start fresh) share the
+    // icon-only Play affordance.
+    content = (
+      <AppTooltip content="Contextual draft">
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Contextual draft"
+          onClick={() => {
+            if (!available) { onSetupNeeded?.(); return }
+            void startContextualRun(projectId, fileId)
+          }}
+        >
+          <Play className="h-3.5 w-3.5" />
+        </Button>
+      </AppTooltip>
     )
-  }
-
-  if (status === "starting") {
-    return (
-      <div className={PILL_BASE} data-testid="contextual-run-pill">
+  } else if (status === "starting") {
+    content = (
+      <>
         <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
         <span className="text-muted-foreground">Starting…</span>
-      </div>
+      </>
     )
-  }
-
-  if (status === "pausing") {
-    return (
-      <div className={PILL_BASE} data-testid="contextual-run-pill">
+  } else if (status === "pausing") {
+    content = (
+      <>
         <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
         <span className="text-muted-foreground">Finishing this passage…</span>
-      </div>
+      </>
     )
-  }
-
-  if (status === "paused") {
-    return (
-      <div className={PILL_BASE} data-testid="contextual-run-pill">
+  } else if (status === "paused") {
+    content = (
+      <>
         <AppTooltip content="Resume drafting">
           <Button
             type="button"
@@ -118,102 +134,110 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
             {progress.done}/{progress.total}
           </span>
         )}
-        <AppTooltip content="Stop this run">
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Stop this run"
-            onClick={() => void terminateContextualRun()}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </AppTooltip>
-      </div>
+      </>
     )
-  }
-
-  if (status === "parked" || status === "done") {
-    return (
-      <div className={PILL_BASE} data-testid="contextual-run-pill">
+    trailing = (
+      <AppTooltip content="Stop this run">
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Stop this run"
+          onClick={() => void terminateContextualRun()}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </AppTooltip>
+    )
+  } else if (status === "parked" || status === "done") {
+    content = (
+      <>
         <Eye className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-muted-foreground">Watching for changes</span>
-        <AppTooltip content="Stop watching">
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Stop watching"
-            onClick={() => void terminateContextualRun()}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </AppTooltip>
-      </div>
+      </>
     )
-  }
-
-  if (status === "failed") {
-    return (
-      <div
-        className={cn(PILL_BASE, "border-destructive/40")}
-        data-testid="contextual-run-pill"
-        role="status"
-      >
+    trailing = (
+      <AppTooltip content="Stop watching">
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Stop watching"
+          onClick={() => void terminateContextualRun()}
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </AppTooltip>
+    )
+  } else if (status === "failed") {
+    pillClass = cn(PILL_BASE, "border-destructive/40")
+    role = "status"
+    content = (
+      <>
         <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
         <span>
           {progress.failed > 0 && progress.total > 0
             ? `${progress.failed} of ${progress.total} passages had problems`
             : "Drafting stopped unexpectedly"}
         </span>
-        <AppTooltip content="Dismiss">
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            aria-label="Dismiss"
-            onClick={dismissContextualRunSummary}
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </AppTooltip>
-      </div>
+      </>
     )
-  }
-
-  // running
-  return (
-    <div className={PILL_BASE} data-testid="contextual-run-pill">
-      <AppTooltip content="Pause after this passage">
+    trailing = (
+      <AppTooltip content="Dismiss">
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label="Pause after this passage"
-          onClick={() => void requestPauseContextualRun()}
+          aria-label="Dismiss"
+          onClick={dismissContextualRunSummary}
         >
-          <Pause className="h-3.5 w-3.5" />
+          <X className="h-3.5 w-3.5" />
         </Button>
       </AppTooltip>
-      <ProgressBar done={progress.done} total={progress.total} />
-      {(phase || spanLabel) && (
-        <span className="max-w-48 truncate text-muted-foreground">
-          {phase}
-          {phase && spanLabel ? " · " : ""}
-          {spanLabel && (
-            <button
-              type="button"
-              className="cursor-pointer underline-offset-2 hover:underline"
-              onClick={() => onSpanClick?.(spanLabel)}
-            >
-              {spanLabel}
-            </button>
-          )}
+    )
+  } else {
+    // running
+    content = (
+      <>
+        <AppTooltip content="Pause after this passage">
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Pause after this passage"
+            onClick={() => void requestPauseContextualRun()}
+          >
+            <Pause className="h-3.5 w-3.5" />
+          </Button>
+        </AppTooltip>
+        <ProgressBar done={progress.done} total={progress.total} />
+        {(phase || spanLabel) && (
+          <span className="max-w-48 truncate text-muted-foreground">
+            {phase}
+            {phase && spanLabel ? " · " : ""}
+            {spanLabel && (
+              <button
+                type="button"
+                className="cursor-pointer underline-offset-2 hover:underline"
+                onClick={() => onSpanClick?.(spanLabel)}
+              >
+                {spanLabel}
+              </button>
+            )}
+          </span>
+        )}
+        <span className="tabular-nums text-muted-foreground">
+          {progress.done}/{progress.total}
         </span>
-      )}
-      <span className="tabular-nums text-muted-foreground">
-        {progress.done}/{progress.total}
-      </span>
+      </>
+    )
+  }
+
+  return (
+    <div className={pillClass} data-testid="contextual-run-pill" role={role}>
+      {content}
+      {steer}
+      {trailing}
     </div>
   )
 }

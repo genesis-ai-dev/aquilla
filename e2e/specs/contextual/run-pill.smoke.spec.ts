@@ -63,4 +63,27 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   expect(briefs.ok()).toBe(true)
   const briefRows = (await briefs.json()) as { sceneBriefs: unknown[] }
   expect(briefRows.sceneBriefs.length).toBeGreaterThan(0)
+
+  // Steering: direct the parked run through the pill's popover. The direction
+  // is queued for the next passage — it must land server-side (2xx) and show
+  // as a chip. (Steering a parked run also wakes it server-side; the chip is
+  // asserted immediately after the POST, before the woken run can consume it.)
+  await alice.getByRole("button", { name: "Direct the run" }).click()
+  const steeringPopover = alice.getByTestId("contextual-steering-popover")
+  await expect(steeringPopover).toBeVisible()
+  await steeringPopover
+    .getByLabel("Direction for the agent")
+    .fill("Keep the tone formal in dialogue")
+  const steeringPosted = alice.waitForResponse(
+    (r) =>
+      r.request().method() === "POST" &&
+      r.url().includes("/contextual/steering") &&
+      r.status() >= 200 &&
+      r.status() < 300,
+  )
+  await steeringPopover.getByRole("button", { name: "Send" }).click()
+  await steeringPosted
+  await expect(steeringPopover.getByTestId("contextual-steering-chip")).toContainText(
+    "Keep the tone formal in dialogue",
+  )
 })

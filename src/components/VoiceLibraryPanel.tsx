@@ -212,11 +212,12 @@ export function VoiceLibraryPanel({
           <Button
             type="button"
             variant="outline"
-            className="w-full justify-center border-dashed"
+            className="w-full"
             disabled={!canEditVoices}
             onClick={() => setEditing({ kind: "create" })}
           >
-            <Plus className="mr-2 h-4 w-4" /> New voice
+            <Plus data-icon="inline-start" />
+            New voice
           </Button>
         </AppTooltip>
       </div>
@@ -330,7 +331,7 @@ function VoiceRow({
                   aria-label="More voice actions"
                   className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
                 >
-                  <MoreHorizontal className="h-4 w-4" />
+                  <MoreHorizontal />
                 </Button>
               }
             />
@@ -366,17 +367,16 @@ function MenuItem({
   destructive?: boolean
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={destructive ? "destructive" : "ghost"}
+      size="sm"
       onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent/50",
-        destructive && "text-destructive hover:bg-destructive/10",
-      )}
+      className="w-full justify-start"
     >
-      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <Icon data-icon="inline-start" />
       {label}
-    </button>
+    </Button>
   )
 }
 

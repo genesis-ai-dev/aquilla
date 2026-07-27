@@ -470,6 +470,10 @@ export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate"
 
 export interface EditorTableHandle {
   scrollToCellIndex: (index: number) => void
+  /** AQU-646: scroll to a cell by id in DISPLAY space (lens-sorted — correct
+   *  for time-ordered files, where store order ≠ display order), optionally
+   *  flashing it. Returns false when the id is not currently displayable. */
+  scrollToCellId: (cellId: string, opts?: { flash?: boolean }) => boolean
   focusCellEditorIndex: (index: number) => void
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
@@ -594,8 +598,10 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void | boolean>
   onCompleteBatch: (cells: CellData[]) => void
+  /** Draft the paragraph group containing this cell as one model call. */
+  onCompleteParagraph?: (cellId: string) => void
   healthMap: Map<string, number>
   infractions?: Map<string, RuleInfraction[]>
   rules?: TranslationRule[]
@@ -978,6 +984,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           animated: false,
         })
       }
+    },
+    scrollToCellId(cellId, opts) {
+      // AQU-646: id-based scroll in DISPLAY space (not store order).
+      const index = displayCellIdsRef.current.indexOf(cellId)
+      if (index < 0) return false
+      void listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false })
+      if (opts?.flash) {
+        requestAnimationFrame(() => {
+          const root = getListQueryRoot()
+          if (!root) return
+          const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
+          if (!el) return
+          el.classList.add("codex-search-flash")
+          window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
+        })
+      }
+      return true
     },
     focusCellEditorIndex: focusCellEditorByIndex,
     getCurrentIndex: () => {
@@ -2012,7 +2035,7 @@ interface MemoizedRowProps {
   healthMap: Map<string, number>
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void | boolean>
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2335,7 +2358,7 @@ interface EditorRowProps {
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
-  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void>
+  onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<void | boolean>
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string

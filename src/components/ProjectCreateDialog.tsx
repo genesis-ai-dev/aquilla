@@ -259,8 +259,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     form.reset()
     clearSubmitError()
     setSubmitWarning(null)
-    // Preserve the existing array reference when there is nothing to reset.
-    setExtraLanguages((prev) => (prev.length === 0 ? prev : []))
   }, [open, form, clearSubmitError])
 
   function pickShape(next: ProjectShape) {

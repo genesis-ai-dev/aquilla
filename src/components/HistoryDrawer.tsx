@@ -222,7 +222,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                 </button>
               </p>
             )}
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            <p className="text-[10px] text-muted-foreground">
               {groups.length} significant {groups.length === 1 ? "revision" : "revisions"}
               {hiddenCount > 0 && (
                 <span className="ml-1 normal-case text-muted-foreground/70">

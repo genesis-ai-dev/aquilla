@@ -207,7 +207,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
       ) : (
         <>
           <fieldset className="space-y-1.5 rounded-lg border p-3">
-            <legend className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <legend className="px-1 text-xs font-medium text-muted-foreground">
               Transcription
             </legend>
             <ModelCheckRow
@@ -219,7 +219,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
           </fieldset>
 
           <fieldset className="space-y-1.5 rounded-lg border p-3">
-            <legend className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <legend className="px-1 text-xs font-medium text-muted-foreground">
               Voice generation
             </legend>
             <RadioGroup

@@ -414,7 +414,7 @@ function ValidationHistoryTimeline({
   return (
     <>
       <div className="my-1 h-px bg-border" />
-      <div className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">History</div>
+      <div className="mb-1 px-1 text-xs text-muted-foreground">History</div>
       <ul className="space-y-0.5">
         {historical.map((entry, i) => {
           const snippet = typeof entry.value === "string"
@@ -1688,7 +1688,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         )}
       >
         {untimedInTimeLens && (
-          <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+          <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             no timing
           </span>
         )}
@@ -1907,7 +1907,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             />
           </div>
         )}
-        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
           {/* Unlabeled tracks: the multi-select column, then the number gutter. */}
           <div aria-hidden="true" />
           <div aria-hidden="true" />
@@ -2813,7 +2813,7 @@ function UsfmNoteChip({
   const tooltipContent = (
     <div className="max-w-72 text-xs">
       <div className="mb-0.5 flex items-center gap-1.5">
-        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{kindLabel}</span>
+        <span className="text-[9px] font-medium text-muted-foreground">{kindLabel}</span>
         {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
       </div>
       <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
@@ -4908,7 +4908,7 @@ function EditorRow({
               className="w-72 rounded-xl p-2"
             >
               <ul className="space-y-0.5">
-                <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <li className="mb-1 px-1 text-xs text-muted-foreground">
                   Validated by
                 </li>
                 {displayedValidators.length === 0 ? (
@@ -6497,7 +6497,7 @@ function EditorRow({
                       })}
                       {waivedInfractions.length > 0 && (
                         <>
-                          <div className="mt-2 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="mt-2 px-1 text-xs text-muted-foreground">
                             Waived
                           </div>
                           {waivedInfractions.map((inf) => {

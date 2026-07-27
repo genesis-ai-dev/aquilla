@@ -256,7 +256,7 @@ export function CheckFindingsDrawer({
           ) : (
             <div className="flex-1 space-y-4 overflow-auto p-3">
               <div>
-                <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="mb-1 text-xs text-muted-foreground">
                   Rule violations ({ruleIssueCount})
                 </p>
                 {result.ruleFindings.length === 0 ? (
@@ -277,7 +277,7 @@ export function CheckFindingsDrawer({
               </div>
 
               <div>
-                <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="mb-1 text-xs text-muted-foreground">
                   Term consistency ({termIssueCount})
                 </p>
                 {flaggedTermFindings.length === 0 ? (

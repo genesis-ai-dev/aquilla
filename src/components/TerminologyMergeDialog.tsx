@@ -277,14 +277,14 @@ export function TerminologyMergeDialog({
                 className="rounded-md border bg-muted/30 p-4 space-y-3"
               >
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                  <p className="text-xs text-muted-foreground mb-1">
                     Survivor (keeps id)
                   </p>
                   <p className="text-sm font-semibold">{survivor.sourceTerm}</p>
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                  <p className="text-xs text-muted-foreground mb-1">
                     Merged renderings
                   </p>
                   <div className="flex flex-wrap gap-1">
@@ -302,7 +302,7 @@ export function TerminologyMergeDialog({
 
                 {preview.notes && (
                   <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                    <p className="text-xs text-muted-foreground mb-1">
                       Combined notes
                     </p>
                     <p className="text-xs text-muted-foreground">{preview.notes}</p>
@@ -310,7 +310,7 @@ export function TerminologyMergeDialog({
                 )}
 
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                  <p className="text-xs text-muted-foreground mb-1">
                     Concepts to remove
                   </p>
                   <div className="flex flex-wrap gap-1">

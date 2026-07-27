@@ -423,7 +423,7 @@ function TermbaseImportDialog({
               type="button"
               onClick={() => setTab(fmt)}
               className={cn(
-                "rounded px-3 py-1 uppercase transition-colors",
+                "rounded px-3 py-1 capitalize transition-colors",
                 tab === fmt
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:text-foreground",
@@ -596,7 +596,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {/* Total active concepts */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Active concepts
           </p>
           <p className="mt-0.5 text-xl font-bold tabular-nums">{activeConcepts}</p>
@@ -604,7 +604,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
 
         {/* % Enforced */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Enforced
           </p>
           <p className={cn(
@@ -623,7 +623,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
 
         {/* % Infringed */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Infringed
           </p>
           <p className={cn(
@@ -644,7 +644,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
 
         {/* Cells analyzed */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Cells analyzed
           </p>
           <p className="mt-0.5 text-xl font-bold tabular-nums text-muted-foreground">
@@ -656,7 +656,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
       {/* Top-5 most infringed */}
       {stats.top5Infringed.length > 0 && (
         <div className="mt-3 border-t pt-3">
-          <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <p className="mb-2 text-xs text-muted-foreground">
             Most infringed
           </p>
           <div className="flex flex-wrap gap-2">
@@ -1309,7 +1309,7 @@ export function TerminologyPage() {
             ) : (
               <>
                 {/* Column header */}
-                <div className="mb-2 hidden items-center gap-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground md:flex">
+                <div className="mb-2 hidden items-center gap-3 text-xs text-muted-foreground md:flex">
                   <span className="w-36 shrink-0">Source term</span>
                   <span className="flex-1">Renderings</span>
                   <span className="w-32 shrink-0">Notes</span>

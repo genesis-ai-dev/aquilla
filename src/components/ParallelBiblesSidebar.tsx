@@ -237,7 +237,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
           )}
         >
           <BookMarked className="h-4 w-4" />
-          <span className="text-[10px] font-medium uppercase tracking-wider [writing-mode:vertical-rl]">
+          <span className="text-[10px] font-medium [writing-mode:vertical-rl]">
             Bibles
           </span>
         </button>
@@ -294,7 +294,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
               return (
                 <div key={versionId} className="group px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                    <span className="text-xs font-medium text-muted-foreground/70">
                       {meta ? (meta.shortName || meta.id) : versionId}
                     </span>
                     <button

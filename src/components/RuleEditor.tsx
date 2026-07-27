@@ -405,7 +405,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
       {/* Live preview */}
       {pattern && !patternError && !sourcePatternError && (
         <div className="rounded border bg-muted/30 p-3 space-y-2">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+          <p className="text-xs text-muted-foreground">
             Live preview — current file
           </p>
           {preview.count === 0 ? (
@@ -441,7 +441,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-muted-foreground">
               Autofix — regex replace
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">

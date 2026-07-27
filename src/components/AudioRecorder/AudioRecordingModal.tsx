@@ -360,13 +360,13 @@ export function AudioRecordingModal({
               </span>
             </div>
             <div className="space-y-0.5">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Source</div>
+              <div className="text-xs text-muted-foreground/60">Source</div>
               <div className="text-xs leading-snug text-muted-foreground">
                 {activeCell.original || <span className="italic text-muted-foreground/60">empty</span>}
               </div>
             </div>
             <div className="space-y-1 pt-2">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Read aloud</div>
+              <div className="text-xs text-muted-foreground/60">Read aloud</div>
               <div className="text-2xl font-medium leading-relaxed">
                 {activeCell.translated || <span className="italic text-base text-muted-foreground/60">not translated</span>}
               </div>

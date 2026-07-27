@@ -243,7 +243,7 @@ export function TimelineCellDetail({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-border bg-card p-2.5">
           <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="text-[9px] font-semibold text-muted-foreground">
               Source{isDialogue ? " · dialogue" : ""}
             </span>
             {/* AQU-646: transcribe the clip's audio into source text right
@@ -279,7 +279,7 @@ export function TimelineCellDetail({
         </div>
         <div className="rounded-lg border border-border bg-card p-2.5">
           <div className="mb-1 flex items-center justify-between gap-2">
-            <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="text-[9px] font-semibold text-muted-foreground">
               Target
             </span>
             {detailActions && (

@@ -226,7 +226,7 @@ export function TranslationNotesSidebar({
             {[...byFile.values()].map(({ fileName, notes: fileNotes }) => (
               <div key={fileName}>
                 {byFile.size > 1 && (
-                  <div className="sticky top-0 bg-muted/60 px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <div className="sticky top-0 bg-muted/60 px-3 py-1 text-xs text-muted-foreground">
                     {fileName}
                   </div>
                 )}

@@ -72,7 +72,7 @@ export function RuleDrawer({
         {rule.description && <p className="text-xs text-muted-foreground">{rule.description}</p>}
 
         <div>
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+          <p className="text-xs text-muted-foreground mb-1">
             Breaking this rule ({infractionCells.length})
           </p>
           {infractionCells.length === 0 ? (
@@ -100,7 +100,7 @@ export function RuleDrawer({
         </div>
 
         <div>
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+          <p className="text-xs text-muted-foreground mb-1">
             Following this rule ({passingCells.length}{passingCells.length >= 10 ? "+" : ""})
           </p>
           {passingCells.length === 0 ? (

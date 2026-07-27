@@ -363,7 +363,7 @@ export function TerminologyTermDetail({
         ) : (
           <>
             {/* Column headers */}
-            <div className="mb-2 hidden items-start gap-4 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:flex">
+            <div className="mb-2 hidden items-start gap-4 text-xs text-muted-foreground sm:flex">
               <span className="w-24 shrink-0">Ref</span>
               <span className="flex-1">Source</span>
               <span className="w-20 shrink-0">Verdict</span>

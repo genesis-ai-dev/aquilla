@@ -261,7 +261,7 @@ function CapInput({
   return (
     <Label className="flex items-center gap-1.5">
       {prefix ? (
-        <span className="w-6 shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="w-6 shrink-0 text-[10px] text-muted-foreground">
           {prefix}
         </span>
       ) : null}

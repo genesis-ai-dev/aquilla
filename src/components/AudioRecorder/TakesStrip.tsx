@@ -160,7 +160,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
 
   return (
     <div className="border-t px-5 py-3">
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+      <div className="mb-2 text-xs text-muted-foreground/60">
         Takes ({takes.length})
       </div>
       <div className="flex flex-wrap gap-1.5">

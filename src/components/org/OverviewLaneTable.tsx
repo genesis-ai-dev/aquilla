@@ -167,11 +167,11 @@ export function OverviewLaneTable({
     <div className="rounded-xl border bg-card p-5" data-testid="overview-lane-table">
       <div className="mb-3 flex items-center gap-2">
         <Languages className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Languages</h2>
+        <h2 className="text-xs font-semibold text-muted-foreground">Languages</h2>
       </div>
 
       <div
-        className="mb-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+        className="mb-1.5 flex items-center gap-3 text-xs font-medium text-muted-foreground"
         data-testid="overview-lane-header"
       >
         <span className="w-28 shrink-0">Language</span>

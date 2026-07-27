@@ -54,27 +54,50 @@ export function subscribeActiveAudio(listener: () => void): () => void {
 }
 
 // Stack of components that have temporarily claimed the audio keyboard
-// shortcuts (Space, arrows). The global handler bails when this is > 0 so the
-// claiming UI (e.g. the recording modal) gets exclusive Space handling.
-let shortcutOverrideCount = 0
+// shortcuts (Space, arrows). The global handler bails while anything holds a
+// claim, so the claiming UI (e.g. the recording modal) gets Space to itself.
+//
+// SUB-52: this used to be a bare counter, which could say "somebody claimed
+// this" but never "who". The media timeline claims Space for its transport for
+// as long as it is mounted, and the recording modal opens ON TOP of it without
+// unmounting it — so Space both toggled recording and started the timeline
+// playing underneath. Tracking owners in order lets a claimant ask whether it
+// is still the innermost one and stand down if it isn't.
+export type AudioShortcutOwner = number
 
-export function pushAudioShortcutOverride(): () => void {
-  shortcutOverrideCount += 1
+let nextShortcutOwner: AudioShortcutOwner = 1
+const shortcutOwners: AudioShortcutOwner[] = []
+
+/** Claim the audio shortcuts. Returns a release fn; the token identifies you. */
+export function pushAudioShortcutOverride(): (() => void) & { owner: AudioShortcutOwner } {
+  const owner = nextShortcutOwner++
+  shortcutOwners.push(owner)
   let released = false
-  return () => {
+  const release = () => {
     if (released) return
     released = true
-    shortcutOverrideCount = Math.max(0, shortcutOverrideCount - 1)
+    const i = shortcutOwners.lastIndexOf(owner)
+    if (i !== -1) shortcutOwners.splice(i, 1)
   }
+  return Object.assign(release, { owner })
 }
 
 export function isAudioShortcutOverridden(): boolean {
-  return shortcutOverrideCount > 0
+  return shortcutOwners.length > 0
+}
+
+/**
+ * True when `owner` is the innermost claim — i.e. nothing has claimed the
+ * shortcuts on top of it. A long-lived claimant (the timeline) checks this so
+ * a modal opened above it takes over cleanly and gets them back on close.
+ */
+export function isTopAudioShortcutOwner(owner: AudioShortcutOwner): boolean {
+  return shortcutOwners.length > 0 && shortcutOwners[shortcutOwners.length - 1] === owner
 }
 
 /** Test seam — drop any leftover overrides between tests. */
 export function __resetAudioShortcutOverridesForTests(): void {
-  shortcutOverrideCount = 0
+  shortcutOwners.length = 0
 }
 
 /**

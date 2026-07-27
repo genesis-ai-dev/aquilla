@@ -16,7 +16,7 @@ import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeli
 // Round 5 exception: the per-track speaker buttons drive setQueueAudibility
 // directly — muting is a pure element-level concern with no workspace state.
 import { useQueueProgress, useQueueState, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
-import { isInEditableContext, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
+import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { TimelineRuler } from "./TimelineRuler"
@@ -199,6 +199,11 @@ export function TimelineEditor({
     const releaseOverride = pushAudioShortcutOverride()
     const onKeyDown = (e: KeyboardEvent) => {
       if (isInEditableContext(e.target)) return
+      // SUB-52: the timeline holds this claim for as long as it is mounted,
+      // and the recording modal opens on top of it without unmounting it —
+      // so Space was starting playback here at the same time as it started
+      // the recording. Stand down whenever something has claimed above us.
+      if (!isTopAudioShortcutOwner(releaseOverride.owner)) return
       if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
         e.preventDefault() // keep Space from scrolling the page
         onTogglePlayRef.current?.()
@@ -265,6 +270,12 @@ export function TimelineEditor({
         const target = activeTargetForCell(c)
         return target ? [{ cell: c, kind: target.kind, audioId: target.audioId }] : []
       }),
+    [dialogue],
+  )
+  // SUB-51: the complement — sections still waiting for a dub. Their empty
+  // space in the Target row offers a record button on hover.
+  const emptyTargets = useMemo(
+    () => dialogue.filter((c) => !activeTargetForCell(c)),
     [dialogue],
   )
   const bounds = useMemo(() => timelineBounds(cells), [cells])
@@ -530,6 +541,7 @@ export function TimelineEditor({
               onRetimeTarget={onRetimeTarget}
               onTrimTarget={onTrimTarget}
               onOpenRecording={detailActions?.onOpenRecording}
+              emptyCells={emptyTargets}
             />
             {untimed.length > 0 && (
               <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">

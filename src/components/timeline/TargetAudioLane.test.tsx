@@ -477,3 +477,83 @@ describe("TargetAudioLane — corner affordances never collide (SUB-48)", () => 
     expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------
+// SUB-51 — a record button waiting in the empty space of an un-dubbed section
+// ---------------------------------------------------------------------------
+
+describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
+  const emptyCell = (id: string, startTime = 30, endTime = 36): CellData =>
+    ({ id, fileId: "f1", medium: "media", startTime, endTime, attachments: {} }) as unknown as CellData
+
+  it("offers a record button spanning each dub-free section", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({}, 4000)]}
+        emptyCells={[emptyCell("c9")]}
+        onOpenRecording={vi.fn()}
+      />,
+    )
+    const slot = screen.getByTestId("tl-target-empty-c9")
+    expect(parseFloat(slot.style.left)).toBeCloseTo(30 * 40)
+    expect(parseFloat(slot.style.width)).toBeCloseTo(6 * 40)
+    expect(screen.getByTestId("tl-target-empty-c9-record")).toBeInTheDocument()
+  })
+
+  it("opens the recorder on that cell and selects it, without seeking", () => {
+    const onOpenRecording = vi.fn()
+    const onSelect = vi.fn()
+    const onSeek = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[]}
+        emptyCells={[emptyCell("c9")]}
+        onSelect={onSelect}
+        onSeek={onSeek}
+        onOpenRecording={onOpenRecording}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-target-empty-c9-record"))
+    expect(onOpenRecording).toHaveBeenCalledWith("c9")
+    expect(onSelect).toHaveBeenCalledWith("c9")
+    expect(onSeek).not.toHaveBeenCalled()
+  })
+
+  it("is absent when read-only, unwired, or the section is too narrow to hit", () => {
+    const { rerender } = render(
+      <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9")]} editable={false} onOpenRecording={vi.fn()} />,
+    )
+    expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+
+    rerender(<TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9")]} />)
+    expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+
+    // 0.5s at 40px/s = 20px — no room for a 28px button.
+    rerender(
+      <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9", 30, 30.5)]} onOpenRecording={vi.fn()} />,
+    )
+    expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+  })
+
+  it("uses a testid distinct from a real chip's, so a dub-free cell still has no chip", () => {
+    render(<TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9")]} onOpenRecording={vi.fn()} />)
+    expect(screen.queryByTestId("tl-target-c9")).toBeNull()
+    expect(screen.getByTestId("tl-target-empty-c9")).toBeInTheDocument()
+  })
+
+  it("skips sections scrolled out of view", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        viewStartSec={0}
+        viewEndSec={20}
+        items={[]}
+        emptyCells={[emptyCell("c9", 40, 46)]}
+        onOpenRecording={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+  })
+})

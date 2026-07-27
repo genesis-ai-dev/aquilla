@@ -8,7 +8,7 @@
 // preview/retake step between stop and upload.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ChevronLeft, ChevronRight, Mic, Play, Sparkles, Square, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
+import { ChevronLeft, ChevronRight, ChevronsRight, Mic, Pin, Play, Sparkles, Square, X, Volume2, VolumeX, RefreshCw, Check } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,7 @@ import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
+import { useRecordingAutoAdvance, setRecordingAutoAdvance } from "@/lib/store/recording-auto-advance-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -55,6 +56,10 @@ export function AudioRecordingModal({
   const countdown = useCountdown()
   const { session } = useFrontierSession()
   const [beepEnabled, setBeepEnabled] = useState(true)
+  // SUB-50: saving jumps to the next cell — great on a pass down the file,
+  // wrong when working one line over and over. Persisted per device.
+  const autoAdvance = useRecordingAutoAdvance()
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [phase, setPhase] = useState<Phase>("idle")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -373,26 +378,52 @@ export function AudioRecordingModal({
         cell: {
           ...activeCell,
           selectedAudioId: fullAudioId,
-          attachments: { ...activeCell.attachments, [fullAudioId]: { url: result.url, type: "audio" } },
+          attachments: {
+            ...activeCell.attachments,
+            // SUB-49: hand transcription the REAL attachment. It re-attaches
+            // when it finishes and forwards whatever it finds here; a stub of
+            // `{url, type}` meant the re-attach carried no duration, which
+            // wiped the take's length a minute after saving. Mirrors the seed
+            // built by auto-transcribe.ts. (The mime type isn't carried on
+            // this shape; the projection's COALESCE protects it instead.)
+            [fullAudioId]: { url: result.url, type: "audio", durationMs: takeDurationMs },
+          },
         },
         session,
         projectId: project.id,
         language: project.targetLanguage,
       })
       // Auto-advance: settle on the new cell after a brief success indication.
-      setTimeout(() => {
-        const nextIdx = activeIndex + 1
-        if (nextIdx < cells.length) {
-          onActiveCellChange(cells[nextIdx].id)
-        } else {
-          onClose()
-        }
-      }, 450)
+      // SUB-50: opt-out for repeat takes on one line, and the handle is now
+      // tracked so closing/navigating inside the window can't fire a stray
+      // jump after the fact.
+      if (autoAdvance) {
+        if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current)
+        advanceTimerRef.current = setTimeout(() => {
+          advanceTimerRef.current = null
+          const nextIdx = activeIndex + 1
+          if (nextIdx < cells.length) {
+            onActiveCellChange(cells[nextIdx].id)
+          } else {
+            onClose()
+          }
+        }, 450)
+      }
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
     }
-  }, [recorder.state, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose])
+  }, [recorder.state, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose, autoAdvance, recordingTakes])
+
+  // A pending advance must never outlive the modal (or a manual jump): the
+  // 450ms window was previously untracked, so closing inside it still fired.
+  useEffect(
+    () => () => {
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current)
+      advanceTimerRef.current = null
+    },
+    [],
+  )
 
   const canNav = phase === "idle" || phase === "preview" || phase === "error" || phase === "saved"
   const gotoIndex = useCallback((idx: number) => {
@@ -425,7 +456,9 @@ export function AudioRecordingModal({
         onClose()
         return
       }
-      if (e.key === " ") {
+      // SUB-52: modifier check matches the other Space handlers — Cmd/Ctrl/
+      // Alt+Space belong to the OS or other shortcuts, not to recording.
+      if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
         e.preventDefault()
         if (phase === "idle" || phase === "error") { startFlow(); return }
         if (phase === "recording") { stopRecording(); return }
@@ -490,6 +523,26 @@ export function AudioRecordingModal({
             </div>
           </div>
           <div className="flex items-center gap-1">
+            <AppTooltip
+              content={
+                autoAdvance
+                  ? "Moving to the next line after each save — click to stay here"
+                  : "Staying on this line after each save — click to move on automatically"
+              }
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                data-testid="rec-auto-advance"
+                aria-pressed={autoAdvance}
+                onClick={() => setRecordingAutoAdvance(!autoAdvance)}
+                aria-label={autoAdvance ? "Stay on this line after saving" : "Move to the next line after saving"}
+                className="text-muted-foreground/60"
+              >
+                {autoAdvance ? <ChevronsRight className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+              </Button>
+            </AppTooltip>
             <AppTooltip content={beepEnabled ? "Mute countdown beep" : "Enable countdown beep"}>
               <Button
                 type="button"

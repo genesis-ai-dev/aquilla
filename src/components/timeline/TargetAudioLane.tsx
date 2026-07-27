@@ -48,6 +48,10 @@ export interface TargetAudioLaneProps {
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
+  /** SUB-51: timed media sections with NO dub yet. Their empty space in this
+   *  row reveals a record button on hover, so starting a line doesn't need a
+   *  trip to the detail pane. */
+  emptyCells?: CellData[]
 }
 
 type ChipDragMode = "move" | "resize-l" | "resize-r"
@@ -366,6 +370,7 @@ export function TargetAudioLane({
   onRetimeTarget,
   onTrimTarget,
   onOpenRecording,
+  emptyCells,
 }: TargetAudioLaneProps) {
   // Resolve every chip first — overflow needs the NEXT chip's start, and
   // snapping needs neighbors' effective edges.
@@ -395,9 +400,48 @@ export function TargetAudioLane({
     return out
   }
 
+  // SUB-51: a record button hiding in the empty space under each dub-free
+  // section. Rendered BEFORE the chips and with no z-index, so a real chip —
+  // including an overlong neighbour painting across — always wins the pointer.
+  const emptySlots =
+    editable && onOpenRecording
+      ? (emptyCells ?? []).flatMap((cell) => {
+          const { startTime, endTime } = cell
+          if (typeof startTime !== "number" || typeof endTime !== "number") return []
+          if (!isVisible(startTime, endTime, viewStartSec, viewEndSec)) return []
+          const widthPx = secToPx(endTime - startTime, pxPerSec)
+          if (widthPx < 24) return [] // no room for a button worth hitting
+          return [{ cell, leftPx: secToPx(startTime, pxPerSec), widthPx }]
+        })
+      : []
+
   return (
     // `isolate`: chip z-indexes stack within the lane — never over the playhead.
     <div data-testid="tl-target-lane" className="isolate relative h-[66px] border-b border-border">
+      {emptySlots.map(({ cell, leftPx, widthPx }) => (
+        <div
+          key={`empty-${cell.id}`}
+          data-testid={`tl-target-empty-${cell.id}`}
+          style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+          className="group/empty absolute top-2.5 flex h-[46px] items-center justify-center"
+        >
+          <button
+            type="button"
+            title="Record audio for this line"
+            data-testid={`tl-target-empty-${cell.id}-record`}
+            aria-label="Record audio for this line"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelect(cell.id)
+              onOpenRecording?.(cell.id)
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/empty:opacity-100 focus-visible:opacity-100"
+          >
+            <Mic className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
       {chips.map((chip, i) =>
         isVisible(chip.geom.start, chip.geom.end, viewStartSec, viewEndSec) ? (
           <TargetAudioChip

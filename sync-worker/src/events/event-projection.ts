@@ -904,6 +904,16 @@ case 'cell.audio.attach': {
           )
           .bind(event.projectId, event.fileId, event.cellId, p.slot, p.audioId),
       )
+      // SUB-49: a re-attach may only ADD to what is known about a clip. The
+      // COALESCE'd columns describe the clip ITSELF, and producers routinely
+      // send a partial payload — transcription re-attaches carrying only its
+      // timings, a trim carrying only trims. Plain `excluded.x` read "field
+      // absent" as "erase it", so finishing a transcription silently nulled a
+      // recording's duration (its chip lost its length), its mime type and its
+      // voice; a later trim then nulled the timings straight back. `label` was
+      // the only protected column, which is why names survived and everything
+      // else didn't. Trims stay plain assignments on purpose: dragging an edge
+      // back to the clip boundary CLEARS them, and that must keep working.
       stmts.push(
         db
           .prepare(
@@ -915,14 +925,14 @@ case 'cell.audio.attach': {
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
               url                = excluded.url,
-              mime_type          = excluded.mime_type,
-              voice_id           = excluded.voice_id,
-              reference_audio_id = excluded.reference_audio_id,
-              duration_ms        = excluded.duration_ms,
+              mime_type          = COALESCE(excluded.mime_type, cell_audio.mime_type),
+              voice_id           = COALESCE(excluded.voice_id, cell_audio.voice_id),
+              reference_audio_id = COALESCE(excluded.reference_audio_id, cell_audio.reference_audio_id),
+              duration_ms        = COALESCE(excluded.duration_ms, cell_audio.duration_ms),
               label              = COALESCE(excluded.label, cell_audio.label),
               trim_start_ms      = excluded.trim_start_ms,
               trim_end_ms        = excluded.trim_end_ms,
-              timings_json       = excluded.timings_json,
+              timings_json       = COALESCE(excluded.timings_json, cell_audio.timings_json),
               selected           = 1,
               deleted            = 0,
               event_id           = excluded.event_id`,

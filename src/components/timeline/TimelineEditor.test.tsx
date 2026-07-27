@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
@@ -21,11 +21,16 @@ vi.mock("@/lib/audio/play-queue", () => ({
 // Round 7: the editor claims the app-wide audio shortcut while mounted.
 const pushOverride = vi.fn()
 const releaseOverride = vi.fn()
+// SUB-52: the override is an ownership STACK now — the timeline stands down
+// whenever something (the recording modal) has claimed on top of it. The mock
+// mirrors that so the transport tests exercise the real guard.
+const topOwner = vi.hoisted(() => ({ value: 1 as number | null }))
 vi.mock("@/lib/audio/audio-coordinator", () => ({
   pushAudioShortcutOverride: () => {
     pushOverride()
-    return releaseOverride
+    return Object.assign(releaseOverride, { owner: 1 })
   },
+  isTopAudioShortcutOwner: (owner: number) => topOwner.value === owner,
   isInEditableContext: (target: EventTarget | null) => {
     const el = target as HTMLElement | null
     return Boolean(el && typeof el.tagName === "string" && (el.tagName === "INPUT" || el.tagName === "TEXTAREA"))
@@ -44,6 +49,9 @@ const cell = (o: Partial<CellData>): CellData =>
   ({ fileId: "f1", original: "", translated: "", ...o }) as unknown as CellData
 
 describe("TimelineEditor", () => {
+  // The timeline is the innermost shortcut claimant unless a test says otherwise.
+  beforeEach(() => { topOwner.value = 1 })
+
   it("renders subtitle + dialogue lanes and an untimed chip; selecting a card fills the detail pane", () => {
     render(
       <TimelineEditor
@@ -189,6 +197,30 @@ describe("TimelineEditor", () => {
     fireEvent.keyDown(input, { key: " " })
     expect(onTogglePlay).toHaveBeenCalledTimes(1)
     input.remove()
+  })
+
+  it("Space stops toggling playback while something claims it on top (SUB-52)", () => {
+    // The recording modal opens ON TOP of the timeline without unmounting it,
+    // so one Space press was both starting the recording and starting queue
+    // playback underneath. The timeline now stands down while it isn't the
+    // innermost claimant.
+    const onTogglePlay = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onCommitTarget={() => {}} onTogglePlay={onTogglePlay}
+      />,
+    )
+    fireEvent.keyDown(document.body, { key: " " })
+    expect(onTogglePlay).toHaveBeenCalledTimes(1)
+
+    topOwner.value = 2 // the modal claims on top
+    fireEvent.keyDown(document.body, { key: " " })
+    expect(onTogglePlay).toHaveBeenCalledTimes(1) // silence underneath
+
+    topOwner.value = 1 // modal closes, the claim comes back
+    fireEvent.keyDown(document.body, { key: " " })
+    expect(onTogglePlay).toHaveBeenCalledTimes(2)
   })
 
   it("Cmd/Ctrl+Enter returns playback to the very beginning", () => {

@@ -64,10 +64,16 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => ({
 vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
-vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {}) }))
+const transcribeCell = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {}))
+vi.mock("@/lib/audio/transcribe", () => ({
+  transcribeCell: (...args: unknown[]) => transcribeCell(...args),
+}))
 vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
+import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
+
+const onActiveCellChange = vi.fn((..._args: unknown[]) => {})
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
 
@@ -270,5 +276,109 @@ describe("AudioRecordingModal — take length comes from the recorder (SUB-48)",
     const call = injectOptimistic.mock.calls.at(-1) as unknown as [string, string, { durationMs: number }, string]
     expect(call[2].durationMs).toBe(6000)
     expect(call[3]).toBe("evt-attach") // the id emitCellAudioAttach resolved with
+  })
+})
+
+describe("AudioRecordingModal — transcription gets the REAL attachment (SUB-49)", () => {
+  beforeEach(() => {
+    attachmentsState.byCellId = new Map()
+    transcribeCell.mockClear()
+    recorderState.value = { kind: "idle" }
+  })
+  afterEach(() => { recorderState.value = { kind: "idle" } })
+
+  it("hands transcription the take's duration, so its re-attach can't wipe it", async () => {
+    // Transcription finishes a minute later and re-attaches. It forwards
+    // whatever it finds on the attachment it was given; a stub of {url, type}
+    // meant the re-attach carried no duration, and the projection read that
+    // as "erase" — the take's chip lost its length long after saving.
+    recorderState.value = {
+      kind: "stopped",
+      blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      ext: "webm",
+      durationSec: 9.5,
+    }
+    renderModal(cellWith("bonjour"))
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+
+    await waitFor(() => expect(transcribeCell).toHaveBeenCalledTimes(1))
+    const [args] = transcribeCell.mock.calls[0] as unknown as [
+      { cell: { selectedAudioId: string; attachments: Record<string, { durationMs?: number }> } },
+    ]
+    const att = args.cell.attachments[args.cell.selectedAudioId]
+    expect(att).toBeDefined()
+    expect(att.durationMs).toBe(9500)
+  })
+})
+
+describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
+  const stopped = {
+    kind: "stopped",
+    blob: new Blob(["x"], { type: "audio/webm" }),
+    mimeType: "audio/webm",
+    ext: "webm",
+    durationSec: 2,
+  }
+
+  beforeEach(() => {
+    attachmentsState.byCellId = new Map()
+    localStorage.removeItem("aq.recording-auto-advance.v1")
+    resetRecordingAutoAdvanceCacheForTests()
+    onActiveCellChange.mockClear()
+    recorderState.value = { kind: "idle" }
+  })
+  afterEach(() => {
+    recorderState.value = { kind: "idle" }
+    localStorage.removeItem("aq.recording-auto-advance.v1")
+    resetRecordingAutoAdvanceCacheForTests()
+  })
+
+  const twoCells = (): CellData[] => [
+    cellWith("bonjour"),
+    { ...cellWith("salut"), id: "c2" } as CellData,
+  ]
+
+  function renderTwo() {
+    return render(
+      <AudioRecordingModal
+        open
+        project={project}
+        cells={twoCells()}
+        activeCellId="c1"
+        username="sam"
+        onActiveCellChange={onActiveCellChange}
+        onClose={() => {}}
+      />,
+    )
+  }
+
+  it("defaults to on — saving still moves to the next line", async () => {
+    recorderState.value = stopped
+    renderTwo()
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+    await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"), { timeout: 2000 })
+  })
+
+  it("turned off, saving stays on the same line for another take", async () => {
+    recorderState.value = stopped
+    renderTwo()
+    fireEvent.click(screen.getByTestId("rec-auto-advance"))
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the save DID happen
+    await new Promise((r) => setTimeout(r, 700)) // well past the 450ms advance window
+    expect(onActiveCellChange).not.toHaveBeenCalled()
+  })
+
+  it("the choice survives a remount", () => {
+    const { unmount } = renderTwo()
+    fireEvent.click(screen.getByTestId("rec-auto-advance"))
+    unmount()
+    resetRecordingAutoAdvanceCacheForTests() // simulate a fresh page load
+    renderTwo()
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
   })
 })

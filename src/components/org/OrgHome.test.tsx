@@ -443,7 +443,7 @@ describe("OrgHome", () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole("button", { name: "Stalled" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Stalled" }))
 
     // Legacy Translation is 30 days stale; New Testament was just edited.
     expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
@@ -454,7 +454,7 @@ describe("OrgHome", () => {
     render(<MemoryRouter><OrgProvider><OrgHome /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole("button", { name: "Needs attention" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Needs attention" }))
 
     // Legacy Translation is overdue + stalled; New Testament is healthy.
     expect(screen.getByText("Legacy Translation")).toBeInTheDocument()

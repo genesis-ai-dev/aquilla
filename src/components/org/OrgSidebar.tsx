@@ -1,7 +1,10 @@
 import { NavLink } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
+import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
+import { Badge } from "@/components/ui/badge"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
@@ -11,6 +14,8 @@ const link = ({ isActive }: { isActive: boolean }) =>
 
 export function OrgSidebar() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, accessibleProjects } = useActiveOrg()
+  const { session } = useFrontierSession()
+  const username = session?.username ?? null
   const isAdmin = !isAllOrgs && (activeOrg?.role.level ?? 0) >= 600
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
@@ -23,8 +28,19 @@ export function OrgSidebar() {
   // caller has at least one cross-org grant. Reachability is preserved for
   // zero-org invitees (the link and the /shared route work regardless of org
   // membership, unlike the all-orgs overview which requires 2+ member orgs).
-  const hasSharedProjects =
-    partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe.length > 0
+  const sharedWithMe =
+    partitionSharedProjects(accessibleProjects, orgs, activeOrgId).sharedWithMe
+  const hasSharedProjects = sharedWithMe.length > 0
+  // AQU-696: light the nav entry while ANY shared project is still unopened —
+  // it clears only once every "New" project has been opened. Read
+  // synchronously: the sidebar remounts on navigation (each page renders its
+  // own AppShell/OrgSidebar), so returning here after opening a project
+  // re-reads a fresh "opened" record.
+  const hasNewSharedProjects =
+    username != null &&
+    sharedWithMe.some((p) =>
+      isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id)),
+    )
 
   return (
     <div className="flex h-full min-w-0 flex-col gap-1 overflow-hidden p-2">
@@ -58,7 +74,16 @@ export function OrgSidebar() {
         {hasSharedProjects && (
           <>
             <div className="my-1 border-t" />
-            <NavLink to="/shared" className={link}>Shared with you</NavLink>
+            <NavLink to="/shared" className={link}>
+              <span className="flex items-center justify-between gap-2">
+                Shared with you
+                {hasNewSharedProjects && (
+                  <Badge className="shrink-0" data-testid="new-shared-nav-badge">
+                    New
+                  </Badge>
+                )}
+              </span>
+            </NavLink>
           </>
         )}
       </nav>

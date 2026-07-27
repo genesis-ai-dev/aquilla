@@ -91,7 +91,7 @@ function makeRows(id: string): CellRow[] {
   ]
 }
 
-function renderTable() {
+function renderTable({ lineNumbers = false }: { lineNumbers?: boolean } = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
   store.replaceRows(makeRows("cell-1"), { full: true, maxServerSeq: 1 })
@@ -112,7 +112,7 @@ function renderTable() {
           onCompleteSingle={() => {}}
           onCompleteBatch={() => {}}
           healthMap={new Map()}
-          lineNumbersEnabled={false}
+          lineNumbersEnabled={lineNumbers}
           cellLabelsEnabled={false}
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
@@ -146,5 +146,30 @@ describe("EditorTable — source/target first-line alignment", () => {
       expect(contextLine.className).toContain(cls)
       expect(headerLane.className).toContain(cls)
     }
+  })
+
+  it("reserves the same strip in the gutter, so the line number rides the first source line", async () => {
+    renderTable()
+    await screen.findByText("hello")
+
+    // Third mirror. The gutter is a separate grid column, so it needs its own
+    // copy of the strip or the number floats above the text it labels.
+    const spacer = screen.getByTestId("gutter-strip-spacer")
+    expect(spacer.className).toContain("h-4")
+    expect(spacer.className).toContain("mb-1")
+
+    const gutter = spacer.parentElement
+    expect(gutter?.className).toContain("py-1.5")
+  })
+
+  it("sizes the line-number box to the source line height, not a fixed height", async () => {
+    renderTable({ lineNumbers: true })
+    await screen.findByText("hello")
+
+    // Centering the digit in a fontSize x 1.6 box is what keeps it on the first
+    // line at every reader font size; a fixed height only agrees at one size.
+    const numberBox = screen.getByLabelText("Line 1")
+    expect(numberBox.style.height).toBe("calc(14px * 1.6)")
+    expect(numberBox.className).not.toContain("h-6")
   })
 })

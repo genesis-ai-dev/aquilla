@@ -4556,7 +4556,15 @@ function EditorRow({
     displayLabel: importDisplayLabel(cell.metadata),
   })
   const numberPill = numberLabel === null ? null : (
-    <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
+    // Box the digit to the source's first line (fontSize × line-height 1.6,
+    // both set on the source well below) and center it, so the number keeps
+    // riding that line as the reader changes font size. A fixed height only
+    // happens to line up at one size.
+    <span
+      className="flex items-center justify-center leading-none"
+      style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+      aria-label={`Line ${numberLabel}`}
+    >
       <CellNumberPill
         number={numberLabel}
         plain
@@ -5091,48 +5099,54 @@ function EditorRow({
             </button>
           </AppTooltip>
         </div>
-        {/* Left gutter — a subtle line number sits to the LEFT of the
-            validation circle, both anchored to the top of the card. The number
-            is the single issue surface (severity tint + title); no
+        {/* Left gutter — a subtle line number plus the row's status
+            affordances, level with the first line of source text. The number is
+            the single issue surface (severity tint + title); no
             stripe/dot/warning. Multi-select has its own column to the left of
-            this gutter, so only the validation button sits between source and
-            target. */}
-        <div className="flex h-full w-full items-start justify-center gap-1 pt-5">
-          {numberPill}
-          {/* The validation circle moved next to the TARGET editing cell
-              (AQU-592); the gutter now carries only the line number and the
-              stale-source / synth status affordances. */}
-          {/* Stale-source indicator. Both flags
-              are already resolved per-row booleans (see isStaleSource's doc
-              comment) — the singleton Set(s) just adapt them to the
-              indicator's managed-mode membership-set contract. */}
-          {(isStaleSource || isUpstreamStaleSource) && hasContent && (
-            <StaleSourceIndicator
-              cellId={cell.id}
-              staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
-              upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
-            />
-          )}
-          {(isSynthBusy || isSynthError) && (
-            <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
-          )}
-          {/* AQU-599: persistent "has comment" indicator. Unlike the action-rail
-              comment button (which only appears on hover/focus), this icon stays
-              visible in the gutter whenever the cell carries an open comment, so
-              comments are discoverable without opening each cell. Clicking it
-              opens the comments panel for the cell. */}
-          {onOpenComments && openCommentCount > 0 && (
-            <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
-              <button
-                type="button"
-                aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
-                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
-                onClick={() => onOpenComments(cell.id)}
-              >
-                <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
-              </button>
-            </AppTooltip>
-          )}
+            this one. */}
+        <div className="flex h-full w-full flex-col items-center py-1.5">
+          {/* Mirrors the source column's context strip (h-4 + mb-1). The strip
+              offsets the source text but not this column, so without the same
+              reservation here every gutter item rides above the first line it
+              annotates. Same mirror the target header lane provides. */}
+          <div data-testid="gutter-strip-spacer" className="mb-1 h-4" aria-hidden />
+          <div className="flex w-full items-start justify-center gap-1">
+            {numberPill}
+            {/* The validation circle moved next to the TARGET editing cell
+                (AQU-592); the gutter now carries only the line number and the
+                stale-source / synth status affordances. */}
+            {/* Stale-source indicator. Both flags
+                are already resolved per-row booleans (see isStaleSource's doc
+                comment) — the singleton Set(s) just adapt them to the
+                indicator's managed-mode membership-set contract. */}
+            {(isStaleSource || isUpstreamStaleSource) && hasContent && (
+              <StaleSourceIndicator
+                cellId={cell.id}
+                staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
+                upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
+              />
+            )}
+            {(isSynthBusy || isSynthError) && (
+              <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+            )}
+            {/* AQU-599: persistent "has comment" indicator. Unlike the action-rail
+                comment button (which only appears on hover/focus), this icon stays
+                visible in the gutter whenever the cell carries an open comment, so
+                comments are discoverable without opening each cell. Clicking it
+                opens the comments panel for the cell. */}
+            {onOpenComments && openCommentCount > 0 && (
+              <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
+                <button
+                  type="button"
+                  aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
+                  className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                  onClick={() => onOpenComments(cell.id)}
+                >
+                  <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
+                </button>
+              </AppTooltip>
+            )}
+          </div>
         </div>
 
         {/* Source column. In Audio mode there's no need for source text to
@@ -5205,9 +5219,10 @@ function EditorRow({
             {/* Source-edit affordance (project_lead+, non-live projects). Emits
                 source.cell.commit — the template-owner correction that propagates
                 downstream. Read-only source stays the default; editing is explicit.
-                Floated to the column's top-right so it costs no layout: the
-                context line below is conditional, and the pencil must still have
-                somewhere to sit when a cell carries no context. */}
+                Floated to the column's top-right so it costs no layout, rather
+                than taking a slot in the context line below — that line is
+                reserved for column alignment and is usually empty, so it has no
+                room to spare. */}
             {canEditSourceForCell ? (
               <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
                 <Button

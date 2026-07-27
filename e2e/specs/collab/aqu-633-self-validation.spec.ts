@@ -50,7 +50,7 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   expect(fileId, "imported file id should be present in the editor URL").toBeTruthy()
 
   // ── 2. Alice (owner) turns OFF allow-self-validation and saves ──────────────
-  await alice.goto(`/project/${projectId}/settings?section=validation`)
+  await alice.goto(`/project/${projectId}/settings/validation`)
   // Base UI Switch: #allow-self-validation is the hidden <input>; the visible,
   // clickable control is the sibling role="switch" carrying aria-checked.
   const selfSwitch = alice.getByRole("switch").first()

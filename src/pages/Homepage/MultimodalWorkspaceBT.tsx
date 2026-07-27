@@ -1,13 +1,13 @@
 // The homepage centerpiece: ONE source verse, rendered across every medium —
 // text, audio, video, image, oral story — inside a single faithful "workspace"
-// frame. Reuses the real Gauge and the app's global karaoke CSS class so
+// frame. Reuses the real HealthRing and the app's global karaoke CSS class so
 // the demo reads as the actual product. "Hear it" uses the Web Speech API
 // (instant, no model download) and drives a karaoke highlight + canvas waveform
 // off one deterministic timeline, so the visual is always smooth even where
 // speech synthesis is unavailable.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Gauge } from "@/components/Gauge"
+import { HealthRing } from "@/components/HealthRing"
 
 type Mode = "text" | "audio" | "video" | "image" | "story"
 
@@ -127,9 +127,9 @@ function TextPanel({ theme }: { theme: "light" | "dark" }) {
           </p>
           <div className="aq-cell-foot">
             <span className="aq-cell-status">
-              <Gauge value={health} sizePx={18} strokeWidth={2.5}>
+              <HealthRing health={health} size={18} strokeWidth={2.5}>
                 {health >= 67 ? <IconCheckTiny /> : null}
-              </Gauge>
+              </HealthRing>
               {health}% support
             </span>
             <button
@@ -186,9 +186,9 @@ function AudioPanel({ theme }: { theme: "light" | "dark" }) {
           {r.rec ? (
             <span aria-hidden="true" className="aq-eq-dot" style={{ width: 10, height: 10, borderRadius: 999, background: "#ef4444", boxShadow: "0 0 10px #ef4444" }} />
           ) : (
-            <Gauge value={r.health} sizePx={18} strokeWidth={2.5}>
+            <HealthRing health={r.health} size={18} strokeWidth={2.5}>
               {r.health >= 67 ? <IconCheckTiny /> : null}
-            </Gauge>
+            </HealthRing>
           )}
         </div>
       ))}

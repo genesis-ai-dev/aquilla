@@ -1,7 +1,7 @@
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { Gauge } from "./Gauge"
+import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
 
 interface StatusBarProps {
@@ -42,7 +42,9 @@ export function StatusBar({
         staleSourceCount={staleSourceCount}
         onJumpToCell={onJumpToCell}
       >
-        <Gauge value={projectHealth} sizePx={18} strokeWidth={2} showValue />
+        <HealthRing health={projectHealth} size={18} strokeWidth={2}>
+          <span className="text-[7px] font-bold">{projectHealth}</span>
+        </HealthRing>
       </DecayBreakdown>
       <span className="flex items-center gap-2">
         <span>{total.toLocaleString()} cells · {translated} translated ({pct}%)</span>

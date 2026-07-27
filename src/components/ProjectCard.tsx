@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { MembershipAvatars } from "./MembershipAvatars"
-import { Gauge } from "./Gauge"
+import { HealthRing } from "./HealthRing"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectHealth } from "@/hooks/useProjectHealth"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -106,13 +106,20 @@ export function ProjectCard({
               wrapping title yields space to it rather than pushing it out. */}
           <div className="flex items-center gap-1.5 shrink-0">
             {!isTrashed && projectHealth !== null && (
-              <Gauge
-                value={projectHealth}
-                sizePx={22}
+              <HealthRing
+                health={projectHealth}
+                size={22}
                 strokeWidth={2.5}
                 className="shrink-0"
-                showValue
-              />
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                <span
+                  className="text-[6px] font-bold leading-none"
+                  style={{ color: projectHealth <= 33 ? "#ef4444" : projectHealth <= 66 ? "#f59e0b" : "#22c55e" }}
+                >
+                  {projectHealth}
+                </span>
+              </HealthRing>
             )}
             {!isTrashed && isInactive && (
               <AppTooltip content="This project is inactive and cannot be edited until reactivated">

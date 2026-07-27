@@ -1,7 +1,7 @@
 // AQU-190 — ProjectCard health ring tests.
 //
 // Verifies:
-//   1. Card renders a Gauge showing the rollup value for a server-side project.
+//   1. Card renders a HealthRing showing the rollup value for a server-side project.
 //   2. Card hides the ring when projectHealth is null (local-only / fetch error).
 //   3. No extra fetch attempts (N+1 stampede guard via call count).
 
@@ -61,7 +61,7 @@ beforeEach(() => {
 })
 
 describe("ProjectCard health ring", () => {
-  it("renders Gauge with the rollup value for a server-side project", () => {
+  it("renders HealthRing with the rollup value for a server-side project", () => {
     projectHealthStub = 72
     const project = makeProject()
     render(
@@ -113,13 +113,13 @@ describe("ProjectCard health ring", () => {
     expect(useProjectHealthMock).toHaveBeenCalledTimes(1)
   })
 
-  it("renders health 0 as absence of ring (Gauge hides ring at 0)", () => {
+  it("renders health 0 as absence of ring (HealthRing hides ring at 0)", () => {
     projectHealthStub = 0
     const project = makeProject()
     render(
       <ProjectCard project={project} onClick={() => {}} />,
     )
-    // At health=0, Gauge suppresses the SVG ring; we still show the score
+    // At health=0, HealthRing suppresses the SVG ring; we still show the score
     // inside the ring container
     expect(screen.getByText("0")).toBeInTheDocument()
   })

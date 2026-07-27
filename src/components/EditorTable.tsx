@@ -7,7 +7,7 @@ import {
 } from "@legendapp/list/react"
 import DOMPurify from "dompurify"
 import {
-  Check, AlertTriangle, AlertCircle, RefreshCw,
+  Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
   MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
   Languages,
@@ -43,20 +43,9 @@ import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
 import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
-import { StatusPie } from "./StatusPie"
-import {
-  isFullValidationStatus,
-  statusPieValidationButtonClass,
-  validationPieTone,
-  validationProgress,
-  validationProgressAfterClick,
-  validationProgressAfterUnvalidate,
-} from "./status-pie-validation"
-import {
-  statusPieAccentColor,
-  statusPieHoverBackground,
-} from "./status-pie-math"
-import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { HealthRing } from "./HealthRing"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
@@ -3263,7 +3252,12 @@ function EditorRow({
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
-  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording } = useEditorActions()
+  const { onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording, myScopes } = useEditorActions()
+  // AQU-633: a scoped member can only validate cells in their assigned lane/file.
+  // Combine the role capability with the per-cell scope check so an out-of-scope
+  // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
+  // members (empty scopes) → always in scope, so this is a no-op for them.
+  const canValidateThisCell = canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
@@ -3916,6 +3910,14 @@ function EditorRow({
       console.warn("[validate] aborting: role too low for", validated ? "cell.validate" : "cell.unvalidate")
       return
     }
+    // AQU-633: additive lane/file scope guard. A scoped member's validate on an
+    // out-of-scope cell is a guaranteed 403 — don't optimistically flip then
+    // revert. The toggle is already greyed (canValidateThisCell); this covers
+    // keyboard/programmatic triggers too. Unscoped members are always in scope.
+    if (!isInMemberScope(myScopes, cell.fileId, activeLane)) {
+      console.warn("[validate] aborting: cell out of the caller's assigned scope")
+      return
+    }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
     if (!project.id || !editEventId) return
     setOptimisticSelfValidation(validated)
@@ -3938,7 +3940,7 @@ function EditorRow({
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
     })
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback(() => {
@@ -4110,6 +4112,7 @@ function EditorRow({
 
   const authoritativeSelfValidated = cell.activeValidators.includes(username)
   const [optimisticSelfValidation, setOptimisticSelfValidation] = useState<boolean | null>(null)
+  const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   useEffect(() => {
     if (optimisticSelfValidation !== null && authoritativeSelfValidated === optimisticSelfValidation) {
       setOptimisticSelfValidation(null)
@@ -4133,26 +4136,51 @@ function EditorRow({
       : cell.validationStatus
   const hasValidatorInfo = displayedValidators.length > 0 || cell.validationHistory.length > 1
 
-  const validationPieProgress = validationProgress(
-    displayedValidators.length,
-    validationRequirement,
-  )
-  const pieTone = validationPieTone(vs)
-  const validationComplete = isFullValidationStatus(vs)
-  const validationHoverPreview = canValidate
-    ? isSelfValidated
-      ? validationProgressAfterUnvalidate(displayedValidators.length, validationRequirement)
-      : validationProgressAfterClick(displayedValidators.length, validationRequirement)
-    : null
-  // Hover well matches the pie's *current* accent (idle grey stays grey —
-  // don't force yellow just because a click would add your validation).
-  const validationHoverBg = statusPieHoverBackground(
-    statusPieAccentColor(pieTone, validationPieProgress, validationComplete),
-  )
+  // Gate Base UI's auto-toggle: clicks on an unvalidated cell should validate
+  // (not open the popover), and hovers should only open when there's actually
+  // something to show. Everything else passes through to the default behavior,
+  // including outside-press / escape-key closes.
+  function handleOpenChange(
+    nextOpen: boolean,
+    details: { reason: string; cancel(): void },
+  ) {
+    if (!nextOpen) {
+      setValidationPopoverOpen(false)
+      return
+    }
+    // "keyboard" fires when activated via Space/Enter; "trigger-press" fires
+    // on pointer press. The trigger button's own click handler performs the
+    // validation, so the popover only needs to stay closed on first touch.
+    if (details.reason === "trigger-press" || details.reason === "keyboard") {
+      if (canValidateThisCell && !isSelfValidated) {
+        details.cancel()
+        return
+      }
+      setValidationPopoverOpen(true)
+      return
+    }
+    if (details.reason === "trigger-hover" && !hasValidatorInfo) {
+      details.cancel()
+      return
+    }
+    setValidationPopoverOpen(true)
+  }
 
-  const toggleMyValidation = useCallback(() => {
-    emitValidationChange(!isSelfValidated)
-  }, [emitValidationChange, isSelfValidated])
+  // "others" now uses a filled Circle (lucide has no dedicated filled-circle
+  // icon; we render Circle with fill="currentColor"). Matches codex-editor
+  // desktop AudioValidationStatusIcon's circle-filled codicon.
+  // full-self = fully validated and current user is one of the validators (double-check, green)
+  // full-others = fully validated but current user has NOT validated (double-check, green)
+  const ValidationIcon =
+    vs === "full-self" || vs === "full-others" ? CheckCheck :
+    vs === "self" ? Check :
+    Circle
+  const validationColorClass =
+    vs === "full-self" ? "text-green-500" :
+    vs === "full-others" ? "text-green-500" :
+    vs === "self" ? "text-green-500" :
+    vs === "others" ? "text-muted-foreground/60" :
+    "text-muted-foreground/30"
 
   const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
@@ -4448,44 +4476,17 @@ function EditorRow({
   const cellRef = cell.context?.trim()
     || cell.globalReferences?.[0]?.trim()
     || `row ${rowIndex + 1}`
-  const validationHoverContent = useMemo(() => {
-    if (!hasValidatorInfo) return null
-    return (
-      <div className="space-y-2 text-left">
-        <div>
-          <p className="mb-1 text-xs text-muted-foreground">
-            Validated by
-          </p>
-          <ul className="space-y-0.5">
-            {displayedValidators.length === 0 ? (
-              <li className="text-xs text-muted-foreground">No active validators</li>
-            ) : (
-              displayedValidators.map((v) => (
-                <li key={v} className="flex items-center gap-1.5 truncate text-xs">
-                  <InitialsAvatar name={v} size="xs" singleInitial className="shrink-0" />
-                  <span className="truncate">
-                    {v}
-                    {v === username ? " (you)" : ""}
-                  </span>
-                </li>
-              ))
-            )}
-          </ul>
-        </div>
-        {cell.validationHistory.length > 0 && (
-          <ValidationHistoryTimeline
-            entries={cell.validationHistory}
-            currentUsername={username}
-          />
-        )}
-      </div>
-    )
-  }, [hasValidatorInfo, displayedValidators, username, cell.validationHistory])
+  const validationTooltip = canValidateThisCell
+    ? "Not validated — click to validate"
+    : canValidate
+      ? "Outside your assigned files or lanes" // AQU-633: scoped-out, not a role gate
+      : "Validation unavailable"
+  type PreventableReactEvent<T> = React.SyntheticEvent<T> & {
+    preventBaseUIHandler?: () => void
+  }
   const renderValidationButton = (onClick?: () => void) => (
-    <Button
+    <button
       type="button"
-      variant="ghost"
-      size="icon-sm"
       data-showcase="cell.health"
       // FRO-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
@@ -4497,33 +4498,118 @@ function EditorRow({
             ? `Validated by others — ${cellRef}. Click to add your validation.`
             : `Not validated — ${cellRef}. Click to validate.`
       }
-      onClick={() => {
-        onClick?.()
+      onClick={(e) => {
+        if (!onClick) return
+        onClick()
+        ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
       }}
       onKeyDown={(e) => {
         if (!onClick || (e.key !== " " && e.key !== "Enter")) return
         e.preventDefault()
         e.stopPropagation()
         onClick()
+        ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
       }}
-      className={cn("group/validate shrink-0", statusPieValidationButtonClass)}
-      style={
-        {
-          transform: "none",
-          "--status-pie-hover-bg": validationHoverBg,
-        } as React.CSSProperties
-      }
-      disabled={!canValidate}
+      className={cn(
+        "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
+        "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
+        "hover:bg-muted/80",
+        validationColorClass,
+        vs === "none" && "hover:text-green-500",
+        vs === "others" && "hover:text-green-500",
+        vs === "full-others" && "hover:text-green-500",
+      )}
+      disabled={!canValidateThisCell}
     >
-      <StatusPie
-        progress={validationPieProgress}
-        tone={pieTone}
-        complete={validationComplete}
-        hoverPreviewProgress={validationHoverPreview}
-        sizePx={18}
+      <HealthRing
+        health={healthValue}
+        size={22}
+        strokeWidth={2}
         className="pointer-events-none"
+        style={{ position: "absolute", inset: 0, margin: "auto" }}
       />
-    </Button>
+      <ValidationIcon
+        className="relative h-3.5 w-3.5"
+        strokeWidth={2.5}
+        {...(vs === "others" ? { fill: "currentColor" } : {})}
+      />
+    </button>
+  )
+  // AQU-592: the validation control (health ring + validate toggle, with the
+  // validators popover) renders to the LEFT of the TARGET editing cell — see the
+  // target column below — instead of in the far-left gutter beside the source.
+  // AQU-687: reserve a stable-width gutter for the validation control whether or
+  // not the cell has content yet. Collapsing this slot to `null` for empty cells
+  // made the target editor snap narrower the instant a prediction/draft filled
+  // the cell (hasContent flips true → the 24px button + gap appears). Keeping a
+  // fixed `w-6` slot at all times holds the editor width steady.
+  const validationControl = (
+    <div data-testid="validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
+      {hasContent ? (
+        hasValidatorInfo ? (
+        <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
+          <PopoverTrigger
+            openOnHover
+            delay={400}
+            closeDelay={100}
+            render={renderValidationButton(
+              canValidateThisCell && !isSelfValidated
+                ? () => emitValidationChange(true)
+                : undefined,
+            )}
+          />
+          {vs !== "empty" && (
+            <PopoverContent
+              side="right"
+              align="start"
+              className="w-72 rounded-xl p-2"
+            >
+              <ul className="space-y-0.5">
+                <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Validated by
+                </li>
+                {displayedValidators.length === 0 ? (
+                  <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
+                ) : (
+                  displayedValidators.map((v) => (
+                    <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
+                      <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
+                      {v === username && canValidate && (
+                        <AppTooltip content="Remove your validation">
+                          <button
+                            type="button"
+                            aria-label="Remove your validation"
+                            className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            onClick={() => {
+                              emitValidationChange(false)
+                              setValidationPopoverOpen(false)
+                            }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </AppTooltip>
+                      )}
+                    </li>
+                  ))
+                )}
+              </ul>
+              {cell.validationHistory.length > 0 && (
+                <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
+              )}
+            </PopoverContent>
+          )}
+        </Popover>
+      ) : (
+        <AppTooltip content={validationTooltip}>
+          {renderValidationButton(
+            canValidateThisCell && !isSelfValidated
+              ? () => emitValidationChange(true)
+              : undefined,
+          )}
+        </AppTooltip>
+        )
+      ) : null}
+    </div>
   )
   const cellStateLabel =
     cell.status === "validated" ? "validated" :
@@ -4617,28 +4703,11 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
-        {/* Left gutter — line number stacked above validation. py-1.5 matches
-            the source/target wells; the digit itself is centered in a
-            source-line-height box so it rides the first line of text. */}
+        {/* Left gutter — line number only. Validation moved beside the TARGET
+            (AQU-592) so reviewers keep their gaze on the translation. */}
         <div className="flex h-full w-full items-start justify-center gap-1 py-1.5">
-          <div className="flex flex-col items-center gap-0.5">
-            {numberPill}
-            {/* Validation — Linear-style pie tile + center icon (quorum progress). */}
-            {hasContent && (
-              <AppTooltip
-                content={validationHoverContent}
-                disabled={!validationHoverContent}
-                side="right"
-                delay={400}
-                className="block max-w-72 w-72 p-2 text-left shadow-md"
-              >
-                {renderValidationButton(
-                  canValidate ? toggleMyValidation : undefined,
-                )}
-              </AppTooltip>
-            )}
-          </div>
-          {/* Stale-source indicator alongside validate button. Both flags
+          {numberPill}
+          {/* Stale-source indicator. Both flags
               are already resolved per-row booleans (see isStaleSource's doc
               comment) — the singleton Set(s) just adapt them to the
               indicator's managed-mode membership-set contract. */}
@@ -4874,20 +4943,21 @@ function EditorRow({
             else (waveform, transcript preview, backtranslation, infractions
             detail) lives in the expansion panel. The showcase node IS the text
             surface (mirrors source). mr-9 reserves space for the ever-present
-            chevron at the right edge. */}
+            chevron at the right edge. AQU-592: validate button sits to the LEFT
+            of the editing cell so validating keeps the reviewer's gaze on TARGET. */}
+        <div className="mr-9 flex h-full min-h-[40px] gap-1.5" dir="ltr" style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}>
+          {validationControl}
         <div
           data-showcase="editor.target"
           data-cell-type="target"
           className={cn(
-            "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 transition-[colors,opacity]",
-            "mr-9 hover:bg-muted/60",
+            "relative flex h-full min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-[colors,opacity]",
+            "hover:bg-muted/60",
             hasInlineFootnotes && "min-h-0 py-0.5",
             "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
             !visibleTranslated?.trim() && "bg-muted/40",
             isSynthBusy && "opacity-70",
           )}
-          dir="ltr"
-          style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
         >
           {(showCellLabel || cell.aiDrafted) && (
             <div className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
@@ -5158,6 +5228,7 @@ function EditorRow({
           )}
         </div>
 
+        </div>
         {/* Floating action rail — anchored to the row's right edge above the
             target text surface so it never covers the first line. z-20 so it
             sits above the sticky column header (z-10).

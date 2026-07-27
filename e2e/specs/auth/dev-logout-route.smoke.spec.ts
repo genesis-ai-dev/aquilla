@@ -30,7 +30,6 @@ test("/__dev/logout is a no-op in built apps: redirects to / with session intact
   // Land on alice's org home so the account menu is definitely mounted
   // (OrgRouteGate not-found has no account switcher).
   await alice.goto(orgRoute(alice))
-  await alice.waitForLoadState("networkidle")
 
   await expect(alice.getByRole("button", { name: /Account menu: alice/i })).toBeVisible({
     timeout: 10_000,

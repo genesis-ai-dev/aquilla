@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
+import { fetchProjectRoster, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
@@ -26,7 +26,7 @@ import {
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
- * chapter scope to an org member. Collapsed to an "Assign…" button until
+ * chapter scope to a project member. Collapsed to an "Assign…" button until
  * opened; emits one assignment.create on submit. Book scope = whole file;
  * chapter scope = a real chapter picked from the file's chapter dropdown
  * (the canonical_ref prefix, e.g. "GEN 1", matched server-side via LIKE).
@@ -48,7 +48,6 @@ export interface AssignWorkProps {
   projectId: string
   /** Files in the project (book = one file). */
   files: { id: string; name: string; bookCode?: string }[]
-  orgId: number
   jwt: string
   /** Manager's username — stamped as the event author (server re-verifies). */
   author: string
@@ -66,7 +65,6 @@ const DEFAULT_ROLE_LEVEL = 500
 export function AssignWork({
   projectId,
   files,
-  orgId,
   jwt,
   author,
   roleLevel = DEFAULT_ROLE_LEVEL,
@@ -76,7 +74,7 @@ export function AssignWork({
 }: AssignWorkProps) {
   const isSelfAssignMode = roleLevel < DEFAULT_ROLE_LEVEL
   const [open, setOpen] = useState(false)
-  const [members, setMembers] = useState<OrgMember[]>([])
+  const [members, setMembers] = useState<ProjectMember[]>([])
   const [assigneeId, setAssigneeId] = useState<number | "">(
     isSelfAssignMode && callerUserId != null ? callerUserId : "",
   )
@@ -101,14 +99,28 @@ export function AssignWork({
     [files],
   )
 
+  // AQU-676: fetch the project's effective roster (same source AssignModal's
+  // hosts use), not the org roster — an org roster both floods the picker with
+  // org-baseline-only people and misses project-only invitees (AQU-474).
+  // Roster-hidden / no-access resolve to an empty list, failing closed.
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    listOrgMembers(jwt, orgId)
-      .then((m) => { if (!cancelled) setMembers(m) })
+    fetchProjectRoster(jwt, projectId)
+      .then((r) => { if (!cancelled) setMembers(r.kind === "ok" ? r.members : []) })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
     return () => { cancelled = true }
-  }, [open, jwt, orgId])
+  }, [open, jwt, projectId])
+
+  // AQU-676: the assignee picker must list only the project's own members,
+  // never everyone with org-baseline access. partitionMembers (AQU-454) keeps
+  // only members with a project-specific path (override / group / creator);
+  // org-baseline-only members drop out. Self-assign mode is exempt (the caller
+  // claims work for themselves) — it filters the raw roster to the caller.
+  const eligibleMembers = useMemo(
+    () => partitionMembers(members).projectMembers,
+    [members],
+  )
 
   // Load the selected file's chapters for the dropdown; reset the picked
   // chapter when the file changes so a stale chapter can't leak across books.
@@ -129,6 +141,13 @@ export function AssignWork({
     }
     if (!fileId) {
       setError("Choose a file.")
+      return
+    }
+    // AQU-676 defense-in-depth: the picker already hides org-baseline-only
+    // members, but re-check on submit so a stale/forced selection can't route
+    // an assignment to someone outside the project.
+    if (!isSelfAssignMode && !eligibleMembers.some((m) => m.userId === Number(assigneeId))) {
+      setError("You can only assign work to a project member.")
       return
     }
     if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, Number(assigneeId))) {
@@ -188,7 +207,8 @@ export function AssignWork({
                       .map((m) => ({ value: String(m.userId), label: `${m.username} (you)` }))
                   : [
                       { value: "", label: "Select member…" },
-                      ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+                      // AQU-676: project members only — org-baseline-only people are excluded.
+                      ...eligibleMembers.map((m) => ({ value: String(m.userId), label: m.username })),
                     ]
               }
               value={assigneeId === "" ? "" : String(assigneeId)}
@@ -209,7 +229,7 @@ export function AssignWork({
                   ) : (
                     <>
                       <SelectItem value="">Select member…</SelectItem>
-                      {members.map((m) => (
+                      {eligibleMembers.map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
                       ))}
                     </>

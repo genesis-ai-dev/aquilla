@@ -1659,7 +1659,6 @@ export function ProjectOverview() {
                       <AssignWork
                         projectId={id}
                         files={project?.files ?? []}
-                        orgId={activeOrgId}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
                         onAssigned={handleAssigned}

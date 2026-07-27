@@ -54,7 +54,7 @@ describe("IDML v2 parser adapter", () => {
     expect(cell.id).toBe(parsed.units[0].id)
     expect(cell.original.length).toBeGreaterThan(200)
     expect(cell.original).toContain("& final")
-    expect(cell.paragraphStart).toBe(true)
+    expect(cell.paragraphStart).toBeUndefined()
     expect(cell.sourceLocator).toMatchObject({
       kind: "idml",
       memberPath: STORY,

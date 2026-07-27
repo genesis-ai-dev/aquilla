@@ -71,7 +71,6 @@ function toTranslatableString(unit: IdmlTranslationUnit): TranslatableString {
     context: scopeLabel(unit.locator.scope),
     group: `${unit.locator.memberPath}:${unit.locator.elementPath}`,
     type: "text",
-    paragraphStart: true,
     sourceLocator: unit.locator,
     metadata: {
       idml: unit.metadata,

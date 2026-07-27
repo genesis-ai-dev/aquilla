@@ -256,6 +256,45 @@ describe("IDML structural parser", () => {
     )
   })
 
+  it("preserves running-header whitespace and processing instructions without blank units", async () => {
+    const runningHeaderStory = `<?xml version="1.0" encoding="UTF-8"?>
+<idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1">
+<ParagraphStyleRange Self="running-header-tab"><CharacterStyleRange><Content>	<?ACE 18?><?ACE 8?></Content></CharacterStyleRange></ParagraphStyleRange>
+<ParagraphStyleRange Self="running-header-variable"><CharacterStyleRange><TextVariableInstance Self="section"/></CharacterStyleRange><CharacterStyleRange><Content> </Content></CharacterStyleRange><CharacterStyleRange><Content>	<?ACE 18?></Content></CharacterStyleRange></ParagraphStyleRange>
+<ParagraphStyleRange Self="real-copy"><CharacterStyleRange><Content>Translate me</Content></CharacterStyleRange></ParagraphStyleRange>
+</Story></idPkg:Story>`
+    const bytes = await makeIdml({ "Stories/Story_u1.xml": runningHeaderStory })
+    const parsed = await parseIdml(bytes)
+
+    expect(parsed.units.filter((unit) => unit.locator.memberPath === "Stories/Story_u1.xml"))
+      .toHaveLength(1)
+    expect(unitById(parsed.units, "real-copy").sourceText).toBe("Translate me")
+    expect(parsed.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "UNSUPPORTED_CONSTRUCT",
+        memberPath: "Stories/Story_u1.xml",
+        details: expect.objectContaining({
+          elementPath: "/idPkg:Story[1]/Story[1]/ParagraphStyleRange[1]",
+          unsupportedDisposition: "preserved-nonliteral",
+          constructKind: "nonliteral-paragraph",
+        }),
+      }),
+      expect.objectContaining({
+        code: "UNSUPPORTED_CONSTRUCT",
+        memberPath: "Stories/Story_u1.xml",
+        details: expect.objectContaining({
+          elementPath: "/idPkg:Story[1]/Story[1]/ParagraphStyleRange[2]",
+          unsupportedDisposition: "preserved-nonliteral",
+          constructKind: "nonliteral-paragraph",
+        }),
+      }),
+    ]))
+
+    const exported = await exportIdml(bytes, [], { strict: true })
+    expect(exported.bytes).toEqual(new Uint8Array(bytes))
+    expect(await memberText(exported.bytes, "Stories/Story_u1.xml")).toBe(runningHeaderStory)
+  })
+
   it("uses deterministic code-unit ordering for stories not listed in designmap", async () => {
     const story = (storyId: string, paragraphId: string) =>
       `<?xml version="1.0"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="${storyId}"><ParagraphStyleRange Self="${paragraphId}"><CharacterStyleRange><Content>${storyId}</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`

@@ -1137,6 +1137,27 @@ async function extractParagraphUnit(
       ],
     }
   }
+  if (!slotElements.some(({ slot }) => slot.text.trim().length > 0)) {
+    return {
+      diagnostics: [
+        ...diagnostics,
+        {
+          code: "UNSUPPORTED_CONSTRUCT",
+          severity: "warning",
+          message:
+            "Paragraph contains only whitespace and protected IDML structure and was preserved without a translation unit",
+          memberPath,
+          details: {
+            elementPath: elementPath(paragraph),
+            slotCount: slotElements.length,
+            protectedTokenCount: tokens.length,
+            unsupportedDisposition: "preserved-nonliteral",
+            constructKind: "nonliteral-paragraph",
+          },
+        },
+      ],
+    }
+  }
   const story = nearestAncestor(paragraph, (ancestor) => ancestor.localName === "Story")
   const storyId = story ? getAttribute(story, "Self") : undefined
   const locator = await createLocator(

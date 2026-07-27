@@ -6,6 +6,7 @@ import JSZip from "jszip"
 
 const IDML_MIME = "application/vnd.adobe.indesign-idml-package"
 const IDPKG = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
+const UTILITY_STORY_PATH = "Stories/Story_running_header.xml"
 const STORY_PATH = "Stories/Story_u100.xml"
 
 async function writeIdmlFixture(filePath: string): Promise<void> {
@@ -13,12 +14,17 @@ async function writeIdmlFixture(filePath: string): Promise<void> {
   zip.file("mimetype", IDML_MIME, { compression: "STORE", createFolders: false })
   zip.file(
     "designmap.xml",
-    `<?xml version="1.0" encoding="UTF-8"?><Document ${IDPKG}><idPkg:Story src="${STORY_PATH}"/></Document>`,
+    `<?xml version="1.0" encoding="UTF-8"?><Document ${IDPKG}><idPkg:Story src="${UTILITY_STORY_PATH}"/><idPkg:Story src="${STORY_PATH}"/></Document>`,
     { compression: "DEFLATE", createFolders: false },
   )
   zip.file(
     "Resources/Styles.xml",
     `<?xml version="1.0"?><idPkg:Styles ${IDPKG}></idPkg:Styles>`,
+    { compression: "DEFLATE", createFolders: false },
+  )
+  zip.file(
+    UTILITY_STORY_PATH,
+    `<?xml version="1.0" encoding="UTF-8"?><idPkg:Story ${IDPKG}><Story Self="running-header"><ParagraphStyleRange Self="running-header-tab"><CharacterStyleRange><Content>	<?ACE 18?><?ACE 8?></Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`,
     { compression: "DEFLATE", createFolders: false },
   )
   zip.file(
@@ -60,6 +66,8 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await ws.openFileBySubstring("protected-roundtrip")
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText("Chapter One")
+  await expect(ws.cellRow(1)).toContainText("the LORD")
+  await expect(alice.locator('[data-paragraph-start="true"]')).toHaveCount(0)
 
   await ws.editCell(0, "Chapitre Un")
   await ws.openExportDialog()

@@ -23,15 +23,17 @@ import {
 } from "./ids"
 import type { IngestEvent } from "./types"
 import { decodeHtmlEntities } from "../html-entities"
+import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
 import {
   canonicalIdmlCellMetadata,
-  classifyIdmlPair,
-  idmlReadinessFromDiagnostics,
   IDML_PROFILE_ID,
   IDML_PROFILE_VERSION,
   isIdmlPair,
   legacyIdmlStructure,
+  orderedCodexPairCells,
   upgradeIdmlCell,
+  type IdmlCellProof,
+  type IdmlMigrationAssessment,
 } from "./idml"
 
 // Project HTML down to the plain-text `value`. Strip tags, decode entities
@@ -111,6 +113,29 @@ export interface MapOptions {
   fallbackAuthor: string
   /** `clientTs` for synthetic events lacking a legacy timestamp. */
   fallbackTs: number
+  /**
+   * Original-byte proof for an IDML pair. Omission is deliberately treated as
+   * needs-artifact; embedded legacy metadata can never self-certify v2.
+   */
+  idmlAssessment?: IdmlMigrationAssessment
+}
+
+function canonicalTargetWithProof(
+  proof: IdmlCellProof | undefined,
+  source: CodexCell | undefined,
+  target: CodexCell | undefined,
+  html: string,
+): string {
+  if (!proof) return html
+  if (target?.value === html && proof.targetHtml !== undefined) return proof.targetHtml
+  const upgraded = upgradeIdmlCell(source, target, html)?.target
+  if (!upgraded?.ok || upgraded.targetHtml === undefined) return html
+  const validation = validateIdmlTranslation(
+    proof.unit.sourceHtml,
+    upgraded.targetHtml,
+    proof.unit.metadata,
+  )
+  return validation.valid ? upgraded.targetHtml : html
 }
 
 /** Map one source/target file pair to its deterministic event stream. */
@@ -119,7 +144,10 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
   const fileId = fileIdFor(projectKey, pair.relPath)
   const events: IngestEvent[] = []
   const idml = isIdmlPair(pair)
-  const idmlReadiness = idml ? classifyIdmlPair(pair, true) : "not-idml"
+  const idmlAssessment = idml ? opts.idmlAssessment : undefined
+  const idmlReadiness = idml
+    ? idmlAssessment?.readiness ?? "needs-artifact"
+    : "not-idml"
 
   events.push({
     id: fileCreateEventId(projectId, fileId),
@@ -144,12 +172,13 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
               profileVersion: IDML_PROFILE_VERSION,
               deterministic: true,
               fidelity: "content-only",
-              unitCount: (pair.target?.cells ?? pair.source?.cells ?? [])
-                .filter((cell) => Boolean(
-                  legacyIdmlStructure(cell)
-                  || cell.metadata.idml
-                  || cell.metadata.aquillaImport,
-                )).length,
+              unitCount: idmlAssessment?.manifest?.unitLocators.length ?? 0,
+              ...(idmlAssessment?.sourceSha256
+                ? {
+                    proofStatus: "verified-original-bytes",
+                    proofSourceSha256: idmlAssessment.sourceSha256,
+                  }
+                : {}),
               warningCounts: idmlReadiness === "native-ready"
                 ? {}
                 : { [idmlReadiness]: 1 },
@@ -161,7 +190,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     },
   })
 
-  const orderedCells = pair.target?.cells ?? pair.source?.cells ?? []
+  const orderedCells = orderedCodexPairCells(pair)
   const sourceById = new Map<string, CodexCell>()
   for (const c of pair.source?.cells ?? []) sourceById.set(c.metadata.id, c)
   const targetById = new Map<string, CodexCell>()
@@ -184,29 +213,25 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     // Source text: the paired source value, falling back to the cell's own
     // value (so structural/milestone cells still carry a label on the source
     // side) and finally empty.
-    const legacyUpgrade = upgradeIdmlCell(s, t, t?.value)
-    const sourceUpgrade = legacyUpgrade?.source
-    const targetUpgrade = legacyUpgrade?.target
+    const proof = idmlAssessment?.readiness === "native-ready"
+      ? idmlAssessment.cells.get(cellId)
+      : undefined
     const carrier = legacyIdmlStructure(s) || s?.metadata.idml
       ? s
       : legacyIdmlStructure(t) || t?.metadata.idml
         ? t
         : undefined
-    const srcHtml = sourceUpgrade?.ok
-      ? sourceUpgrade.sourceHtml
+    const srcHtml = proof
+      ? proof.sourceHtml
       : s?.value ?? ordered.value ?? ""
-    const sourceMetadata = sourceUpgrade?.ok && carrier
+    const sourceMetadata = proof && carrier && idmlAssessment?.sourceSha256
       ? {
-          ...canonicalIdmlCellMetadata(sourceUpgrade, carrier, physicalOrder),
-          ...(targetUpgrade && !targetUpgrade.ok
-            ? {
-                idmlMigration: {
-                  status: idmlReadinessFromDiagnostics(targetUpgrade.diagnostics),
-                  diagnostics: targetUpgrade.diagnostics
-                    .map(({ code, message }) => ({ code, message })),
-                },
-              }
-            : {}),
+          ...canonicalIdmlCellMetadata(proof.unit, carrier, physicalOrder),
+          idmlMigration: {
+            version: 2,
+            readiness: "native-ready",
+            sourceSha256: idmlAssessment.sourceSha256,
+          },
         }
       : carrier
         ? {
@@ -217,12 +242,10 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
                 : {}),
             },
             idmlMigration: {
-              status: sourceUpgrade && !sourceUpgrade.ok
-                ? idmlReadinessFromDiagnostics(sourceUpgrade.diagnostics)
-                : "unsupported-legacy-html",
-              diagnostics: sourceUpgrade && !sourceUpgrade.ok
-                ? sourceUpgrade.diagnostics.map(({ code, message }) => ({ code, message }))
-                : [],
+              version: 2,
+              readiness: idmlReadiness,
+              diagnostics: (idmlAssessment?.diagnostics ?? [])
+                .map(({ code, message }) => ({ code, message })),
             },
           }
         : undefined
@@ -264,8 +287,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
       // No value-history. Emit one synthetic commit for a real (non-structural)
       // translation that exists but predates the edit ledger; skip milestones.
       if (t.value && t.value.trim() !== "" && t.metadata.type !== "milestone") {
-        const upgraded = upgradeIdmlCell(s, t, t.value)?.target
-        const targetHtml = upgraded?.ok ? upgraded.targetHtml ?? t.value : t.value
+        const targetHtml = canonicalTargetWithProof(proof, s, t, t.value)
         events.push({
           id: targetCommitEventId(projectId, fileId, cellId, 0),
           kind: "target.cell.commit",
@@ -286,8 +308,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     let headEdit: EditHistory | undefined
     for (const { e, i } of valueEdits) {
       const html = editValueHtml(e)
-      const upgraded = upgradeIdmlCell(s, t, html)?.target
-      const targetHtml = upgraded?.ok ? upgraded.targetHtml ?? html : html
+      const targetHtml = canonicalTargetWithProof(proof, s, t, html)
       const id = targetCommitEventId(projectId, fileId, cellId, i)
       events.push({
         id,

@@ -27,10 +27,15 @@ import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import { randomUUID } from "node:crypto"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
-import { classifyIdmlPair, isIdmlPair } from "../src/lib/migrate/idml"
+import {
+  assessIdmlPair,
+  isIdmlPair,
+  type IdmlMigrationAssessment,
+} from "../src/lib/migrate/idml"
 import {
   resolveLocalIdmlOriginal,
   uploadLocalIdmlOriginal,
+  type LocalIdmlOriginal,
 } from "./lib/idml-migration-artifacts"
 
 const AUTH = process.env.AUTH_BASE ?? "http://127.0.0.1:8788"
@@ -286,6 +291,11 @@ async function main() {
 
   const events: IngestEvent[] = []
   const pairs: FilePairInput[] = []
+  const idmlPlans: Array<{
+    pair: FilePairInput
+    original?: LocalIdmlOriginal
+    assessment: IdmlMigrationAssessment
+  }> = []
   for (const stem of stems) {
     const pair: FilePairInput = {
       relPath: stem,
@@ -295,11 +305,25 @@ async function main() {
     }
     if (!pair.source && !pair.target) continue
     pairs.push(pair)
-    const fileEvents = mapFilePairToEvents(pair, opts)
+    const original = isIdmlPair(pair) ? resolveLocalIdmlOriginal(dir, pair) : undefined
+    const assessment = isIdmlPair(pair)
+      ? await assessIdmlPair(pair, original?.bytes)
+      : undefined
+    if (assessment) idmlPlans.push({ pair, ...(original ? { original } : {}), assessment })
+    const fileEvents = mapFilePairToEvents(pair, {
+      ...opts,
+      ...(assessment ? { idmlAssessment: assessment } : {}),
+    })
     events.push(...fileEvents)
     console.log(
       `  ${stem.slice(0, 48).padEnd(48)} ${pair.source ? "S" : " "}${pair.target ? "T" : " "}  ${fileEvents.length} events`,
     )
+    if (assessment) {
+      console.log(
+        `    IDML: ${assessment.readiness}`
+        + (original ? ` ← ${original.relativePath}` : " (missing files/originals attachment)"),
+      )
+    }
   }
 
   // Project-level comments (.project/comments.json) → comment.create/resolve.
@@ -337,26 +361,38 @@ async function main() {
   const token = await devLogin()
   await createProject(token, aquillaProjectId, projectName)
 
-  console.log("Ingesting events…")
-  await ingest(aquillaProjectId, events, secret)
+  // Source upload requires a projected file row. Project only those genesis
+  // events first; canonical/v2 cell events remain withheld until every
+  // available original is durably bound.
+  const artifactFileIds = new Set(
+    idmlPlans
+      .filter((plan) => plan.original)
+      .map((plan) => fileIdFor(legacyKey, plan.pair.relPath)),
+  )
+  const prerequisiteEvents = events.filter((event) => (
+    event.kind === "file.create"
+    && typeof event.fileId === "string"
+    && artifactFileIds.has(event.fileId)
+  ))
+  if (prerequisiteEvents.length > 0) {
+    console.log("Projecting IDML file prerequisites…")
+    await ingest(aquillaProjectId, prerequisiteEvents, secret)
+  }
 
-  // IDML originals are immutable export skeletons. Resolve only an exact or
-  // otherwise unambiguous file under attachments/files/originals; a missing or
-  // ambiguous artifact is reported and never guessed.
-  for (const pair of pairs) {
-    if (!isIdmlPair(pair)) continue
-    const fileId = fileIdFor(legacyKey, pair.relPath)
-    const original = resolveLocalIdmlOriginal(dir, pair)
-    const readiness = classifyIdmlPair(pair, Boolean(original))
+  for (const plan of idmlPlans) {
+    const fileId = fileIdFor(legacyKey, plan.pair.relPath)
+    const { original, assessment } = plan
     if (!original) {
       console.warn(
-        `  ! ${pair.name}: ${readiness}; expected the matching .idml under `
+        `  ! ${plan.pair.name}: ${assessment.readiness}; expected the matching .idml under `
         + `.project/attachments/files/originals`,
       )
       continue
     }
-    if (readiness !== "native-ready") {
-      console.warn(`  ! ${pair.name}: ${readiness}; original preserved but export remains unavailable`)
+    if (assessment.readiness !== "native-ready") {
+      console.warn(
+        `  ! ${plan.pair.name}: ${assessment.readiness}; original preserved but export remains unavailable`,
+      )
     }
     const syncToken = await mintSyncToken(token, aquillaProjectId, fileId)
     await uploadLocalIdmlOriginal({
@@ -366,7 +402,20 @@ async function main() {
       token: syncToken,
       original,
     })
-    console.log(`  source artifact: ${pair.name} ← ${original.relativePath} (${readiness})`)
+    console.log(
+      `  source artifact: ${plan.pair.name} ← ${original.relativePath} (${assessment.readiness})`,
+    )
+  }
+
+  const prerequisiteIds = new Set(prerequisiteEvents.map((event) => event.id))
+  const remainingEvents = events.filter((event) => !prerequisiteIds.has(event.id))
+  console.log("Ingesting content events…")
+  await ingest(aquillaProjectId, remainingEvents, secret)
+
+  // A failed upload above throws before this point, so no canonical IDML cell
+  // metadata can enter the event log without its immutable source artifact.
+  if (idmlPlans.some((plan) => plan.original) && remainingEvents.length === 0) {
+    console.log("  IDML artifacts bound; no remaining content delta")
   }
 
   if (args.audio) {

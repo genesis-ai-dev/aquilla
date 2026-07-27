@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { FilePairInput } from "../../src/lib/migrate/map"
 import {
+  downloadGitlabIdmlOriginalBytes,
+  readGitlabIdmlOriginalBytes,
   resolveGitlabIdmlOriginal,
   resolveLocalIdmlOriginal,
 } from "./idml-migration-artifacts"
@@ -29,6 +32,7 @@ function pair(originalName = "book.idml"): FilePairInput {
 
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true })
+  vi.unstubAllGlobals()
 })
 
 describe("Codex IDML original resolution", () => {
@@ -39,13 +43,15 @@ describe("Codex IDML original resolution", () => {
     fs.writeFileSync(path.join(originals, "other.idml"), "OTHER")
     fs.writeFileSync(path.join(originals, "book.idml"), "BOOK")
 
-    expect(resolveLocalIdmlOriginal(root, pair())).toMatchObject({
+    const resolved = resolveLocalIdmlOriginal(root, pair())
+    expect(resolved).toMatchObject({
       kind: "local",
       relativePath: ".project/attachments/files/originals/book.idml",
       name: "book.idml",
       size: 4,
     })
-    expect(resolveLocalIdmlOriginal(root, pair())?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(resolved?.sha256).toMatch(/^[0-9a-f]{64}$/)
+    expect(Array.from(resolved?.bytes ?? [])).toEqual(Array.from(Buffer.from("BOOK")))
   })
 
   it("does not guess when several originals exist and none matches", () => {
@@ -72,6 +78,68 @@ describe("Codex IDML original resolution", () => {
       name: "book.idml",
       size: 123,
       oid,
+      filesAbsolutePath: path.join(
+        root,
+        ".project",
+        "attachments",
+        "files",
+        "originals",
+        "book.idml",
+      ),
+    })
+  })
+
+  it("accepts only locally dereferenced GitLab bytes matching the pointer OID and size", () => {
+    const root = tempProject()
+    const pointerDir = path.join(root, ".project", "attachments", "pointers", "originals")
+    const filesDir = path.join(root, ".project", "attachments", "files", "originals")
+    fs.mkdirSync(pointerDir, { recursive: true })
+    fs.mkdirSync(filesDir, { recursive: true })
+    const bytes = Buffer.from("BOOK")
+    const oid = createHash("sha256").update(bytes).digest("hex")
+    fs.writeFileSync(
+      path.join(pointerDir, "book.idml"),
+      `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${bytes.byteLength}\n`,
+    )
+    const original = resolveGitlabIdmlOriginal(root, pair())!
+
+    fs.writeFileSync(original.filesAbsolutePath, bytes)
+    expect(Array.from(readGitlabIdmlOriginalBytes(original) ?? [])).toEqual(Array.from(bytes))
+
+    fs.writeFileSync(original.filesAbsolutePath, "EVIL")
+    expect(readGitlabIdmlOriginalBytes(original)).toBeUndefined()
+  })
+
+  it("downloads only the selected GitLab original and verifies it before assessment", async () => {
+    const root = tempProject()
+    const pointerDir = path.join(root, ".project", "attachments", "pointers", "originals")
+    fs.mkdirSync(pointerDir, { recursive: true })
+    const bytes = Buffer.from("BOOK")
+    const oid = createHash("sha256").update(bytes).digest("hex")
+    fs.writeFileSync(
+      path.join(pointerDir, "book.idml"),
+      `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize ${bytes.byteLength}\n`,
+    )
+    const original = resolveGitlabIdmlOriginal(root, pair())!
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        objects: [{
+          oid,
+          size: bytes.byteLength,
+          actions: { download: { href: "https://objects.example/book" } },
+        }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(bytes, { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(downloadGitlabIdmlOriginalBytes({
+      original,
+      repositoryUrl: "https://gitlab.example/group/repo.git",
+      gitlabToken: "secret",
+    })).resolves.toEqual(new Uint8Array(bytes))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toMatchObject({
+      objects: [{ oid, size: bytes.byteLength }],
     })
   })
 })

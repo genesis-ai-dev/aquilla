@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest"
+import { makeIdml } from "../../../packages/idml-roundtrip/src/test-helpers/idml-fixture"
 import type { CodexNotebookFile } from "../codex-editor/types"
+import { assessIdmlPair } from "./idml"
 import { mapFilePairToEvents, collectSpeakers, type FilePairInput, type MapOptions } from "./map"
 import { fileIdFor, sourceCellCreateEventId, targetCommitEventId } from "./ids"
 
@@ -55,7 +57,7 @@ function fixture(): FilePairInput {
 }
 
 describe("mapFilePairToEvents", () => {
-  it("migrates legacy Codex IDML as the canonical v2 file/cell/HTML contract", () => {
+  it("migrates legacy Codex IDML as the canonical v2 file/cell/HTML contract", async () => {
     const sourceBlockXml = [
       '<ParagraphStyleRange Self="p1" AppliedParagraphStyle="ParagraphStyle/Body">',
       '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>Hello</Content></CharacterStyleRange>',
@@ -112,7 +114,31 @@ describe("mapFilePairToEvents", () => {
       },
     }
 
-    const events = mapFilePairToEvents(pair, OPTS)
+    const original = await makeIdml({
+      "designmap.xml": [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<idPkg:DesignMap xmlns:idPkg="urn:adobe:ns:indesign/idml/1.0/packaging">',
+        '<idPkg:Story src="Stories/Story_u1.xml"/>',
+        "</idPkg:DesignMap>",
+      ].join(""),
+      "Stories/Story_u1.xml": [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<idPkg:Story xmlns:idPkg="urn:adobe:ns:indesign/idml/1.0/packaging">',
+        '<Story Self="u1">',
+        sourceBlockXml,
+        "</Story>",
+        "</idPkg:Story>",
+      ].join(""),
+      "Stories/Story_u3.xml": null,
+      "Stories/Story_u9.xml": null,
+      "Resources/TextVariables.xml": null,
+    })
+    const assessment = await assessIdmlPair(pair, original)
+    expect(assessment.readiness).toBe("native-ready")
+    const events = mapFilePairToEvents(pair, {
+      ...OPTS,
+      idmlAssessment: assessment,
+    })
     const file = events.find((event) => event.kind === "file.create")!
     expect(file.payload).toMatchObject({
       fileType: "idml",
@@ -143,11 +169,28 @@ describe("mapFilePairToEvents", () => {
     expect(target.payload.valueHtml).toContain("Bonjour")
     expect(target.payload.valueHtml).not.toContain("idml-segment")
 
+    const sourceOnlyPair = structuredClone(pair)
+    sourceOnlyPair.target!.cells = []
+    const sourceOnlyAssessment = await assessIdmlPair(sourceOnlyPair, original)
+    expect(sourceOnlyAssessment.readiness).toBe("native-ready")
+    const sourceOnlyEvents = mapFilePairToEvents(sourceOnlyPair, {
+      ...OPTS,
+      idmlAssessment: sourceOnlyAssessment,
+    })
+    expect(sourceOnlyEvents.filter((event) => event.kind === "source.cell.create")).toHaveLength(1)
+    expect(sourceOnlyEvents.find((event) => event.kind === "source.cell.create")!.payload.valueHtml)
+      .toContain('data-idml-version="2"')
+
     const invalidPair = structuredClone(pair)
     const invalidTarget = invalidPair.target!.cells[0]!
     invalidTarget.value = targetHtml.replace('data-segment-index="0"', 'data-segment-index="9"')
     invalidTarget.metadata.edits![0]!.value = invalidTarget.value
-    const invalidEvents = mapFilePairToEvents(invalidPair, OPTS)
+    const invalidAssessment = await assessIdmlPair(invalidPair, original)
+    expect(invalidAssessment.readiness).toBe("unsupported-legacy-html")
+    const invalidEvents = mapFilePairToEvents(invalidPair, {
+      ...OPTS,
+      idmlAssessment: invalidAssessment,
+    })
     expect(invalidEvents.find((event) => event.kind === "file.create")!.payload)
       .toMatchObject({
         importManifest: {
@@ -156,7 +199,7 @@ describe("mapFilePairToEvents", () => {
       })
     expect(invalidEvents.find((event) => event.kind === "source.cell.create")!.payload.metadata)
       .toMatchObject({
-        idmlMigration: { status: "unsupported-legacy-html" },
+        idmlMigration: { readiness: "unsupported-legacy-html" },
       })
     expect(invalidEvents.find((event) => event.kind === "target.cell.commit")!.payload.valueHtml)
       .toContain('data-segment-index="9"')

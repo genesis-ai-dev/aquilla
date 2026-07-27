@@ -6,7 +6,14 @@ import {
   sourceArtifactBindingIdFor,
   sourceArtifactIdFor,
 } from "../../src/lib/migrate/ids"
-import { discoverPointers, type DiscoveredPointer } from "../../src/lib/migrate/gitlab/lfs"
+import {
+  discoverPointers,
+  downloadLfsObjectBytes,
+  lfsServerUrl,
+  requestLfsBatch,
+  verifyOid,
+  type DiscoveredPointer,
+} from "../../src/lib/migrate/gitlab/lfs"
 
 export interface LocalIdmlOriginal {
   kind: "local"
@@ -15,6 +22,7 @@ export interface LocalIdmlOriginal {
   name: string
   size: number
   sha256: string
+  bytes: Uint8Array
 }
 
 export interface GitlabIdmlOriginal {
@@ -23,6 +31,7 @@ export interface GitlabIdmlOriginal {
   name: string
   size: number
   oid: string
+  filesAbsolutePath: string
 }
 
 function walkFiles(root: string): string[] {
@@ -82,6 +91,7 @@ export function resolveLocalIdmlOriginal(
     name: path.basename(chosen),
     size: bytes.byteLength,
     sha256: createHash("sha256").update(bytes).digest("hex"),
+    bytes,
   }
 }
 
@@ -107,7 +117,51 @@ export function resolveGitlabIdmlOriginal(
     name: path.basename(chosen.relativePath),
     size: chosen.pointer.size,
     oid: chosen.pointer.oid,
+    filesAbsolutePath: chosen.filesAbsPath,
   }
+}
+
+/** Read an already-dereferenced GitLab original only after OID + size proof. */
+export function readGitlabIdmlOriginalBytes(
+  original: GitlabIdmlOriginal,
+): Uint8Array | undefined {
+  if (!fs.existsSync(original.filesAbsolutePath)) return undefined
+  const bytes = fs.readFileSync(original.filesAbsolutePath)
+  if (bytes.byteLength !== original.size || !verifyOid(bytes, original.oid)) return undefined
+  return bytes
+}
+
+/**
+ * Resolve only this IDML pointer through GitLab LFS. This avoids downloading a
+ * project's unrelated media while still proving the exact bytes later copied
+ * to Aquilla by immutable OID.
+ */
+export async function downloadGitlabIdmlOriginalBytes(args: {
+  original: GitlabIdmlOriginal
+  repositoryUrl: string
+  gitlabToken: string
+}): Promise<Uint8Array> {
+  const existing = readGitlabIdmlOriginalBytes(args.original)
+  if (existing) return existing
+  const objects = await requestLfsBatch(
+    lfsServerUrl(args.repositoryUrl),
+    args.gitlabToken,
+    [{ oid: args.original.oid, size: args.original.size }],
+  )
+  const exact = objects.filter((object) => object.oid.toLowerCase() === args.original.oid)
+  if (exact.length !== 1) {
+    throw new Error(
+      `GitLab LFS returned ${exact.length} matches for IDML original ${args.original.oid}`,
+    )
+  }
+  const bytes = await downloadLfsObjectBytes(exact[0]!)
+  if (bytes.byteLength !== args.original.size) {
+    throw new Error(
+      `GitLab LFS size mismatch for IDML original ${args.original.oid}: `
+      + `${bytes.byteLength} != ${args.original.size}`,
+    )
+  }
+  return bytes
 }
 
 export async function uploadLocalIdmlOriginal(args: {
@@ -135,7 +189,9 @@ export async function uploadLocalIdmlOriginal(args: {
         "X-Artifact-Profile-Version": "2",
         "X-Artifact-Fidelity": "content-only",
       },
-      body: fs.readFileSync(args.original.absolutePath),
+      // Upload the same immutable bytes that were parsed for migration proof;
+      // do not re-read a path that may have changed between assess and upload.
+      body: args.original.bytes,
     },
   )
   if (!response.ok) {

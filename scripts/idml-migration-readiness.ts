@@ -6,13 +6,14 @@ import { parseCodexNotebook } from "../src/lib/codex-editor/parse-codex"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
 import { fileIdFor } from "../src/lib/migrate/ids"
 import {
+  assessIdmlPair,
   buildIdmlMetadataPatchEvents,
-  classifyIdmlPair,
   isIdmlPair,
   type IdmlMigrationReadiness,
 } from "../src/lib/migrate/idml"
 import type { FilePairInput } from "../src/lib/migrate/map"
 import {
+  readGitlabIdmlOriginalBytes,
   resolveGitlabIdmlOriginal,
   resolveLocalIdmlOriginal,
 } from "./lib/idml-migration-artifacts"
@@ -59,7 +60,7 @@ function pairs(projectDir: string): FilePairInput[] {
     .filter((pair) => pair.source || pair.target)
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const projectDir = process.argv[2]?.startsWith("--") ? undefined : process.argv[2]
   if (!projectDir) {
     throw new Error(
@@ -85,16 +86,26 @@ function main(): void {
     const original = gitlab
       ? resolveGitlabIdmlOriginal(projectDir, pair)
       : resolveLocalIdmlOriginal(projectDir, pair)
-    const status = classifyIdmlPair(pair, Boolean(original))
+    const originalBytes = original?.kind === "local"
+      ? original.bytes
+      : original
+        ? readGitlabIdmlOriginalBytes(original)
+        : undefined
+    const assessment = await assessIdmlPair(pair, originalBytes)
+    const status = assessment.readiness
     const fileId = projectKey ? fileIdFor(projectKey, pair.relPath) : undefined
     const patches = projectId && fileId && status === "native-ready"
-      ? buildIdmlMetadataPatchEvents(pair, {
-          projectId,
-          fileId,
-          author: "legacy-import",
-          // Deterministic CLI output: patch ids and timestamps do not drift.
-          clientTs: 0,
-        }).events
+      ? buildIdmlMetadataPatchEvents(
+          pair,
+          assessment,
+          {
+            projectId,
+            fileId,
+            author: "legacy-import",
+            // Deterministic CLI output: patch ids and timestamps do not drift.
+            clientTs: 0,
+          },
+        ).events
       : []
     patchEvents.push(...patches)
     rows.push({
@@ -120,4 +131,7 @@ function main(): void {
   }
 }
 
-main()
+main().catch((error) => {
+  process.stderr.write(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
+  process.exitCode = 1
+})

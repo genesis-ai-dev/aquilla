@@ -13,6 +13,7 @@ describe("source artifact format registry", () => {
       "ebible",
       "helloao",
       "html",
+      "idml",
       "json",
       "macula-tsv",
       "md",
@@ -49,6 +50,11 @@ describe("source artifact format registry", () => {
       .map(([format]) => format)
       .sort()
     expect(native).toEqual(["docx", "pptx", "usfm"])
+    expect(sourceArtifactDescriptor("idml")).toEqual({
+      extension: "idml",
+      contentType: "application/vnd.adobe.indesign-idml-package",
+      defaultFidelity: "content-only",
+    })
     expect(sourceArtifactDescriptor("future-vendor-format")).toEqual({
       extension: "bin",
       contentType: "application/octet-stream",

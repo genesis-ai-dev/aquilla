@@ -249,7 +249,13 @@ export interface OutboxEventPayloads {
     voiceId?: string
     referenceAudioId?: string
     durationMs?: number
+    /** Non-destructive playback trim window into the clip, in ms. */
+    trimStartMs?: number
+    trimEndMs?: number
     timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+    /** AQU-646: ASR transcript of the clip's trim window (media source segments
+     *  only) — the server lands it on the source cell's `transcription`. */
+    transcription?: string
   }
   "cell.audio.select": {
     audioId: string
@@ -303,6 +309,11 @@ export interface OutboxEventPayloads {
     scope: CommentScope
     body: string // markdown OK
     parentCommentId: string | null // null = top-level thread; non-null = reply
+    // AQU-692: snapshot of the cell's target text at thread-creation time, for
+    // the "Translation changed since this thread was created" badge. Only
+    // meaningful on a root (parentCommentId === null); omit/null for replies and
+    // for scopes with no target text. A missing value is an unknown baseline.
+    createdForTranslated?: string | null
   }
   "comment.edit": {
     commentId: string

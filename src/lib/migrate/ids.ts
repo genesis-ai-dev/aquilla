@@ -56,6 +56,27 @@ export const sourceCellCreateEventId = (
   cellId: string,
 ): string => u5(`cell-create:${projectId}:${fileId}:${cellId}`)
 
+/** Durable v2 metadata backfill for one already-migrated source cell. */
+export const sourceCellMetadataPatchEventId = (
+  projectId: string,
+  fileId: string,
+  cellId: string,
+): string => u5(`source-cell-metadata-patch:v2:${projectId}:${fileId}:${cellId}`)
+
+/** Immutable original artifact id. Same seed is enforced by the worker copy route. */
+export const sourceArtifactIdFor = (
+  projectId: string,
+  fileId: string,
+  sourceSha256: string,
+): string => u5(`source-artifact:${projectId}:${fileId}:${sourceSha256.toLowerCase()}`)
+
+/** Stable source binding id for trusted migration retries. */
+export const sourceArtifactBindingIdFor = (
+  projectId: string,
+  fileId: string,
+  sourceSha256: string,
+): string => u5(`source-artifact-binding:${projectId}:${fileId}:${sourceSha256.toLowerCase()}`)
+
 /** event id for the i-th `target.cell.commit` in a cell's edit history.
  *  `editIdx` is the 0-based index into the legacy `metadata.edits[]` (the
  *  source of full-history fidelity); commit_sha is deliberately excluded so a

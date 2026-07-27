@@ -9,6 +9,14 @@ interface Options {
   /** Hard cap on records returned to the UI; the IDB read uses 2× this so the
    *  filter doesn't starve when many other-file events are pending. Default 500. */
   maxResults?: number
+  /**
+   * SUB-9: include `failed` (quarantined) records. ONLY for inspector-style
+   * views that must show refusals with Retry/Discard. Overlay consumers must
+   * NOT set this — a quarantined commit would replay as live cell state
+   * (AQU-274), and pending-count logic (useReconcileOnDrain) would never
+   * reach zero. Default false (pending-only, unchanged behavior).
+   */
+  includeFailed?: boolean
 }
 
 function outboxRecordKey(record: OutboxRecord): string {
@@ -47,7 +55,7 @@ function recordsEqual(a: readonly OutboxRecord[], b: readonly OutboxRecord[]): b
  * inspector should call `peekOutboxBatch` directly to get all statuses.
  */
 export function usePendingOutboxRecords(opts: Options): OutboxRecord[] {
-  const { enabled, fileId, maxResults = 500 } = opts
+  const { enabled, fileId, maxResults = 500, includeFailed = false } = opts
   const [records, setRecords] = useState<OutboxRecord[]>([])
 
   useEffect(() => {
@@ -61,9 +69,9 @@ export function usePendingOutboxRecords(opts: Options): OutboxRecord[] {
       const all = await peekOutboxBatch(maxResults * 2)
       if (cancelled) return
       // AQU-274: exclude quarantined records from the overlay so failed events
-      // don't show as pending validation/commit state. Inspector views should
-      // use peekOutboxBatch directly to preserve visibility of failed records.
-      const active = all.filter((r) => (r.status ?? "pending") !== "failed")
+      // don't show as pending validation/commit state. SUB-9: inspector views
+      // opt in via `includeFailed` so refusals stay visible with Retry/Discard.
+      const active = includeFailed ? all : all.filter((r) => (r.status ?? "pending") !== "failed")
       const scoped = fileId ? active.filter((r) => r.event.fileId === fileId) : active
       const next = scoped.slice(0, maxResults)
       setRecords((prev) => recordsEqual(prev, next) ? prev : next)
@@ -75,7 +83,7 @@ export function usePendingOutboxRecords(opts: Options): OutboxRecord[] {
       cancelled = true
       unsub()
     }
-  }, [enabled, fileId, maxResults])
+  }, [enabled, fileId, maxResults, includeFailed])
 
   return records
 }

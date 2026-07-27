@@ -44,7 +44,7 @@ interface Props {
    * never fires a guaranteed-403; the server stays authoritative.
    */
   myScopes: MemberScope[]
-  completeSingle?: (cell: CellData) => Promise<void> | void
+  completeSingle?: (cell: CellData) => Promise<boolean> | void
   completeBatch?: (cells: CellData[]) => Promise<void> | void
   /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
   audioMode?: boolean

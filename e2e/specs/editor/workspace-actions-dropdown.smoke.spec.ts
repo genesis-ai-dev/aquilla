@@ -2,24 +2,22 @@ import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
- * PrimaryActionButton "More actions" dropdown.
+ * Workspace actions in the ⋯ overflow menu.
  *
- * The workspace header has a split button: the left part runs the default
- * action, the right chevron opens a dropdown listing all available actions.
+ * AQU-661: the dynamic primary-action split button was removed; the workspace
+ * actions now lead the header ⋯ overflow menu (button aria-label "More").
  *
- * With a file open and untranslated cells:
- *   - "Run AI completions" is the default action (translated < total)
- *   - The dropdown should include all primary actions available for the file:
- *     "Export", "Batch validate…", and potentially others
+ * With a file open and untranslated cells the menu should list the available
+ * actions — "Export" and "Run AI completions" among them.
  *
- * This spec verifies the dropdown opens, lists multiple actions, and closes
+ * This spec verifies the menu opens, lists multiple actions, and closes
  * without triggering any action.
  */
 test("workspace actions dropdown lists available actions", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Actions ${Date.now()}` })
   await openSeededProject(alice, seeded)
 
-  const moreBtn = alice.getByRole("button", { name: /More actions/i })
+  const moreBtn = alice.getByRole("banner").getByRole("button", { name: /^More$/i })
   await expect(moreBtn).toBeVisible({ timeout: 10_000 })
   await moreBtn.click()
 

@@ -307,9 +307,17 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
               aria-live="polite"
               aria-atomic="true"
             >
-              {rows.length === 0
-                ? "All synced"
-                : `${rows.length} pending`}
+              {(() => {
+                // SUB-9: failed (quarantined) rows are in the feed now — count
+                // them separately so a refused change is never labeled "pending"
+                // and "All synced" only appears when the outbox is truly empty.
+                const failed = rows.filter((r) => r.rec.status === "failed").length
+                const pending = rows.length - failed
+                if (rows.length === 0) return "All synced"
+                if (failed === 0) return `${pending} pending`
+                if (pending === 0) return `${failed} failed`
+                return `${pending} pending · ${failed} failed`
+              })()}
             </span>
           </div>
           {rows.length > 0 && (

@@ -56,7 +56,9 @@ export async function spawnWranglerDev(opts: {
   let ready = false
   while (Date.now() - start < 120_000) {
     try {
-      const r = await fetch(`http://127.0.0.1:${opts.port}/`)
+      const r = await fetch(`http://127.0.0.1:${opts.port}/`, {
+        signal: AbortSignal.timeout(2_000),
+      })
       if (r.status < 500) { ready = true; break }
     } catch {
       // not yet reachable

@@ -175,6 +175,17 @@ export function mergeServerProjectWithLocalCache(
     ...(local.suggestionsDismissedAt
       ? { suggestionsDismissedAt: local.suggestionsDismissedAt }
       : {}),
+    // AQU-701: the voice/transcription skip is a device-local flag with no
+    // server column; without this overlay every refetch drops it.
+    ...(local.aiSetupSkipped !== undefined
+      ? { aiSetupSkipped: local.aiSetupSkipped }
+      : {}),
+    // AQU-701: voice settings chosen in the setup checklist (provider, BYOK
+    // gemini key) are written to the device-local record; carry them across
+    // server refetches, letting server-synced keys win where present.
+    ...(local.ttsSettings
+      ? { ttsSettings: { ...local.ttsSettings, ...server.ttsSettings } }
+      : {}),
   }
 }
 

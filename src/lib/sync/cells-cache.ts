@@ -202,6 +202,14 @@ function walkAnchorChain(rows: CellRow[]): CellRow[] {
  * the whole merged set is re-walked per side (source chain first, then
  * target — the full-read shape). `joinSourceAndTarget` in useCells only
  * depends on per-side order, so either inter-side layout is equivalent.
+ *
+ * AQU-538: the walk dedupes by cellId, so N target lanes for the same cell
+ * must be walked PER LANE — exactly like the server's read route — or a
+ * sibling lane's row is silently dropped from the merged set. That drop was
+ * the "lane translation disappears on reload" bug: the boot delta returned
+ * both lanes' target rows, and the lane-blind target walk kept only one.
+ * Default lane ('') first, then added lanes in name order — for N=1 the
+ * output is byte-identical to the single-bucket walk.
  */
 export function mergeCellsDelta(
   cached: CellRow[],
@@ -210,16 +218,29 @@ export function mergeCellsDelta(
 ): CellRow[] {
   const changed = new Set(changedCellIds)
   const source: CellRow[] = []
-  const target: CellRow[] = []
+  const targetByLane = new Map<string, CellRow[]>()
   const push = (r: CellRow) => {
-    if (r.side === "source") source.push(r)
-    else if (r.side === "target") target.push(r)
+    if (r.side === "source") {
+      source.push(r)
+    } else if (r.side === "target") {
+      const lane = r.targetLang ?? ""
+      let bucket = targetByLane.get(lane)
+      if (!bucket) {
+        bucket = []
+        targetByLane.set(lane, bucket)
+      }
+      bucket.push(r)
+    }
   }
   for (const r of cached) {
     if (!changed.has(r.cellId)) push(r)
   }
   for (const r of deltaRows) push(r)
-  return [...walkAnchorChain(source), ...walkAnchorChain(target)]
+  const ordered = walkAnchorChain(source)
+  for (const lane of [...targetByLane.keys()].sort()) {
+    ordered.push(...walkAnchorChain(targetByLane.get(lane)!))
+  }
+  return ordered
 }
 
 /** Drop a single file's cache entry. */

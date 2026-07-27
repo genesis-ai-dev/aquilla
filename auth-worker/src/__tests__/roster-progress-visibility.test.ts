@@ -142,8 +142,14 @@ describe("roster visibility — rosterViewMinRole=maintainer(600) configured", (
     expect(res.status).toBe(200)
   })
 
-  it("hides the PROJECT roster (inherited from the project's org) from a contributor", async () => {
+  it("hides the PROJECT roster from a below-floor contributor who has project access", async () => {
     await seedOrgAndProject()
+    // AQU-435: tom's org contributor (400) role no longer reaches the project
+    // by itself — give him a direct grant so he hits the roster gate, not the
+    // project-access 403.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 3, 400, 1)",
+    ).run()
     await setOrgSettings({ rosterViewMinRole: 600 })
     const res = await getProjectMembers("tom")
     expect(res.status).toBe(403)

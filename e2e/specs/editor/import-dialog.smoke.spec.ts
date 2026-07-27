@@ -4,8 +4,9 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * ImportDialog landing screen.
  *
- * The workspace header "Import" button (or PrimaryActionButton "Import" when
- * no files exist) opens ImportDialog. The landing screen shows two options:
+ * The no-files empty state shows an "Import a file" CTA (AQU-661: the header
+ * primary-action button was removed; Import also lives in the ⋯ overflow menu).
+ * Either opens ImportDialog. The landing screen shows two options:
  *   - "Upload Files"
  *   - "eBible Corpus"
  *
@@ -22,9 +23,9 @@ test("import dialog shows Upload Files and eBible Corpus options", async ({ alic
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
 
-  // Wait for workspace to load. With no files, PrimaryActionButton shows "Import".
-  // Open ImportDialog via the primary action button or the sidebar import trigger.
-  const importBtn = alice.getByRole("button", { name: /^Import$/i }).first()
+  // Wait for workspace to load. With no files, the cell-area empty state shows
+  // an "Import a file" CTA that opens ImportDialog (AQU-661).
+  const importBtn = alice.getByRole("button", { name: /Import a file/i }).first()
   await expect(importBtn).toBeVisible({ timeout: 10_000 })
   await importBtn.click()
 

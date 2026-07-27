@@ -10,6 +10,7 @@ import {
   restoreProject,
   storeOriginalFile,
   getOriginalFile,
+  mergeServerProjectWithLocalCache,
   _resetDbForTesting,
 } from "./project-index"
 import type { ProjectRecord } from "../parsers/types"
@@ -227,5 +228,47 @@ describe("project-index trash", () => {
     expect(result.remote.kind).toBe("forbidden")
     const fetched = await getProject("p6")
     expect(fetched?.deletedAt).toBe("2026-04-23T12:00:00Z")
+  })
+})
+
+describe("mergeServerProjectWithLocalCache — client-local overlays", () => {
+  it("AQU-701: carries the local aiSetupSkipped flag onto the server record", () => {
+    const server = makeProject({ id: "s1" })
+    const local = { ...server, aiSetupSkipped: true }
+    expect(mergeServerProjectWithLocalCache(server, local).aiSetupSkipped).toBe(true)
+  })
+
+  it("AQU-701: carries an explicit false (Set up anyway) so the step re-arms", () => {
+    const server = makeProject({ id: "s2" })
+    const local = { ...server, aiSetupSkipped: false }
+    expect(mergeServerProjectWithLocalCache(server, local).aiSetupSkipped).toBe(false)
+  })
+
+  it("leaves aiSetupSkipped unset when the local cache has no opinion", () => {
+    const server = makeProject({ id: "s3" })
+    expect(mergeServerProjectWithLocalCache(server, { ...server }).aiSetupSkipped).toBeUndefined()
+    expect(mergeServerProjectWithLocalCache(server, undefined).aiSetupSkipped).toBeUndefined()
+  })
+
+  it("AQU-701: keeps device-local ttsSettings (provider + gemini key) across refetches", () => {
+    const server = makeProject({ id: "s4" })
+    const local = {
+      ...server,
+      ttsSettings: { provider: "gemini" as const, apiKey: "AIzaLocalKey1234567890123" },
+    }
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.ttsSettings?.provider).toBe("gemini")
+    expect(merged.ttsSettings?.apiKey).toBe("AIzaLocalKey1234567890123")
+  })
+
+  it("AQU-701: server-synced ttsSettings keys win, device-only apiKey still survives", () => {
+    const server = makeProject({ id: "s5", ttsSettings: { provider: "kokoro" as const } })
+    const local = {
+      ...server,
+      ttsSettings: { provider: "gemini" as const, apiKey: "AIzaLocalKey1234567890123" },
+    }
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.ttsSettings?.provider).toBe("kokoro")
+    expect(merged.ttsSettings?.apiKey).toBe("AIzaLocalKey1234567890123")
   })
 })

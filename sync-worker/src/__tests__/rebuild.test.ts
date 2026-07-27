@@ -111,6 +111,48 @@ describe('handleRebuildProjectionRequest — empty + decode', () => {
 })
 
 describe('handleRebuildProjectionRequest — successful replay', () => {
+  it('replays source.cell.metadata.patch so IDML backfills survive projection rebuilds', async () => {
+    const canonicalHtml = '<p data-idml-version="2"></p>'
+    const { db, snapshot } = await makeTestDb({
+      events: [
+        evt({
+          id: 'evt-source',
+          kind: 'source.cell.create',
+          payload: JSON.stringify({
+            cellId: 'cell-1',
+            value: 'source',
+            valueHtml: '<p>legacy</p>',
+            metadata: { existing: true },
+          }),
+          server_seq: 1,
+        }),
+        evt({
+          id: 'evt-idml-patch',
+          schema_version: 2,
+          kind: 'source.cell.metadata.patch',
+          payload: JSON.stringify({
+            version: 1,
+            metadata: { idml: { version: 2, slotCount: 1 } },
+            valueHtml: canonicalHtml,
+          }),
+          server_seq: 2,
+        }),
+      ],
+    })
+    const res = await handleRebuildProjectionRequest(
+      makeRequest('/admin/projects/proj-1/rebuild-projection'),
+      makeEnv(db),
+    ) as Response
+    expect(res.status).toBe(200)
+    const source = (await snapshot()).cells[0]
+    expect(source.value_html).toBe(canonicalHtml)
+    expect(source.metadata).toMatchObject({
+      existing: true,
+      idml: { version: 2, slotCount: 1 },
+    })
+    expect(source.event_id).toBe('evt-source')
+  })
+
   it('projects a target.cell.create → target.cell.commit chain', async () => {
     const { db, snapshot } = await makeTestDb({
       events: [

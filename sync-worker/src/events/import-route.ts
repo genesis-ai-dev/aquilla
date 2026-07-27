@@ -152,6 +152,7 @@ interface ImportTarget {
   cellId: string
   parentId: string
   value: string
+  valueHtml?: string
   targetLang?: string
 }
 
@@ -305,6 +306,23 @@ export async function handleBulkImportRequest(
           request,
         )
       }
+    }
+  }
+  for (const target of body.targets ?? []) {
+    if (
+      typeof target.value !== 'string'
+      || (target.valueHtml !== undefined && typeof target.valueHtml !== 'string')
+    ) {
+      return withCors(new Response('target value/valueHtml must be strings', { status: 400 }), request)
+    }
+    if (
+      utf8Bytes(target.value) > MAX_CELL_TEXT_BYTES
+      || (target.valueHtml !== undefined && utf8Bytes(target.valueHtml) > MAX_CELL_TEXT_BYTES)
+    ) {
+      return withCors(
+        Response.json({ error: 'target text exceeds size limit', maxBytes: MAX_CELL_TEXT_BYTES }, { status: 413 }),
+        request,
+      )
     }
   }
 
@@ -604,6 +622,7 @@ export async function handleBulkImportRequest(
       || typeof target.cellId !== 'string'
       || typeof target.parentId !== 'string'
       || typeof target.value !== 'string'
+      || (target.valueHtml !== undefined && typeof target.valueHtml !== 'string')
       || (target.targetLang !== undefined && typeof target.targetLang !== 'string')
     ) {
       return withCors(new Response('each target needs string id, cellId, parentId, and value', { status: 400 }), request)
@@ -625,6 +644,7 @@ export async function handleBulkImportRequest(
       author,
       payload: {
         value: target.value,
+        ...(target.valueHtml !== undefined ? { valueHtml: target.valueHtml } : {}),
         sourceEventId: target.parentId,
         ...(target.targetLang ? { targetLang: target.targetLang } : {}),
       },

@@ -77,6 +77,52 @@ describe('comment.create', () => {
     expect(row.deleted_at).toBeNull()
   })
 
+  // AQU-692: a root thread carries the cell's target-text snapshot so the drawer
+  // can decide the "stale" badge. It must persist to the comments row verbatim.
+  it('persists created_for_translated from the payload (root thread)', async () => {
+    const { db, snapshot } = await makeTestDb()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('comment.create', {
+        commentId: 'cmt-snap',
+        scope: { kind: 'cell', fileId: 'file-a', cellId: 'cell-1' },
+        body: 'Nice rendering',
+        parentCommentId: null,
+        createdForTranslated: 'La lumière',
+      }),
+      stmts,
+    )
+    await db.batch(stmts)
+
+    const tables = (await snapshot()) as any
+    const row = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-snap')
+    expect(row).toBeDefined()
+    expect(row.created_for_translated).toBe('La lumière')
+  })
+
+  // Legacy / degrade-safe path: an event with no snapshot stores NULL, which the
+  // client treats as an unknown baseline and never flags stale.
+  it('stores NULL created_for_translated when the payload omits it', async () => {
+    const { db, snapshot } = await makeTestDb()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent('comment.create', {
+        commentId: 'cmt-nosnap',
+        scope: { kind: 'cell', fileId: 'file-a', cellId: 'cell-1' },
+        body: 'Legacy-shaped event',
+        parentCommentId: null,
+      }),
+      stmts,
+    )
+    await db.batch(stmts)
+
+    const tables = (await snapshot()) as any
+    const row = (tables.comments as any[]).find((r: any) => r.comment_id === 'cmt-nosnap')
+    expect(row.created_for_translated).toBeNull()
+  })
+
   it('inserts a threaded reply with parent_comment_id set', async () => {
     const { db, snapshot } = await makeTestDb()
     const stmts1: AquillaStatement[] = []
@@ -285,6 +331,7 @@ describe('GET /comments — cellRef (AQU-599)', () => {
           file_id: 'f1', cell_id: 'c1', parent_comment_id: null,
           body: 'on a resolved cell', resolved: 0, author_id: 'alice',
           created_at: 100, updated_at: 100, deleted_at: null,
+          created_for_translated: 'Au commencement',
         },
         {
           comment_id: 'cmt-orphan', project_id: 'p1', scope_kind: 'cell',
@@ -325,5 +372,15 @@ describe('GET /comments — cellRef (AQU-599)', () => {
     const orphan = comments.find((c) => c.commentId === 'cmt-orphan')
     expect(orphan).toBeDefined()
     expect(orphan!.cellRef).toBeNull()
+  })
+
+  // AQU-692: the read route surfaces the target-text snapshot so the drawer can
+  // populate createdForTranslated instead of the old hardcoded "".
+  it('returns createdForTranslated for a thread that has a snapshot, null otherwise', async () => {
+    const comments = await readComments('p1')
+    const known = comments.find((c) => c.commentId === 'cmt-known')
+    expect(known!.createdForTranslated).toBe('Au commencement')
+    const orphan = comments.find((c) => c.commentId === 'cmt-orphan')
+    expect(orphan!.createdForTranslated).toBeNull()
   })
 })

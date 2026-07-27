@@ -1,4 +1,6 @@
-export type FileType = "md" | "docx" | "pptx" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+import type { ImportSourceLocator } from "../../../shared/import-contract"
+
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
 export type CellType =
   | "text"
@@ -19,6 +21,9 @@ export interface TranslatableString {
   original: string
   originalHtml?: string
   translated: string
+  /** Rich target initialized by format-aware parsers. IDML uses this for its
+   * protected empty slot anchors even before any translated words exist. */
+  translatedHtml?: string
   context: string
   group: string
   /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). */
@@ -55,6 +60,8 @@ export interface TranslatableString {
   metadata?: Record<string, unknown>
   type: CellType
   sourceLocation?: SourceLocation
+  /** Exact format locator when a package-block locator would lose identity. */
+  sourceLocator?: ImportSourceLocator
 }
 
 /** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
@@ -340,6 +347,13 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
+  /**
+   * AQU-701: set when the user explicitly skips the voice & transcription setup
+   * step ("we don't use voice or transcription"). Marks that step complete in
+   * the setup checklist so a team that never wants voice/transcription isn't
+   * nagged as "not set up". Cleared when they opt back in from the step.
+   */
+  aiSetupSkipped?: boolean
   /** ISO timestamp set when the user dismisses the "your project is still using
    * default AI instructions" nudge, OR when they actually customize the system
    * prompt. Either way, we stop nagging. */
@@ -613,6 +627,9 @@ export interface WeightedExample {
 export interface CellHistoryEntry {
   timestamp: string
   value: string
+  /** Rich target/source snapshot for formats whose structural HTML is part of
+   *  the round-trip contract (IDML v2) and for ordinary rich-text history. */
+  valueHtml?: string
   source: "human" | "llm"
   author: string
   validated: boolean
@@ -655,7 +672,12 @@ export interface CommentThread {
   createdAt: string
   resolvedAt?: string
   resolvedBy?: string
-  createdForTranslated: string
+  /**
+   * AQU-692: snapshot of the target text when the thread was created, used to
+   * decide the "Translation changed since this thread was created" badge.
+   * `null` = unknown baseline (legacy thread or git-imported) → never stale.
+   */
+  createdForTranslated: string | null
   messages: CommentMessage[]
 }
 
@@ -716,6 +738,7 @@ export function detectFileType(fileName: string): FileType | null {
     markdown: "md",
     docx: "docx",
     pptx: "pptx",
+    idml: "idml",
     xlsx: "xlsx",
     txt: "txt",
     html: "html",

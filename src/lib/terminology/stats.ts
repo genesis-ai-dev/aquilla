@@ -20,6 +20,7 @@
  */
 
 import type { Concept } from "./types"
+import { effectiveSourceText } from "@/lib/cell-text"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Cell pair input shape (a minimal subset of CellData)
@@ -30,6 +31,9 @@ export interface CellPair {
   original: string
   /** Target text (translation). */
   translated: string
+  // SUB-28: media sections match against their transcript, not the filename.
+  medium?: import("@/lib/sync/cells-read-types").SegmentMedium | null
+  transcription?: string
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -101,7 +105,7 @@ function evaluateCell(
   cell: CellPair,
 ): "enforced" | "infringed" | "na" {
   const sourceRe = termRegex(concept.sourceTerm)
-  if (!sourceRe.test(cell.original)) return "na"
+  if (!sourceRe.test(effectiveSourceText(cell))) return "na"
 
   const approved = concept.renderings.filter(
     (r) => r.status === "preferred" || r.status === "admitted",

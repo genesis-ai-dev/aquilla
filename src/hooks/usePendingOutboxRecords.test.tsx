@@ -112,4 +112,20 @@ describe("usePendingOutboxRecords (AQU-274: overlay excludes failed records)", (
     await new Promise((r) => setTimeout(r, 0))
     expect(result.current).toHaveLength(0)
   })
+
+  // ── SUB-9: inspector opt-in to failed records ─────────────────────────────
+
+  it("includeFailed returns quarantined records alongside pending ones", async () => {
+    await enqueueOutboxEvent(makeEvent("ev1"))
+    await enqueueOutboxEvent(makeEvent("ev2"))
+    await quarantineOutboxEvents(["ev2"], { status: 403, reason: "forbidden" })
+
+    const { result } = renderHook(() =>
+      usePendingOutboxRecords({ enabled: true, fileId: null, includeFailed: true }),
+    )
+    await waitFor(() => expect(result.current).toHaveLength(2))
+    const statuses = new Map(result.current.map((r) => [r.id, r.status]))
+    expect(statuses.get("ev1")).toBe("pending")
+    expect(statuses.get("ev2")).toBe("failed")
+  })
 })

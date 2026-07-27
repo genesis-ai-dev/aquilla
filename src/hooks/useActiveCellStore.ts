@@ -354,7 +354,10 @@ export class CellStore {
       })
       .filter((item): item is NonNullable<typeof item> => {
         if (!item) return false
-        return mediaLayer ? item.medium === "media" : (item.medium ?? "text") !== "media"
+        // AQU-646: the TEXT lens shows media sections too — their transcript
+        // IS the translatable source text (an imported audio file's text view
+        // was empty before this). The media lens stays media-only.
+        return mediaLayer ? item.medium === "media" : true
       })
     return sortByLens(rows, "time").map((row) => row.id)
   }

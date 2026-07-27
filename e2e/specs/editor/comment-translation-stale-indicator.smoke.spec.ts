@@ -85,3 +85,89 @@ test("comment stale indicator appears when translation changes after thread was 
   const staleIndicator = drawer2.getByText("stale", { exact: true })
   await expect(staleIndicator).toBeVisible({ timeout: 5_000 })
 })
+
+/**
+ * AQU-692 regression guard.
+ *
+ * The original bug: the drawer adapter hardcoded `createdForTranslated = ""`, so
+ * a comment posted on a cell that ALREADY has target text was flagged stale the
+ * instant it was created (`"" !== <the translation>`), and stayed stale across a
+ * reload. This test posts on an already-translated cell and asserts NO badge,
+ * then asserts a genuine translation change DOES surface the badge — and that
+ * reverting clears it again. It fails against current `main` at the first
+ * "no stale badge" assertion.
+ */
+test("comment on an already-translated cell is NOT stale, but genuine drift is", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `StaleComment2 ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
+
+  const ws = new Workspace(alice)
+  await ws.importFile(SAMPLE_MD)
+  await ws.openFileBySubstring("sample")
+  await ws.waitForEditor()
+
+  // Step 1: translate cell 0 FIRST, so the cell already has target text when the
+  // thread is created (the key precondition the original spec never exercised).
+  const initialTranslation = "traduction initiale"
+  await ws.editCell(0, initialTranslation)
+
+  // Step 2: open the comments drawer on cell 0 and post a comment.
+  const row = ws.cellRow(0)
+  await row.scrollIntoViewIfNeeded()
+  await row.hover()
+  const addCommentBtn = row.locator('button[aria-label="Add comment"]')
+  await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+  await addCommentBtn.click()
+
+  const drawer = alice.locator("[data-testid='comments-drawer']").first()
+  await expect(drawer).toBeVisible({ timeout: 5_000 })
+  const commentText = `already-translated-${Date.now()}`
+  const textarea = drawer.locator("textarea").first()
+  await textarea.fill(commentText)
+  await drawer.getByRole("button", { name: /post|submit|send/i }).first().click()
+  await expect(drawer).toContainText(commentText, { timeout: 8_000 })
+
+  // Assertion A: the freshly-posted thread must NOT be stale (this fails on main).
+  await expect(drawer.getByText("stale", { exact: true })).toHaveCount(0)
+
+  // Assertion B: still not stale after a full page reload.
+  await alice.reload()
+  await ws.waitForEditor()
+  await row.hover()
+  const openCommentsBtn = row.locator('button[aria-label$="open comments"]')
+  await expect(openCommentsBtn).toBeVisible({ timeout: 8_000 })
+  await openCommentsBtn.click()
+  const drawer2 = alice.locator("[data-testid='comments-drawer']").first()
+  await expect(drawer2).toBeVisible({ timeout: 5_000 })
+  await expect(drawer2).toContainText(commentText, { timeout: 5_000 })
+  await expect(drawer2.getByText("stale", { exact: true })).toHaveCount(0)
+
+  // Close the drawer (header X is the first button in the drawer).
+  await drawer2.getByRole("button").first().click()
+  await expect(drawer2).not.toBeVisible({ timeout: 3_000 })
+
+  // Step 3: genuinely change the translation → the thread is now stale.
+  await ws.editCell(0, "traduction modifiée")
+  await row.hover()
+  await expect(openCommentsBtn).toBeVisible({ timeout: 5_000 })
+  await openCommentsBtn.click()
+  const drawer3 = alice.locator("[data-testid='comments-drawer']").first()
+  await expect(drawer3).toBeVisible({ timeout: 5_000 })
+  await expect(drawer3.getByText("stale", { exact: true })).toBeVisible({ timeout: 5_000 })
+
+  // Step 4: revert the translation to exactly the snapshot → badge clears again
+  // (proves the comparison is against a real snapshot, not a one-way flag).
+  await drawer3.getByRole("button").first().click()
+  await expect(drawer3).not.toBeVisible({ timeout: 3_000 })
+  await ws.editCell(0, initialTranslation)
+  await row.hover()
+  await expect(openCommentsBtn).toBeVisible({ timeout: 5_000 })
+  await openCommentsBtn.click()
+  const drawer4 = alice.locator("[data-testid='comments-drawer']").first()
+  await expect(drawer4).toBeVisible({ timeout: 5_000 })
+  await expect(drawer4).toContainText(commentText, { timeout: 5_000 })
+  await expect(drawer4.getByText("stale", { exact: true })).toHaveCount(0)
+})

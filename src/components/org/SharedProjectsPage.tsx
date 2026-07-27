@@ -11,6 +11,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
+import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 
 /**
  * AQU-417: the single, dedicated home for "shared with you" projects — every
@@ -32,6 +33,7 @@ export function SharedProjectsPage() {
   const { orgs, activeOrgId, isLoading: orgLoading } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const username = session?.username ?? null
 
   // AQU-624: the org switcher sends a guest org's click here scoped to that org
   // (`/shared?org=<id>`). When present, this page acts as that org's overview —
@@ -110,6 +112,13 @@ export function SharedProjectsPage() {
             <section data-testid="shared-with-you" className="rounded-2xl border divide-y">
               {sharedProjects.map((p) => {
                 const orgLabel = p.orgName ?? (p.orgId != null ? `Org #${p.orgId}` : null)
+                // AQU-696: new until the user has opened it (recorded on
+                // project landing). Read synchronously — the page remounts on
+                // navigation, so returning here after opening re-reads a fresh
+                // "opened" record and drops the badge.
+                const isNew = username
+                  ? isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id))
+                  : false
                 return (
                   <Link
                     key={p.id}
@@ -117,6 +126,11 @@ export function SharedProjectsPage() {
                     className="flex items-center gap-4 p-4 hover:bg-muted/50 transition-colors"
                   >
                     <p className="flex-1 min-w-0 truncate font-medium">{p.name}</p>
+                    {isNew && (
+                      <Badge className="shrink-0" data-testid="new-shared-badge">
+                        New
+                      </Badge>
+                    )}
                     {orgLabel && (
                       <Badge variant="secondary" className="shrink-0 truncate">
                         {orgLabel}

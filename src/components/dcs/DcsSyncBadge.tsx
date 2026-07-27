@@ -50,7 +50,6 @@ export function DcsSyncBadge({ cursor, onClick }: DcsSyncBadgeProps) {
       <Badge
         variant="outline"
         data-testid="dcs-sync-badge"
-        className={onClick ? "cursor-pointer" : undefined}
         render={
           onClick
             ? <button type="button" onClick={onClick} aria-label="Door43 source link — open Project Settings" />

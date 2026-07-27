@@ -265,24 +265,6 @@
   html.dark {
     color-scheme: dark;
   }
-
-  /* Pointer signals clickability. This reverses the earlier Linear-style
-     arrow-everywhere experiment (e1c64447) — product call 2026-07-08 — and
-     restores what Tailwind v4's preflight stopped providing (v3 set
-     `button { cursor: pointer }`; v4 leaves the native arrow). Disabled
-     controls keep the arrow so dead buttons don't advertise. */
-  :where(
-    button,
-    [role="button"],
-    [role="menuitem"],
-    [role="tab"],
-    [role="option"],
-    summary,
-    a,
-    label[for]
-  ):not(:disabled, [aria-disabled="true"]) {
-    cursor: pointer;
-  }
 }
 
 .violation-blot {

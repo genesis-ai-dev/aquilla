@@ -388,7 +388,7 @@ function SynthStatusBadge({
         trigger={
           <button
             type="button"
-            className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-md bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+            className="inline-flex max-w-[80px] items-center gap-1 truncate rounded-md bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
           >
             Audio failed
           </button>
@@ -2764,7 +2764,7 @@ function SourceWithTermLookup({
           concepts={activeConcepts}
           onApply={onTermApply}
         >
-          <span className="cursor-pointer underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
+          <span className="underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
             {word}
           </span>
         </TermLookupPopover>,

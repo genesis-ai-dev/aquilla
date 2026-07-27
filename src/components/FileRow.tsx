@@ -77,7 +77,7 @@ export function FileRow(props: FileRowProps) {
       {canExpand ? (
         <AppTooltip content={expanded ? "Collapse sections" : "Expand sections"} side="right">
           <button
-            className="p-0.5 rounded-full text-muted-foreground transition-colors hover:text-foreground"
+            className="p-0.5 rounded-lg text-muted-foreground transition-colors hover:text-foreground"
             onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
             aria-label={expanded ? "Collapse" : "Expand"}
           >
@@ -160,7 +160,7 @@ export function FileRow(props: FileRowProps) {
       {!editing && (
         <AppTooltip content="File actions" side="right">
           <button
-            className="p-1 rounded-full text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+            className="p-1 rounded-lg text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
             onClick={(e) => { e.stopPropagation(); onOpenMenu(e.clientX, e.clientY) }}
             aria-label="File actions"
           >
@@ -171,7 +171,7 @@ export function FileRow(props: FileRowProps) {
       {hasSuggestion && !editing && (
         <AppTooltip content="A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar." side="right" className="max-w-xs">
           <button
-            className="p-1 rounded-full shrink-0 transition-colors hover:text-foreground"
+            className="p-1 rounded-lg shrink-0 transition-colors hover:text-foreground"
             onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}
             aria-label="Apply rename suggestion"
           >

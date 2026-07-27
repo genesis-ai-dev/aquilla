@@ -10,7 +10,7 @@ import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
 
 const link = ({ isActive }: { isActive: boolean }) =>
-  `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "hover:bg-accent/60"}`
+  `block rounded-md px-2 py-1.5 text-sm transition-colors ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
 
 export function OrgSidebar() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, accessibleProjects } = useActiveOrg()

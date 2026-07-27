@@ -137,11 +137,13 @@ export function ExpandableFileList({
               type="button"
               onClick={onOpenGlossary}
               className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                glossaryActive ? "bg-accent text-accent-foreground" : "hover:bg-muted/60",
+                "flex h-7 w-full items-center gap-1 rounded-lg px-2 text-[13px] transition-colors",
+                glossaryActive
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
               )}
             >
-              <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <BookOpen className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">Glossary</span>
             </button>
           )}
@@ -193,7 +195,7 @@ export function ExpandableFileList({
                     {canEditCorpus && !isEditingCorpus && (
                       <AppTooltip content={`Rename ${group.label}`} side="right">
                         <button
-                          className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
+                          className="rounded-lg p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
                           aria-label={`Rename ${group.label}`}
                         >

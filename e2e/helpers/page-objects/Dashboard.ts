@@ -92,9 +92,10 @@ export class Dashboard {
   /** Click a project card by name and wait for the workspace shell to render.
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
-    // The workspace lives at /project/:id/editor (optionally /file/:fileId).
-    // There is no bare /project/:id route, so this must not stop at the id.
-    const workspaceUrl = /\/project\/[^/?#]+\/editor(?:\/[^?#]*)?(?:[?#].*)?$/
+    // Editor route promotion: workspace is `/project/:id/editor` (optional
+    // `/file/:fileId`) — those are the only two routes. Bare `/project/:id` is
+    // intentionally dead, so this must not stop at the id.
+    const workspaceUrl = /\/project\/[^/?#]+\/editor(?:\/file\/[^/?#]+)?(?:[?#].*)?$/
     // A project card now lands on the project Overview (/projects/:id). Enter
     // the editor workspace via its "Open project" action when present (older
     // UIs went straight to the editor).

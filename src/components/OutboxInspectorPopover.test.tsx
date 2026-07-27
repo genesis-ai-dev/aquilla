@@ -67,3 +67,57 @@ describe("OutboxInspectorPopover volume guard", () => {
     expect(screen.queryByText(/more queued/i)).not.toBeInTheDocument()
   })
 })
+
+// ── SUB-9: failed (quarantined) records render with their reason + actions ──
+
+function makeFailedRecord(i: number, reason = "self-validation is not allowed on this project"): OutboxRecord {
+  return {
+    ...makeRecord(i),
+    id: `fail-${i}`,
+    event: { ...makeRecord(i).event, id: `fail-${i}`, kind: "cell.validate", payload: { editEventId: "e1" } },
+    attempts: 1,
+    lastAttemptAt: 2_000 + i,
+    lastError: { status: 403, reason },
+    status: "failed",
+  } as unknown as OutboxRecord
+}
+
+describe("OutboxInspectorPopover failed records (SUB-9)", () => {
+  it("renders a quarantined record with Retry and Discard instead of claiming all-caught-up", async () => {
+    render(
+      <OutboxInspectorPopover
+        trigger={<button type="button">open inspector</button>}
+        records={[makeFailedRecord(1)]}
+        pendingCount={0}
+        onRetryNow={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /open inspector/i }))
+
+    // No "caught up" lie while a refusal exists.
+    expect(screen.queryByText(/all caught up/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^All synced$/)).not.toBeInTheDocument()
+    // Header counts the refusal as failed, not pending.
+    expect(await screen.findByText(/1 failed/i)).toBeInTheDocument()
+    // The row is present; per-row actions live behind the row's expander.
+    const list = screen.getByRole("list")
+    const rows = within(list).getAllByRole("listitem")
+    expect(rows.length).toBe(1)
+    fireEvent.click(within(rows[0]).getAllByRole("button")[0]) // expand the row
+    expect(await within(rows[0]).findByText(/self-validation/)).toBeInTheDocument()
+    expect(within(rows[0]).getByRole("button", { name: /retry/i })).toBeInTheDocument()
+    expect(within(rows[0]).getByRole("button", { name: /discard this change/i })).toBeInTheDocument()
+  })
+
+  it("counts mixed pending + failed separately in the header", async () => {
+    render(
+      <OutboxInspectorPopover
+        trigger={<button type="button">open inspector</button>}
+        records={[makeRecord(1), makeRecord(2), makeFailedRecord(3)]}
+        pendingCount={2}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /open inspector/i }))
+    expect(await screen.findByText(/2 pending · 1 failed/i)).toBeInTheDocument()
+  })
+})

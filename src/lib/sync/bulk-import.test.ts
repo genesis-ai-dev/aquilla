@@ -377,6 +377,7 @@ describe("bulkUploadSource", () => {
   })
 
   it.each([
+    ["idml", "content-only"],
     ["usx", "content-only"],
     ["vtt", "content-only"],
     ["paratext-project", "preserved-only"],

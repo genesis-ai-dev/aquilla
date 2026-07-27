@@ -25,7 +25,13 @@ export const LOGIN_MAX_FAILURES_PER_IP = 20
 // observable to a caller probing for it).
 export const RESET_REQUEST_MAX_PER_IDENTIFIER = 3
 
-export type RateLimitKind = "login" | "password_reset_request"
+// Public "book a call" contact-form submissions allowed per IP inside the
+// window before POST /api/v2/contact/book-call rejects with 429 — the endpoint
+// is unauthenticated and sends email, so without this it's an inbox-bombing
+// primitive (see routes/contact.ts).
+export const CONTACT_MAX_PER_IP = 5
+
+export type RateLimitKind = "login" | "password_reset_request" | "contact"
 
 /** Roughly 1-in-50 calls also prunes stale rows so the table stays bounded
  *  without a scheduled job. Cheap (indexed on created_at via the lookup

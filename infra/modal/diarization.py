@@ -23,7 +23,7 @@ import hmac
 import ipaddress
 import os
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import modal
 
@@ -125,10 +125,8 @@ class Diarizer:
 
         secret = os.environ["DIARIZATION_SHARED_SECRET"]
         try:
-            with httpx.Client(timeout=300, follow_redirects=True) as c:
-                resp = c.get(audio_url)
-                resp.raise_for_status()
-            turns = self._run(resp.content, num_speakers)
+            audio_bytes = _fetch_validated(audio_url, "audioUrl")
+            turns = self._run(audio_bytes, num_speakers)
             _post(callback_url, {"jobId": job_id, "status": "succeeded", "turns": turns}, secret)
         except Exception as e:  # noqa: BLE001 — report any failure to the worker
             _post(callback_url, {"jobId": job_id, "status": "failed", "error": str(e)}, secret)
@@ -148,7 +146,8 @@ def _assert_public_https_url(url: str, label: str) -> None:
     note), so if that secret ever leaks, `audioUrl`/`callbackUrl` would
     otherwise let a caller make this GPU container fetch/POST to arbitrary
     internal addresses (cloud metadata service, Modal-internal hosts, etc.).
-    This is a pre-fetch check only — it doesn't re-validate after redirects."""
+    Callers that follow redirects must re-run this on every hop — see
+    `_fetch_validated` for the audio-fetch path that does so."""
     from fastapi import HTTPException
 
     parsed = urlparse(url)
@@ -168,6 +167,29 @@ def _assert_public_https_url(url: str, label: str) -> None:
         ip = ipaddress.ip_address(addr)
         if not ip.is_global:
             raise HTTPException(status_code=400, detail=f"{label} resolves to a non-public address")
+
+
+def _fetch_validated(url: str, label: str, *, max_redirects: int = 5, timeout: float = 300) -> bytes:
+    """GET url, re-validating the target host with `_assert_public_https_url` on
+    every hop instead of trusting httpx's built-in redirect follower. A pre-fetch-only
+    check would let a same-secret-authenticated caller point `audioUrl` at a public
+    https URL that 302s to an internal/cloud-metadata address; this closes that gap
+    by disabling httpx's auto-follow and re-checking each `Location` ourselves."""
+    import httpx
+
+    for _ in range(max_redirects + 1):
+        _assert_public_https_url(url, label)
+        with httpx.Client(timeout=timeout, follow_redirects=False) as c:
+            resp = c.get(url)
+        if resp.is_redirect:
+            location = resp.headers.get("location")
+            if not location:
+                resp.raise_for_status()
+            url = urljoin(url, location)
+            continue
+        resp.raise_for_status()
+        return resp.content
+    raise RuntimeError(f"{label}: exceeded {max_redirects} redirects")
 
 
 @app.function(image=image, secrets=[APP_SECRET])

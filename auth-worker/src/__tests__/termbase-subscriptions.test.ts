@@ -25,6 +25,11 @@ async function seed() {
       ('consumer', 'Consumer', 1, 1),
       ('other', 'CrossOrg', 2, 1)`,
   ).run()
+  // AQU-435: tom's org contributor (400) role no longer grants project
+  // access by itself — his reads on `consumer` need a direct grant now.
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('consumer', 3, 400, 1)",
+  ).run()
 }
 
 const req = async (

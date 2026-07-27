@@ -15,6 +15,7 @@ function makeAssignment(overrides: Partial<MyAssignment> = {}): MyAssignment {
   return {
     assignmentId: "asgn-1",
     projectId: "proj-1",
+    fileId: "file-1",
     scopeKind: "books",
     scopeLabel: "Genesis",
     targetLang: "",
@@ -72,17 +73,18 @@ describe("ProjectAssignedToMe", () => {
     expect(screen.getByText("es")).toBeTruthy()
   })
 
-  it("calls onJumpToScopeLabel when a row is clicked", async () => {
-    mockGetMyAssignments.mockResolvedValue([
-      makeAssignment({ scopeLabel: "Genesis" }),
-    ])
+  it("passes the whole assignment to onJumpToAssignment when a row is clicked", async () => {
+    // AQU-690: the handler needs the file + lane, not just the label, to open
+    // the assignment's file and switch to its lane.
+    const assignment = makeAssignment({ scopeLabel: "Genesis", fileId: "file-B", targetLang: "es" })
+    mockGetMyAssignments.mockResolvedValue([assignment])
     const onJump = vi.fn()
     render(
-      <ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" onJumpToScopeLabel={onJump} />,
+      <ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" onJumpToAssignment={onJump} />,
     )
     await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
     fireEvent.click(screen.getByText("Genesis").closest("button")!)
-    expect(onJump).toHaveBeenCalledWith("Genesis")
+    expect(onJump).toHaveBeenCalledWith(assignment)
   })
 
   it("shows deadline when present", async () => {

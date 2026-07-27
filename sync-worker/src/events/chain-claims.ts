@@ -75,7 +75,21 @@ export function eventQualifiedParentKey(
   kind: string,
   payload: unknown,
 ): string {
-  const base = parentKeyOf(parentId)
+  return qualifyParentKeyBase(parentKeyOf(parentId), kind, payload)
+}
+
+/**
+ * Same side/lane qualification as eventQualifiedParentKey, but starting from
+ * an already-computed base key (a raw parent_id or GENESIS_PARENT_KEY). For
+ * callers that read `COALESCE(parent_id, '<null>')` straight out of SQL —
+ * e.g. the events route's batched chain-winner prefetch — where the original
+ * null-vs-id distinction is already folded into the base key.
+ */
+export function qualifyParentKeyBase(
+  base: string,
+  kind: string,
+  payload: unknown,
+): string {
   if (kind.startsWith('source.cell.')) return `${base}@side:source`
   if (!kind.startsWith('target.cell.')) return base
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang

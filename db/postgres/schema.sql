@@ -559,7 +559,12 @@ CREATE TABLE comments (
     author_label      TEXT,
     created_at        BIGINT NOT NULL,
     updated_at        BIGINT NOT NULL,
-    deleted_at        BIGINT
+    deleted_at        BIGINT,
+    -- AQU-692: target-text snapshot captured on comment.create for a root
+    -- thread. Drives the "Translation changed since this thread was created"
+    -- badge. NULL = unknown baseline (reply, non-cell scope, or legacy row) →
+    -- never shown as stale.
+    created_for_translated TEXT
 );
 
 -- ─────────────────────────── assignments + misc ─────────────────────────

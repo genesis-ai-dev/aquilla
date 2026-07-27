@@ -46,6 +46,14 @@ export interface CodexData {
   deleted?: boolean;
   originalText?: string;
   globalReferences?: string[];
+  /**
+   * Legacy Codex IDML surgical-export metadata. Keep this deliberately open:
+   * several desktop releases added fields without bumping the notebook
+   * schema. The shared v2 upgrader validates the exact supported shape.
+   */
+  idmlStructure?: Record<string, unknown>;
+  /** Legacy multipart relationships used to prove an IDML cell's stable part. */
+  relationships?: Record<string, unknown>;
 }
 
 export interface CodexCellAttachment {
@@ -59,6 +67,11 @@ export interface CodexCellAttachment {
   voiceId?: string;
   referenceAudioId?: string;
   durationMs?: number;
+  /** AQU-646: non-destructive playback trim window into the clip, in ms.
+   *  Imported media segments share one clip; the trim identifies this cell's
+   *  slice (transcription must decode only this window, not the whole file). */
+  trimStartMs?: number;
+  trimEndMs?: number;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character
@@ -75,6 +88,13 @@ export interface WordTiming {
 export interface CodexCellMetadata {
   id: string;
   type: CodexCellType;
+  /** Legacy IDML story/paragraph identity mirrored from the desktop shape. */
+  storyId?: string;
+  paragraphId?: string;
+  /** Already-upgraded IDML v2 format metadata, when emitted by newer Codex. */
+  idml?: Record<string, unknown>;
+  /** Normalized import provenance, including the v2 IDML source locator. */
+  aquillaImport?: Record<string, unknown>;
   edits?: EditHistory[];
   data?: CodexData;
   cellLabel?: string;

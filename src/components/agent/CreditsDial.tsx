@@ -54,8 +54,11 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
   const { day, week, config, remaining } = data
   const pct = capUsagePct(day.agentCredits, config.agentDailyCap)
 
-  // 12px ring: r=5, circumference ≈ 31.4.
-  const C = 2 * Math.PI * 5
+  // Ring drawn in a 12x12 box, rendered at 16px. The radius insets by half the
+  // stroke so the arc stays inside the box at this weight.
+  const stroke = 2.5
+  const r = (12 - stroke) / 2
+  const C = 2 * Math.PI * r
 
   return (
     <Popover>
@@ -65,25 +68,32 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
             type="button"
             onClick={refresh}
             data-testid="credits-dial"
-            title="Agent credits used today"
-            className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+            title={`Agent credits used today: ${formatCredits(day.agentCredits)}`}
+            aria-label={`Agent credits used today: ${formatCredits(day.agentCredits)}`}
+            className="flex items-center rounded-full border bg-background p-1 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
           />
         }
       >
-        <svg viewBox="0 0 12 12" className="h-3 w-3 -rotate-90" aria-hidden>
-          <circle cx="6" cy="6" r="5" fill="none" strokeWidth="2" className="stroke-muted" />
+        <svg viewBox="0 0 12 12" className="h-4 w-4 -rotate-90" aria-hidden>
           <circle
             cx="6"
             cy="6"
-            r="5"
+            r={r}
             fill="none"
-            strokeWidth="2"
+            strokeWidth={stroke}
+            className="stroke-muted-foreground/25"
+          />
+          <circle
+            cx="6"
+            cy="6"
+            r={r}
+            fill="none"
+            strokeWidth={stroke}
             strokeLinecap="round"
             strokeDasharray={`${(pct / 100) * C} ${C}`}
             className={ringClass(pct)}
           />
         </svg>
-        <span>{formatCredits(day.agentCredits)}</span>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3 text-xs" data-testid="credits-dial-popover">
         <p className="mb-2 font-medium">Agent credits</p>

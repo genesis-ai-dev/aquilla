@@ -48,18 +48,32 @@ describe("turnsToSegments", () => {
     { startMs: 100, endMs: 100, speaker: 9 }, // zero-length → dropped
   ]
 
-  it("sorts by start, drops zero-length turns, one segment per turn", () => {
+  it("sorts by start, drops zero-length turns, one segment per turn — timing tiled (AQU-646)", () => {
     const { segments } = turnsToSegments(turns)
+    // Timing partitions the covered span: each turn extends to the next turn's
+    // start so inter-turn audio is playable; last end stays tight (no totalMs).
     expect(segments.map((s) => [s.startMs, s.endMs, s.speaker])).toEqual([
-      [0, 2000, 0],
-      [2500, 3800, 0],
+      [0, 2500, 0],
+      [2500, 4000, 0],
       [4000, 6000, 1],
     ])
   })
 
-  it("sets each segment's trim window to its own range", () => {
+  it("keeps each segment's TRIM window at the tight turn bounds (AQU-646)", () => {
+    // Trims feed voice-reference extraction + Whisper — tiling them would
+    // contaminate a speaker's clone reference with the neighbor's audio.
     const { segments } = turnsToSegments(turns)
-    expect(segments.every((s) => s.trimStartMs === s.startMs && s.trimEndMs === s.endMs)).toBe(true)
+    expect(segments.map((s) => [s.trimStartMs, s.trimEndMs])).toEqual([
+      [0, 2000],
+      [2500, 3800],
+      [4000, 6000],
+    ])
+  })
+
+  it("tiles the last turn's timing out to totalMs when known", () => {
+    const { segments } = turnsToSegments(turns, 7500)
+    expect(segments[segments.length - 1].endMs).toBe(7500)
+    expect(segments[segments.length - 1].trimEndMs).toBe(6000)
   })
 
   it("returns the distinct speakers, ascending (the dropped turn's speaker is excluded)", () => {

@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "generated": true,
+  "license": "CC0-1.0",
+  "generator": "scripts/generate-corpus.ts",
+  "valid": [
+    {
+      "path": "valid/feature-rich.idml",
+      "sha256": "4eb9e2658a7b90c364f25d21bc52175ccb6f67fc6d24ecef0a6bf21e53a1dad1",
+      "profiles": [
+        "generic",
+        "biblica"
+      ],
+      "expectedScopes": [
+        "story-paragraph",
+        "table-cell",
+        "footnote",
+        "endnote",
+        "note",
+        "anchored-story",
+        "text-path",
+        "master-story",
+        "custom-variable"
+      ]
+    },
+    {
+      "path": "valid/biblica-profile.idml",
+      "sha256": "5fabad93ee1cf18590475d9a31283c2701fc183952e1bd687d859e89f30fb16d",
+      "profiles": [
+        "generic",
+        "biblica"
+      ],
+      "expectedUnitIds": [
+        "biblica-p1",
+        "biblica-p2"
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "path": "invalid/malformed-xml.idml",
+      "sha256": "3d72df33b9b8cee4be406cec21c0b709e986fcfa2fabb1dff22c9b8df7a6a681",
+      "operation": "parse",
+      "errorCode": "MALFORMED_XML"
+    },
+    {
+      "path": "invalid/doctype-entity.idml",
+      "sha256": "39ca4a2f634318f57fc0150a86932c8c222d4244e5a78e91ef5fa92d637db160",
+      "operation": "parse",
+      "errorCode": "UNSAFE_XML_DECLARATION"
+    },
+    {
+      "path": "invalid/corrupt-zip.idml",
+      "sha256": "11af675130ac5d8dcc53f2e61c4655c1cc308ecb238ce3bc023437b1576ed264",
+      "operation": "inspect",
+      "errorCode": "INVALID_ZIP"
+    },
+    {
+      "path": "invalid/duplicate-member.idml",
+      "sha256": "11199756d1debf632a87f2f338669c3cc94b523bdc0ac35ab7fbaf781493ec14",
+      "operation": "inspect",
+      "errorCode": "DUPLICATE_MEMBER"
+    },
+    {
+      "path": "invalid/unsafe-path.idml",
+      "sha256": "cf9a0ee4d308ec3224fd8544c40cd9b17ee63d26f64309186016c038e472e7fd",
+      "operation": "inspect",
+      "errorCode": "UNSAFE_MEMBER_PATH"
+    },
+    {
+      "path": "invalid/encrypted-member.idml",
+      "sha256": "d6bdf7dc0f8ce79c65f995e1447dc0c9c8d128e34607ae6ea1046bb7d0a375be",
+      "operation": "inspect",
+      "errorCode": "ENCRYPTED_MEMBER"
+    },
+    {
+      "path": "invalid/unsupported-compression.idml",
+      "sha256": "b4df420eff88a6ff4036769bb7e482148d82bc00f33533826cee755924e9f965",
+      "operation": "inspect",
+      "errorCode": "UNSUPPORTED_COMPRESSION"
+    },
+    {
+      "path": "invalid/missing-designmap.idml",
+      "sha256": "780d8c599d950cfda89f059e408d38bdea17f02547167b228618561e2ef1c817",
+      "operation": "inspect",
+      "errorCode": "MISSING_DESIGNMAP"
+    },
+    {
+      "path": "invalid/invalid-mimetype.idml",
+      "sha256": "ddb322608764b4f7ff9fe1f6a6f4506730d5a6f986924e2c69696e127bffaa53",
+      "operation": "inspect",
+      "errorCode": "INVALID_MIMETYPE"
+    },
+    {
+      "path": "invalid/compression-bomb.idml",
+      "sha256": "f5ab1243d7ff186e06ff402e5a967a777eec7f932f27f2399a40489ae4136127",
+      "operation": "inspect",
+      "errorCode": "COMPRESSION_RATIO_EXCEEDED",
+      "limits": {
+        "maxCompressionRatio": 20
+      }
+    }
+  ],
+  "metadata": [
+    {
+      "path": "metadata/legacy-codex.json",
+      "sha256": "44aa4fbfe7068811324d61079296a50cfef82572eb69ebfe68f44b246df10fc1",
+      "expected": "upgradeable"
+    },
+    {
+      "path": "metadata/v2-cell.json",
+      "sha256": "923dd9154e61b0203e702627ac6ec304c862e62d6aed020231731a3912b40c19",
+      "expected": "v2"
+    },
+    {
+      "path": "metadata/stale-locator.json",
+      "sha256": "36c326ce42e9a61ebb093048fedcde0792db0a64042f01fb3b74823ead06a8a0",
+      "expected": "export-rejected"
+    }
+  ]
+}

@@ -12,19 +12,22 @@ import type { ForbiddenEntry } from "./outbox-flush"
  *  new/unmapped server message is still shown rather than swallowed. */
 export function forbiddenReasonCopy(reason: string): string {
   const r = reason.toLowerCase()
+  // SUB-8: copy is PAST tense — it describes why the server refused the change
+  // AT THE TIME, not current project policy (settings may have changed since;
+  // asserting "self-validation is off" after it was re-enabled reads as false).
   if (r.includes("not in scope")) {
-    if (r.includes("file '")) return "this file isn't in your assigned scope"
-    if (r.includes("lane '")) return "this language lane isn't in your assigned scope"
-    return "it's outside your assigned files or lanes"
+    if (r.includes("file '")) return "the file was outside your assigned scope"
+    if (r.includes("lane '")) return "the language lane was outside your assigned scope"
+    return "it was outside your assigned files or lanes"
   }
   if (r.includes("self-validation is not allowed")) {
-    return "you can't validate a cell you translated (self-validation is off for this project)"
+    return "validating your own translation wasn't allowed (self-validation was off for this project at the time)"
   }
   if (r.includes("too low to validate") || r.includes("role too low")) {
-    return "your role can't validate on this project"
+    return "your role wasn't allowed to validate on this project"
   }
   if (r.includes("validator allowlist")) {
-    return "you're not on this project's validator allowlist"
+    return "you weren't on this project's validator allowlist"
   }
   return reason
 }

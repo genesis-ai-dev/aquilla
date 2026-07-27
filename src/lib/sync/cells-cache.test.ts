@@ -133,6 +133,31 @@ describe("mergeCellsDelta", () => {
     expect(merged.map((r) => r.cellId)).toEqual(["a", "z1", "z2"])
   })
 
+  it("AQU-538: keeps BOTH lanes' target rows for one cell through a delta merge", () => {
+    // Regression: the target side was walked as ONE bucket, and the walk
+    // dedupes by cellId — so when a cell had a default-lane row AND a named-
+    // lane row (the delta returns all lanes), one lane's row was silently
+    // dropped from the merged set. Symptom: a lane translation that was
+    // saved and server-projected "disappeared" on reload (boot delta path).
+    const cached = [
+      row("a", "source"),
+      row("a", "target", { value: "stale default", targetLang: "" }),
+    ]
+    const delta = [
+      row("a", "source"),
+      row("a", "target", { value: "English draft", targetLang: "", eventId: "e-a-default" }),
+      row("a", "target", { value: "Hola draft", targetLang: "es", eventId: "e-a-es" }),
+    ]
+    const merged = mergeCellsDelta(cached, ["a"], delta)
+    const targets = merged.filter((r) => r.side === "target")
+    expect(targets.map((r) => [r.targetLang ?? "", r.value])).toEqual([
+      ["", "English draft"],
+      ["es", "Hola draft"],
+    ])
+    // Source first, then default lane, then named lanes (the full-read shape).
+    expect(merged[0].side).toBe("source")
+  })
+
   it("tiebreaks siblings claiming the same anchor by eventId, matching the server", () => {
     const cached = [row("head", "source", { eventId: "e-0" })]
     const merged = mergeCellsDelta(cached, ["s1", "s2"], [

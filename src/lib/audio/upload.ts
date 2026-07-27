@@ -56,6 +56,22 @@ export function buildDenoisedAudioId(cellId: string): string {
 }
 
 /**
+ * SUB-29 (AQU-646): was this audioId seeded with `id` when built? buildAudioId
+ * embeds its seed verbatim for uuid ids (the normaliser only touches chars R2
+ * dislikes), so provenance is readable back out: the IMPORTED SOURCE CLIP is
+ * seeded with the FILE id (import + attach-media flows), while every mic/upload
+ * take is seeded with the CELL id. This is the only per-cell O(1) signal that
+ * distinguishes them — attachment trims fail in both directions (single-segment
+ * imports carry none; cropped takes gain some). Relies on the seed convention
+ * above staying stable — change buildAudioId's seeding and this breaks.
+ */
+export function audioIdSeededWith(audioId: string | undefined, id: string): boolean {
+  if (!audioId || !id) return false
+  const normalised = id.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
+  return audioId.includes(`-${normalised}-`)
+}
+
+/**
  * True when an audioId names a denoised take. Tolerates the stored
  * `<id>.<ext>` form since the marker is on the leading segment.
  */
@@ -245,4 +261,31 @@ export async function fetchCellAudio(args: FetchCellAudioArgs): Promise<Uint8Arr
   }
   const buf = await res.arrayBuffer()
   return new Uint8Array(buf)
+}
+
+export type CellAudioPresence = "present" | "missing" | "unknown"
+
+/**
+ * Lightweight existence check for an uploaded clip. Issues a single-byte ranged
+ * GET (the endpoint supports Range/206) so it can run on clip selection without
+ * pulling the whole object like fetchCellAudio does. Returns:
+ *   "missing" — the R2 object is gone (404); retrying can never succeed.
+ *   "present" — the object exists (2xx/206).
+ *   "unknown" — no token, network error, or any other status; caller should
+ *               not draw a conclusion (don't flash a missing badge on a blip).
+ */
+export async function probeCellAudioPresent(args: FetchCellAudioArgs): Promise<CellAudioPresence> {
+  const { projectId, fileId, audioId, ext, getSyncToken } = args
+  const token = await getSyncToken(projectId, fileId)
+  if (!token) return "unknown"
+  try {
+    const res = await fetch(audioEndpoint(projectId, fileId, audioId, ext), {
+      headers: { Authorization: `Bearer ${token}`, Range: "bytes=0-0" },
+    })
+    if (res.status === 404) return "missing"
+    if (res.ok) return "present" // 200 (Range ignored) or 206 (partial)
+    return "unknown"
+  } catch {
+    return "unknown"
+  }
 }

@@ -34,8 +34,9 @@ test("rule suggest button is disabled when LLM is not configured", async ({ alic
   await expect(suggestBtn).toBeVisible({ timeout: 10_000 })
   await expect(suggestBtn).toBeDisabled({ timeout: 3_000 })
 
-  // Tooltip lives in AppTooltip (native title is cleared).
-  await suggestBtn.hover({ force: true })
+  // Tooltip lives in AppTooltip on a span wrapper (disabled buttons don't
+  // receive pointerenter).
+  await alice.locator("span.inline-flex").filter({ has: suggestBtn }).hover()
   await expect(alice.getByRole("tooltip", { name: /Configure LLM in .*settings first/i })).toBeVisible({
     timeout: 3_000,
   })

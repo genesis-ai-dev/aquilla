@@ -135,8 +135,6 @@ import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
-import { PreAcceptanceWarningBand } from "./PreAcceptanceWarningBand"
-import { detectPreAcceptanceWarnings } from "@/lib/terminology/preacceptance"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
@@ -3899,22 +3897,6 @@ function EditorRow({
     return () => document.removeEventListener("selectionchange", handleSelectionChange)
   }, [sourceSelection, showAddConceptDialog])
 
-  // Slice 4: advisory pre-acceptance terminology warnings for the AI copilot.
-  // Computed against the completion text (the streaming preview while loading,
-  // otherwise the committed target text) versus the cell's source and the
-  // project's active concepts. ADVISORY ONLY — never gates accept/commit.
-  // Recomputes naturally as the preview streams in and as the committed text /
-  // BT verdict changes on later renders.
-  const preAcceptanceWarnings = useMemo(() => {
-    const completionText = isLoading ? (completionPreview ?? "") : (visibleTranslated ?? "")
-    if (!completionText.trim()) return []
-    return detectPreAcceptanceWarnings(
-      completionText,
-      cell.original ?? "",
-      terminologyConcepts,
-    )
-  }, [isLoading, completionPreview, visibleTranslated, cell.original, terminologyConcepts])
-
   // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
   // so we can conditionally surface the Apply affordance in the popover.
@@ -5120,10 +5102,6 @@ function EditorRow({
               compact
             />
           )}
-          {/* Slice 4: advisory terminology warning band for the copilot
-              completion. Renders nothing when there are no warnings; never
-              blocks accept/commit. */}
-          <PreAcceptanceWarningBand warnings={preAcceptanceWarnings} className="mt-1" />
           {error && <p className="mt-0.5 text-xs text-destructive">{error}</p>}
           {/* FRO-297: polite live region for transient inline feedback that
               is NOT already assertive (FRO-274 write-failure banners use

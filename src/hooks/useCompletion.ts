@@ -50,6 +50,11 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import {
+  idmlCompletionPromptSource,
+  idmlCompletionSystemAddendum,
+  normalizeProtectedCompletion,
+} from "@/lib/idml/completion"
 
 // Cap per LLM call. Above this we split into independent review packages.
 // Tuned for typical context windows; revisit if real selections start brushing
@@ -288,35 +293,54 @@ export function useCompletion(
       // No-footnote cells pass through unchanged. Runs on the EFFECTIVE
       // source (SUB-28): for text cells that IS `original`; media transcripts
       // carry no USFM markers and pass through.
+      const idmlAddendum = idmlCompletionSystemAddendum([cell])
       const prepared = prepareFootnotesForPrompt(sourceText)
+      const systemAddendum = idmlAddendum
+        ?? (prepared.footnoteCount > 0
+          ? buildFootnoteInstruction(prepared.footnoteCount)
+          : undefined)
 
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-        sourceText: prepared.promptSource,
+        sourceText: idmlCompletionPromptSource(cell, prepared.promptSource),
         examples: compressedExamples,
         rules,
         validatedPairs,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
         precedingContext,
-        ...(prepared.footnoteCount > 0 && {
-          systemAddendum: buildFootnoteInstruction(prepared.footnoteCount),
+        ...(systemAddendum && { systemAddendum }),
+        ...(!idmlAddendum && prepared.footnoteCount > 0 && {
           preSourceBlock: prepared.footnoteBlock,
         }),
       })
       const result = await complete({
         settings: generationSettings, session,
         messages,
-        stream: true,
-        onChunk: (text) => {
-          setPreviews((p) => new Map(p).set(cell.id, text))
-        },
+        // Protected IDML markup is committed only after whole-response anchor
+        // validation; never flash partial HTML as a translator-visible draft.
+        stream: !idmlAddendum,
+        ...(!idmlAddendum && {
+          onChunk: (text: string) => {
+            setPreviews((p) => new Map(p).set(cell.id, text))
+          },
+        }),
         signal,
         // Model A/B: remember which experiment request drafted this cell so the
         // user's validate/edit gesture can be attributed to the served model.
         onAbAssignment: (ab) => noteAbAssignment(cell.fileId, cell.id, ab),
       })
+      // AQU-685: a successful HTTP call can still yield an empty completion —
+      // the model produced no content, or a streamed 200 carried only an
+      // error/usage frame with no content deltas. Committing that persists a
+      // blank translation and clears the spinner, so the prediction silently
+      // "doesn't show up" with nothing to tell the user it failed. Treat an
+      // empty result as a failure so the catch path below surfaces it visibly
+      // (error badge + message) instead of writing an empty draft.
+      if (!result.trim()) {
+        throw new Error("The AI returned an empty translation. Please try again.")
+      }
       posthog.capture("ai translation completed", {
         provider,
         model: modelName,
@@ -330,7 +354,7 @@ export function useCompletion(
       // Reassemble the model's [n]-form reply into real \f...\f* markers so
       // the committed target carries actual footnotes, not placeholder text.
       let finalText = result
-      if (prepared.footnoteCount > 0) {
+      if (!idmlAddendum && prepared.footnoteCount > 0) {
         const rein = reintegrateFootnotes(result, prepared.notes)
         if (rein.missingNoteLines.length || rein.appendedCallers.length) {
           console.warn(
@@ -355,6 +379,7 @@ export function useCompletion(
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.
       const llmAuthor = modelName
+      normalizeProtectedCompletion(cell, finalText)
       await commitCompletedCell?.(
         cell,
         finalText,
@@ -486,7 +511,9 @@ export function useCompletion(
             const cell = chunk[idx - 1]
             if (!cell) continue
             const text = m[2].trim()
-            setPreviews((p) => new Map(p).set(cell.id, text))
+            if (!idmlCompletionSystemAddendum([cell])) {
+              setPreviews((p) => new Map(p).set(cell.id, text))
+            }
             filledText.set(idx, text)
           }
         }
@@ -501,12 +528,15 @@ export function useCompletion(
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
           systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-          cells: chunk.map((c) => ({ source: effectiveSourceText(c) })),
+          cells: chunk.map((c) => ({
+            source: idmlCompletionPromptSource(c, effectiveSourceText(c)),
+          })),
           examples: examplesForPrompt,
           rules,
           validatedPairs: batchValidatedPairs,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
           briefSummary,
+          systemAddendum: idmlCompletionSystemAddendum(chunk),
         })
 
         // AQU-361: a sub-batch call gets one retry before it's given up on.
@@ -600,6 +630,7 @@ export function useCompletion(
           if (text !== undefined && text.trim()) {
             if (commitCompletedCell) {
               try {
+                normalizeProtectedCompletion(cell, text)
                 await commitCompletedCell(
                   cell,
                   text,
@@ -780,7 +811,7 @@ export function useCompletion(
         // requested from the model.
         cells: groupCells.map((c) => ({
           cellId: c.id,
-          source: effectiveSourceText(c),
+          source: idmlCompletionPromptSource(c, effectiveSourceText(c)),
           ...(c.status === "validated" ? { lockedTarget: c.translated } : {}),
         })),
         examples: examplesForPrompt,
@@ -798,6 +829,7 @@ export function useCompletion(
           groupIds[groupIds.length - 1],
           draftContext.precedingTargetCells,
         ),
+        systemAddendum: idmlCompletionSystemAddendum(draftCells),
       })
 
       // 4. Call model (on-complete; progressive streaming disabled for Frontier per spec).
@@ -857,7 +889,10 @@ export function useCompletion(
           setCompleting((p) => { const m = new Map(p); m.delete(cellId); return m })
           continue
         }
-        setPreviews((p) => new Map(p).set(cellId, text))
+        if (!idmlCompletionSystemAddendum([cell])) {
+          setPreviews((p) => new Map(p).set(cellId, text))
+        }
+        normalizeProtectedCompletion(cell, text)
         await commitCompletedCell?.(
           cell,
           text,

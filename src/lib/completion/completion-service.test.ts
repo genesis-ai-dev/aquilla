@@ -123,6 +123,18 @@ describe("buildPrompt", () => {
 })
 
 describe("buildBatchPrompt", () => {
+  it("appends a format-specific output contract to the system prompt", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "<p data-idml-version=\"2\">protected</p>" }],
+      examples: [],
+      systemAddendum: "PRESERVE-IDML-ANCHORS",
+    })
+    expect(messages[0].content).toContain("PRESERVE-IDML-ANCHORS")
+    expect(messages[1].content).not.toContain("PRESERVE-IDML-ANCHORS")
+  })
+
   it("frames live cells as numbered <vN> tags and asks for the same structure back", () => {
     const messages = buildBatchPrompt({
       sourceLanguage: "English", targetLanguage: "French",
@@ -946,6 +958,18 @@ const ID_A = "aaaa-aaaa"
 const ID_B = "bbbb-bbbb"
 
 describe("buildParagraphPrompt", () => {
+  it("appends a format-specific output contract to the system prompt", () => {
+    const [system, user] = buildParagraphPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ cellId: ID_A, source: "<p data-idml-version=\"2\">protected</p>" }],
+      examples: [],
+      systemAddendum: "PRESERVE-IDML-ANCHORS",
+    })
+    expect(system.content).toContain("PRESERVE-IDML-ANCHORS")
+    expect(user.content).not.toContain("PRESERVE-IDML-ANCHORS")
+  })
+
   it("encodes source cells as <c id> tags in the user message (D11)", () => {
     const [, user] = buildParagraphPrompt({
       sourceLanguage: "English", targetLanguage: "French",

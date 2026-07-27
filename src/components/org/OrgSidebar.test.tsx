@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { OrgSidebar } from "./OrgSidebar"
 
 // AQU-474: project-only invitees (direct project_members grant, no org
@@ -84,5 +85,51 @@ describe("OrgSidebar shared-projects nav (AQU-474 / AQU-417)", () => {
 
     await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalled())
     expect(screen.queryByText("Shared with you")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-696: the nav entry itself carries the "New" badge while any shared
+// project remains unopened, so the signal is visible from every page — not
+// just once you're already on /shared or /projects.
+describe("OrgSidebar 'New' badge on the Shared-with-you entry (AQU-696)", () => {
+  const shared = (id: string, name: string, grantedAt: string | null) => ({
+    id,
+    name,
+    gitlabProjectId: null,
+    orgId: 99,
+    role: { level: 400, name: "contributor", source: "override" },
+    grantedAt,
+  })
+
+  it("shows the badge while at least one shared project is unopened, and clears once ALL are opened", async () => {
+    listMyOrgs.mockResolvedValue([])
+    fetchAccessibleProjects.mockResolvedValue([
+      shared("p1", "Genesis Draft", "2026-07-20T00:00:00Z"),
+      shared("p2", "Exodus Draft", "2026-07-21T00:00:00Z"),
+    ])
+
+    // One of two opened after its grant — the badge must stay lit.
+    markProjectOpened("wendi", "p1")
+    const first = renderSidebar()
+    expect(await screen.findByTestId("new-shared-nav-badge")).toBeInTheDocument()
+    first.unmount()
+
+    // Both opened — the badge clears (sidebar remounts on navigation, so a
+    // fresh render models "returning to the list").
+    markProjectOpened("wendi", "p2")
+    renderSidebar()
+    await screen.findByRole("link", { name: /Shared with you/ })
+    expect(screen.queryByTestId("new-shared-nav-badge")).not.toBeInTheDocument()
+  })
+
+  it("shows no badge when grant times are unavailable (degradation: never mark everything New)", async () => {
+    listMyOrgs.mockResolvedValue([])
+    fetchAccessibleProjects.mockResolvedValue([shared("p1", "Genesis Draft", null)])
+
+    renderSidebar()
+
+    const link = await screen.findByRole("link", { name: "Shared with you" })
+    expect(link).toBeInTheDocument()
+    expect(screen.queryByTestId("new-shared-nav-badge")).not.toBeInTheDocument()
   })
 })

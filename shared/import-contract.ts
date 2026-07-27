@@ -46,6 +46,10 @@ export type RoundTripFidelity = (typeof ROUND_TRIP_FIDELITIES)[number]
 export const SOURCE_ARTIFACT_FORMATS = {
   docx: { extension: "docx", contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", defaultFidelity: "native" },
   pptx: { extension: "pptx", contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", defaultFidelity: "native" },
+  // Native fidelity remains gated on automated Adobe open/save/reopen
+  // validation. The v2 engine preserves the exact source artifact today, but
+  // the product must not claim native fidelity before that external gate.
+  idml: { extension: "idml", contentType: "application/vnd.adobe.indesign-idml-package", defaultFidelity: "content-only" },
   xlsx: { extension: "xlsx", contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", defaultFidelity: "content-only" },
   usfm: { extension: "usfm", contentType: "text/plain; charset=utf-8", defaultFidelity: "native" },
   usx: { extension: "usx", contentType: "application/xml; charset=utf-8", defaultFidelity: "content-only" },
@@ -186,6 +190,36 @@ export type ImportSourceLocator =
       record: number
       field?: string
     }
+  | IdmlImportLocator
+
+export type IdmlImportScope =
+  | "story-paragraph"
+  | "table-cell"
+  | "footnote"
+  | "endnote"
+  | "note"
+  | "text-path"
+  | "anchored-story"
+  | "master-story"
+  | "custom-variable"
+
+/**
+ * Exact IDML v2 source locator. Keep this structurally identical to
+ * `@aquilla/idml-roundtrip`'s `IdmlLocator`: the shared import contract cannot
+ * import browser/Node package code, but both consumers must persist the same
+ * JSON shape.
+ */
+export interface IdmlImportLocator {
+  kind: "idml"
+  memberPath: string
+  storyId?: string
+  elementPath: string
+  elementId?: string
+  scope: IdmlImportScope
+  part: number
+  slotIndexes: readonly number[]
+  sourceBlockHash: string
+}
 
 /**
  * Versioned import provenance. Deterministic/declarative recipes describe

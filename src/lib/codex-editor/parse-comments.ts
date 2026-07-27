@@ -45,7 +45,9 @@ export function mapCodexCommentsToThreads(
       createdAt: thread.comments[0] ? new Date(thread.comments[0].timestamp).toISOString() : new Date().toISOString(),
       resolvedAt: resolvedEvt ? new Date(resolvedEvt.timestamp).toISOString() : undefined,
       resolvedBy: resolvedEvt?.author?.name,
-      createdForTranslated: "",
+      // AQU-692: git-imported threads carry no target-text snapshot — unknown
+      // baseline, so never flag them stale (null, not "").
+      createdForTranslated: null,
       messages: thread.comments.filter(c => !c.deleted).map(mapMessage),
     };
     (out[cellId] ??= []).push(mapped);

@@ -57,8 +57,15 @@ import { injectSdbhXml } from "@/lib/parsers/sdbh"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
+import posthog from "@/lib/posthog"
+import {
+  CURRENT_IDML_FORMAT_COPY,
+  idmlFormatCopy,
+  idmlOrgEligible,
+} from "@/lib/idml/release-gate"
+import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "pptx" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -69,7 +76,7 @@ interface FormatOption {
   lossy: boolean
 }
 
-const FORMAT_OPTIONS: FormatOption[] = [
+const BASE_FORMAT_OPTIONS: FormatOption[] = [
   {
     id: "usfm",
     label: "USFM",
@@ -93,6 +100,15 @@ const FORMAT_OPTIONS: FormatOption[] = [
     label: "PowerPoint (.pptx)",
     ext: ".pptx",
     description: "Translations injected back into the original slide deck. Slide/shape/paragraph structure is preserved; mixed per-run formatting inside a translated paragraph keeps the first run's styling. Requires the original file to have been imported after round-trip export support was added — re-import older files to enable.",
+    lossy: false,
+  },
+  {
+    // IDML v2 export remains experimental until the Adobe validation gate.
+    // Only shown for files imported as .idml (activeFileType).
+    id: "idml",
+    label: CURRENT_IDML_FORMAT_COPY.label,
+    ext: ".idml",
+    description: CURRENT_IDML_FORMAT_COPY.description,
     lossy: false,
   },
   {
@@ -195,6 +211,7 @@ const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
   usfm: "usfm",
   docx: "docx",
   pptx: "pptx",
+  idml: "idml",
   md: "md",
   txt: "txt",
   vtt: "vtt",
@@ -240,6 +257,10 @@ interface ExportDialogProps {
    *  Required for "audio-by-character" export; safe to omit for other formats. */
   ttsSettings?: ProjectTtsSettings
   getToken: (fileId: string) => Promise<string | null>
+  /** Organization identifier used for internal/beta rollout allowlists. */
+  orgId?: string
+  /** Opens the import flow when an IDML locator or anchor needs repair. */
+  onReimport?: () => void
   /**
    * AQU-654: count of outstanding (non-waived) LQA/validation "health"
    * infractions on the active file. Export NEVER hard-blocks on these — the
@@ -267,13 +288,23 @@ export function ExportDialog({
   targetLang = "",
   ttsSettings,
   getToken,
+  orgId,
+  onReimport,
   outstandingInfractionCount = 0,
 }: ExportDialogProps) {
   // The file's own format is the default export — "give me my file back".
   // Types without a 1:1 native exporter (ebible, obs, audio, video, sdbh, …)
   // have no primary download; the format list opens instead.
   const nativeFormatId = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
-  const nativeOption = nativeFormatId ? FORMAT_OPTIONS.find((f) => f.id === nativeFormatId)! : null
+  const effectiveIdmlCopy = idmlOrgEligible(orgId, import.meta.env)
+    ? CURRENT_IDML_FORMAT_COPY
+    : idmlFormatCopy({})
+  const formatOptions = useMemo(() => BASE_FORMAT_OPTIONS.map((option) => (
+    option.id === "idml"
+      ? { ...option, label: effectiveIdmlCopy.label, description: effectiveIdmlCopy.description }
+      : option
+  )), [effectiveIdmlCopy.description, effectiveIdmlCopy.label])
+  const nativeOption = nativeFormatId ? formatOptions.find((f) => f.id === nativeFormatId)! : null
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
@@ -315,7 +346,7 @@ export function ExportDialog({
   }, [activeFileId, nativeFormatId])
 
   // audio-by-character, vtt, docx, pptx, and plain-text-dump only support file scope.
-  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "pptx", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   const isProjectOnlyFormat = format === "sdbh-xml"
@@ -347,8 +378,12 @@ export function ExportDialog({
   // Inline-style fidelity report for the last export (parity run: users must
   // see when formatting could not be carried into edited translations).
   const [fidelityWarnings, setFidelityWarnings] = useState<ExportFidelityWarning[]>([])
+  const [idmlRecovery, setIdmlRecovery] = useState<{
+    bytes: ArrayBuffer
+    downloadName: string
+  } | null>(null)
 
-  const selectedFormat = FORMAT_OPTIONS.find((f) => f.id === format)!
+  const selectedFormat = formatOptions.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
 
   // AQU-439: Voice filter — collect distinct voice names from metadata.cast_name.
@@ -430,7 +465,7 @@ export function ExportDialog({
     // and always targets the current file; the footer Export button uses the
     // selected radio format + scope.
     const fmt = overrideFormat ?? format
-    const fmtOption = FORMAT_OPTIONS.find((f) => f.id === fmt)!
+    const fmtOption = formatOptions.find((f) => f.id === fmt)!
     const runScope: ExportScope = overrideFormat
       ? "file"
       : fmt === "sdbh-xml"
@@ -440,6 +475,9 @@ export function ExportDialog({
           : scope
     setStatus({ kind: "busy", msg: "Exporting…" })
     setFidelityWarnings([])
+    setIdmlRecovery(null)
+    let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
+    let idmlTelemetryStartedAt: number | null = null
     try {
       if (fmt === "usfm") {
         if (runScope === "project") {
@@ -518,6 +556,28 @@ export function ExportDialog({
           ...collectInlineStyleWarnings(cells),
         ])
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.pptx${note}` })
+      } else if (fmt === "idml") {
+        idmlTelemetryStartedAt = performance.now()
+        // IDML v2 export is fail-closed: the shared engine proves every
+        // translated locator and protected anchor before changing package bytes.
+        setStatus({ kind: "busy", msg: "Fetching original document…" })
+        const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
+        const baseName = buildExportStem(false)
+        recoverableIdmlOriginal = { bytes: rawBytes.slice(0), downloadName: `${baseName}-original.idml` }
+        setStatus({ kind: "busy", msg: "Validating protected translations…" })
+        const { exportIdml } = await import("@/lib/export/exporters/idml")
+        const result = await exportIdml(rawBytes, cells)
+        posthog.capture("idml export completed", idmlTelemetryProperties({
+          cells,
+          report: result.report,
+          diagnostics: result.diagnostics,
+          durationMs: performance.now() - idmlTelemetryStartedAt,
+        }))
+        downloadBlob(result.blob, `${baseName}.idml`)
+        const note = result.report.translated === 0
+          ? " (no translations — original bytes returned unchanged)"
+          : ` (${result.report.translated} paragraph${result.report.translated === 1 ? "" : "s"} translated)`
+        setStatus({ kind: "ok", msg: `Downloaded ${baseName}.idml${note}` })
       } else if (fmt === "audio-by-character") {
         setStatus({ kind: "busy", msg: "Decoding audio…" })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
@@ -658,6 +718,18 @@ export function ExportDialog({
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}${ext}` })
       }
     } catch (e) {
+      if (recoverableIdmlOriginal) setIdmlRecovery(recoverableIdmlOriginal)
+      if (idmlTelemetryStartedAt !== null) {
+        posthog.capture("idml export blocked", idmlTelemetryProperties({
+          cells,
+          diagnostics: (
+            e && typeof e === "object" && Array.isArray((e as { diagnostics?: unknown }).diagnostics)
+              ? (e as { diagnostics: [] }).diagnostics
+              : []
+          ),
+          durationMs: performance.now() - idmlTelemetryStartedAt,
+        }))
+      }
       setStatus({ kind: "error", msg: (e as Error).message || "Export failed." })
     }
   }
@@ -666,6 +738,7 @@ export function ExportDialog({
     if (!next) {
       setStatus({ kind: "idle" })
       setFidelityWarnings([])
+      setIdmlRecovery(null)
     }
     onOpenChange(next)
   }
@@ -797,10 +870,11 @@ export function ExportDialog({
             className="flex flex-col gap-0.5"
             aria-label="Export format"
           >
-            {FORMAT_OPTIONS.filter((f) => {
+            {formatOptions.filter((f) => {
               if (f.id === "usfm") return activeFileType === "usfm"
               if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
               if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
+              if (f.id === "idml") return activeFileType === "idml" // only for idml imports
               if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
               if (f.id === "plain-text-dump") return false // shown in Advanced section only
               return true
@@ -1125,6 +1199,37 @@ export function ExportDialog({
             )}
             <span className="flex flex-col gap-1">
               <span>{status.msg}</span>
+              {status.kind === "error" && idmlRecovery && (
+                <span className="flex flex-wrap items-center gap-2 pt-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      downloadBlob(
+                        new Blob([idmlRecovery.bytes], {
+                          type: "application/vnd.adobe.indesign-idml-package",
+                        }),
+                        idmlRecovery.downloadName,
+                      )
+                    }}
+                  >
+                    Download original unchanged
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      handleOpenChange(false)
+                      onReimport?.()
+                    }}
+                    disabled={!onReimport}
+                  >
+                    Repair by re-importing
+                  </Button>
+                </span>
+              )}
               {status.kind === "ok-lossy" && (
                 <span className="flex items-start gap-1 text-amber-600 dark:text-amber-400 text-xs font-medium">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />

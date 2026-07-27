@@ -284,6 +284,8 @@ export function buildBatchPrompt(options: {
   exampleFormat?: "source-and-target" | "target-only"
   /** The project brief's L1 summary — injected before the rules block. */
   briefSummary?: string
+  /** Format-specific output contract appended after project rules. */
+  systemAddendum?: string
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -295,6 +297,7 @@ export function buildBatchPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) baseSys = baseSys + "\n\n" + block
   }
+  if (options.systemAddendum) baseSys = baseSys + "\n\n" + options.systemAddendum
   if (targetOnly) {
     baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
   }
@@ -382,6 +385,8 @@ export function buildParagraphPrompt(options: {
   rules?: TranslationRule[]
   /** Project brief L1 summary. */
   briefSummary?: string
+  /** Format-specific output contract appended after project rules. */
+  systemAddendum?: string
   /** How to render few-shot examples. */
   exampleFormat?: "source-and-target" | "target-only"
   // Left-context is the COMMITTED TARGET of preceding paragraphs (not source): this is what
@@ -409,6 +414,7 @@ export function buildParagraphPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+  if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   if (targetOnly) {
     sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."

@@ -163,6 +163,10 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
+import {
+  resolveIdmlEditorConfiguration,
+  validateIdmlEditorCommit,
+} from "@/lib/richtext/idml-editor"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 import {
   useCellPresence,
@@ -791,6 +795,21 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // already overwritten the id, and an out-of-order focus-out from the row we
     // just left must not wipe it.
     setFocusedRailCellId((cur) => railFocusOwnerOnBlur(cur, cellId))
+  }, [])
+  useEffect(() => {
+    const handleDocumentFocusIn = (event: FocusEvent) => {
+      const target = event.target
+      if (target instanceof Node && listRootRef.current?.contains(target)) return
+
+      // AQU-669: row-level blur is not a sufficient release signal across
+      // TipTap surfaces and recycled virtual rows. Whenever browser focus
+      // demonstrably enters a surface outside the cell list, release the
+      // exclusive rail owner so an abandoned row cannot stay pinned.
+      setFocusedRailCellId(null)
+    }
+
+    document.addEventListener("focusin", handleDocumentFocusIn)
+    return () => document.removeEventListener("focusin", handleDocumentFocusIn)
   }, [])
   // Mirror ref so the imperative handle (getCurrentIndex) reads current
   // values without widening its dependency array — same pattern as
@@ -3577,6 +3596,14 @@ function EditorRow({
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
+  const idmlConfiguration = useMemo(
+    () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
+    [cell.metadata, cell.originalHtml],
+  )
+  const canEditSourceForCell = canEditSource && !idmlConfiguration
+  const sourceReadOnlyReasonForCell = idmlConfiguration
+    ? "IDML source text is protected because changing it would invalidate the original package locator."
+    : sourceReadOnlyReason
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const sourceCellDirection = useMemo(
@@ -3798,6 +3825,11 @@ function EditorRow({
       void onCellCommitted?.(cell.id)
       return
     }
+    const idmlCommitError = validateIdmlEditorCommit(idmlConfiguration, valueHtml)
+    if (idmlCommitError) {
+      setWriteError(idmlCommitError)
+      return
+    }
     // Optimistic local patch: applies BEFORE the outbox enqueue so this row's
     // signature (`status original translated`) shifts and `useHealth` re-runs
     // `checkRulesForCell` for this one cell on the next render — no other
@@ -3881,7 +3913,7 @@ function EditorRow({
         valueHtml: cell.translatedHtml ?? "",
       })
     })
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder, idmlConfiguration])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -3918,7 +3950,7 @@ function EditorRow({
   // PROJECT_LEAD floor and the live-mode mirror lock; `enqueueEvent` also mirrors
   // the role floor client-side (InsufficientRoleError).
   const handleSourceCommit = useCallback(({ value, valueHtml }: { value: string; valueHtml: string }) => {
-    if (!canEditSource || !project.id) return
+    if (!canEditSourceForCell || !project.id) return
     // Belt-and-suspenders role-mirror (canEditSource already encodes ≥500), in
     // case a role downgrade hasn't propagated to the capability yet.
     if (!canPerform("source.cell.commit", project.syncRole?.level ?? null)) {
@@ -3947,7 +3979,7 @@ function EditorRow({
       setWriteError(msg)
       setSourceDraft(null)
     })
-  }, [canEditSource, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
+  }, [canEditSourceForCell, project.id, project.syncRole?.level, cell.fileId, cell.id, cell.sourceEventId, username, onCellCommitted])
 
   // Reconcile the pending source head against the projection — the mirror of
   // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
@@ -3977,13 +4009,13 @@ function EditorRow({
   // — the user kept typing into a void. Closing is bounded loss (only the text
   // since the flip moment); the writeError banner says WHY so it isn't silent.
   useEffect(() => {
-    if (!sourceEditing || canEditSource) return
+    if (!sourceEditing || canEditSourceForCell) return
     setSourceEditing(false)
     setWriteError(
-      sourceReadOnlyReason ??
+      sourceReadOnlyReasonForCell ??
         "Source editing is no longer available on this project — the source editor was closed.",
     )
-  }, [sourceEditing, canEditSource, sourceReadOnlyReason])
+  }, [sourceEditing, canEditSourceForCell, sourceReadOnlyReasonForCell])
 
   // Focus the inline source editor when entering edit mode (mirrors the target
   // editor's focus effect, but scoped to the source column so it can't grab the
@@ -4845,9 +4877,15 @@ function EditorRow({
   // validators popover) renders to the LEFT of the TARGET editing cell — see the
   // target column below — instead of in the far-left gutter beside the source.
   // A reviewer no longer has to cross the screen from the target to validate.
-  const validationControl = hasContent ? (
-    <div className="flex shrink-0 items-start pt-1">
-      {hasValidatorInfo ? (
+  // AQU-687: reserve a stable-width gutter for the validation control whether or
+  // not the cell has content yet. Collapsing this slot to `null` for empty cells
+  // made the target editor snap narrower the instant a prediction/draft filled
+  // the cell (hasContent flips true → the 24px button + gap appears). Keeping a
+  // fixed `w-6` slot at all times holds the editor width steady.
+  const validationControl = (
+    <div data-testid="validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
+      {hasContent ? (
+        hasValidatorInfo ? (
         <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
           <PopoverTrigger
             openOnHover
@@ -4908,9 +4946,10 @@ function EditorRow({
               : undefined,
           )}
         </AppTooltip>
-      )}
+        )
+      ) : null}
     </div>
-  ) : null
+  )
   const cellStateLabel =
     cell.status === "validated" ? "validated" :
     cell.status === "empty" ? "empty" :
@@ -5165,7 +5204,7 @@ function EditorRow({
               {/* Source-edit affordance (project_lead+, non-live projects). Emits
                   source.cell.commit — the template-owner correction that propagates
                   downstream. Read-only source stays the default; editing is explicit. */}
-              {canEditSource ? (
+              {canEditSourceForCell ? (
                 <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
                   <button
                     type="button"
@@ -5182,11 +5221,11 @@ function EditorRow({
                     <Pencil className="h-3 w-3" />
                   </button>
                 </AppTooltip>
-              ) : sourceReadOnlyReason ? (
+              ) : sourceReadOnlyReasonForCell ? (
                 // Force-locked source lane (DCS pin): keep an explained
                 // affordance where the pencil would be instead of letting it
                 // silently vanish (AQU-615 review nit).
-                <AppTooltip content={sourceReadOnlyReason} className="max-w-xs">
+                <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
                   <span
                     aria-label="Source is locked"
                     className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
@@ -5301,6 +5340,8 @@ function EditorRow({
                     cellId={cell.id}
                     initialPlain={visibleTranslated}
                     initialHtml={visibleTranslatedHtml}
+                    idmlConfiguration={idmlConfiguration}
+                    onIdmlValidationError={setWriteError}
                     // AQU-667: only authoritative when we're not masking it with a
                     // local human draft — then `visibleTranslated` IS cell.translated.
                     aiDrafted={!localTargetDraft && cell.aiDrafted}

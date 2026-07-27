@@ -42,7 +42,9 @@ test("walking focus across cells leaves exactly one revealed rail (AQU-669)", as
     ws.cellRow(2).locator('[data-slot="cell-action-rail"]'),
   ).toHaveAttribute("data-revealed", "true")
 
-  // Clicking away from the editor entirely leaves no pinned rail on any row.
-  await aside.click()
+  // Move browser focus to a real control outside the editor. Clicking the
+  // non-focusable aside background does not consistently move focus in
+  // Chromium, so it cannot exercise the row's focus-out contract.
+  await alice.getByPlaceholder("Filter files...").click()
   await expect(revealedRails).toHaveCount(0)
 })

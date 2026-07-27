@@ -123,17 +123,43 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      assignments: Array<{ assignmentId: string; scopeKind: string; scopeLabel: string; cellsTotal: number; cellsDone: number }>
+      assignments: Array<{ assignmentId: string; fileId: string | null; scopeKind: string; scopeLabel: string; cellsTotal: number; cellsDone: number }>
     }
     // Only anna's OPEN assignment: as-anna-old is unassigned; as-bob is bob's.
     expect(body.assignments).toHaveLength(1)
     expect(body.assignments[0]).toMatchObject({
       assignmentId: "as-anna",
+      // AQU-690: the inbox row carries the file its scope resolved to (anna's
+      // cells all live in f1) so the Editor click can open the right file.
+      fileId: "f1",
       scopeKind: "books",
       scopeLabel: "Genesis",
       cellsTotal: 3,
       cellsDone: 2,
     })
+  })
+
+  // AQU-690: a scope that resolved to zero cells has no file to route on, so
+  // fileId is null rather than an arbitrary/wrong file.
+  it("returns fileId null for an assignment with no resolved cells", async () => {
+    await seedOrgWithAssignments()
+    // A second OPEN assignment for anna with no assignment_cells rows.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, cells_total, created_by, created_at, unassigned_at) VALUES
+        ('as-anna-empty', 'pa', 2, 'books', 'Ruth', 0, 1, 1200, NULL)`,
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; fileId: string | null }>
+    }
+    const byId = Object.fromEntries(body.assignments.map((a) => [a.assignmentId, a]))
+    expect(byId["as-anna-empty"].fileId).toBeNull()
+    expect(byId["as-anna"].fileId).toBe("f1")
   })
 
   it("403s a user with no access to the project", async () => {

@@ -61,7 +61,9 @@
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
 | Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
 | Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
+| Export      | IDML import → protected edit → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
 | Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
+| Marketing   | Homepage "book a call": Google Calendar booking link + contact form → POST /api/v2/contact/book-call → sent state | `e2e/specs/marketing/book-call.smoke.spec.ts` | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
 | Editor      | Formatting loss warning when source has bold/italic   | `e2e/specs/editor/formatting-loss-warning.smoke.spec.ts`      |   ✅   |
 | Editor      | File actions hover menu (rename/delete)               | `e2e/specs/editor/file-actions-button.smoke.spec.ts`          |   ✅   |
@@ -193,6 +195,8 @@
 | Editor      | Video attachment remove clears saved URL              | `e2e/specs/editor/video-attachment-dialog.smoke.spec.ts`      |   ✅   |
 | Editor      | Setup checklist drawer expands items + skip           | `e2e/specs/editor/setup-checklist.smoke.spec.ts` + `setup-checklist-item-expand.smoke.spec.ts` + `setup-checklist-skip.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist AI models section expand              | `e2e/specs/editor/setup-checklist-ai-models-expand.smoke.spec.ts` |   ✅   |
+| Editor      | Setup checklist voice step skip + Set up anyway (AQU-701) | `e2e/specs/editor/setup-checklist-voice-skip.smoke.spec.ts` |   ✅   |
+| Editor      | Setup checklist survives refresh mid-setup (no auto-open) | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |   ✅   |
 | Editor      | Setup checklist invite creates share link             | `e2e/specs/editor/setup-checklist-invite-create-link.smoke.spec.ts` |   ✅   |
 | Editor      | AI setup dialog opens and configures provider         | `e2e/specs/editor/ai-setup-dialog.smoke.spec.ts` + `ai-setup-dialog-custom-provider.smoke.spec.ts` | ✅ |
 | Editor      | AI completion dialog opens (mock LLM)                 | `e2e/specs/editor/ai-completion-dialog.smoke.spec.ts`         |   ✅   |

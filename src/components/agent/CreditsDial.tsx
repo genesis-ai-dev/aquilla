@@ -70,7 +70,7 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
             data-testid="credits-dial"
             title={`Agent credits used today: ${formatCredits(day.agentCredits)}`}
             aria-label={`Agent credits used today: ${formatCredits(day.agentCredits)}`}
-            className="flex items-center rounded-full border bg-background p-1 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+            className="flex items-center rounded-lg border bg-background p-1 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
           />
         }
       >

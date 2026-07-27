@@ -89,7 +89,7 @@ describe("CreditsDial — maintainer view", () => {
     render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
     const dial = await screen.findByTestId("credits-dial")
     expect(dial.querySelector("svg")?.getAttribute("class")).toContain("h-4")
-    expect(dial.className).toContain("rounded-full")
+    expect(dial.className).toContain("rounded-lg")
     // The heavier treatment is styling only — the ring still stands alone (AQU-671).
     expect(dial.textContent).not.toContain("150 cr")
     expect(dial).toHaveAttribute("title", "Agent credits used today: 150 cr")

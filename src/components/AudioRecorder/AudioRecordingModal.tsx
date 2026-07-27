@@ -469,7 +469,7 @@ export function AudioRecordingModal({
 
           {displayPhase === "saved" && (
             <div className="flex flex-col items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-500/10">
                 <Check className="h-6 w-6 text-emerald-500" />
               </div>
               <p className="text-sm text-muted-foreground">Saved — moving to next cell…</p>

@@ -336,12 +336,12 @@ export function TeamsList() {
                   </span>
                   <span className="mt-2 flex flex-wrap gap-1">
                     {!t.isInternal && (
-                      <span className="inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                      <span className="inline-block rounded-lg border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
                         Public
                       </span>
                     )}
                     {t.viewerIsMember && (
-                      <span className="inline-block rounded-full border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                      <span className="inline-block rounded-lg border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
                         Member
                       </span>
                     )}

@@ -550,7 +550,7 @@ export function LivingMemoryPage() {
                 />
               </AppTooltip>
               {isLoading ? (
-                <Skeleton className="h-4 w-20 rounded-full" aria-label="Loading count" />
+                <Skeleton className="h-4 w-20 rounded-lg" aria-label="Loading count" />
               ) : (
                 <Badge variant="secondary" className="text-[10px] tabular-nums">
                   {cells.length.toLocaleString()} validated

@@ -140,7 +140,7 @@ export function ChapterNavigator({
                       >
                         <Badge
                           variant={selected ? "default" : "outline"}
-                          className="size-6 rounded-full p-0 tabular-nums"
+                          className="size-6 rounded-lg p-0 tabular-nums"
                           aria-hidden="true"
                         >
                           {chapter.displayLabel.match(/\d+$/)?.[0]}

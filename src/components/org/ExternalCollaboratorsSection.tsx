@@ -94,7 +94,7 @@ export function ExternalCollaboratorsSection({
               {e.grants.map((g) => (
                 <span
                   key={`${g.projectId}:${e.userId}`}
-                  className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
+                  className="flex items-center gap-1 rounded-lg border px-2 py-0.5 text-xs"
                 >
                   <span className="max-w-40 truncate">{g.projectName}</span>
                   <span className="text-muted-foreground">· <RoleLabel name={g.roleName} /></span>

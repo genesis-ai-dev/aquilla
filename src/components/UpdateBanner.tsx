@@ -11,7 +11,7 @@ export function UpdateBanner() {
       variant="outline"
       size="sm"
       onClick={() => window.location.reload()}
-      className="fixed bottom-3 left-3 z-30 animate-in slide-in-from-bottom-2 fade-in gap-2 rounded-full border-violet-300 bg-background/90 shadow-md backdrop-blur-sm duration-300 hover:border-violet-400 dark:border-violet-500/50"
+      className="fixed bottom-3 left-3 z-30 animate-in slide-in-from-bottom-2 fade-in gap-2 rounded-lg border-violet-300 bg-background/90 shadow-md backdrop-blur-sm duration-300 hover:border-violet-400 dark:border-violet-500/50"
     >
       <span className="relative flex h-2 w-2">
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75" />

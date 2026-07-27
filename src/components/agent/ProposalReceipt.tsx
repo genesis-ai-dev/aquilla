@@ -48,7 +48,7 @@ function Pill({ className, children }: { className?: string; children: React.Rea
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground",
+        "inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[10px] text-muted-foreground",
         className,
       )}
     >

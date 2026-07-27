@@ -401,7 +401,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
 
         {rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-3 py-10 text-center">
-            <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
               <Check className="size-4" aria-hidden />
             </span>
             <p className="text-sm font-medium">You&rsquo;re all caught up</p>

@@ -96,7 +96,7 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
               <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
                 <div
                   className={cn(
-                    "h-full rounded-full",
+                    "h-full rounded-lg",
                     acceptPct >= 70 ? "bg-emerald-500" : acceptPct >= 40 ? "bg-primary" : "bg-amber-500",
                   )}
                   style={{ width: `${acceptPct}%` }}

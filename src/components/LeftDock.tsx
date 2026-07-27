@@ -102,7 +102,7 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
     <div
       className={cn(
         isTop
-          ? "mx-2 mt-2 flex min-w-0 items-center gap-0.5 rounded-full p-1 bg-muted"
+          ? "mx-2 mt-2 flex min-w-0 items-center gap-0.5 rounded-lg p-1 bg-muted"
           : "flex h-full w-10 shrink-0 flex-col items-center gap-1 pt-2",
       )}
     >
@@ -119,7 +119,7 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
               "relative flex items-center justify-center transition-colors",
               isTop
                 ? cn(
-                    "h-7 gap-1.5 rounded-full px-2 text-xs",
+                    "h-7 gap-1.5 rounded-lg px-2 text-xs",
                     // Only the active tab shows its label (and flexes to fill);
                     // the rest collapse to icon-only so 4+ tabs never overflow.
                     isActive
@@ -140,7 +140,7 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
               <span
                 aria-label={`${agentBadge} unread`}
                 className={cn(
-                  "flex items-center justify-center rounded-full bg-primary text-primary-foreground",
+                  "flex items-center justify-center rounded-lg bg-primary text-primary-foreground",
                   isTop
                     ? "ml-0.5 h-4 min-w-4 px-1 text-[9px]"
                     : "absolute -right-0.5 -top-0.5 h-3.5 w-3.5 text-[9px]",

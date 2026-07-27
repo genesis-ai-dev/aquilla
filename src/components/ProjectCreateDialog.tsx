@@ -780,7 +780,7 @@ function ExtraTargetLanguages({
             <li
               key={lang}
               data-testid={`create-extra-lang-chip-${lang}`}
-              className="flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-xs"
+              className="flex items-center gap-1 rounded-lg border bg-muted px-2 py-0.5 text-xs"
             >
               {lang}
               <button

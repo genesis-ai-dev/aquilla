@@ -76,7 +76,7 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
             {directions.length > 0 && (
               <span
                 data-testid="contextual-steering-count"
-                className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] leading-none tabular-nums text-primary-foreground"
+                className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-lg bg-primary px-0.5 text-[9px] leading-none tabular-nums text-primary-foreground"
               >
                 {directions.length}
               </span>
@@ -99,7 +99,7 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
               <span
                 key={`${direction}-${i}`}
                 data-testid="contextual-steering-chip"
-                className="max-w-full truncate rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                className="max-w-full truncate rounded-lg bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                 title={direction}
               >
                 {direction}

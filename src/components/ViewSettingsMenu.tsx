@@ -122,7 +122,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           <button
             type="button"
             onClick={() => applyDirectionMismatchFix("auto")}
-            className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+            className="rounded-lg px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
           >
             Auto
           </button>
@@ -130,7 +130,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             <button
               type="button"
               onClick={() => applyDirectionMismatchFix(detectedManualDirection)}
-              className="rounded-full px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+              className="rounded-lg px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
             >
               {detectedManualDirection.toUpperCase()}
             </button>
@@ -142,7 +142,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               size="icon-xs"
               onClick={() => setDismissedMismatchSignature(mismatchSignature)}
               aria-label="Dismiss direction warning"
-              className="size-5 rounded-full text-muted-foreground/70"
+              className="size-5 rounded-lg text-muted-foreground/70"
             >
               <X className="h-3 w-3" />
             </Button>
@@ -195,7 +195,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               </Menu.Item>
               {onFootnoteViewModeChange && (
                 <>
-                  <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
+                  <div className="-mx-1 my-1.5 h-px rounded-lg" role="separator" />
                   <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                     Footnotes
                   </div>
@@ -219,7 +219,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                   />
                 </>
               )}
-              <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
+              <div className="-mx-1 my-1.5 h-px rounded-lg" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Text Direction
               </div>
@@ -239,7 +239,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                 autoSummary={targetAutoDirectionSummary}
                 onChange={onTargetDirectionModeChange}
               />
-              <div className="-mx-1 my-1.5 h-px rounded-full" role="separator" />
+              <div className="-mx-1 my-1.5 h-px rounded-lg" role="separator" />
               <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Font Size
               </div>
@@ -269,7 +269,7 @@ function Pill({ on }: { on: boolean }) {
   return (
     <span
       className={
-        "rounded-full px-2 py-0.5 text-[10px] font-medium " +
+        "rounded-lg px-2 py-0.5 text-[10px] font-medium " +
         (on ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")
       }
     >
@@ -424,7 +424,7 @@ function DirPill({
 }) {
   const label = mode === "auto" ? `AUTO ${(autoSummary ?? dir).toUpperCase()}` : dir.toUpperCase()
   return (
-    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+    <span className="rounded-lg bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground">
       {label}
     </span>
   )

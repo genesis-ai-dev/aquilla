@@ -41,7 +41,7 @@ export function CellAudioButton({ controller, hidden }: Props) {
       disabled={state === "loading"}
       aria-label={tooltip}
       className={cn(
-        "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+        "flex h-5 w-5 items-center justify-center rounded-lg transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
         state === "error"
           ? "text-destructive hover:text-destructive/80"
           : state === "cloud"

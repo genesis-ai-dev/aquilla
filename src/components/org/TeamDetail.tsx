@@ -405,7 +405,7 @@ export function TeamDetail() {
                       {/* "?" tooltip summarising all access levels — hover or focus to read */}
                       <AppTooltip content={Object.values(ROLE_DESCRIPTIONS).join("\n")} className="max-w-xs">
                         <span
-                          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border text-[10px] leading-none text-muted-foreground"
+                          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-lg border text-[10px] leading-none text-muted-foreground"
                           aria-label="Access level definitions"
                           tabIndex={0}
                         >
@@ -506,7 +506,7 @@ export function TeamDetail() {
                                   aria-label={`Org-level role: ${roleLabel(m.roleLevel)}`}
                                 >
                                   {roleLabel(m.roleLevel)}
-                                  <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
+                                  <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-lg border text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
                                 </span>
                               </AppTooltip>
                             )}

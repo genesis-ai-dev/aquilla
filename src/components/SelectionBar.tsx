@@ -287,7 +287,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
     <div
       className={cn(
         "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
-        "bottom-4 rounded-full border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10",
+        "bottom-4 rounded-lg border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10",
       )}
       role="toolbar"
       aria-label="Selection actions"
@@ -300,7 +300,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           </span>
         )}
       </span>
-      <div className="mx-1 h-5 w-px rounded-full" />
+      <div className="mx-1 h-5 w-px rounded-lg" />
       {audioMode && (
         <Button
           type="button"
@@ -321,7 +321,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           )}
           Voice together
           {voiceableCount > 1 && (
-            <span className="ml-1 rounded-full bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
+            <span className="ml-1 rounded-lg bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
               {Math.min(voiceableCount, 12)}
             </span>
           )}
@@ -348,7 +348,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         )}
         Translate
         {missingCount > 0 && allHaveTranslation === false && (
-          <span className="ml-1 rounded-full bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
+          <span className="ml-1 rounded-lg bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
             {missingCount}
           </span>
         )}
@@ -370,7 +370,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         ) : null}
         Validate
         {validatableCount > 0 && (
-          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+          <span className="ml-1 rounded-lg bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
             {validatableCount}
           </span>
         )}
@@ -389,7 +389,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       >
         Remove my validations
         {unvalidatableCount > 0 && (
-          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+          <span className="ml-1 rounded-lg bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
             {unvalidatableCount}
           </span>
         )}
@@ -413,7 +413,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         >
           <Wand2 className="mr-1 h-3.5 w-3.5" />
           Harmonize…
-          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+          <span className="ml-1 rounded-lg bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
             {harmonizableCount}
           </span>
         </Button>

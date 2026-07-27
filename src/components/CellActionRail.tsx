@@ -54,7 +54,7 @@ export function RailButton({
         disabled={disabled}
         aria-label={tooltip}
         className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-full",
+          "flex h-6 w-6 items-center justify-center rounded-lg",
           "transition-[transform,color,background-color] duration-150 ease-out",
           "active:scale-[0.88]",
           "hover:bg-muted/80",
@@ -112,7 +112,7 @@ export function CellActionRail({
       data-slot="cell-action-rail"
       data-revealed={revealed ? "true" : "false"}
       className={cn(
-        "flex items-center justify-end gap-0.5 rounded-full px-1 py-0.5",
+        "flex items-center justify-end gap-0.5 rounded-lg px-1 py-0.5",
         // Filled pill only when revealed, so the rail reads as a distinct
         // cluster off the cell surface instead of competing with text.
         revealed && "bg-card",

@@ -43,10 +43,10 @@ export function StatusBar({
       <span className="flex items-center gap-2">
         <span>{total.toLocaleString()} cells · {translated} translated ({pct}%)</span>
         {unvalidated > 0 && (
-          <span className="bg-muted rounded-full px-2 py-0.5 text-xs text-amber-500">{unvalidated} unvalidated</span>
+          <span className="bg-muted rounded-lg px-2 py-0.5 text-xs text-amber-500">{unvalidated} unvalidated</span>
         )}
         {validated > 0 && (
-          <span className="bg-muted rounded-full px-2 py-0.5 text-xs text-green-500">{validated} validated</span>
+          <span className="bg-muted rounded-lg px-2 py-0.5 text-xs text-green-500">{validated} validated</span>
         )}
       </span>
     </footer>

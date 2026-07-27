@@ -213,7 +213,7 @@ function AccessProjectRow({
 
 function Chip({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-full border bg-muted px-2 py-0.5 text-[10px]">
+    <span className="inline-flex items-center rounded-lg border bg-muted px-2 py-0.5 text-[10px]">
       {children}
     </span>
   )

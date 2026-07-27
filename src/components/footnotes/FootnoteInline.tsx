@@ -157,7 +157,7 @@ export function FootnotesTray({
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <span className="rounded-lg bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
             {visibleFootnoteCount}
           </span>
           {onClose && (
@@ -187,7 +187,7 @@ export function FootnotesTray({
                 className="grid gap-2 border-b border-border/50 px-4 py-2 last:border-b-0 md:grid-cols-[minmax(4rem,0.45fr)_minmax(18rem,0.55fr)]"
               >
                 <div className="flex min-w-0 items-start gap-2 pt-0.5">
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  <span className="rounded-lg bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                     {entry.cellLabel}
                   </span>
                   {entry.cellRef && (
@@ -234,7 +234,7 @@ function FootnoteSurfaceHeader({
         {title}
       </span>
       {typeof count === "number" && count > 0 && (
-        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold leading-none text-primary">
+        <span className="rounded-lg bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold leading-none text-primary">
           {count}
         </span>
       )}
@@ -560,7 +560,7 @@ export function FootnotedTextValue({
     content.push(
       <sup
         key={`fn-${footnote.index}-${index}`}
-        className="mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary/15 px-0.5 align-super text-[9px] font-bold leading-none text-primary"
+        className="mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-lg bg-primary/15 px-0.5 align-super text-[9px] font-bold leading-none text-primary"
       >
         {footnoteDisplayLabel(footnote, index, numberOffset)}
       </sup>,
@@ -601,7 +601,7 @@ function FootnoteMarkerBadge({
   onActivate?: () => void
 }) {
   const className = cn(
-    "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[9px] font-bold",
+    "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-lg px-1 text-[9px] font-bold",
     active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
     onActivate &&
       "cursor-pointer hover:ring-1 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",

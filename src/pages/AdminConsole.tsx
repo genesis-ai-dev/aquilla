@@ -234,7 +234,7 @@ function ConsoleSkeleton() {
       templateClassName="min-h-[34rem]"
     >
       <div className="flex flex-col gap-6">
-        <Skeleton className="h-8 w-72 rounded-full" />
+        <Skeleton className="h-8 w-72 rounded-lg" />
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-20 rounded-2xl border bg-card" />

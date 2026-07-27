@@ -44,7 +44,7 @@ function LoadingTemplate({
         {children}
       </div>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/20">
-        <div className="flex items-center gap-3 rounded-full border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
+        <div className="flex items-center gap-3 rounded-lg border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
           <Spinner aria-hidden="true" className="size-5" />
           <span>{label}…</span>
         </div>
@@ -129,7 +129,7 @@ function NeutralLoadingTemplate() {
       <aside className="hidden w-56 shrink-0 flex-col gap-5 p-3 sm:flex">
         <div className="flex items-center justify-between">
           <Skeleton className="size-8 rounded-lg" />
-          <Skeleton className="h-5 w-12 rounded-full" />
+          <Skeleton className="h-5 w-12 rounded-lg" />
         </div>
         <div className="flex flex-col gap-2">
           <Skeleton className="h-9 w-full" />

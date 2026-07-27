@@ -131,7 +131,7 @@ function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f
         return (
           <span
             key={i}
-            className={cn("flex-1 rounded-full transition-colors", on ? "bg-primary" : "bg-muted-foreground/25")}
+            className={cn("flex-1 rounded-lg transition-colors", on ? "bg-primary" : "bg-muted-foreground/25")}
             style={{ height: `${h}%` }}
           />
         )

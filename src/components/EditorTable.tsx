@@ -319,7 +319,7 @@ function SynthStatusBadge({
         : "Loading voice model"
     return (
       <AppTooltip content={tooltip}>
-        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+        <span className="inline-flex items-center gap-1 rounded-lg bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
           <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
           {isTranslating
             ? "Translating"
@@ -333,7 +333,7 @@ function SynthStatusBadge({
   if (status.kind === "synthesizing") {
     return (
       <AppTooltip content="Generating audio…">
-        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+        <span className="inline-flex items-center gap-1 rounded-lg bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
           <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
           Voicing
         </span>
@@ -372,7 +372,7 @@ function SynthStatusBadge({
     if (dismissed) {
       return (
         <AppTooltip content="Audio generation failed — click Generate to retry">
-          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-full bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-lg bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
             Not voiced
           </span>
         </AppTooltip>
@@ -389,7 +389,7 @@ function SynthStatusBadge({
         trigger={
           <button
             type="button"
-            className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+            className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-lg bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
           >
             Audio failed
           </button>
@@ -1916,7 +1916,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div className="flex items-center gap-2">
             {audioLens ? "Controls" : "Source"}
             {!audioLens && project.sourceLanguage && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+              <span className="rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
                 {project.sourceLanguage}
               </span>
             )}
@@ -1952,7 +1952,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       data-testid="lane-switcher"
                       data-active-lane={activeLane}
                       aria-label="Active translation lane"
-                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className="flex items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     />
                   }
                 >
@@ -2042,13 +2042,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 data-testid="edit-target-language"
                 onClick={onEditTargetLanguage}
                 aria-label={project.targetLanguage ? "Change target language" : "Set target language"}
-                className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {project.targetLanguage || "Set target language"}
                 <Languages className="h-2.5 w-2.5" />
               </button>
             ) : project.targetLanguage ? (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+              <span className="rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
                 {project.targetLanguage}
               </span>
             ) : null}
@@ -2820,7 +2820,7 @@ function UsfmNoteChip({
     <button
       type="button"
       className={cn(
-        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-lg bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
         panelActive ? "cursor-default" : "cursor-help",
       )}
       aria-label={`${kindLabel}${note.ref ? ` ${note.ref}` : ""}`}
@@ -4849,7 +4849,7 @@ function EditorRow({
         ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
       }}
       className={cn(
-        "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
+        "relative flex h-6 w-6 items-center justify-center rounded-lg transition-[transform,color,background-color] duration-150 ease-out",
         "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
         "hover:bg-muted/80",
         validationColorClass,
@@ -5069,7 +5069,7 @@ function EditorRow({
             onPointerDown={onSelectionPointerDown}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute left-1 top-10 z-20 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full border",
+              "absolute left-1 top-10 z-20 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-lg border",
               "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
               "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
               isMultiSelected
@@ -5118,7 +5118,7 @@ function EditorRow({
               <button
                 type="button"
                 aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
-                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-lg text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
                 onClick={() => onOpenComments(cell.id)}
               >
                 <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
@@ -5212,7 +5212,7 @@ function EditorRow({
                     aria-pressed={sourceEditing}
                     onClick={() => setSourceEditing((v) => !v)}
                     className={cn(
-                      "ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors",
+                      "ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-lg transition-colors",
                       sourceEditing
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
@@ -5228,7 +5228,7 @@ function EditorRow({
                 <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
                   <span
                     aria-label="Source is locked"
-                    className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-lg text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
                   >
                     <Lock className="h-3 w-3" />
                   </span>
@@ -5494,7 +5494,7 @@ function EditorRow({
                     /* Pre-stream spinner — centered so it doesn't overlap
                        any existing target text peeking through the dimmed
                        editor underneath. */
-                    <div className="m-auto flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-muted-foreground">
+                    <div className="m-auto flex items-center gap-1.5 rounded-lg bg-card px-2.5 py-1 text-muted-foreground">
                       <Spinner className="size-3.5" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
@@ -6008,7 +6008,7 @@ function EditorRow({
                           <AppTooltip content="Contributor+ required to edit back-translations">
                             <span
                               aria-label="Contributor+ required to edit back-translations"
-                              className="inline-flex h-6 w-6 cursor-not-allowed items-center justify-center rounded-full text-muted-foreground opacity-40"
+                              className="inline-flex h-6 w-6 cursor-not-allowed items-center justify-center rounded-lg text-muted-foreground opacity-40"
                             >
                               <Pencil className="h-3 w-3" />
                             </span>
@@ -6039,7 +6039,7 @@ function EditorRow({
                               type="button"
                               onClick={() => onBacktranslate?.(cell, "refresh")}
                               disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
                               Refresh
@@ -6065,7 +6065,7 @@ function EditorRow({
                             <button
                               type="button"
                               onClick={handleBtCancel}
-                              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
+                              className="rounded-lg px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
                             >
                               Cancel
                             </button>
@@ -6073,7 +6073,7 @@ function EditorRow({
                               type="button"
                               onClick={handleBtSave}
                               disabled={btSaving || !btEditValue.trim()}
-                              className="rounded-full bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="rounded-lg bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {btSaving ? "Saving…" : "Save"}
                             </button>
@@ -6105,7 +6105,7 @@ function EditorRow({
                             type="button"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
                             disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {isBacktranslating ? (
                               <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
@@ -6385,7 +6385,7 @@ function EditorRow({
                     </>
                   ) : (
                     <div className="flex flex-col items-center gap-3 py-4 text-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40 text-muted-foreground/50">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground/50">
                         <Mic className="h-5 w-5" />
                       </div>
                       <p className="text-xs text-muted-foreground">

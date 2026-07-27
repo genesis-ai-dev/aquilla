@@ -305,7 +305,7 @@ function VoiceRow({
       {isDefault && (
         <span
           title="Narrator — lines without an explicit speaker use this voice."
-          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
         >
           <Star className="h-2.5 w-2.5" /> Narrator
         </span>

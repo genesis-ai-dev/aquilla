@@ -54,7 +54,7 @@ export function CellAudioRecordButton({ onOpenRecording, disabled, micDenied }: 
             disabled={Boolean(disabled || unsupportedReason)}
             aria-label={tooltip}
             className={cn(
-              "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+              "flex h-5 w-5 items-center justify-center rounded-lg transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
               blocked
                 ? micDenied
                   ? "cursor-pointer text-amber-500/70 hover:text-amber-500"

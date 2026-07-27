@@ -6031,7 +6031,11 @@ function EditorRow({
                               aria-label="Regenerate the back-translation"
                               className="rounded-full text-muted-foreground hover:text-foreground"
                             >
-                              <RefreshCw className={cn(isBacktranslating && "animate-spin")} />
+                              {isBacktranslating ? (
+                                <Spinner className="size-3.5" />
+                              ) : (
+                                <RefreshCw />
+                              )}
                             </Button>
                           </AppTooltip>
                         )}
@@ -6094,7 +6098,11 @@ function EditorRow({
                               disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                               className="h-auto shrink-0 gap-1 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-500/25 dark:text-amber-200"
                             >
-                              <RefreshCw className={cn(isBacktranslating && "animate-spin")} />
+                              {isBacktranslating ? (
+                                <Spinner className="size-3.5" />
+                              ) : (
+                                <RefreshCw />
+                              )}
                               Refresh
                             </Button>
                           )}
@@ -6162,7 +6170,7 @@ function EditorRow({
                             disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
                           >
                             {isBacktranslating ? (
-                              <><RefreshCw className="animate-spin" /> Reading it back…</>
+                              <><Spinner className="size-3.5" /> Reading it back…</>
                             ) : (
                               <><Sparkles /> Read it back with AI</>
                             )}

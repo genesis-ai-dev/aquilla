@@ -9,9 +9,10 @@
  * affordance reuses the existing CommentsDrawer via onOpenComments.
  */
 
-import { X, AlertTriangle, AlertCircle, BookA, Loader2, MessageSquare } from "lucide-react"
+import { X, AlertTriangle, AlertCircle, BookA, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import type { CellData } from "@/hooks/useCells"
@@ -236,7 +237,7 @@ export function CheckFindingsDrawer({
 
       {running ? (
         <div className="flex flex-1 items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Spinner className="size-4" />
           Checking…
         </div>
       ) : !result ? (

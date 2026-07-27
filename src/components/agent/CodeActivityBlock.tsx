@@ -9,7 +9,8 @@
  */
 
 import { useState } from "react"
-import { ChevronRight, Loader2, TerminalSquare } from "lucide-react"
+import { ChevronRight, TerminalSquare } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import type { CodeActivityItem } from "@/lib/agent/run-state"
@@ -41,7 +42,7 @@ export function CodeActivityBlock({ item }: { item: CodeActivityItem }) {
         {settled ? (
           <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{item.durationMs}ms</span>
         ) : (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" aria-label="Code running" />
+          <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label="Code running" />
         )}
       </button>
       {open && (

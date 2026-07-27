@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Card,
   CardContent,
@@ -1269,7 +1270,7 @@ export function TerminologyPage() {
               </p>
               {candidatesLoading && !candidatesReady ? (
                 <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  <Spinner className="size-4" />
                   Mining candidate terms…
                 </div>
               ) : (

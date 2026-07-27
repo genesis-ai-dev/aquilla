@@ -17,11 +17,11 @@
  */
 
 import { useMemo, useState } from "react"
-import { Check, ChevronDown, ChevronUp, Loader2, MessageSquare, Pencil, ShieldCheck } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Check, ChevronDown, ChevronUp, MessageSquare, Pencil, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
@@ -340,7 +340,7 @@ function StagedProposalCard({
               >
               {state === "applying" ? (
                 <>
-                  <Loader2 className={cn("h-3 w-3 animate-spin")} /> Applying…
+                  <Spinner className="size-3" /> Applying…
                 </>
               ) : (
                 "Apply"

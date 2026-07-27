@@ -13,7 +13,6 @@
 import { useRef, useState } from "react"
 import {
   History as HistoryIcon,
-  Loader2,
   MessageCircle,
   Mic,
   NotebookPen,
@@ -21,6 +20,7 @@ import {
   Sparkles,
   VolumeX,
 } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { fmtClock } from "./format"
 import { TimelineSourceAudio } from "./TimelineSourceAudio"
@@ -262,7 +262,7 @@ export function TimelineCellDetail({
               >
                 {transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing" ? (
                   <>
-                    <Loader2 className="h-3 w-3 animate-spin" /> Transcribing…
+                    <Spinner className="size-3" /> Transcribing…
                   </>
                 ) : (
                   <>
@@ -380,7 +380,7 @@ export function TimelineCellDetail({
               data-testid="tl-detail-generating"
               className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground"
             >
-              <Loader2 className="h-3 w-3 animate-spin" />
+              <Spinner className="size-3" />
               {completingState === "searching" ? "Finding examples…" : "Generating…"}
             </div>
           )}

@@ -10,9 +10,10 @@
  */
 
 import { useState } from "react"
-import { BadgeCheck, Check, Loader2, X } from "lucide-react"
+import { BadgeCheck, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import { applyStagedEvent, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 
@@ -95,7 +96,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                     aria-label={`Validate ${ev.display.canonicalRef ?? ev.cellId ?? "cell"}`}
                   >
                   {state === "applying" ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <Spinner className="size-3" />
                   ) : (
                     <Check data-icon="inline-start" />
                   )}

@@ -150,10 +150,11 @@ export function eventsToHistoryEntries(events: CellHistoryEvent[]): CellHistoryE
   // oldest-first — reverse here so consumers don't have to.
   const entries: CellHistoryEntry[] = []
   for (const e of [...events].reverse()) {
-    const payload = e.payload as { value?: string } | null
+    const payload = e.payload as { value?: string; valueHtml?: string } | null
     entries.push({
       timestamp: new Date(e.serverTs).toISOString(),
       value: payload?.value ?? "",
+      ...(payload?.valueHtml !== undefined ? { valueHtml: payload.valueHtml } : {}),
       source: "human",
       author: e.author,
       validated: false,

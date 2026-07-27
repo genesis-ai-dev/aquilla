@@ -123,6 +123,58 @@ describe("normalized import manifest", () => {
     })
   })
 
+  it("preserves the exact IDML v2 locator and protected source/target HTML", () => {
+    const locator = {
+      kind: "idml" as const,
+      memberPath: "Stories/Story_u1.xml",
+      storyId: "u1",
+      elementPath: "/Story/ParagraphStyleRange[1]",
+      elementId: "p1",
+      scope: "story-paragraph" as const,
+      part: 0,
+      slotIndexes: [0, 1],
+      sourceBlockHash: "a".repeat(64),
+    }
+    const sourceHtml = '<p data-idml-version="2"><span data-idml-slot="0">Source</span></p>'
+    const targetHtml = '<p data-idml-version="2"><span data-idml-slot="0"></span></p>'
+    const manifest = normalizeTranslatableStrings([{
+      id: "idml-unit",
+      original: "Source",
+      originalHtml: sourceHtml,
+      translated: "",
+      translatedHtml: targetHtml,
+      context: "Paragraph",
+      group: "story",
+      type: "text",
+      sourceLocator: locator,
+      metadata: { idml: { version: 2 } },
+    }], {
+      fileName: "layout.idml",
+      fileType: "idml",
+      profileId: "builtin:idml-roundtrip",
+      profileVersion: "2",
+    })
+
+    expect(manifest).toMatchObject({
+      profileId: "builtin:idml-roundtrip",
+      profileVersion: "2",
+      fidelity: "content-only",
+    })
+    expect(manifest.units[0]).toMatchObject({
+      unitKey: `idml:${locator.memberPath}:${locator.elementPath}:0`,
+      address: {
+        scheme: "document",
+        memberPath: locator.memberPath,
+        blockPath: locator.elementPath,
+        segment: 1,
+      },
+      sourceLocator: locator,
+      sourceHtml,
+      targetHtml,
+      metadata: { idml: { version: 2 } },
+    })
+  })
+
   it("uses timing and cue order as subtitle identity while retaining speakers", () => {
     const strings: TranslatableString[] = [{
       id: "cue-random-id",

@@ -26,6 +26,7 @@ import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { synthesizeCellTts } from "@/lib/sync/tts"
+import { effectiveSourceText } from "@/lib/cell-text"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -130,7 +131,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         geminiContext: {
           sourceLanguage: project.sourceLanguage,
           targetLanguage: project.targetLanguage,
-          original: chosen[0].original,
+          original: effectiveSourceText(chosen[0]),
           context: chosen[0].context,
           cellLabel: chosen[0].cellLabel,
         },

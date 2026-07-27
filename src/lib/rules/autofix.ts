@@ -1,5 +1,6 @@
 import type { RuleAutofix } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { complete } from "@/lib/completion/completion-service"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -184,7 +185,7 @@ function buildBatchUserMessage(rule: TranslationRule, breaking: CellData[], pass
   const breakSample = breaking.slice(0, 10)
   const passSample = passing.slice(0, 5)
   const fmt = (cs: CellData[]) =>
-    cs.map((c, i) => `${i + 1}. Source: "${c.original}"\n   Target: "${c.translated}"`).join("\n\n") || "(none)"
+    cs.map((c, i) => `${i + 1}. Source: "${effectiveSourceText(c)}"\n   Target: "${c.translated}"`).join("\n\n") || "(none)"
   return [
     `Rule name: ${rule.name}`,
     `Severity: ${rule.severity}`,
@@ -203,7 +204,7 @@ function buildBatchUserMessage(rule: TranslationRule, breaking: CellData[], pass
 
 function buildPerCellUserMessage(rule: TranslationRule, breaking: CellData[]): string {
   const list = breaking
-    .map((c) => `- cellId: ${c.id}\n  source: "${c.original}"\n  translated: "${c.translated}"`)
+    .map((c) => `- cellId: ${c.id}\n  source: "${effectiveSourceText(c)}"\n  translated: "${c.translated}"`)
     .join("\n")
   return [
     `Rule name: ${rule.name}`,

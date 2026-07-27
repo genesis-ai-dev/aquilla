@@ -36,3 +36,27 @@ describe("truncateCellText", () => {
     expect(truncateCellText("hi", 5)).toBe("hi")
   })
 })
+
+// SUB-28: effective (semantic) source text.
+import { effectiveSourceText } from "./cell-text"
+
+describe("effectiveSourceText", () => {
+  it("media section with a transcript → the transcript", () => {
+    expect(
+      effectiveSourceText({ medium: "media", original: "episode.mp3", transcription: "hello world" }),
+    ).toBe("hello world")
+  })
+
+  it("untranscribed media section → empty (the filename is never source text)", () => {
+    expect(effectiveSourceText({ medium: "media", original: "episode.mp3" })).toBe("")
+    expect(
+      effectiveSourceText({ medium: "media", original: "episode.mp3", transcription: "   " }),
+    ).toBe("")
+  })
+
+  it("text cells (and missing medium) → original, unchanged", () => {
+    expect(effectiveSourceText({ medium: "text", original: "a verse" })).toBe("a verse")
+    expect(effectiveSourceText({ original: "a verse" })).toBe("a verse")
+    expect(effectiveSourceText({ medium: null, original: "a verse" })).toBe("a verse")
+  })
+})

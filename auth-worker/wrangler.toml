@@ -125,6 +125,9 @@ crons = ["*/5 * * * *"]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@support.aquilla.app"
+# Team inbox for the public "book a call" form (routes/contact.ts). Must be a
+# routed destination address in Cloudflare Email Routing.
+CONTACT_EMAIL = "joel@frontierrnd.com"
 # EMAIL_FROM is an unmonitored noreply@, so replies are routed here instead.
 # This address MUST be wired to a human in Cloudflare Email Routing, or a
 # reply lands nowhere (see services/email.ts DEFAULT_REPLY_TO).
@@ -204,6 +207,9 @@ name = "EMAIL"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@support.aquilla.app"
+# Team inbox for the public "book a call" form (routes/contact.ts). Must be a
+# routed destination address in Cloudflare Email Routing.
+CONTACT_EMAIL = "joel@frontierrnd.com"
 # EMAIL_FROM is an unmonitored noreply@, so replies are routed here instead.
 # This address MUST be wired to a human in Cloudflare Email Routing, or a
 # reply lands nowhere (see services/email.ts DEFAULT_REPLY_TO).
@@ -272,6 +278,9 @@ name = "EMAIL"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@support.aquilla.app"
+# Team inbox for the public "book a call" form (routes/contact.ts). Must be a
+# routed destination address in Cloudflare Email Routing.
+CONTACT_EMAIL = "joel@frontierrnd.com"
 # EMAIL_FROM is an unmonitored noreply@, so replies are routed here instead.
 # This address MUST be wired to a human in Cloudflare Email Routing, or a
 # reply lands nowhere (see services/email.ts DEFAULT_REPLY_TO).
@@ -344,6 +353,9 @@ name = "EMAIL"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
 EMAIL_FROM = "noreply@support.aquilla.app"
+# Team inbox for the public "book a call" form (routes/contact.ts). Must be a
+# routed destination address in Cloudflare Email Routing.
+CONTACT_EMAIL = "joel@frontierrnd.com"
 # EMAIL_FROM is an unmonitored noreply@, so replies are routed here instead.
 # This address MUST be wired to a human in Cloudflare Email Routing, or a
 # reply lands nowhere (see services/email.ts DEFAULT_REPLY_TO).

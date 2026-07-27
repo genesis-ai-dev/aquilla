@@ -16,11 +16,14 @@
 // source blobs in R2; the future re-parse path fetches from R2.
 
 import { v7 as uuidv7 } from "uuid"
+import type { IdmlProgress } from "@aquilla/idml-roundtrip"
 import { proxyOrigin } from "./net/resource-proxy"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
+import { tileSegments } from "./timeline/tile-segments"
+import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
 import {
@@ -36,7 +39,6 @@ import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
 import {
   enqueueTargetCommitBatch,
-  enqueueTargetCommits,
   bulkUploadMorphRows,
   publishStagedImport,
   reconcileSourceImport,
@@ -45,6 +47,7 @@ import {
 } from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
+import { extractIdmlStrings } from "./parsers/idml"
 import { extractHtmlStrings } from "./parsers/html"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
@@ -477,7 +480,9 @@ export interface ImportContext {
 type PrepareImportContext = Pick<
   ImportContext,
   "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal"
->
+> & {
+  onIdmlProgress?: (progress: IdmlProgress) => void
+}
 
 function preparedParsedFile(
   file: File,
@@ -650,8 +655,18 @@ export async function prepareImportFile(
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
     if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
-      if (extensionType === "docx" || extensionType === "pptx") {
-        return preparedParsedFile(file, extensionType, await parseFile(file, extensionType))
+      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml") {
+        return preparedParsedFile(
+          file,
+          extensionType,
+          await parseFile(
+            file,
+            extensionType,
+            extensionType === "idml"
+              ? { signal: ctx.signal, onIdmlProgress: ctx.onIdmlProgress }
+              : undefined,
+          ),
+        )
       }
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)
@@ -702,6 +717,11 @@ export async function prepareImportFile(
       }
       return prepared
     } catch (error) {
+      // IDML is an opaque UCF/ZIP package with a strict, versioned parser.
+      // Never flatten or execute generated parser code against it: doing so
+      // discards its source-artifact and locator contract and can only produce
+      // a non-round-trippable "custom" import.
+      if (extensionType === "idml") throw error
       if (!ctx.identityToken) throw error
       return prepareSandboxImport(file, { ...ctx, identityToken: ctx.identityToken }, error)
     }
@@ -1292,8 +1312,13 @@ export async function emitParsedFile(
   const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
     fileName: result.name,
     fileType,
-    profileId: fileType === "usfm" ? "builtin:usfm-lossless" : `builtin:${fileType}`,
-    profileVersion: "1",
+    profileId: fileType === "usfm"
+      ? "builtin:usfm-lossless"
+      : fileType === "idml"
+        ? "builtin:idml-roundtrip"
+        : `builtin:${fileType}`,
+    profileVersion: fileType === "idml" ? "2" : "1",
+    ...(result.roundTripFidelity ? { fidelity: result.roundTripFidelity } : {}),
   })
 
   // Chain cells via anchorCellId: the first cell's anchor is null (genesis —
@@ -1305,8 +1330,15 @@ export async function emitParsedFile(
   })
   const targets: TargetCommit[] = cells.flatMap((cell, index) => {
     const value = result.strings[index]?.translated
-    return value
-      ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
+    const valueHtml = result.strings[index]?.translatedHtml
+    return value || valueHtml
+      ? [{
+          id: uuidv7(),
+          cellId: cell.cellId,
+          parentId: cell.id,
+          value: value ?? "",
+          ...(valueHtml !== undefined ? { valueHtml } : {}),
+        }]
       : []
   })
 
@@ -1348,38 +1380,6 @@ export async function emitParsedFile(
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
   })
-
-  // AQU-638: bilingual imports (CSV/TSV column mapping, TMX, XLIFF, csv-bilingual)
-  // carry target text on each parsed string. bulkUploadSource seeds only the
-  // SOURCE side, so without this the mapped/paired target column silently
-  // vanishes — source cells populate, targets stay empty. Emit one
-  // target.cell.commit per non-empty translation, chained on the freshly-minted
-  // source cell event id (AD-9 staleness pin). `cells[i]` is 1:1 with
-  // `result.strings[i]` — buildBulkCellsWithSpeakers emits exactly one cell per
-  // string in order and never skips. Source-only formats leave `translated`
-  // empty/undefined, so no target commits are emitted for them.
-  const targetCommits: TargetCommit[] = []
-  for (let i = 0; i < cells.length; i++) {
-    const translated = result.strings[i]?.translated?.trim()
-    if (translated) {
-      targetCommits.push({
-        id: uuidv7(),
-        cellId: cells[i].cellId,
-        parentId: cells[i].id,
-        value: translated,
-      })
-    }
-  }
-  if (targetCommits.length > 0) {
-    await enqueueTargetCommits({
-      projectId: ctx.projectId,
-      fileId,
-      author: ctx.author,
-      commits: targetCommits,
-      getToken: ctx.getToken,
-      signal: ctx.signal,
-    })
-  }
 
   return {
     ref: {
@@ -1430,6 +1430,13 @@ export interface MediaSegmentSpec {
  * Never synthesizes timing — a fallback spec uses the real probed duration, or
  * is left untimed (editor flags it) if even that fails. Shared by the importer
  * (new file) and the media-lens attach flow (existing file).
+ *
+ * AQU-646 timing/trim split: cell TIMING (startMs/endMs) is TILED so the
+ * segments partition the whole clip — playback can never skip the audio
+ * between detected speech regions ("cuts, not deletions"). Attachment TRIMS
+ * (trimStartMs/trimEndMs) stay at the tight detected boundaries — they feed
+ * Whisper transcription and voice-reference extraction, which must not absorb
+ * silence or neighboring speech.
  */
 export async function computeMediaSegmentSpecs(
   file: File,
@@ -1438,9 +1445,16 @@ export async function computeMediaSegmentSpecs(
   const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
   const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
 
+  const timings = tileSegments(segments, durationMs)
   const specs: MediaSegmentSpec[] =
     segments.length >= 2
-      ? segments.map((s) => ({ cellId: uuidv7(), startMs: s.startMs, endMs: s.endMs, trimStartMs: s.startMs, trimEndMs: s.endMs }))
+      ? segments.map((s, i) => ({
+          cellId: uuidv7(),
+          startMs: timings[i].startMs,
+          endMs: timings[i].endMs,
+          trimStartMs: s.startMs,
+          trimEndMs: s.endMs,
+        }))
       : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
   return { durationMs, specs }
 }
@@ -1535,6 +1549,21 @@ export async function emitMediaFile(
     })),
     getToken: ctx.getToken,
     signal: ctx.signal,
+  })
+
+  // AQU-646: seed the post-import auto-transcribe — the workspace's
+  // import-completion handler consumes this (the cell store won't have these
+  // cells, let alone their attachments, until an unawaitable revalidate).
+  recordMediaImportSeed({
+    fileId,
+    cells: buildMediaSeedCells({
+      fileId,
+      fileName: file.name,
+      specs,
+      audioId: `${upload.audioId}.${upload.ext}`,
+      url: upload.url,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    }),
   })
 
   return {
@@ -2072,7 +2101,16 @@ function withExactSourceArtifact(
   return normalized
 }
 
-export async function parseFile(file: File, fileType: FileType): Promise<ImportResult[]> {
+export interface ParseFileOptions {
+  signal?: AbortSignal
+  onIdmlProgress?: (progress: IdmlProgress) => void
+}
+
+export async function parseFile(
+  file: File,
+  fileType: FileType,
+  options?: ParseFileOptions,
+): Promise<ImportResult[]> {
   switch (fileType) {
     case "txt":
     case "md":
@@ -2141,6 +2179,30 @@ export async function parseFile(file: File, fileType: FileType): Promise<ImportR
       const strings = await extractPptxStrings(buffer)
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
+    }
+    case "idml": {
+      // The strict worker client transfers (detaches) its input without a
+      // hidden copy. Re-read the File after parsing so the preserved recovery
+      // artifact never shares/detaches the worker's parse buffer.
+      const parseBuffer = await file.arrayBuffer()
+      const strings = await extractIdmlStrings(
+        parseBuffer,
+        undefined,
+        "generic",
+        {
+          signal: options?.signal,
+          onProgress: options?.onIdmlProgress,
+        },
+      )
+      const sourceBuffer = await file.arrayBuffer()
+      // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
+      return [{
+        name: file.name,
+        strings,
+        rawBytes: sourceBuffer,
+        rawSourceFormat: "idml",
+        roundTripFidelity: "content-only",
+      }]
     }
     case "xlsx":
       throw new Error("XLSX files import through spreadsheet column mapping")

@@ -26,7 +26,9 @@ describe("GET /api/v2/orgs/:orgId/members/:userId/access", () => {
     }
     expect(body.orgRole).toBe(100)
     const pa = body.projects.find((p) => p.projectId === "pa")!
-    expect(pa).toMatchObject({ direct: 300, org: 100, creator: false, resolved: 400 }) // group contributor wins
+    // AQU-435: anna's sub-maintainer org role (100) is reported as orgRole but
+    // is NOT a per-project grant path and must not fold into `resolved`.
+    expect(pa).toMatchObject({ direct: 300, org: null, creator: false, resolved: 400 }) // group contributor wins
     expect(pa.groups).toEqual([{ groupId: 5, name: "Translators", roleLevel: 400 }])
     const pb = body.projects.find((p) => p.projectId === "pb")!
     expect(pb).toMatchObject({ direct: null, creator: true, resolved: 700 }) // creator of pb

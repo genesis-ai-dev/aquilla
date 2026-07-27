@@ -99,3 +99,6 @@ ds-bundle/
 
 # TypeScript incremental build state
 *.tsbuildinfo
+
+# Local QA session logs (findings/decisions scratch) — deliberately untracked.
+/docs/qa/

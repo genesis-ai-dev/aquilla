@@ -41,6 +41,15 @@ export interface OutboxRecord {
    *             permanent error in the indicator.
    */
   status: "pending" | "failed"
+  /**
+   * SUB-8 (AQU-633 follow-up): wallclock when the user acknowledged this
+   * FAILED record's banner ("Dismiss"). Persisted so the forbidden banner
+   * doesn't resurrect the same refusal on every reload; the record itself
+   * stays visible in the outbox inspector until discarded. Cleared by
+   * `requeueOutboxEvents` — a retried-then-refused change must banner again.
+   * Absent/undefined = not acknowledged.
+   */
+  acknowledgedAt?: number
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -485,8 +494,42 @@ export async function requeueOutboxEvents(ids: string[]): Promise<void> {
           lastAttemptAt: null,
           lastError: null,
           status: "pending",
+          // acknowledgedAt intentionally omitted (SUB-8): a retried record
+          // that gets refused again is a NEW refusal and must banner again.
         }
         store.put(next)
+      }
+    }
+  })
+  notifyOutboxChanged()
+}
+
+/**
+ * SUB-8 (AQU-633 follow-up): mark FAILED records as user-acknowledged so the
+ * forbidden banner stops resurfacing them across reloads. Non-destructive —
+ * the record keeps its status/lastError and stays in the inspector (where it
+ * can be retried or discarded). No-op for ids that don't exist.
+ */
+export async function acknowledgeOutboxEvents(ids: string[]): Promise<void> {
+  if (ids.length === 0) return
+  let db: IDBDatabase
+  try {
+    db = await openDb()
+  } catch {
+    return
+  }
+  const at = Date.now()
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.onerror = () => resolve()
+    tx.oncomplete = () => resolve()
+    const store = tx.objectStore(STORE)
+    for (const id of ids) {
+      const getReq = store.get(id)
+      getReq.onsuccess = () => {
+        const rec = getReq.result as OutboxRecord | undefined
+        if (!rec || !rec.id || !rec.event) return
+        store.put({ ...rec, acknowledgedAt: at })
       }
     }
   })

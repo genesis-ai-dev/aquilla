@@ -5,6 +5,8 @@
 // dependency; a token budget is a later refinement.
 // See docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md (D4, D10).
 
+import { effectiveSourceText } from "@/lib/cell-text"
+
 export interface DraftContextSettings {
   /** How many preceding approved-target cells (same file, document order) to
    *  include as left-context. v1 unit is cell count; token budget is deferred. */
@@ -21,6 +23,9 @@ type MinimalCell = {
   original: string
   translated: string
   status: string
+  // SUB-28: media sections source from their transcript.
+  medium?: import("@/lib/sync/cells-read-types").SegmentMedium | null
+  transcription?: string
 }
 
 /**
@@ -49,14 +54,16 @@ export function gatherPrecedingContext(
   for (let i = idx - 1; i >= 0 && out.length < count; i--) {
     const c = cells[i]
     if (c.fileId !== fileId) break // do not cross a file boundary
-    if (!c.original.trim()) continue // no source → nothing to show
+    // SUB-28: media sections source from their transcript (empty until ASR).
+    const src = effectiveSourceText(c)
+    if (!src.trim()) continue // no source → nothing to show
     const approvedTarget = c.status === "validated" && c.translated.trim()
       ? c.translated
       : ""
     if (!approvedTarget && !sourceFallback) continue
     // Unapproved target text is never prompt context. In paragraph fallback
     // mode its source may still provide discourse information.
-    out.push({ source: c.original, target: approvedTarget })
+    out.push({ source: src, target: approvedTarget })
   }
   return out.reverse() // restore document order (oldest → newest)
 }
@@ -82,8 +89,9 @@ export function gatherFollowingSource(
   for (let i = idx + 1; i < cells.length && out.length < count; i++) {
     const c = cells[i]
     if (c.fileId !== fileId) break // do not cross a file boundary
-    if (!c.original.trim()) continue
-    out.push({ source: c.original })
+    const src = effectiveSourceText(c)
+    if (!src.trim()) continue
+    out.push({ source: src })
   }
   return out // already in document order (forward scan)
 }

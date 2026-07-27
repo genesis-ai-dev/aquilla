@@ -1,12 +1,14 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/idml-roundtrip" },
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" },
     { "path": "./tsconfig.e2e.json" }
   ],
   "compilerOptions": {
     "paths": {
+      "@aquilla/idml-roundtrip": ["./packages/idml-roundtrip/src/index.ts"],
       "@/*": ["./src/*"]
     }
   }

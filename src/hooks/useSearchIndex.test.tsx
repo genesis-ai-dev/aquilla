@@ -65,3 +65,40 @@ describe("useSearchIndex.search", () => {
     expect(result.current.search("unreviewed source", 5).every((pair) => pair.cellId !== "draft")).toBe(true)
   })
 })
+
+// SUB-28: the index + passage lookup carry the SEMANTIC source for media
+// sections — transcript in, filename never, untranscribed excluded.
+describe("useSearchIndex — media sections (SUB-28)", () => {
+  it("indexes a validated media cell by its transcript; the filename is unfindable", () => {
+    const cells = [
+      cell({
+        id: "m1", original: "episode.mp3", translated: "au commencement",
+        medium: "media", transcription: "in the beginning was the word", status: "validated",
+      } as Partial<CellData> & { id: string; original: string; translated: string }),
+    ]
+    const { result } = renderHook(() => useSearchIndex([], cells))
+    const byTranscript = result.current.search("in the beginning was the word", 5)
+    expect(byTranscript.some((p) => p.cellId === "m1")).toBe(true)
+    expect(byTranscript[0]?.source).toBe("in the beginning was the word")
+    expect(result.current.search("episode.mp3", 5)).toHaveLength(0)
+  })
+
+  it("excludes untranscribed validated media cells from index and passages", () => {
+    const cells = [
+      cell({
+        id: "m0", original: "episode.mp3", translated: "quelque chose",
+        medium: "media", status: "validated",
+      } as Partial<CellData> & { id: string; original: string; translated: string }),
+      cell({
+        id: "m1", original: "episode.mp3", translated: "au commencement",
+        medium: "media", transcription: "in the beginning", status: "validated",
+      } as Partial<CellData> & { id: string; original: string; translated: string }),
+    ]
+    const { result } = renderHook(() => useSearchIndex([], cells))
+    const passages = result.current.searchPassages("in the beginning", 3, 2)
+    const allSources = passages.flatMap((p) => p.cells.map((c) => c.source))
+    expect(allSources).toContain("in the beginning")
+    expect(allSources).not.toContain("episode.mp3")
+    expect(passages.flatMap((p) => p.cells.map((c) => c.cellId))).not.toContain("m0")
+  })
+})

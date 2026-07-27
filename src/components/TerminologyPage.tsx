@@ -777,7 +777,7 @@ export function TerminologyPage() {
     [projectFileCells],
   )
   const cellPairs: CellPair[] = useMemo(
-    () => allCells.map((c) => ({ original: c.original, translated: c.translated })),
+    () => allCells.map((c) => ({ original: c.original, translated: c.translated, medium: c.medium, transcription: c.transcription })),
     [allCells],
   )
 

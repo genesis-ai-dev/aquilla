@@ -5240,19 +5240,24 @@ function EditorRow({
                 </span>
               </AppTooltip>
             ) : null}
-            {(cell.context || showFormattingLossWarning) && (
-              <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
-                <span>{cell.context}</span>
-                {showFormattingLossWarning && (
-                  <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
-                    <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                      <AlertTriangle className="h-2.5 w-2.5" />
-                      formatting
-                    </span>
-                  </AppTooltip>
-                )}
-              </div>
-            )}
+            {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
+                mirrors the target column's header lane, and that mirror is what
+                puts the two columns' first text lines on the same baseline. Drop
+                it for context-free cells and every such row's source text rides
+                20px above its translation — the target lane can't be made
+                conditional to match, because it also reserves the strip the
+                floating action rail occupies. */}
+            <div data-testid="source-context-line" className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
+              <span>{cell.context}</span>
+              {showFormattingLossWarning && (
+                <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
+                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                    <AlertTriangle className="h-2.5 w-2.5" />
+                    formatting
+                  </span>
+                </AppTooltip>
+              )}
+            </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
               <TranslatedEditor
@@ -5319,7 +5324,7 @@ function EditorRow({
               the floating action rail a lane of its own instead of letting it
               cover the first line of target text. The cast/character label
               lives here (left side), not squished into the line-number pill. */}
-          <div className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
+          <div data-testid="target-header-lane" className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
             {showCellLabel && (
               <AppTooltip content={labelText} disabled={!labelText}>
                 <span className="max-w-[60%] truncate">

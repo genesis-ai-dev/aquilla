@@ -796,6 +796,21 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // just left must not wipe it.
     setFocusedRailCellId((cur) => railFocusOwnerOnBlur(cur, cellId))
   }, [])
+  useEffect(() => {
+    const handleDocumentFocusIn = (event: FocusEvent) => {
+      const target = event.target
+      if (target instanceof Node && listRootRef.current?.contains(target)) return
+
+      // AQU-669: row-level blur is not a sufficient release signal across
+      // TipTap surfaces and recycled virtual rows. Whenever browser focus
+      // demonstrably enters a surface outside the cell list, release the
+      // exclusive rail owner so an abandoned row cannot stay pinned.
+      setFocusedRailCellId(null)
+    }
+
+    document.addEventListener("focusin", handleDocumentFocusIn)
+    return () => document.removeEventListener("focusin", handleDocumentFocusIn)
+  }, [])
   // Mirror ref so the imperative handle (getCurrentIndex) reads current
   // values without widening its dependency array — same pattern as
   // displayCellsRef below.

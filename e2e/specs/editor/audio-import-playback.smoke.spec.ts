@@ -40,6 +40,19 @@ test("alice imports an mp3, sees silence-split timeline clips, and plays them", 
 
   const ws = new Workspace(alice)
   await ws.importMediaFile(TONE_MP3)
+
+  // A fresh browser asks before downloading the local transcription model.
+  // This journey exercises playback, not transcription, so explicitly decline
+  // and prove the consent overlay no longer blocks the imported file.
+  const modelConsent = alice.getByRole("dialog").filter({
+    has: alice.getByRole("heading", {
+      name: /Download Whisper \(transcription\)\?/i,
+    }),
+  })
+  await expect(modelConsent).toBeVisible({ timeout: 10_000 })
+  await modelConsent.getByRole("button", { name: /^Cancel$/i }).click()
+  await expect(modelConsent).toBeHidden({ timeout: 5_000 })
+
   await ws.openFileBySubstring("tone-segments")
 
   // Time-ordered file → the second lens tab is labelled "Media" (AQU-353).

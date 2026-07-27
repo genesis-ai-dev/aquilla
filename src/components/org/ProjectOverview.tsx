@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, SlidersHorizontal } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
@@ -72,7 +72,11 @@ import {
   type StatKey,
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import {
   Select,
   SelectContent,
@@ -110,7 +114,7 @@ function ProjectOverviewSkeleton() {
       <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
         <div className="flex items-center gap-2">
           <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-lg" />
         </div>
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-20" />
@@ -220,7 +224,7 @@ function LanePill({ active, onClick, testId, children }: {
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+        "rounded-lg border px-2.5 py-0.5 text-xs font-medium transition-colors",
         active
           ? "border-transparent bg-primary text-primary-foreground"
           : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -1371,14 +1375,18 @@ export function ProjectOverview() {
                       after its row moves.
                     */}
                     <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <Input
-                        type="text"
-                        placeholder="Filter files by name…"
-                        aria-label="Filter files by name"
-                        value={fileNameFilter}
-                        onChange={(e) => setFileNameFilter(e.target.value)}
-                        className="max-w-56"
-                      />
+                      <InputGroup className="h-9 max-w-56">
+                        <InputGroupAddon>
+                          <Search />
+                        </InputGroupAddon>
+                        <InputGroupInput
+                          type="text"
+                          placeholder="Filter files by name…"
+                          aria-label="Filter files by name"
+                          value={fileNameFilter}
+                          onChange={(e) => setFileNameFilter(e.target.value)}
+                        />
+                      </InputGroup>
                       <Select
                         items={FILE_SORT_MODES}
                         value={fileSortMode}

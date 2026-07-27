@@ -11,7 +11,11 @@ import {
   type Table as TanStackTable,
 } from "@tanstack/react-table"
 
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import {
   Table,
   TableBody,
@@ -22,6 +26,7 @@ import {
 } from "@/components/ui/table"
 import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
 import { cn } from "@/lib/utils"
+import { Search } from "lucide-react"
 
 function columnAlignClass(meta: unknown) {
   return (meta as { align?: "right" } | undefined)?.align === "right" ? "text-right" : undefined
@@ -102,13 +107,17 @@ function DataTable<TData, TValue>({
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex flex-wrap items-center gap-3">
           {searchPlaceholder ? (
-            <Input
-              placeholder={searchPlaceholder}
-              value={globalFilter}
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              aria-label={searchPlaceholder}
-              className="max-w-sm"
-            />
+            <InputGroup className="h-9 max-w-sm">
+              <InputGroupAddon>
+                <Search />
+              </InputGroupAddon>
+              <InputGroupInput
+                placeholder={searchPlaceholder}
+                value={globalFilter}
+                onChange={(event) => setGlobalFilter(event.target.value)}
+                aria-label={searchPlaceholder}
+              />
+            </InputGroup>
           ) : null}
           {toolbarNode}
         </div>

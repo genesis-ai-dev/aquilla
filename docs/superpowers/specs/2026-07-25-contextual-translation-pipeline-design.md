@@ -458,6 +458,26 @@ Improvement is by subtraction first (skill order): the first ablation candidates
 `verify_force` at deep→mid, and `summarize` (inline into construe's final round) — each is
 one eval-set re-run.
 
+### Anchors and frozen rules
+
+The verifier panel is an LLM judging an LLM against an LLM's register — left alone, the
+three can converge into mutual confirmation: everything consistent, nothing verified. So
+the system's **anchors** — measurements that settle against the world, not against another
+model — are named here, and every tuning decision must key off them alone:
+
+- human edit-distance on accepted drafts vs. the `mode:"batch"` baseline (metric 3);
+- human validation / rejection rates on staged drafts;
+- scene-brief review outcomes (approve / edit / reject by a person).
+
+Metric 2 (the ambiguity-veto rate) is a *diagnostic*, never an optimization target —
+optimizing toward it teaches the performer to please the verifier, not the reader.
+
+**Frozen rules** — never tunable by any optimization pass, ablation, or future automation,
+precisely because they are what an optimizer would most want to relax: the human gate (no
+commit without a person), the mandatory `verify_ambiguity` stance with its code-counted
+veto, and the validated-only example pool. Changing any of these is a human design
+decision recorded in this document, not a parameter sweep.
+
 ## 12. Out of scope (explicitly)
 
 - Any auto-commit / auto-validate path — the human gate is a design invariant, not a

@@ -26,5 +26,14 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["vite.config.ts", "scripts/**/*.ts"]
+  "include": ["vite.config.ts", "scripts/**/*.ts"],
+  /* Worker-package imports need auth-worker/sync-worker installs. Cloudflare
+   * SPA builds only `pnpm install` at the repo root, so typechecking these
+   * one-off tools here fails with TS2307 (e.g. bcryptjs / @noble/hashes). */
+  "exclude": [
+    "scripts/migrate-users.ts",
+    "scripts/mock-legacy-migration.ts",
+    "scripts/neon-backfill-progress.ts",
+    "scripts/pg-build-projections.ts"
+  ]
 }

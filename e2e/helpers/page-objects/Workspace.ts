@@ -190,8 +190,10 @@ export class Workspace {
           return
         }
       } else {
+        // A fully hydrated project with no files uses the editor empty-state
+        // CTA ("Import a file") instead of the header overflow action.
         const directImportBtn = this.page
-          .getByRole("button", { name: /^Import$/i })
+          .getByRole("button", { name: /^Import(?: a file)?$/i })
           .filter({ visible: true })
           .first()
         await expect(directImportBtn).toBeVisible({ timeout: 10_000 })

@@ -33,9 +33,21 @@ const lc = (s: string | undefined | null): string => (s ?? "").trim().toLowerCas
 export function planUserImport(src: SourceUser[], existing: ExistingUser[]): UserImportPlan {
   const byUsername = new Map<string, ExistingUser>()
   const byEmail = new Map<string, ExistingUser>()
+  const sourceUsernameCount = new Map<string, number>()
+  const sourceEmailCount = new Map<string, number>()
   for (const e of existing) {
     if (e.username) byUsername.set(lc(e.username), e)
     if (e.email) byEmail.set(lc(e.email), e)
+  }
+  for (const u of src) {
+    if (u.username) {
+      const key = lc(u.username)
+      sourceUsernameCount.set(key, (sourceUsernameCount.get(key) ?? 0) + 1)
+    }
+    if (u.email) {
+      const key = lc(u.email)
+      sourceEmailCount.set(key, (sourceEmailCount.get(key) ?? 0) + 1)
+    }
   }
 
   const toInsert: SourceUser[] = []
@@ -45,6 +57,17 @@ export function planUserImport(src: SourceUser[], existing: ExistingUser[]): Use
   for (const u of src) {
     if (!u.username || !u.email) {
       conflicts.push({ username: u.username, email: u.email, reason: "missing username or email" })
+      continue
+    }
+    if (
+      (sourceUsernameCount.get(lc(u.username)) ?? 0) > 1 ||
+      (sourceEmailCount.get(lc(u.email)) ?? 0) > 1
+    ) {
+      conflicts.push({
+        username: u.username,
+        email: u.email,
+        reason: "duplicate case-insensitive identity in source",
+      })
       continue
     }
     const mu = byUsername.get(lc(u.username))

@@ -4,9 +4,8 @@
 // frontend can target aquilla-identity by flipping VITE_AUTH_BASE without
 // touching the rest of the request shape.
 //
-// Side-by-side writer model: rows land in the same frontier-db-v2 the legacy
-// frontier-server uses, with the same SECRET_KEY and Werkzeug-scrypt password
-// format, so JWTs and user records are interchangeable.
+// Neon is authoritative. AQU-713 adds a one-way, read-only bridge for a legacy
+// identity only when no case-insensitive Neon identity exists.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -30,6 +29,11 @@ import {
   recordAuthEvent,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
+import {
+  LegacyUserMigrationError,
+  migrateLegacyUserForLogin,
+  type LegacyMigrationRuntime,
+} from "../services/legacy-user-migration"
 
 /** Append to activity_logs. Best-effort: a logging failure is swallowed so it
  *  never fails the caller's request; awaited (not fire-and-forget) so the
@@ -92,6 +96,32 @@ interface ExistingUserCheck {
 
 interface ResetTokenRow {
   expires_at: string
+}
+
+function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
+  if (String(env.LEGACY_USER_MIGRATION_ENABLED).toLowerCase() !== "true") {
+    return null
+  }
+  const accountId = env.FRONTIER_D1_ACCOUNT_ID?.trim()
+  const databaseId = env.FRONTIER_D1_DATABASE_ID?.trim()
+  const apiToken = env.FRONTIER_D1_API_TOKEN?.trim()
+  const gitlabUrl = env.GITLAB_URL?.trim().replace(/\/+$/, "")
+  const gitlabToken = env.GITLAB_ADMIN_TOKEN?.trim()
+  if (!accountId || !databaseId || !apiToken || !gitlabUrl || !gitlabToken) {
+    throw new LegacyUserMigrationError(
+      "dependency",
+      "legacy user migration is enabled but not fully configured",
+    )
+  }
+  return {
+    d1: {
+      accountId,
+      databaseId,
+      apiToken,
+      apiBaseUrl: env.FRONTIER_D1_API_BASE_URL?.trim() || undefined,
+    },
+    gitlab: { gitlabUrl, gitlabToken, accessToken: "" },
+  }
 }
 
 auth.post("/register", zValidator("json", registerSchema), async (c) => {
@@ -192,6 +222,7 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
     if (
       msg.includes("UNIQUE constraint failed: users.username") ||
       msg.includes("UNIQUE constraint failed: users.email") ||
+      msg.includes("duplicate key value violates unique constraint") ||
       msg.includes("User already exists")
     ) {
       return c.json(
@@ -280,6 +311,47 @@ auth.post("/token", async (c) => {
     if (!user) {
       user = await jwtService.getUserByEmail(username)
     }
+    let passwordAlreadyVerified = false
+    if (!user) {
+      try {
+        const runtime = legacyMigrationRuntime(c.env)
+        if (runtime) {
+          const migrated = await migrateLegacyUserForLogin(
+            c.env.AQUILLA_PG,
+            username,
+            password,
+            runtime,
+          )
+          if (migrated) {
+            user = await jwtService.getUserByUsername(migrated.username)
+            if (!user) {
+              throw new LegacyUserMigrationError(
+                "dependency",
+                "migrated Neon identity could not be loaded",
+              )
+            }
+            // Only a row created by this exact request can reuse the password
+            // verification performed against the byte-identical copied hash.
+            // A concurrent/idempotent result is re-verified against Neon below.
+            passwordAlreadyVerified = migrated.created
+          }
+        }
+      } catch (error) {
+        if (error instanceof LegacyUserMigrationError) {
+          if (error.code === "conflict") {
+            return c.json(
+              { error: "Account migration requires support" },
+              409,
+            )
+          }
+          return c.json(
+            { error: "Account migration is temporarily unavailable. Please try again." },
+            503,
+          )
+        }
+        throw error
+      }
+    }
     if (!user) {
       await Promise.all([
         recordAuthEvent(c.env.AQUILLA_PG, "login", identifier, false),
@@ -288,11 +360,13 @@ auth.post("/token", async (c) => {
       return c.json({ error: "Incorrect username/email or password" }, 401)
     }
 
-    let isValidPassword = false
+    let isValidPassword = passwordAlreadyVerified
     try {
-      const result = await verifyPassword(password, user.password_hash)
+      const result = passwordAlreadyVerified
+        ? { isValid: true, shouldRehashToWerkzeugScrypt: false }
+        : await verifyPassword(password, user.password_hash)
       isValidPassword = result.isValid
-      if (result.isValid && result.shouldRehashToWerkzeugScrypt) {
+      if (!passwordAlreadyVerified && result.isValid && result.shouldRehashToWerkzeugScrypt) {
         try {
           const newHash = await hashPasswordWerkzeugScrypt(password)
           await c.env.AQUILLA_PG.prepare(

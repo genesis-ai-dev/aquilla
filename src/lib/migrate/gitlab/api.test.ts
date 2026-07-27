@@ -5,8 +5,12 @@
 // fixture mirrors the real shape codex-editor writes, verified against an
 // on-disk project's metadata.json.
 
-import { describe, it, expect } from "vitest"
-import { parseNextPage, isCodexMetadata } from "./api"
+import { afterEach, describe, it, expect, vi } from "vitest"
+import { isCodexMetadata, listGroupMembers, parseNextPage } from "./api"
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 /** Minimal Headers-like stand-in matching what parseNextPage consumes. */
 function headers(map: Record<string, string>): { get(name: string): string | null } {
@@ -97,5 +101,28 @@ describe("isCodexMetadata", () => {
     expect(isCodexMetadata({ languages: "en" })).toBe(false)
     // projectName must be a string, not a number.
     expect(isCodexMetadata({ projectName: 123 })).toBe(false)
+  })
+})
+
+describe("listGroupMembers", () => {
+  it("loads effective members so inherited parent-group access is preserved", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify([{ id: 77, username: "cleiton", access_level: 30 }]),
+        { status: 200, headers: { "X-Next-Page": "" } },
+      ),
+    )
+
+    await expect(listGroupMembers({
+      gitlabUrl: "https://gitlab.example",
+      gitlabToken: "admin-token",
+      accessToken: "",
+    }, 11)).resolves.toEqual([
+      { id: 77, username: "cleiton", access_level: 30 },
+    ])
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://gitlab.example/api/v4/groups/11/members/all?per_page=100&page=1",
+      { headers: { Authorization: "Bearer admin-token" } },
+    )
   })
 })

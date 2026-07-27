@@ -88,6 +88,7 @@
     "neon:backfill:progress:dev": "tsx scripts/neon-target.ts dev backfill-progress",
     "neon:backfill:progress:staging": "tsx scripts/neon-target.ts staging backfill-progress",
     "neon:backfill:progress:prod": "tsx scripts/neon-target.ts production backfill-progress",
+    "migrate:users": "tsx scripts/migrate-users.ts",
     "neon:refresh:dev": "tsx scripts/refresh-neon-branch.ts dev",
     "neon:refresh:staging": "tsx scripts/refresh-neon-branch.ts staging",
     "neon:refresh-dev": "pnpm neon:refresh:dev"

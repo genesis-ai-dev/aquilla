@@ -4802,8 +4802,6 @@ export function ProjectWorkspace() {
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
-                  onOpenGlossary={() => navigate(`/project/${projectId}/terminology`)}
-                  glossaryActive={centerSurface === "terminology"}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}

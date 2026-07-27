@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Search as SearchIcon, X, ChevronDown, Pencil, BookOpen } from "lucide-react"
+import { Search as SearchIcon, X, ChevronDown, Pencil } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
@@ -50,10 +50,6 @@ interface Props {
    * wired up org settings.
    */
   canExportByOrgPolicy?: boolean
-  /** Render a pinned "Glossary" pseudo-file entry; invoked on click. Omit to hide. */
-  onOpenGlossary?: () => void
-  /** True when the glossary surface is the active center surface (for highlight). */
-  glossaryActive?: boolean
 }
 
 export function ExpandableFileList({
@@ -61,7 +57,6 @@ export function ExpandableFileList({
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  onOpenGlossary, glossaryActive,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
@@ -132,21 +127,6 @@ export function ExpandableFileList({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="p-2 space-y-2">
-          {onOpenGlossary && (
-            <button
-              type="button"
-              onClick={onOpenGlossary}
-              className={cn(
-                "flex h-7 w-full items-center gap-1 rounded-lg px-2 text-[13px] transition-colors",
-                glossaryActive
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <BookOpen className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">Glossary</span>
-            </button>
-          )}
           {groups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">
               {filter ? `No files match "${filter}".` : "No files imported yet."}

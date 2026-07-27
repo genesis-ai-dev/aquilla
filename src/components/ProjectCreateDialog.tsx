@@ -137,6 +137,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const { projects: discoveredProjects } = useProjectsForNavigation(suppliedProjects == null)
   const linkableProjects = suppliedProjects ?? discoveredProjects
   const [open, setOpen] = useState(false)
+  // AQU-712: one stable project id per dialog session, minted when the dialog
+  // opens and re-minted when it closes (or after a successful create that keeps
+  // the dialog open). Reusing the same id across submit attempts within a
+  // session — double-click, or an error-then-retry after the server actually
+  // committed the row — lets the server's `ON CONFLICT(id) DO NOTHING` dedup
+  // land the retry on the same row instead of creating a duplicate project.
+  const draftProjectId = useRef(uuid())
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   // Self-contained shape only (spec §5 "creation fix"): extra target
   // languages beyond the primary one, applied as settings.targetLanes after
@@ -171,7 +178,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       }
 
       const project: ProjectRecord = {
-        id: uuid(),
+        id: draftProjectId.current,
         name: value.name.trim(),
         sourceLanguage: value.sourceLanguage.trim(),
         targetLanguage: value.shape === "source-only" ? "" : value.targetLanguage.trim(),
@@ -246,7 +253,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       if (extraLanguagesFailed) {
         // The project exists and onCreated already fired — leave the dialog
         // open just long enough for the warning to be readable rather than
-        // rolling anything back.
+        // rolling anything back. This create succeeded, so a subsequent submit
+        // in the still-open dialog is a NEW project: mint a fresh draft id so
+        // it doesn't false-dedup onto the row we just created (AQU-712).
+        draftProjectId.current = uuid()
         setSubmitWarning(EXTRA_LANGUAGES_WARNING)
       } else {
         setOpen(false)
@@ -261,6 +271,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     setSubmitWarning(null)
     // Preserve the existing array reference when there is nothing to reset.
     setExtraLanguages((prev) => (prev.length === 0 ? prev : []))
+    // AQU-712: closing the dialog ends the session — mint a fresh draft id so
+    // the next time it opens starts a brand-new project (no false dedup onto a
+    // project created in a previous session).
+    draftProjectId.current = uuid()
   }, [open, form, clearSubmitError])
 
   function pickShape(next: ProjectShape) {

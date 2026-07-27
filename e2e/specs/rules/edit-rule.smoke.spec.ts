@@ -38,8 +38,8 @@ test("edit rule button opens inline RuleEditor pre-filled with rule name", async
   // Wait for rule to appear in the list.
   await expect(alice.getByText(ruleName).first()).toBeVisible({ timeout: 5_000 })
 
-  // Click "Edit rule" Pencil button.
-  const editBtn = alice.locator('button[title="Edit rule"]').first()
+  // Click "Edit rule" Pencil button (aria-label; AppTooltip clears native title).
+  const editBtn = alice.getByRole("button", { name: "Edit rule" }).first()
   await expect(editBtn).toBeVisible({ timeout: 5_000 })
   await editBtn.click()
 

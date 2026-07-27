@@ -39,8 +39,8 @@ test("RuleDrawer opens from rules page button showing rule name", async ({ alice
   await alice.getByRole("button", { name: /Create rule/i }).click()
   await expect(alice.getByText(ruleName).first()).toBeVisible({ timeout: 5_000 })
 
-  // Click the "Opens the editor with this rule's drawer" button.
-  const openEditorBtn = alice.locator(`button[title="Opens the editor with this rule's drawer"]`).first()
+  // "Try to fix all" navigates to the editor with this rule's drawer open.
+  const openEditorBtn = alice.getByRole("button", { name: /Try to fix all/i }).first()
   await expect(openEditorBtn).toBeVisible({ timeout: 5_000 })
   await openEditorBtn.click()
 

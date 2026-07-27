@@ -153,20 +153,20 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogTrigger
-        render={
-          <AppTooltip content={triggerTooltip}>
+      <AppTooltip content={triggerTooltip}>
+        <DialogTrigger
+          render={
             <Button
               variant="outline"
               size="sm"
               disabled={!isConfigured || !canManage}
-            >
-              <Sparkles className="mr-1 h-3.5 w-3.5" />
-              Suggest from edits
-            </Button>
-          </AppTooltip>
-        }
-      />
+            />
+          }
+        >
+          <Sparkles className="mr-1 h-3.5 w-3.5" />
+          Suggest from edits
+        </DialogTrigger>
+      </AppTooltip>
 
       <DialogContent className="max-w-2xl">
         <DialogHeader>

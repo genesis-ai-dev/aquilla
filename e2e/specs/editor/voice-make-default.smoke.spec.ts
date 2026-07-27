@@ -43,12 +43,12 @@ test("CharacterModal Make narrator sets the voice as narrator/default", async ({
   await expect(voiceRow).toBeVisible({ timeout: 5_000 })
 
   // A fresh voice is not the narrator yet.
-  await expect(voiceRow.getByTitle(/lines without an explicit speaker/i)).toHaveCount(0)
+  await expect(voiceRow.getByText("Narrator", { exact: true })).toHaveCount(0)
 
   // Open the row's ⋯ menu and set it as narrator.
   await voiceRow.getByRole("button", { name: /More voice actions/i }).click({ force: true })
   await alice.getByRole("button", { name: /Set as narrator/i }).click()
 
-  // The row now carries the narrator badge.
-  await expect(voiceRow.getByTitle(/lines without an explicit speaker/i)).toBeVisible({ timeout: 3_000 })
+  // The row now carries the Narrator badge (tooltip via AppTooltip, not title).
+  await expect(voiceRow.getByText("Narrator", { exact: true })).toBeVisible({ timeout: 3_000 })
 })

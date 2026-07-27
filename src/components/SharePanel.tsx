@@ -538,7 +538,7 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
             </div>
             {revokeTarget === inv.token ? (
               <div className="flex shrink-0 items-center gap-1">
-                <label className="flex items-center gap-1 text-[10px] text-destructive cursor-pointer">
+                <label className="flex items-center gap-1 text-[10px] text-destructive">
                   <Checkbox
                     className="size-3"
                     checked={revokeConfirm}

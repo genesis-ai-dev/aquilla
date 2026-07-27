@@ -339,7 +339,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
         </div>
 
         <div className="flex items-end">
-          <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+          <label className="flex items-center gap-1.5 text-xs">
             <Switch
               size="sm"
               checked={enabled}

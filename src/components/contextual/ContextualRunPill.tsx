@@ -219,7 +219,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
             {spanLabel && (
               <button
                 type="button"
-                className="cursor-pointer underline-offset-2 hover:underline"
+                className="underline-offset-2 hover:underline"
                 onClick={() => onSpanClick?.(spanLabel)}
               >
                 {spanLabel}

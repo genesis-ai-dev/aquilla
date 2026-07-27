@@ -32,7 +32,7 @@ export function DecaySettingsSection({
   return (
     <details className="rounded-lg border p-3">
       <AppTooltip content={disabledTooltip} disabled={!disabled}>
-        <summary className="cursor-pointer text-sm font-medium">Retrieval support</summary>
+        <summary className="text-sm font-medium">Retrieval support</summary>
       </AppTooltip>
       <div className="mt-3 space-y-4">
         <p className="text-xs text-muted-foreground">

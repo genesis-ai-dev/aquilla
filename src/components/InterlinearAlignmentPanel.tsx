@@ -317,7 +317,7 @@ export function InterlinearAlignmentPanel({
           exists without forcing it on them. */}
       {amberLinks.length > 0 && (
         <details className="rounded-md border border-amber-500/20 bg-amber-500/5">
-          <summary className="cursor-pointer select-none px-2 py-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 list-none flex items-center gap-1">
+          <summary className="select-none px-2 py-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 list-none flex items-center gap-1">
             <span className="flex-1">Needs confirmation ({amberLinks.length})</span>
             <span className="text-[9px] text-muted-foreground/60">30–59%</span>
           </summary>

@@ -265,6 +265,17 @@
   html.dark {
     color-scheme: dark;
   }
+
+  /* Links are the one place the hand cursor isn't ours to remove by dropping a
+     class: Blink and WebKit pick it in the hit-test whenever the computed
+     cursor is `auto` and the node is a link, so no amount of removing
+     `cursor-pointer` reaches it. An explicit value overrides that. Interactive
+     controls that need a non-arrow cursor (resize handles, text, not-allowed)
+     still set it themselves. Marketing pages are a separate entry
+     (homepage.html / homepage.css) and keep their own affordances. */
+  :where(a):not(:disabled, [aria-disabled="true"]) {
+    cursor: default;
+  }
 }
 
 .violation-blot {

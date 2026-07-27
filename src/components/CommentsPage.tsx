@@ -707,7 +707,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           </label>
 
           {/* Show resolved toggle */}
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+          <label className="flex items-center gap-1.5 select-none">
             <Checkbox
               checked={filter.showResolved}
               onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}

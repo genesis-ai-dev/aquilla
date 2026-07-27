@@ -878,7 +878,7 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
         "gap-0 px-3",
         disabled
           ? "cursor-not-allowed opacity-55"
-          : "cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          : "transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
       <div className="flex items-start gap-3">
@@ -1428,7 +1428,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             Drag & drop files here, or
           </p>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+            <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
               Choose Files
               <input
                 type="file"
@@ -1437,7 +1437,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 onChange={handleFileInput}
               />
             </Button>
-            <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+            <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
               Choose Folder
               {/* Folder picker for an unzipped Paratext project. */}
               <input
@@ -2348,7 +2348,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
               <ul className="grid grid-cols-2 gap-x-2 p-2 sm:grid-cols-3">
                 {books.map((b) => (
                   <li key={b.id}>
-                    <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-accent">
+                    <label className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-accent">
                       <Checkbox
                         checked={checkedBooks.has(b.id)}
                         disabled={importing}
@@ -3150,7 +3150,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
         file; each sense groups as one paragraph with a cell per definition, gloss list, and comment.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
           {masterFile ? masterFile.name : "Choose master edition (SDBH-en.JSON)"}
           <input
             type="file"
@@ -3163,7 +3163,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
             disabled={importing}
           />
         </Button>
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
           {localizedFile ? localizedFile.name : "Choose localized edition (optional)"}
           <input
             type="file"
@@ -3256,7 +3256,7 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
         morphology (lemma, morph code, Strong's) will be preserved alongside the verse text.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
           {file ? file.name : "Choose Macula TSV file"}
           <input
             type="file"
@@ -3353,7 +3353,7 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
         translation cell at the matching verse reference.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
           {file ? file.name : "Choose Translation Notes TSV"}
           <input
             type="file"

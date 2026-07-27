@@ -384,7 +384,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
             </FieldGroup>
 
             <details className="rounded-xl border px-3 py-2.5 [&[open]>summary]:mb-3">
-              <summary className="cursor-pointer text-xs font-medium text-muted-foreground select-none">
+              <summary className="text-xs font-medium text-muted-foreground select-none">
                 Advanced: project shape
               </summary>
               <form.Field

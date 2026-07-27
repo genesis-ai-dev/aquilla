@@ -605,7 +605,7 @@ function FootnoteMarkerBadge({
     "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-md px-1 text-[9px] font-bold",
     active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
     onActivate &&
-      "cursor-pointer hover:ring-1 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+      "hover:ring-1 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
   )
   if (onActivate) {
     return (

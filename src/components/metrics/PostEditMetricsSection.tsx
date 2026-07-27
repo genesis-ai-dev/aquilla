@@ -132,7 +132,6 @@ function UserTable({ users, activeUser, onSelectUser }: {
                 key={u.author}
                 data-state={isActive ? "selected" : undefined}
                 onClick={() => onSelectUser(isActive ? null : u.author)}
-                className="cursor-pointer"
               >
                 <TableCell className="font-mono text-xs">{u.author}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{u.count}</TableCell>

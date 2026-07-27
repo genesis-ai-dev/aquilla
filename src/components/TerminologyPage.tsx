@@ -458,7 +458,7 @@ function TermbaseImportDialog({
                 variant="outline"
                 size="sm"
                 nativeButton={false}
-                render={<label className="cursor-pointer" />}
+                render={<label />}
               >
                 Choose {tab.toUpperCase()} file
                 <input
@@ -515,7 +515,7 @@ function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: Conce
       <div className="min-w-0 w-36 shrink-0">
         <button
           type="button"
-          className="text-sm font-medium hover:underline text-left cursor-pointer"
+          className="text-sm font-medium hover:underline text-left"
           onClick={() => onDrillDown(concept)}
         >
           {concept.sourceTerm}

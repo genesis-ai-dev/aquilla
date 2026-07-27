@@ -195,7 +195,7 @@ function OccurrenceRow({
             type="button"
             className={cn(
               "w-full text-left text-sm leading-relaxed",
-              canEdit && "cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 transition-colors",
+              canEdit && "hover:bg-muted/50 rounded px-1 -mx-1 transition-colors",
               !translated.trim() && "text-muted-foreground italic",
             )}
             onClick={() => canEdit && setEditing(true)}

@@ -110,7 +110,7 @@ export function SectionVisibilityBadge({
       variant="outline"
       className={cn(
         "gap-1 font-normal text-muted-foreground",
-        interactive && "cursor-pointer hover:bg-muted",
+        interactive && "hover:bg-muted",
         className,
       )}
     >

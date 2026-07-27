@@ -379,7 +379,6 @@ export function OrgProjectsDataTable({
         data={tableData}
         getRowId={(p) => p.id}
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
-        rowClassName="cursor-pointer"
         initialSorting={
           initialLens === "attention" ? [] : [...lensToSorting(initialLens)]
         }

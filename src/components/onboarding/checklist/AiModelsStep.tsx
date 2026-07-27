@@ -388,7 +388,7 @@ function ModelCheckRow({ checked, onChange, meta, status }: ModelCheckRowProps) 
   return (
     <label
       className={cn(
-        "flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40",
+        "flex items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40",
       )}
     >
       <Checkbox
@@ -419,7 +419,7 @@ interface RadioRowProps {
 
 function RadioRow({ value, label, hint }: RadioRowProps) {
   return (
-    <label className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40">
+    <label className="flex items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40">
       <RadioGroupItem value={value} className="mt-1" />
       <div className="flex-1">
         <div className="text-sm font-medium">{label}</div>
@@ -437,7 +437,7 @@ interface ModelRadioRowProps {
 
 function ModelRadioRow({ value, meta, status }: ModelRadioRowProps) {
   return (
-    <label className="flex cursor-pointer items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40">
+    <label className="flex items-start gap-2 rounded-md px-1 py-1 hover:bg-accent/40">
       <RadioGroupItem value={value} className="mt-1" />
       <div className="flex-1">
         <div className="flex items-center gap-2 text-sm">

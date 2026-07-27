@@ -1499,7 +1499,7 @@ export function ProjectSettings() {
         {searchGroupLabel("section-advanced-llm")}
         {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
           <details id="section-advanced-llm" className="group rounded-lg border bg-card">
-            <summary className="cursor-pointer select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
+            <summary className="select-none list-none px-6 py-4 text-sm font-medium marker:hidden">
               <span className="flex items-center justify-between">
                 <span>Advanced LLM settings</span>
                 <span className="text-xs text-muted-foreground">

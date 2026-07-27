@@ -35,13 +35,14 @@ function Page({
   size = "default",
   className,
   children,
+  ...props
 }: {
   size?: PageSize
   className?: string
   children: React.ReactNode
-}) {
+} & Omit<React.ComponentProps<"div">, "children" | "className">) {
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="h-full overflow-y-auto" {...props}>
       <div
         className={cn(
           "mx-auto w-full px-4 py-6 sm:px-6 sm:py-8",

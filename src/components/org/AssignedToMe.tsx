@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 import { ClipboardList, Building2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { AppShell } from "@/components/AppShell"
-import { EmptyState } from "@/components/ui/page"
+import { EmptyState, Page, PageHeader } from "@/components/ui/page"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -54,11 +54,10 @@ export function AssignedToMe() {
       header={<OrgBreadcrumb section="Assigned to me" />}
       statusBar={null}
       main={
-        // AQU-366: see ProjectsList.tsx for why `h-full overflow-y-auto` is the
-        // correct (and only) scroll surface inside AppShell's main slot;
-        // `overscroll-contain` prevents wheel/trackpad chaining to an ancestor.
-        <div className="h-full overflow-y-auto overscroll-contain space-y-4 p-6" data-testid="assigned-to-me-scroll">
-          <h1 className="text-lg font-semibold">Assigned to me</h1>
+        // Match Members / Teams: Page size="wide" (max-w-6xl) inside AppShell.
+        // data-testid kept on the Page scroll root for the existing scroll helper.
+        <Page size="wide" data-testid="assigned-to-me-scroll" className="overscroll-contain">
+          <PageHeader title="Assigned to me" />
           {activeOrgId == null ? (
             <EmptyState
               icon={Building2}
@@ -108,7 +107,7 @@ export function AssignedToMe() {
               })}
             </div>
           )}
-        </div>
+        </Page>
       }
     />
   )

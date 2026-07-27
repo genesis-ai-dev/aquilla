@@ -941,3 +941,34 @@
 @media (max-width: 880px) {
   .aq-beta-cards, .aq-roadmap { grid-template-columns: 1fr; }
 }
+
+/* ── Book a call (homepage #book-call) ──────────────────────────────────── */
+.aq-book { display: grid; grid-template-columns: 1.05fr 1fr; gap: clamp(32px, 5vw, 72px); align-items: center; }
+@media (max-width: 900px) { .aq-book { grid-template-columns: 1fr; } }
+.aq-book .aq-feature-copy h2 { font-size: clamp(26px, 3.4vw, 38px); }
+.aq-book-alt { margin-top: 16px; font-size: 14px; color: var(--aq-faint); }
+
+.aq-book-form { display: flex; flex-direction: column; gap: 14px; }
+.aq-book-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 560px) { .aq-book-row { grid-template-columns: 1fr; } }
+.aq-field { display: flex; flex-direction: column; gap: 6px; }
+.aq-field > span { font-size: 12.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--aq-faint); }
+.aq-field > span em { font-style: normal; text-transform: none; letter-spacing: 0; opacity: 0.8; }
+.aq-input {
+  width: 100%; padding: 11px 13px; border-radius: 10px;
+  border: 1px solid var(--aq-line-strong); background: var(--aq-fill);
+  color: var(--aq-text); font-size: 15px; font-family: inherit;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.aq-input::placeholder { color: var(--aq-faint); }
+.aq-input:focus { outline: none; border-color: var(--aq-gold); background: var(--aq-fill-2); }
+.aq-textarea { resize: vertical; min-height: 96px; line-height: 1.5; }
+
+/* Honeypot — off-screen for humans, present in the DOM for naive bots. */
+.aq-book-hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+.aq-book-error { font-size: 14px; color: oklch(0.68 0.19 25); }
+.aq-book-sent { text-align: center; padding: 28px 10px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.aq-book-sent h3 { font-size: 22px; }
+.aq-book-sent p { font-size: 15px; line-height: 1.6; color: var(--aq-dim); }
+.aq-book-sent a { color: var(--aq-gold-soft); text-decoration: underline; text-underline-offset: 3px; }

@@ -42,8 +42,6 @@ test("pending invite appears on /members and can be revoked", async ({ alice }) 
 
   // Navigate to /members.
   await alice.goto(orgRoute(alice, "/members"))
-  await alice.waitForLoadState("networkidle")
-
   // The PendingInvitesSection should show the invite row for our project.
   const revokeBtn = alice.getByRole("button", {
     name: new RegExp(`Revoke invitation to ${name}`, "i"),

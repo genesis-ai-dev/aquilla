@@ -42,13 +42,14 @@ function LaneChip({
     <AppTooltip content={tooltip}>
       <span
         data-testid={`lane-chip-${projectId}-${lane.lane}`}
-        className="inline-flex items-center gap-1 rounded border bg-card px-1.5 py-0.5 text-xs"
+        className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded border bg-card px-1.5 py-0.5 text-xs"
+        aria-label={`${label}: ${pct}% translated`}
       >
-      <span className="font-medium">{label}</span>
-      <span className="h-1.5 w-8 overflow-hidden rounded-full bg-muted" aria-hidden>
-        <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
-      </span>
-      <span className="tabular-nums text-muted-foreground">{pct}%</span>
+        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+        <span className="h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>
+          <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+        </span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">{pct}%</span>
       </span>
     </AppTooltip>
   )
@@ -67,7 +68,7 @@ export function LaneChips({
   const overflow = lanes.length - visible.length
 
   return (
-    <span className={cn("inline-flex flex-wrap items-center gap-1", className)}>
+    <span className={cn("inline-flex min-w-0 max-w-full flex-wrap items-center gap-1", className)}>
       {visible.map((lane) => (
         <LaneChip
           key={lane.lane || "__default__"}
@@ -81,7 +82,7 @@ export function LaneChips({
           <button
             type="button"
             data-testid={`lane-chip-overflow-${projectId}`}
-            className="inline-flex items-center rounded border bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+            className="inline-flex shrink-0 items-center rounded border bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:bg-muted"
             onClick={(e) => {
               e.stopPropagation()
               onOverflowClick()
@@ -92,7 +93,7 @@ export function LaneChips({
         ) : (
           <span
             data-testid={`lane-chip-overflow-${projectId}`}
-            className="inline-flex items-center rounded border bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-muted-foreground"
+            className="inline-flex shrink-0 items-center rounded border bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-muted-foreground"
           >
             +{overflow}
           </span>

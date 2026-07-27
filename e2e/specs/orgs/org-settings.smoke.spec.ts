@@ -12,8 +12,6 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("org settings page renders Identity section and stats", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/settings"))
-  await alice.waitForLoadState("networkidle")
-
   // Main heading.
   await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible({
     timeout: 10_000,

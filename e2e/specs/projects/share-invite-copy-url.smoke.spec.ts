@@ -17,8 +17,6 @@ test("share panel Copy URL button shows Copied confirmation", async ({ alice }) 
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CopyUrl ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/editor`)
-  await alice.waitForLoadState("networkidle")
-
   // Open Share panel.
   // Share lives in the sidebar "More" menu (sidebar cleanup).
   await alice.getByRole("button", { name: /More project options/i }).click()

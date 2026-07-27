@@ -4,6 +4,7 @@ import { ClipboardList, Building2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { AppShell } from "@/components/AppShell"
 import { EmptyState } from "@/components/ui/page"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -65,7 +66,7 @@ export function AssignedToMe() {
               description="Assignments are scoped to a single organization."
             />
           ) : loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <LoadingPanel label="Loading assignments" className="min-h-80" />
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : rows.length === 0 ? (

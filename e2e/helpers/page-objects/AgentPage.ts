@@ -88,7 +88,7 @@ export class AgentPage {
 
   // ── Changeset staging + approval ───────────────────────────────────────
 
-  /** Wait for the staged-changeset card (contract `changeset.staged` frame)
+  /** Wait for a legacy staged-changeset card (`changeset.staged` frame)
    * and return its approval URL (from the card's link href, or by reading
    * the run timeline text if the card doesn't expose an anchor). */
   async waitForStagedChangeset(): Promise<{ approvalUrl: string; card: Locator }> {

@@ -15,8 +15,6 @@ test("living memory delete entry dialog confirms and removes the entry", async (
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
 
   await alice.goto(`/project/${seeded.projectId}/memory`)
-  await alice.waitForLoadState("networkidle")
-
   // Add an entry first.
   const instructionsSection = alice.locator('section[aria-label="Instructions"]')
   await alice.locator('section[aria-label="Instructions"]').getByRole("button", { name: /Add/i }).click()

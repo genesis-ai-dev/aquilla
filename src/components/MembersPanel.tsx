@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppTooltip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -263,6 +263,20 @@ export function MembersPanel({
 }
 
 /**
+ * AQU-645: build the compact scope summary shown on the collapsed header, so a
+ * member's access is scannable without expanding. "Full access" when nothing is
+ * scoped, otherwise a per-kind count like "2 lanes · 1 file" (each kind
+ * pluralized, kinds with zero selected omitted).
+ */
+function scopeSummary(laneCount: number, fileCount: number): string {
+  if (laneCount === 0 && fileCount === 0) return "Full access";
+  const parts: string[] = [];
+  if (laneCount > 0) parts.push(`${laneCount} lane${laneCount === 1 ? "" : "s"}`);
+  if (fileCount > 0) parts.push(`${fileCount} file${fileCount === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
+/**
  * AQU-553: per-member lane/file scope editor. Renders a checkbox list of the
  * project's lanes and files; the member may write target-side content only on
  * checked lanes AND only in checked files (empty selection for a kind = no
@@ -271,6 +285,11 @@ export function MembersPanel({
  * "Unscoped" (no checkboxes ticked at all) is the default and means the member
  * writes across every lane and file their role allows — identical to a member
  * with no scope rows.
+ *
+ * AQU-645: collapsed by default. The header row (a keyboard-accessible button)
+ * shows a scope summary of the member's *saved* access and toggles the editor
+ * body. Expand/collapse is local to this instance, so opening one member's
+ * scopes never affects another's.
  */
 function MemberScopesEditor({
   userId,
@@ -289,6 +308,13 @@ function MemberScopesEditor({
   );
   const [lanes, setLanes] = useState<Set<string>>(initialLanes);
   const [files, setFiles] = useState<Set<string>>(initialFiles);
+  // AQU-645: the collapsed summary reflects the last *persisted* selection, not
+  // in-flight edits — it starts from `current` and only advances on a
+  // successful save, so an expand-toggle-collapse without saving keeps showing
+  // the real access.
+  const [savedLaneCount, setSavedLaneCount] = useState(initialLanes.size);
+  const [savedFileCount, setSavedFileCount] = useState(initialFiles.size);
+  const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -308,6 +334,8 @@ function MemberScopesEditor({
     ];
     try {
       await config.onSave(userId, scopes);
+      setSavedLaneCount(lanes.size);
+      setSavedFileCount(files.size);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Could not save scopes");
     } finally {
@@ -315,58 +343,83 @@ function MemberScopesEditor({
     }
   }
 
+  const bodyId = `member-scopes-body-${userId}`;
+
   return (
     <div
       data-testid={`member-scopes-${userId}`}
-      className="rounded border bg-muted/30 p-2 text-xs"
+      className="rounded border bg-muted/30 text-xs"
     >
-      <p className="mb-1.5 font-medium text-muted-foreground">
-        Scopes <span className="font-normal">(leave empty for full access)</span>
-      </p>
-      {config.lanes.length > 0 && (
-        <fieldset className="mb-2">
-          <legend className="mb-1 text-[10px] text-muted-foreground">
-            Lanes
-          </legend>
-          <div className="flex flex-wrap gap-x-3 gap-y-1">
-            {config.lanes.map((lane) => (
-              <label key={lane.value || "__default__"} className="flex items-center gap-1.5">
-                <Checkbox
-                  checked={lanes.has(lane.value)}
-                  onCheckedChange={() => setLanes((s) => toggle(s, lane.value))}
-                  aria-label={`Lane ${lane.label}`}
-                />
-                <span>{lane.label}</span>
-              </label>
-            ))}
+      <button
+        type="button"
+        data-testid={`member-scopes-toggle-${userId}`}
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left"
+      >
+        <ChevronRight
+          className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+            expanded ? "rotate-90" : ""
+          }`}
+          aria-hidden
+        />
+        <span className="font-medium text-muted-foreground">Scopes</span>
+        <span className="ml-auto truncate text-muted-foreground">
+          {scopeSummary(savedLaneCount, savedFileCount)}
+        </span>
+      </button>
+      {expanded && (
+        <div id={bodyId} className="border-t px-2 pb-2 pt-2">
+          <p className="mb-1.5 font-normal text-muted-foreground">
+            Leave empty for full access.
+          </p>
+          {config.lanes.length > 0 && (
+            <fieldset className="mb-2">
+              <legend className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                Lanes
+              </legend>
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                {config.lanes.map((lane) => (
+                  <label key={lane.value || "__default__"} className="flex items-center gap-1.5">
+                    <Checkbox
+                      checked={lanes.has(lane.value)}
+                      onCheckedChange={() => setLanes((s) => toggle(s, lane.value))}
+                      aria-label={`Lane ${lane.label}`}
+                    />
+                    <span>{lane.label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          {config.files.length > 0 && (
+            <fieldset className="mb-2">
+              <legend className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                Files
+              </legend>
+              <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
+                {config.files.map((file) => (
+                  <label key={file.id} className="flex items-center gap-1.5">
+                    <Checkbox
+                      checked={files.has(file.id)}
+                      onCheckedChange={() => setFiles((s) => toggle(s, file.id))}
+                      aria-label={`File ${file.name}`}
+                    />
+                    <span className="truncate">{file.name}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? "Saving…" : "Save scopes"}
+            </Button>
+            {saveError && <span className="text-destructive">{saveError}</span>}
           </div>
-        </fieldset>
+        </div>
       )}
-      {config.files.length > 0 && (
-        <fieldset className="mb-2">
-          <legend className="mb-1 text-[10px] text-muted-foreground">
-            Files
-          </legend>
-          <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
-            {config.files.map((file) => (
-              <label key={file.id} className="flex items-center gap-1.5">
-                <Checkbox
-                  checked={files.has(file.id)}
-                  onCheckedChange={() => setFiles((s) => toggle(s, file.id))}
-                  aria-label={`File ${file.name}`}
-                />
-                <span className="truncate">{file.name}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      )}
-      <div className="flex items-center gap-2">
-        <Button size="sm" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving…" : "Save scopes"}
-        </Button>
-        {saveError && <span className="text-destructive">{saveError}</span>}
-      </div>
     </div>
   );
 }

@@ -420,8 +420,11 @@ export async function handleCellsReadRequest(
   // bursts coalesce to a handful of cells at most.
   const qCellIds = url.searchParams.get("cellIds")
   const cellIdsFilter = qCellIds
-    ? qCellIds.split(",").map((s) => s.trim()).filter((s) => s.length > 0).slice(0, 100)
+    ? qCellIds.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
     : null
+  if (cellIdsFilter && cellIdsFilter.length > 100) {
+    return new Response("too many cellIds: maximum is 100 per request", { status: 400 })
+  }
 
   // Conditional / delta machinery (audit M2-1). Skipped for the targeted
   // cellIds fast path, which stays exactly as it was. Both branches are

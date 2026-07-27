@@ -38,6 +38,11 @@ vi.mock("@/lib/completion/compress-examples", () => ({
   compressExampleSource: (src: string) => src,
   dedupeExamples: (exs: unknown[]) => exs,
   dropPrecedingContextDuplicates: (exs: unknown[]) => exs,
+  // AQU-617 added this to completeSingle's example pipeline; the mock must
+  // provide it or completeSingle throws before ever calling the model.
+  // The hook imports this too (AQU-617) — the mock shadows the real module,
+  // so omitting it made completeSingle throw before fetch and every test in
+  // this file fail on empty `bodies`.
   dropValidatedPairDuplicates: (exs: unknown[]) => exs,
 }))
 

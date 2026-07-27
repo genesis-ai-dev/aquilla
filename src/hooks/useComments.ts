@@ -43,6 +43,17 @@ export interface UseCommentsOptions {
   author: string
   /** Optional narrow scope — when set, only loads comments for this scope. */
   scope?: { fileId?: string; cellId?: string }
+  /**
+   * Optional auth-readiness signal (AQU-640). When the caller's `getToken`
+   * can only mint a real token once a session/JWT has loaded, pass whether
+   * that token is ready yet (e.g. `!!session?.jwt`). While `false`, the
+   * initial auto-load waits (showing the loading state) instead of firing a
+   * fetch that would bail on the null token and never retry; the load fires
+   * once it flips to `true`. Omit (leave `undefined`) to always auto-load on
+   * mount/projectId change — the legacy behavior for callers whose token
+   * fetcher is ready synchronously.
+   */
+  tokenReady?: boolean
 }
 
 export interface UseCommentsApi {
@@ -57,6 +68,12 @@ export interface UseCommentsApi {
     scope: CommentScope
     body: string
     parentCommentId?: string | null
+    /**
+     * AQU-692: snapshot of the cell's current target text, captured only when
+     * opening a new root thread on a cell. Powers the "Translation changed
+     * since this thread was created" badge. Omit for replies / non-cell scopes.
+     */
+    createdForTranslated?: string | null
   }) => Promise<string>
   editComment: (commentId: string, body: string) => Promise<void>
   deleteComment: (commentId: string) => Promise<void>
@@ -65,7 +82,7 @@ export interface UseCommentsApi {
 }
 
 export function useComments(opts: UseCommentsOptions): UseCommentsApi {
-  const { projectId, getToken, author, scope } = opts
+  const { projectId, getToken, author, scope, tokenReady } = opts
 
   const [comments, setComments] = useState<CommentRecord[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -157,12 +174,23 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     }
   }, [])
 
-  // Load on mount and when projectId changes.
+  // Load on mount, when projectId changes, and — crucially — once the auth
+  // token becomes available (AQU-640). On a cold load / direct navigation the
+  // page can mount before the session JWT has loaded; a fetch fired then would
+  // hit the null-token guard in refresh(), bail silently, and never re-arm.
+  // Threading `tokenReady` into this effect's deps re-fires the load the moment
+  // the token is ready. While it's explicitly `false` we show the loading state
+  // and wait rather than flashing the "No comments yet" empty state.
   useEffect(() => {
-    if (projectId) {
-      refresh().catch(() => {/* refresh sets isError */})
+    if (!projectId) return
+    if (tokenReady === false) {
+      // Session not ready yet — keep the spinner up and wait; the effect will
+      // re-run (and load) once tokenReady flips true.
+      setIsLoading(true)
+      return
     }
-  }, [projectId, refresh])
+    refresh().catch(() => {/* refresh sets isError */})
+  }, [projectId, tokenReady, refresh])
 
   /**
    * Derive the envelope fileId for a comment mutation.
@@ -180,10 +208,12 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       scope: commentScope,
       body,
       parentCommentId = null,
+      createdForTranslated,
     }: {
       scope: CommentScope
       body: string
       parentCommentId?: string | null
+      createdForTranslated?: string | null
     }): Promise<string> => {
       const pid = projectRef.current
       if (!pid) return ''
@@ -195,6 +225,9 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
         commentScope.kind === 'cell' || commentScope.kind === 'file'
           ? commentScope.fileId
           : PROJECT_SENTINEL_FILE_ID
+      // AQU-692: only a root thread carries a target-text snapshot; a reply
+      // (parentCommentId set) never gets a stale badge, so leave it null.
+      const snapshot = parentCommentId ? null : createdForTranslated ?? null
       await enqueueEvent({
         kind: 'comment.create',
         projectId: pid,
@@ -206,6 +239,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
           scope: commentScope,
           body,
           parentCommentId: parentCommentId ?? null,
+          createdForTranslated: snapshot,
         },
       })
       // Optimistic update: add locally before the server round-trip.
@@ -227,6 +261,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
+        createdForTranslated: snapshot,
       }
       mutationSeqRef.current++
       optimisticRef.current.set(commentId, optimisticRecord)

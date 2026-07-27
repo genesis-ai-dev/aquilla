@@ -23,8 +23,6 @@ test("team attach project adds project to team project list", async ({ alice }) 
 
   // Navigate to teams and create a new team.
   await alice.goto(orgRoute(alice, "/teams"))
-  await alice.waitForLoadState("networkidle")
-
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })
   await expect(createBtn).toBeVisible({ timeout: 10_000 })
   await createBtn.click()

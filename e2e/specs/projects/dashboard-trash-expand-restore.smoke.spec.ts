@@ -44,6 +44,5 @@ test("archived project can be restored back to active projects", async ({ alice 
 
   // …and it is back in the active projects list.
   await alice.goto(orgRoute(alice))
-  await alice.waitForLoadState("networkidle")
   await expect(alice.getByText(name)).toBeVisible({ timeout: 10_000 })
 })

@@ -39,9 +39,10 @@ test("SelectionBar Remove my validations button removes validation", async ({ al
   await expect(removeValBtn).toBeEnabled({ timeout: 3_000 })
   await removeValBtn.click()
 
-  // After clicking, SelectionBar may close or the button may become disabled.
-  // Either outcome means unvalidation was initiated.
-  await alice.waitForTimeout(500)
-  // No error toast should appear.
-  await expect(alice.getByRole("alert", { name: /error/i })).not.toBeVisible()
+  // Assert the actual state transition; a click without a persisted
+  // unvalidation is not success.
+  await expect(ws.validationToggle(0)).toHaveAttribute("aria-pressed", "false", {
+    timeout: 15_000,
+  })
+  await expect(removeValBtn).toBeDisabled()
 })

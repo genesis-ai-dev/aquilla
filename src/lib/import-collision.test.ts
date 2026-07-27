@@ -16,6 +16,33 @@ import { describe, it, expect } from "vitest"
 import { detectCollisions } from "./import-collision"
 
 describe("detectCollisions — bookCode primary", () => {
+  it("returns the existing file id needed for safe in-place reconciliation", () => {
+    expect(detectCollisions(
+      [{ name: "Genesis", bookCode: "GEN" }],
+      [{ id: "existing-gen", name: "Genèse", bookCode: "GEN" }],
+    )).toEqual([{
+      name: "Genesis",
+      bookCode: "GEN",
+      existingName: "Genèse",
+      existingId: "existing-gen",
+    }])
+  })
+
+  it("never chooses an arbitrary existing file when identity is ambiguous", () => {
+    expect(detectCollisions(
+      [{ name: "Genesis", bookCode: "GEN" }],
+      [
+        { id: "gen-a", name: "Genesis A", bookCode: "GEN" },
+        { id: "gen-b", name: "Genesis B", bookCode: "GEN" },
+      ],
+    )).toEqual([{
+      name: "Genesis",
+      bookCode: "GEN",
+      existingName: "Multiple matching files",
+      ambiguous: true,
+    }])
+  })
+
   it("matches when incoming bookCode equals existing bookCode (case-insensitive)", () => {
     const result = detectCollisions(
       [{ name: "Genesis", bookCode: "GEN" }],

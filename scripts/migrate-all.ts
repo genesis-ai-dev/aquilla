@@ -53,6 +53,17 @@ import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
+import {
+  assessIdmlPair,
+  isIdmlPair,
+  type IdmlMigrationAssessment,
+} from "../src/lib/migrate/idml"
+import {
+  copyGitlabIdmlOriginal,
+  downloadGitlabIdmlOriginalBytes,
+  resolveGitlabIdmlOriginal,
+  type GitlabIdmlOriginal,
+} from "./lib/idml-migration-artifacts"
 
 const SYNC = process.env.SYNC_BASE ?? "https://api.aquilla.app/sync"
 const INGEST_CHUNK = 2500
@@ -419,13 +430,31 @@ async function doProject(
   const dir = await fetchProject(p.id, true) // content sweep: text only (no LFS)
   const pairs = buildPairs(dir)
   const events: IngestEvent[] = []
+  const idmlPlans: Array<{
+    pair: FilePairInput
+    original?: GitlabIdmlOriginal
+    assessment: IdmlMigrationAssessment
+  }> = []
   for (const pair of pairs) {
+    const original = isIdmlPair(pair) ? resolveGitlabIdmlOriginal(dir, pair) : undefined
+    const originalBytes = original
+      ? await downloadGitlabIdmlOriginalBytes({
+          original,
+          repositoryUrl: p.httpUrlToRepo,
+          gitlabToken: CREDS.gitlabToken,
+        })
+      : undefined
+    const assessment = isIdmlPair(pair)
+      ? await assessIdmlPair(pair, originalBytes)
+      : undefined
+    if (assessment) idmlPlans.push({ pair, ...(original ? { original } : {}), assessment })
     events.push(
       ...mapFilePairToEvents(pair, {
         projectId,
         projectKey: String(p.id),
         fallbackAuthor: FALLBACK_AUTHOR,
         fallbackTs: Date.now(),
+        ...(assessment ? { idmlAssessment: assessment } : {}),
       }),
     )
   }
@@ -444,8 +473,23 @@ async function doProject(
     `  → aquilla ${projectId}  org_id=${org.id}${team ? ` team_id=${team.id}` : " (no team)"}  files=${pairs.length} events=${events.length} characters=${speakerCount}`,
   )
   if (!args.apply) {
+    for (const plan of idmlPlans) {
+      console.log(
+        `  [idml] ${plan.pair.name}: ${plan.assessment.readiness}`
+        + (plan.original ? ` ← ${plan.original.relativePath}` : " (missing pointers/originals attachment)"),
+      )
+    }
     console.log("  [dry-run] no writes")
     return
+  }
+  if (
+    args.eventsOnly
+    && idmlPlans.some((plan) => plan.original)
+  ) {
+    throw new Error(
+      "IDML original binding is required before IDML content ingestion; "
+      + "--events-only cannot migrate projects with IDML source artifacts",
+    )
   }
 
   await upsertProject({
@@ -462,7 +506,43 @@ async function doProject(
   if (existing.size) {
     console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total (${existing.size} already in D1)`)
   }
-  await ingest(projectId, newEvents, args.eventsOnly)
+  const artifactFileIds = new Set(
+    idmlPlans
+      .filter((plan) => plan.original)
+      .map((plan) => fileIdFor(String(p.id), plan.pair.relPath)),
+  )
+  const prerequisiteEvents = newEvents.filter((event) => (
+    event.kind === "file.create"
+    && typeof event.fileId === "string"
+    && artifactFileIds.has(event.fileId)
+  ))
+  if (prerequisiteEvents.length > 0) {
+    await ingest(projectId, prerequisiteEvents, false)
+  }
+  for (const plan of idmlPlans) {
+    if (!plan.original) {
+      console.warn(
+        `  ! ${plan.pair.name}: needs-artifact; expected matching Git LFS pointer under `
+        + `.project/attachments/pointers/originals`,
+      )
+      continue
+    }
+    const fileId = fileIdFor(String(p.id), plan.pair.relPath)
+    await copyGitlabIdmlOriginal({
+      syncBase: SYNC,
+      secret: process.env.SYNC_SECRET_KEY!,
+      projectId,
+      fileId,
+      original: plan.original,
+    })
+    console.log(
+      `  source artifact: ${plan.pair.name} ← ${plan.original.relativePath} `
+      + `(${plan.assessment.readiness})`,
+    )
+  }
+  const prerequisiteIds = new Set(prerequisiteEvents.map((event) => event.id))
+  const remainingEvents = newEvents.filter((event) => !prerequisiteIds.has(event.id))
+  await ingest(projectId, remainingEvents, args.eventsOnly)
   // Deferred file-counters: recompute them once now that all cells are projected.
   if (!args.eventsOnly) await finalizeCounters(projectId)
   let voices = 0

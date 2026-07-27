@@ -19,8 +19,12 @@ import { cn } from "@/lib/utils"
 interface ProjectAssignedToMeProps {
   projectId: string
   jwt: string | null
-  /** Called when the user clicks a row — parent scrolls to the matching cell. */
-  onJumpToScopeLabel?: (scopeLabel: string) => void
+  /**
+   * Called when the user clicks a row — parent opens the assignment's file,
+   * switches to its lane, and scrolls to its first cell (AQU-690). The whole
+   * assignment is passed so the handler has the file + lane, not just the label.
+   */
+  onJumpToAssignment?: (assignment: MyAssignment) => void
   /** Refresh token — increment to force a re-fetch (e.g. after a new assignment lands). */
   refreshKey?: number
 }
@@ -28,7 +32,7 @@ interface ProjectAssignedToMeProps {
 export function ProjectAssignedToMe({
   projectId,
   jwt,
-  onJumpToScopeLabel,
+  onJumpToAssignment,
   refreshKey = 0,
 }: ProjectAssignedToMeProps) {
   const [assignments, setAssignments] = useState<MyAssignment[]>([])
@@ -50,9 +54,9 @@ export function ProjectAssignedToMe({
 
   const handleRowClick = useCallback(
     (a: MyAssignment) => {
-      if (onJumpToScopeLabel) onJumpToScopeLabel(a.scopeLabel)
+      if (onJumpToAssignment) onJumpToAssignment(a)
     },
-    [onJumpToScopeLabel],
+    [onJumpToAssignment],
   )
 
   // Don't render if there are no assignments and we're not loading (clean state).
@@ -92,7 +96,7 @@ export function ProjectAssignedToMe({
                     onClick={() => handleRowClick(a)}
                     className={cn(
                       "group w-full rounded px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
-                      !onJumpToScopeLabel && "cursor-default",
+                      !onJumpToAssignment && "cursor-default",
                     )}
                   >
                     <div className="flex items-center justify-between gap-1">

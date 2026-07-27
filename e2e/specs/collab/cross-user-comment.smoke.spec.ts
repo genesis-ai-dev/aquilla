@@ -2,7 +2,12 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
-import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
+import {
+  addOrgMember,
+  addProjectMember,
+  getMyOrg,
+  ROLE,
+} from "../../helpers/frontier-api"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -41,6 +46,12 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
   // Extract project id from URL.
   const projectId = alice.url().split("/project/")[1]?.split("/")[0]
   expect(projectId).toBeTruthy()
+  await addProjectMember(
+    aliceSession.jwt,
+    projectId!,
+    "bob",
+    ROLE.CONTRIBUTOR,
+  )
 
   // Alice opens comments drawer and posts.
   const row = ws.cellRow(0)
@@ -64,8 +75,6 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
 
   // Bob navigates to the comments page for the same project.
   await bob.goto(`/project/${projectId}/comments`)
-  await bob.waitForLoadState("networkidle")
-
   // Bob sees alice's comment. The comments page fetches once on mount with no
   // live subscription (useComments loads on mount only), while alice's
   // comment.create drains via the 5s outbox interval — so bob's first fetch can

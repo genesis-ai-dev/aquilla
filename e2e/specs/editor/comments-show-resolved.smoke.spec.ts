@@ -43,10 +43,8 @@ test("comments page Show resolved checkbox reveals resolved threads", async ({ a
   const projectId = alice.url().match(/\/project\/([^/?]+)/)?.[1]
   expect(projectId).toBeTruthy()
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   // The "Show resolved" toggle lives inside the collapsed "Filters" panel.
-  await alice.getByRole("button", { name: /Filters/i }).click()
+  await alice.getByRole("button", { name: /^Filters$/i }).click()
 
   // "Show resolved" — label wraps the shadcn Checkbox (role="checkbox")
   // and a <span>Show resolved</span>. Unchecked by default: resolved

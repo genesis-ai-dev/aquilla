@@ -6,6 +6,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { MultimodalWorkspace } from "./MultimodalWorkspace"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitz"
 import { BetaBar } from "./BetaBar"
+import { BookCallSection } from "./BookCallSection"
 import { useMarketingShell } from "./useMarketingShell"
 import "./homepage.css"
 
@@ -63,6 +64,7 @@ export function Homepage() {
             <a className="aq-nav-link" href="#languages">Languages</a>
             <a className="aq-nav-link" href="#quality">Quality</a>
             <a className="aq-nav-link" href="#pricing">Pricing</a>
+            <a className="aq-nav-link" href="#book-call">Book a call</a>
           </div>
           <div className="aq-nav-cta">
             <AppTooltip content={theme === "dark" ? "Light mode" : "Dark mode"}>
@@ -481,6 +483,9 @@ export function Homepage() {
           </div>
         </section>
 
+        {/* ── Book a call ─────────────────────────────────────────────── */}
+        <BookCallSection />
+
         {/* ── Final CTA ───────────────────────────────────────────────── */}
         <section className="aq-container aq-section" style={{ paddingTop: 0 }}>
           <div className="aq-cta-band aq-reveal">
@@ -516,6 +521,7 @@ export function Homepage() {
                 <h5>Get started</h5>
                 <a href={appHref}>Open app</a>
                 <a href="/onboarding">Sign up free</a>
+                <a href="#book-call">Book a call</a>
                 <a href="#pricing">Enterprise</a>
               </div>
             </div>

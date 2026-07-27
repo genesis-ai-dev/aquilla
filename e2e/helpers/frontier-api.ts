@@ -47,6 +47,13 @@ export async function getMyOrg(jwt: string): Promise<MyOrg> {
   return (await r.json()) as MyOrg
 }
 
+/** GET /api/v2/orgs — every organization visible to the caller. */
+export async function listMyOrgs(jwt: string): Promise<MyOrg[]> {
+  const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs`, { headers: authHeaders(jwt) })
+  if (!r.ok) throw new Error(`listMyOrgs failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { orgs: MyOrg[] }).orgs
+}
+
 /** POST /api/v2/orgs — create a named org owned by the caller. */
 export async function createOrg(jwt: string, name: string): Promise<MyOrg> {
   const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs`, {

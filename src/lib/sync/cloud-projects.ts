@@ -14,6 +14,8 @@ export interface CloudFileSummary {
   name: string
   type: string
   cellCount: number
+  bookCode?: string | null
+  hasScriptureContent?: boolean
   sourceLanguage?: string | null
   targetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
@@ -46,6 +48,14 @@ export interface CloudProjectSummary {
    * endpoint may omit (older servers).
    */
   sourceProjectId?: string | null
+  /**
+   * AQU-696: when the caller was granted access to this project (ISO 8601),
+   * from the list endpoint. Drives the "New" badge on newly-shared projects
+   * (new until opened). Optional and nullable: an older worker that omits it,
+   * or an own/creator project with no grant row, degrades to "not new" — never
+   * to "everything is new".
+   */
+  grantedAt?: string | null
   /** AQU-476/478: link mode/consumes/gate/cursor. Only the single-project
    *  endpoint returns these (the list endpoint returns sourceProjectId only —
    *  the picker/settings-detail views are what need the full state). */
@@ -225,6 +235,8 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       type: f.type as FileType,
       createdAt: now,
       cellCount: f.cellCount,
+      ...(f.bookCode ? { bookCode: f.bookCode } : {}),
+      ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
       ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),

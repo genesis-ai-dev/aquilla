@@ -25,8 +25,6 @@ test("project overview overflow menu opens with Archive and Download items", asy
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/projects/${projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // The "⋯" More actions button is visible.
   const moreBtn = alice.getByRole("button", { name: /More actions/i })
   await expect(moreBtn).toBeVisible({ timeout: 10_000 })

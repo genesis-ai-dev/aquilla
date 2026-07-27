@@ -23,7 +23,7 @@ import type {
   CellTtsSettings, ProjectTtsSettings,
 } from "@/lib/parsers/types"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
-import { resolveVoice } from "@/lib/audio/voices"
+import { resolveVoice, resolveCastVoice } from "@/lib/audio/voices"
 import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo } from "@/lib/audio/tts-providers"
 
 interface Props {
@@ -108,7 +108,9 @@ export function CellTtsButton({
   const trimmed = text.trim()
   const statusKey = ttsStatusKey(cellId)
   const status = useTtsStatus(statusKey)
-  const baseVoice = resolveVoice(projectTtsSettings, cellTtsSettings?.voiceId)
+  // AQU-646: honor persisted cast assignments (e.g. diarization's Speaker N →
+  // cell mapping) so generate speaks in the assigned character's voice.
+  const baseVoice = resolveCastVoice(projectTtsSettings, cellId, cellTtsSettings?.voiceId)
   const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
   const modelStatus = useModelStatus(provider === "mms" ? "mms" : "kokoro")
@@ -193,7 +195,7 @@ export function CellTtsButton({
               cellId,
               text: trimmed,
               projectTtsSettings,
-              cellVoiceId: cellTtsSettings?.voiceId,
+              cellVoiceId: baseVoice.id,
               geminiContext,
               session,
               username: session.username,
@@ -212,7 +214,7 @@ export function CellTtsButton({
           } else {
             blob = await synthesizeForCell(trimmed, {
               projectTtsSettings,
-              cellVoiceId: cellTtsSettings?.voiceId,
+              cellVoiceId: baseVoice.id,
               geminiContext,
               onProgress,
             })

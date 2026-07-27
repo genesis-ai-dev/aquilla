@@ -6,6 +6,8 @@
  *  timestamp) — that is what the trusted endpoint preserves. */
 export interface IngestEvent {
   id: string
+  /** Event contract version. Legacy events default to 1; metadata patches use 2. */
+  schemaVersion?: number
   kind: string
   fileId?: string | null
   cellId?: string | null

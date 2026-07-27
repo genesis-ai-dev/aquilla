@@ -8,6 +8,8 @@ export default defineConfig({
     // CPU-heavy, so cap parallelism to avoid contention and give generous timeouts.
     testTimeout: 30000,
     hookTimeout: 30000,
-    poolOptions: { forks: { minForks: 1, maxForks: 3 } },
+    pool: "forks",
+    minWorkers: 1,
+    maxWorkers: 3,
   },
 })

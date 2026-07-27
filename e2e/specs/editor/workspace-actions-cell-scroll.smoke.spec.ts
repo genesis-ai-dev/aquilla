@@ -29,5 +29,5 @@ test("next unfinished button advances past validated cell or shows all-done stat
   // The editor renders cell rows as [data-cell-id] divs — there is no <table>
   // and no "All done" toast — so in both outcomes the rows must still be
   // visible, proving the jump completed without crashing the editor.
-  await expect(alice.locator("[data-cell-id]").first()).toBeVisible({ timeout: 5_000 })
+  await expect(ws.cellRow(0)).toBeVisible()
 })

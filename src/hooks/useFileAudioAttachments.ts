@@ -134,6 +134,10 @@ export function mergeCellsWithAudio(
         ...(a.voiceId ? { voiceId: a.voiceId } : {}),
         ...(a.referenceAudioId ? { referenceAudioId: a.referenceAudioId } : {}),
         ...(a.durationMs != null ? { durationMs: a.durationMs } : {}),
+        // AQU-646: forward the trim window so consumers (transcription) can
+        // address this cell's slice of a shared imported clip.
+        ...(a.trimStartMs != null ? { trimStartMs: a.trimStartMs } : {}),
+        ...(a.trimEndMs != null ? { trimEndMs: a.trimEndMs } : {}),
       }
     }
     return {

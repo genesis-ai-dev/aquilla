@@ -88,6 +88,18 @@ function makeCell(id: string, original: string, translated: string, group: strin
   }
 }
 
+function withLocator(cell: CellData, memberPath: string, blockPath: string, segment = 0): CellData {
+  return {
+    ...cell,
+    metadata: {
+      aquillaImport: {
+        sourceLocator: { kind: "package-block", memberPath, blockPath, segment },
+        physicalOrder: segment,
+      },
+    },
+  }
+}
+
 // Paragraph order across the deck (parser order): Hello world / Second shape
 // text / Slide two title / Slide two body.
 function fixtureCells(): CellData[] {
@@ -190,6 +202,30 @@ describe("exportPptx — translation injection (AQU-152a)", () => {
     expect(result.untouched).toBe(3)
     const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
     expect(reExtracted[0].original).toBe("Hola mundo")
+  })
+
+  it("uses package locators instead of editor order when cells are reordered", async () => {
+    const cells = [
+      withLocator(
+        makeCell("c3", "Slide two title", "Título correcto", ""),
+        "ppt/slides/slide2.xml",
+        "p:sp[1]/p:txBody/a:p[1]",
+      ),
+      withLocator(
+        makeCell("c1", "Hello world", "Hola correcto", ""),
+        "ppt/slides/slide1.xml",
+        "p:sp[1]/p:txBody/a:p[1]",
+      ),
+    ]
+
+    const result = await exportPptx(buffer, cells)
+    const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
+    expect(reExtracted.map((value) => value.original)).toEqual([
+      "Hola correcto",
+      "Second shape text",
+      "Título correcto",
+      "Slide two body",
+    ])
   })
 
   it("throws on a zip with no slide parts", async () => {

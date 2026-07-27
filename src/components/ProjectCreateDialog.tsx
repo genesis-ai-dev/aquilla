@@ -52,6 +52,8 @@ interface ProjectCreateDialogProps {
   onCreated: (project: ProjectRecord) => void
   /** Scope the new project to a specific org. Omit for personal/default org. */
   orgId?: number
+  /** Reuse a parent/provider project directory instead of fetching it again. */
+  linkableProjects?: CloudProjectSummary[]
 }
 
 /**
@@ -134,9 +136,10 @@ const projectSchema = z
     }
   })
 
-export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogProps) {
+export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppliedProjects }: ProjectCreateDialogProps) {
   const { session } = useFrontierSession()
-  const { projects: linkableProjects } = useProjectsForNavigation()
+  const { projects: discoveredProjects } = useProjectsForNavigation(suppliedProjects == null)
+  const linkableProjects = suppliedProjects ?? discoveredProjects
   const [open, setOpen] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [submitWarning, setSubmitWarning] = useState<string | null>(null)
@@ -256,6 +259,8 @@ export function ProjectCreateDialog({ onCreated, orgId }: ProjectCreateDialogPro
     form.reset()
     clearSubmitError()
     setSubmitWarning(null)
+    // Preserve the existing array reference when there is nothing to reset.
+    setExtraLanguages((prev) => (prev.length === 0 ? prev : []))
   }, [open, form, clearSubmitError])
 
   function pickShape(next: ProjectShape) {

@@ -27,8 +27,6 @@ test("project settings validation section: changing options makes form dirty", a
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/settings/validation`)
-  await alice.waitForLoadState("networkidle")
-
   // The Allow self-validation switch is visible.
   const selfValidationSwitch = alice.locator("#allow-self-validation")
   await expect(selfValidationSwitch).toBeVisible({ timeout: 10_000 })

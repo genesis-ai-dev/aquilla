@@ -14,8 +14,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("preferences analytics consent switch toggles on and off", async ({ alice }) => {
   await alice.goto("/preferences/privacy")
-  await alice.waitForLoadState("networkidle")
-
   // Find the analytics consent switch by its accessible name (from the
   // associated "Share usage data" label).
   const toggle = alice.getByRole("switch", { name: "Share usage data" })

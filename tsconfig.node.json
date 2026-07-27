@@ -22,6 +22,7 @@
 
     /* Path aliases — scripts/ pull in src/ modules that use the @/ alias */
     "paths": {
+      "@aquilla/idml-roundtrip": ["./packages/idml-roundtrip/src/index.ts"],
       "@/*": ["./src/*"]
     }
   },

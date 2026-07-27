@@ -228,7 +228,7 @@ export async function handlePrepare(
       `INSERT INTO changesets (
          id, project_id, created_by_user_id, credential_id, autonomy_mode,
          status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(
@@ -284,14 +284,92 @@ async function preparePlanImport(
     })
   }
 
-  // A referenced artifact must exist in this project.
+  // A referenced artifact must exist in this project. Fidelity declarations
+  // below use its persisted inspection result as evidence rather than trusting
+  // a filename or caller-authored manifest.
+  let artifact: { id: string; kind: string; metadata: unknown } | null = null
   if (cmd.artifactId) {
-    const artifact = await db
-      .prepare(`SELECT id FROM artifacts WHERE id::text = ? AND project_id = ?`)
+    artifact = await db
+      .prepare(`SELECT id, kind, metadata FROM artifacts WHERE id::text = ? AND project_id = ?`)
       .bind(cmd.artifactId, projectId)
-      .first<{ id: string }>()
+      .first<{ id: string; kind: string; metadata: unknown }>()
     if (!artifact) {
       return errorResponse('validation_failed', `artifact ${cmd.artifactId} not found in project`)
+    }
+    if (artifact.kind !== 'source') {
+      return errorResponse('validation_failed', `artifact ${cmd.artifactId} is not a source artifact`)
+    }
+  }
+
+  const fidelity = cmd.manifest?.fidelity
+  if ((fidelity === 'native' || fidelity === 'verified-recipe') && !artifact) {
+    return errorResponse('validation_failed', `${fidelity} fidelity requires a preserved source artifact`)
+  }
+  if (fidelity === 'native' && artifact) {
+    let metadata: Record<string, unknown> = {}
+    if (typeof artifact.metadata === 'string') {
+      try {
+        const parsed = JSON.parse(artifact.metadata) as unknown
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          metadata = parsed as Record<string, unknown>
+        }
+      } catch {
+        return errorResponse('validation_failed', `artifact ${artifact.id} has invalid inspection metadata`)
+      }
+    } else if (artifact.metadata && typeof artifact.metadata === 'object' && !Array.isArray(artifact.metadata)) {
+      metadata = artifact.metadata as Record<string, unknown>
+    }
+    const inspection = metadata.inspection as Record<string, unknown> | undefined
+    const detected = inspection?.detectedFormat
+    const fileType = cmd.fileType.toLowerCase()
+    const expectedProfiles: Record<string, string> = {
+      usfm: 'builtin:usfm-lossless',
+      sfm: 'builtin:usfm-lossless',
+      docx: 'builtin:ooxml-docx',
+      pptx: 'builtin:ooxml-pptx',
+    }
+    const expectedProfile = expectedProfiles[fileType]
+    const detectedMatches = fileType === 'usfm' || fileType === 'sfm'
+      ? detected === 'usfm' || detected === 'paratext-project'
+      : detected === fileType
+    if (!expectedProfile || cmd.manifest?.profileId !== expectedProfile || !detectedMatches) {
+      return errorResponse(
+        'validation_failed',
+        'native fidelity requires an inspected artifact and its built-in round-trip profile',
+        {
+          fileType: cmd.fileType,
+          profileId: cmd.manifest?.profileId,
+          detectedFormat: detected ?? null,
+          expectedProfile: expectedProfile ?? null,
+        },
+      )
+    }
+  }
+
+  // Target lane ids are language tags in the current lane model. Reject an
+  // unregistered lane instead of committing data the workspace cannot select.
+  const projectSettings = await loadProjectSettings(db, projectId)
+  const registeredLanes = new Set(
+    Array.isArray(projectSettings.settings.targetLanes)
+      ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
+      : [],
+  )
+  for (const [cellIndex, cell] of cmd.cells.entries()) {
+    for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
+      if (variant.laneId && !registeredLanes.has(variant.laneId)) {
+        return errorResponse(
+          'validation_failed',
+          `PlanImport.cells[${cellIndex}].variants[${variantIndex}] targets unregistered lane "${variant.laneId}"; register it with UpdateProjectSettings first`,
+        )
+      }
+      const effectiveLanguage = variant.laneId || cmd.targetLanguage || ''
+      if (variant.languageTag && variant.languageTag !== effectiveLanguage) {
+        return errorResponse(
+          'validation_failed',
+          `PlanImport.cells[${cellIndex}].variants[${variantIndex}].languageTag must match its lane language`,
+          { laneId: variant.laneId, expectedLanguageTag: effectiveLanguage },
+        )
+      }
     }
   }
 
@@ -316,6 +394,7 @@ async function preparePlanImport(
   const summary: ChangesetSummary = {
     filesCreated: 1,
     sourceCellsAdded: cmd.cells.length,
+    targetVariantsAdded: cmd.cells.reduce((count, cell) => count + (cell.variants?.length ?? 0), 0),
     ...(cmd.artifactId ? { artifactLinked: cmd.artifactId } : {}),
     warnings,
   }
@@ -334,10 +413,16 @@ async function preparePlanImport(
     planImport: {
       fileId: uuidv7(),
       fileEventId: uuidv7(),
+      hideEventId: uuidv7(),
+      revealEventId: uuidv7(),
       cells: cmd.cells.map((cell) => ({
         cellId: cell.id ?? uuidv7(),
         eventId: uuidv7(),
+        ...(cell.variants?.length
+          ? { variantEventIds: cell.variants.map(() => uuidv7()) }
+          : {}),
       })),
+      ...(cmd.artifactId ? { artifactBindingId: uuidv7() } : {}),
     },
   }
 
@@ -346,7 +431,7 @@ async function preparePlanImport(
       `INSERT INTO changesets (
          id, project_id, created_by_user_id, credential_id, autonomy_mode,
          status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(
@@ -421,7 +506,7 @@ async function stageReceiptOnlyChangeset(
       `INSERT INTO changesets (
          id, project_id, created_by_user_id, credential_id, autonomy_mode,
          status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(
@@ -513,7 +598,7 @@ async function prepareLinkMedia(
       `INSERT INTO changesets (
          id, project_id, created_by_user_id, credential_id, autonomy_mode,
          status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(

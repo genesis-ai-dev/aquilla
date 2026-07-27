@@ -24,10 +24,20 @@ export class Dashboard {
     const target =
       typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}` : "/"
     await this.page.goto(target)
-    await this.page.waitForLoadState("networkidle")
     await expect(this.page.getByRole("button", { name: /new project/i }).first()).toBeVisible({
       timeout: 15_000,
     })
+  }
+
+  organizationSwitcher(): Locator {
+    return this.page.getByRole("button", { name: /^Organization switcher:/i })
+  }
+
+  async openOrganizationSwitcher(): Promise<Locator> {
+    const trigger = this.organizationSwitcher()
+    await expect(trigger).toBeVisible({ timeout: 10_000 })
+    await trigger.click()
+    return trigger
   }
 
   async createProject(opts: CreateProjectOpts = {}): Promise<string> {
@@ -82,6 +92,7 @@ export class Dashboard {
   /** Click a project card by name and wait for the workspace shell to render.
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
+    const workspaceUrl = /\/project\/[^/?#]+(?:[?#].*)?$/
     // A project card now lands on the project Overview (/projects/:id). Enter
     // the editor workspace (/project/:id/editor) via its "Open project" action when
     // present (older UIs went straight to the editor).
@@ -89,10 +100,23 @@ export class Dashboard {
     if (!(await openInEditor.isVisible({ timeout: 1_000 }).catch(() => false))) {
       await this.page.getByRole("link", { name, exact: true }).click()
     }
-    if (await openInEditor.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      await openInEditor.click()
+    if (!workspaceUrl.test(this.page.url())) {
+      await expect(openInEditor).toBeVisible({ timeout: 15_000 })
+      await Promise.all([
+        this.page.waitForURL(workspaceUrl, { timeout: 15_000 }),
+        openInEditor.click(),
+      ])
     }
-    await expect(this.page.locator("aside")).toBeVisible({ timeout: 10_000 })
+    await expect(this.page).toHaveURL(workspaceUrl, { timeout: 15_000 })
+    // Waiting for any <aside> is insufficient: the project Overview already
+    // has an org sidebar, so the old helper could return while SPA navigation
+    // was still replacing that page. A click issued in that window landed on
+    // the workspace and was then erased by its first render. This control is a
+    // workspace-only readiness marker and guarantees callers interact after
+    // the destination route has mounted.
+    await expect(
+      this.page.getByRole("button", { name: /^More project options$/i }),
+    ).toBeVisible({ timeout: 15_000 })
     const setupSheet = this.page.getByRole("dialog", { name: /project setup/i })
     if (await setupSheet.isVisible().catch(() => false)) {
       await this.page.keyboard.press("Escape")

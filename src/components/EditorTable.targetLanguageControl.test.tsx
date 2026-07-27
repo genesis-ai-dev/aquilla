@@ -72,7 +72,8 @@ function makeProject(targetLanguage: string): ProjectRecord {
     createdAt: "2026-01-01T00:00:00Z",
     files: [],
     members: [],
-    syncRole: { level: ROLE.PROJECT_LEAD, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" },
+    // AQU-608: the lane switcher is intentionally restricted to maintainer+.
+    syncRole: { level: ROLE.MAINTAINER, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" },
   }
 }
 

@@ -33,6 +33,15 @@ beforeEach(() => localStorage.clear())
 afterEach(() => vi.clearAllMocks())
 
 describe("ArchivedProjects", () => {
+  it("shows explicit progress while archived projects are unresolved", async () => {
+    fetchArchivedProjects.mockImplementationOnce(() => new Promise(() => {}))
+    renderArchived()
+
+    expect(
+      await screen.findByRole("status", { name: "Loading archived projects" }),
+    ).toHaveAttribute("aria-busy", "true")
+  })
+
   it("lists archived projects and restores on click", async () => {
     fetchArchivedProjects.mockResolvedValue([
       { id: "old", name: "Old Project", role: { level: 700, name: "owner", source: "org" } },

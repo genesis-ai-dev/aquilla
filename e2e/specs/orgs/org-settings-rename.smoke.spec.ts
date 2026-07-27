@@ -16,8 +16,6 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("org settings rename and save updates org name", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/settings/identity"))
-  await alice.waitForLoadState("networkidle")
-
   // Enter edit mode.
   const renameBtn = alice.getByRole("button", { name: /rename organization/i })
   await expect(renameBtn).toBeVisible({ timeout: 10_000 })

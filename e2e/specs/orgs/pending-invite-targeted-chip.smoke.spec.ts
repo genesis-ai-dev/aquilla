@@ -54,8 +54,6 @@ test("targeted invite chip appears on /members when invite has a recipient email
 
   // Navigate to /members.
   await alice.goto(orgRoute(alice, "/members"))
-  await alice.waitForLoadState("networkidle")
-
   // The targeted invite chip with the email badge should be visible.
   const inviteRow = alice.locator("li").filter({ hasText: name }).first()
   const targetedChip = inviteRow.getByText("targeted@example.com")

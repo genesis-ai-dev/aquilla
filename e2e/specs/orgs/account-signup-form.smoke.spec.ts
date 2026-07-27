@@ -17,8 +17,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("signup form show/hide password toggle switches input type", async ({ alice }) => {
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
-
   // Open account switcher.
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })

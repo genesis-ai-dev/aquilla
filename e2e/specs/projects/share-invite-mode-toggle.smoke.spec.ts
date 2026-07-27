@@ -22,8 +22,6 @@ test("share panel invite mode toggles between @user and email", async ({ alice }
 
   // The mode toggle lives in the Members page "Add to projects" dialog.
   await alice.goto(orgRoute(alice, "/members"))
-  await alice.waitForLoadState("networkidle")
-
   const addToProjectsBtn = alice.getByRole("button", { name: /Add to projects/i })
   await expect(addToProjectsBtn).toBeVisible({ timeout: 10_000 })
   await expect(addToProjectsBtn).toBeEnabled({ timeout: 10_000 })

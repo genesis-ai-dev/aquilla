@@ -13,6 +13,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline } from "@/lib/sync/cloud-projects"
+import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
@@ -81,6 +82,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingTemplate } from "@/components/ui/loading-overlay"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -555,6 +557,16 @@ export function ProjectOverview() {
   const jwt = session?.jwt ?? null
   const { activeOrgId } = useActiveOrg()
 
+  // AQU-696: landing on a project's overview counts as "opening" it — this is
+  // the page a shared-projects row links to. Recording it here clears the
+  // "New" badge for that user, persisted in localStorage across sessions.
+  // Keyed on the session username so it survives sign-out (unlike the IDB
+  // project index, which is wiped on logout/account switch).
+  useEffect(() => {
+    const uname = session?.username
+    if (uname && id) markProjectOpened(uname, id)
+  }, [session?.username, id])
+
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [audio, setAudio] = useState<PortfolioProject | null>(null)
@@ -900,7 +912,13 @@ export function ProjectOverview() {
 
   const nonReadyContent =
     status === "loading" ? (
-      <ProjectOverviewSkeleton />
+      <LoadingTemplate
+        label="Loading project details"
+        className="min-h-[34rem] max-w-5xl"
+        data-testid="project-overview-loading"
+      >
+        <ProjectOverviewSkeleton />
+      </LoadingTemplate>
     ) : status === "unreachable" ? (
       <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
         <span className="text-amber-800 dark:text-amber-200">
@@ -1641,7 +1659,6 @@ export function ProjectOverview() {
                       <AssignWork
                         projectId={id}
                         files={project?.files ?? []}
-                        orgId={activeOrgId}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
                         onAssigned={handleAssigned}

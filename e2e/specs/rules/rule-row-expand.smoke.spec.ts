@@ -22,8 +22,6 @@ test("rule row chevron expands and collapses autofix editor", async ({ alice }) 
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1] ?? ""
 
   await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Create a rule first.
   const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })

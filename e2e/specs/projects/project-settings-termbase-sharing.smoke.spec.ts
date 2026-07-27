@@ -28,8 +28,6 @@ test.skip("project settings termbase sharing section renders publish toggle", as
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/settings/ai`)
-  await alice.waitForLoadState("networkidle")
-
   // "Termbase Sharing" card title is visible.
   await expect(alice.getByText(/Termbase Sharing/i).first()).toBeVisible({ timeout: 10_000 })
 

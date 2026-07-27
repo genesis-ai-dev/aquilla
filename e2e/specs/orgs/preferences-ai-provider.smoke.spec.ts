@@ -14,8 +14,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("preferences AI provider section expands to show endpoint and key inputs", async ({ alice }) => {
   await alice.goto("/preferences/provider-keys")
-  await alice.waitForLoadState("networkidle")
-
   // The provider disclosure is collapsed by default.
   const toggleBtn = alice.getByRole("button", { name: /AI provider \(advanced\)/i })
   await expect(toggleBtn).toBeVisible({ timeout: 10_000 })

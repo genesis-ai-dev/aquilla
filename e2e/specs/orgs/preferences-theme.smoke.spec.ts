@@ -5,8 +5,6 @@ test("appearance preference selects and persists the workspace theme", async ({ 
     window.localStorage.setItem("codex-color-theme", "rose")
   })
   await alice.goto("/preferences/appearance")
-  await alice.waitForLoadState("networkidle")
-
   await expect(alice.getByRole("heading", { name: "Appearance" })).toBeVisible()
   await expect(alice.getByRole("tab", { name: "System" })).toBeVisible()
   await expect(alice.getByRole("tab", { name: "Light" })).toBeVisible()

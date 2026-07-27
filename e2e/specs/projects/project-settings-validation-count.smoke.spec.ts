@@ -18,8 +18,6 @@ test("project settings validation count and role floor can be changed", async ({
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ValCount ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings/validation`)
-  await alice.waitForLoadState("networkidle")
-
   // Scroll to Validation section.
   const validationSection = alice.locator("#section-validation")
   await expect(validationSection).toBeVisible({ timeout: 10_000 })

@@ -7,6 +7,8 @@
 //
 // Auth: Bearer ${SYNC_SECRET_KEY}, same as /admin/files/*.
 
+import { secureCompare } from "./lib/secure-compare"
+
 export interface ProjectArchiveEnv {
   ProjectSync?: DurableObjectNamespace
   SYNC_SECRET_KEY?: string
@@ -46,7 +48,7 @@ export async function handleProjectArchiveRequest(
 
   const auth = request.headers.get("Authorization") ?? ""
   const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || auth !== expected) {
+  if (!expected || !secureCompare(auth, expected)) {
     return new Response("unauthorized", { status: 401 })
   }
 

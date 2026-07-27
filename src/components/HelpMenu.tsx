@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react"
 import { HelpCircle, ExternalLink, Mail, BookOpen, Map, Flag } from "lucide-react"
 import { Discord } from "@/components/icons/Discord"
+import { cn } from "@/lib/utils"
 import { useProductTourContext } from "@/context/ProductTourContext"
 import { ReportProblemDialog } from "@/components/ReportProblemButton/ReportProblemDialog"
 import {
@@ -10,7 +11,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { cn } from "@/lib/utils"
 
 // Configured at build time with sane defaults so help links always work.
 const DOCS_URL =

@@ -13,8 +13,6 @@ test("project settings audio loading strategy selection marks form dirty", async
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AudioStrat ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings/audio-media`)
-  await alice.waitForLoadState("networkidle")
-
   // "Audio loading" card title is visible.
   await expect(alice.getByText(/Audio loading/i).first()).toBeVisible({ timeout: 10_000 })
 

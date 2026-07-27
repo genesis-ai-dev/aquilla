@@ -38,6 +38,15 @@ describe("requiredRoleFor — source.* (importer / admin)", () => {
   })
 })
 
+describe("requiredRoleFor — cell audio", () => {
+  // AQU-646 depends on this floor: transcription rides cell.audio.attach
+  // precisely so contributors (translators) can transcribe imported segments.
+  // Raising this floor would silently break the transcribe workflow.
+  it("returns CONTRIBUTOR for cell.audio.attach", () => {
+    expect(requiredRoleFor('cell.audio.attach')).toBe(ROLE.CONTRIBUTOR)
+  })
+})
+
 describe("requiredRoleFor — validation", () => {
   it("returns REVIEWER for cell.validate", () => {
     expect(requiredRoleFor('cell.validate')).toBe(ROLE.REVIEWER)

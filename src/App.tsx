@@ -66,6 +66,13 @@ const OrgSettingsExport = lazy(() =>
 const OrgSettingsProviders = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsProviders })),
 )
+const OrgSettingsMonday = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
+)
+// Monday OAuth landing — Monday's registered redirect URI is this SPA route.
+const MondayOAuthCallback = lazy(() =>
+  import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
+)
 const OrgSettingsRoster = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRoster })),
 )
@@ -123,7 +130,7 @@ function RootRedirect() {
   return <Navigate to={resumeOrgPath()} replace />
 }
 
-/** Minimal fallback used while lazy route chunks are loading. */
+/** Fallback used while lazy route chunks are loading (e.g. the workspace). */
 function RouteLoadingFallback() {
   return (
     <div className="flex h-screen items-center justify-center text-muted-foreground">
@@ -215,6 +222,7 @@ function AppRoutes() {
           <Route path="settings/roster" element={<OrgSettingsRoster />} />
           <Route path="settings/assignment" element={<OrgSettingsAssignment />} />
           <Route path="settings/providers" element={<OrgSettingsProviders />} />
+          <Route path="settings/monday" element={<OrgSettingsMonday />} />
         </Route>
 
         {/* Project routes stay flat (not nested under /orgs).
@@ -231,6 +239,11 @@ function AppRoutes() {
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
         <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
         <Route path="/project/:id/members" element={<ProjectWorkspace />} />
+
+        {/* Monday.com OAuth redirect URI (top-level; see MondayOAuthCallback).
+            Monday's registered redirect URI is a fixed top-level SPA path, so
+            it cannot live under the /orgs/:orgId shell. */}
+        <Route path="/oauth/callback" element={<MondayOAuthCallback />} />
 
         {/* Lazy — site-wide admin console (platform operators only; gated
             client-side by usePlatformAdmin and server-side by ADMIN_EMAILS) */}

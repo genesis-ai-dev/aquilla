@@ -20,8 +20,6 @@ test("member access row expands and collapses project access details", async ({ 
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
   await alice.goto(orgRoute(alice, "/members"))
-  await alice.waitForLoadState("networkidle")
-
   // bob's MemberAccessRow toggle — the only button whose accessible name
   // STARTS with "bob" (roster-row actions are named "Remove bob" etc.). Not
   // exact-matched: once the lazy access fetch resolves, the button's name

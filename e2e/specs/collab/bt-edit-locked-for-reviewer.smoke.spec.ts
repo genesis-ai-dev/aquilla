@@ -97,8 +97,6 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
     }))
   }, { endpoint: `${llmBase}/v1` })
   await alice.reload()
-  await alice.waitForLoadState("networkidle")
-
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")
@@ -140,8 +138,6 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
 
   // Bob opens the project and file.
   await bob.goto(`/project/${projectId}/editor`)
-  await bob.waitForLoadState("networkidle")
-
   const bobWs = new Workspace(bob)
   await bobWs.openFileBySubstring("sample")
   await bobWs.waitForEditor()
@@ -169,10 +165,9 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   const btPanel = bob.getByRole("tabpanel", { name: /back-translation/i })
   const lockedEdit = btPanel.getByLabel("Contributor+ required to edit back-translations")
   await expect(async () => {
-    const visible = await lockedEdit.isVisible().catch(() => false)
+    const visible = await lockedEdit.isVisible()
     if (!visible) {
       await bob.reload()
-      await bob.waitForLoadState("networkidle")
       await bobWs.waitForEditor()
       await openBtTabAsBob()
       await expect(lockedEdit).toBeVisible({ timeout: 2_000 })

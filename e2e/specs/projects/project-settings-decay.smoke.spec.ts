@@ -17,8 +17,6 @@ test("project settings decay section expands and changing target marks form dirt
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `DecaySettings ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings/validation`)
-  await alice.waitForLoadState("networkidle")
-
   const summary = alice.locator("summary").filter({ hasText: /Retrieval support/i })
   await expect(summary).toBeVisible({ timeout: 10_000 })
 

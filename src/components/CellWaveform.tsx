@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Download, RotateCw } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import type { AudioMediaStrategy } from "@/lib/parsers/types"
 
@@ -92,6 +93,8 @@ export function CellWaveform({
   const isLoading = peaksState === "loading"
   const hasPeaks = peaksState === "ready" && peaks && peaks.length > 0
   const needsUserAction = !shouldAutoLoad && peaksState === "idle"
+  // Permanent 404: the stored audio is gone, so retrying can never succeed.
+  const isMissing = peaksState === "missing"
 
   const handleLoadClick = () => {
     setUserTriggered(true)
@@ -112,7 +115,7 @@ export function CellWaveform({
           : "Click to seek"
 
   return (
-    <AppTooltip content={waveformTooltip} disabled={peaksState === "error"}>
+    <AppTooltip content={waveformTooltip} disabled={peaksState === "error" || isMissing}>
       <div
         className={cn(
           "group/wf bg-muted relative w-full select-none rounded-xl transition-shadow",
@@ -134,7 +137,7 @@ export function CellWaveform({
           "block h-full w-full text-muted-foreground/50",
           isPlaying && "text-foreground/70",
           isLoading && "animate-pulse text-muted-foreground/30",
-          (needsUserAction || peaksState === "error") && "opacity-0",
+          (needsUserAction || peaksState === "error" || isMissing) && "opacity-0",
         )}
       />
       {hasPeaks && duration > 0 && (
@@ -153,6 +156,14 @@ export function CellWaveform({
           <Download className="h-3 w-3" />
           <span>Load waveform</span>
         </button>
+      )}
+      {isMissing && (
+        <div
+          className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl text-[10px] font-medium text-muted-foreground"
+          role="status"
+        >
+          <span>{MISSING_AUDIO_MESSAGE}</span>
+        </div>
       )}
       {peaksState === "error" && (
         <AppTooltip content="Couldn't load this clip's waveform; click to retry">

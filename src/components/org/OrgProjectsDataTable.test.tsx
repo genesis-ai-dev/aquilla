@@ -98,6 +98,8 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     const defaultChip = screen.getByTestId("lane-chip-p1-")
     expect(defaultChip).toHaveTextContent("en-target")
     expect(defaultChip).toHaveTextContent("68%")
+    expect(defaultChip.parentElement).toHaveClass("min-w-0", "max-w-full", "flex-1")
+    expect(defaultChip).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
     const esChip = screen.getByTestId("lane-chip-p1-es")
     expect(esChip).toHaveTextContent("es")
     expect(esChip).toHaveTextContent("22%")

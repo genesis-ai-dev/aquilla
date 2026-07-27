@@ -24,8 +24,6 @@ test("delete a custom rule removes it from the rules list", async ({ alice }) =>
   })
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Add a custom rule via "+ Add Rule".
   const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })

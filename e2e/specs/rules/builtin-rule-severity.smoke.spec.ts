@@ -20,8 +20,6 @@ test("builtin rule severity select changes from minor to major", async ({ alice 
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Severity ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Find the "Extra whitespace" severity select trigger.
   const severitySelect = alice.getByRole("combobox", { name: "Extra whitespace severity" })
   await expect(severitySelect).toBeVisible({ timeout: 10_000 })

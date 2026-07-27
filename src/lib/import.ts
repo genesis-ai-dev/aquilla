@@ -16,12 +16,14 @@
 // source blobs in R2; the future re-parse path fetches from R2.
 
 import { v7 as uuidv7 } from "uuid"
+import type { IdmlProgress } from "@aquilla/idml-roundtrip"
 import { proxyOrigin } from "./net/resource-proxy"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType } from "./parsers/types"
-import { buildAudioId, uploadCellAudio, deleteCellAudio } from "./audio/upload"
-import { emitCellAudioAttach } from "./sync/events-emit"
+import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
 import { detectSpeechSegments } from "./timeline/silence-split"
+import { tileSegments } from "./timeline/tile-segments"
+import { recordMediaImportSeed, buildMediaSeedCells } from "./audio/auto-transcribe"
 import { parseTextFormatOffMainThread } from "./parsers/parse-worker-client"
 import { usfmSectionToStrings } from "./parsers/parse-text-formats"
 import {
@@ -29,14 +31,31 @@ import {
   type ParatextBook,
   type ParatextProject,
   type ProjectEntry,
+  type ProjectEntryCollection,
+  type ProjectSourceArtifact,
 } from "./parsers/paratext-project"
 import { buildBilingualPlan, type SourceVerse } from "./parsers/paratext-pairing"
 import type { ParatextSettings } from "./parsers/paratext"
 import { usxToUsfm, looksLikeUsx } from "./parsers/usx"
-import { enqueueTargetCommits, bulkUploadMorphRows, type MorphRow, type TargetCommit } from "./sync/bulk-import"
+import {
+  enqueueTargetCommitBatch,
+  bulkUploadMorphRows,
+  publishStagedImport,
+  reconcileSourceImport,
+  type MorphRow,
+  type TargetCommit,
+} from "./sync/bulk-import"
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
+import { extractIdmlStrings } from "./parsers/idml"
+import { extractHtmlStrings } from "./parsers/html"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
+import {
+  assertSourceUploadByteLength,
+  assertSourceUploadSize,
+  bindSourceArtifact,
+  uploadSourceOriginal,
+} from "./sync/source-upload"
 import {
   fetchTranslationText,
   parseEBibleCorpus,
@@ -52,6 +71,28 @@ import { parseTmx } from "./parsers/tmx"
 import { parseMaculaTsv } from "./parsers/macula"
 import { parseTnTsv } from "./parsers/translation-notes"
 import { parseObsStories } from "./parsers/obs"
+import {
+  aquillaImportMetadata,
+  normalizeTranslatableStrings,
+  summarizeNormalizedImport,
+  type NormalizedImportFile,
+} from "./import/normalized-manifest"
+import { ImportService } from "./import/import-service"
+import type { ImportPreviewNotice, PreparedImportFile } from "./import/import-service"
+import {
+  classifyAndParseUnknownText,
+  readUnknownTextFile,
+  shouldUseAiForKnownText,
+  sniffKnownTextFile,
+  decodeImportText,
+  type AiImportClassification,
+} from "./import/ai-recipe"
+import type { DeclarativeImportRecipe } from "./import/normalized-manifest"
+import type {
+  RoundTripFidelity,
+  SourceArtifactFormat,
+} from "../../shared/import-contract"
+import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -115,6 +156,8 @@ export interface EBibleMatchResult {
   /** Cells the incoming corpus never had a verse for (the rare inverse orphan).
    *  Surfaced for completeness — typically 0 for whole-Bible imports. */
   unmatchedSourceCount: number
+  /** Exact imported payload retained until the user confirms the target write. */
+  sourceArtifact?: TargetImportArtifact
 }
 
 export type EBibleTargetPhase = "download" | "parse" | "match" | "save"
@@ -124,6 +167,12 @@ export interface EBibleTargetProgress {
   total?: number
   cellsEnqueued?: number
   cellsTotal?: number
+}
+
+export interface TargetImportArtifact {
+  name: string
+  bytes: ArrayBuffer
+  format: SourceArtifactFormat
 }
 
 /**
@@ -217,7 +266,14 @@ export async function prepareEBibleTargetImport(
   }))
 
   onProgress?.({ phase: "match" })
-  return matchEBibleToSourceCells(verses, sourceCells)
+  return {
+    ...matchEBibleToSourceCells(verses, sourceCells),
+    sourceArtifact: {
+      name: `${translation.id}.txt`,
+      bytes: new TextEncoder().encode(corpusText).buffer as ArrayBuffer,
+      format: "ebible",
+    },
+  }
 }
 
 /**
@@ -231,7 +287,9 @@ export async function prepareEBibleTargetImport(
 export async function applyEBibleTargetImport(
   matchResult: EBibleMatchResult,
   selectedCellIds: Set<string>,
-  ctx: Pick<ImportContext, "projectId" | "author" | "getToken" | "signal">,
+  ctx: Pick<ImportContext, "projectId" | "author" | "getToken" | "signal" | "targetLang"> & {
+    sourceArtifact?: TargetImportArtifact
+  },
   onProgress?: (p: EBibleTargetProgress) => void,
 ): Promise<{ committedCount: number; skippedCount: number }> {
   const toCommit = matchResult.matched.filter((m) => selectedCellIds.has(m.cellId))
@@ -247,35 +305,74 @@ export async function applyEBibleTargetImport(
     byFile.set(m.fileId, arr)
   }
 
-  onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: toCommit.length })
-  let totalEnqueued = 0
-
-  for (const [fileId, cells] of byFile) {
-    const commits: TargetCommit[] = cells
-      .filter((c) => c.parentId) // skip cells with no chain parent (edge case)
-      .map((c) => ({
+  const groups = [...byFile].map(([fileId, cells]) => ({
+    fileId,
+    commits: cells
+      .filter((cell) => cell.parentId)
+      .map((cell) => ({
         id: uuidv7(),
-        cellId: c.cellId,
-        parentId: c.parentId,
-        value: c.incomingText,
-      }))
+        cellId: cell.cellId,
+        parentId: cell.parentId!,
+        value: cell.incomingText,
+      })),
+  })).filter((group) => group.commits.length > 0)
+  const committedCount = groups.reduce((count, group) => count + group.commits.length, 0)
 
-    await enqueueTargetCommits({
+  // Preserve the exact target-side input before queuing any edits. One
+  // immutable artifact can bind to several Aquilla files, and the active lane
+  // is part of every binding so later audit/export never confuses languages.
+  const sourceArtifact = ctx.sourceArtifact ?? matchResult.sourceArtifact
+  if (sourceArtifact && groups.length > 0) {
+    const [firstFileId, ...otherFileIds] = groups.map((group) => group.fileId)
+    const artifactId = uuidv7()
+    await uploadSourceOriginal({
       projectId: ctx.projectId,
-      fileId,
-      author: ctx.author,
-      commits,
+      fileId: firstFileId,
+      artifactId,
+      bytes: sourceArtifact.bytes,
+      format: sourceArtifact.format,
+      artifactName: sourceArtifact.name,
+      bindingRole: "target",
+      targetLang: ctx.targetLang,
+      profileId: `builtin:target-${sourceArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      updateSourceSidecar: false,
       getToken: ctx.getToken,
       signal: ctx.signal,
-      onProgress: (count) => {
-        totalEnqueued += count
-        onProgress?.({ phase: "save", cellsEnqueued: totalEnqueued, cellsTotal: toCommit.length })
-      },
     })
+    for (const fileId of otherFileIds) {
+      await bindSourceArtifact({
+        projectId: ctx.projectId,
+        fileId,
+        artifactId,
+        memberPath: sourceArtifact.name,
+        profileId: `builtin:target-${sourceArtifact.format}`,
+        profileVersion: "1",
+        fidelity: "preserved-only",
+        bindingRole: "target",
+        targetLang: ctx.targetLang,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+    }
   }
 
-  const skippedCount = matchResult.matched.length - toCommit.length
-  return { committedCount: toCommit.length, skippedCount }
+  onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: committedCount })
+  await enqueueTargetCommitBatch({
+    projectId: ctx.projectId,
+    author: ctx.author,
+    targetLang: ctx.targetLang,
+    groups,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+    onProgress: (count) => {
+      onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: committedCount })
+    },
+  })
+
+  const skippedCount = matchResult.matched.length - committedCount
+  return { committedCount, skippedCount }
 }
 
 export type MaculaImportPhase = "parse" | "save" | "morph"
@@ -320,7 +417,7 @@ export interface ImportResult {
    *  side-car so export can reconstruct the original markup with current
    *  translations substituted. */
   rawSource?: string
-  rawSourceFormat?: string
+  rawSourceFormat?: SourceArtifactFormat
   /** Raw binary bytes for binary formats (DOCX, PPTX). Uploaded directly to R2
    *  via PUT …/files/{fileId}/source instead of being base64-encoded in the
    *  import event payload. Not subject to the old 512 KB cap. */
@@ -333,6 +430,14 @@ export interface ImportResult {
   /** Original filename (e.g. "01GENarONAV12.SFM") — preserved for export naming
    *  and hover-to-see-original when we rename the file to a localized book name. */
   originalName?: string
+  /** AI-assisted unknown-format recipe, shown in preview and persisted. */
+  importRecipe?: DeclarativeImportRecipe
+  importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
+  importNotices?: ImportPreviewNotice[]
+  roundTripFidelity?: RoundTripFidelity
+  /** Exact container for a multi-book import. Stored once and bound to every
+   * emitted book instead of becoming every book's export skeleton. */
+  sharedSourceArtifact?: TargetImportArtifact
 }
 
 export interface ImportContext {
@@ -343,6 +448,10 @@ export interface ImportContext {
   /** Optional language pair to stamp on the `file.create` payload. */
   sourceLanguage?: string
   targetLanguage?: string
+  /** Target-lane storage key. Empty/absent means the project's default lane. */
+  targetLang?: string
+  /** Identity JWT used only for AI-assisted classification of unknown text. */
+  identityToken?: string
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
@@ -360,6 +469,62 @@ export interface ImportContext {
    * "skipped by user" rather than being uploaded.
    */
   skipKeys?: ReadonlySet<string>
+  /** Existing files selected for safe unit-identity reconciliation. Keys use
+   * the same normalized book-code/name vocabulary as skipKeys. */
+  reimportFileIds?: ReadonlyMap<string, string>
+  /** Advanced orchestrators can keep fresh files hidden while persisting
+   * package-level or format-specific secondary data. */
+  deferPublication?: boolean
+}
+
+type PrepareImportContext = Pick<
+  ImportContext,
+  "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal"
+> & {
+  onIdmlProgress?: (progress: IdmlProgress) => void
+  /** AQU-634: per-project USFM front-matter opt-out, forwarded to parseFile. */
+  excludeFrontMatter?: boolean
+}
+
+function preparedParsedFile(
+  file: File,
+  fileType: FileType,
+  results: ImportResult[],
+): PreparedImportFile {
+  if (results.length === 0 || results.every((result) => result.strings.length === 0)) {
+    throw new Error(`${file.name} did not contain any content the ${fileType} adapter could import.`)
+  }
+  return { fileType, results }
+}
+
+async function prepareSandboxImport(
+  file: File,
+  ctx: PrepareImportContext & { identityToken: string },
+  firstError: unknown,
+  retainedBytes?: ArrayBuffer,
+): Promise<PreparedImportFile> {
+  const sandboxed = await parseUnknownFileInSandbox(file, {
+    identityToken: ctx.identityToken,
+    projectId: ctx.projectId,
+    sourceLanguage: ctx.sourceLanguage,
+    targetLanguage: ctx.targetLanguage,
+    signal: ctx.signal,
+  }).catch((sandboxError) => {
+    const first = firstError instanceof Error ? firstError.message : String(firstError)
+    const second = sandboxError instanceof Error ? sandboxError.message : String(sandboxError)
+    throw new Error(`${first}. Sandbox fallback also failed: ${second}`)
+  })
+  return {
+    fileType: "custom",
+    results: [{
+      name: file.name,
+      strings: sandboxed.strings,
+      rawBytes: retainedBytes ?? await file.arrayBuffer(),
+      rawSourceFormat: "custom-original",
+      importRecipe: sandboxed.classification.recipe,
+      importClassification: sandboxed.classification,
+    }],
+  }
 }
 
 function normalizeImportedDirection(value: string | undefined | null): "ltr" | "rtl" | undefined {
@@ -372,6 +537,14 @@ export interface ImportFileResult {
   /** Speaker→cellId pairs from every subtitle cue, sharing the same cellIds as
    *  the uploaded cells (single parse). Empty for non-subtitle formats. */
   speakerPairs: { cellId: string; speaker: string | undefined }[]
+  skipped?: { book: string; reason: string }[]
+}
+
+/** Stable domain kind is intentionally distinct from the parser/extension.
+ * TMX files participate in translation-memory retrieval even though their
+ * deterministic parser id remains `tmx`. */
+export function importedFileKind(fileType: FileType): string {
+  return fileType === "tmx" ? "translation-memory" : fileType
 }
 
 /**
@@ -386,46 +559,219 @@ export interface ImportFileResult {
 export async function importFile(
   file: File,
   ctx: ImportContext,
+  prepared?: PreparedImportFile,
 ): Promise<ImportFileResult> {
-  const fileType = detectFileType(file.name)
-  if (!fileType) {
-    throw new Error(`Unsupported file type: ${file.name}`)
+  const service = new ImportService<ImportContext, FileReference>({
+    detectFileType,
+    isMediaFileType,
+    parseFile,
+    emitMediaFile,
+    emitParsedFile,
+  })
+  const ready = prepared ?? await prepareImportFile(file, ctx)
+  const sharedArtifact = ready.results.find((result) => result.sharedSourceArtifact)?.sharedSourceArtifact
+  const multiResult = ready.results.length > 1
+  const imported = await service.importFile(
+    file,
+    multiResult ? { ...ctx, deferPublication: true } : ctx,
+    ready,
+  )
+  if (!multiResult) return { refs: imported.refs, speakerPairs: imported.speakerPairs }
+
+  if (sharedArtifact && imported.refs.length > 0) {
+    const artifactId = uuidv7()
+    await uploadSourceOriginal({
+      projectId: ctx.projectId,
+      fileId: imported.refs[0].id,
+      artifactId,
+      artifactName: sharedArtifact.name,
+      bytes: sharedArtifact.bytes,
+      format: sharedArtifact.format,
+      bindingRole: "support",
+      memberPath: imported.refs[0].name,
+      profileId: `builtin:multi-${sharedArtifact.format}`,
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      updateSourceSidecar: false,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+    for (const ref of imported.refs.slice(1)) {
+      await bindSourceArtifact({
+        projectId: ctx.projectId,
+        fileId: ref.id,
+        artifactId,
+        memberPath: ref.name,
+        profileId: `builtin:multi-${sharedArtifact.format}`,
+        profileVersion: "1",
+        fidelity: "preserved-only",
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+    }
   }
 
-  // Timeline-segment-model (Scope A): audio/video files have no text parser —
-  // they import as a single media segment on a time-ordered file.
-  if (isMediaFileType(fileType)) {
-    const ref = await emitMediaFile(file, fileType, ctx)
-    return { refs: [ref], speakerPairs: [] }
-  }
-
-  // AQU-287: single-file skip — key is normalized file name (lowercase trimmed).
-  const fileNameKey = file.name.trim().toLowerCase()
-  if (ctx.skipKeys?.has(fileNameKey)) {
-    return { refs: [], speakerPairs: [] }
-  }
-
-  const results = await parseFile(file, fileType)
+  const existingFileIds = new Set(ctx.reimportFileIds?.values() ?? [])
   const refs: FileReference[] = []
-  const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
-
-  for (const result of results) {
-    // AQU-287: per-result skip — key is normalized display name (for USFM parsed
-    // results the name is the book display name; fall back to bookCode key too).
-    const resultNameKey = result.name.trim().toLowerCase()
-    const resultCodeKey = result.bookCode?.toUpperCase()
-    if (
-      ctx.skipKeys?.has(resultNameKey) ||
-      (resultCodeKey && ctx.skipKeys?.has(resultCodeKey))
-    ) {
+  const skipped: { book: string; reason: string }[] = []
+  for (const ref of imported.refs) {
+    if (existingFileIds.has(ref.id)) {
+      refs.push(ref)
       continue
     }
-    const { ref, speakerPairs: pairs } = await emitParsedFile(result, fileType, ctx)
-    refs.push(ref)
-    speakerPairs.push(...pairs)
+    try {
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId: ref.id,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+      refs.push(ref)
+    } catch (error) {
+      skipped.push({
+        book: ref.name,
+        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+  if (refs.length === 0 && skipped.length > 0) {
+    throw new Error(`Import could not publish any files: ${skipped[0].reason}`)
+  }
+  return { refs, speakerPairs: imported.speakerPairs, ...(skipped.length ? { skipped } : {}) }
+}
+
+/** Parse/classify exactly once so preview and commit use the same immutable
+ * recipe and parsed units. Deterministic content sniffing precedes AI. */
+export async function prepareImportFile(
+  file: File,
+  ctx: PrepareImportContext,
+): Promise<PreparedImportFile> {
+  if (file.size === 0) throw new Error(`${file.name} is empty.`)
+  // Fail before parsing/decompression and before any server event. The same
+  // ceiling is enforced again by the artifact route as a trust boundary.
+  assertSourceUploadByteLength(file.size)
+  const extensionType = detectFileType(file.name)
+  if (extensionType) {
+    // Opaque packages/media need their deterministic binary adapter. Textual
+    // extensions are sniffed as content first so a USFM document named .txt,
+    // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
+    if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
+    try {
+      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml") {
+        return preparedParsedFile(
+          file,
+          extensionType,
+          await parseFile(
+            file,
+            extensionType,
+            extensionType === "idml"
+              ? { signal: ctx.signal, onIdmlProgress: ctx.onIdmlProgress }
+              : undefined,
+          ),
+        )
+      }
+      const bytes = await file.arrayBuffer()
+      const text = decodeImportText(bytes, file.name)
+      const sniffedType = sniffKnownTextFile(text)
+      const fileType = sniffedType ?? extensionType
+      let analysisError: unknown
+      if (
+        ctx.identityToken
+        && sniffedType === null
+        && shouldUseAiForKnownText(fileType, text)
+      ) {
+        try {
+          const assisted = await classifyAndParseUnknownText(file, {
+            identityToken: ctx.identityToken,
+            projectId: ctx.projectId,
+            sourceLanguage: ctx.sourceLanguage,
+            targetLanguage: ctx.targetLanguage,
+            signal: ctx.signal,
+          }, { text, bytes })
+          return {
+            fileType: "custom",
+            results: [{
+              name: file.name,
+              strings: assisted.strings,
+              rawBytes: bytes,
+              rawSourceFormat: "custom-original",
+              importRecipe: assisted.classification.recipe,
+              importClassification: assisted.classification,
+            }],
+          }
+        } catch (error) {
+          // A well-defined built-in parser is still a safe fallback when model
+          // infrastructure is unavailable. Make that downgrade explicit in the
+          // mandatory preview instead of failing or silently flattening data.
+          analysisError = error
+        }
+      }
+      const prepared = preparedParsedFile(file, fileType, await parseFile(file, fileType, { excludeFrontMatter: ctx.excludeFrontMatter }))
+      if (analysisError) {
+        prepared.results = prepared.results.map((result) => ({
+          ...result,
+          importNotices: [{
+            code: "basic-parser-fallback",
+            severity: "warning",
+            message: "Aquilla could not verify this structured layout with AI, so it used the basic parser. Check the preview carefully before importing.",
+          }],
+        }))
+      }
+      return prepared
+    } catch (error) {
+      // IDML is an opaque UCF/ZIP package with a strict, versioned parser.
+      // Never flatten or execute generated parser code against it: doing so
+      // discards its source-artifact and locator contract and can only produce
+      // a non-round-trippable "custom" import.
+      if (extensionType === "idml") throw error
+      if (!ctx.identityToken) throw error
+      return prepareSandboxImport(file, { ...ctx, identityToken: ctx.identityToken }, error)
+    }
   }
 
-  return { refs, speakerPairs }
+  let inspected: Awaited<ReturnType<typeof readUnknownTextFile>> | undefined
+  let declarativeError: unknown
+  try {
+    inspected = await readUnknownTextFile(file, ctx.signal)
+    const sniffedType = sniffKnownTextFile(inspected.text)
+    if (sniffedType) {
+      return preparedParsedFile(file, sniffedType, await parseFile(file, sniffedType, { excludeFrontMatter: ctx.excludeFrontMatter }))
+    }
+    if (!ctx.identityToken) {
+      throw new Error(`Unsupported file type: ${file.name}. Sign in to use AI-assisted format detection.`)
+    }
+    const assisted = await classifyAndParseUnknownText(file, {
+      identityToken: ctx.identityToken,
+      projectId: ctx.projectId,
+      sourceLanguage: ctx.sourceLanguage,
+      targetLanguage: ctx.targetLanguage,
+      signal: ctx.signal,
+    }, inspected)
+    return {
+      fileType: "custom",
+      results: [{
+        name: file.name,
+        strings: assisted.strings,
+        rawBytes: inspected.bytes,
+        rawSourceFormat: "custom-original",
+        importRecipe: assisted.classification.recipe,
+        importClassification: assisted.classification,
+      }],
+    }
+  } catch (error) {
+    declarativeError = error
+  }
+  if (!ctx.identityToken) throw declarativeError
+
+  // The safe declarative recipe is the preferred AI path. Only formats it
+  // cannot decode or express are escalated to generated code, and that code
+  // executes in the isolated import sandbox—not in this browser/runtime.
+  return prepareSandboxImport(
+    file,
+    { ...ctx, identityToken: ctx.identityToken },
+    declarativeError,
+    inspected?.bytes,
+  )
 }
 
 export async function importEBible(
@@ -460,7 +806,7 @@ export async function importEBible(
 
   // eBible has no speaker tags — ignore speakerPairs.
   const { ref } = await emitParsedFile(
-    { name: fileName, strings },
+    { name: fileName, strings, rawSource: corpusText, rawSourceFormat: "ebible" },
     "ebible",
     {
       ...ctx,
@@ -517,18 +863,21 @@ async function downloadObsStoryFiles(
     .sort((a, b) => parseInt(a.name, 10) - parseInt(b.name, 10))
 
   const out: ObsStoryFile[] = []
+  const failed: string[] = []
   for (let i = 0; i < mdFiles.length; i++) {
     if (signal?.aborted) throw new Error("Import cancelled")
     const item = mdFiles[i]
     const rawUrl = `${OBS_REPO.baseUrl}/${OBS_REPO.owner}/${OBS_REPO.repo}/raw/branch/${OBS_REPO.branch}/${item.path}`
     const fileRes = await fetch(rawUrl, { signal })
     if (!fileRes.ok) {
-      // Skip an individual file rather than failing the whole import.
-      console.warn(`[obs import] failed to fetch ${item.name}: ${fileRes.status}`)
+      failed.push(`${item.name} (${fileRes.status})`)
       continue
     }
     out.push({ name: item.name, content: await fileRes.text() })
     onProgress?.(i + 1, mdFiles.length)
+  }
+  if (failed.length > 0) {
+    throw new Error(`Open Bible Stories download was incomplete: ${failed.join(", ")}. Nothing was imported.`)
   }
   if (out.length === 0) throw new Error("No OBS story files could be downloaded")
   return out
@@ -585,7 +934,12 @@ export async function importObs(
   const fileName = opts?.fileName ?? "Open Bible Stories"
 
   const { ref } = await emitParsedFile(
-    { name: fileName, strings },
+    {
+      name: fileName,
+      strings,
+      rawSource: JSON.stringify(storyFiles),
+      rawSourceFormat: "obs-package",
+    },
     "obs",
     {
       ...ctx,
@@ -616,10 +970,12 @@ export async function importHelloao(
 ): Promise<FileReference> {
   onProgress?.({ phase: "download", received: 0, total: 0 })
 
+  let rawComplete = ""
   const complete = await fetchHelloaoComplete(
     translation.id,
     (received, total) => onProgress?.({ phase: "download", received, total }),
     signal,
+    (raw) => { rawComplete = raw },
   )
 
   onProgress?.({ phase: "parse" })
@@ -636,7 +992,12 @@ export async function importHelloao(
   const fileName = `${translation.englishName || translation.name} (${translation.id})`
 
   const { ref } = await emitParsedFile(
-    { name: fileName, strings },
+    {
+      name: fileName,
+      strings,
+      rawSource: rawComplete || JSON.stringify(complete),
+      rawSourceFormat: "helloao",
+    },
     "helloao",
     {
       ...ctx,
@@ -668,7 +1029,9 @@ export async function importMacula(
 ): Promise<FileReference[]> {
   onProgress?.({ phase: "parse" })
 
-  const text = await file.text()
+  assertSourceUploadByteLength(file.size)
+  const rawBytes = await file.arrayBuffer()
+  const text = decodeImportText(rawBytes, file.name)
   const { strings, morphRows, bookCode, sourceLanguage } = parseMaculaTsv(text)
 
   if (strings.length === 0) {
@@ -700,6 +1063,9 @@ export async function importMacula(
       bookCode,
     },
     cells,
+    rawBytes,
+    rawSourceFormat: "macula-tsv",
+    deferPublication: true,
     getToken: ctx.getToken,
     onProgress: (count, total) => {
       onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total })
@@ -726,32 +1092,23 @@ export async function importMacula(
     }
   }
 
-  // Upload morphology rows to /import-morph. If the server doesn't yet support
-  // this endpoint (404), we surface a SWARM-TODO and continue — cells are already
-  // uploaded so the source is usable in the editor.
+  // Morphology is required data for this format. Keep the file staged until
+  // every row is durable; a failure remains retryable and never exposes a
+  // deceptively complete source file.
   if (allMorphRows.length > 0) {
     onProgress?.({ phase: "morph", morphEnqueued: 0, morphTotal: allMorphRows.length })
-    try {
-      await bulkUploadMorphRows({
-        projectId: ctx.projectId,
-        fileId,
-        rows: allMorphRows,
-        getToken: ctx.getToken,
-        onProgress: (count, total) => {
-          onProgress?.({ phase: "morph", morphEnqueued: count, morphTotal: total })
-        },
-      })
-    } catch (err) {
-      // SWARM-TODO(server-morph): /import-morph endpoint not yet implemented in
-      // sync-worker — morph rows are parsed client-side but not persisted to
-      // cell_word_morph on the server. The source text (cells) IS uploaded and
-      // usable in the editor. Morph server persistence requires adding
-      // handleBulkMorphImportRequest to sync-worker/src/events/import-morph-route.ts
-      // and registering it in sync-worker/src/events/route.ts.
-      // For now, log the error rather than failing the whole import.
-      console.warn("[importMacula] morph upload failed (server endpoint may not be deployed):", err)
-    }
+    await bulkUploadMorphRows({
+      projectId: ctx.projectId,
+      fileId,
+      rows: allMorphRows,
+      getToken: ctx.getToken,
+      onProgress: (count, total) => {
+        onProgress?.({ phase: "morph", morphEnqueued: count, morphTotal: total })
+      },
+    })
   }
+
+  await publishStagedImport({ projectId: ctx.projectId, fileId, getToken: ctx.getToken })
 
   return [
     {
@@ -785,7 +1142,9 @@ export async function importTranslationNotes(
 ): Promise<FileReference> {
   onProgress?.({ phase: "parse" })
 
-  const text = await file.text()
+  assertSourceUploadByteLength(file.size)
+  const rawBytes = await file.arrayBuffer()
+  const text = decodeImportText(rawBytes, file.name)
   const { strings, skippedCount } = parseTnTsv(text)
 
   if (strings.length === 0) {
@@ -813,6 +1172,8 @@ export async function importTranslationNotes(
       parserVersion: "tn-tsv-v1",
     },
     cells,
+    rawBytes,
+    rawSourceFormat: "tn-tsv",
     getToken: ctx.getToken,
     onProgress: (count, total) => {
       onProgress?.({ phase: "save", cellsEnqueued: count, cellsTotal: total, skippedCount })
@@ -837,36 +1198,76 @@ export async function importTranslationNotes(
 export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
   cells: BulkImportCell[]
   speakerPairs: { cellId: string; speaker: string | undefined }[]
+}
+export function buildBulkCellsWithSpeakers(
+  strings: TranslatableString[],
+  options: {
+    fileName?: string
+    fileType?: FileType
+    profileId?: string
+    profileVersion?: string
+    normalizedFile?: NormalizedImportFile
+  },
+): {
+  cells: BulkImportCell[]
+  speakerPairs: { cellId: string; speaker: string | undefined }[]
+}
+export function buildBulkCellsWithSpeakers(
+  strings: TranslatableString[],
+  options: {
+    fileName?: string
+    fileType?: FileType
+    profileId?: string
+    profileVersion?: string
+    normalizedFile?: NormalizedImportFile
+  } = {},
+): {
+  cells: BulkImportCell[]
+  speakerPairs: { cellId: string; speaker: string | undefined }[]
 } {
+  const normalizedFile = options.normalizedFile ?? normalizeTranslatableStrings(strings, {
+    fileName: options.fileName ?? "import",
+    fileType: options.fileType ?? "txt",
+    profileId: options.profileId,
+    profileVersion: options.profileVersion,
+  })
+  if (normalizedFile.units.length !== strings.length) {
+    throw new Error("Normalized import unit count does not match parsed string count")
+  }
   const cells: BulkImportCell[] = []
   const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
   let prevCellId: string | null = null
-  let seq = 0
-  for (const str of strings) {
+  for (let seq = 0; seq < strings.length; seq++) {
+    const str = strings[seq]
+    const unit = normalizedFile.units[seq]
     const cellId = str.id || uuidv7()
+    const metadata = {
+      ...(str.metadata ?? {}),
+      aquillaImport: aquillaImportMetadata(normalizedFile, unit),
+      ...(str.paragraphStart ? { paragraphStart: true } : {}),
+    }
     cells.push({
       id: uuidv7(),
       cellId,
       anchorCellId: prevCellId,
-      value: str.original,
-      ...(str.originalHtml ? { valueHtml: str.originalHtml } : {}),
+      value: unit.sourceText,
+      ...(unit.sourceHtml ? { valueHtml: unit.sourceHtml } : {}),
       ...(str.type !== undefined ? { type: str.type } : {}),
-      ...(str.group ? { canonicalRef: str.group } : {}),
-      ...(str.start !== undefined && str.end !== undefined ? { startMs: Math.round(str.start * 1000), endMs: Math.round(str.end * 1000) } : {}),
+      ...(unit.canonicalRef ? { canonicalRef: unit.canonicalRef } : {}),
+      ...(unit.startMs !== undefined && unit.endMs !== undefined ? { startMs: unit.startMs, endMs: unit.endMs } : {}),
       // Timeline-segment-model: intrinsic order key (import order). For
       // time-ordered files it is the tiebreak / home for untimed rows; for
       // sequence-ordered files it IS the order. `medium` defaults to 'text'
       // (absent), so only an explicit media import needs to set it.
-      sequenceIndex: seq,
+      sequenceIndex: unit.physicalOrder,
       ...(str.medium ? { medium: str.medium } : {}),
       ...(str.paragraphStart ? { paragraphStart: true } : {}),
       // Extensible per-cell metadata (OBS frame attachments today). Threaded
       // into the bulk POST body verbatim → cells.metadata JSONB on the server.
-      ...(str.metadata ? { metadata: str.metadata } : {}),
+      metadata,
     })
     speakerPairs.push({ cellId, speaker: str.speaker })
     prevCellId = cellId
-    seq += 1
   }
   return { cells, speakerPairs }
 }
@@ -898,14 +1299,50 @@ export async function emitParsedFile(
   result: ImportResult,
   fileType: FileType,
   ctx: ImportContext,
+  normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
-  const fileId = uuidv7()
+  const reimportKeys = [
+    result.bookCode?.trim().toUpperCase(),
+    result.name.trim().toLowerCase(),
+    result.originalName?.trim().toLowerCase(),
+  ].filter((key): key is string => Boolean(key))
+  const existingFileId = reimportKeys
+    .map((key) => ctx.reimportFileIds?.get(key))
+    .find((id): id is string => Boolean(id))
+  const fileId = existingFileId ?? uuidv7()
+
+  const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
+    fileName: result.name,
+    fileType,
+    profileId: fileType === "usfm"
+      ? "builtin:usfm-lossless"
+      : fileType === "idml"
+        ? "builtin:idml-roundtrip"
+        : `builtin:${fileType}`,
+    profileVersion: fileType === "idml" ? "2" : "1",
+    ...(result.roundTripFidelity ? { fidelity: result.roundTripFidelity } : {}),
+  })
 
   // Chain cells via anchorCellId: the first cell's anchor is null (genesis —
   // first in file); each subsequent cell anchors on the prior cell's id.
   // Use buildBulkCellsWithSpeakers so we capture speakerPairs from the SAME
   // call that mints the cellIds — avoids the double-parse cellId mismatch.
-  const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings)
+  const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
+    normalizedFile: normalized,
+  })
+  const targets: TargetCommit[] = cells.flatMap((cell, index) => {
+    const value = result.strings[index]?.translated
+    const valueHtml = result.strings[index]?.translatedHtml
+    return value || valueHtml
+      ? [{
+          id: uuidv7(),
+          cellId: cell.cellId,
+          parentId: cell.id,
+          value: value ?? "",
+          ...(valueHtml !== undefined ? { valueHtml } : {}),
+        }]
+      : []
+  })
 
   // Timeline-segment-model: subtitle imports are time-true (their cues carry
   // timecodes and the timeline is the spine); every text/document format is
@@ -913,7 +1350,8 @@ export async function emitParsedFile(
   // need to mark the time-ordered case explicitly.
   const orderedBy: OrderedBy = orderedByForFileType(fileType)
 
-  await bulkUploadSource({
+  const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
+  await upload({
     projectId: ctx.projectId,
     fileId,
     file: {
@@ -921,9 +1359,10 @@ export async function emitParsedFile(
       name: result.name,
       fileType,
       role: "source",
-      kind: fileType,
+      kind: importedFileKind(fileType),
       importFormat: fileType,
-      parserVersion: "workspace-import-v1",
+      parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
+      importManifest: summarizeNormalizedImport(normalized),
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
       sourceTextDirection: ctx.sourceTextDirection,
@@ -935,6 +1374,10 @@ export async function emitParsedFile(
     rawSource: result.rawSource,
     rawSourceFormat: result.rawSourceFormat,
     rawBytes: result.rawBytes,
+    artifactFidelity: normalized.fidelity,
+    targets,
+    targetLang: ctx.targetLang,
+    ...(!existingFileId && ctx.deferPublication ? { deferPublication: true } : {}),
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
@@ -948,12 +1391,18 @@ export async function emitParsedFile(
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
       orderedBy,
+      ...(normalized.units.some((unit) => (
+        unit.address?.scheme === "scripture" || unit.address?.scheme === "scripture-structure"
+      ))
+        ? { hasScriptureContent: true }
+        : {}),
       ...(ctx.sourceLanguage ? { sourceLanguage: ctx.sourceLanguage } : {}),
       ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
       ...(ctx.sourceTextDirection ? { sourceTextDirection: ctx.sourceTextDirection } : {}),
       ...(ctx.targetTextDirection ? { targetTextDirection: ctx.targetTextDirection } : {}),
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
+      ...(result.bookCode ? { bookCode: result.bookCode } : {}),
     },
     speakerPairs,
   }
@@ -962,7 +1411,7 @@ export async function emitParsedFile(
 /** Subtitle + media formats are time-ordered (the timeline is the spine);
  *  every text/document format is sequence-ordered. */
 export function orderedByForFileType(fileType: FileType): OrderedBy {
-  return fileType === "vtt" || fileType === "srt" || isMediaFileType(fileType)
+  return fileType === "vtt" || fileType === "srt" || fileType === "sbv" || isMediaFileType(fileType)
     ? "time"
     : "sequence"
 }
@@ -983,6 +1432,13 @@ export interface MediaSegmentSpec {
  * Never synthesizes timing — a fallback spec uses the real probed duration, or
  * is left untimed (editor flags it) if even that fails. Shared by the importer
  * (new file) and the media-lens attach flow (existing file).
+ *
+ * AQU-646 timing/trim split: cell TIMING (startMs/endMs) is TILED so the
+ * segments partition the whole clip — playback can never skip the audio
+ * between detected speech regions ("cuts, not deletions"). Attachment TRIMS
+ * (trimStartMs/trimEndMs) stay at the tight detected boundaries — they feed
+ * Whisper transcription and voice-reference extraction, which must not absorb
+ * silence or neighboring speech.
  */
 export async function computeMediaSegmentSpecs(
   file: File,
@@ -991,9 +1447,16 @@ export async function computeMediaSegmentSpecs(
   const durationMs = decoded?.durationMs ?? (await probeMediaDurationMs(file).catch(() => undefined))
   const segments = decoded ? detectSpeechSegments(decoded.channel, decoded.sampleRate) : []
 
+  const timings = tileSegments(segments, durationMs)
   const specs: MediaSegmentSpec[] =
     segments.length >= 2
-      ? segments.map((s) => ({ cellId: uuidv7(), startMs: s.startMs, endMs: s.endMs, trimStartMs: s.startMs, trimEndMs: s.endMs }))
+      ? segments.map((s, i) => ({
+          cellId: uuidv7(),
+          startMs: timings[i].startMs,
+          endMs: timings[i].endMs,
+          trimStartMs: s.startMs,
+          trimEndMs: s.endMs,
+        }))
       : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
   return { durationMs, specs }
 }
@@ -1010,6 +1473,10 @@ export async function emitMediaFile(
   fileType: FileType,
   ctx: ImportContext,
 ): Promise<FileReference> {
+  if (file.size === 0) throw new Error(`${file.name} is empty.`)
+  if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
+    throw new Error(`${file.name} exceeds the 95 MB media import limit.`)
+  }
   const fileId = uuidv7()
   const { durationMs, specs } = await computeMediaSegmentSpecs(file)
 
@@ -1031,7 +1498,7 @@ export async function emitMediaFile(
       name: file.name,
       fileType,
       role: "source",
-      kind: fileType,
+      kind: importedFileKind(fileType),
       importFormat: fileType,
       parserVersion: "workspace-import-v1",
       sourceLanguage: ctx.sourceLanguage,
@@ -1041,6 +1508,7 @@ export async function emitMediaFile(
       orderedBy: "time",
     },
     cells,
+    deferPublication: true,
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
@@ -1051,36 +1519,54 @@ export async function emitMediaFile(
   // a dedicated source-media slot is a later refinement.
   const ext = (file.name.split(".").pop() || "bin").toLowerCase()
   const audioId = buildAudioId(fileId)
+  const artifactId = uuidv7()
   const upload = await uploadCellAudio({
     projectId: ctx.projectId,
     fileId,
     audioId,
     ext,
     blob: file,
+    artifactId,
+    artifactName: file.name,
     getSyncToken: (_p, f) => ctx.getToken(f),
+    signal: ctx.signal,
   })
-  try {
-    for (const s of specs) {
-      await emitCellAudioAttach({
-        projectId: ctx.projectId,
-        fileId,
-        cellId: s.cellId,
-        audioId: upload.audioId,
-        url: upload.url,
-        slot: "recording",
-        ...(file.type ? { mimeType: file.type } : {}),
-        ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
-        ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
-          ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
-          : {}),
-        author: ctx.author,
-      })
-    }
-  } catch (err) {
-    // The bytes landed but an attach event failed → clean up the orphan.
-    await deleteCellAudio({ projectId: ctx.projectId, fileId, audioId, ext, getSyncToken: (_p, f) => ctx.getToken(f) })
-    throw err
-  }
+  // Persist every attachment and reveal the staged file in one worker
+  // transaction. If the response is lost after commit, publishStagedImport
+  // retries the same event ids; never delete the clip on an ambiguous publish
+  // failure because the server may already have made it live.
+  await publishStagedImport({
+    projectId: ctx.projectId,
+    fileId,
+    attachments: specs.map((s) => ({
+      cellId: s.cellId,
+      audioId: `${upload.audioId}.${upload.ext}`,
+      url: upload.url,
+      slot: "recording",
+      ...(file.type ? { mimeType: file.type } : {}),
+      ...(durationMs !== undefined ? { durationMs: Math.round(durationMs) } : {}),
+      ...(s.trimStartMs !== undefined && s.trimEndMs !== undefined
+        ? { trimStartMs: s.trimStartMs, trimEndMs: s.trimEndMs }
+        : {}),
+    })),
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
+
+  // AQU-646: seed the post-import auto-transcribe — the workspace's
+  // import-completion handler consumes this (the cell store won't have these
+  // cells, let alone their attachments, until an unawaitable revalidate).
+  recordMediaImportSeed({
+    fileId,
+    cells: buildMediaSeedCells({
+      fileId,
+      fileName: file.name,
+      specs,
+      audioId: `${upload.audioId}.${upload.ext}`,
+      url: upload.url,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    }),
+  })
 
   return {
     id: fileId,
@@ -1182,6 +1668,9 @@ export interface ParatextBookPlan {
 export interface ParatextPlan {
   project: ParatextProject
   books: ParatextBookPlan[]
+  /** Whole ZIP/folder package, including Settings, BookNames, support files,
+   * and any media members. One immutable artifact binds to every book file. */
+  sourceArtifact?: ProjectSourceArtifact
 }
 
 /**
@@ -1190,7 +1679,7 @@ export interface ParatextPlan {
  * user confirms the import.
  */
 export async function prepareParatextProject(
-  entries: ProjectEntry[],
+  entries: ProjectEntryCollection,
   opts?: { excludeFrontMatter?: boolean },
 ): Promise<ParatextPlan> {
   const project = await assembleParatextProject(entries)
@@ -1205,7 +1694,59 @@ export async function prepareParatextProject(
     })
     return { book, strings, duplicateRefs, cellCount: strings.length }
   })
-  return { project, books }
+  // Materialize and validate the complete package during preview. Commit then
+  // uploads these exact immutable bytes; a large folder-derived ZIP cannot
+  // fail only after book files have already been staged.
+  let sourceArtifact: ProjectSourceArtifact | undefined
+  if (entries.sourceArtifact) {
+    const bytes = await entries.sourceArtifact.bytes()
+    assertSourceUploadSize(bytes)
+    sourceArtifact = { ...entries.sourceArtifact, bytes: async () => bytes }
+  }
+  return { project, books, ...(sourceArtifact ? { sourceArtifact } : {}) }
+}
+
+async function preserveParatextPackage(
+  plan: ParatextPlan,
+  bindings: Array<{ fileId: string; memberPath: string }>,
+  ctx: Pick<ImportContext, "projectId" | "getToken" | "signal">,
+  options: { bindingRole?: "support" | "target"; targetLang?: string } = {},
+): Promise<void> {
+  if (!plan.sourceArtifact || bindings.length === 0) return
+  const artifactId = uuidv7()
+  const bytes = await plan.sourceArtifact.bytes()
+  await uploadSourceOriginal({
+    projectId: ctx.projectId,
+    fileId: bindings[0].fileId,
+    artifactId,
+    artifactName: plan.sourceArtifact.name,
+    bytes,
+    format: plan.sourceArtifact.format,
+    bindingRole: options.bindingRole ?? "support",
+    targetLang: options.targetLang,
+    memberPath: bindings[0].memberPath,
+    profileId: "builtin:paratext-project",
+    profileVersion: "1",
+    fidelity: "preserved-only",
+    updateSourceSidecar: false,
+    getToken: ctx.getToken,
+    signal: ctx.signal,
+  })
+  for (const binding of bindings.slice(1)) {
+    await bindSourceArtifact({
+      projectId: ctx.projectId,
+      fileId: binding.fileId,
+      artifactId,
+      memberPath: binding.memberPath,
+      profileId: "builtin:paratext-project",
+      profileVersion: "1",
+      fidelity: "preserved-only",
+      bindingRole: options.bindingRole,
+      targetLang: options.targetLang,
+      getToken: ctx.getToken,
+      signal: ctx.signal,
+    })
+  }
 }
 
 export interface ParatextImportResult {
@@ -1254,6 +1795,7 @@ export async function commitParatextProject(
   // inherits it (caller may override per source/target choice).
   const baseCtx: ImportContext = {
     ...ctx,
+    deferPublication: true,
     sourceLanguage: plan.project.settings.languageIsoCode || ctx.sourceLanguage,
     sourceTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.sourceTextDirection,
   }
@@ -1265,6 +1807,8 @@ export async function commitParatextProject(
 
   let done = 0
   let cellsUploaded = 0
+  const existingFileIds = new Set(ctx.reimportFileIds?.values() ?? [])
+  const packageBindings: Array<{ fileId: string; memberPath: string }> = []
   for (const bookPlan of plan.books) {
     const book = bookPlan.book
     onProgress?.({
@@ -1305,6 +1849,7 @@ export async function commitParatextProject(
         bookCtx,
       )
       refs.push(ref)
+      packageBindings.push({ fileId: ref.id, memberPath: book.fileName })
       cellsUploaded = cellsBefore + bookPlan.cellCount
     } catch (err) {
       skipped.push({ book: book.displayName, reason: err instanceof Error ? err.message : String(err) })
@@ -1313,7 +1858,49 @@ export async function commitParatextProject(
     onProgress?.({ phase: "save", book: book.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
   }
 
-  return { refs, settings: plan.project.settings, skipped }
+  let packagePreservationError: string | null = null
+  try {
+    await preserveParatextPackage(plan, packageBindings, baseCtx)
+  } catch (error) {
+    packagePreservationError = error instanceof Error ? error.message : String(error)
+  }
+  const visibleRefs: FileReference[] = []
+  const freshRefs = refs.filter((ref) => !existingFileIds.has(ref.id))
+  if (packagePreservationError && freshRefs.length === 0) {
+    skipped.push({
+      book: plan.sourceArtifact?.name ?? "Paratext package",
+      reason: `package preservation failed: ${packagePreservationError}`,
+    })
+  }
+  for (const ref of refs) {
+    if (existingFileIds.has(ref.id)) {
+      visibleRefs.push(ref)
+      continue
+    }
+    if (packagePreservationError) {
+      skipped.push({
+        book: ref.name,
+        reason: `not published because package preservation failed: ${packagePreservationError}`,
+      })
+      continue
+    }
+    try {
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId: ref.id,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+      visibleRefs.push(ref)
+    } catch (error) {
+      skipped.push({
+        book: ref.name,
+        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+
+  return { refs: visibleRefs, settings: plan.project.settings, skipped }
 }
 
 /**
@@ -1347,6 +1934,8 @@ export async function importParatextAsTarget(
   )
   let cellsUploaded = 0
   let done = 0
+  const existingFileIds = new Set(ctx.reimportFileIds?.values() ?? [])
+  const packageBindings: Array<{ fileId: string; memberPath: string }> = []
 
   for (const bookPlan of plans) {
     onProgress?.({
@@ -1361,27 +1950,33 @@ export async function importParatextAsTarget(
       continue
     }
     try {
-      const fileId = uuidv7()
-      // Source cells (reference text), chained; remember each source cell's
-      // event id so the paired target commit can use it as its AD-2 parent.
-      const cells: BulkImportCell[] = []
-      const targets: TargetCommit[] = []
-      let prevCellId: string | null = null
-      for (const c of bookPlan.cells) {
-        const sourceEventId = uuidv7()
-        cells.push({
-          id: sourceEventId,
-          cellId: c.cellId,
-          anchorCellId: prevCellId,
-          value: c.sourceText,
-          type: "verse",
-          canonicalRef: c.ref,
-        })
-        prevCellId = c.cellId
-        if (c.targetText) {
-          targets.push({ id: uuidv7(), cellId: c.cellId, parentId: sourceEventId, value: c.targetText })
-        }
-      }
+      const existingFileId = ctx.reimportFileIds?.get(bookPlan.bookId.toUpperCase())
+      const fileId = existingFileId ?? uuidv7()
+      const strings: TranslatableString[] = bookPlan.cells.map((cell) => ({
+        id: cell.cellId,
+        original: cell.sourceText,
+        translated: cell.targetText,
+        context: cell.ref,
+        group: cell.ref,
+        globalReferences: [cell.ref],
+        type: cell.type,
+        ...(cell.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+      }))
+      const normalized = normalizeTranslatableStrings(strings, {
+        fileName: bookPlan.displayName,
+        fileType: "usfm",
+        profileId: "builtin:paratext-bilingual",
+        profileVersion: "1",
+      })
+      // Compile source and target from one normalized unit list. Headings stay
+      // structural/unnumbered and both sides share the same semantic unit key.
+      const { cells } = buildBulkCellsWithSpeakers(strings, { normalizedFile: normalized })
+      const targets: TargetCommit[] = cells.flatMap((cell, index) => {
+        const value = bookPlan.cells[index].targetText
+        return value
+          ? [{ id: uuidv7(), cellId: cell.cellId, parentId: cell.id, value }]
+          : []
+      })
 
       const cellsBefore = cellsUploaded
       const bookProgress = (uploaded: number) => {
@@ -1391,7 +1986,8 @@ export async function importParatextAsTarget(
         })
       }
 
-      await bulkUploadSource({
+      const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
+      await upload({
         projectId: ctx.projectId,
         fileId,
         file: {
@@ -1401,7 +1997,8 @@ export async function importParatextAsTarget(
           role: "target",
           kind: "usfm",
           importFormat: "usfm",
-          parserVersion: "paratext-target-v1",
+          parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
+          importManifest: summarizeNormalizedImport(normalized),
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
           targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
@@ -1410,18 +2007,15 @@ export async function importParatextAsTarget(
         cells,
         rawSource: bookPlan.rawSource,
         rawSourceFormat: "usfm",
+        artifactBindingRole: "target",
+        artifactTargetLang: ctx.targetLang,
+        updateSourceSidecar: true,
+        artifactFidelity: "native",
+        targets,
+        targetLang: ctx.targetLang,
+        ...(!existingFileId ? { deferPublication: true } : {}),
         getToken: ctx.getToken,
         onProgress: (uploaded) => bookProgress(uploaded),
-        signal: ctx.signal,
-      })
-
-      await enqueueTargetCommits({
-        projectId: ctx.projectId,
-        fileId,
-        author: ctx.author,
-        commits: targets,
-        getToken: ctx.getToken,
-        onProgress: (uploaded) => bookProgress(cells.length + uploaded),
         signal: ctx.signal,
       })
 
@@ -1435,6 +2029,11 @@ export async function importParatextAsTarget(
         ...(ctx.targetLanguage ? { targetLanguage: ctx.targetLanguage } : {}),
         ...(plan.project.settings.rightToLeft ? { targetTextDirection: "rtl" as const } : {}),
         ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
+        bookCode: bookPlan.bookId,
+      })
+      packageBindings.push({
+        fileId,
+        memberPath: plan.project.books.find((book) => book.bookId === bookPlan.bookId)?.fileName ?? `${bookPlan.bookId}.SFM`,
       })
       cellsUploaded = cellsBefore + cells.length + targets.length
     } catch (err) {
@@ -1444,7 +2043,69 @@ export async function importParatextAsTarget(
     onProgress?.({ phase: "save", book: bookPlan.displayName, booksDone: done, booksTotal: total, cellsDone: cellsUploaded, cellsTotal })
   }
 
-  return { refs, settings: project.settings, skipped }
+  let packagePreservationError: string | null = null
+  try {
+    await preserveParatextPackage(plan, packageBindings, ctx, {
+      bindingRole: "target",
+      targetLang: ctx.targetLang,
+    })
+  } catch (error) {
+    packagePreservationError = error instanceof Error ? error.message : String(error)
+  }
+
+  const visibleRefs: FileReference[] = []
+  const freshRefs = refs.filter((ref) => !existingFileIds.has(ref.id))
+  if (packagePreservationError && freshRefs.length === 0) {
+    skipped.push({
+      book: plan.sourceArtifact?.name ?? "Paratext package",
+      reason: `package preservation failed: ${packagePreservationError}`,
+    })
+  }
+  for (const ref of refs) {
+    if (existingFileIds.has(ref.id)) {
+      visibleRefs.push(ref)
+      continue
+    }
+    if (packagePreservationError) {
+      skipped.push({
+        book: ref.name,
+        reason: `not published because package preservation failed: ${packagePreservationError}`,
+      })
+      continue
+    }
+    try {
+      await publishStagedImport({
+        projectId: ctx.projectId,
+        fileId: ref.id,
+        getToken: ctx.getToken,
+        signal: ctx.signal,
+      })
+      visibleRefs.push(ref)
+    } catch (error) {
+      skipped.push({
+        book: ref.name,
+        reason: `publication failed: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+  }
+
+  return { refs: visibleRefs, settings: project.settings, skipped }
+}
+
+function withExactSourceArtifact(
+  result: ImportResult,
+  bytes: ArrayBuffer,
+  format: SourceArtifactFormat,
+): ImportResult {
+  // A single-member import has one authoritative original: the exact uploaded
+  // bytes. The USFM parser also returns a decoded/converted rawSource skeleton,
+  // but retaining both makes provenance ambiguous (and for USX they are
+  // different formats). Multi-book imports intentionally keep per-book text
+  // skeletons and preserve their exact shared container through the separate
+  // sharedSourceArtifact path below.
+  const normalized = { ...result, rawBytes: bytes, rawSourceFormat: format }
+  delete normalized.rawSource
+  return normalized
 }
 
 export interface ParseFileOptions {
@@ -1452,41 +2113,76 @@ export interface ParseFileOptions {
    *  intro-block front matter from the imported cells (AQU-634). Default:
    *  false (import front matter). */
   excludeFrontMatter?: boolean
+  signal?: AbortSignal
+  onIdmlProgress?: (progress: IdmlProgress) => void
 }
 
 export async function parseFile(
   file: File,
   fileType: FileType,
-  opts?: ParseFileOptions,
+  options?: ParseFileOptions,
 ): Promise<ImportResult[]> {
   switch (fileType) {
     case "txt":
     case "md":
+    case "json":
+    case "po":
+    case "properties":
     case "obs":
     case "vtt":
     case "srt":
+    case "sbv":
     case "csv":
     case "tsv": {
       // DOM-free text formats parse off the main thread so a large import never
       // freezes the UI. The worker client falls back to inline parsing when a
       // worker can't be created (SSR / tests). Per-format logic + the multi-book
       // USFM split live in parse-text-formats.ts (worker-safe core).
-      const text = await file.text()
-      return parseTextFormatOffMainThread({ fileType, text, name: file.name })
+      const bytes = await file.arrayBuffer()
+      const text = decodeImportText(bytes, file.name)
+      const parsed = await parseTextFormatOffMainThread({ fileType, text, name: file.name })
+      return parsed.map((result) => ({
+        ...result,
+        rawBytes: bytes,
+        rawSourceFormat: fileType,
+      }))
     }
     case "usfm": {
-      const raw = await file.text()
+      const bytes = await file.arrayBuffer()
+      const raw = decodeImportText(bytes, file.name)
       // USX (Paratext's XML export) → USFM conversion uses the Window-only
       // DOMParser, so it runs HERE on the main thread; the heavy lossless parse
       // (verse extraction, \id book split, side-car capture) then happens in the
       // worker via parse-text-formats.ts.
-      const text = looksLikeUsx(raw) ? usxToUsfm(raw) : raw
-      return parseTextFormatOffMainThread({
+      const isUsx = looksLikeUsx(raw)
+      const text = isUsx ? usxToUsfm(raw) : raw
+      const results = await parseTextFormatOffMainThread({
         fileType: "usfm",
         text,
         name: file.name,
-        excludeFrontMatter: opts?.excludeFrontMatter,
+        excludeFrontMatter: options?.excludeFrontMatter,
       })
+      if (results.length > 1) {
+        return results.map((result, index) => ({
+          ...result,
+          // Each Aquilla book needs its own valid export skeleton. The exact
+          // original bundle is retained separately and bound to every book.
+          rawSourceFormat: "usfm",
+          roundTripFidelity: "content-only" as const,
+          ...(index === 0 ? {
+            sharedSourceArtifact: {
+              name: file.name,
+              bytes,
+              format: isUsx ? "usx" : "usfm",
+            },
+          } : {}),
+        }))
+      }
+      return results.map((result) => withExactSourceArtifact(
+        result,
+        bytes,
+        isUsx ? "usx" : "usfm",
+      ))
     }
     case "docx": {
       const buffer = await file.arrayBuffer()
@@ -1500,13 +2196,46 @@ export async function parseFile(
       // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
       return [{ name: file.name, strings, rawBytes: buffer, rawSourceFormat: "pptx" }]
     }
+    case "idml": {
+      // The strict worker client transfers (detaches) its input without a
+      // hidden copy. Re-read the File after parsing so the preserved recovery
+      // artifact never shares/detaches the worker's parse buffer.
+      const parseBuffer = await file.arrayBuffer()
+      const strings = await extractIdmlStrings(
+        parseBuffer,
+        undefined,
+        "generic",
+        {
+          signal: options?.signal,
+          onProgress: options?.onIdmlProgress,
+        },
+      )
+      const sourceBuffer = await file.arrayBuffer()
+      // Upload raw bytes to R2 via PUT …/files/{fileId}/source (no 512 KB cap).
+      return [{
+        name: file.name,
+        strings,
+        rawBytes: sourceBuffer,
+        rawSourceFormat: "idml",
+        roundTripFidelity: "content-only",
+      }]
+    }
+    case "xlsx":
+      throw new Error("XLSX files import through spreadsheet column mapping")
+    case "html": {
+      const bytes = await file.arrayBuffer()
+      const text = decodeImportText(bytes, file.name)
+      return [{ name: file.name, strings: extractHtmlStrings(text), rawBytes: bytes, rawSourceFormat: "html" }]
+    }
     case "xliff": {
-      const text = await file.text()
-      return [{ name: file.name, strings: parseXliff(text) }]
+      const bytes = await file.arrayBuffer()
+      const text = decodeImportText(bytes, file.name)
+      return [{ name: file.name, strings: parseXliff(text), rawBytes: bytes, rawSourceFormat: "xliff" }]
     }
     case "tmx": {
-      const text = await file.text()
-      return [{ name: file.name, strings: parseTmx(text) }]
+      const bytes = await file.arrayBuffer()
+      const text = decodeImportText(bytes, file.name)
+      return [{ name: file.name, strings: parseTmx(text), rawBytes: bytes, rawSourceFormat: "tmx" }]
     }
     case "ebible":
       throw new Error("eBible translations import via importEBible(), not importFile()")
@@ -1514,6 +2243,8 @@ export async function parseFile(
       throw new Error("Hello AO translations import via importHelloao(), not importFile()")
     case "sdbh":
       throw new Error("SDBH lexicon editions import via importSdbh(), not importFile()")
+    case "custom":
+      throw new Error("Custom formats must be prepared by the AI-assisted recipe service")
     case "audio":
     case "video":
       // Media files have no text parser; importFile() routes them to

@@ -29,10 +29,9 @@ import type { EventKind } from '../types'
 import {
   buildEventProjectionStmts,
   isChainMutatingKind,
-  laneOfEvent,
   type PersistedEvent,
 } from '../event-projection'
-import { buildChainClaimStmt, laneQualifiedParentKey, type ChainSlot } from '../chain-claims'
+import { buildChainClaimStmt, eventQualifiedParentKey, type ChainSlot } from '../chain-claims'
 import { buildEventInsertStmt } from '../event-insert'
 import type { DispatchResult } from './types'
 
@@ -106,17 +105,14 @@ export function handleCellEvent(
     event.fileId &&
     event.cellId
   ) {
-    // AQU-538: the chain slot is lane-qualified for non-default target lanes
-    // — two lanes' first commits share a parent (the source head) and must
-    // not compete for one slot. Default-lane events keep the legacy key.
+    // The chain slot is side-qualified for source events and lane-qualified
+    // for non-default target lanes. A translation pinned to a source head
+    // must not prevent that source from being corrected later.
     chainGate = {
       projectId: event.projectId,
       fileId: event.fileId,
       cellId: event.cellId,
-      parentKey: laneQualifiedParentKey(
-        event.parentId,
-        laneOfEvent(event.kind, event.payload) || undefined,
-      ),
+      parentKey: eventQualifiedParentKey(event.parentId, event.kind, event.payload),
     }
     stmts.push(buildChainClaimStmt(db, chainGate, event.id))
   }

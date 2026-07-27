@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -10,7 +12,6 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
-import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
@@ -51,66 +52,92 @@ import {
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { Skeleton } from "@/components/ui/skeleton"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
 
-function ProjectRowSkeleton() {
+function DashboardRowTemplate() {
   return (
     <div className="flex items-center gap-4 p-4">
-      <div className="min-w-0 flex-1 space-y-2">
-        <Skeleton className="h-4 w-1/3" />
-        <Skeleton className="h-1.5 w-full rounded-full" />
-        <Skeleton className="h-1.5 w-full rounded-full" />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <Skeleton className="h-4 w-2/5" />
+        <Skeleton className="h-3 w-3/5" />
       </div>
-      <div className="shrink-0 space-y-2 text-right">
-        <Skeleton className="ml-auto h-3 w-16" />
-        <Skeleton className="ml-auto h-3 w-16" />
-      </div>
+      <Skeleton className="h-4 w-16 shrink-0" />
     </div>
   )
 }
 
-function OrgHomeSkeleton({ isAllOrgs }: { isAllOrgs: boolean }) {
+function DashboardPanelTemplate({ rows }: { rows: number }) {
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-[88px] space-y-2 rounded-2xl border bg-card p-4">
-            <Skeleton className="h-3 w-16" />
-            <Skeleton className="h-6 w-10" />
-          </div>
+    <section className="overflow-hidden rounded-2xl border bg-card">
+      <div className="flex items-center justify-between gap-4 border-b px-4 py-3">
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-3 w-16" />
+        </div>
+        <Skeleton className="h-8 w-40" />
+      </div>
+      <div className="divide-y">
+        {Array.from({ length: rows }).map((_, index) => (
+          <DashboardRowTemplate key={index} />
         ))}
       </div>
-      {isAllOrgs ? (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <section className="rounded-2xl border bg-card">
-            <div className="border-b px-4 py-3">
-              <Skeleton className="h-5 w-28" />
+    </section>
+  )
+}
+
+/**
+ * A stable, value-free preview of the dashboard's eventual geometry. This
+ * never reads partially hydrated org/project state, so startup has exactly one
+ * visual transition: template → resolved dashboard.
+ */
+function OrgHomeLoadingTemplate() {
+  return (
+    <div data-testid="org-home-loading-template" className="h-full">
+      <AppShell
+        sidebar={
+          <div className="flex h-full flex-col gap-4 p-2">
+            <Skeleton className="h-9 w-full" />
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-3/4" />
+              <Skeleton className="h-8 w-2/3" />
             </div>
-            <div className="divide-y">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <ProjectRowSkeleton key={i} />
-              ))}
+            <div className="mt-auto flex flex-col gap-2">
+              <Skeleton className="h-8 w-4/5" />
+              <Skeleton className="h-10 w-full" />
             </div>
-          </section>
-          <section className="rounded-2xl border bg-card">
-            <div className="border-b px-4 py-3">
-              <Skeleton className="h-5 w-20" />
+          </div>
+        }
+        header={
+          <div className="flex items-center justify-between gap-4 px-4">
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-7 w-56 rounded-full" />
+          </div>
+        }
+        statusBar={null}
+        main={
+          <Page size="wide">
+            <Skeleton className="mb-8 h-7 w-48" />
+            <div className="flex flex-col gap-6">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="flex h-[88px] flex-col gap-2 rounded-2xl border bg-card px-5 py-4"
+                  >
+                    <Skeleton className="h-6 w-12" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                ))}
+              </div>
+              <div className="grid items-start gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
+                <DashboardPanelTemplate rows={3} />
+                <DashboardPanelTemplate rows={4} />
+              </div>
             </div>
-            <div className="divide-y">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <ProjectRowSkeleton key={i} />
-              ))}
-            </div>
-          </section>
-        </div>
-      ) : (
-        <div className="rounded-2xl border divide-y">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <ProjectRowSkeleton key={i} />
-          ))}
-        </div>
-      )}
+          </Page>
+        }
+      />
     </div>
   )
 }
@@ -460,13 +487,14 @@ export function ProjectTable({
 
                 <span
                   data-testid="project-table-languages"
-                  className="hidden min-w-0 items-center @md/project-table:flex"
+                  className="hidden min-w-0 items-center overflow-hidden @md/project-table:flex"
                 >
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
                     defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
                     maxVisible={2}
+                    className="w-full"
                   />
                 </span>
 
@@ -501,10 +529,27 @@ export function ProjectTable({
 }
 
 export function OrgHome() {
-  const { activeOrg, activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, setActiveOrg } = useActiveOrg()
+  const {
+    activeOrg,
+    activeOrgId,
+    isAllOrgs,
+    orgs,
+    accessibleProjects,
+    accessibleProjectsLoading,
+    isLoading: orgLoading,
+    setActiveOrg,
+    refreshAccessibleProjects,
+  } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const navigate = useNavigate()
   const jwt = session?.jwt ?? null
+  const portfolioScopeKey = !jwt || orgLoading
+    ? null
+    : isAllOrgs
+      ? `all:${orgs.map((org) => org.id).sort((a, b) => a - b).join(",")}`
+      : activeOrgId == null
+        ? null
+        : `org:${activeOrgId}`
 
   // AQU-486: per-section visibility chrome for Team workload / Team usage
   // (both gated by the AQU-485 memberProgressViewMinRole floor — they're both
@@ -517,13 +562,13 @@ export function OrgHome() {
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
 
   const [projects, setProjects] = useState<PortfolioProjectRow[]>([])
-  // AQU-335: accessible-project rows supply direct/group/org role attribution
-  // and identify projects shared from orgs the portfolio endpoint can't see.
-  const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
   // AQU-326: unredeemed invites addressed to the caller's email — without
   // this card, an invite whose link never arrived is undiscoverable in-app.
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
-  const [loading, setLoading] = useState(false)
+  // The key records which dashboard scope has actually resolved. Deriving the
+  // first-load state from it prevents a post-render effect from painting an
+  // empty portfolio as real data before its request has even started.
+  const [resolvedPortfolioScopeKey, setResolvedPortfolioScopeKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [projectQuery, setProjectQuery] = useState("")
   const [orgQuery, setOrgQuery] = useState("")
@@ -546,21 +591,18 @@ export function OrgHome() {
   useEffect(() => {
     if (!jwt) {
       setProjects([])
-      setLoading(false)
+      setResolvedPortfolioScopeKey(null)
       return
     }
     if (isAllOrgs) {
-      if (orgLoading) {
-        setLoading(false)
-        return
-      }
+      if (orgLoading) return
       if (orgs.length === 0) {
+        setError(null)
         setProjects([])
-        setLoading(false)
+        setResolvedPortfolioScopeKey(portfolioScopeKey)
         return
       }
       let cancelled = false
-      setLoading(true)
       setError(null)
       const orgById = new Map(orgs.map((org) => [org.id, org]))
       getPortfolios(jwt, orgs.map((org) => org.id))
@@ -584,17 +626,17 @@ export function OrgHome() {
           }
         })
         .finally(() => {
-          if (!cancelled) setLoading(false)
+          if (!cancelled) setResolvedPortfolioScopeKey(portfolioScopeKey)
         })
       return () => { cancelled = true }
     }
     if (activeOrgId == null) {
+      setError(null)
       setProjects([])
-      setLoading(false)
+      setResolvedPortfolioScopeKey(null)
       return
     }
     let cancelled = false
-    setLoading(true)
     setError(null)
     getPortfolio(jwt, activeOrgId)
       .then((list) => {
@@ -615,28 +657,10 @@ export function OrgHome() {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setResolvedPortfolioScopeKey(portfolioScopeKey)
       })
     return () => { cancelled = true }
-  }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs, refreshTick])
-
-  // AQU-335: surface cross-org grants on the Projects page too — otherwise a user
-  // whose only project arrived via an invite link sees an empty dashboard.
-  useEffect(() => {
-    if (!jwt) {
-      setAccessibleProjects([])
-      return
-    }
-    if (orgLoading) return
-    let cancelled = false
-    fetchAccessibleProjects(jwt)
-      .then((all) => {
-        if (cancelled) return
-        setAccessibleProjects(all)
-      })
-      .catch(() => { if (!cancelled) setAccessibleProjects([]) })
-    return () => { cancelled = true }
-  }, [jwt, orgs, activeOrgId, orgLoading])
+  }, [jwt, activeOrgId, activeOrg?.name, isAllOrgs, orgLoading, orgs, portfolioScopeKey, refreshTick])
 
   // AQU-326: received-invites surface. Org-independent (matched by email).
   useEffect(() => {
@@ -674,8 +698,22 @@ export function OrgHome() {
     )
   }
 
-  const isPageLoading = sessionLoading || orgLoading || loading
+  const isPageLoading = sessionLoading
+    || orgLoading
+    || accessibleProjectsLoading
+    || (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey)
   const workspaceLabel = isAllOrgs ? "All organizations" : activeOrg?.name ?? "Workspace"
+
+  // Keep cold-start data atomic while preserving the destination's geometry.
+  // The template is intentionally disconnected from partial org/project state:
+  // unknown values remain skeletons and startup has one visual transition.
+  if (isPageLoading) {
+    return (
+      <LoadingOverlay label="Loading dashboard" data-testid="org-home-loading">
+        <OrgHomeLoadingTemplate />
+      </LoadingOverlay>
+    )
+  }
 
   // Rollup stats
   const now = Date.now()
@@ -746,6 +784,7 @@ export function OrgHome() {
   }
 
   function handleCreated(project: ProjectRecord) {
+    void refreshAccessibleProjects()
     navigate(`/projects/${project.id}`)
   }
 
@@ -793,7 +832,11 @@ export function OrgHome() {
         <div className="flex items-center justify-between pr-4">
           <OrgBreadcrumb section="Projects" />
           {activeOrgId != null ? (
-            <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
+            <ProjectCreateDialog
+              orgId={activeOrgId}
+              onCreated={handleCreated}
+              linkableProjects={accessibleProjects}
+            />
           ) : (
             <Badge variant="outline">Select an organization to create a project</Badge>
           )}
@@ -803,9 +846,7 @@ export function OrgHome() {
       main={
         <Page size="wide">
           <PageHeader title={workspaceLabel} />
-          {isPageLoading ? (
-            <OrgHomeSkeleton isAllOrgs={isAllOrgs} />
-          ) : error ? (
+          {error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (
             <div className="space-y-6">
@@ -844,6 +885,7 @@ export function OrgHome() {
                   orgId={activeOrgId}
                   projectCount={projects.length}
                   onProjectCreated={handleCreated}
+                  linkableProjects={accessibleProjects}
                 />
               )}
 
@@ -1082,7 +1124,11 @@ export function OrgHome() {
                       action={
                         <div className="flex flex-wrap items-center justify-center gap-2">
                           {activeOrgId != null && (
-                            <ProjectCreateDialog orgId={activeOrgId} onCreated={handleCreated} />
+                            <ProjectCreateDialog
+                              orgId={activeOrgId}
+                              onCreated={handleCreated}
+                              linkableProjects={accessibleProjects}
+                            />
                           )}
                           <Button
                             variant="outline"

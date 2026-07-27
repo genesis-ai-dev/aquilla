@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, useCallback } from "react"
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   listSessions, addSession, activateSession, removeSession,
@@ -8,7 +17,7 @@ import {
 import { clearAllLocalData } from "@/lib/store/project-index"
 import type { FrontierSession } from "@/lib/frontier/types"
 
-export function useAccounts() {
+function useAccountsState(enabled = true) {
   const qc = useQueryClient()
   const [active, setActive] = useState<FrontierSession | null>(null)
   const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -22,6 +31,8 @@ export function useAccounts() {
   const prevKeyRef = useRef<string | null | undefined>(undefined)
 
   const refresh = useCallback(async () => {
+    if (!enabled) return
+    setLoading(true)
     const [a, s] = await Promise.all([loadActiveSession(), listSessions()])
     const key = a ? sessionKey(a) : null
     if (prevKeyRef.current !== undefined && prevKeyRef.current !== key) {
@@ -31,14 +42,17 @@ export function useAccounts() {
     setActive(a)
     setSessions(s)
     setLoading(false)
-  }, [qc])
+  }, [enabled, qc])
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     refresh().catch(() => { if (!cancelled) setLoading(false) })
-    const un = subscribeSession(() => { refresh() })
+    const un = subscribeSession(() => {
+      void refresh().catch(() => { if (!cancelled) setLoading(false) })
+    })
     return () => { cancelled = true; un() }
-  }, [refresh])
+  }, [enabled, refresh])
 
   const add = useCallback(async (s: FrontierSession) => { await addSession(s) }, [])
   // Switching accounts drops the prior account's cached projects (thin
@@ -57,4 +71,28 @@ export function useAccounts() {
   }, [qc])
 
   return { active, sessions, loading, add, activate, remove }
+}
+
+type AccountsContextValue = ReturnType<typeof useAccountsState>
+
+const AccountsContext = createContext<AccountsContextValue | null>(null)
+
+/**
+ * Loads the browser's active account once and shares it with every session
+ * consumer. Without this provider each useFrontierSession/useAccounts caller
+ * independently read IndexedDB and subscribed to account changes, producing
+ * staggered first-paint states and unnecessary storage work.
+ */
+export function AccountsProvider({ children }: { children: ReactNode }) {
+  const value = useAccountsState()
+  return createElement(AccountsContext.Provider, { value }, children)
+}
+
+export function useAccounts() {
+  const shared = useContext(AccountsContext)
+  // Keep hooks/components independently renderable in focused tests and small
+  // standalone entry points. The disabled local state performs no IDB reads or
+  // subscriptions when the app-level provider is present.
+  const local = useAccountsState(shared == null)
+  return shared ?? local
 }

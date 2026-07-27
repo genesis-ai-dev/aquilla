@@ -2,7 +2,14 @@
 // These test business logic only — no React rendering needed.
 
 import { describe, it, expect } from "vitest"
-import { applyFilters, applySorting, DEFAULT_FILTER, resolveFileName } from "./CommentsPage"
+import {
+  applyFilters,
+  applySorting,
+  countActiveFilters,
+  headerBadgeCount,
+  DEFAULT_FILTER,
+  resolveFileName,
+} from "./CommentsPage"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
@@ -173,6 +180,71 @@ describe("applySorting", () => {
     ]
     const result = applySorting(roots, "recent-activity")
     expect(result[0].commentId).toBe("active")
+  })
+})
+
+// ── AQU-650: header count badge reflects active filters ──────────────────
+// The badge next to the "Comments" title shows the project total when no
+// filter is active, but the number of *visible threads* once any filter is on.
+
+describe("countActiveFilters", () => {
+  it("is 0 with the default (no) filter", () => {
+    expect(countActiveFilters(DEFAULT_FILTER)).toBe(0)
+  })
+
+  it("counts each narrowing filter type", () => {
+    expect(countActiveFilters({ ...DEFAULT_FILTER, fileId: "GEN.sfm" })).toBe(1)
+    expect(countActiveFilters({ ...DEFAULT_FILTER, authorId: "user-alice" })).toBe(1)
+    expect(countActiveFilters({ ...DEFAULT_FILTER, participant: "user-bob" })).toBe(1)
+    expect(countActiveFilters({ ...DEFAULT_FILTER, showResolved: true })).toBe(1)
+    expect(countActiveFilters({ ...DEFAULT_FILTER, search: "hello" })).toBe(1)
+  })
+
+  it("sums combined filters", () => {
+    expect(
+      countActiveFilters({ ...DEFAULT_FILTER, authorId: "user-alice", search: "hi" }),
+    ).toBe(2)
+  })
+
+  it("does not count sort (never narrows the list)", () => {
+    expect(countActiveFilters({ ...DEFAULT_FILTER, sort: "creation" })).toBe(0)
+  })
+
+  it("ignores a whitespace-only search — applyFilters ignores it too", () => {
+    expect(countActiveFilters({ ...DEFAULT_FILTER, search: "   " })).toBe(0)
+  })
+})
+
+describe("headerBadgeCount", () => {
+  it("shows the project total when no filter is active", () => {
+    // 6 comments total, no filter → badge shows 6 (unchanged behavior)
+    expect(headerBadgeCount(6, 6, 0)).toBe(6)
+  })
+
+  it("shows the visible-thread count when a filter narrows the list", () => {
+    // author filter leaves 1 of 6 threads visible → badge shows 1, not 6
+    expect(headerBadgeCount(6, 1, 1)).toBe(1)
+  })
+
+  it("shows 0 when filters are active but nothing matches", () => {
+    expect(headerBadgeCount(6, 0, 2)).toBe(0)
+  })
+
+  it("reflects further narrowing from combined filters", () => {
+    // author + search narrows 6 → 2
+    expect(headerBadgeCount(6, 2, 2)).toBe(2)
+  })
+
+  it("end-to-end: applyFilters output drives the badge count", () => {
+    const roots = [
+      makeComment({ commentId: "a", authorId: "user-alice" }),
+      makeComment({ commentId: "b", authorId: "user-bob" }),
+      makeComment({ commentId: "c", authorId: "user-bob" }),
+    ]
+    const filter = { ...DEFAULT_FILTER, authorId: "user-alice" }
+    const visible = applyFilters(roots, noReplies, filter)
+    const badge = headerBadgeCount(roots.length, visible.length, countActiveFilters(filter))
+    expect(badge).toBe(1)
   })
 })
 

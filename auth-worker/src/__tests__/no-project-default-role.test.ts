@@ -123,12 +123,14 @@ describe("AQU-487: no project-wide default role — effective role is explicit-g
     // silently strip or alter their access.
     await seedOrgAndProject()
     await seedUser(5, "org_only_member")
+    // AQU-435: the org-wide grant path now starts at maintainer (600); a
+    // maintainer is the member who still relies solely on it.
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 5, 400, 1)",
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 5, 600, 1)",
     ).run()
 
     const before = await getRole("org_only_member")
-    expect(before.level).toBe(400)
+    expect(before.level).toBe(600)
     expect(before.source).toBe("org")
 
     // Another member gets a brand-new direct override at a different level.
@@ -137,7 +139,7 @@ describe("AQU-487: no project-wide default role — effective role is explicit-g
     ).run()
 
     const after = await getRole("org_only_member")
-    expect(after.level).toBe(400)
+    expect(after.level).toBe(600)
     expect(after.source).toBe("org")
   })
 })

@@ -174,6 +174,92 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
     expect(onEscapeToGrid).not.toHaveBeenCalled()
   })
 
+  // AQU-667: an AI draft (sparkle / batch "Draft all") that lands while the
+  // target editor is focused must become the editor's content, and a subsequent
+  // blur must NOT commit the stale pre-draft text over it — otherwise the
+  // prediction "randomly doesn't save" (the cell reloads blank).
+  it("absorbs an AI draft that lands while focused and never blurs stale text over it", async () => {
+    const commits: { value: string; valueHtml: string }[] = []
+    const onCommit = (snap: { value: string; valueHtml: string }) => { commits.push(snap) }
+    const { container, rerender } = render(
+      <TranslatedEditor
+        cellId="cell-ai"
+        initialPlain=""
+        aiDrafted={false}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+
+    const pm = container.querySelector(".ProseMirror") as HTMLElement
+    // Focus the (empty, untranslated) cell — the translator is sitting in it
+    // when the prediction lands.
+    act(() => { pm.focus() })
+
+    // The AI draft lands in the store while we're focused: the row re-renders
+    // with the predicted value flagged as an authoritative AI draft.
+    await act(async () => {
+      rerender(
+        <TranslatedEditor
+          cellId="cell-ai"
+          initialPlain="predicted text"
+          aiDrafted
+          onCommit={onCommit}
+        />,
+      )
+      await Promise.resolve()
+    })
+
+    // The prediction is now visible INSIDE the editor (absorbed while focused),
+    // so a keystroke would edit the prediction, not the empty pre-draft value.
+    expect(pm.textContent).toContain("predicted text")
+
+    // Move away — the classic reproduction step.
+    await act(async () => {
+      pm.blur()
+      await Promise.resolve()
+    })
+
+    // The invariant: the blur must never have committed the stale empty value.
+    expect(commits.some((c) => c.value.trim() === "")).toBe(false)
+    // And if it committed at all, it committed the prediction — never older text.
+    for (const c of commits) expect(c.value).toContain("predicted text")
+  })
+
+  // Negative guard: a NON-AI (human/remote) value change while focused must NOT
+  // yank the focused editor's content — that path is owned by the
+  // discard-and-reload banner, not a silent re-hydrate. Protects normal editing.
+  it("does not overwrite a focused editor on a non-AI value change", async () => {
+    const { container, rerender } = render(
+      <TranslatedEditor
+        cellId="cell-human"
+        initialPlain="hello"
+        aiDrafted={false}
+        onCommit={() => { /* no-op */ }}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+
+    const pm = container.querySelector(".ProseMirror") as HTMLElement
+    act(() => { pm.focus() })
+
+    await act(async () => {
+      rerender(
+        <TranslatedEditor
+          cellId="cell-human"
+          initialPlain="remote change"
+          aiDrafted={false}
+          onCommit={() => { /* no-op */ }}
+        />,
+      )
+      await Promise.resolve()
+    })
+
+    // Still showing the focused content — not silently replaced.
+    expect(pm.textContent).toContain("hello")
+    expect(pm.textContent).not.toContain("remote change")
+  })
+
   it("renders the discard-and-reload banner when remoteChangedDuringEdit is true", async () => {
     const onDiscard = vi.fn()
     const { getByText } = render(

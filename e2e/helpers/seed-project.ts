@@ -31,6 +31,7 @@ import { fileURLToPath } from "node:url"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
 import { createProjectServerSide } from "./frontier-api"
+import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -95,7 +96,10 @@ export async function seedProjectWithFile(
       ...(str.type !== undefined ? { type: str.type } : {}),
       ...(str.group ? { canonicalRef: str.group } : {}),
       sequenceIndex: seq,
-      ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      // useCells reads paragraphStart from `source.metadata.paragraphStart`
+      // (src/hooks/useCells.ts), not the top-level field — mirror
+      // buildBulkCellsWithSpeakers (src/lib/import.ts), which sets both.
+      ...(str.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
     }
     prevCellId = str.id
     return cell
@@ -115,18 +119,18 @@ export async function seedProjectWithFile(
     importFormat: "md",
     parserVersion: "workspace-import-v1",
   }
-  const r = await fetch(`${SYNC_BASE}/import`, {
-    method: "POST",
+  await postIdempotentJson({
+    url: `${SYNC_BASE}/import`,
     headers: importHeaders,
-    body: JSON.stringify({ projectId, fileId, file, cells, clientTs: Date.now() }),
+    body: { projectId, fileId, file, cells, clientTs: Date.now() },
+    operation: "bulk import",
   })
-  if (!r.ok) throw new Error(`bulk import failed: HTTP ${r.status} — ${await r.text()}`)
-  const done = await fetch(`${SYNC_BASE}/import`, {
-    method: "POST",
+  await postIdempotentJson({
+    url: `${SYNC_BASE}/import`,
     headers: importHeaders,
-    body: JSON.stringify({ projectId, fileId, cells: [], complete: true }),
+    body: { projectId, fileId, cells: [], complete: true },
+    operation: "import finalize",
   })
-  if (!done.ok) throw new Error(`import finalize failed: HTTP ${done.status} — ${await done.text()}`)
 
   return { projectId, projectName, fileId, fileName, cellIds: strings.map((s) => s.id) }
 }
@@ -135,8 +139,31 @@ export async function seedProjectWithFile(
  * for cells to render. Replaces createProject + openProject + importFile +
  * openFileBySubstring + waitForEditor. */
 export async function openSeededProject(page: Page, seeded: SeededProject): Promise<Workspace> {
+  const sourceCellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
+  const sourceCellsLoaded = page.waitForResponse((response) => {
+    if (response.request().method() !== "GET") return false
+    const url = new URL(response.url())
+    return url.pathname === sourceCellsPath && url.searchParams.get("side") === "source"
+  }, { timeout: 30_000 })
+
   await page.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
+  const sourceResponse = await sourceCellsLoaded
+  if (!sourceResponse.ok()) {
+    throw new Error(
+      `Seeded source cells failed to load: HTTP ${sourceResponse.status()} — ${await sourceResponse.text()}`,
+    )
+  }
+  const payload = await sourceResponse.json() as {
+    cells?: Array<{ cellId?: string }>
+  }
+  const firstCellId = seeded.cellIds[0]
+  if (!firstCellId || !payload.cells?.some((cell) => cell.cellId === firstCellId)) {
+    throw new Error(
+      `Seeded source response did not contain expected first cell ${firstCellId ?? "<missing>"}`,
+    )
+  }
+
   const ws = new Workspace(page)
-  await ws.waitForEditor()
+  await ws.waitForEditor(firstCellId)
   return ws
 }

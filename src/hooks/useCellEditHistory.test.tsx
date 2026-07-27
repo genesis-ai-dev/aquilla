@@ -74,7 +74,16 @@ describe("useCellEditHistory (Phase 2b)", () => {
   })
 
   it("maps the newest-first server payload to CellHistoryEntry shape", async () => {
-    fetchCellHistoryMock.mockResolvedValueOnce([SERVER_EVENTS[0]])
+    fetchCellHistoryMock.mockResolvedValueOnce([
+      makeEvent({
+        id: "e3",
+        serverSeq: 3,
+        payload: {
+          value: "third edit",
+          valueHtml: '<p data-idml-version="2">third edit</p>',
+        },
+      }),
+    ])
     const { result } = renderHook(() =>
       useCellEditHistory({
         enabled: true,
@@ -87,6 +96,7 @@ describe("useCellEditHistory (Phase 2b)", () => {
     await waitFor(() => expect(result.current.history).toHaveLength(1))
     const entry = result.current.history[0]
     expect(entry.value).toBe("third edit")
+    expect(entry.valueHtml).toBe('<p data-idml-version="2">third edit</p>')
     expect(entry.source).toBe("human")
     expect(entry.author).toBe("alice")
     expect(entry.validated).toBe(false)

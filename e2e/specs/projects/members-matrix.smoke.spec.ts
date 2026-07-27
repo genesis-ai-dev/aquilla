@@ -12,8 +12,6 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("members page renders roster with expandable project access", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/members"))
-  await alice.waitForLoadState("networkidle")
-
   await expect(alice.locator("h1").filter({ hasText: /Members/i }).first()).toBeVisible({
     timeout: 10_000,
   })

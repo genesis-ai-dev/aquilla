@@ -49,6 +49,12 @@ export interface OrgWorkloadAssignment {
 export interface MyAssignment {
   assignmentId: string
   projectId: string
+  /**
+   * AQU-690: the file the assignment's scope resolved to, so the Editor's
+   * "My assignments" click can open the right file. null only when the scope
+   * resolved to zero cells.
+   */
+  fileId: string | null
   scopeKind: string
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */

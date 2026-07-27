@@ -6,7 +6,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
  * AssignWork — submitting the assignment form.
  *
  * AssignWork.tsx renders a form with:
- *   - Assignee <select> (org members)
+ *   - Assignee <select> (project members only — AQU-676)
  *   - Book <select> (project files)
  *   - Chapter <select> (optional sections)
  *   - Deadline <input type="date"> (optional)
@@ -28,8 +28,6 @@ test("AssignWork form submits and collapses after success", async ({ alice }) =>
 
   // Navigate to the org project overview (ProjectOverview.tsx).
   await alice.goto(`/projects/${seeded.projectId}`)
-  await alice.waitForLoadState("networkidle")
-
   // The "Assign…" button should be visible for the project owner.
   const assignBtn = alice.getByRole("button", { name: /^Assign…$/i })
   await expect(assignBtn).toBeVisible({ timeout: 10_000 })
@@ -39,14 +37,12 @@ test("AssignWork form submits and collapses after success", async ({ alice }) =>
   const panel = alice.locator('[role="group"][aria-label="Assign work"]')
   await expect(panel).toBeVisible({ timeout: 5_000 })
 
-  // Select assignee — alice is in the org so her option should appear.
+  // Select assignee — alice is the project creator (a project-specific
+  // membership path per AQU-676) so her option should appear.
   const assigneeSelect = panel.getByRole("combobox", { name: "Assignee" })
   await expect(assigneeSelect).toBeVisible({ timeout: 5_000 })
 
-  // Wait for org members to load (API call on panel open).
-  await alice.waitForTimeout(1_500)
-
-  // Select alice as the assignee (she's the project owner, so she's in the org).
+  // Select alice as the assignee (she created the project, so she's a project member).
   await assigneeSelect.click()
   const assigneeOptions = alice.getByRole("option")
   await expect(assigneeOptions.first()).toBeVisible({ timeout: 3_000 })

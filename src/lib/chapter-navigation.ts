@@ -59,13 +59,19 @@ export function shouldAcceptChapterVisibleIndex(
   return nextIndex >= pendingJump.index && nextIndex < pendingJump.endIndex
 }
 
-/** Prefer a pinned jump target over a transient viewport section label. */
+/**
+ * Prefer an explicit selection (a pinned jump target or a picker/arrow choice)
+ * over a transient viewport section label. This both prevents the label from
+ * flashing intermediate chapters during a programmatic jump and keeps a short
+ * final chapter — whose first row can't reach the viewport's top edge —
+ * authoritative until the user scrolls.
+ */
 export function resolveActiveChapterLabel(
   chapterLabels: readonly string[],
-  currentSectionLabel: string,
-  pinnedLabel: string | null,
+  viewportLabel: string,
+  selectedLabel: string | null,
 ): string {
-  if (pinnedLabel && chapterLabels.includes(pinnedLabel)) return pinnedLabel
-  if (chapterLabels.includes(currentSectionLabel)) return currentSectionLabel
+  if (selectedLabel && chapterLabels.includes(selectedLabel)) return selectedLabel
+  if (chapterLabels.includes(viewportLabel)) return viewportLabel
   return chapterLabels[0] ?? ""
 }

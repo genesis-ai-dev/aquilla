@@ -33,8 +33,6 @@ test("all org-level routes render without errors", async ({ alice }) => {
   ]
   for (const route of ORG_ROUTES) {
     await alice.goto(route)
-    await alice.waitForLoadState("networkidle")
-
     // No crash boundary.
     await expect(alice.locator("text=/Something went wrong/i")).not.toBeVisible()
     // No unhandled error overlay from Vite.
@@ -50,8 +48,6 @@ test("all org-level routes render without errors", async ({ alice }) => {
 test("all project-level routes render without errors", async ({ alice }) => {
   for (const route of PROJECT_ROUTES) {
     await alice.goto(route)
-    await alice.waitForLoadState("networkidle")
-
     await expect(alice.locator("text=/Something went wrong/i")).not.toBeVisible()
     await expect(alice.locator("vite-error-overlay")).not.toBeAttached()
   }

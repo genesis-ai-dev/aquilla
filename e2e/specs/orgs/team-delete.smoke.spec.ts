@@ -13,8 +13,6 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("team delete confirm workflow navigates back to teams list", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/teams"))
-  await alice.waitForLoadState("networkidle")
-
   // Create a team to delete.
   await alice.getByRole("button", { name: /New team/i }).click()
   const nameInput = alice.locator('input[placeholder="Team name"]')
@@ -22,8 +20,6 @@ test("team delete confirm workflow navigates back to teams list", async ({ alice
   await nameInput.fill(`DeleteTeam ${Date.now()}`)
   await alice.getByRole("button", { name: /^Create$/i }).click()
   await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
-  await alice.waitForLoadState("networkidle")
-
   // "Delete team" button reveals inline confirmation.
   const deleteTeamBtn = alice.getByRole("button", { name: /Delete team/i })
   await expect(deleteTeamBtn).toBeVisible({ timeout: 5_000 })

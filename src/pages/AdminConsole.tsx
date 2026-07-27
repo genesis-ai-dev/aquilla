@@ -5,6 +5,8 @@ import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Page, PageHeader, Section } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { LoadingTemplate } from "@/components/ui/loading-overlay"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
@@ -227,18 +229,24 @@ export function AdminConsole() {
 /** Skeleton mirroring the Overview home while the first fetch is in flight. */
 function ConsoleSkeleton() {
   return (
-    <div className="space-y-6">
-      <div className="h-8 w-72 animate-pulse rounded-md bg-muted" />
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-20 animate-pulse rounded-2xl border bg-card" />
-        ))}
+    <LoadingTemplate
+      label="Loading admin console"
+      className="min-h-[34rem]"
+      templateClassName="min-h-[34rem]"
+    >
+      <div className="flex flex-col gap-6">
+        <Skeleton className="h-8 w-72 rounded-full" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 rounded-2xl border bg-card" />
+          ))}
+        </div>
+        <Skeleton className="h-48 rounded-2xl border bg-card" />
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Skeleton className="h-40 rounded-2xl border bg-card" />
+          <Skeleton className="h-40 rounded-2xl border bg-card" />
+        </div>
       </div>
-      <div className="h-48 animate-pulse rounded-2xl border bg-card" />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="h-40 animate-pulse rounded-2xl border bg-card" />
-        <div className="h-40 animate-pulse rounded-2xl border bg-card" />
-      </div>
-    </div>
+    </LoadingTemplate>
   )
 }

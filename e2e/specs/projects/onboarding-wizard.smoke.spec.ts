@@ -16,8 +16,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("onboarding wizard welcome step renders and Get started advances to step 2", async ({ alice }) => {
   await alice.goto("/onboarding")
-  await alice.waitForLoadState("networkidle")
-
   // WelcomeStep h1 renders.
   const h1 = alice.locator("h1").first()
   await expect(h1).toBeVisible({ timeout: 10_000 })

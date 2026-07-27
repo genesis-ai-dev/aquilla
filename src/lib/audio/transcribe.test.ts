@@ -10,7 +10,7 @@ import { createOpfsFs } from "@/lib/fs/opfs-fs"
 import { MemoryDirectoryHandle } from "@/lib/fs/__test__/mem-fs-handles"
 import { __setRootForTests, audioCachePut, audioCacheGet } from "./bytes-cache"
 import { __resetOpfsAvailabilityForTests } from "@/lib/storage/opfs-availability"
-import { transcribeCell, __setTranscribeAudioForTests } from "./transcribe"
+import { transcribeCell, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
 import { getTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
 import { buildFrontierAudioUrl } from "./upload"
 import type { CellData } from "@/hooks/useCells"
@@ -114,5 +114,159 @@ describe("transcribeCell — local-first bytes (FRO-355)", () => {
     const status = getTranscribeStatus(FULL_ID)
     expect(status.kind).toBe("error")
     expect(status.kind === "error" && status.message).toMatch(/boom/)
+  })
+})
+
+// ── AQU-646: trim-window slicing (imported segments share ONE clip) ────────
+
+describe("slicePcmToTrim", () => {
+  // 2 s of 16 kHz PCM where sample i holds value i — slice boundaries are
+  // directly readable off the values.
+  const ramp = () => Float32Array.from({ length: 32000 }, (_, i) => i)
+
+  it("slices [trimStartMs, trimEndMs) at 16 kHz sample indices", () => {
+    const out = slicePcmToTrim(ramp(), { trimStartMs: 500, trimEndMs: 1500 })
+    expect(out.length).toBe(16000)
+    expect(out[0]).toBe(8000) // 0.5 s * 16 kHz
+    expect(out[out.length - 1]).toBe(23999)
+  })
+
+  it("returns the buffer untouched when there is no trim", () => {
+    const pcm = ramp()
+    expect(slicePcmToTrim(pcm)).toBe(pcm)
+    expect(slicePcmToTrim(pcm, { trimStartMs: null, trimEndMs: null })).toBe(pcm)
+  })
+
+  it("clamps edges to the clip bounds", () => {
+    const out = slicePcmToTrim(ramp(), { trimStartMs: -200, trimEndMs: 99999 })
+    expect(out.length).toBe(32000)
+    const tail = slicePcmToTrim(ramp(), { trimStartMs: 1500, trimEndMs: null })
+    expect(tail.length).toBe(8000)
+    expect(tail[0]).toBe(24000)
+  })
+
+  it("returns the full clip for an inverted/empty window (defensive)", () => {
+    const pcm = ramp()
+    expect(slicePcmToTrim(pcm, { trimStartMs: 1500, trimEndMs: 500 })).toBe(pcm)
+    expect(slicePcmToTrim(pcm, { trimStartMs: 700, trimEndMs: 700 })).toBe(pcm)
+  })
+})
+
+// ── AQU-646: media segments — trim + source language + transcription emit ──
+
+function makeMediaCell(): CellData {
+  const cell = makeCell()
+  return {
+    ...cell,
+    medium: "media",
+    translated: "",
+    attachments: {
+      [FULL_ID]: {
+        type: "audio",
+        url: buildFrontierAudioUrl(AUDIO_ID, EXT),
+        trimStartMs: 1000,
+        trimEndMs: 4000,
+        durationMs: 3000,
+      } as never,
+    },
+  } as CellData
+}
+
+describe("transcribeCell — imported media segments (AQU-646)", () => {
+  it("passes the attachment's trim window and the mapped language to Whisper", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    const impl = fakeTranscribe(["bonjour", "monde"])
+    __setTranscribeAudioForTests(impl)
+
+    await transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "fra" })
+
+    expect(impl).toHaveBeenCalledOnce()
+    const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
+    expect(opts.trim).toEqual({ trimStartMs: 1000, trimEndMs: 4000 })
+    expect(opts.language).toBe("fr")
+  })
+
+  it("leaves language undefined (auto-detect) for unmapped tags", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    const impl = fakeTranscribe(["x"])
+    __setTranscribeAudioForTests(impl)
+
+    await transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "Tripuri" })
+
+    const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
+    expect(opts.language).toBeUndefined()
+  })
+
+  it("re-emits attach carrying the transcription AND the preserved trim window", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["bonjour", "monde"]))
+
+    await transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "fra" })
+
+    expect(emitCellAudioAttach).toHaveBeenCalledOnce()
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input.transcription).toBe("bonjour monde")
+    // Latent-bug guard: the projection UPSERT overwrites trim columns with the
+    // emitted values, so the re-emit MUST carry them or the segment loses its
+    // slice of the shared clip.
+    expect(input.trimStartMs).toBe(1000)
+    expect(input.trimEndMs).toBe(4000)
+    expect(input.durationMs).toBe(3000)
+  })
+
+  it("recorded takes (non-media) never emit transcription", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola", "mundo"]))
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1", language: "spa" })
+
+    expect(emitCellAudioAttach).toHaveBeenCalledOnce()
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input).not.toHaveProperty("transcription")
+  })
+
+  it("does not pass a trim for recorded takes (whole clip)", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    const impl = fakeTranscribe(["hola"])
+    __setTranscribeAudioForTests(impl)
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1" })
+
+    const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
+    expect(opts.trim).toBeUndefined()
+  })
+})
+
+// ── SUB-29: a TAKE recorded onto a media cell is target speech ─────────────
+
+function makeMediaCellWithTake(): CellData {
+  // Take audioId is seeded with the CELL id (recorder convention).
+  const takeId = `audio-${"cell-1"}-1700000000-abcdefgh.webm`
+  const base = makeCell()
+  return {
+    ...base,
+    medium: "media",
+    translated: "hola mundo",
+    selectedAudioId: takeId,
+    attachments: {
+      [takeId]: { type: "audio", url: buildFrontierAudioUrl(`audio-cell-1-1700000000-abcdefgh`, "webm") } as never,
+    },
+  } as CellData
+}
+
+describe("transcribeCell — dub take on a media cell (SUB-29)", () => {
+  it("transcribes the WHOLE take (no trim window) and never writes transcription", async () => {
+    const takeAudioId = "audio-cell-1-1700000000-abcdefgh"
+    await audioCachePut(takeAudioId, "webm", new Uint8Array([1, 2, 3]))
+    const impl = fakeTranscribe(["hola", "mundo"])
+    __setTranscribeAudioForTests(impl)
+
+    await transcribeCell({ cell: makeMediaCellWithTake(), session, projectId: "proj-1", language: "spa" })
+
+    const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
+    expect(opts.trim).toBeUndefined() // take plays/transcribes in full
+    expect(emitCellAudioAttach).toHaveBeenCalledOnce()
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input).not.toHaveProperty("transcription") // source text untouched
   })
 })

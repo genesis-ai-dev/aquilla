@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { useOrgMembers } from "@/hooks/useOrg"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 const dismissKey = (orgId: number) => `org:setup:dismissed:${orgId}`
 
@@ -21,10 +22,12 @@ export function OrgSetupChecklist({
   orgId,
   projectCount,
   onProjectCreated,
+  linkableProjects,
 }: {
   orgId: number
   projectCount: number
   onProjectCreated: (p: ProjectRecord) => void
+  linkableProjects?: CloudProjectSummary[]
 }) {
   const navigate = useNavigate()
   const { members } = useOrgMembers(orgId)
@@ -78,7 +81,11 @@ export function OrgSetupChecklist({
           )}
           <span className="flex-1 text-sm">Create your first project</span>
           {!createdProject && (
-            <ProjectCreateDialog orgId={orgId} onCreated={onProjectCreated} />
+            <ProjectCreateDialog
+              orgId={orgId}
+              onCreated={onProjectCreated}
+              linkableProjects={linkableProjects}
+            />
           )}
         </li>
         <li className="flex items-center gap-3">

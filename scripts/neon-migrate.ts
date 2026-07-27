@@ -34,6 +34,11 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Client } from "pg"
 import { neonClient } from "./pg"
+import {
+  diffSchemaContract,
+  expectedSchemaContract,
+  readLiveSchemaContract,
+} from "./neon-schema-contract"
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const SCHEMA_FILE = path.join(REPO_ROOT, "db", "postgres", "schema.sql")
@@ -55,67 +60,28 @@ function migrationFiles(): string[] {
   return fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort()
 }
 
-/**
- * Parse schema.sql into table → column names. The file is regular: blocks
- * open with `CREATE TABLE name (`, one column per line, close with `);`.
- * Lines starting with a constraint keyword are skipped.
- */
-function parseSchemaTables(sql: string): Map<string, string[]> {
-  const tables = new Map<string, string[]>()
-  let current: string[] | null = null
-  for (const raw of sql.split("\n")) {
-    const line = raw.replace(/--.*$/, "").trim()
-    if (current === null) {
-      const m = line.match(/^CREATE TABLE (?:IF NOT EXISTS )?([A-Za-z_][A-Za-z0-9_]*)\s*\($/i)
-      if (m) {
-        current = []
-        tables.set(m[1].toLowerCase(), current)
-      }
-      continue
-    }
-    if (line.startsWith(")")) {
-      current = null
-      continue
-    }
-    const first = line.split(/[\s(,]/)[0]
-    if (!first) continue
-    if (/^(PRIMARY|UNIQUE|CHECK|CONSTRAINT|FOREIGN|EXCLUDE)$/i.test(first)) continue
-    current.push(first.toLowerCase())
-  }
-  return tables
-}
-
-async function liveColumns(client: Client): Promise<Map<string, Set<string>>> {
-  const { rows } = await client.query(
-    `SELECT table_name, column_name FROM information_schema.columns
-     WHERE table_schema = 'public'`,
+/** Diff the declarative schema plus security invariants from migrations. */
+async function schemaDrift(client: Client): Promise<{
+  problems: string[]
+  tables: number
+  columns: number
+  constraints: number
+  indexes: number
+  policies: number
+}> {
+  const expected = expectedSchemaContract(
+    fs.readFileSync(SCHEMA_FILE, "utf8"),
+    migrationFiles().map((file) => fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8")),
   )
-  const live = new Map<string, Set<string>>()
-  for (const r of rows as { table_name: string; column_name: string }[]) {
-    if (!live.has(r.table_name)) live.set(r.table_name, new Set())
-    live.get(r.table_name)!.add(r.column_name)
+  const live = await readLiveSchemaContract(client)
+  return {
+    problems: diffSchemaContract(expected, live),
+    tables: expected.tables.size,
+    columns: [...expected.tables.values()].reduce((sum, table) => sum + table.size, 0),
+    constraints: expected.constraints.size,
+    indexes: expected.indexes.size,
+    policies: [...expected.policies.values()].reduce((sum, policies) => sum + policies.size, 0),
   }
-  return live
-}
-
-/** Diff schema.sql against the live DB. Returns human-readable problems. */
-async function schemaDrift(client: Client): Promise<{ problems: string[]; tables: number; columns: number }> {
-  const expected = parseSchemaTables(fs.readFileSync(SCHEMA_FILE, "utf8"))
-  const live = await liveColumns(client)
-  const problems: string[] = []
-  let columns = 0
-  for (const [table, cols] of expected) {
-    columns += cols.length
-    const liveCols = live.get(table)
-    if (!liveCols) {
-      problems.push(`missing table: ${table}`)
-      continue
-    }
-    for (const col of cols) {
-      if (!liveCols.has(col)) problems.push(`missing column: ${table}.${col}`)
-    }
-  }
-  return { problems, tables: expected.size, columns }
 }
 
 async function ledgerExists(client: Client): Promise<boolean> {
@@ -155,7 +121,10 @@ async function status(client: Client): Promise<number> {
     for (const p of drift.problems) console.log(`✗ schema drift: ${p}`)
     failures += drift.problems.length
   } else {
-    console.log(`✓ schema: all ${drift.tables} tables / ${drift.columns} columns in db/postgres/schema.sql exist live`)
+    console.log(
+      `✓ schema: ${drift.tables} tables / ${drift.columns} columns / ` +
+      `${drift.constraints} named constraints / ${drift.indexes} indexes / ${drift.policies} RLS policies match live`,
+    )
   }
 
   console.log(failures ? `\nFAIL — ${failures} problem(s); do not deploy workers against this DB` : "\nOK — schema is current")

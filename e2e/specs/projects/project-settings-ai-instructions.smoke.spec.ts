@@ -17,8 +17,6 @@ test("project settings AI instructions textarea makes form dirty", async ({ alic
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AIInstr ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings/ai`)
-  await alice.waitForLoadState("networkidle")
-
   // The system prompt textarea.
   const textarea = alice.locator("#sp")
   await expect(textarea).toBeVisible({ timeout: 10_000 })

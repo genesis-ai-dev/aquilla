@@ -7,6 +7,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
+import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
@@ -15,6 +16,7 @@ import { UserError } from "@/lib/errors/user-error"
 import { buttonVariants, Button } from "@/components/ui/button"
 import { RoleLabel } from "@/components/RoleLabel"
 import { Badge } from "@/components/ui/badge"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import {
   InputGroup,
   InputGroupAddon,
@@ -138,10 +140,13 @@ function ProjectRow({
   project: p,
   orgLabel,
   onOpen,
+  isNew = false,
 }: {
   project: CloudProjectSummary
   orgLabel?: string
   onOpen: () => void
+  /** AQU-696: show the "New" badge (shared-projects list only). */
+  isNew?: boolean
 }) {
   return (
     <li>
@@ -153,6 +158,11 @@ function ProjectRow({
         {/* Name + status badge */}
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate text-sm font-medium">{p.name}</span>
+          {isNew && (
+            <Badge className="shrink-0" data-testid="new-shared-badge">
+              New
+            </Badge>
+          )}
           {orgLabel && (
             <Badge variant="secondary" className="shrink-0">
               {orgLabel}
@@ -177,10 +187,13 @@ export function ProjectsList() {
   const { activeOrgId, isAllOrgs, orgs, isLoading: orgLoading, error: orgError, refresh: refreshOrgs } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const username = session?.username ?? null
   const navigate = useNavigate()
   const [projects, setProjects] = useState<CloudProjectSummary[]>([])
   const [portfolioProjects, setPortfolioProjects] = useState<PortfolioProject[]>([])
-  const [loading, setLoading] = useState(false)
+  // Start unresolved so the first render cannot briefly claim the org has no
+  // projects before the initial request effect has had a chance to begin.
+  const [loading, setLoading] = useState(true)
   const [unreachable, setUnreachable] = useState(false)
 
   // Filter + sort state
@@ -204,9 +217,18 @@ export function ProjectsList() {
   }
 
   function loadProjects() {
-    if (!jwt || (!isAllOrgs && activeOrgId == null)) {
+    if (!jwt) {
       setProjects([])
       setLoading(false)
+      return
+    }
+    if (!isAllOrgs && activeOrgId == null) {
+      setProjects([])
+      // Org hydration can publish the membership list and its automatically
+      // selected org across adjacent renders. Keep the project surface
+      // unresolved through that hand-off; only a genuinely org-less account
+      // has a resolved empty project scope.
+      if (!orgLoading && orgs.length === 0) setLoading(false)
       return
     }
     let cancelled = false
@@ -238,7 +260,7 @@ export function ProjectsList() {
     const cleanup = loadProjects()
     return cleanup
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jwt, activeOrgId, isAllOrgs])
+  }, [jwt, activeOrgId, isAllOrgs, orgLoading, orgs.length])
 
   useEffect(() => {
     if (!jwt || !isAllOrgs || orgLoading) {
@@ -374,7 +396,7 @@ export function ProjectsList() {
         // is exhausted, which otherwise reads as "scrolling does nothing".
         <div className="h-full overflow-y-auto overscroll-contain p-6" data-testid="projects-list-scroll">
           {isPageLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <LoadingPanel label="Loading projects" className="min-h-[34rem]" />
           ) : unreachable || orgsUnreachable ? (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
               <span className="text-amber-800 dark:text-amber-200">
@@ -493,7 +515,16 @@ export function ProjectsList() {
                   </div>
                   <ul className="divide-y">
                     {filteredShared.map((p) => (
-                      <ProjectRow key={p.id} project={p} onOpen={() => navigate(`/projects/${p.id}`)} />
+                      <ProjectRow
+                        key={p.id}
+                        project={p}
+                        isNew={
+                          username
+                            ? isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id))
+                            : false
+                        }
+                        onOpen={() => navigate(`/projects/${p.id}`)}
+                      />
                     ))}
                   </ul>
                 </section>

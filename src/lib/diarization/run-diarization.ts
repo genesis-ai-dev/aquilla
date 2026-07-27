@@ -14,6 +14,7 @@ import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { emitSourceCellCreate, emitSourceCellDelete, emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { extractVoiceReference, type ReferenceRange } from "@/lib/audio/reference-extract"
 import { turnsToSegments, speakerLabel, type DiarizationTurn } from "@/lib/timeline/diarization"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -46,6 +47,8 @@ interface Clip {
   /** audioId (no extension) + url, for re-attaching the shared clip per cell. */
   audioId: string
   url: string
+  /** Clip length when the attachment carries it — lets turn tiling reach the clip end. */
+  durationMs?: number
 }
 
 const POLL_INTERVAL_MS = 2500
@@ -57,10 +60,16 @@ export function findFileClip(cells: readonly CellData[]): Clip | null {
     if (c.medium !== "media") continue
     const att = c.attachments
     if (!att) continue
-    const url = (c.selectedAudioId && att[c.selectedAudioId]?.url) || Object.values(att)[0]?.url
+    const entry = (c.selectedAudioId && att[c.selectedAudioId]) || Object.values(att)[0]
+    const url = entry?.url
     const parsed = url ? parseFrontierAudioUrl(url) : null
-    if (parsed) {
-      return { objectName: `${parsed.audioId}.${parsed.ext}`, audioId: parsed.audioId, url }
+    if (parsed && url) {
+      return {
+        objectName: `${parsed.audioId}.${parsed.ext}`,
+        audioId: parsed.audioId,
+        url,
+        ...(entry?.durationMs != null ? { durationMs: entry.durationMs } : {}),
+      }
     }
   }
   return null
@@ -112,7 +121,9 @@ async function applyTurns(
   clip: Clip,
   turns: DiarizationTurn[],
 ): Promise<RunDiarizationResult> {
-  const { segments, speakers } = turnsToSegments(turns)
+  // AQU-646: tile turn timing to the clip length so playback covers inter-turn
+  // audio; trims stay tight (see turnsToSegments doc).
+  const { segments, speakers } = turnsToSegments(turns, clip.durationMs)
 
   // Replace: drop the file's current media cells, then create one per turn.
   for (const c of args.cells) {
@@ -157,8 +168,50 @@ async function applyTurns(
   // Cast: one "Speaker N" voice per cluster, assigned to its cells. Merge the
   // new assignments into any existing ones (don't clobber other files).
   const additions = buildCastAdditions(pairs, args.ttsSettings, () => uuidv7())
+
+  // AQU-646: give each Speaker voice a clone reference extracted from that
+  // speaker's own turns in the imported clip, so generating target audio on
+  // their cells speaks in the imported speaker's voice (TTS→Seed-VC runs
+  // automatically once `referenceAudioId` is set). Failure-tolerant per
+  // speaker: an extraction error leaves that voice reference-less (today's
+  // behavior) rather than failing the diarization.
+  const speakerRanges = new Map<string, ReferenceRange[]>()
+  for (const s of segments) {
+    const label = speakerLabel(s.speaker)
+    const list = speakerRanges.get(label) ?? []
+    // trim* are in-clip coordinates — exactly what extraction slices.
+    list.push({ startMs: s.trimStartMs, endMs: s.trimEndMs })
+    speakerRanges.set(label, list)
+  }
+  const voiceIdBySpeaker = new Map<string, string>()
+  for (const p of pairs) {
+    const vid = additions.castAssignments[p.cellId]
+    if (vid && !voiceIdBySpeaker.has(p.speaker)) voiceIdBySpeaker.set(p.speaker, vid)
+  }
+  const getSyncToken = (_pid: string, fid: string) => args.getToken(fid)
+  const voices = [...additions.voices]
+  for (const [speaker, ranges] of speakerRanges) {
+    const voiceId = voiceIdBySpeaker.get(speaker)
+    if (!voiceId) continue
+    const idx = voices.findIndex((v) => v.id === voiceId)
+    // Reused voices that already carry a reference keep it.
+    if (idx < 0 || voices[idx].referenceAudioId) continue
+    try {
+      const referenceAudioId = await extractVoiceReference({
+        projectId: args.projectId,
+        fileId: args.fileId,
+        clipUrl: clip.url,
+        ranges,
+        getSyncToken,
+      })
+      if (referenceAudioId) voices[idx] = { ...voices[idx], referenceAudioId }
+    } catch (err) {
+      console.warn(`[diarize] voice reference extraction failed for ${speaker}:`, err)
+    }
+  }
+
   await args.saveTts({
-    voices: additions.voices,
+    voices,
     castAssignments: { ...(args.ttsSettings?.castAssignments ?? {}), ...additions.castAssignments },
   })
 

@@ -122,8 +122,8 @@ Cleared: regressions lens fully; double-apply/gate-bypass; SSE pairing; tenancy 
    I held the push because the new auth-worker memory routes 500 without these tables, and I
    couldn't safely confirm the staging Neon target from here at 2am. Two commands, then push.
 3. First agent-worker deploy (whenever ready): docker image — ROOT CAUSE FOUND: the pull
-   fails because `cloudflare/sandbox:0.7.0` ships NO linux/arm64 manifest (Apple Silicon).
-   Fix: `docker pull --platform linux/amd64 docker.io/cloudflare/sandbox:0.7.0` (Colima needs
+   fails because `cloudflare/sandbox:0.7.0-python` ships NO linux/arm64 manifest (Apple Silicon).
+   Fix: `docker pull --platform linux/amd64 docker.io/cloudflare/sandbox:0.7.0-python` (Colima needs
    x86 emulation: `colima start --vz-rosetta` or `--arch x86_64`), OR bump the pinned SDK/image
    to a 0.12.x version if it ships arm64 (check `docker manifest inspect`). Then `wrangler secret put AGENT_SANDBOX_KEY`,
    `wrangler deploy` from agent-worker/ (claims nothing on the zone; no routes), then set

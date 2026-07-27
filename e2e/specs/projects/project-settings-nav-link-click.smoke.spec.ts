@@ -17,8 +17,6 @@ test("settings sub-menu link navigates to its pane and back", async ({ alice }) 
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `SettingsNavClick ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings`)
-  await alice.waitForLoadState("networkidle")
-
   // The index shows the sub-menu list, not any section's controls.
   const validationLink = alice.getByRole("link", { name: /Validation & health/i })
   await expect(validationLink).toBeVisible({ timeout: 10_000 })

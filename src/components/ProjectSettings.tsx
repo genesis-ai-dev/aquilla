@@ -3,10 +3,11 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import {
   Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
-  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines,
+  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import {
   DropdownMenu,
@@ -65,6 +66,7 @@ import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsS
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
+import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -826,6 +828,9 @@ export function ProjectSettings() {
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
     { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
+    // Monday.com board sync — cloud (synced) projects only: the link lives on
+    // the server against the project's org connection.
+    { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -909,6 +914,13 @@ export function ProjectSettings() {
       icon: BarChart3,
       sectionIds: ["section-ai-metrics"],
     },
+    {
+      id: "integrations",
+      label: "Integrations",
+      description: "Monday.com board sync",
+      icon: Plug,
+      sectionIds: ["section-monday"],
+    },
   ]
 
   const visibleSectionIdSet = new Set(visibleSections.map((s) => s.id))
@@ -931,6 +943,10 @@ export function ProjectSettings() {
     : activeGroup
       ? visibleSections.filter((s) => activeGroup.sectionIds.includes(s.id))
       : []
+
+  if (loading) {
+    return <LoadingPanel label="Loading project settings" className="min-h-screen" />
+  }
 
   // Search-only: place each main-section label above the first matching card
   // in that group (same labels as the index NavList). Non-search panes stay
@@ -958,6 +974,7 @@ export function ProjectSettings() {
       "section-git-sync",
       "section-terminology",
       "section-termbase-sharing",
+      "section-monday",
       "section-ai-metrics",
     ]
     const headers = new Map<string, string>()
@@ -1890,6 +1907,15 @@ export function ProjectSettings() {
         {searchGroupLabel("section-termbase-sharing")}
         {id && SHOW_TERMBASE_SHARING_IN_SETTINGS && sectionsToRender.some((s) => s.id === "section-termbase-sharing") && (
           <TermbaseSharingSection
+            projectId={id}
+            orgId={org?.id ?? null}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+
+        {searchGroupLabel("section-monday")}
+        {id && sectionsToRender.some((s) => s.id === "section-monday") && (
+          <MondayIntegrationSection
             projectId={id}
             orgId={org?.id ?? null}
             roleLevel={project?.syncRole?.level ?? null}

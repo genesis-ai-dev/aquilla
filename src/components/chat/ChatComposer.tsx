@@ -41,6 +41,8 @@ export interface SuggestedAction {
 
 export interface ChatComposerHandle {
   insertChip: (chip: ContextChip) => void
+  /** Prefill the composer with plain text (e.g. an example prompt) and focus it. */
+  insertText: (text: string) => void
 }
 
 export interface ChatComposerProps {
@@ -147,6 +149,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         .focus()
         .insertContent([{ type: "contextChip", attrs: chip }, { type: "text", text: " " }])
         .run()
+      setIsEmpty(editor.isEmpty)
+    },
+    insertText(text: string) {
+      if (!editor) return
+      editor.chain().focus().insertContent(text).run()
       setIsEmpty(editor.isEmpty)
     },
   }), [editor])

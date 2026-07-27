@@ -26,8 +26,6 @@ test("editor shows Import a file CTA when project has no files", async ({ alice 
 
   // If createProject already went to the workspace, navigate to get clean state.
   await alice.goto(`/project/${projectId}/editor`)
-  await alice.waitForLoadState("networkidle")
-
   // "No files yet" heading is visible when the project has no imported files.
   await expect(alice.getByText(/No files yet/i).first()).toBeVisible({ timeout: 10_000 })
 

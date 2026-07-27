@@ -21,6 +21,8 @@ export interface FileTargetImportDialogProps {
   onOpenChange: (open: boolean) => void
   projectId: string
   username: string
+  /** Target-lane storage key. Empty/absent means the project's default lane. */
+  targetLang?: string
   fileName: string
   /** The open file's cells, in display order. */
   cells: FileTargetCellRef[]
@@ -40,6 +42,7 @@ export function FileTargetImportDialog({
   onOpenChange,
   projectId,
   username,
+  targetLang,
   fileName,
   cells,
   getToken,
@@ -70,6 +73,7 @@ export function FileTargetImportDialog({
             key={panelKey}
             projectId={projectId}
             username={username}
+            targetLang={targetLang}
             fileName={fileName}
             cells={cells}
             getToken={getToken}

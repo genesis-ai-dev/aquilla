@@ -1,4 +1,6 @@
-export type FileType = "md" | "docx" | "pptx" | "txt" | "vtt" | "srt" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh"
+import type { ImportSourceLocator } from "../../../shared/import-contract"
+
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
 export type CellType =
   | "text"
@@ -19,6 +21,9 @@ export interface TranslatableString {
   original: string
   originalHtml?: string
   translated: string
+  /** Rich target initialized by format-aware parsers. IDML uses this for its
+   * protected empty slot anchors even before any translated words exist. */
+  translatedHtml?: string
   context: string
   group: string
   /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). */
@@ -55,6 +60,8 @@ export interface TranslatableString {
   metadata?: Record<string, unknown>
   type: CellType
   sourceLocation?: SourceLocation
+  /** Exact format locator when a package-block locator would lose identity. */
+  sourceLocator?: ImportSourceLocator
 }
 
 /** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
@@ -63,11 +70,19 @@ export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
 
-/** AQU-460: true when any project file is a scripture type (USFM/eBible/HelloAO).
- *  Feeds `resolveBibleResourcesEnabled` — same signal as `fileTypeHasSections`,
- *  just aggregated across the file list. */
-export function projectHasScriptureFiles(files: { type: FileType }[] | undefined): boolean {
-  return (files ?? []).some((f) => SCRIPTURE_FILE_TYPES.has(f.type))
+/** Content-aware section capability. `hasScriptureContent` is persisted in
+ * the normalized import manifest for Scripture-shaped spreadsheets and custom
+ * formats; native Scripture types remain compatible with older records. */
+export function fileHasSections(file: Pick<FileReference, "type" | "hasScriptureContent">): boolean {
+  return file.hasScriptureContent === true || fileTypeHasSections(file.type)
+}
+
+/** AQU-460: true when any project file is a native Scripture type or carries
+ * canonical Scripture content in its normalized import manifest. */
+export function projectHasScriptureFiles(
+  files: Pick<FileReference, "type" | "hasScriptureContent">[] | undefined,
+): boolean {
+  return (files ?? []).some(fileHasSections)
 }
 
 /**
@@ -80,8 +95,8 @@ export function projectHasScriptureFiles(files: { type: FileType }[] | undefined
  * scripture project — that's the trust invariant this redesign exists for
  * (a prior load-time auto-enable effect silently overrode explicit OFF).
  *
- * Mirrored server-side in auth-worker/src/lib/aquifer/gate.ts using
- * `files.kind` (the server projection of `FileType`) as the scripture signal.
+ * Mirrored server-side in auth-worker/src/lib/aquifer/gate.ts using the native
+ * `files.kind` signal plus the normalized import manifest capability.
  */
 export function resolveBibleResourcesEnabled(
   explicit: boolean | undefined,
@@ -332,6 +347,13 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
+  /**
+   * AQU-701: set when the user explicitly skips the voice & transcription setup
+   * step ("we don't use voice or transcription"). Marks that step complete in
+   * the setup checklist so a team that never wants voice/transcription isn't
+   * nagged as "not set up". Cleared when they opt back in from the step.
+   */
+  aiSetupSkipped?: boolean
   /** ISO timestamp set when the user dismisses the "your project is still using
    * default AI instructions" nudge, OR when they actually customize the system
    * prompt. Either way, we stop nagging. */
@@ -483,6 +505,12 @@ export interface FileReference {
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
   originalName?: string  // Set the first time `name` is auto-rewritten by a suggestion or user rename. Enables hover-to-see-original. Never overwritten after set.
+  /** Stable USFM/Scripture book identity used for re-import collision matching. */
+  bookCode?: string
+  /** Content capability derived from canonical import addresses. This is
+   * intentionally separate from `type`, which remains the real source format
+   * used for re-import and round-trip export. */
+  hasScriptureContent?: boolean
   /**
    * Display lens for this file's segments (timeline-segment-model, Scope A).
    * `'time'`   → rows sort by timing start (sequenceIndex breaks ties / homes
@@ -603,6 +631,9 @@ export interface WeightedExample {
 export interface CellHistoryEntry {
   timestamp: string
   value: string
+  /** Rich target/source snapshot for formats whose structural HTML is part of
+   *  the round-trip contract (IDML v2) and for ordinary rich-text history. */
+  valueHtml?: string
   source: "human" | "llm"
   author: string
   validated: boolean
@@ -645,7 +676,12 @@ export interface CommentThread {
   createdAt: string
   resolvedAt?: string
   resolvedBy?: string
-  createdForTranslated: string
+  /**
+   * AQU-692: snapshot of the target text when the thread was created, used to
+   * decide the "Translation changed since this thread was created" badge.
+   * `null` = unknown baseline (legacy thread or git-imported) → never stale.
+   */
+  createdForTranslated: string | null
   messages: CommentMessage[]
 }
 
@@ -705,17 +741,20 @@ export function detectFileType(fileName: string): FileType | null {
     md: "md",
     markdown: "md",
     docx: "docx",
-    // AQU-431: .doc files — modern Word often saves OOXML under a .doc extension;
-    // attempt the same ZIP/XML parse path as .docx. True legacy binary .doc
-    // (OLE2 compound document) will fail with a JSZip error; the error surface is
-    // the same "Import failed" message the user already sees for corrupt .docx files.
-    // SWARM-TODO(AQU-431): add a dedicated legacy .doc binary parser (e.g. via
-    // cfb + a doc-text extractor) once a suitable in-repo dependency is available.
-    doc: "docx",
     pptx: "pptx",
+    idml: "idml",
+    xlsx: "xlsx",
     txt: "txt",
+    html: "html",
+    htm: "html",
+    json: "json",
+    arb: "json",
+    po: "po",
+    pot: "po",
+    properties: "properties",
     vtt: "vtt",
     srt: "srt",
+    sbv: "sbv",
     usfm: "usfm",
     sfm: "usfm",
     usx: "usfm",

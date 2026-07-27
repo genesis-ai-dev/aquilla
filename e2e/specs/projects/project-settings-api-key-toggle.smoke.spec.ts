@@ -22,8 +22,6 @@ test("project settings API key toggle shows and hides key", async ({ alice }) =>
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ApiKeyToggle ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings/ai`)
-  await alice.waitForLoadState("networkidle")
-
   // The Gemini ApiKeyField lives inside the Voice card.
   const voice = alice.locator("#section-voice")
   await expect(voice).toBeVisible({ timeout: 10_000 })

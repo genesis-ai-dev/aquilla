@@ -45,7 +45,7 @@ import {
   type ParatextPlan,
   prepareEBibleTargetImport,
   applyEBibleTargetImport,
-  parseFile,
+  prepareImportFile,
   type EBibleProgress,
   type EBibleTargetProgress,
   type EBibleMatchResult,
@@ -55,7 +55,9 @@ import {
   type SourceCellRef,
   type ImportResult,
 } from "@/lib/import"
+import type { PreparedImportFile } from "@/lib/import/import-service"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
+import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
@@ -82,6 +84,12 @@ import { getTestament } from "@/lib/codex-editor/bible-books"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
+
+interface CollisionResolution {
+  skipKeys: ReadonlySet<string>
+  /** normalized incoming book-code/name → existing file id */
+  reimportFileIds: ReadonlyMap<string, string>
+}
 import posthog from "@/lib/posthog"
 import {
   IMPORT_STARTED,
@@ -109,6 +117,10 @@ interface ImportDialogProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  /** Active target-lane storage key. Empty means the project default lane. */
+  targetLang?: string
+  /** Identity JWT used only when a format needs AI-assisted analysis. */
+  identityToken?: string
   /** Mints a sync-token scoped to (projectId, fileId) for the bulk upload. */
   getToken: (fileId: string) => Promise<string | null>
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string; explicit?: boolean }) => void | Promise<void>
@@ -129,11 +141,11 @@ interface ImportDialogProps {
   sourceCells?: SourceCellRef[]
   /**
    * AQU-287: files already in the project. Used by the collision guard to detect
-   * re-imports and offer Skip / Import as duplicate choices. Wired from
+   * re-imports and offer Update existing / Skip / Import as duplicate. Wired from
    * ProjectWorkspace (AQU-272 glue); FileReference satisfies { name }.
    * Fresh projects (empty array or absent) skip the detection step.
    */
-  existingFiles?: { name: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string }[]
   /**
    * DCS (Door43) import (spec §8/§9): persist the `dcsUpstream` cursor to the
    * current project's settings after a successful import, pinning it to the
@@ -177,6 +189,8 @@ export function ImportDialog({
   username,
   sourceLanguage,
   targetLanguage,
+  targetLang,
+  identityToken,
   getToken,
   onImported,
   ttsSettings,
@@ -202,6 +216,7 @@ export function ImportDialog({
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }
     skipped: { book: string; reason: string }[]
   } | null>(null)
+  const [importResultError, setImportResultError] = useState<string | null>(null)
   const [directionSource, setDirectionSource] = useState("")
   const [directionTarget, setDirectionTarget] = useState("")
   // Guard against double-clicks on "Set direction".
@@ -212,14 +227,18 @@ export function ImportDialog({
   const [collisionState, setCollisionState] = useState<{
     collisions: CollisionResult[]
     // Callback that continues the pending import once the user resolves collisions.
-    proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>
+    proceed: (resolution: CollisionResolution) => void | Promise<void>
   } | null>(null)
   // AQU-310: preview state — parsed results waiting for user confirmation before upload.
   const [previewState, setPreviewState] = useState<{
     results: ImportResult[]
     /** Commits the parsed results to the server once user confirms. */
     commit: () => void | Promise<void>
+    /** Surface to restore if the user cancels the preview. */
+    returnScreen: "upload" | "spreadsheet"
   } | null>(null)
+  const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
+  const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
   // PreviewPanel can render an in-flight indicator).
@@ -240,41 +259,61 @@ export function ImportDialog({
       setScreen("landing")
       setPendingImport(null)
       setImportResult(null)
+      setImportResultError(null)
       setCollisionState(null)
       setPreviewState(null)
       setPreviewUploadPhase("")
       setPreviewUploadProgress(null)
+      setSpreadsheetSeedFile(null)
+      setSpreadsheetReturnScreen("landing")
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
     }
   }, [open])
 
-  // BLOCKER 2: intercept dialog close — if we're on the direction screen with a
-  // pending import, flush it via the skip path before propagating the close so
-  // the imported files are never silently dropped.
+  const finishPendingImport = useCallback(async (
+    captured: NonNullable<typeof pendingImport>,
+    rememberSkip: boolean,
+  ) => {
+    if (flushingRef.current) return
+    flushingRef.current = true
+    setConfirming(true)
+    setConfirmError(null)
+    try {
+      await onImported(captured.refs, captured.inferredLanguages)
+      if (rememberSkip) {
+        try {
+          localStorage.setItem(skipStorageKey(projectId), "true")
+        } catch {
+          // localStorage may be unavailable; the import itself still succeeded.
+        }
+      }
+      setPendingImport(null)
+      onOpenChange(false)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      setPendingImport(captured)
+      setConfirmError(`Couldn't finish saving your import — please try again. (${message})`)
+    } finally {
+      flushingRef.current = false
+      setConfirming(false)
+    }
+  }, [onImported, onOpenChange, projectId])
+
+  // Intercept dialog close while an imported file still needs its final project
+  // handoff. Keep the dialog visible until that async write succeeds; on failure
+  // the same direction screen shows a retryable error instead of closing and
+  // leaving a console-only warning.
   const handleOpenChange = useCallback(
     (nextOpen: boolean) => {
       if (!nextOpen && pendingImport !== null) {
-        // Fix 3: bail if we already started a flush this macrotask.
-        if (flushingRef.current) {
-          onOpenChange(nextOpen)
-          return
-        }
-        flushingRef.current = true
-        // Flush the pending import without language overrides (skip semantics).
-        // SWARM-TODO(AQU-274): surface this as a user-visible banner ("Import
-        // couldn't be saved — copy your files and try again") once the
-        // ImportDialog report-flow agent lands (wave collisions risk). For now
-        // the error stays console-only to avoid conflicting with that refactor.
-        void Promise.resolve(onImported(pendingImport.refs, pendingImport.inferredLanguages)).catch((err: unknown) => {
-          console.warn("[ImportDialog] flush-on-close failed:", err)
-        })
-        setPendingImport(null)
+        void finishPendingImport(pendingImport, false)
+        return
       }
       onOpenChange(nextOpen)
     },
-    [pendingImport, onImported, onOpenChange],
+    [finishPendingImport, pendingImport, onOpenChange],
   )
 
   // Called by child panels when they finish importing. If the language
@@ -297,6 +336,7 @@ export function ImportDialog({
           project_id: projectId,
         })
         setImportResult({ refs, inferredLanguages, skipped: skippedBooks })
+        setImportResultError(null)
         setScreen("result")
         // Persist per-project so a re-show is possible (bonus scope).
         try {
@@ -352,18 +392,26 @@ export function ImportDialog({
   const handleResultDismiss = useCallback(async () => {
     if (!importResult) return
     const { refs, inferredLanguages } = importResult
-    setImportResult(null)
-    // Run through the normal post-import flow (direction prompt if needed).
-    await handleChildImported(refs, inferredLanguages)
+    setImportResultError(null)
+    try {
+      // Run through the normal post-import flow (direction prompt if needed).
+      // Retain the report until the handoff succeeds so Close is safely retryable.
+      await handleChildImported(refs, inferredLanguages)
+      setImportResult(null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setImportResultError(`Couldn't finish saving your import — please try again. (${message})`)
+    }
   }, [importResult, handleChildImported])
 
   // BLOCKER 1 fix: values confirmed via DirectionPanel are EXPLICIT — they
   // replace current values, not merely fill empty slots.
   async function handleDirectionConfirm() {
-    if (!pendingImport || confirming) return
+    if (!pendingImport || confirming || flushingRef.current) return
     // AQU-249 fix: clear inline error from any previous attempt.
     setConfirmError(null)
     setConfirming(true)
+    flushingRef.current = true
     const captured = pendingImport
     // Null out synchronously as a double-click guard.
     setPendingImport(null)
@@ -385,26 +433,14 @@ export function ImportDialog({
       const message = err instanceof Error ? err.message : String(err)
       setConfirmError(`Couldn't save your import — please try again. (${message})`)
     } finally {
+      flushingRef.current = false
       setConfirming(false)
     }
   }
 
   function handleDirectionSkip() {
-    if (!pendingImport) return
-    // Persist the skip so re-imports don't re-prompt this project.
-    try {
-      localStorage.setItem(skipStorageKey(projectId), "true")
-    } catch {
-      // localStorage may be unavailable in some environments — ignore silently.
-    }
-    const captured = pendingImport
-    setPendingImport(null)
-    // SWARM-TODO(AQU-274): surface this as a user-visible banner once the
-    // ImportDialog report-flow agent lands — same wave-collision concern as above.
-    void Promise.resolve(onImported(captured.refs, captured.inferredLanguages)).catch((err: unknown) => {
-      console.warn("[ImportDialog] skip flush failed:", err)
-    })
-    onOpenChange(false)
+    if (!pendingImport || confirming) return
+    void finishPendingImport(pendingImport, true)
   }
 
   return (
@@ -417,13 +453,18 @@ export function ImportDialog({
             ) : screen === "direction" ? (
               "Set translation direction"
             ) : screen === "result" ? (
-              "Import complete — some books skipped"
+              "Import complete — some items skipped"
             ) : screen === "collision" ? (
               "Re-import detected"
             ) : screen === "preview" ? (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton
-                  onClick={() => { setPreviewState(null); setScreen("upload") }}
+                  onClick={() => {
+                    const returnScreen = previewState?.returnScreen ?? "upload"
+                    setPreviewState(null)
+                    setPreviewCommitError(null)
+                    setScreen(returnScreen)
+                  }}
                   label="Back to file selection"
                 />
                 Preview
@@ -457,6 +498,10 @@ export function ImportDialog({
             allowDcs={patchDcsCursor !== undefined}
             onSelect={(s) => {
               posthog.capture(IMPORT_STARTED, { import_type: s, project_id: projectId })
+              if (s === "spreadsheet") {
+                setSpreadsheetSeedFile(null)
+                setSpreadsheetReturnScreen("landing")
+              }
               setScreen(s)
             }}
           />
@@ -468,6 +513,8 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
+            targetLang={targetLang}
+            identityToken={identityToken}
             getToken={getToken}
             ttsSettings={ttsSettings}
             onCastUpdated={onCastUpdated}
@@ -484,8 +531,13 @@ export function ImportDialog({
               setPreviewUploadPhase("")
               setPreviewUploadProgress(null)
               setPreviewCommitError(null)
-              setPreviewState({ results, commit })
+              setPreviewState({ results, commit, returnScreen: "upload" })
               setScreen("preview")
+            }}
+            onSpreadsheetFile={(file) => {
+              setSpreadsheetSeedFile(file)
+              setSpreadsheetReturnScreen("upload")
+              setScreen("spreadsheet")
             }}
             onCommitPhase={setPreviewUploadPhase}
             onCommitProgress={setPreviewUploadProgress}
@@ -501,6 +553,7 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
+            targetLang={targetLang}
             getToken={getToken}
             sourceCells={sourceCells}
             onImported={async (ref, inferredLanguages) => {
@@ -544,8 +597,8 @@ export function ImportDialog({
             getToken={getToken}
             defaultLang={sourceLanguage}
             patchDcsCursor={patchDcsCursor}
-            onImported={async (refs, inferredLanguages) => {
-              await handleChildImported(refs, inferredLanguages)
+            onImported={async (refs, inferredLanguages, skipped) => {
+              await handleChildImported(refs, inferredLanguages, skipped)
             }}
             excludeFrontMatter={excludeFrontMatter}
           />
@@ -581,8 +634,8 @@ export function ImportDialog({
             projectId={projectId}
             username={username}
             getToken={getToken}
-            onImported={async (refs, inferredLanguages) => {
-              await handleChildImported(refs, inferredLanguages)
+            onImported={async (refs, inferredLanguages, skipped) => {
+              await handleChildImported(refs, inferredLanguages, skipped)
             }}
           />
         )}
@@ -594,17 +647,26 @@ export function ImportDialog({
             username={username}
             sourceLanguage={sourceLanguage}
             targetLanguage={targetLanguage}
+            targetLang={targetLang}
             getToken={getToken}
             ttsSettings={ttsSettings}
             onCastUpdated={onCastUpdated}
             onPreview={(results, commit) => {
-              setPreviewState({ results, commit })
+              setPreviewUploadPhase("")
+              setPreviewUploadProgress(null)
+              setPreviewCommitError(null)
+              setPreviewState({ results, commit, returnScreen: "spreadsheet" })
               setScreen("preview")
             }}
+            onCommitError={setPreviewCommitError}
             onImported={async (refs) => {
               await handleChildImported(refs)
             }}
-            onCancel={() => setScreen("landing")}
+            initialFile={spreadsheetSeedFile}
+            onCancel={() => {
+              setSpreadsheetSeedFile(null)
+              setScreen(spreadsheetReturnScreen)
+            }}
           />
         )}
 
@@ -634,6 +696,7 @@ export function ImportDialog({
           <PairedImportPanel
             projectId={projectId}
             username={username}
+            targetLang={targetLang}
             sourceCells={sourceCells}
             getToken={getToken}
             onImported={(committedCount) => {
@@ -668,6 +731,7 @@ export function ImportDialog({
             importedCount={importResult.refs.length}
             skipped={importResult.skipped}
             onDismiss={handleResultDismiss}
+            error={importResultError}
           />
         )}
 
@@ -681,9 +745,10 @@ export function ImportDialog({
               await previewState.commit()
             }}
             onCancel={() => {
+              const returnScreen = previewState.returnScreen
               setPreviewState(null)
               setPreviewCommitError(null)
-              setScreen("upload")
+              setScreen(returnScreen)
             }}
             uploadPhase={previewUploadPhase}
             uploadProgress={previewUploadProgress}
@@ -695,25 +760,28 @@ export function ImportDialog({
         {screen === "collision" && collisionState && (
           <CollisionPanel
             collisions={collisionState.collisions}
-            onResolve={async (skipKeys) => {
+            onResolve={async (resolution) => {
               const totalCount = collisionState.collisions.length
-              const skippedCount = skipKeys.size
-              const duplicatedCount = totalCount - skippedCount
+              const skippedCount = resolution.skipKeys.size
+              const updatedCount = resolution.reimportFileIds.size
+              const duplicatedCount = totalCount - skippedCount - updatedCount
               if (skippedCount > 0) {
                 posthog.capture(IMPORT_COLLISION_SKIPPED, {
                   skipped_count: skippedCount,
                   duplicated_count: duplicatedCount,
+                  updated_count: updatedCount,
                   project_id: projectId,
                 })
               } else {
                 posthog.capture(IMPORT_COLLISION_DUPLICATED, {
                   duplicated_count: duplicatedCount,
+                  updated_count: updatedCount,
                   project_id: projectId,
                 })
               }
               setCollisionState(null)
               setScreen("upload")
-              await collisionState.proceed(skipKeys)
+              await collisionState.proceed(resolution)
             }}
             onCancel={() => {
               setCollisionState(null)
@@ -756,7 +824,7 @@ type ImportOption = {
 
 const POPULAR_OPTIONS: ImportOption[] = [
   { id: "upload", title: "Upload files", icon: Upload,
-    description: "USFM, DOC, DOCX, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
+    description: "USFM, DOCX, PPTX, IDML, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
   { id: "ebible", title: "eBible Corpus", hint: "public library", icon: Library,
     description: "Openly-licensed Bible translations, imported directly — no download." },
   { id: "helloao", title: "Bible API", hint: "helloao.org", icon: Globe,
@@ -780,8 +848,8 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     description: "Import any released Door43 resource as source and pin it to a release — pull upstream changes later." },
   { id: "sdbh", title: "SDBH Hebrew Lexicon", hint: "UBS MARBLE", icon: BookA, badge: "beta",
     description: "Semantic Dictionary of Biblical Hebrew — localize definitions and glosses by semantic domain, with lossless export back to the MARBLE XML." },
-  { title: "Translation Memory", hint: "TMX", icon: Database, badge: "soon", disabled: true,
-    description: "Reuse prior translations from TMX memory files." },
+  { id: "upload", title: "Translation Memory", hint: "TMX", icon: Database,
+    description: "Import source/target pairs from a TMX memory file." },
 ]
 
 function OptionBadge({ kind }: { kind: "beta" | "soon" }) {
@@ -920,6 +988,8 @@ interface UploadPanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  targetLang?: string
+  identityToken?: string
   getToken: (fileId: string) => Promise<string | null>
   /** AQU-277: third argument carries skipped books for partial Paratext imports. */
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
@@ -929,9 +999,9 @@ interface UploadPanelProps {
    * AQU-287: files already in the project. Passed to detectCollisions before
    * any import starts; on collision, onCollision is called instead of proceeding.
    */
-  existingFiles?: { name: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string }[]
   /** AQU-287: called when collisions are detected; parent shows the collision screen. */
-  onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
+  onCollision?: (collisions: CollisionResult[], proceed: (resolution: CollisionResolution) => void | Promise<void>) => void
   /**
    * AQU-310: called after client-side parsing completes, before any upload.
    * Parent shows a preview screen; commit() triggers the actual bulk upload.
@@ -950,6 +1020,10 @@ interface UploadPanelProps {
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
    *  the Paratext preview). */
   excludeFrontMatter?: boolean
+  /** Spreadsheet-shaped files need explicit column mapping before preview.
+   * Keep this handoff inside the unified Upload files entry point so users do
+   * not have to know which specialized importer to choose. */
+  onSpreadsheetFile: (file: File) => void
 }
 
 /** Sorted, deduped extension list ("mp3,usfm") for import telemetry breakdowns. */
@@ -957,12 +1031,34 @@ function fileExts(list: File[]): string {
   return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, excludeFrontMatter }: UploadPanelProps) {
+function idmlParsePhase(
+  fileName: string,
+  progress: { phase: string; completed: number; total: number },
+): string {
+  const action = progress.phase === "inspect"
+    ? "Checking"
+    : progress.phase === "unpack"
+      ? "Opening"
+      : "Reading"
+  const count = progress.total > 1
+    ? ` (${Math.min(progress.completed, progress.total)}/${progress.total})`
+    : ""
+  return `${action} ${fileName}${count}…`
+}
+
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter }: UploadPanelProps) {
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [phase, setPhase] = useState<string>("")
   const [progress, setProgress] = useState<ImportUploadProgress | null>(null)
+  const parseAbortRef = useRef<AbortController | null>(null)
+  const finalizationCheckpointRef = useRef<{
+    files: File[]
+    refs: FileReference[]
+    skipped?: { book: string; reason: string }[]
+  } | null>(null)
+  useEffect(() => () => parseAbortRef.current?.abort(), [])
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
   // importing.
@@ -987,11 +1083,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         const collisions = detectCollisions(incoming, existingFiles)
         if (collisions.length > 0) {
           // Pause and ask the user; once resolved, re-run with a skipKeys set.
-          onCollision(collisions, async (skipKeys) => {
+          onCollision(collisions, async (resolution) => {
             // Filter out skipped files and proceed with the rest.
-            const filtered = list.filter((f) => !skipKeys.has(f.name.trim().toLowerCase()))
+            const filtered = list.filter((f) => !resolution.skipKeys.has(f.name.trim().toLowerCase()))
             if (filtered.length === 0) return
-            await doImportFiles(filtered)
+            await doImportFiles(filtered, resolution.reimportFileIds)
           })
           return
         }
@@ -1000,7 +1096,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
       await doImportFiles(list)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision]
   )
 
   /** Inner helper: import a resolved list of files (after collision resolution).
@@ -1011,7 +1107,17 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
    * Media files bypass preview (they have no text cells to show).
    */
   const doImportFiles = useCallback(
-    async (list: File[]) => {
+    async (list: File[], reimportFileIds?: ReadonlyMap<string, string>) => {
+      const spreadsheets = list.filter((file) => /\.(?:csv|tsv|xlsx)$/i.test(file.name))
+      if (spreadsheets.length > 0) {
+        if (list.length !== 1) {
+          setError("Import one spreadsheet at a time so its columns can be mapped safely.")
+          return
+        }
+        onSpreadsheetFile(spreadsheets[0])
+        return
+      }
+
       setImporting(true)
       setProgress(null)
       setError(null)
@@ -1031,16 +1137,31 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
 
       // Parse text files client-side for the preview.
       const allParsedResults: ImportResult[] = []
+      const preparedByFile = new Map<File, PreparedImportFile>()
       if (textFiles.length > 0 && onPreview) {
+        parseAbortRef.current?.abort()
+        const parseController = new AbortController()
+        parseAbortRef.current = parseController
         try {
           for (const file of textFiles) {
-            setPhase(`Reading ${file.name}…`)
-            const ft = detectFileType(file.name)
-            if (!ft) continue
-            const results = await parseFile(file, ft, { excludeFrontMatter })
-            allParsedResults.push(...results)
+            const knownType = detectFileType(file.name)
+            setPhase(knownType ? `Reading ${file.name}…` : `Analyzing ${file.name}…`)
+            const prepared = await prepareImportFile(file, {
+              projectId,
+              identityToken,
+              sourceLanguage,
+              targetLanguage,
+              signal: parseController.signal,
+              excludeFrontMatter,
+              onIdmlProgress: (progress) => {
+                setPhase(idmlParsePhase(file.name, progress))
+              },
+            })
+            preparedByFile.set(file, prepared)
+            allParsedResults.push(...prepared.results)
           }
         } catch (err) {
+          if (parseController.signal.aborted) return
           posthog.captureException(err, { import_stage: "parse", project_id: projectId, file_exts: fileExts(list) })
           posthog.capture(IMPORT_FAILED, {
             import_stage: "parse",
@@ -1052,6 +1173,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
           setImporting(false)
           setPhase("")
           return
+        } finally {
+          if (parseAbortRef.current === parseController) parseAbortRef.current = null
         }
         setImporting(false)
         setPhase("")
@@ -1059,27 +1182,53 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         // Hand off to parent to show the preview screen.
         // The commit closure does the actual upload.
         onPreview(allParsedResults, async () => {
-          await doCommit(list)
+          await doCommit(list, preparedByFile, reimportFileIds)
         })
         return
       }
 
       // No preview (media-only batch, or no onPreview callback) — commit immediately.
-      await doCommit(list)
+      await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, onPreview]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
   const doCommit = useCallback(
-    async (list: File[]) => {
+    async (
+      list: File[],
+      preparedByFile?: ReadonlyMap<File, PreparedImportFile>,
+      reimportFileIds?: ReadonlyMap<string, string>,
+    ) => {
       setImporting(true)
       setProgress(null)
       setPhase("")
       onCommitProgress?.(null)
       onCommitError?.(null)
+      const checkpoint = finalizationCheckpointRef.current
+      if (checkpoint?.files === list) {
+        const finishPhase = "Finishing up…"
+        setPhase(finishPhase)
+        onCommitPhase?.(finishPhase)
+        try {
+          await onImported(checkpoint.refs, undefined, checkpoint.skipped)
+          finalizationCheckpointRef.current = null
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Import finalization failed"
+          setError(message)
+          onCommitError?.(message)
+        } finally {
+          setImporting(false)
+          setProgress(null)
+          onCommitProgress?.(null)
+          setPhase("")
+          onCommitPhase?.("")
+        }
+        return
+      }
       const allRefs: FileReference[] = []
+      const allSkipped: { book: string; reason: string }[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
       const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
       // AQU-520: byte totals so the progress UI can show "X / Y MB", not just a
@@ -1088,8 +1237,25 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
       // fraction. `bytesTotal === 0` (media with no size, etc.) hides the readout.
       const bytesTotal = list.reduce((sum, f) => sum + (f.size || 0), 0)
       let bytesBefore = 0
+      let currentFileIndex = 0
+      let castAttempted = false
+      let handoffAttempted = false
+      const persistCastAdditions = async () => {
+        castAttempted = true
+        if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
+          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({
+            voices: additions.voices,
+            castAssignments: {
+              ...(ttsSettings?.castAssignments ?? {}),
+              ...additions.castAssignments,
+            },
+          })
+        }
+      }
       try {
-        for (const file of list) {
+        for (; currentFileIndex < list.length; currentFileIndex++) {
+          const file = list[currentFileIndex]
           const filePhase = `Uploading ${file.name}…`
           setPhase(filePhase)
           // AQU-430: surface phase to parent so PreviewPanel can show progress.
@@ -1098,11 +1264,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
           onCommitProgress?.(null)
           // importFile returns speakerPairs from the SAME buildBulkCellsWithSpeakers
           // call that minted the uploaded cells — cellIds are guaranteed to match.
-          const { refs, speakerPairs } = await importFile(file, {
+          const { refs, speakerPairs, skipped } = await importFile(file, {
             projectId,
             author: username,
             sourceLanguage,
             targetLanguage,
+            targetLang,
+            identityToken,
+            reimportFileIds,
             getToken,
             onCellEnqueued: (count, total) => {
               const p = `Uploading ${file.name}`
@@ -1114,26 +1283,22 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
               setProgress(next)
               onCommitProgress?.(next)
             },
-          })
+          }, preparedByFile?.get(file))
           bytesBefore += file.size || 0
           allRefs.push(...refs)
           allSpeakerPairs.push(...speakerPairs)
+          if (skipped) allSkipped.push(...skipped)
         }
         // Apply cast additions if any subtitle speakers were found.
-        if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
-          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
-          await onCastUpdated({
-            voices: additions.voices,
-            castAssignments: {
-              ...(ttsSettings?.castAssignments ?? {}),
-              ...additions.castAssignments,
-            },
-          })
-        }
+        await persistCastAdditions()
         const finishPhase = "Finishing up…"
         setPhase(finishPhase)
         onCommitPhase?.(finishPhase)
-        await onImported(allRefs)
+        handoffAttempted = true
+        const skipped = allSkipped.length ? allSkipped : undefined
+        finalizationCheckpointRef.current = { files: list, refs: allRefs, skipped }
+        await onImported(allRefs, undefined, skipped)
+        finalizationCheckpointRef.current = null
       } catch (err) {
         const message = err instanceof Error ? err.message : "Import failed"
         posthog.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
@@ -1143,10 +1308,50 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
           file_exts: fileExts(list),
           error_message: message,
         })
-        setError(message)
-        // AQU-430 (fix): also surface to the parent — during the preview screen
-        // this UploadPanel is unmounted, so its local error would never show.
-        onCommitError?.(message)
+        if (allRefs.length > 0 && !handoffAttempted) {
+          const failedAndUnattempted = [
+            ...allSkipped,
+            ...list.slice(currentFileIndex).map((file, index) => ({
+              book: file.name,
+              reason: index === 0 ? message : "not attempted after an earlier file failed",
+            })),
+          ]
+          // Speakers from files that did succeed must not disappear merely
+          // because a later file failed. Report a cast write failure separately
+          // from file failures instead of retrying the file publication.
+          if (!castAttempted) {
+            try {
+              await persistCastAdditions()
+            } catch (castError) {
+              failedAndUnattempted.push({
+                book: "Cast assignments",
+                reason: castError instanceof Error ? castError.message : String(castError),
+              })
+            }
+          }
+          if (failedAndUnattempted.length === 0) {
+            failedAndUnattempted.push({ book: "Import finalization", reason: message })
+          }
+          handoffAttempted = true
+          finalizationCheckpointRef.current = {
+            files: list,
+            refs: allRefs,
+            skipped: failedAndUnattempted,
+          }
+          try {
+            await onImported(allRefs, undefined, failedAndUnattempted)
+            finalizationCheckpointRef.current = null
+          } catch (handoffError) {
+            const handoffMessage = handoffError instanceof Error ? handoffError.message : "Import finalization failed"
+            setError(handoffMessage)
+            onCommitError?.(handoffMessage)
+          }
+        } else {
+          setError(message)
+          // AQU-430 (fix): also surface to the parent — during the preview screen
+          // this UploadPanel is unmounted, so its local error would never show.
+          onCommitError?.(message)
+        }
       } finally {
         setImporting(false)
         setProgress(null)
@@ -1155,7 +1360,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -1181,6 +1386,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
         username={username}
         sourceLanguage={sourceLanguage}
         targetLanguage={targetLanguage}
+        targetLang={targetLang}
         getToken={getToken}
         onImported={onImported}
         onCancel={() => setParatextChoice(null)}
@@ -1243,7 +1449,6 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
                 type="file"
                 multiple
                 className="hidden"
-                accept=".md,.markdown,.doc,.docx,.pptx,.txt,.vtt,.srt,.usfm,.sfm,.usx,.zip,.xlf,.xliff,.tmx,.csv,.tsv,.mp3,.wav,.m4a,.aac,.flac,.ogg,.oga,.opus,.mp4,.m4v,.mov,.webm,.mkv"
                 onChange={handleFileInput}
               />
             </Button>
@@ -1263,9 +1468,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, getT
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
             <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
-            <p><span className="font-medium text-foreground/70">Documents</span> — DOC, DOCX, TXT, MD, PPTX</p>
-            <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT</p>
+            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)</p>
+            <p><span className="font-medium text-foreground/70">Localization</span> — PO/POT, Java properties</p>
+            <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT, SBV</p>
             <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
+            <p><span className="font-medium text-foreground/70">Other formats</span> — AI-assisted when configured, always reviewed before import</p>
           </div>
         </>
       )}
@@ -1281,15 +1488,16 @@ interface ParatextChoiceProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
   /** AQU-277: third argument carries skipped books from a partial import so the
    *  parent can show the result screen before closing. */
   onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }, skipped?: { book: string; reason: string }[]) => void | Promise<void>
   onCancel: () => void
   /** AQU-287: files already in the project; used for collision detection. */
-  existingFiles?: { name: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string }[]
   /** AQU-287: called when collisions are detected before running the import. */
-  onCollision?: (collisions: CollisionResult[], proceed: (skipKeys: ReadonlySet<string>) => void | Promise<void>) => void
+  onCollision?: (collisions: CollisionResult[], proceed: (resolution: CollisionResolution) => void | Promise<void>) => void
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to
    *  prepareParatextProject). */
   excludeFrontMatter?: boolean
@@ -1301,7 +1509,7 @@ interface ParatextChoiceProps {
  *  consultant's in-progress translation against an eBible source picked here
  *  (aligned by verse ref). */
 function ParatextChoice({
-  entries, bookCount, projectId, username, sourceLanguage, targetLanguage, getToken, onImported, onCancel,
+  entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
   existingFiles, onCollision, excludeFrontMatter,
 }: ParatextChoiceProps) {
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
@@ -1315,7 +1523,7 @@ function ParatextChoice({
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(new Set())
   const [expandedBook, setExpandedBook] = useState<string | null>(null)
 
-  const ctx = { projectId, author: username, sourceLanguage, targetLanguage, getToken }
+  const ctx = { projectId, author: username, sourceLanguage, targetLanguage, targetLang, getToken }
 
   // AQU-310: parse the whole project client-side on mount — fast (no network),
   // so the preview appears immediately and the user confirms before any upload.
@@ -1363,11 +1571,15 @@ function ParatextChoice({
     return detectCollisions(incoming, existingFiles)
   }
 
-  async function runSourceWithSkipKeys(skipKeys: ReadonlySet<string>) {
+  async function runSourceWithResolution(resolution: CollisionResolution) {
     if (!plan) return
     setMode("importing"); setError(null); setPhase("Uploading…"); setProgress(null)
     try {
-      const { refs, settings, skipped } = await commitParatextProject(plan, { ...ctx, skipKeys: mergedSkipKeys(skipKeys) }, onProgress)
+      const { refs, settings, skipped } = await commitParatextProject(plan, {
+        ...ctx,
+        skipKeys: mergedSkipKeys(resolution.skipKeys),
+        reimportFileIds: resolution.reimportFileIds,
+      }, onProgress)
       const inferredLang = settings.languageIsoCode || settings.language
       await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
@@ -1387,11 +1599,11 @@ function ParatextChoice({
     if (onCollision) {
       const collisions = detectPlanCollisions(plan)
       if (collisions.length > 0) {
-        onCollision(collisions, (skipKeys) => runSourceWithSkipKeys(skipKeys))
+        onCollision(collisions, runSourceWithResolution)
         return
       }
     }
-    await runSourceWithSkipKeys(new Set())
+    await runSourceWithResolution({ skipKeys: new Set(), reimportFileIds: new Map() })
   }
 
   async function startTarget() {
@@ -1405,7 +1617,7 @@ function ParatextChoice({
     }
   }
 
-  async function runTargetWithSkipKeys(sel: EBibleTranslation, skipKeys: ReadonlySet<string>) {
+  async function runTargetWithResolution(sel: EBibleTranslation, resolution: CollisionResolution) {
     if (!plan) return
     setMode("importing"); setError(null); setPhase(`Fetching source: ${sel.title}…`); setProgress(null)
     try {
@@ -1415,7 +1627,12 @@ function ParatextChoice({
         text: s.original,
       }))
       const selSourceLang = sel.languageCode || sel.id
-      const { refs, settings, skipped } = await importParatextAsTarget(plan, sourceVerses, { ...ctx, sourceLanguage: selSourceLang, skipKeys: mergedSkipKeys(skipKeys) }, onProgress)
+      const { refs, settings, skipped } = await importParatextAsTarget(plan, sourceVerses, {
+        ...ctx,
+        sourceLanguage: selSourceLang,
+        skipKeys: mergedSkipKeys(resolution.skipKeys),
+        reimportFileIds: resolution.reimportFileIds,
+      }, onProgress)
       const inferredTargetLang = settings.languageIsoCode || settings.language
       await onImported(
         refs,
@@ -1433,11 +1650,11 @@ function ParatextChoice({
     if (onCollision) {
       const collisions = detectPlanCollisions(plan)
       if (collisions.length > 0) {
-        onCollision(collisions, (skipKeys) => runTargetWithSkipKeys(sel, skipKeys))
+        onCollision(collisions, (resolution) => runTargetWithResolution(sel, resolution))
         return
       }
     }
-    await runTargetWithSkipKeys(sel, new Set())
+    await runTargetWithResolution(sel, { skipKeys: new Set(), reimportFileIds: new Map() })
   }
 
   const filtered = useMemo(() => {
@@ -1621,6 +1838,7 @@ interface EBiblePanelProps {
   username: string
   sourceLanguage: string
   targetLanguage: string
+  targetLang?: string
   getToken: (fileId: string) => Promise<string | null>
   onImported: (ref: FileReference, inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
   /** When provided, enables the "into target" mode toggle (AQU-191). */
@@ -1632,7 +1850,7 @@ interface EBiblePanelProps {
 type EBiblePanelMode = "source" | "target"
 type EBibleTargetStep = "pick" | "review" | "applying" | "done"
 
-function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
+function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
   const [mode, setMode] = useState<EBiblePanelMode>("source")
   const [targetStep, setTargetStep] = useState<EBibleTargetStep>("pick")
   const [matchResult, setMatchResult] = useState<EBibleMatchResult | null>(null)
@@ -1749,7 +1967,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, getT
       await applyEBibleTargetImport(
         matchResult,
         selectedCellIds,
-        { projectId, author: username, getToken },
+        { projectId, author: username, getToken, targetLang },
         setTargetProgress,
       )
       setTargetStep("done")
@@ -2364,16 +2582,17 @@ interface ImportResultPanelProps {
   importedCount: number
   skipped: { book: string; reason: string }[]
   onDismiss: () => void | Promise<void>
+  error?: string | null
 }
 
-function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPanelProps) {
+function ImportResultPanel({ importedCount, skipped, onDismiss, error }: ImportResultPanelProps) {
   const [copied, setCopied] = useState(false)
   const [dismissing, setDismissing] = useState(false)
 
   const reportText = [
-    `Import complete: ${importedCount} book${importedCount === 1 ? "" : "s"} imported, ${skipped.length} skipped.`,
+    `Import complete: ${importedCount} item${importedCount === 1 ? "" : "s"} imported, ${skipped.length} skipped.`,
     "",
-    "Skipped books:",
+    "Skipped items:",
     ...skipped.map((s) => `  ${s.book}: ${s.reason}`),
   ].join("\n")
 
@@ -2400,7 +2619,7 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-sm text-muted-foreground">
-        <span className="font-medium text-foreground">{importedCount}</span> book{importedCount === 1 ? "" : "s"} imported
+        <span className="font-medium text-foreground">{importedCount}</span> item{importedCount === 1 ? "" : "s"} imported
         successfully; <span className="font-medium text-amber-600">{skipped.length}</span> could not be imported.
         Review the list below and copy it before closing.
       </p>
@@ -2414,6 +2633,7 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
           ))}
         </ul>
       </ScrollArea>
+      {error ? <FieldError role="alert">{error}</FieldError> : null}
       <div className="flex justify-between gap-2">
         <Button variant="outline" size="sm" onClick={handleCopy} disabled={dismissing}>
           {copied ? "Copied!" : "Copy report"}
@@ -2429,30 +2649,26 @@ function ImportResultPanel({ importedCount, skipped, onDismiss }: ImportResultPa
 // ---------------------------------------------------------------------------
 // Collision guard panel — AQU-287
 // Shown when re-importing into a project that already has matching files.
-// Offers Skip / Import as duplicate per collision. Apply-to-all toggle lets
+// Offers safe identity-based update, Skip, or Import as duplicate per collision. Apply-to-all lets
 // the user resolve the whole batch in one click.
-//
-// Replace-existing is NOT included in this pass because superseding the
-// content of existing cells would require a cross-file cell-update write path
-// that doesn't exist yet (the import pipeline only creates new cells). The UI
-// doesn't show a "Replace" button rather than showing a disabled one so users
-// aren't confused by a grayed-out option.
 // ---------------------------------------------------------------------------
 
-type CollisionChoice = "skip" | "duplicate"
+type CollisionChoice = "update" | "skip" | "duplicate"
 
 interface CollisionPanelProps {
   collisions: CollisionResult[]
-  onResolve: (skipKeys: ReadonlySet<string>) => void | Promise<void>
+  onResolve: (resolution: CollisionResolution) => void | Promise<void>
   onCancel: () => void
 }
 
 /** Per-collision prompt with apply-to-all toggle. */
 function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps) {
-  // Map from incoming name → choice. Default is "skip" (safe default).
+  // Updating preserves logical cell ids and is the safe default when the
+  // existing project listing supplied an id. Legacy name-only callers fall
+  // back to Skip because they cannot address an existing file safely.
   const [choices, setChoices] = useState<Map<string, CollisionChoice>>(() => {
     const m = new Map<string, CollisionChoice>()
-    for (const c of collisions) m.set(c.name, "skip")
+    for (const c of collisions) m.set(c.name, c.existingId ? "update" : "skip")
     return m
   })
   const [resolving, setResolving] = useState(false)
@@ -2465,10 +2681,10 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
     })
   }
 
-  function toggle(name: string) {
+  function setChoice(name: string, choice: CollisionChoice) {
     setChoices((prev) => {
       const next = new Map(prev)
-      next.set(name, prev.get(name) === "skip" ? "duplicate" : "skip")
+      next.set(name, choice)
       return next
     })
   }
@@ -2479,19 +2695,21 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
     try {
       // Build skipKeys: normalized keys for every item the user chose to skip.
       const skipKeys = new Set<string>()
+      const reimportFileIds = new Map<string, string>()
       for (const [name, choice] of choices) {
+        const collision = collisions.find((c) => c.name === name)
+        const key = collision?.bookCode
+          ? collision.bookCode.toUpperCase()
+          : name.trim().toLowerCase()
         if (choice === "skip") {
           // Key must match what importFile / importParatextProject checks.
           // bookCode (uppercase) or normalized name (lowercase trimmed).
-          const collision = collisions.find((c) => c.name === name)
-          if (collision?.bookCode) {
-            skipKeys.add(collision.bookCode.toUpperCase())
-          } else {
-            skipKeys.add(name.trim().toLowerCase())
-          }
+          skipKeys.add(key)
+        } else if (choice === "update" && collision?.existingId) {
+          reimportFileIds.set(key, collision.existingId)
         }
       }
-      await onResolve(skipKeys)
+      await onResolve({ skipKeys, reimportFileIds })
     } finally {
       setResolving(false)
     }
@@ -2499,6 +2717,8 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
 
   const allSkip = [...choices.values()].every((v) => v === "skip")
   const allDup = [...choices.values()].every((v) => v === "duplicate")
+  const allUpdate = [...choices.values()].every((v) => v === "update")
+  const canUpdateAll = collisions.every((collision) => collision.existingId)
 
   return (
     <div className="flex flex-col gap-4 py-2">
@@ -2506,10 +2726,29 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
         The following {collisions.length === 1 ? "file already exists" : `${collisions.length} files already exist`} in this
         project. Choose what to do with each one.
       </p>
+      <p className="text-xs text-muted-foreground">
+        Updating matches stable units and keeps translations, language lanes, comments, audio, and units missing from the new file.
+      </p>
+      {collisions.some((collision) => collision.ambiguous) && (
+        <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+          Some files have multiple matches. Choose Skip or Import as duplicate for those files.
+        </p>
+      )}
 
       {/* Apply-to-all row */}
       <div className="flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">Apply to all:</span>
+        <button
+          type="button"
+          onClick={() => setAll("update")}
+          disabled={!canUpdateAll}
+          className={cn(
+            "rounded border px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+            allUpdate ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
+          )}
+        >
+          Update all
+        </button>
         <button
           type="button"
           onClick={() => setAll("skip")}
@@ -2547,11 +2786,24 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
                     {c.bookCode ? ` (${c.bookCode})` : ""}
                   </p>
                 </div>
-                {/* Toggle between Skip and Duplicate */}
+                {/* Explicit three-way resolution; update never replaces target data. */}
                 <div className="flex shrink-0 gap-1 text-xs">
                   <button
                     type="button"
-                    onClick={() => choice !== "skip" && toggle(c.name)}
+                    disabled={!c.existingId}
+                    onClick={() => setChoice(c.name, "update")}
+                    className={cn(
+                      "rounded border px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                      choice === "update"
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-muted text-muted-foreground hover:border-foreground/40",
+                    )}
+                  >
+                    Update existing
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChoice(c.name, "skip")}
                     className={cn(
                       "rounded border px-2 py-0.5 transition-colors",
                       choice === "skip"
@@ -2563,7 +2815,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
                   </button>
                   <button
                     type="button"
-                    onClick={() => choice !== "duplicate" && toggle(c.name)}
+                    onClick={() => setChoice(c.name, "duplicate")}
                     className={cn(
                       "rounded border px-2 py-0.5 transition-colors",
                       choice === "duplicate"
@@ -2712,11 +2964,16 @@ interface DcsPanelProps {
   defaultLang?: string
   /** Persist the pinned-release cursor to the project settings. Returns true on save. */
   patchDcsCursor: (cursor: DcsCursor) => Promise<boolean>
-  /** Signal the parent to refresh the project after a successful import. DCS
-   *  writes source cells server-side (bulkUploadSource → POST /import); we pass
-   *  empty refs and let the parent's refresh()/revalidateCells() pull the fresh
-   *  projection — importDcsResource returns counts, not per-file references. */
-  onImported: (refs: FileReference[], inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string }) => void | Promise<void>
+  /** Signal the parent to refresh the project after a successful or partial
+   *  import. DCS writes source cells server-side (bulkUploadSource → POST
+   *  /import); we pass empty refs and let the parent's refresh()/revalidateCells()
+   *  pull the fresh projection — importDcsResource returns counts, not per-file
+   *  references. */
+  onImported: (
+    refs: FileReference[],
+    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
+    skipped?: { book: string; reason: string }[],
+  ) => void | Promise<void>
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to
    *  importDcsResource). */
   excludeFrontMatter?: boolean
@@ -2762,10 +3019,12 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
       }
       setSummary({ files: result.files, cells: result.cells, ref: result.cursor.ref, pinned })
       setStage("done")
-      // Refresh the project so the new source files/cells appear. DCS imports
-      // have no FileReferences to append optimistically; the server projection
-      // is authoritative and the parent's refresh pulls it in.
-      await onImported([], entry.language ? { sourceLanguage: entry.language } : undefined)
+      // Refresh the project and retain a per-file report if only part landed.
+      await onImported(
+        result.refs,
+        entry.language ? { sourceLanguage: entry.language } : undefined,
+        result.skipped,
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed")
       setStage("browse")
@@ -2850,6 +3109,7 @@ interface SdbhPanelProps {
   onImported: (
     refs: FileReference[],
     inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
+    skipped?: { book: string; reason: string }[],
   ) => void | Promise<void>
 }
 
@@ -2872,6 +3132,8 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
     setProgress({ phase: "parse" })
     abortRef.current = new AbortController()
     try {
+      assertSourceUploadByteLength(masterFile.size)
+      if (localizedFile) assertSourceUploadByteLength(localizedFile.size)
       const masterJson = await masterFile.text()
       const localizedJson = localizedFile ? await localizedFile.text() : null
       const summary = await importSdbh(
@@ -2879,11 +3141,17 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
         localizedJson,
         { projectId, author: username, getToken, signal: abortRef.current.signal },
         setProgress,
+        {
+          master: { name: masterFile.name, bytes: await masterFile.arrayBuffer() },
+          ...(localizedFile ? {
+            localized: { name: localizedFile.name, bytes: await localizedFile.arrayBuffer() },
+          } : {}),
+        },
       )
       await onImported(summary.refs, {
         sourceLanguage: "hbo",
         ...(summary.targetLanguageCode ? { targetLanguage: summary.targetLanguageCode } : {}),
-      })
+      }, summary.skipped)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Import failed")
     } finally {

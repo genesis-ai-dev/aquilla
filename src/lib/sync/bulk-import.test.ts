@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { bulkUploadSource, type BulkImportCell } from "./bulk-import"
+import {
+  bulkUploadSource,
+  publishStagedImport,
+  reconcileSourceImport,
+  type BulkImportCell,
+} from "./bulk-import"
 import * as sourceUpload from "./source-upload"
 
 // Stub syncWorkerHttpOrigin so no VITE env lookup is needed.
@@ -9,7 +14,8 @@ vi.mock("./sync-worker-url", () => ({
 
 // Stub source-upload so rawBytes tests don't need a real worker.
 vi.mock("./source-upload", () => ({
-  uploadSourceOriginal: vi.fn().mockResolvedValue(undefined),
+  assertSourceUploadSize: vi.fn(),
+  uploadSourceOriginal: vi.fn().mockResolvedValue({ artifactId: "artifact-1", key: "key", sha256: "digest" }),
 }))
 
 function makeCell(i: number): BulkImportCell {
@@ -40,6 +46,26 @@ describe("bulkUploadSource", () => {
     ).rejects.toThrow(/signed out/)
   })
 
+  it.each([
+    [{ rawBytes: new ArrayBuffer(4) }, /original bytes require a source format/i],
+    [{ rawSourceFormat: "docx" }, /source format requires original bytes/i],
+    [{ rawBytes: new ArrayBuffer(4), rawSource: "duplicate", rawSourceFormat: "docx" }, /raw bytes or raw text, not both/i],
+  ] as const)("rejects incomplete or ambiguous provenance before creating server state", async (provenance, message) => {
+    const getToken = vi.fn(async () => "tok")
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    await expect(bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.docx" },
+      cells: [makeCell(0)],
+      ...provenance,
+      getToken,
+      fetchImpl: fetchMock,
+    })).rejects.toThrow(message)
+    expect(getToken).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("sends one request for a small batch (< 1500 cells)", async () => {
     const bodies: unknown[] = []
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -63,7 +89,9 @@ describe("bulkUploadSource", () => {
     expect((body.cells as unknown[]).length).toBe(3)
     // file meta included on first (only) chunk
     expect(body.file).toBeDefined()
+    expect(body.stageEventId).toEqual(expect.any(String))
     expect((bodies[1] as Record<string, unknown>).complete).toBe(true)
+    expect((bodies[1] as Record<string, unknown>).publishEventId).toEqual(expect.any(String))
   })
 
   it("sends multiple chunks for > 1500 cells", async () => {
@@ -335,18 +363,53 @@ describe("bulkUploadSource", () => {
 
     const uploadMock = vi.mocked(sourceUpload.uploadSourceOriginal)
     expect(uploadMock).toHaveBeenCalledTimes(1)
-    expect(uploadMock).toHaveBeenCalledWith({
+    expect(uploadMock).toHaveBeenCalledWith(expect.objectContaining({
       projectId: "p1",
       fileId: "f1",
+      artifactId: expect.any(String),
       bytes: rawBytes,
       format: "docx",
       getToken: expect.any(Function),
-    })
+      artifactName: "test.docx",
+      bindingRole: "source",
+      fidelity: "native",
+    }))
   })
 
-  it("does NOT call uploadSourceOriginal when rawBytes is absent (USFM path)", async () => {
+  it.each([
+    ["idml", "content-only"],
+    ["usx", "content-only"],
+    ["vtt", "content-only"],
+    ["paratext-project", "preserved-only"],
+  ] as const)("uses the shared %s artifact fidelity instead of guessing in the client", async (format, fidelity) => {
     const fetchMock = vi.fn(
       async () => new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 }),
+    ) as typeof fetch
+
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: `source.${format}` },
+      cells: [makeCell(0)],
+      rawBytes: new ArrayBuffer(4),
+      rawSourceFormat: format,
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).toHaveBeenCalledWith(expect.objectContaining({
+      format,
+      fidelity,
+    }))
+  })
+
+  it("preserves text originals as first-class artifacts too", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(
+      async (_url: RequestInfo | URL, init?: RequestInit) => {
+        bodies.push(JSON.parse(init?.body as string))
+        return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+      },
     ) as typeof fetch
 
     await bulkUploadSource({
@@ -360,6 +423,198 @@ describe("bulkUploadSource", () => {
       fetchImpl: fetchMock,
     })
 
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p1",
+      fileId: "f1",
+      artifactId: expect.any(String),
+      format: "usfm",
+    }))
+    expect(bodies[0]).not.toHaveProperty("rawSource")
+    expect(bodies[0]).not.toHaveProperty("rawSourceFormat")
+  })
+
+  it("keeps a staged file hidden when artifact preservation fails", async () => {
+    vi.mocked(sourceUpload.uploadSourceOriginal).mockRejectedValueOnce(new Error("R2 unavailable"))
+    const bodies: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(init?.body as string) as Record<string, unknown>
+      bodies.push(body)
+      return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+
+    await expect(bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "test.docx" },
+      cells: [makeCell(0)],
+      rawBytes: new ArrayBuffer(4),
+      rawSourceFormat: "docx",
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })).rejects.toThrow(/R2 unavailable/)
+
+    expect(bodies.at(-1)).toMatchObject({ complete: true })
+    expect(bodies.at(-1)).not.toHaveProperty("publishEventId")
+  })
+
+  it("batches target commits with their source parents before publication", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(init?.body as string))
+      return new Response(JSON.stringify({ accepted: 1, fileId: "f1" }), { status: 200 })
+    }) as typeof fetch
+    const cells = [makeCell(0), makeCell(1)]
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "pairs.xlf" },
+      cells,
+      targets: cells.map((cell, index) => ({
+        id: `target-${index}`,
+        cellId: cell.cellId,
+        parentId: cell.id,
+        value: `translation ${index}`,
+      })),
+      targetLang: "fr-CA",
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(bodies[0].targets).toEqual([
+      expect.objectContaining({ id: "target-0", targetLang: "fr-CA" }),
+      expect.objectContaining({ id: "target-1", targetLang: "fr-CA" }),
+    ])
+  })
+
+  it("can finalize a file without publishing it for post-processing", async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(init?.body as string))
+      return Response.json({ accepted: 1, fileId: "f1" })
+    }) as typeof fetch
+
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "recording.wav" },
+      cells: [makeCell(0)],
+      deferPublication: true,
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(bodies.at(-1)).toMatchObject({ complete: true })
+    expect(bodies.at(-1)).not.toHaveProperty("publishEventId")
+  })
+
+  it("publishes a staged file with stable attachment event ids", async () => {
+    vi.useFakeTimers()
+    const bodies: Array<Record<string, unknown>> = []
+    let attempts = 0
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(init?.body as string))
+      attempts++
+      if (attempts === 1) return new Response("temporary", { status: 503 })
+      return Response.json({ accepted: 1, fileId: "f1" })
+    }) as typeof fetch
+
+    const publishing = publishStagedImport({
+      projectId: "p1",
+      fileId: "f1",
+      attachments: [{
+        cellId: "cell-0",
+        audioId: "audio-1.wav",
+        url: "frontier-audio://audio-1.wav",
+        slot: "recording",
+        mimeType: "audio/wav",
+      }],
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    await vi.runAllTimersAsync()
+    await publishing
+
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).toEqual(bodies[1])
+    expect(bodies[0]).toMatchObject({
+      complete: true,
+      publishEventId: expect.any(String),
+      attachments: [{
+        id: expect.any(String),
+        cellId: "cell-0",
+        audioId: "audio-1.wav",
+      }],
+    })
+  })
+})
+
+describe("reconcileSourceImport", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.clearAllMocks()
+  })
+
+  it("uploads an immutable original without switching the sidecar before reconciliation", async () => {
+    const responseBody = {
+      fileId: "existing-file",
+      replayed: false,
+      matched: 1,
+      added: 0,
+      changed: 1,
+      unchanged: 0,
+      retainedMissing: 2,
+      importedTargets: 0,
+    }
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(responseBody))
+    const fetchMock = fetchSpy as typeof fetch
+    const result = await reconcileSourceImport({
+      projectId: "p1",
+      fileId: "existing-file",
+      file: { id: "reimport-event", name: "GEN.usfm", fileType: "usfm" },
+      cells: [{
+        ...makeCell(0),
+        metadata: { aquillaImport: { unitKey: "scripture:GEN 1:1" } },
+      }],
+      rawSource: "\\id GEN\n\\c 1\n\\v 1 Updated",
+      rawSourceFormat: "usfm",
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+
+    expect(result).toEqual(responseBody)
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p1",
+      fileId: "existing-file",
+      bindingRole: "source",
+      updateSourceSidecar: false,
+    }))
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(fetchSpy.mock.calls[0][0]).toBe("https://sync.example/import/reconcile")
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
+    expect(payload).toMatchObject({
+      projectId: "p1",
+      fileId: "existing-file",
+      artifactId: "artifact-1",
+      rawSourceFormat: "usfm",
+    })
+  })
+
+  it("does not upload a source artifact when the parsed format has no original bytes", async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({
+      fileId: "existing-file", replayed: false, matched: 0, added: 1,
+      changed: 1, unchanged: 0, retainedMissing: 0, importedTargets: 0,
+    }))
+    const fetchMock = fetchSpy as typeof fetch
+    await reconcileSourceImport({
+      projectId: "p1",
+      fileId: "existing-file",
+      file: { id: "reimport-event", name: "generated.txt", fileType: "txt" },
+      cells: [makeCell(0)],
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
     expect(vi.mocked(sourceUpload.uploadSourceOriginal)).not.toHaveBeenCalled()
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
+    expect(payload.artifactId).toBeUndefined()
   })
 })

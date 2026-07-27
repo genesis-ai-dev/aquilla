@@ -4,6 +4,7 @@
 
 import { FileText, FolderOpen, Sparkles, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
@@ -43,37 +44,30 @@ export function CellAreaPlaceholder({
   if (state.kind === "ready-empty") {
     return <ReadyEmpty fileName={fileName} onImportClick={onImportClick} />
   }
-  // loading and syncing-empty both render skeleton rows. The syncing-empty
-  // hint differs only by the caption below so the user knows why they're
-  // still waiting.
-  return (
-    <SkeletonRows
-      caption={
-        state.kind === "syncing-empty"
-          ? "Syncing from the cloud…"
-          : "Opening file…"
-      }
-    />
-  )
+  return <SkeletonRows />
 }
 
-function SkeletonRows({ caption }: { caption: string }) {
+function SkeletonRows() {
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-2 overflow-hidden p-4" aria-label={caption}>
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
-            <Skeleton className="h-6 w-10" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-6 w-10" />
-          </div>
-        ))}
+    <LoadingTemplate
+      label="Syncing file from the cloud"
+      className="h-full min-h-64"
+      templateClassName="min-h-64"
+      data-testid="cell-area-loading"
+    >
+      <div className="flex h-full min-h-64 flex-col">
+        <div className="flex flex-1 flex-col gap-2 overflow-hidden p-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-2xl px-4 py-3`}>
+              <Skeleton className="h-6 w-10" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-6 w-10" />
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="px-4 py-2 text-xs text-muted-foreground">
-        {caption}
-      </div>
-    </div>
+    </LoadingTemplate>
   )
 }
 

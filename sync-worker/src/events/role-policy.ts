@@ -39,6 +39,7 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'source.cell.commit': ROLE.PROJECT_LEAD,
   'source.cell.delete': ROLE.PROJECT_LEAD,
   'source.cell.reorder': ROLE.PROJECT_LEAD,
+  'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
 
   // Target-side: translator commits.
   'target.cell.create': ROLE.CONTRIBUTOR,

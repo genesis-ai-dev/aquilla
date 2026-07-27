@@ -84,6 +84,13 @@ export interface AquillaDb {
   batchPipelined?<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]>
   exec(query: string): Promise<{ count: number; duration: number }>
   close(): Promise<void>
+  /** Thread a user identity into every query on the returned handle (see
+   *  PostgresDb.withUser) so RLS backstop policies apply. Optional — many
+   *  test doubles implement only prepare/batch/exec/close; identity-sensitive
+   *  call sites must feature-detect (`db.withUser?.(...) ?? db`) rather than
+   *  assume it exists. */
+  withUser?(userId: number | string | null): AquillaDb
+  asAdmin?(): AquillaDb
 }
 
 /** Minimal neutral executor the handle runs against (postgres.js or PGlite). */

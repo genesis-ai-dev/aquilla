@@ -1,0 +1,413 @@
+/*
+ * AQU-709 — Adobe-side IDML validation.
+ *
+ * This UXP script runs in InDesign 18.5+ or InDesign Server. It intentionally
+ * records structure and failure codes, never story contents or translated
+ * text. Arguments:
+ *   manifest=/absolute/path/materialized-manifest.json
+ *   output=/absolute/path/adobe-raw-report.json
+ */
+
+const { app, ExportFormat, SaveOptions, UserInteractionLevels } = require("indesign")
+const { script, storage } = require("uxp")
+const fs = require("fs")
+
+const SCHEMA_VERSION = 1
+
+async function main() {
+  const args = parseArguments(script.args || [])
+  if (!args.manifest || !args.output) {
+    throw new Error("validate.idjs requires manifest=<path> and output=<path> arguments")
+  }
+  const manifest = JSON.parse(await fs.readFile(args.manifest, "utf8"))
+  if (manifest.schemaVersion !== SCHEMA_VERSION || !Array.isArray(manifest.fixtures)) {
+    throw new Error("Unsupported Adobe materialized manifest")
+  }
+
+  const startedAt = new Date().toISOString()
+  const previousInteraction = app.scriptPreferences.userInteractionLevel
+  const fixtures = []
+  try {
+    app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT
+    for (const fixture of manifest.fixtures) {
+      fixtures.push(await validateFixture(fixture, manifest.preflightProfile))
+    }
+  } finally {
+    app.scriptPreferences.userInteractionLevel = previousInteraction
+    closeAllDocuments()
+  }
+
+  const report = {
+    schemaVersion: SCHEMA_VERSION,
+    executionMode: manifest.executionMode,
+    adobeVersion: String(app.version),
+    startedAt,
+    completedAt: new Date().toISOString(),
+    fixtures,
+  }
+  await fs.writeFile(args.output, JSON.stringify(report, null, 2), { encoding: "utf8" })
+  script.setResult(JSON.stringify({
+    schemaVersion: SCHEMA_VERSION,
+    fixtureCount: fixtures.length,
+    output: args.output,
+  }))
+}
+
+async function validateFixture(fixture, preflightProfile) {
+  const result = {
+    id: fixture.id,
+    source: emptyObservation(),
+    candidate: emptyObservation(),
+    reopened: emptyObservation(),
+    pdf: { created: false, byteLength: 0 },
+    savedIdml: { created: false, byteLength: 0 },
+    errors: [],
+  }
+  let sourceDocument = null
+  let candidateDocument = null
+  let reopenedDocument = null
+  try {
+    sourceDocument = await openDocument(fixture.source)
+    result.source = await observeDocument(sourceDocument, preflightProfile)
+  } catch (error) {
+    result.source.error = adobeError("SOURCE_OPEN_FAILED", error)
+    result.errors.push(result.source.error)
+  } finally {
+    closeDocument(sourceDocument)
+  }
+
+  try {
+    candidateDocument = await openDocument(fixture.candidate)
+    result.candidate = await observeDocument(candidateDocument, preflightProfile)
+    const idmlEntry = await outputFile(fixture.resavedIdml)
+    candidateDocument.exportFile(ExportFormat.INDESIGN_MARKUP, idmlEntry, false)
+    result.savedIdml = await fileResult(fixture.resavedIdml)
+    const pdfEntry = await outputFile(fixture.pdf)
+    candidateDocument.exportFile(ExportFormat.PDF_TYPE, pdfEntry, false)
+    result.pdf = await fileResult(fixture.pdf)
+  } catch (error) {
+    const detail = adobeError("CANDIDATE_PROCESSING_FAILED", error)
+    result.candidate.error = detail
+    result.errors.push(detail)
+  } finally {
+    closeDocument(candidateDocument)
+  }
+
+  if (result.savedIdml.created) {
+    try {
+      reopenedDocument = await openDocument(fixture.resavedIdml)
+      result.reopened = await observeDocument(reopenedDocument, preflightProfile)
+    } catch (error) {
+      result.reopened.error = adobeError("REOPEN_FAILED", error)
+      result.errors.push(result.reopened.error)
+    } finally {
+      closeDocument(reopenedDocument)
+    }
+  }
+  return result
+}
+
+async function openDocument(path) {
+  const entry = await storage.localFileSystem.getEntryWithUrl(fileUrl(path))
+  return app.open(entry, false)
+}
+
+async function observeDocument(document, profileName) {
+  const observation = emptyObservation()
+  observation.opened = true
+  document.recompose()
+  observation.metrics = documentMetrics(document)
+  try {
+    const profile = app.preflightProfiles.item(profileName)
+    if (!profile || profile.isValid === false) {
+      throw new Error(`Preflight profile ${profileName} is unavailable`)
+    }
+    const process = app.preflightProcesses.add(document, profile, document.preflightOptions)
+    const completed = process.waitForProcess(300)
+    observation.preflightCompleted = completed === true
+    observation.preflightIssueCount = preflightIssueCount(process.aggregatedResults)
+    observation.preflightResults = {
+      description: safeString(process.description),
+      aggregatedResults: jsonSafe(process.aggregatedResults),
+      processResults: safeString(process.processResults),
+    }
+    process.remove()
+  } catch (error) {
+    observation.error = adobeError("PREFLIGHT_FAILED", error)
+  }
+  return observation
+}
+
+function documentMetrics(document) {
+  const pageItems = []
+  const allPageItems = document.allPageItems
+  for (let index = 0; index < collectionLength(allPageItems); index += 1) {
+    const item = collectionItem(allPageItems, index)
+    if (!item) continue
+    pageItems.push({
+      id: safeNumber(item.id),
+      type: safeString(item.constructorName || item.constructor?.name),
+      geometricBounds: measurementArray(item.geometricBounds),
+      visibleBounds: measurementArray(item.visibleBounds),
+      objectStyle: safeName(item.appliedObjectStyle),
+      layerId: nullableNumber(item.itemLayer?.id),
+      parentPageId: nullableNumber(item.parentPage?.id),
+    })
+  }
+
+  const tables = []
+  const paragraphAssignments = []
+  const characterAssignments = []
+  const oversetStoryIds = []
+  let footnoteCount = 0
+  let endnoteCount = 0
+  let noteCount = 0
+  const stories = document.stories
+  for (let storyIndex = 0; storyIndex < collectionLength(stories); storyIndex += 1) {
+    const story = collectionItem(stories, storyIndex)
+    if (!story) continue
+    const storyId = safeNumber(story.id)
+    if (story.overflows === true) oversetStoryIds.push(storyId)
+    footnoteCount += collectionLength(story.footnotes)
+    endnoteCount += collectionLength(story.endnoteRanges)
+    noteCount += collectionLength(story.notes)
+    const storyTables = story.tables
+    for (let index = 0; index < collectionLength(storyTables); index += 1) {
+      const table = collectionItem(storyTables, index)
+      tables.push({
+        storyId,
+        index,
+        rowCount: collectionLength(table?.rows),
+        columnCount: collectionLength(table?.columns),
+        tableStyle: safeName(table?.appliedTableStyle),
+      })
+    }
+    const paragraphs = story.paragraphs
+    for (let index = 0; index < collectionLength(paragraphs); index += 1) {
+      const paragraph = collectionItem(paragraphs, index)
+      paragraphAssignments.push({
+        storyId,
+        index,
+        style: safeName(paragraph?.appliedParagraphStyle),
+      })
+    }
+    const ranges = story.textStyleRanges
+    for (let index = 0; index < collectionLength(ranges); index += 1) {
+      const range = collectionItem(ranges, index)
+      characterAssignments.push({
+        storyId,
+        index,
+        style: safeName(range?.appliedCharacterStyle),
+      })
+    }
+  }
+
+  const links = mapCollection(document.links, (link) => ({
+    id: safeNumber(link?.id),
+    status: safeString(link?.status),
+    type: safeString(link?.linkType),
+  }))
+  const textVariables = mapCollection(document.textVariables, (variable) => ({
+    name: safeString(variable?.name),
+    type: safeString(variable?.variableType),
+  }))
+  const crossReferences = mapCollection(document.crossReferenceSources, (source) => ({
+    name: safeString(source?.name),
+    type: safeString(source?.constructorName || source?.constructor?.name),
+    format: safeName(source?.appliedFormat),
+  }))
+  const layers = mapCollection(document.layers, (layer) => ({
+    id: safeNumber(layer?.id),
+    name: safeString(layer?.name),
+  }))
+  const masterSpreads = mapCollection(document.masterSpreads, (spread) => ({
+    id: safeNumber(spread?.id),
+    name: safeString(spread?.name),
+    pageCount: collectionLength(spread?.pages),
+  }))
+
+  return {
+    pageCount: collectionLength(document.pages),
+    spreadCount: collectionLength(document.spreads),
+    masterSpreadCount: collectionLength(document.masterSpreads),
+    layerCount: collectionLength(document.layers),
+    storyCount: collectionLength(document.stories),
+    footnoteCount,
+    endnoteCount,
+    noteCount,
+    tableCount: tables.length,
+    hyperlinkCount: collectionLength(document.hyperlinks),
+    textVariableCount: textVariables.length,
+    crossReferenceCount: crossReferences.length,
+    pageItems,
+    tables,
+    paragraphAssignments,
+    characterAssignments,
+    links,
+    textVariables,
+    crossReferences,
+    layers,
+    masterSpreads,
+    oversetStoryIds,
+  }
+}
+
+async function outputFile(path) {
+  return storage.localFileSystem.createEntryWithUrl(fileUrl(path), {
+    type: storage.types.file,
+    overwrite: true,
+  })
+}
+
+async function fileResult(path) {
+  try {
+    const stat = await fs.stat(path)
+    return { created: stat.isFile(), byteLength: Number(stat.size) || 0 }
+  } catch {
+    return { created: false, byteLength: 0 }
+  }
+}
+
+function closeDocument(document) {
+  if (!document) return
+  try {
+    if (document.isValid !== false) document.close(SaveOptions.NO)
+  } catch {
+    // Cleanup must not hide the primary fixture failure.
+  }
+}
+
+function closeAllDocuments() {
+  while (collectionLength(app.documents) > 0) {
+    closeDocument(collectionItem(app.documents, 0))
+  }
+}
+
+function emptyObservation() {
+  return {
+    opened: false,
+    preflightCompleted: false,
+    preflightIssueCount: null,
+    preflightResults: null,
+  }
+}
+
+function preflightIssueCount(aggregatedResults) {
+  if (aggregatedResults == null) return null
+  if (Array.isArray(aggregatedResults)) {
+    if (aggregatedResults.length === 0) return 0
+    // Adobe documents an ordered array:
+    // [documentName, profileName, results[]].
+    if (Array.isArray(aggregatedResults[2])) return aggregatedResults[2].length
+  }
+  if (
+    typeof aggregatedResults === "object"
+    && Array.isArray(aggregatedResults.results)
+  ) {
+    return aggregatedResults.results.length
+  }
+  return null
+}
+
+function parseArguments(args) {
+  const values = {}
+  for (const entry of args) {
+    const text = String(entry)
+    const separator = text.indexOf("=")
+    if (separator <= 0) continue
+    values[text.slice(0, separator)] = text.slice(separator + 1)
+  }
+  return values
+}
+
+function fileUrl(path) {
+  const normalized = String(path).replace(/\\/g, "/")
+  return normalized.startsWith("/")
+    ? `file:${encodeURI(normalized)}`
+    : `file:/${encodeURI(normalized)}`
+}
+
+function collectionLength(collection) {
+  const value = Number(collection?.length)
+  return Number.isFinite(value) ? value : 0
+}
+
+function collectionItem(collection, index) {
+  if (!collection) return null
+  try {
+    if (typeof collection.item === "function") return collection.item(index)
+  } catch {
+    return null
+  }
+  return collection[index] || null
+}
+
+function mapCollection(collection, mapper) {
+  const values = []
+  for (let index = 0; index < collectionLength(collection); index += 1) {
+    const item = collectionItem(collection, index)
+    if (item) values.push(mapper(item))
+  }
+  return values
+}
+
+function measurementArray(value) {
+  if (!value || typeof value.length !== "number") return []
+  return Array.from(value, (entry) => safeString(entry))
+}
+
+function safeName(value) {
+  try {
+    return safeString(value?.name)
+  } catch {
+    return ""
+  }
+}
+
+function safeString(value) {
+  try {
+    return value === undefined || value === null ? "" : String(value)
+  } catch {
+    return ""
+  }
+}
+
+function safeNumber(value) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : -1
+}
+
+function nullableNumber(value) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function jsonSafe(value) {
+  try {
+    return JSON.parse(JSON.stringify(value))
+  } catch {
+    return safeString(value)
+  }
+}
+
+function adobeError(code, error) {
+  return {
+    code,
+    message: safeString(error?.message || error),
+  }
+}
+
+main().catch(async (error) => {
+  const result = {
+    schemaVersion: SCHEMA_VERSION,
+    fatal: adobeError("ADOBE_SCRIPT_FAILED", error),
+  }
+  try {
+    const args = parseArguments(script.args || [])
+    if (args.output) {
+      await fs.writeFile(args.output, JSON.stringify(result, null, 2), { encoding: "utf8" })
+    }
+  } finally {
+    script.setResult(JSON.stringify(result))
+  }
+})

@@ -44,7 +44,9 @@ describe("OrgSwitcher", () => {
     // Multiple orgs → the switcher defaults to the all-organizations scope.
     await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
     // Open the switcher; each org is listed with its role.
-    await act(async () => { screen.getByRole("button", { name: /all organizations/i }).click() })
+    const switcher = screen.getByRole("button", { name: "Organization switcher: All organizations" })
+    expect(switcher).toBeInTheDocument()
+    await act(async () => { switcher.click() })
     expect(screen.getByText("Come and See")).toBeInTheDocument()
     expect(screen.getByText(/maintainer/i)).toBeInTheDocument()
     // Selecting an org makes it the active scope and persists it.

@@ -65,7 +65,7 @@ export function useAccessibleProjects(): UseAccessibleProjects {
  * Unlike `useAccessibleProjects` (minRole=600, invite picker only), this hook
  * fetches with no minRole filter so viewers and contributors appear too.
  */
-export function useProjectsForNavigation(): UseAccessibleProjects {
+export function useProjectsForNavigation(enabled = true): UseAccessibleProjects {
   const { session } = useFrontierSession();
   const jwt = session?.jwt ?? null;
   const [projects, setProjects] = useState<CloudProjectSummary[]>([]);
@@ -78,6 +78,7 @@ export function useProjectsForNavigation(): UseAccessibleProjects {
   }, []);
 
   const refresh = async () => {
+    if (!enabled) return;
     if (!jwt) {
       if (aliveRef.current) setProjects([]);
       return;
@@ -93,7 +94,7 @@ export function useProjectsForNavigation(): UseAccessibleProjects {
     }
   };
 
-  useEffect(() => { void refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [jwt]);
+  useEffect(() => { void refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled, jwt]);
 
   return { projects, isLoading, refresh };
 }

@@ -37,7 +37,10 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
       status: root.resolved ? "resolved" : "open",
       createdAt: new Date(root.createdAt).toISOString(),
       resolvedAt: root.resolved ? new Date(root.updatedAt).toISOString() : undefined,
-      createdForTranslated: "",
+      // AQU-692: populate the real target-text snapshot captured at thread
+      // creation. Missing (older worker / legacy thread) → null = unknown
+      // baseline, so CommentThread shows no stale badge instead of a false one.
+      createdForTranslated: root.createdForTranslated ?? null,
       messages: [root, ...replies].map((r) => ({
         id: r.commentId,
         author: r.authorLabel ?? r.authorId,

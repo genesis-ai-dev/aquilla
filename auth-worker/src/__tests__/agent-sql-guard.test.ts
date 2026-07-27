@@ -109,7 +109,7 @@ describe("guardSql — rejects", () => {
     // Unbalanced quote would desync literal masking — rejected outright.
     reject("SELECT 'a FROM cells WHERE project_id = :project", /unbalanced/)
     // A keyword INSIDE a balanced literal is fine (it is data, not SQL)…
-    const ok = guard("SELECT 'DROP TABLE x' WHERE :project = :project")
+    const ok = guard("SELECT 'DROP TABLE x' FROM cells WHERE project_id = :project")
     expect(ok.ok).toBe(true)
   })
 
@@ -121,6 +121,14 @@ describe("guardSql — rejects", () => {
 
   it("requires :project (all reads are project-scoped)", () => {
     reject("SELECT count(*) FROM cells", /:project/)
+  })
+
+  it("rejects a non-equality use of :project as scoping (the old presence-only check let this through)", () => {
+    // A query that references :project but never actually filters ON it —
+    // e.g. explicitly excluding the caller's own project — used to satisfy
+    // the naive "does :project appear anywhere" check.
+    reject("SELECT * FROM cells WHERE project_id <> :project", /project_id = :project/)
+    reject("SELECT * FROM cells WHERE project_id != :project", /project_id = :project/)
   })
 
   it("rejects unknown :vars and unbound focus vars", () => {
@@ -167,5 +175,24 @@ describe("runGuardedSql — execution against Postgres", () => {
     )
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toMatch(/sql error/)
+  })
+
+  // AQU pen-test finding: the guard's :project text check can't catch every
+  // cross-tenant query shape (e.g. a join that scopes one aliased table but
+  // selects from an unscoped second reference to the same table). Threading
+  // the caller's identity via withUser() activates the RLS backstop
+  // (db/postgres/migrations/0034) as defence-in-depth regardless of query
+  // shape — this asserts the identity is actually threaded, not just that
+  // the query still runs.
+  it("threads the caller's identity into the query (activates RLS backstop when deployed)", async () => {
+    await seedCells(1)
+    const r = await runGuardedSql(
+      env.AQUILLA_PG,
+      "SELECT current_setting('app.user_id', true) AS uid FROM cells WHERE project_id = :project LIMIT 1",
+      vars,
+      new AliasMap(),
+    )
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.rows[0]?.uid).toBe(String(vars.userId))
   })
 })

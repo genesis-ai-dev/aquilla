@@ -406,6 +406,13 @@ export interface CellAudioAttachInput {
   trimStartMs?: number
   trimEndMs?: number
   timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+  /**
+   * AQU-646: ASR transcript of this clip's trim window. Only pass for
+   * `medium:"media"` source segments — the server writes it to the SOURCE
+   * cell's `transcription` (translatable source text). Never pass for
+   * recorded takes on target cells.
+   */
+  transcription?: string
   author: string
   clientTs?: number
 }
@@ -430,6 +437,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.trimStartMs !== undefined ? { trimStartMs: input.trimStartMs } : {}),
       ...(input.trimEndMs !== undefined ? { trimEndMs: input.trimEndMs } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
+      ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
     },
     clientTs: input.clientTs,
   })

@@ -18,8 +18,6 @@ test("project settings search filters and clears sections", async ({ alice }) =>
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `NavSearch ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/settings`)
-  await alice.waitForLoadState("networkidle")
-
   const searchInput = alice.locator('input[aria-label="Search settings"]')
   await expect(searchInput).toBeVisible({ timeout: 10_000 })
 

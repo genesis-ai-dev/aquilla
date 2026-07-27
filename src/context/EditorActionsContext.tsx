@@ -15,6 +15,7 @@
  */
 
 import { createContext, useContext, type ReactNode } from "react"
+import type { MemberScope } from "@/lib/sync/member-scopes"
 
 export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
@@ -22,6 +23,14 @@ export interface EditorActionsContextValue {
   onOpenHistory?: (cellId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
+  /**
+   * AQU-633: the current user's own lane/file scopes (empty/undefined =
+   * unscoped). Rows gate the per-cell Validate affordance on this so a scoped
+   * member isn't offered a guaranteed-403 validate on an out-of-scope cell.
+   * Passed via context (not the ~40-prop row bag) since it changes rarely
+   * (once on load) and every row reads it the same way.
+   */
+  myScopes?: MemberScope[]
 }
 
 const EditorActionsContext = createContext<EditorActionsContextValue>({})

@@ -33,14 +33,11 @@ test("archive a project and restore it", async ({ alice }) => {
 
   // handleArchive() calls navigate("/projects") on success — wait for that redirect.
   await alice.waitForURL(/\/projects$/, { timeout: 10_000 })
-  await alice.waitForLoadState("networkidle")
-
   // 2. The project should NOT appear in the active projects list.
   await expect(alice.getByText(name).first()).not.toBeVisible({ timeout: 5_000 })
 
   // 3. Navigate to /projects/archived and confirm it's listed there.
   await alice.goto(orgRoute(alice, "/archived"))
-  await alice.waitForLoadState("networkidle")
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
 
   // 4. Click Restore — ArchivedProjects calls load() after success, which removes
@@ -48,13 +45,10 @@ test("archive a project and restore it", async ({ alice }) => {
   const restoreBtn = alice.getByRole("button", { name: "Restore" }).first()
   await expect(restoreBtn).toBeVisible({ timeout: 3_000 })
   await restoreBtn.click()
-  await alice.waitForLoadState("networkidle")
-
   // The project should now be gone from the archived list.
   await expect(alice.getByText(name).first()).not.toBeVisible({ timeout: 5_000 })
 
   // 5. Navigate to /projects — the project is back in the active list.
   await alice.goto("/projects")
-  await alice.waitForLoadState("networkidle")
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
 })

@@ -48,8 +48,6 @@ test("comments page Go to cell navigates to the cell in editor", async ({ alice 
 
   // Navigate to the comments page.
   await alice.goto(`/project/${projectId}/comments`)
-  await alice.waitForLoadState("networkidle")
-
   await expect(alice.locator("h1").filter({ hasText: /Comments/i })).toBeVisible({
     timeout: 10_000,
   })

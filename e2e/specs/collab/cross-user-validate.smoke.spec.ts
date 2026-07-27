@@ -1,4 +1,4 @@
-import { test } from "../../helpers/multi-user"
+import { test, expect } from "../../helpers/multi-user"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
 import { bootstrapSharedProject, ROLE } from "../../helpers/frontier-api"
@@ -34,8 +34,6 @@ test("bob can validate alice's edit in a shared project", async ({ alice, bob })
 
   // Alice imports the file and edits cell 0.
   await alice.goto(`/project/${projectId}/editor`)
-  await alice.waitForLoadState("networkidle")
-
   // Server-side-created projects have no source/target language, so the import
   // flow opens a blocking "Set translation direction" screen after the preview
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
@@ -48,17 +46,17 @@ test("bob can validate alice's edit in a shared project", async ({ alice, bob })
   await aliceWs.importFile(SAMPLE_MD)
   await aliceWs.openFileBySubstring("sample")
   await aliceWs.waitForEditor()
-  await aliceWs.editCell(0, "Alice translation for validation")
+  const translation = "Alice translation for validation"
+  await aliceWs.editCell(0, translation)
+  const fileId = alice.url().match(/\/file\/([^/?#]+)/)?.[1]
+  expect(fileId, "imported file id should be present in the editor URL").toBeTruthy()
 
-  // Wait for the edit to sync before bob reads.
-  await alice.waitForTimeout(2_000)
-
-  // Bob opens the same file.
-  await bob.goto(`/project/${projectId}/editor`)
-  await bob.waitForLoadState("networkidle")
+  // Bob opens the exact same file and waits for alice's projected edit. This
+  // is the synchronization boundary the test cares about—not elapsed time.
+  await bob.goto(`/project/${projectId}/editor/file/${fileId}`)
   const bobWs = new Workspace(bob)
-  await bobWs.openFileBySubstring("sample")
   await bobWs.waitForEditor()
+  await expect(bobWs.cellRow(0)).toContainText(translation, { timeout: 20_000 })
 
   // Bob validates cell 0.
   await bobWs.validateCell(0)

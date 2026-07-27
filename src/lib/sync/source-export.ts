@@ -17,6 +17,16 @@ export interface DownloadSourceArgs {
    *  it (rare). */
   downloadName: string
   getToken: (fileId: string) => Promise<string | null>
+  /** Target-language lane to overlay. Empty/omitted selects the legacy lane. */
+  targetLang?: string
+}
+
+function sourceExportUrl(projectId: string, fileId: string, targetLang?: string): string {
+  const base =
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
+    `/files/${encodeURIComponent(fileId)}/source`
+  if (!targetLang) return base
+  return `${base}?${new URLSearchParams({ lane: targetLang }).toString()}`
 }
 
 // erasableSyntaxOnly: parameter properties (`public readonly status`) use
@@ -45,9 +55,7 @@ export interface DownloadSourceResult {
 export async function downloadSourceFile(args: DownloadSourceArgs): Promise<DownloadSourceResult> {
   const token = await args.getToken(args.fileId)
   if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
-  const url =
-    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}` +
-    `/files/${encodeURIComponent(args.fileId)}/source`
+  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang)
 
   const res = await fetch(url, {
     method: "GET",
@@ -77,9 +85,7 @@ export async function downloadSourceFile(args: DownloadSourceArgs): Promise<Down
 export async function fetchSourceSidecar(args: Omit<DownloadSourceArgs, "downloadName">): Promise<ArrayBuffer> {
   const token = await args.getToken(args.fileId)
   if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
-  const url =
-    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}` +
-    `/files/${encodeURIComponent(args.fileId)}/source`
+  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang)
 
   const res = await fetch(url, {
     method: "GET",
@@ -116,6 +122,8 @@ export interface DownloadProjectZipArgs {
   getToken: (fileId: string) => Promise<string | null>
   /** Optional progress hook: (done, total) after each file lands. */
   onProgress?: (done: number, total: number) => void
+  /** Target-language lane to overlay in every exported USFM file. */
+  targetLang?: string
 }
 
 const EXPORTABLE = new Set(["usfm"])
@@ -150,8 +158,7 @@ export async function downloadProjectZip(
       const token = await args.getToken(file.id)
       if (!token) throw new SourceExportError("Couldn't get an export token.")
       const res = await fetch(
-        `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}` +
-          `/files/${encodeURIComponent(file.id)}/source`,
+        sourceExportUrl(args.projectId, file.id, args.targetLang),
         { headers: { Authorization: `Bearer ${token}` } },
       )
       if (!res.ok) {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronRight, MoreHorizontal, Sparkles, AudioWaveform } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileTypeHasSections, fileOrderedBy } from "@/lib/parsers/types"
+import { fileHasSections, fileOrderedBy } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
@@ -65,7 +65,7 @@ export function FileRow(props: FileRowProps) {
     ? Math.round((progress.translated / progress.total) * 100) : 0
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : 0
-  const canExpand = fileTypeHasSections(file.type)
+  const canExpand = fileHasSections(file)
   // Timeline-segment-model: a file is either time-true (timeline spine) or
   // sequence-true (intrinsic order). Sequence is the default, so only the
   // exceptional timeline files carry a marker — repeating an icon on every

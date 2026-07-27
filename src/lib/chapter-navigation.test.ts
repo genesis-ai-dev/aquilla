@@ -77,3 +77,19 @@ describe("resolveActiveChapterLabel", () => {
     expect(resolveActiveChapterLabel(labels, "UNKNOWN", null)).toBe("MAT 1")
   })
 })
+
+describe("resolveActiveChapterLabel", () => {
+  const chapters = ["GEN 1", "GEN 2"]
+
+  it("keeps an explicit chapter selection authoritative over viewport tracking", () => {
+    expect(resolveActiveChapterLabel(chapters, "GEN 1", "GEN 2")).toBe("GEN 2")
+  })
+
+  it("returns to viewport tracking when there is no explicit selection", () => {
+    expect(resolveActiveChapterLabel(chapters, "GEN 2", null)).toBe("GEN 2")
+  })
+
+  it("ignores stale labels from another file", () => {
+    expect(resolveActiveChapterLabel(chapters, "GEN 2", "EXO 1")).toBe("GEN 2")
+  })
+})

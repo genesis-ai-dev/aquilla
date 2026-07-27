@@ -397,7 +397,8 @@ CREATE TABLE files (
     -- human-edited or validated). Recomputed by fileCountersRecomputeStmt on every
     -- target.cell.commit or cell.validate projection. Forward-only: 0 for all cells
     -- predating migration 0037.
-    ai_drafted_count INTEGER NOT NULL DEFAULT 0
+    ai_drafted_count INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (id, project_id)
 );
 
 CREATE TABLE cells (
@@ -558,7 +559,12 @@ CREATE TABLE comments (
     author_label      TEXT,
     created_at        BIGINT NOT NULL,
     updated_at        BIGINT NOT NULL,
-    deleted_at        BIGINT
+    deleted_at        BIGINT,
+    -- AQU-692: target-text snapshot captured on comment.create for a root
+    -- thread. Drives the "Translation changed since this thread was created"
+    -- badge. NULL = unknown baseline (reply, non-cell scope, or legacy row) →
+    -- never shown as stale.
+    created_for_translated TEXT
 );
 
 -- ─────────────────────────── assignments + misc ─────────────────────────
@@ -900,7 +906,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
     id                  UUID PRIMARY KEY,
     project_id          TEXT NOT NULL,
     uploaded_by_user_id TEXT NOT NULL,
-    credential_id       TEXT NOT NULL,
+    credential_id       TEXT,
     name                TEXT NOT NULL,
     content_type        TEXT,
     size_bytes          BIGINT NOT NULL,
@@ -909,9 +915,48 @@ CREATE TABLE IF NOT EXISTS artifacts (
     file_id             TEXT,
     kind                TEXT NOT NULL DEFAULT 'source',
     audio_id            TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    -- AQU-635: format inspection/classification facts that belong to the
+    -- immutable artifact rather than any one file interpretation.
+    metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (id, project_id)
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
+
+-- AQU-635: one immutable artifact can contribute multiple package members or
+-- files. Per-cell reversible locators remain in cells.metadata; this relation
+-- stores only file-level interpretation/provenance and compact manifests.
+CREATE TABLE IF NOT EXISTS artifact_bindings (
+    id              UUID PRIMARY KEY,
+    project_id      TEXT NOT NULL,
+    artifact_id     UUID NOT NULL,
+    file_id         TEXT NOT NULL,
+    binding_role    TEXT NOT NULL
+                      CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
+    target_lang     TEXT NOT NULL DEFAULT '',
+    member_path     TEXT NOT NULL DEFAULT '',
+    profile_id      TEXT NOT NULL,
+    profile_version TEXT NOT NULL,
+    fidelity        TEXT NOT NULL
+                      CHECK (fidelity IN ('native', 'verified-recipe', 'content-only', 'preserved-only')),
+    manifest        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    recipe          JSONB,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (artifact_id, file_id, binding_role, target_lang, member_path),
+    CONSTRAINT artifact_bindings_artifact_project_fkey
+      FOREIGN KEY (artifact_id, project_id)
+      REFERENCES artifacts(id, project_id)
+      ON DELETE CASCADE,
+    CONSTRAINT artifact_bindings_file_project_fkey
+      FOREIGN KEY (file_id, project_id)
+      REFERENCES files(id, project_id)
+      ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_bindings_project_file
+  ON artifact_bindings(project_id, file_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_bindings_artifact
+  ON artifact_bindings(artifact_id);
 
 -- Agent memory + project brief (0066_agent_memory.sql; AQU-AGENT contracts §3).
 -- Long-term, human-reviewed agent memory. `agent_memories` rows move
@@ -974,6 +1019,58 @@ CREATE TABLE IF NOT EXISTS project_brief_history (
   updated_by text,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (project_id, version)
+);
+
+-- 0069: external integrations (provider-generic; Monday.com first). One OAuth
+-- connection per (org, provider) with AES-GCM-encrypted tokens, one remote
+-- link per (project, provider) (config = per-provider mapping, e.g.
+-- MondayMapping in auth-worker/src/lib/monday/types.ts), and an entity ->
+-- remote-item map for idempotent upserts.
+CREATE TABLE IF NOT EXISTS integration_connections (
+  id TEXT PRIMARY KEY,                -- uuid
+  org_id TEXT NOT NULL,
+  provider TEXT NOT NULL,             -- 'monday' (first of several)
+  account JSONB,                      -- provider identity, e.g. {accountId, accountSlug, userId, userName}
+  access_token_enc TEXT NOT NULL,     -- AES-GCM, base64(iv||ciphertext)
+  refresh_token_enc TEXT,             -- OAuth 2.1 rotating refresh token, same encryption; NULL for legacy non-expiring tokens
+  access_token_expires_at TIMESTAMPTZ,-- from the access-token JWT exp claim; NULL = non-expiring (legacy flow)
+  needs_reauth BOOLEAN NOT NULL DEFAULT FALSE, -- set when refresh fails (revoked/max lifetime); cleared on successful OAuth callback
+  scopes TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (org_id, provider)
+);
+
+CREATE TABLE IF NOT EXISTS integration_links (
+  id TEXT PRIMARY KEY,                -- uuid
+  project_id TEXT NOT NULL,
+  provider TEXT NOT NULL,             -- 'monday'
+  connection_id TEXT NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
+  external_id TEXT NOT NULL,          -- remote container id (Monday: board id)
+  external_name TEXT,                 -- remote container name (Monday: board name)
+  config JSONB NOT NULL,              -- per-provider mapping config (Monday: MondayMapping)
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  webhook_ids JSONB NOT NULL DEFAULT '[]'::jsonb,   -- remote webhook ids we created
+  remote_state JSONB,                 -- cached remote structure (Monday: {fetchedAt, columns, groups})
+  remote_state_stale BOOLEAN NOT NULL DEFAULT FALSE,
+  dirty_at TIMESTAMPTZ,               -- set when progress changed but push was debounced
+  last_pushed_at TIMESTAMPTZ,
+  last_push_status TEXT,              -- 'ok' | 'error'
+  last_push_error TEXT,
+  created_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (project_id, provider)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_links_dirty ON integration_links (dirty_at) WHERE dirty_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS integration_item_links (
+  link_id TEXT NOT NULL REFERENCES integration_links(id) ON DELETE CASCADE,
+  entity_kind TEXT NOT NULL,          -- 'project' | 'file'
+  entity_id TEXT NOT NULL,            -- project_id or file_id
+  external_item_id TEXT NOT NULL,     -- remote item id (Monday: item id)
+  PRIMARY KEY (link_id, entity_kind, entity_id)
 );
 
 -- ───────────────────────── post-migration notes ─────────────────────────

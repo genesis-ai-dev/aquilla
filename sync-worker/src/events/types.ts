@@ -25,6 +25,8 @@ export type EventKind =
   | 'source.cell.commit'
   | 'source.cell.delete'
   | 'source.cell.reorder'
+  // Versioned, metadata-only backfill. Does not advance the source text chain.
+  | 'source.cell.metadata.patch'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -165,6 +167,16 @@ export interface EventPayloads {
   'source.cell.delete': Record<string, never>
   'source.cell.reorder': {
     anchorCellId: string | null
+  }
+  'source.cell.metadata.patch': {
+    /** Payload contract version; v1 is the only supported patch shape. */
+    version: 1
+    /** Shallow JSON merge into cells.metadata. Existing unrelated keys survive. */
+    metadata: Record<string, unknown>
+    /** Optional canonical protected source HTML produced by the v2 upgrader. */
+    valueHtml?: string
+    /** Optional canonical current target HTML; text/history stay untouched. */
+    targetHtml?: string
   }
 
   // ── Target-side ────────────────────────────────────────────────────────
@@ -315,6 +327,15 @@ export interface EventPayloads {
     trimStartMs?: number
     trimEndMs?: number
     timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
+    /**
+     * AQU-646: ASR transcript of this clip (its trim window). Only sent for
+     * `medium:"media"` source segments — the projection writes it to the
+     * SOURCE cell row's `transcription` column so imported audio surfaces
+     * translatable source text. Riding this event keeps the write at the
+     * CONTRIBUTOR floor (source.cell.* are project_lead) and avoids the
+     * source.cell.create UPSERT clobbering segment fields.
+     */
+    transcription?: string
   }
   'cell.audio.select': {
     audioId: string
@@ -339,6 +360,16 @@ export interface EventPayloads {
     name: string
     /** "codex" | "vtt" | "srt" | etc. — matches `files.file_type`. */
     fileType: string
+    /** Stable domain semantics may differ from the parser id (for example,
+     * TMX parses with `fileType=tmx` but is a translation-memory file). */
+    kind?: string
+    role?: string
+    bookCode?: string
+    sourceFileId?: string
+    anchorFileId?: string
+    r2Key?: string
+    importFormat?: string
+    parserVersion?: string
     /** ISO codes; null/undefined when unknown at import time. */
     sourceLanguage?: string
     targetLanguage?: string
@@ -347,6 +378,14 @@ export interface EventPayloads {
     /** Timeline-segment-model: order lens — 'time' | 'sequence'. Stored in
      *  files.meta (JSON). Absent ⇒ client treats as 'sequence'. */
     orderedBy?: string
+    /** Versioned normalized-import summary persisted under files.meta. */
+    importManifest?: Record<string, unknown>
+    /**
+     * Internal re-import fold snapshot. The specialized re-import route uses
+     * this to make event-log rebuilds reproduce the live merged file metadata
+     * exactly. Normal genesis imports omit it.
+     */
+    projectionMeta?: Record<string, unknown>
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
   // (Corpus/grouping marker is not server-backed yet — name only.)
@@ -367,6 +406,10 @@ export interface EventPayloads {
     scope: CommentScope
     body: string // markdown OK
     parentCommentId: string | null // null = top-level; non-null = reply
+    // AQU-692: snapshot of the cell's target text at thread-creation time, so the
+    // client can render the "Translation changed since this thread was created"
+    // badge. Root threads only; null/absent = unknown baseline (no badge).
+    createdForTranslated?: string | null
   }
   'comment.edit': {
     commentId: string

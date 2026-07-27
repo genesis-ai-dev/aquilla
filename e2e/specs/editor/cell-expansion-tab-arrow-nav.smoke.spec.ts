@@ -54,7 +54,6 @@ test("CellExpansion tabs respond to ArrowRight / Home / End keyboard nav", async
 
   // Press ArrowRight → second tab should get focus (and be selected).
   await alice.keyboard.press("ArrowRight")
-  await alice.waitForTimeout(200)
 
   const secondTab = tabs.nth(1)
   // The second tab should now be selected (aria-selected=true).
@@ -64,12 +63,10 @@ test("CellExpansion tabs respond to ArrowRight / Home / End keyboard nav", async
 
   // Press Home → first tab should be selected.
   await alice.keyboard.press("Home")
-  await alice.waitForTimeout(200)
   await expect(firstTab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })
 
   // Press End → last tab should be selected.
   await alice.keyboard.press("End")
-  await alice.waitForTimeout(200)
   const lastTab = tabs.nth(tabCount - 1)
   await expect(lastTab).toHaveAttribute("aria-selected", "true", { timeout: 2_000 })
 })

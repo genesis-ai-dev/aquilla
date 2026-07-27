@@ -31,8 +31,6 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   // Navigate to project settings.
   // AQU-501: Project name lives in the "General" sub-menu pane.
   await alice.goto(`/project/${seeded.projectId}/settings/general`)
-  await alice.waitForLoadState("networkidle")
-
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
   await sourceLanguage.fill("English (US)")
@@ -72,8 +70,6 @@ test("project settings discard dialog: Discard navigates away from settings", as
 
   // AQU-501: Project name lives in the "General" sub-menu pane.
   await alice.goto(`/project/${seeded.projectId}/settings/general`)
-  await alice.waitForLoadState("networkidle")
-
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
   await sourceLanguage.fill("English (Canada)")

@@ -7,15 +7,17 @@
  * optimisation, not a behaviour change.
  *
  * Fixture covers all four grant paths required by the issue spec:
- *   - org-membership role:  anna has org viewer (100) on org 1
+ *   - org-membership role:  anna has org viewer (100) on org 1 — per AQU-435
+ *     this is BELOW the maintainer floor, so it is NOT a grant path and never
+ *     appears as a contribution (wendi's org owner role, 700, still does)
  *   - direct override:      anna has a direct reviewer (300) on project "pa"
  *   - group grant:          anna is in "Translators" group → contributor (400) on "pa"
  *   - creator:              anna created project "pb" → owner (700)
  *
- * max-wins for anna on "pa":  group(400) > override(300) > org(100)
- *   winner = group, secondarySources = [override(300), org(100)]
- * max-wins for anna on "pb":  creator(700) > org(100)
- *   winner = creator, secondarySources = [org(100)]
+ * max-wins for anna on "pa":  group(400) > override(300); org(100) contributes nothing
+ *   winner = group, secondarySources = [override(300)]
+ * max-wins for anna on "pb":  creator(700) only
+ *   winner = creator, secondarySources = []
  *
  * Edge: org with zero accessible projects (viewer has no grant paths on any
  * project) → matrix returns empty `projects` array without error.
@@ -127,7 +129,7 @@ describe("GET /api/v2/orgs/:orgId/members-matrix (AQU-218 batched endpoint)", ()
     expect(simplify(pbBatched)).toEqual(simplify(pbRef))
   })
 
-  it("anna on 'pa' wins via group (400), with direct(300) and org(100) as secondarySources", async () => {
+  it("anna on 'pa' wins via group (400), with direct(300) as the only secondary — sub-floor org role excluded", async () => {
     await seedFixture()
     const jwt = await jwtFor("wendi")
 
@@ -141,16 +143,16 @@ describe("GET /api/v2/orgs/:orgId/members-matrix (AQU-218 batched endpoint)", ()
     const anna = pa!.members.find((m) => m.username === "anna")
     expect(anna).toBeDefined()
 
-    // Winning path: group(400) > override(300) > org(100)
+    // Winning path: group(400) > override(300); org(100) is sub-floor (AQU-435)
     expect(anna!.role.source).toBe("group")
     expect(anna!.role.level).toBe(400)
 
-    // secondarySources must contain both the direct override and the org path
+    // secondarySources: only the direct override — the org viewer role is not a path
     const sources = anna!.secondarySources.map((s) => s.source).sort()
-    expect(sources).toEqual(["org", "override"])
+    expect(sources).toEqual(["override"])
   })
 
-  it("anna on 'pb' (her project) wins via creator (700), org(100) is secondary", async () => {
+  it("anna on 'pb' (her project) wins via creator (700), with no secondaries — sub-floor org role excluded", async () => {
     await seedFixture()
     const jwt = await jwtFor("wendi")
 
@@ -164,13 +166,12 @@ describe("GET /api/v2/orgs/:orgId/members-matrix (AQU-218 batched endpoint)", ()
     const anna = pb!.members.find((m) => m.username === "anna")
     expect(anna).toBeDefined()
 
-    // Creator path wins (700 > 100)
+    // Creator path wins; her org viewer (100) role is sub-floor (AQU-435)
     expect(anna!.role.source).toBe("creator")
     expect(anna!.role.level).toBe(700)
 
-    // org path is secondary
-    expect(anna!.secondarySources).toHaveLength(1)
-    expect(anna!.secondarySources[0]).toMatchObject({ source: "org", level: 100 })
+    // no secondary paths — the org viewer role contributes nothing
+    expect(anna!.secondarySources).toHaveLength(0)
   })
 
   it("non-member gets 403", async () => {

@@ -20,8 +20,6 @@ test("team add member workflow shows new member in members list", async ({ alice
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
   await alice.goto(orgRoute(alice, "/teams"))
-  await alice.waitForLoadState("networkidle")
-
   // Create a team.
   await alice.getByRole("button", { name: /New team/i }).click()
   const nameInput = alice.locator('input[placeholder="Team name"]')
@@ -30,8 +28,6 @@ test("team add member workflow shows new member in members list", async ({ alice
   await nameInput.fill(teamName)
   await alice.getByRole("button", { name: /^Create$/i }).click()
   await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
-  await alice.waitForLoadState("networkidle")
-
   // "Add member" button appears for admin.
   const addMemberBtn = alice.getByRole("button", { name: /Add member/i })
   await expect(addMemberBtn).toBeVisible({ timeout: 5_000 })

@@ -1,9 +1,8 @@
 /**
- * ChangesetCard.tsx — a PlanImport changeset staged via changeset-bridge
- * (AQU-AGENT §2 plan_import / §4 changeset.staged), awaiting human approval
- * at the existing `/approve/:changesetId` surface. Unlike ProposalCard this
- * is NOT applied from chat — the "Review & approve" link is the only action,
- * opened in a new tab so the run stays on screen.
+ * ChangesetCard.tsx — backward-compatible rendering for a PlanImport
+ * changeset.staged frame persisted by an older agent run. Current imports use
+ * the dedicated Import dialog; an old pending card still links to the existing
+ * `/approve/:changesetId` surface so it remains actionable after the change.
  *
  * mem-M5 liveness: while the card is mounted and the changeset is still
  * pending, it polls `GET /api/v2/changesets/:id/approval` (same route/shape

@@ -13,6 +13,7 @@ import { X, AlertTriangle, AlertCircle, BookA, MessageSquare } from "lucide-reac
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cellTextForDisplay, truncateCellText } from "@/lib/cell-text"
+import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import type { CellData } from "@/hooks/useCells"
 import type {
   CheckRunResult,
@@ -61,6 +62,25 @@ function formatRunTime(iso: string): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
 }
 
+/** SUB-5: human title for a finding card. Prefer the cell's label (verse ref);
+ * for subtitle cues (no label) fall back to the cue's timestamp range parsed
+ * from `context` — never show a raw cell UUID unless the cell is unknown. */
+export function findingCellLabel(cell: CellData | undefined, cellId: string): string {
+  if (cell?.cellLabel) return cell.cellLabel
+  const range = cell ? parseTimestampRange(cell.context) : null
+  if (range) return `${fmtCueTime(range.start)}–${fmtCueTime(range.end)}`
+  return cellId
+}
+
+/** Compact cue clock: mm:ss.t, hours only when nonzero. */
+function fmtCueTime(sec: number): string {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  const ss = s.toFixed(1).padStart(4, "0")
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`
+}
+
 interface CellRefButtonProps {
   cellId: string
   label: string
@@ -72,14 +92,18 @@ interface CellRefButtonProps {
 
 function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, detail }: CellRefButtonProps) {
   return (
-    <li className="flex items-start gap-1">
+    // min-w-0 on the flex item + button (SUB-5): without it, long unbroken
+    // content (raw HTML snippets, UUIDs) sets the intrinsic width and the card
+    // punches through the fixed-width drawer; the inner `truncate`s only work
+    // once their flex ancestors are allowed to shrink.
+    <li className="flex min-w-0 items-start gap-1">
       <button
         type="button"
-        className="flex-1 rounded border-l-2 border-amber-400 bg-amber-50 p-1.5 text-left text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
+        className="min-w-0 flex-1 rounded border-l-2 border-amber-400 bg-amber-50 p-1.5 text-left text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
         onClick={() => onNavigateToCell(cellId)}
         title="Go to cell"
       >
-        <div className="font-medium">{label}</div>
+        <div className="truncate font-medium">{label}</div>
         {detail && <div className="truncate text-muted-foreground">{detail}</div>}
         {cell && (
           <div className="truncate text-muted-foreground">
@@ -132,7 +156,7 @@ function RuleFindingCard({
             <CellRefButton
               key={`${inf.ruleId}:${inf.cellId}`}
               cellId={inf.cellId}
-              label={cell?.cellLabel ?? inf.cellId}
+              label={findingCellLabel(cell, inf.cellId)}
               cell={cell}
               detail={inf.spans[0]?.matchedText ? `matched "${inf.spans[0].matchedText}"` : undefined}
               onNavigateToCell={onNavigateToCell}
@@ -171,7 +195,7 @@ function TermFindingCard({
           <CellRefButton
             key={fc.cellId}
             cellId={fc.cellId}
-            label={fc.cellLabel ?? fc.cellId}
+            label={fc.cellLabel ?? findingCellLabel(cellMap.get(fc.cellId), fc.cellId)}
             cell={cellMap.get(fc.cellId)}
             onNavigateToCell={onNavigateToCell}
             onOpenComments={onOpenComments}

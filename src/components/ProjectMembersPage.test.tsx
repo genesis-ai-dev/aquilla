@@ -10,8 +10,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
-import { ProjectMembersPage } from "./ProjectMembersPage"
+import { ProjectMembersPage, MemberAddCombobox } from "./ProjectMembersPage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import type { OrgMember } from "@/lib/frontier/orgs"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,26 @@ function renderPage(projectId = "proj-1") {
 describe("ProjectMembersPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it("shows explicit progress while the member list is unresolved", () => {
+    mockUseProjectMembers.mockReturnValueOnce({
+      members: [],
+      isLoading: true,
+      error: null,
+      rosterHidden: false,
+      refresh: mockRefresh,
+      add: mockAdd,
+      remove: mockRemove,
+      changeRole: mockAdd,
+    })
+
+    renderPage()
+
+    const status = screen.getByRole("status", { name: "Loading members" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(screen.queryByText("No members yet.")).not.toBeInTheDocument()
   })
 
   it("renders the page header and tab bar", () => {
@@ -449,5 +470,95 @@ describe("ProjectMembersPage — AQU-485 roster visibility", () => {
     renderPage()
     expect(screen.queryByText(/roster hidden/i)).not.toBeInTheDocument()
     expect(screen.getByText("alice")).toBeInTheDocument()
+  })
+})
+
+// AQU-672: the add-member field is a combobox that suggests org members (minus
+// those already directly granted) yet stays free-text for exact usernames.
+describe("MemberAddCombobox — AQU-672 org-member suggestions", () => {
+  const om = (userId: number, username: string): OrgMember =>
+    ({ userId, username, role: { level: 400, name: "contributor" } }) as OrgMember
+
+  function renderCombobox(
+    props: Partial<Parameters<typeof MemberAddCombobox>[0]> = {},
+  ) {
+    const onChange = vi.fn()
+    const onSubmit = vi.fn()
+    const utils = render(
+      <MemberAddCombobox
+        members={props.members ?? [om(1, "dana"), om(2, "dave"), om(3, "eve")]}
+        value={props.value ?? ""}
+        onChange={props.onChange ?? onChange}
+        onSubmit={props.onSubmit ?? onSubmit}
+        orgLoaded={props.orgLoaded ?? true}
+        disabled={props.disabled}
+      />,
+    )
+    return { ...utils, onChange: props.onChange ?? onChange, onSubmit: props.onSubmit ?? onSubmit }
+  }
+
+  it("opens on focus and lists the eligible org members", () => {
+    renderCombobox()
+    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
+    const list = screen.getByRole("listbox", { name: "Org members" })
+    expect(within(list).getByRole("option", { name: /dana/ })).toBeInTheDocument()
+    expect(within(list).getByRole("option", { name: /dave/ })).toBeInTheDocument()
+    expect(within(list).getByRole("option", { name: /eve/ })).toBeInTheDocument()
+  })
+
+  it("narrows the list by case-insensitive substring as you type", () => {
+    // Parent owns `value`; simulate its update by re-rendering with the typed value.
+    const { rerender } = renderCombobox({ value: "" })
+    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
+    rerender(
+      <MemberAddCombobox
+        members={[om(1, "dana"), om(2, "dave"), om(3, "eve")]}
+        value="DA"
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        orgLoaded
+      />,
+    )
+    const list = screen.getByRole("listbox", { name: "Org members" })
+    expect(within(list).getByRole("option", { name: /dana/ })).toBeInTheDocument()
+    expect(within(list).getByRole("option", { name: /dave/ })).toBeInTheDocument()
+    expect(within(list).queryByRole("option", { name: /eve/ })).not.toBeInTheDocument()
+  })
+
+  it("picking a suggestion fills the field via onChange", () => {
+    const { onChange } = renderCombobox()
+    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
+    fireEvent.click(screen.getByRole("option", { name: /dave/ }))
+    expect(onChange).toHaveBeenCalledWith("dave")
+  })
+
+  it("shows an explicit empty state when every org member already has a grant", () => {
+    renderCombobox({ members: [], orgLoaded: true })
+    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
+    expect(
+      screen.getByText(/all org members are already on this project/i),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps free text: an unknown username is still submittable (onSubmit on Enter)", () => {
+    const { onSubmit } = renderCombobox({ value: "outsider" })
+    const input = screen.getByRole("combobox", { name: "Member to add" })
+    fireEvent.focus(input)
+    // No org member matches — the field stays usable and Enter submits.
+    expect(
+      screen.getByText(/press add to grant by exact username/i),
+    ).toBeInTheDocument()
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(onSubmit).toHaveBeenCalled()
+  })
+
+  it("with no org roster (personal project) stays a plain free-text field", () => {
+    renderCombobox({ members: [], orgLoaded: false })
+    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
+    // No dropdown/listbox opens — just the input.
+    expect(screen.queryByRole("listbox", { name: "Org members" })).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/all org members are already on this project/i),
+    ).not.toBeInTheDocument()
   })
 })

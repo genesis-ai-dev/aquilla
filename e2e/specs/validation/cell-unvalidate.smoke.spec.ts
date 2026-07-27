@@ -10,13 +10,7 @@ test("cell validation button toggles the current user's validation", async ({ al
   const ws = await openSeededProject(alice, seeded)
   await ws.editCell(0, "Translation to validate then remove")
   await ws.validateCell(0)
+  await ws.unvalidateCell(0)
 
-  const row = ws.cellRow(0)
-  await row.hover()
-  const healthBtn = row.getByRole("button", { name: /Validated/i }).first()
-  await expect(healthBtn).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 })
-
-  await healthBtn.click()
-
-  await expect(healthBtn).toHaveAttribute("aria-pressed", "false", { timeout: 15_000 })
+  await expect(ws.validationToggle(0)).toHaveAttribute("aria-pressed", "false")
 })

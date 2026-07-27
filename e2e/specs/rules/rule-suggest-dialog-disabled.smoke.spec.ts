@@ -29,8 +29,6 @@ test("rule suggest button is disabled when LLM is not configured", async ({ alic
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1] ?? ""
 
   await alice.goto(`/project/${projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // "Suggest from edits" button is disabled when LLM is not configured.
   const suggestBtn = alice.getByRole("button", { name: /Suggest from edits/i })
   await expect(suggestBtn).toBeVisible({ timeout: 10_000 })

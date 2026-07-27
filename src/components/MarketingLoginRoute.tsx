@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { Spinner } from "@/components/ui/spinner"
 import { marketingLogin } from "@/lib/frontier/auth"
 
 // Mirrors M_PROJECT_ID in auth-worker/src/routes/marketing-seed.ts.
@@ -45,7 +46,10 @@ export function MarketingLoginRoute() {
   return (
     <div className="flex h-screen items-center justify-center p-6">
       <div className="max-w-md space-y-2 text-center">
-        <h1 className="text-lg font-semibold">Loading the Aquilla demo…</h1>
+        <h1 className="flex items-center justify-center gap-2 text-lg font-semibold">
+          <Spinner className="size-5" />
+          Loading the Aquilla demo…
+        </h1>
         {error ? (
           <p className="text-sm text-red-600" data-testid="marketing-login-error">
             {error}

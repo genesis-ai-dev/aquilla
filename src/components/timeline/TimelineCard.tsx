@@ -4,15 +4,24 @@
 // window-level pointer listeners (robust when the pointer leaves the card, and
 // testable under happy-dom). Read-only files disable drag but still select.
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import { secToPx, pxToSec, clampRange } from "@/lib/timeline/scale"
+import { subtitleMirrorText } from "@/lib/timeline/lanes"
 import { fmtClock } from "./format"
+import { formatVttTime } from "@/lib/video/vtt-generator"
 import type { CellData } from "@/hooks/useCells"
 
 const MIN_DUR_SEC = 0.2
 
 type DragMode = "move" | "resize-l" | "resize-r"
+
+/** SUB-11: millisecond clock for the live drag readout — `formatVttTime`
+ * (HH:MM:SS.mmm) with a zero hours field trimmed for width. */
+function fmtDragTime(sec: number): string {
+  const t = formatVttTime(Math.max(0, sec))
+  return t.startsWith("00:") ? t.slice(3) : t
+}
 
 export interface TimelineCardProps {
   cell: CellData
@@ -25,6 +34,10 @@ export interface TimelineCardProps {
   onSelect(cellId: string): void
   /** Final bounds in seconds, fired once on pointer-up. */
   onRetime(cellId: string, startSec: number, endSec: number): void
+  /** AQU-646: navigate playback to this clip on a CLEAN click (a drag that
+   *  moved the pointer >3px is a retime, not a seek). Optional — read-only
+   *  surfaces select without seeking. */
+  onSeek?(cellId: string): void
 }
 
 export function TimelineCard({
@@ -36,10 +49,14 @@ export function TimelineCard({
   editable,
   onSelect,
   onRetime,
+  onSeek,
 }: TimelineCardProps) {
   const startSec = cell.startTime ?? 0
   const endSec = cell.endTime ?? startSec + MIN_DUR_SEC
   const [drag, setDrag] = useState<{ mode: DragMode; dx: number } | null>(null)
+  // Set while a drag gesture moved the pointer — the click event that closes a
+  // drag must not also yank playback to the clip's start.
+  const movedRef = useRef(false)
 
   // Live preview geometry while dragging; committed values come from props.
   let left = secToPx(startSec - laneStartSec, pxPerSec)
@@ -53,6 +70,30 @@ export function TimelineCard({
   }
   width = Math.max(width, secToPx(MIN_DUR_SEC, pxPerSec))
 
+  // SUB-11: live preview TIMES during drag — the same per-mode + clampRange
+  // math `onUp` commits, so the readout always shows exactly what release
+  // would produce. `previewStart/End` equal the committed props when idle.
+  let previewStart = startSec
+  let previewEnd = endSec
+  if (drag) {
+    const dSec = pxToSec(drag.dx, pxPerSec)
+    let ns = startSec
+    let ne = endSec
+    if (drag.mode === "move") {
+      ns = startSec + dSec
+      ne = endSec + dSec
+    } else if (drag.mode === "resize-l") ns = startSec + dSec
+    else ne = endSec + dSec
+    const clamped = clampRange(ns, ne, MIN_DUR_SEC)
+    previewStart = clamped.startSec
+    previewEnd = clamped.endSec
+  }
+  const dragDeltaSec = drag
+    ? drag.mode === "resize-r"
+      ? previewEnd - endSec
+      : previewStart - startSec
+    : 0
+
   function beginDrag(mode: DragMode, e: React.PointerEvent) {
     if (!editable) return
     e.stopPropagation()
@@ -63,7 +104,11 @@ export function TimelineCard({
       /* happy-dom / unsupported — window listeners still work */
     }
     setDrag({ mode, dx: 0 })
-    const onMove = (ev: PointerEvent) => setDrag((d) => (d ? { ...d, dx: ev.clientX - startX } : d))
+    movedRef.current = false
+    const onMove = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - startX) > 3) movedRef.current = true
+      setDrag((d) => (d ? { ...d, dx: ev.clientX - startX } : d))
+    }
     const onUp = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
@@ -86,8 +131,17 @@ export function TimelineCard({
   }
 
   const isDialogue = variant === "dialogue"
+  // AQU-646: a media cell rendered in the SUBTITLE lane is the mirror card of
+  // an audio block — it shows the translation once translated, else the
+  // transcript (never the filename-ish `original`).
   const label =
-    (isDialogue ? cell.transcription || cell.original : cell.original) || cell.cellLabel || "—"
+    (isDialogue
+      ? cell.transcription || cell.original
+      : (cell.medium ?? "text") === "media"
+        ? subtitleMirrorText(cell)
+        : cell.original) ||
+    cell.cellLabel ||
+    "—"
   const castName =
     cell.metadata && typeof cell.metadata.cast_name === "string"
       ? (cell.metadata.cast_name as string)
@@ -98,18 +152,41 @@ export function TimelineCard({
       data-testid={`tl-card-${cell.id}`}
       role="button"
       tabIndex={0}
-      onClick={() => onSelect(cell.id)}
+      onClick={() => {
+        onSelect(cell.id)
+        if (!movedRef.current) onSeek?.(cell.id)
+        movedRef.current = false
+      }}
       onPointerDown={(e) => beginDrag("move", e)}
       className={cn(
-        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 overflow-hidden rounded-lg border px-2.5 transition-colors",
+        "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 rounded-lg border px-2.5 transition-colors",
+        // SUB-11: the drag chip renders above the card bounds, so overflow can't
+        // be hidden mid-drag; inner text stays contained by its own `truncate`s.
+        drag ? "z-20 overflow-visible" : "overflow-hidden",
         isDialogue
           ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-200"
           : "border-border bg-card text-foreground",
         selected && "z-10 ring-2 ring-sky-500 ring-offset-1 ring-offset-background",
-        !selected && "hover:z-10 hover:bg-muted/30",
+        !selected && !drag && "hover:z-10 hover:bg-muted/30",
       )}
       style={{ left: `${left}px`, width: `${width}px` }}
     >
+      {drag && (
+        // SUB-11: live millisecond readout while dragging — anchored to the
+        // edge being manipulated; shows the exact value release would commit.
+        <span
+          data-testid="tl-drag-chip"
+          className={cn(
+            "pointer-events-none absolute -top-6 z-30 rounded bg-foreground px-1.5 py-0.5 font-mono text-[10px] tabular-nums whitespace-nowrap text-background shadow",
+            drag.mode === "resize-r" ? "right-0" : "left-0",
+          )}
+        >
+          {drag.mode === "move"
+            ? `${fmtDragTime(previewStart)}–${fmtDragTime(previewEnd)}`
+            : fmtDragTime(drag.mode === "resize-l" ? previewStart : previewEnd)}
+          {" "}({dragDeltaSec >= 0 ? "+" : "−"}{Math.abs(dragDeltaSec).toFixed(2)}s)
+        </span>
+      )}
       <span
         className={cn(
           "absolute inset-y-0 left-0 w-[3px] rounded-l-lg",
@@ -141,7 +218,11 @@ export function TimelineCard({
         )}
         {castName && <span className="font-medium text-foreground/80">{castName}</span>}
         <span className="font-mono tabular-nums">
-          {fmtClock(startSec, true)}–{fmtClock(endSec, true)}
+          {/* SUB-11: while dragging, show the live preview bounds (ms) rather
+              than the stale committed props. */}
+          {drag
+            ? `${fmtDragTime(previewStart)}–${fmtDragTime(previewEnd)}`
+            : `${fmtClock(startSec, true)}–${fmtClock(endSec, true)}`}
         </span>
       </div>
       {editable && (

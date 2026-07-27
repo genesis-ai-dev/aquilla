@@ -12,8 +12,6 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("archived projects page renders breadcrumb and empty state", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/archived"))
-  await alice.waitForLoadState("networkidle")
-
   // OrgBreadcrumb shows "Archived".
   await expect(alice.getByText("Archived").first()).toBeVisible({ timeout: 10_000 })
 

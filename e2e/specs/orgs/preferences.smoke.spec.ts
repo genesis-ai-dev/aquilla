@@ -13,8 +13,6 @@ import { test, expect } from "../../helpers/multi-user"
  */
 test("preferences page renders Privacy section", async ({ alice }) => {
   await alice.goto("/preferences")
-  await alice.waitForLoadState("networkidle")
-
   await expect(alice.locator("h1").filter({ hasText: /Preferences/i })).toBeVisible({
     timeout: 10_000,
   })

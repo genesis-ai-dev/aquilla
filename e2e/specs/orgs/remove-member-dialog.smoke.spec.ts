@@ -18,8 +18,6 @@ test("remove member dialog opens and Cancel keeps member", async ({ alice }) => 
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
   await alice.goto(orgRoute(alice, "/members"))
-  await alice.waitForLoadState("networkidle")
-
   // Wait for bob to appear in the members list.
   await expect(alice.getByText("bob").first()).toBeVisible({ timeout: 10_000 })
 

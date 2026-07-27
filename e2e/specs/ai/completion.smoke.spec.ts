@@ -33,7 +33,6 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
 
   // Reload so React reads the patched project state.
   await alice.reload()
-  await alice.waitForLoadState("networkidle")
   await ws.waitForEditor()
 
   // The sparkle lives in CellActionRail, hidden until the row is hovered
@@ -47,7 +46,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
     .first()
   await sparkle.scrollIntoViewIfNeeded()
   await alice.locator("[data-cell-id]").first().hover()
-  await alice.waitForTimeout(250) // let the 180ms opacity fade settle
+  await expect(sparkle).toBeVisible()
   await sparkle.click()
 
   // Mock LLM's default response is "Traducción de prueba".

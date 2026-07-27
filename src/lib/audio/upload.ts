@@ -56,6 +56,22 @@ export function buildDenoisedAudioId(cellId: string): string {
 }
 
 /**
+ * SUB-29 (AQU-646): was this audioId seeded with `id` when built? buildAudioId
+ * embeds its seed verbatim for uuid ids (the normaliser only touches chars R2
+ * dislikes), so provenance is readable back out: the IMPORTED SOURCE CLIP is
+ * seeded with the FILE id (import + attach-media flows), while every mic/upload
+ * take is seeded with the CELL id. This is the only per-cell O(1) signal that
+ * distinguishes them — attachment trims fail in both directions (single-segment
+ * imports carry none; cropped takes gain some). Relies on the seed convention
+ * above staying stable — change buildAudioId's seeding and this breaks.
+ */
+export function audioIdSeededWith(audioId: string | undefined, id: string): boolean {
+  if (!audioId || !id) return false
+  const normalised = id.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 64)
+  return audioId.includes(`-${normalised}-`)
+}
+
+/**
  * True when an audioId names a denoised take. Tolerates the stored
  * `<id>.<ext>` form since the marker is on the leading segment.
  */
@@ -93,11 +109,25 @@ export interface UploadCellAudioArgs {
   audioId: string
   ext: string
   blob: Blob
+  /** Optional immutable provenance record for imported media. Ordinary editor
+   * recordings omit this and keep the existing lightweight R2-only path. */
+  artifactId?: string
+  artifactName?: string
   getSyncToken: SyncTokenForFile
+  signal?: AbortSignal
+  fetchFn?: typeof fetch
+  retryDelaysMs?: readonly number[]
+}
+
+const AUDIO_UPLOAD_ATTEMPTS = 3
+const AUDIO_UPLOAD_RETRY_DELAYS_MS = [200, 800] as const
+
+function isRetryableAudioUploadStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500
 }
 
 export async function uploadCellAudio(args: UploadCellAudioArgs): Promise<AudioUploadResult> {
-  const { projectId, fileId, audioId, ext, blob, getSyncToken } = args
+  const { projectId, fileId, audioId, ext, blob, artifactId, artifactName, getSyncToken } = args
   if (blob.size > MAX_AUDIO_UPLOAD_BYTES) {
     const mb = (n: number) => Math.round(n / (1024 * 1024))
     throw new Error(
@@ -106,27 +136,56 @@ export async function uploadCellAudio(args: UploadCellAudioArgs): Promise<AudioU
         `or split the file.`,
     )
   }
-  const token = await getSyncToken(projectId, fileId)
+  let token = await getSyncToken(projectId, fileId)
   if (!token) throw new Error("audio upload: no sync token (not signed in or no project access)")
 
-  const res = await fetch(audioEndpoint(projectId, fileId, audioId, ext), {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": blob.type || "application/octet-stream",
-    },
-    body: blob,
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw new Error(`audio upload failed (${res.status}): ${text || res.statusText}`)
+  const fetchFn = args.fetchFn ?? fetch
+  const delays = args.retryDelaysMs ?? AUDIO_UPLOAD_RETRY_DELAYS_MS
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt < AUDIO_UPLOAD_ATTEMPTS; attempt++) {
+    if (args.signal?.aborted) throw new Error("audio upload cancelled")
+    let res: Response | null = null
+    try {
+      res = await fetchFn(audioEndpoint(projectId, fileId, audioId, ext), {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": blob.type || "application/octet-stream",
+          ...(artifactId ? { "X-Artifact-Id": artifactId } : {}),
+          ...(artifactName ? { "X-Artifact-Name": encodeURIComponent(artifactName) } : {}),
+        },
+        body: blob,
+        signal: args.signal,
+      })
+    } catch (error) {
+      if (args.signal?.aborted) throw new Error("audio upload cancelled")
+      lastError = error instanceof Error ? error : new Error(String(error))
+    }
+    if (res) {
+      if (res.ok) {
+        return {
+          audioId,
+          ext,
+          url: buildFrontierAudioUrl(audioId, ext),
+          sizeBytes: blob.size,
+        }
+      }
+      const text = await res.text().catch(() => "")
+      lastError = new Error(`audio upload failed (${res.status}): ${text || res.statusText}`)
+      if (res.status === 401 && attempt < AUDIO_UPLOAD_ATTEMPTS - 1) {
+        const refreshed = await getSyncToken(projectId, fileId)
+        if (refreshed) {
+          token = refreshed
+          continue
+        }
+      }
+      if (!isRetryableAudioUploadStatus(res.status)) throw lastError
+    }
+    if (attempt < AUDIO_UPLOAD_ATTEMPTS - 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt] ?? 0))
+    }
   }
-  return {
-    audioId,
-    ext,
-    url: buildFrontierAudioUrl(audioId, ext),
-    sizeBytes: blob.size,
-  }
+  throw lastError ?? new Error("audio upload failed")
 }
 
 export interface FetchCellAudioArgs {
@@ -202,4 +261,31 @@ export async function fetchCellAudio(args: FetchCellAudioArgs): Promise<Uint8Arr
   }
   const buf = await res.arrayBuffer()
   return new Uint8Array(buf)
+}
+
+export type CellAudioPresence = "present" | "missing" | "unknown"
+
+/**
+ * Lightweight existence check for an uploaded clip. Issues a single-byte ranged
+ * GET (the endpoint supports Range/206) so it can run on clip selection without
+ * pulling the whole object like fetchCellAudio does. Returns:
+ *   "missing" — the R2 object is gone (404); retrying can never succeed.
+ *   "present" — the object exists (2xx/206).
+ *   "unknown" — no token, network error, or any other status; caller should
+ *               not draw a conclusion (don't flash a missing badge on a blip).
+ */
+export async function probeCellAudioPresent(args: FetchCellAudioArgs): Promise<CellAudioPresence> {
+  const { projectId, fileId, audioId, ext, getSyncToken } = args
+  const token = await getSyncToken(projectId, fileId)
+  if (!token) return "unknown"
+  try {
+    const res = await fetch(audioEndpoint(projectId, fileId, audioId, ext), {
+      headers: { Authorization: `Bearer ${token}`, Range: "bytes=0-0" },
+    })
+    if (res.status === 404) return "missing"
+    if (res.ok) return "present" // 200 (Range ignored) or 206 (partial)
+    return "unknown"
+  } catch {
+    return "unknown"
+  }
 }

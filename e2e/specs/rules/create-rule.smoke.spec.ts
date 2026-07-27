@@ -18,8 +18,6 @@ test("add rule inline editor appears and Cancel dismisses", async ({ alice }) =>
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AddRule ${Date.now()}` })
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // "+ Add Rule" button opens the inline editor.
   const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })

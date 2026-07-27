@@ -25,13 +25,28 @@ import { clearSelection, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import { canPerform } from "@/lib/sync/role-policy"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
+import { isInMemberScope, type MemberScope } from "@/lib/sync/member-scopes"
 
 interface Props {
   project: ProjectRecord
   cellStore: CellStore
   session: FrontierSession | null
   username: string
-  completeSingle?: (cell: CellData) => Promise<void> | void
+  /**
+   * AQU-538/AQU-633: the active target lane. Bulk validate/unvalidate must
+   * carry it as `targetLang` so the events land on the correct lane's chain
+   * slot and pass the sync-worker's lane-scope gate — matching the single-cell
+   * path (EditorTable.emitValidationChange) and ProjectWorkspace.runBatchValidate.
+   * `''` = default lane and is omitted on the wire by the emit helpers.
+   */
+  activeLane: string
+  /**
+   * AQU-633: the current user's own lane/file scopes (empty = unscoped). Bulk
+   * validate/unvalidate skip cells outside these scopes so a scoped member
+   * never fires a guaranteed-403; the server stays authoritative.
+   */
+  myScopes: MemberScope[]
+  completeSingle?: (cell: CellData) => Promise<boolean> | void
   completeBatch?: (cells: CellData[]) => Promise<void> | void
   /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
   audioMode?: boolean
@@ -66,7 +81,7 @@ type Running =
   | { kind: "validate" }
   | { kind: "voice" }
 
-export function SelectionBar({ project, cellStore, username, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
+export function SelectionBar({ project, cellStore, username, activeLane, myScopes, completeBatch, audioMode, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted }: Props) {
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
@@ -98,9 +113,12 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
   )
   const validatableCount = useMemo(
     () => selectedCells.filter(
-      (c) => isBulkValidationEligible(c) && !c.activeValidators.includes(username),
+      (c) =>
+        isBulkValidationEligible(c) &&
+        !c.activeValidators.includes(username) &&
+        isInMemberScope(myScopes, c.fileId, activeLane),
     ).length,
-    [selectedCells, username],
+    [selectedCells, username, myScopes, activeLane],
   )
   const unvalidatableCount = useMemo(
     () => selectedCells.filter(
@@ -113,6 +131,16 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
   // drafts needing individual review → cells still lacking a translation.
   const validateDisabledReason = useMemo(() => {
     if (validatableCount > 0) return null
+    // AQU-633: cells eligible + not-yet-mine but blocked only by scope.
+    const outOfScope = selectedCells.filter(
+      (c) =>
+        isBulkValidationEligible(c) &&
+        !c.activeValidators.includes(username) &&
+        !isInMemberScope(myScopes, c.fileId, activeLane),
+    ).length
+    if (outOfScope > 0) {
+      return "Some selected cells are outside your assigned files or lanes"
+    }
     const alreadyMine = selectedCells.filter(
       (c) => isBulkValidationEligible(c) && c.activeValidators.includes(username),
     ).length
@@ -126,7 +154,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
     if (aiDrafts > 0) return "Nothing eligible — untouched AI drafts require individual review"
     if (needTranslation > 0) return "Selected cells need a translation first"
     return "Nothing eligible to validate"
-  }, [validatableCount, selectedCells, username])
+  }, [validatableCount, selectedCells, username, myScopes, activeLane])
   const allHaveTranslation = selectedCells.length > 0 && selectedCells.every((c) => c.translated.trim())
   const voiceableCount = useMemo(
     () => selectedCells.filter((c) => c.type !== "paratext" && c.translated.trim()).length,
@@ -176,6 +204,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
       for (const cell of selectedCells) {
         if (!isBulkValidationEligible(cell)) continue
         if (cell.activeValidators.includes(username)) { alreadyValidated++; continue }
+        if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue // AQU-633: skip out-of-scope
         if (!cell.targetEventId || !project.id) continue
         void emitCellValidate({
           projectId: project.id,
@@ -183,6 +212,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
           cellId: cell.id,
           author: username,
           editEventId: cell.targetEventId,
+          targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
         })
         validated++
       }
@@ -196,7 +226,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, validatableCount, isBusy, project.id, onValidationCommitted])
+  }, [selectedCells, username, activeLane, myScopes, validatableCount, isBusy, project.id, onValidationCommitted])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return
@@ -207,6 +237,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
       for (const cell of selectedCells) {
         if (!cell.translated.trim()) continue
         if (!cell.activeValidators.includes(username)) continue
+        if (!isInMemberScope(myScopes, cell.fileId, activeLane)) continue // AQU-633: skip out-of-scope
         if (!cell.targetEventId || !project.id) continue
         void emitCellUnvalidate({
           projectId: project.id,
@@ -214,6 +245,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
           cellId: cell.id,
           author: username,
           editEventId: cell.targetEventId,
+          targetLang: activeLane, // AQU-633: '' omitted on the wire by the emit
         })
         removed++
       }
@@ -223,7 +255,7 @@ export function SelectionBar({ project, cellStore, username, completeBatch, audi
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, unvalidatableCount, isBusy, project.id, onValidationCommitted])
+  }, [selectedCells, username, activeLane, myScopes, unvalidatableCount, isBusy, project.id, onValidationCommitted])
 
   // AQU-365: viewers (and any role below the lowest gated action here —
   // REVIEWER 300, the validate floor) get no selection affordance at all.

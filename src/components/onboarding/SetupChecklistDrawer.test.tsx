@@ -179,6 +179,39 @@ describe("SetupChecklistDrawer — AQU-334 role-aware read-only rows", () => {
     expect(screen.getByText(/Configure voice/)).toBeInTheDocument()
   })
 
+  it("AQU-693: launching import from step 1 fires onOpenImport but does NOT signal a dismissal via onOpenChange", () => {
+    // Regression guard: the step-1 button used to call onOpenChange(false)
+    // before onOpenImport(). In ProjectWorkspace that close handler persists
+    // the `setupChecklistDismissed` flag, so using step 1 as intended silently
+    // ended the whole setup flow. The drawer must launch the import without
+    // ever routing through the dismissal path — the parent owns hiding and
+    // reopening the drawer around the import dialog.
+    const onOpenChange = vi.fn()
+    const onOpenImport = vi.fn()
+    render(
+      <SetupChecklistDrawer
+        open
+        onOpenChange={onOpenChange}
+        project={makeProject()}
+        roleLevel={ROLE.OWNER}
+        state={EMPTY_STATE}
+        onProjectUpdated={() => {}}
+        onSharesChanged={() => {}}
+        onDismiss={() => {}}
+        onOpenImport={onOpenImport}
+      />,
+      { wrapper },
+    )
+
+    // Expand the step (only the accordion header matches while collapsed), then
+    // click the inner action button (exact "Import files", no extra description).
+    expandStep("Import files")
+    fireEvent.click(screen.getByRole("button", { name: /^import files$/i }))
+
+    expect(onOpenImport).toHaveBeenCalledTimes(1)
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
   it("Coming Soon rows remain inactive teasers regardless of role (unaffected by this change)", () => {
     renderDrawer(ROLE.CONTRIBUTOR)
     expect(screen.getByText("Upload project standards")).toBeInTheDocument()

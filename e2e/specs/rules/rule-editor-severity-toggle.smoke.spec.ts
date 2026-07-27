@@ -20,8 +20,6 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("rule editor severity toggle switches between Minor and Major", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `SeverityRule ${Date.now()}` })
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // "+ Add Rule" opens the inline RuleEditor (no dialog).
   const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })

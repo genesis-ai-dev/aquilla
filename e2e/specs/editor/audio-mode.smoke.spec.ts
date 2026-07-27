@@ -10,7 +10,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  */
 test("text/audio mode toggle switches lens and preserves editor mount", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AudioMode ${Date.now()}` })
-  await openSeededProject(alice, seeded)
+  const ws = await openSeededProject(alice, seeded)
 
   const textTab = alice.getByRole("tab", { name: /^Text$/i })
   const audioTab = alice.getByRole("tab", { name: /^Audio$/i })
@@ -28,7 +28,7 @@ test("text/audio mode toggle switches lens and preserves editor mount", async ({
   await expect(textTab).toHaveAttribute("aria-selected", "false")
 
   // The editor cells should still be mounted (lens toggle doesn't unmount the list).
-  await expect(alice.locator("[data-cell-id]").first()).toBeVisible({ timeout: 5_000 })
+  await expect(ws.cellRow(0)).toBeVisible()
 
   // 3. Switch back to Text lens.
   await textTab.click()

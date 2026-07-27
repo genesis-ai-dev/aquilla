@@ -47,6 +47,11 @@ function nameLabel(container: HTMLElement): HTMLElement {
 }
 
 describe("FileRow — AQU-341 truncation consistency", () => {
+  it("offers section expansion for Scripture-shaped non-USFM imports", () => {
+    const { getByRole } = renderRow({ file: makeFile({ type: "csv", hasScriptureContent: true }) })
+    expect(getByRole("button", { name: "Expand" })).toBeInTheDocument()
+  })
+
   it("renders the file name with the shared `truncate` rule", () => {
     const { container } = renderRow()
     const label = nameLabel(container)

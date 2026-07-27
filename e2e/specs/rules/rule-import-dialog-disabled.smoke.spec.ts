@@ -23,8 +23,6 @@ test("rule import button is disabled when LLM is not configured", async ({ alice
 
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `RuleImport ${Date.now()}` })
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // "Import from doc" button is disabled because LLM is not configured.
   const importBtn = alice.getByRole("button", { name: /Import from doc/i })
   await expect(importBtn).toBeVisible({ timeout: 10_000 })

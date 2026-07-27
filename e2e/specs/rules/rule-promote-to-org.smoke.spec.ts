@@ -15,8 +15,6 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("Promote to org button opens confirmation dialog", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `PromoteOrg ${Date.now()}` })
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  await alice.waitForLoadState("networkidle")
-
   // Create a rule so the "Promote to org" button appears.
   const addRuleBtn = alice.getByRole("button", { name: /Add Rule|New rule|Add rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })

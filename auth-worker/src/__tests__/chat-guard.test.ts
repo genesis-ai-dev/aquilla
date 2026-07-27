@@ -108,6 +108,32 @@ describe("chat /api/v1/chat/completions — allowlist guard", () => {
     )
     expect(res.status).toBe(200)
   })
+
+  it("uses the configured OpenRouter-compatible base URL", async () => {
+    await seedUser(22, "local-importer")
+    const jwt = await jwtFor("local-importer")
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ choices: [{ message: { content: "{}", role: "assistant" } }], usage: {} }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ))
+    const testEnv = withEnvOverrides({
+      OPENROUTER_API_KEY: "test-key",
+      OPENROUTER_BASE_URL: "http://127.0.0.1:9456/api/v1/",
+      AI_BUDGET_ENFORCE: "false",
+    })
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      testEnv,
+    )
+
+    expect(res.status).toBe(200)
+    expect(upstream).toHaveBeenCalledWith(
+      "http://127.0.0.1:9456/api/v1/chat/completions",
+      expect.objectContaining({ method: "POST" }),
+    )
+  })
 })
 
 describe("chat /api/v1/chat/completions — budget enforcement", () => {

@@ -22,8 +22,6 @@ test("project settings Voice section Open Voice Studio button navigates to works
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1] ?? ""
 
   await alice.goto(`/project/${projectId}/settings/ai`)
-  await alice.waitForLoadState("networkidle")
-
   // "Open Voice Studio" button is visible in the Voice section.
   const voiceStudioBtn = alice.getByRole("button", { name: /Open Voice Studio/i })
   await expect(voiceStudioBtn).toBeVisible({ timeout: 10_000 })

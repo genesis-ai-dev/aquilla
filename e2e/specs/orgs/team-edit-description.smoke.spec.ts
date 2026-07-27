@@ -13,8 +13,6 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
  */
 test("team edit saves description on team detail page", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/teams"))
-  await alice.waitForLoadState("networkidle")
-
   // Create a new team.
   const newTeamBtn = alice.getByRole("button", { name: /New team/i })
   await expect(newTeamBtn).toBeVisible({ timeout: 10_000 })
@@ -28,8 +26,6 @@ test("team edit saves description on team detail page", async ({ alice }) => {
 
   // Navigate to the team detail page.
   await alice.waitForURL(/\/teams\/\d+$/, { timeout: 10_000 })
-  await alice.waitForLoadState("networkidle")
-
   // Click Edit to enter edit mode.
   const editBtn = alice.getByRole("button", { name: /^Edit$/i })
   await expect(editBtn).toBeVisible({ timeout: 5_000 })

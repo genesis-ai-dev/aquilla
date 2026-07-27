@@ -38,6 +38,24 @@ function setState(next: QueueState): void {
 
 export function getQueueState(): QueueState { return state }
 
+/**
+ * True when an error is `fetchCellAudio`'s missing-bytes 404 sentinel — the R2
+ * object for a `frontier-audio://` clip doesn't exist (deleted, or an upload
+ * that never completed). Kept distinct from transient/auth failures so the
+ * queue can skip the dead clip and surface a clear "missing" state instead of
+ * dead-ending on the raw `audio not found (404): not found` as if playback were
+ * simply broken.
+ */
+export function isMissingAudioError(e: unknown): boolean {
+  if (e && typeof e === "object" && "status" in e && (e as { status?: unknown }).status === 404) {
+    return true
+  }
+  return e instanceof Error && e.message.includes("audio not found (404)")
+}
+
+/** User-facing copy for the "this clip has no bytes to play" state. */
+export const MISSING_AUDIO_MESSAGE = "This clip's audio is missing."
+
 function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
@@ -222,6 +240,19 @@ function disposeCurrent(): void {
   pendingDub = null
   disposeAllOverlays()
   if (currentAudio) {
+    // Detach handlers BEFORE clearing src: setting src="" re-runs the media
+    // load algorithm, which fires a final `error` event on the element. With
+    // handlers still attached (and seq unchanged — dispose isn't always
+    // followed by a new playAt), that zombie onerror would stomp whatever
+    // state the caller just set (e.g. MISSING_AUDIO_MESSAGE) with the generic
+    // "Audio failed to load".
+    currentAudio.onerror = null
+    currentAudio.onended = null
+    currentAudio.ontimeupdate = null
+    currentAudio.onloadedmetadata = null
+    currentAudio.ondurationchange = null
+    currentAudio.onpause = null
+    currentAudio.onplay = null
     currentAudio.pause()
     currentAudio.src = ""
     currentAudio = null
@@ -1043,7 +1074,10 @@ function adoptCell(
   )
 }
 
-async function playAt(index: number, opts: { atSeconds?: number; autoplay?: boolean } = {}): Promise<void> {
+/** `explicit` marks a user-chosen start on a specific cell (AQU-660): a
+ *  missing clip there surfaces its "missing" state instead of skipping to a
+ *  neighbour, which auto-advance is allowed to do. */
+async function playAt(index: number, opts: { atSeconds?: number; autoplay?: boolean; explicit?: boolean } = {}): Promise<void> {
   const ctx = activeContext
   if (!ctx) return
   const cell = ctx.cells[index]
@@ -1091,11 +1125,30 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   setState({ kind: "loading", cellIndex: index, cellId: cell.id })
   ctx.onCellChange?.(index, cell.id)
 
+  const surfaceMissing = (missingCellId: string): void => {
+    disposeCurrent()
+    setState({ kind: "error", message: MISSING_AUDIO_MESSAGE, cellId: missingCellId })
+  }
+  // A clip whose bytes are gone must not dead-end the whole transport: during
+  // auto-advance we skip to the next clip that has audio, surfacing a clear
+  // "missing" state only when none remain (rather than the misleading raw 404).
+  // But when the user EXPLICITLY started on this clip (selected it on the
+  // timeline and pressed Play), skipping would silently play a neighbour — the
+  // reported bug (AQU-660). In that case surface the missing state on the
+  // selected clip instead of hopping past it.
+  const skipMissingFrom = (missingCellId: string): void => {
+    if (opts.explicit) { surfaceMissing(missingCellId); return }
+    const next = findNextPlayable(ctx.cells, index + 1)
+    if (next >= 0) { void playAt(next, { autoplay: opts.autoplay }); return }
+    surfaceMissing(missingCellId)
+  }
+
   let resolved: ResolvedAudioSrc
   try {
     resolved = await resolveAudioSrc(playable.url, ctx.projectId, cell.fileId, ctx.session)
   } catch (e) {
     if (seq !== currentSeq) return // superseded
+    if (isMissingAudioError(e)) { skipMissingFrom(cell.id); return }
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
     return
   }
@@ -1217,6 +1270,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
           )
         } catch (e) {
           if (seq !== currentSeq) return
+          if (isMissingAudioError(e)) { skipMissingFrom(cell.id); return }
           setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
         }
       })()
@@ -1243,13 +1297,23 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     await audio.play()
   } catch (e) {
     if (seq !== currentSeq) return
+    // A source that fails to LOAD rejects play() with NotSupportedError and
+    // also fires the element's onerror — which owns recovery (blob fallback →
+    // missing-bytes skip → MISSING_AUDIO_MESSAGE). Publishing the raw
+    // rejection here would race that path and surface "Failed to load because
+    // no supported source was found." for a merely-missing clip (AQU-660).
+    // Genuine playback refusals (e.g. autoplay's NotAllowedError) don't fire
+    // onerror, so they still report here.
+    if (e instanceof DOMException && e.name === "NotSupportedError") return
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
   }
 }
 
 /** Start playback at a specific cell index (or skip forward to the next
- *  cell with audio if the start index has none). */
-export function startQueue(ctx: PlayContext, fromIndex: number): void {
+ *  cell with audio if the start index has none). `explicit` marks a
+ *  user-chosen start (e.g. a selected timeline clip) so a missing clip there
+ *  surfaces its "missing" state rather than skipping to a neighbour. */
+export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false): void {
   activeContext = ctx
   if (timingMode === "audioFirst") {
     progRebuild()
@@ -1270,7 +1334,7 @@ export function startQueue(ctx: PlayContext, fromIndex: number): void {
     disposeCurrent()
     return
   }
-  void playAt(start)
+  void playAt(start, { explicit })
 }
 
 /**
@@ -1297,7 +1361,7 @@ export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}):
   if (plan.kind === "none") return
   if (!currentAudio) {
     // Still loading — reopen at the target instead of racing the resolve.
-    void playAt(plan.index, { atSeconds: plan.seconds, autoplay: wantPlay })
+    void playAt(plan.index, { atSeconds: plan.seconds, autoplay: wantPlay, explicit: true })
     return
   }
   if (plan.kind === "element") {
@@ -1315,7 +1379,9 @@ export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}):
     syncPlayState(wantPlay)
     return
   }
-  void playAt(plan.index, { atSeconds: plan.seconds, autoplay: wantPlay })
+  // A seek is a user-chosen target (AQU-660): if the destination clip's bytes
+  // are missing, surface that there instead of skipping to a neighbour.
+  void playAt(plan.index, { atSeconds: plan.seconds, autoplay: wantPlay, explicit: true })
 }
 
 function syncPlayState(wantPlay: boolean): void {
@@ -1347,7 +1413,8 @@ export function startQueueAtTime(ctx: PlayContext, seconds: number, opts: { play
     void playAt(start, { autoplay: opts.play ?? true })
     return
   }
-  void playAt(target, { atSeconds: at, autoplay: opts.play ?? true })
+  // The user picked this time/section (AQU-660): surface a missing clip here.
+  void playAt(target, { atSeconds: at, autoplay: opts.play ?? true, explicit: true })
 }
 
 export function pauseQueue(): void {

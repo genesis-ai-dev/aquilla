@@ -27,7 +27,13 @@ export function useForbiddenOutboxRecords(enabled: boolean): OutboxRecord[] {
       const all = await peekOutboxBatch(1000)
       if (cancelled) return
       const forbidden = all.filter(
-        (r) => r.status === "failed" && r.lastError?.status === 403 && !!r.lastError.reason,
+        (r) =>
+          r.status === "failed" &&
+          r.lastError?.status === 403 &&
+          !!r.lastError.reason &&
+          // SUB-8: user-acknowledged refusals stay in the inspector but never
+          // resurrect the banner (acknowledgment persists in IDB).
+          !r.acknowledgedAt,
       )
       setRecords((prev) => (sameIds(prev, forbidden) ? prev : forbidden))
     }

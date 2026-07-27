@@ -80,17 +80,25 @@ export function buildTerminologyChipDecorationSet(
         })
       )
 
-      // Widget chip rendered at the END of the matched span (top-right visually
-      // via CSS absolute positioning on the host span)
+      // Widget chip rendered at the END of the matched span. The chip is
+      // wrapped in its own `position:relative` host so the absolutely-positioned
+      // dot anchors to the term's trailing edge. Without this wrapper a widget
+      // is a *sibling* of the term span (ProseMirror inserts it between inline
+      // nodes, not inside `term-chip-host`), so `.term-chip`'s absolute offset
+      // would escape to the nearest positioned ancestor — the `position:relative`
+      // cell wrapper — and paint in the cell's top-right corner (AQU-664).
       decorations.push(
         Decoration.widget(to, () => {
+          const host = document.createElement("span")
+          host.className = "term-chip-host"
           const chip = document.createElement("span")
           chip.className = `term-chip term-chip-preferred`
           chip.setAttribute("data-source-term", concept.sourceTerm)
           chip.setAttribute("aria-label", `Managed term: ${concept.sourceTerm}`)
           chip.setAttribute("title", `Managed term: ${concept.sourceTerm}`)
           // Dot rendered via CSS content/background, text is empty
-          return chip
+          host.appendChild(chip)
+          return host
         }, { side: 1 }) // side:1 → placed after the character, before any following content
       )
     }

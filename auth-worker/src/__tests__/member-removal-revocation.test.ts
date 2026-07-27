@@ -128,7 +128,8 @@ describe("AQU-346 — removal routes notify the sync-worker (live-session eject)
     ).run()
     await env.AQUILLA_PG.prepare("UPDATE projects SET org_id = 9 WHERE id = 'proj-r'").run()
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (9, 2, 400, 1)",
+      // AQU-435: only a Maintainer+ org role survives as a grant path.
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (9, 2, 600, 1)",
     ).run()
     const fetchSpy = stubFetch()
 
@@ -175,7 +176,8 @@ describe("AQU-346 — removal routes notify the sync-worker (live-session eject)
     ).run()
     await env.AQUILLA_PG.prepare("UPDATE projects SET org_id = 9 WHERE id = 'proj-r'").run()
     await env.AQUILLA_PG.prepare(
-      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (9, 2, 400, 1)",
+      // AQU-435: only a Maintainer+ org role survives as a grant path.
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (9, 2, 600, 1)",
     ).run()
     const fetchSpy = stubFetch()
 

@@ -25,8 +25,12 @@ import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineCellDetail, type TimelineDetailActions } from "./TimelineCellDetail"
 import { useTimelineClock } from "./useTimelineClock"
+import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
-import type { AudioTimingMode } from "@/lib/parsers/types"
+import type { Concept } from "@/lib/terminology/types"
+import type { AudioTimingMode, ProjectRecord, RuleInfraction } from "@/lib/parsers/types"
+import type { FrontierSession } from "@/lib/frontier/types"
+import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 export type { TimelineDetailActions } from "./TimelineCellDetail"
 
@@ -38,7 +42,8 @@ export interface TimelineEditorProps {
   fileId: string
   /** Round 6 (SUB-36): retiming exists ONLY on the subtitle row — the source
    *  split is frozen at import. Media cells get an independent subtitle span;
-   *  text cells' own timing IS their subtitle timing (the workspace routes). */
+   *  text cells' own timing IS their subtitle timing (the workspace routes).
+   *  (Renamed from `onRetime` when the source row was frozen.) */
   onRetimeSubtitle(cellId: string, startSec: number, endSec: number): void
   /** Round 6/7: move a section's dub chip — its clip-zero anchor (file sec). */
   onRetimeTarget?(cellId: string, anchorSec: number): void
@@ -48,7 +53,9 @@ export interface TimelineEditorProps {
    *  paused→resume, idle→start). The editor claims the app-wide audio
    *  shortcut while mounted so a last-played single cell can't steal Space. */
   onTogglePlay?(): void
-  onCommitTarget(cellId: string, value: string): void
+  /** `valueHtml` (AQU-659): the detail pane runs the shared editor now, so a
+   *  commit can carry rich text alongside the plain value. */
+  onCommitTarget(cellId: string, value: string, valueHtml?: string): void
   /** When provided, shows a "Link video" control. null clears the link. */
   onLinkVideo?(url: string | null): void
   /** AQU-646: transcribe a media clip's audio into source text (detail pane). */
@@ -73,6 +80,22 @@ export interface TimelineEditorProps {
   /** SUB-53: change the project's mode. Absent = the control is read-only
    *  (the server requires maintainer to write project settings). */
   onChangeTimingMode?(mode: AudioTimingMode): void
+  /** Forwarded to the clip detail pane so it can resolve/stream source audio. */
+  project?: ProjectRecord
+  /** Active managed terminology concepts for the detail-pane editor's chips. */
+  terminologyConcepts?: Concept[]
+  /** Per-cell rule infractions (keyed by cell id) for the detail-pane blots. */
+  infractions?: Map<string, RuleInfraction[]>
+  /** Fires when the highlighted section changes so a sibling transport (the
+   *  bottom playback bar) can start playback from the selected section. */
+  onSelectCell?(cellId: string | null): void
+  /** Session for the missing-audio probe that badges a selected clip whose
+   *  recording is permanently gone. Absent (focused unit tests) → no probe. */
+  session?: FrontierSession | null
+  /** Per-file audio-attachment reads (from useFileAudioAttachments). Timeline
+   *  cells carry no attachments, so the probe resolves the selected clip's take
+   *  from this map. Absent → no badge. */
+  audioByCellId?: Map<string, CellAudioEntry>
 }
 
 const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
@@ -136,6 +159,12 @@ export function TimelineEditor({
   onSelectedCellChange,
   timingMode = "dubbing",
   onChangeTimingMode,
+  project,
+  terminologyConcepts,
+  infractions,
+  onSelectCell,
+  session,
+  audioByCellId,
 }: TimelineEditorProps) {
   const audioFirst = timingMode === "audioFirst"
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
@@ -298,14 +327,28 @@ export function TimelineEditor({
   )
   const durationSec = layout.totalSec
   const trackWidthPx = secToPx(durationSec, pxPerSec)
-  const viewStartSec = pxToSec(scrollLeft, pxPerSec)
+  // SUB-18: overscan the visibility window by ~240px each side so cards at the
+  // edges don't pop in/out during zoom glides and fast scrolls (windowing was
+  // exact-to-the-pixel, so any transient scroll/zoom mismatch blinked cards).
+  const overscanSec = pxToSec(240, pxPerSec)
+  const viewStartSec = pxToSec(scrollLeft, pxPerSec) - overscanSec
   // Before the scroll container is measured (viewportPx 0), fall back to the
   // full track so every card renders — correct, and keeps tests deterministic.
-  const viewEndSec = pxToSec(scrollLeft + (viewportPx || trackWidthPx), pxPerSec)
+  const viewEndSec = pxToSec(scrollLeft + (viewportPx || trackWidthPx), pxPerSec) + overscanSec
   const selectedCell = useMemo(
     () => cells.find((c) => c.id === selectedId) ?? null,
     [cells, selectedId],
   )
+  const selectedClipAudio = useMemo(
+    () => (selectedId ? resolveEntryAudio(audioByCellId?.get(selectedId)) : null),
+    [audioByCellId, selectedId],
+  )
+  const audioMissing = useClipAudioMissing({
+    audio: selectedClipAudio,
+    projectId: project?.id ?? null,
+    fileId,
+    session: session ?? null,
+  })
 
   function scrollTrackTo(left: number) {
     const el = scrollRef.current
@@ -338,6 +381,116 @@ export function TimelineEditor({
     }
   }
 
+  // SUB-12: cursor-centered wheel/pinch zoom (⌘/ctrl + wheel — trackpad pinch
+  // arrives as a ctrlKey wheel). Native listener with passive:false because
+  // React's synthetic onWheel can't reliably preventDefault (the browser would
+  // page-zoom). Plain wheel (no modifier) keeps scrolling untouched.
+  //
+  // Smoothness (Sam's "spazzy" feedback on v1):
+  //  - the factor scales with gesture velocity (exp of deltaY) instead of a
+  //    fixed 1.15 step per event — a pinch emits dozens of small-delta events,
+  //    which v1 turned into runaway zoom speed;
+  //  - the scroll anchor is applied in a LAYOUT effect (post-commit, pre-paint)
+  //    instead of requestAnimationFrame, so the point under the cursor never
+  //    visibly jumps for a frame and snaps back;
+  //  - the listener attaches ONCE (refs carry current zoom), so no per-step
+  //    detach/re-attach gaps.
+  const pxPerSecRef = useRef(pxPerSec)
+  pxPerSecRef.current = pxPerSec
+  const zoomAnchorRef = useRef<{ timeSec: number; offsetX: number } | null>(null)
+  // Eased zoom: wheel/pinch moves a TARGET; the committed zoom glides toward it
+  // (~35%/frame exponential approach) for a light accel/decel feel. The first
+  // step applies synchronously so response is immediate; the rAF loop carries
+  // the tail. The anchor persists across the glide so the cursor-point stays
+  // pinned through every animated frame.
+  const zoomTargetRef = useRef(pxPerSec)
+  const zoomAnimRef = useRef<number | null>(null)
+  const zoomGestureAnchorRef = useRef<{ timeSec: number; offsetX: number } | null>(null)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    zoomTargetRef.current = pxPerSecRef.current
+
+    const step = () => {
+      const cur = pxPerSecRef.current
+      const target = zoomTargetRef.current
+      // Precision bypass: a SLOW gesture (per-tick increments ≤ ~6% of the
+      // current zoom, i.e. the gap never builds up) applies 1:1 with no glide —
+      // easing there reads as rubber-band lag. Fast gestures/wheel notches open
+      // a bigger gap and get the eased approach (and its decel tail on stop).
+      const next =
+        Math.abs(target - cur) <= Math.max(0.4, cur * 0.06)
+          ? target
+          : cur + (target - cur) * 0.35
+      const anchor = zoomGestureAnchorRef.current
+      zoomAnchorRef.current = anchor
+      setPxPerSec(next)
+      // SUB-18 (flicker): update the scroll STATE in the same batch as the
+      // zoom. Otherwise each glide frame renders with new zoom + stale
+      // scrollLeft (state only catches up via the DOM scroll event a beat
+      // later), the visibility window miscomputes for that frame, and edge
+      // cards blink out. The layout effect still writes the DOM scrollLeft.
+      if (anchor) {
+        setScrollLeft(Math.max(0, secToPx(anchor.timeSec, next) - anchor.offsetX))
+      }
+      if (next !== target) {
+        zoomAnimRef.current = requestAnimationFrame(step)
+      } else {
+        zoomAnimRef.current = null
+        zoomGestureAnchorRef.current = null
+      }
+    }
+
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      // Two very different inputs share this event: trackpad PINCH ticks are
+      // floats whose magnitude tracks gesture speed (~1 slow … ~60+ hard),
+      // wheel NOTCHES are ~±100+. Wheel keeps its dialed-in gain; pinch speed
+      // grows linearly with the tick and is CAPPED (not cliffed) so a hard
+      // pinch is uniformly fast — the old <40 threshold dropped fast-pinch
+      // ticks into the 8×-weaker wheel gain, deadening exactly the fast case.
+      const mag = Math.abs(e.deltaY)
+      const speed = mag >= 90 ? mag * 0.0022 : Math.min(mag * 0.019, 0.55)
+      const target = Math.max(
+        ZOOM_MIN,
+        Math.min(ZOOM_MAX, zoomTargetRef.current * Math.exp(e.deltaY < 0 ? speed : -speed)),
+      )
+      if (target === zoomTargetRef.current && target === pxPerSecRef.current) return
+      zoomTargetRef.current = target
+      const offsetX = e.clientX - el.getBoundingClientRect().left
+      zoomGestureAnchorRef.current = {
+        timeSec: pxToSec(el.scrollLeft + offsetX, pxPerSecRef.current),
+        offsetX,
+      }
+      try {
+        localStorage.setItem(zoomKey(fileId), String(target))
+      } catch {
+        /* private mode / unavailable — zoom just won't persist */
+      }
+      if (zoomAnimRef.current === null) step() // immediate first step; rAF glides the rest
+    }
+
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => {
+      el.removeEventListener("wheel", onWheel)
+      if (zoomAnimRef.current !== null) cancelAnimationFrame(zoomAnimRef.current)
+      zoomAnimRef.current = null
+    }
+  }, [fileId])
+  // Re-anchor the scroll position in the same commit as the zoom (before
+  // paint), keeping the time under the cursor stationary with zero flicker.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const anchor = zoomAnchorRef.current
+    if (!el || !anchor) return
+    zoomAnchorRef.current = null
+    // Stamp as programmatic: zoom re-anchoring must not read as a manual
+    // scroll and disengage follow-playhead mid-glide.
+    lastProgrammaticScrollAt.current = performance.now()
+    el.scrollLeft = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
+  }, [pxPerSec])
+
   function seekTo(sec: number) {
     clock.seekTo(sec)
     if (videoRef.current) {
@@ -352,12 +505,16 @@ export function TimelineEditor({
     setFollow(true)
   }
 
-  // AQU-646 round 3: mirror every selection change up for the media→text
-  // trace (one effect catches the lanes' onSelect AND the untimed chips
-  // without touching call sites; the mount fire harmlessly mirrors the seed).
+  // Mirror every selection change up — one effect catches the lanes' onSelect
+  // AND the untimed chips without touching call sites; the mount fire
+  // harmlessly mirrors the trace seed. Two listeners, two features:
+  // onSelectedCellChange feeds the media→text trace (AQU-646 round 3);
+  // onSelectCell lets the bottom playback bar start from the highlighted
+  // section (AQU-666).
   useEffect(() => {
     onSelectedCellChange?.(selectedId)
-  }, [selectedId, onSelectedCellChange])
+    onSelectCell?.(selectedId)
+  }, [selectedId, onSelectedCellChange, onSelectCell])
 
   // AQU-646 round 3: consume the text→media trace once on mount. Reads the
   // live clientWidth (viewportPx state is still 0 here — it lands via the
@@ -390,7 +547,6 @@ export function TimelineEditor({
       trackWidthPx,
     )
     if (target != null) scrollTrackTo(target)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- element scrollLeft is read live
   }, [follow, queuePlaying, queueProgress.currentTime, pxPerSec, viewportPx, trackWidthPx])
 
   const laneProps = {
@@ -589,6 +745,7 @@ export function TimelineEditor({
         </div>
         <div
           ref={scrollRef}
+          data-testid="tl-scroll"
           className="overflow-x-auto"
           onScroll={(e) => {
             setScrollLeft(e.currentTarget.scrollLeft)
@@ -654,7 +811,17 @@ export function TimelineEditor({
         </div>
       </div>
 
-      <TimelineCellDetail cell={selectedCell} editable={editable} onCommitTarget={onCommitTarget} onTranscribe={onTranscribe} detailActions={detailActions} />
+      <TimelineCellDetail
+        cell={selectedCell}
+        editable={editable}
+        onCommitTarget={onCommitTarget}
+        onTranscribe={onTranscribe}
+        detailActions={detailActions}
+        project={project}
+        terminologyConcepts={terminologyConcepts}
+        infractions={selectedCell ? infractions?.get(selectedCell.id) : undefined}
+        audioMissing={audioMissing}
+      />
     </div>
   )
 }

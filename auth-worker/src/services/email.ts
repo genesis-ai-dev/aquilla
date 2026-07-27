@@ -342,6 +342,108 @@ export async function sendOrgInviteEmail(
   }
 }
 
+/** A marketing-site "book a call" form submission (routes/contact.ts). */
+export interface BookCallSubmission {
+  name: string
+  email: string
+  organization?: string
+  message?: string
+}
+
+/**
+ * Build the internal notification email for a "book a call" form submission.
+ * Pure and exported so the copy can be unit-tested without an EMAIL binding.
+ * Every field is visitor-controlled — escape all of them.
+ */
+export function buildBookCallEmail(
+  submission: BookCallSubmission,
+): { subject: string; html: string; text: string } {
+  const name = submission.name.trim()
+  const email = submission.email.trim()
+  const organization = submission.organization?.trim() || null
+  const message = submission.message?.trim() || null
+
+  const subject = `Book-a-call request from ${name}`
+
+  const rows = [
+    ["Name", name],
+    ["Email", email],
+    ...(organization ? [["Organization", organization]] : []),
+  ]
+    .map(
+      ([label, value]) =>
+        `<tr>
+          <td style="padding: 6px 12px 6px 0; color: #6b7280; white-space: nowrap; vertical-align: top;">${label}</td>
+          <td style="padding: 6px 0;">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("")
+
+  const messageBlock = message
+    ? `<p style="margin-top: 20px; color: #6b7280;">Message:</p>
+       <p style="background-color: #f3f4f6; padding: 12px; border-radius: 6px; white-space: pre-wrap;">${escapeHtml(message)}</p>`
+    : ""
+
+  const html = `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb; margin-bottom: 16px;">New book-a-call request</h2>
+          <p>Someone asked to book a call via the Aquilla homepage.</p>
+          <table style="border-collapse: collapse; margin: 16px 0;">${rows}</table>
+          ${messageBlock}
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+          <p style="color: #6b7280; font-size: 0.875rem;">
+            Reply to this email to respond directly — Reply-To is set to the visitor's address.
+          </p>
+        </div>
+      </body>
+    </html>
+  `.trim()
+
+  const text =
+    `New book-a-call request from the Aquilla homepage.\n\n` +
+    `Name: ${name}\nEmail: ${email}\n` +
+    (organization ? `Organization: ${organization}\n` : "") +
+    (message ? `\nMessage:\n${message}\n` : "") +
+    `\nReply to this email to respond directly.`
+
+  return { subject, html, text }
+}
+
+/**
+ * Forward a "book a call" form submission to the team inbox (CONTACT_EMAIL,
+ * default joel@frontierrnd.com — must be a routed destination in Cloudflare
+ * Email Routing). Returns `{ delivered: false }` without error when the EMAIL
+ * binding is absent (local/e2e profiles) so the public form still succeeds in
+ * dev; throws when a configured send actually fails so the route can surface
+ * a delivery error to the visitor.
+ */
+export async function sendBookCallEmail(
+  env: Env,
+  submission: BookCallSubmission,
+): Promise<{ delivered: boolean }> {
+  if (!env.EMAIL) return { delivered: false }
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const to = env.CONTACT_EMAIL || "joel@frontierrnd.com"
+  const { subject, html, text } = buildBookCallEmail(submission)
+  try {
+    await env.EMAIL.send({
+      from,
+      // Reply-To is the visitor so a plain reply starts the conversation.
+      replyTo: submission.email.trim(),
+      to: [to],
+      subject,
+      html,
+      text,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Failed to send book-a-call email: ${message}`)
+  }
+  return { delivered: true }
+}
+
 function buildAdminElevationHtml(code: string, ttlMinutes: number): string {
   return `
     <html>

@@ -239,3 +239,14 @@ export function useActiveOrg(): OrgContextValue {
   if (!v) throw new Error("useActiveOrg must be used within <OrgProvider>")
   return v
 }
+
+/**
+ * Non-throwing variant of {@link useActiveOrg}. Returns `null` when rendered
+ * outside an `<OrgProvider>` instead of throwing. Use on surfaces that can be
+ * embedded without org context (or unit-tested in isolation) and only need the
+ * active org opportunistically — e.g. MembersTab, which falls back to a
+ * free-text add-member field when no org roster is available.
+ */
+export function useActiveOrgOptional(): OrgContextValue | null {
+  return useContext(OrgContext)
+}

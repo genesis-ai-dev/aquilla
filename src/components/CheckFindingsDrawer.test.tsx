@@ -15,6 +15,7 @@ import {
   CheckFindingsDrawer,
   checkScopeSummary,
   termFindingHeadline,
+  findingCellLabel,
 } from "./CheckFindingsDrawer"
 import type { CheckRunResult, TermConsistencyFinding } from "@/lib/check/deterministic-check"
 import type { CellData } from "@/hooks/useCells"
@@ -164,5 +165,30 @@ describe("CheckFindingsDrawer", () => {
       />,
     )
     expect(screen.getByText(/Checking…/)).toBeInTheDocument()
+  })
+})
+
+// ── SUB-5: human titles for finding cards (never a raw UUID when avoidable) ──
+
+describe("findingCellLabel", () => {
+  const mk = (o: Partial<CellData>): CellData => ({ id: "x", context: "", ...o }) as unknown as CellData
+
+  it("prefers the cell's label when present", () => {
+    expect(findingCellLabel(mk({ cellLabel: "MAT 1:1" }), "uuid-1")).toBe("MAT 1:1")
+  })
+
+  it("falls back to the cue timestamp range for subtitle cells", () => {
+    const cell = mk({ context: "00:36:01.995 --> 00:36:05.374" })
+    expect(findingCellLabel(cell, "uuid-1")).toBe("36:02.0–36:05.4")
+  })
+
+  it("keeps hours when nonzero", () => {
+    const cell = mk({ context: "01:02:03.000 --> 01:02:04.500" })
+    expect(findingCellLabel(cell, "uuid-1")).toBe("1:02:03.0–1:02:04.5")
+  })
+
+  it("falls back to the id only when the cell is unknown or untimed", () => {
+    expect(findingCellLabel(undefined, "uuid-1")).toBe("uuid-1")
+    expect(findingCellLabel(mk({ context: "GEN 1:1" }), "uuid-2")).toBe("uuid-2")
   })
 })

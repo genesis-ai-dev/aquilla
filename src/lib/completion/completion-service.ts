@@ -191,6 +191,17 @@ export function buildPrompt(options: {
    *  real continuity, not a retrieved example. Left-context is the TARGET, not the
    *  source: it is what gives connectives and participant reference real flow. (D4) */
   precedingContext?: { source: string; target: string }[]
+  /** Extra task instruction appended to the system prompt after the rules
+   *  block. Must be placeholder-free — it is appended AFTER the
+   *  {sourceLanguage}/{targetLanguage} substitution. Used by the footnote
+   *  output contract (buildFootnoteInstruction); instructions must live here,
+   *  never inside `sourceText`, where they contradict the base prompt's
+   *  "translate the final source line only" rule. */
+  systemAddendum?: string
+  /** Labelled context block rendered in the user message after
+   *  precedingContext and immediately BEFORE the final `Source:` line — never
+   *  inside it. Used for the source-footnote listing. */
+  preSourceBlock?: string
 }): ChatMessage[] {
   let sys = options.systemPrompt
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
@@ -204,6 +215,8 @@ export function buildPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+
+  if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -237,6 +250,7 @@ export function buildPrompt(options: {
       user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
     }
   }
+  if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
   user += `Source: ${options.sourceText}\nTranslation:`
 
   return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
@@ -270,6 +284,8 @@ export function buildBatchPrompt(options: {
   exampleFormat?: "source-and-target" | "target-only"
   /** The project brief's L1 summary — injected before the rules block. */
   briefSummary?: string
+  /** Format-specific output contract appended after project rules. */
+  systemAddendum?: string
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -281,6 +297,7 @@ export function buildBatchPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) baseSys = baseSys + "\n\n" + block
   }
+  if (options.systemAddendum) baseSys = baseSys + "\n\n" + options.systemAddendum
   if (targetOnly) {
     baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
   }
@@ -368,6 +385,8 @@ export function buildParagraphPrompt(options: {
   rules?: TranslationRule[]
   /** Project brief L1 summary. */
   briefSummary?: string
+  /** Format-specific output contract appended after project rules. */
+  systemAddendum?: string
   /** How to render few-shot examples. */
   exampleFormat?: "source-and-target" | "target-only"
   // Left-context is the COMMITTED TARGET of preceding paragraphs (not source): this is what
@@ -395,6 +414,7 @@ export function buildParagraphPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+  if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   if (targetOnly) {
     sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."

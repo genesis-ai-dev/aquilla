@@ -40,6 +40,7 @@ import { handleMigrateEventIdsRequest } from "./events/migrate-event-ids-route"
 import { handleMigrateFinalizeRequest } from "./events/migrate-finalize-route"
 import { handleMigrateAudioRequest } from "./events/migrate-audio-route"
 import { handleMigrateAudioCopyRequest } from "./events/migrate-audio-copy-route"
+import { handleMigrateSourceArtifactCopyRequest } from "./events/migrate-source-artifact-copy-route"
 import { handleMigrateOrgTeamMapsRequest } from "./events/migrate-org-team-maps-route"
 import { handleMigrateGroupsRequest } from "./events/migrate-groups-route"
 import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route"
@@ -307,6 +308,8 @@ const worker = {
     if (migrateAudioResponse) return migrateAudioResponse
     const migrateAudioCopyResponse = await handleMigrateAudioCopyRequest(request, env)
     if (migrateAudioCopyResponse) return migrateAudioCopyResponse
+    const migrateSourceArtifactCopyResponse = await handleMigrateSourceArtifactCopyRequest(request, env)
+    if (migrateSourceArtifactCopyResponse) return migrateSourceArtifactCopyResponse
     const migrateOrgTeamMapsResponse = await handleMigrateOrgTeamMapsRequest(request, env)
     if (migrateOrgTeamMapsResponse) return migrateOrgTeamMapsResponse
     const migrateGroupsResponse = await handleMigrateGroupsRequest(request, env)

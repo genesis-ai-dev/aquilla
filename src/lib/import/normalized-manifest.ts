@@ -30,6 +30,7 @@ export interface NormalizedImportUnit {
   sourceText: string
   sourceHtml?: string
   targetText?: string
+  targetHtml?: string
   startMs?: number
   endMs?: number
   speaker?: string
@@ -176,6 +177,21 @@ function addressAndLocator(
   contentOrder: number,
   locationSegment: number,
 ): { address: ImportAddress; sourceLocator: ImportSourceLocator; keyBase: string; displayLabel: string | null } {
+  if (value.sourceLocator?.kind === "idml") {
+    const locator = value.sourceLocator
+    return {
+      address: {
+        scheme: "document",
+        memberPath: locator.memberPath,
+        blockPath: locator.elementPath,
+        segment: locator.part + 1,
+      },
+      sourceLocator: locator,
+      keyBase: `idml:${locator.memberPath}:${locator.elementPath}:${locator.part}`,
+      displayLabel: kind === "heading" || kind === "paratext" ? null : String(contentOrder),
+    }
+  }
+
   const recipe = value.metadata?.aquillaRecipe as RecipeMetadata | undefined
   const recipeId = nonEmptyString(recipe?.recipeId)
   const recipeRecord = typeof recipe?.record === "number" && Number.isInteger(recipe.record)
@@ -316,6 +332,8 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "docx":
     case "pptx":
       return "native"
+    case "idml":
+      return "content-only"
     case "xliff":
     case "tmx":
     case "csv":
@@ -423,6 +441,7 @@ export function normalizeTranslatableStrings(
       sourceText: value.original,
       ...(value.originalHtml ? { sourceHtml: value.originalHtml } : {}),
       ...(value.translated ? { targetText: value.translated } : {}),
+      ...(value.translatedHtml ? { targetHtml: value.translatedHtml } : {}),
       ...(startMs === undefined ? {} : { startMs }),
       ...(endMs === undefined ? {} : { endMs }),
       ...(value.speaker ? { speaker: value.speaker } : {}),
@@ -488,7 +507,11 @@ export function summarizeNormalizedImport(
 }
 
 export function sourceLocationFromLocator(locator: ImportSourceLocator): SourceLocation | undefined {
-  return locator.kind === "package-block"
-    ? { file: locator.memberPath, blockPath: locator.blockPath }
-    : undefined
+  if (locator.kind === "package-block") {
+    return { file: locator.memberPath, blockPath: locator.blockPath }
+  }
+  if (locator.kind === "idml") {
+    return { file: locator.memberPath, blockPath: locator.elementPath }
+  }
+  return undefined
 }

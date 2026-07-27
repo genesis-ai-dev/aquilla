@@ -41,6 +41,7 @@ import {
   isCanonicalRoleLevel,
   isLinkRoleLevel,
   LINK_ROLE_ALLOWED,
+  ORG_WIDE_ACCESS_FLOOR,
   resolveProjectRole,
   resolveProjectRoleIncludingArchived,
   ROLE_NAMES,
@@ -324,6 +325,11 @@ projects.get("/", authMiddleware, async (c) => {
   // tie, attribution credit goes in declaration order (override > group >
   // org > creator) to match the resolver in project-permissions.ts.
   //
+  // AQU-435: the org path is gated at ORG_WIDE_ACCESS_FLOOR (maintainer) in
+  // BOTH the access predicate and the role computation — a sub-maintainer
+  // org_members row neither reveals a project nor contributes to its
+  // resolved role. Mirrors resolveProjectRole.
+  //
   // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds.
   //   ?1-?4  : user.id for creator CASE expressions
   //   ?5-?7  : user.id for LEFT JOIN conditions (pm, om, gm)
@@ -337,20 +343,20 @@ projects.get("/", authMiddleware, async (c) => {
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
-              COALESCE(om.role_level, 0),
+              CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END,
               CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
             ) AS role_level,
             CASE
               WHEN pm.role_level IS NOT NULL
                 AND pm.role_level >= COALESCE(gg.max_grant, 0)
-                AND pm.role_level >= COALESCE(om.role_level, 0)
+                AND pm.role_level >= (CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END)
                 AND pm.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'override'
               WHEN gg.max_grant IS NOT NULL
-                AND gg.max_grant >= COALESCE(om.role_level, 0)
+                AND gg.max_grant >= (CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END)
                 AND gg.max_grant >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'group'
-              WHEN om.role_level IS NOT NULL
+              WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR}
                 AND om.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'org'
               ELSE 'creator'
@@ -377,7 +383,7 @@ projects.get("/", authMiddleware, async (c) => {
           OR p.created_by = ?
           OR pm.user_id = ?
           OR gg.max_grant IS NOT NULL
-          OR (p.org_id IS NOT NULL AND om.user_id = ?)
+          OR (p.org_id IS NOT NULL AND om.user_id = ? AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )
         AND (?::bigint IS NULL OR p.org_id = ?::bigint)
       ORDER BY LOWER(p.name)`,

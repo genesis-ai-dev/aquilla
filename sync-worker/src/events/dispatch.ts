@@ -69,6 +69,7 @@ export function dispatchEvent(
     case 'source.cell.commit':
     case 'source.cell.delete':
     case 'source.cell.reorder':
+    case 'source.cell.metadata.patch':
     case 'target.cell.create':
     case 'target.cell.commit':
     case 'target.cell.delete':

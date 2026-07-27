@@ -11,6 +11,8 @@ import {
   peekPendingOutboxBatch,
   getOutboxRecordsForCell,
   quarantineOutboxEvents,
+  acknowledgeOutboxEvents,
+  requeueOutboxEvents,
   resetOutboxConnectionForTests,
   OUTBOX_MAX_ATTEMPTS,
   requeueTransientlyFailedOutboxEvents,
@@ -291,5 +293,42 @@ describe("cqrs outbox", () => {
     await enqueueOutboxEvents([ev("dup", "c1")])
     const rows = await peekOutboxBatch(100)
     expect(rows.filter((r) => r.id === "dup")).toHaveLength(1)
+  })
+
+  // ── SUB-8: persistent banner acknowledgment ───────────────────────────────
+
+  it("acknowledgeOutboxEvents stamps acknowledgedAt, keeps the record, and notifies", async () => {
+    await enqueueOutboxEvent(sample)
+    await quarantineOutboxEvents(["e1"], { status: 403, reason: "self-validation is not allowed on this project" })
+
+    const notified = vi.fn()
+    const unsub = subscribeToOutbox(notified)
+    await acknowledgeOutboxEvents(["e1"])
+    unsub()
+
+    expect(notified).toHaveBeenCalled()
+    const rec = (await peekOutboxBatch(10)).find((r) => r.id === "e1")
+    // Non-destructive: still failed, error preserved, just acknowledged.
+    expect(rec?.status).toBe("failed")
+    expect(rec?.lastError?.status).toBe(403)
+    expect(rec?.acknowledgedAt).toBeTypeOf("number")
+  })
+
+  it("requeueOutboxEvents clears acknowledgedAt so a re-refused change banners again", async () => {
+    await enqueueOutboxEvent(sample)
+    await quarantineOutboxEvents(["e1"], { status: 403, reason: "forbidden" })
+    await acknowledgeOutboxEvents(["e1"])
+
+    await requeueOutboxEvents(["e1"])
+
+    const rec = (await peekOutboxBatch(10)).find((r) => r.id === "e1")
+    expect(rec?.status).toBe("pending")
+    expect(rec?.acknowledgedAt).toBeUndefined()
+  })
+
+  it("acknowledgeOutboxEvents is a no-op for unknown ids and empty input", async () => {
+    await acknowledgeOutboxEvents([])
+    await acknowledgeOutboxEvents(["nope"])
+    expect(await peekOutboxBatch(10)).toHaveLength(0)
   })
 })

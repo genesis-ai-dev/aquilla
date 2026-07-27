@@ -23,12 +23,14 @@ import { fetchBranchingSearchPassages } from "@/lib/sync/branching-search-passag
 import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
+import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
-import { completionBatchSizeFor } from "@/lib/workspace-actions/registry"
+import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
+import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { AudioTimingMode, FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveAudioTimingMode } from "@/lib/sync/project-settings"
@@ -97,6 +99,7 @@ import {
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
 import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { acknowledgeOutboxEvents } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
@@ -131,7 +134,6 @@ import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
-import { PrimaryActionButton } from "./PrimaryActionButton"
 import { ExpandableFileList } from "./ExpandableFileList"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
@@ -149,7 +151,7 @@ import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/de
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
-import { fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
+import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
 import { invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
@@ -172,6 +174,9 @@ import {
   workspaceReturnPath,
 } from "@/lib/ad11/navigation"
 import { generateBacktranslation } from "@/lib/completion/backtranslation-service"
+import { normalizeProtectedCompletion } from "@/lib/idml/completion"
+import { hasIdmlMetadata, replaceProtectedIdmlText } from "@/lib/idml/protected-html"
+import { hasIdmlCellMetadata } from "@/lib/richtext/idml-editor"
 import { addConcept } from "@/lib/terminology/store"
 import type { Concept } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
@@ -800,6 +805,9 @@ export function ProjectWorkspace() {
     navigate(`/project/${projectId}/settings?q=gemini`)
   }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
+  // The section highlighted on the Dialogue timeline. Lifted here so the bottom
+  // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
+  const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
   // Holds a cell to scroll to once cells are loaded after a restore-location
   // navigation (or an AQU-646 media→text trace, which also flashes). Set by
@@ -927,6 +935,7 @@ export function ProjectWorkspace() {
     refreshPending: refreshOutboxPending,
     flushNow: outboxFlushNow,
     records: outboxRecords,
+    inspectorRecords: outboxInspectorRecords,
     staleSiblingCount: outboxStaleSiblingCount,
     staleSiblingEntries: outboxStaleSiblingEntries,
     clearStaleSiblings: clearStaleSiblings,
@@ -947,27 +956,28 @@ export function ProjectWorkspace() {
   // Surface the reason so it isn't a silent flip-then-revert behind the pill.
   // AQU-633: derive the "reason" banner from the outbox's quarantined 403
   // records (source of truth) — captures a refusal regardless of which flush
-  // path quarantined it, unlike a flush callback. A local dismissed-id set hides
-  // the banner until a fresh refusal (new id) appears.
+  // path quarantined it, unlike a flush callback. Dismissal is a persistent
+  // acknowledgment stamped on the record (SUB-8), so refusals banner once.
   const forbiddenRecords = useForbiddenOutboxRecords(Boolean(project?.id))
-  const [dismissedForbidden, setDismissedForbidden] = useState<Set<string>>(new Set())
   const forbiddenEntries = useMemo<ForbiddenEntry[]>(
     () =>
-      forbiddenRecords
-        .filter((r) => !dismissedForbidden.has(r.id))
-        .map((r) => ({
-          id: r.id,
-          status: r.lastError?.status ?? 403,
-          reason: r.lastError?.reason ?? "forbidden",
-          kind: r.event.kind,
-          fileId: r.event.fileId ?? null,
-          cellId: r.event.cellId ?? null,
-        })),
-    [forbiddenRecords, dismissedForbidden],
+      forbiddenRecords.map((r) => ({
+        id: r.id,
+        status: r.lastError?.status ?? 403,
+        reason: r.lastError?.reason ?? "forbidden",
+        kind: r.event.kind,
+        fileId: r.event.fileId ?? null,
+        cellId: r.event.cellId ?? null,
+      })),
+    [forbiddenRecords],
   )
   const showForbiddenBanner = forbiddenEntries.length > 0
+  // SUB-8: Dismiss = persistent acknowledgment (stamped on the IDB record, so
+  // the banner stays gone across reloads). The hook's subscription re-derives
+  // the list after the write, which hides the banner — no local state needed.
+  // The records themselves remain in the outbox inspector until discarded.
   const dismissForbidden = useCallback(
-    () => setDismissedForbidden(new Set(forbiddenRecords.map((r) => r.id))),
+    () => void acknowledgeOutboxEvents(forbiddenRecords.map((r) => r.id)),
     [forbiddenRecords],
   )
   // AQU-633: the current user's own lane/file scopes, so bulk validate skips
@@ -1087,6 +1097,16 @@ export function ProjectWorkspace() {
   // so concurrent completions on different cells don't cross-contaminate.
   const pendingCompletionEventIdRef = useRef<Map<string, string>>(new Map())
 
+  // AQU-538: both pending maps above key by (cellId, ACTIVE LANE), not bare
+  // cellId. Lanes are independent AD-2 chains sharing cell ids — an entry left
+  // by a default-lane commit must never resolve as the parent of a commit in
+  // another lane (a cross-lane parent pollutes that lane's chain). Entries for
+  // a non-active lane are simply dormant until that lane is active again.
+  const laneCellKey = useCallback(
+    (cellId: string) => `${cellId}\u0000${activeLane}`,
+    [activeLane],
+  )
+
   const glosserCacheRef = useRef<{
     corpusCells: readonly CellSummary[]
     backtranslationCache: Map<string, string>
@@ -1113,42 +1133,46 @@ export function ProjectWorkspace() {
   )
 
   const getPendingTargetEventId = useCallback((cellId: string) => {
-    return pendingTargetCommitHeadsRef.current.get(cellId)?.eventId ?? null
-  }, [])
+    return pendingTargetCommitHeadsRef.current.get(laneCellKey(cellId))?.eventId ?? null
+  }, [laneCellKey])
 
   const resolveTargetCommitParentId = useCallback((cell: Pick<CellData, "id" | "targetEventId" | "sourceEventId">) => {
     return (
-      pendingTargetCommitHeadsRef.current.get(cell.id)?.eventId ??
-      pendingCompletionEventIdRef.current.get(cell.id) ??
+      pendingTargetCommitHeadsRef.current.get(laneCellKey(cell.id))?.eventId ??
+      pendingCompletionEventIdRef.current.get(laneCellKey(cell.id)) ??
       cell.targetEventId ??
       cell.sourceEventId ??
       null
     )
-  }, [])
+  }, [laneCellKey])
 
   const rememberPendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
-    pendingTargetCommitHeadsRef.current.set(cellId, { eventId, parentId })
-  }, [])
+    pendingTargetCommitHeadsRef.current.set(laneCellKey(cellId), { eventId, parentId })
+  }, [laneCellKey])
 
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
+    // cellSummaries reflect the ACTIVE lane, so only this lane's keys can be
+    // confirmed/cleared here; another lane's entries stay dormant until that
+    // lane is active again.
     for (const summary of cellSummaries) {
-      const pending = pendingTargetCommitHeadsRef.current.get(summary.id)
+      const key = laneCellKey(summary.id)
+      const pending = pendingTargetCommitHeadsRef.current.get(key)
       if (!pending) continue
       const projectedHead = summary.targetEventId ?? null
       if (projectedHead === pending.eventId) {
-        pendingTargetCommitHeadsRef.current.delete(summary.id)
-        if (pendingCompletionEventIdRef.current.get(summary.id) === pending.eventId) {
-          pendingCompletionEventIdRef.current.delete(summary.id)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
+          pendingCompletionEventIdRef.current.delete(key)
         }
       } else if (projectedHead && projectedHead !== pending.parentId) {
-        pendingTargetCommitHeadsRef.current.delete(summary.id)
-        if (pendingCompletionEventIdRef.current.get(summary.id) === pending.eventId) {
-          pendingCompletionEventIdRef.current.delete(summary.id)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
+          pendingCompletionEventIdRef.current.delete(key)
         }
       }
     }
-  }, [cellSummaries])
+  }, [cellSummaries, laneCellKey])
   // Phase 5 / AD-9 — Phase 3a-final wiring. Fetch the set of cell ids
   // whose source has advanced since the translator's last commit, so the
   // editor table can decorate stale rows with the AlertTriangle badge.
@@ -1566,11 +1590,13 @@ export function ProjectWorkspace() {
 
   // Timeline editor detail pane: commit a target edit (same path as the table).
   const handleTimelineCommitTarget = useCallback(
-    async (cellId: string, value: string) => {
+    async (cellId: string, value: string, valueHtml?: string) => {
       if (!project?.id) return
       const cell = cellStore.getCellView(cellId)
       if (!cell) return
-      applyOptimisticTargetEdit(cellId, { value })
+      // AQU-659: carry the rich-text form so media-pane edits persist
+      // identically to the main table (footnotes, marks, violation blots).
+      applyOptimisticTargetEdit(cellId, valueHtml !== undefined ? { value, valueHtml } : { value })
       const parentId = resolveTargetCommitParentId(cell)
       const eventId = await emitTargetCellCommit({
         projectId: project.id,
@@ -1579,6 +1605,7 @@ export function ProjectWorkspace() {
         parentId,
         sourceEventId: cell.sourceEventId ?? null,
         value,
+        ...(valueHtml !== undefined ? { valueHtml } : {}),
         author: currentUsername,
         targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
       })
@@ -1937,6 +1964,20 @@ export function ProjectWorkspace() {
     // (applyOptimisticTargetEdit) of a write the server will refuse, matching
     // the same mirror-check used by handleEditorCommit/commitTrayFootnoteText.
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
+    // TOCTOU guard: `cell` is the row snapshot captured when the sparkle was
+    // clicked. A rapid second draft can arrive after the FIRST draft's
+    // projection confirmed (which clears its pending-head entry) but before
+    // the virtualized row re-rendered with the new targetEventId — the
+    // snapshot then resolves parentId to the pre-draft head, the commit lands
+    // as a sibling of the first draft, and the server dead-letters it. Read
+    // the live store row instead; it was updated by the same write-back that
+    // cleared the pending entry, so at least one of the two is always fresh.
+    const liveCell = getActiveCell(cell.id)
+    const commitCell = liveCell ?? cell
+    // IDML v2 model output is protected HTML, not plain text. Validate the
+    // exact slot/token sequence before any optimistic mutation or event is
+    // created; ordinary formats pass through unchanged.
+    const completed = normalizeProtectedCompletion(commitCell, text)
     // Optimistic local patch BEFORE the outbox enqueue. Mirrors what
     // handleEditorCommit in EditorTable does for hand-typed edits, and
     // collapses the race window where `cells.translated` would otherwise
@@ -1947,32 +1988,128 @@ export function ProjectWorkspace() {
     // bounce) chains a *revert* event with the pre-gen text onto the
     // gen — producing the "two events at 5:08, second one identical to
     // 2:28" history pattern.
-    applyOptimisticTargetEdit(cell.id, { value: text, aiDrafted: true })
+    applyOptimisticTargetEdit(cell.id, {
+      value: completed.value,
+      ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+      aiDrafted: true,
+    })
     // RACE-3/QW-2: use the pending event id for this cell (last AI-completion
     // commit we enqueued) as parentId, falling back to the projection value.
     // This prevents a second rapid completion commit from becoming a sibling
     // of the first (which the server dead-letters) when the read-back hasn't
     // landed yet.
-    const parentId = resolveTargetCommitParentId(cell)
-    const eventId = await emitTargetCellCommit({
-      projectId: project.id,
-      fileId: cell.fileId,
-      cellId: cell.id,
-      parentId,
-      sourceEventId: cell.sourceEventId ?? null,
-      value: text,
-      author,
-      targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
-      // FRO-292: tag AI-generated commits so the server projection can
-      // track ai_drafted on the cell row. A human edit (no aiSuggestion)
-      // will clear it on the next commit.
-      aiSuggestion: true,
-      aiDraft: provenance,
-    })
-    pendingCompletionEventIdRef.current.set(cell.id, eventId)
-    rememberPendingTargetCommit(cell.id, eventId, parentId)
-    await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-    await refreshOutboxPending()
+    //
+    // AD-2 rebase-retry: "accepted" is not "saved" — the server can log the
+    // event yet dead-letter it as a stale sibling (no projection write). A
+    // display-layer refetch race can leave EVERY local parent source stale at
+    // once (pending maps cleared by the confirming write-back while a slower
+    // fetch swaps the store back to a pre-draft snapshot — see
+    // completion-races.spec.ts), so on a dead-letter we rebase ONCE onto the
+    // authoritative lane head read straight from the server and re-commit.
+    // An AI draft carries no hand-typed content, so the rebase is lossless; a
+    // second loss means a genuine concurrent conflict and fails loudly so the
+    // sparkle flow never shows "Saved" over a draft with no visible effect.
+    let parentId = resolveTargetCommitParentId(commitCell)
+    let sourceEventIdPin = commitCell.sourceEventId ?? null
+    let eventId = ""
+    let draftDeadLettered = false
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        eventId = await emitTargetCellCommit({
+          projectId: project.id,
+          fileId: cell.fileId,
+          cellId: cell.id,
+          parentId,
+          sourceEventId: sourceEventIdPin,
+          value: completed.value,
+          ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+          author,
+          targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
+          // FRO-292: tag AI-generated commits so the server projection can
+          // track ai_drafted on the cell row. A human edit (no aiSuggestion)
+          // will clear it on the next commit.
+          aiSuggestion: true,
+          aiDraft: provenance,
+        })
+      } catch (err) {
+        // AQU-670: the AI draft never queued (IDB quota/private-mode, role
+        // rejection, etc.). Revert the optimistic patch — mirroring
+        // handleEditorCommit's catch — so the predicted text doesn't linger as a
+        // ghost (a new floor over the prior content also stops the freshness floor
+        // above from protecting the failed draft past the next refetch). Rethrow so
+        // the caller reports the failure instead of rendering "Saved". Restore
+        // the LIVE row's value — the click-time snapshot can predate a draft
+        // that already landed, and reverting to it would blank real content.
+        applyOptimisticTargetEdit(cell.id, {
+          value: commitCell.translated ?? "",
+          valueHtml: commitCell.translatedHtml ?? "",
+        })
+        throw err
+      }
+      pendingCompletionEventIdRef.current.set(laneCellKey(cell.id), eventId)
+      rememberPendingTargetCommit(cell.id, eventId, parentId)
+      draftDeadLettered = false
+      const flushedEventId = eventId
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onStaleSiblings: (entries) => {
+          if (entries.some((entry) => entry.id === flushedEventId)) draftDeadLettered = true
+        },
+      })
+      await refreshOutboxPending()
+      if (!draftDeadLettered) break
+
+      // The draft had no visible effect. Drop it from the pending-parent maps
+      // (chaining anything on a dead-lettered event would dead-letter too).
+      if (pendingCompletionEventIdRef.current.get(laneCellKey(cell.id)) === eventId) {
+        pendingCompletionEventIdRef.current.delete(laneCellKey(cell.id))
+      }
+      if (pendingTargetCommitHeadsRef.current.get(laneCellKey(cell.id))?.eventId === eventId) {
+        pendingTargetCommitHeadsRef.current.delete(laneCellKey(cell.id))
+      }
+      if (attempt === 0) {
+        // Rebase: read the authoritative row for THIS lane straight from the
+        // server (not the possibly-stale local store) and re-commit chained
+        // on its head. Only retry when that head actually differs from the
+        // parent that just lost — otherwise the retry would lose identically.
+        try {
+          const mint = await getTokenForProjectFile(project.id, cell.fileId)
+          if (mint.token) {
+            const rows = await fetchCellsByIds(
+              project.id, cell.fileId, [cell.id], mint.token, activeLane || undefined,
+            )
+            const targetRow = rows.find(
+              (r) => r.side === "target" && (r.targetLang ?? "") === activeLane,
+            )
+            const sourceRow = rows.find((r) => r.side === "source")
+            const rebasedParent = targetRow?.eventId ?? sourceRow?.eventId ?? null
+            if (rebasedParent && rebasedParent !== parentId) {
+              console.warn(
+                `[commitCompletedCell] draft dead-lettered; rebasing onto authoritative head ${rebasedParent} (was ${parentId}) for cell ${cell.id}`,
+              )
+              parentId = rebasedParent
+              if (sourceRow?.eventId) sourceEventIdPin = sourceRow.eventId
+              continue
+            }
+          }
+        } catch (err) {
+          console.warn("[commitCompletedCell] rebase head fetch failed:", err)
+        }
+      }
+      break
+    }
+    if (draftDeadLettered) {
+      // Rebase exhausted — a genuine concurrent conflict. Revert to the LIVE
+      // row's value (see the enqueue-failure catch above); the targeted
+      // refetch below then confirms it against the server.
+      applyOptimisticTargetEdit(cell.id, {
+        value: commitCell.translated ?? "",
+        valueHtml: commitCell.translatedHtml ?? "",
+      })
+      revalidateCellStats(cell.id)
+      revalidateCell(cell.id)
+      throw new Error("The draft was outdated by another change to this cell and was not saved — try again")
+    }
     // Targeted: we just changed exactly one cell. Pull only that row's stats
     // and cell data back (its authoritative event_id becomes the next
     // commit's parent) instead of re-fetching stats for all ~30k cells in
@@ -1980,7 +2117,7 @@ export function ProjectWorkspace() {
     // confirms; the WS event.applied also pokes the same cell (coalesced).
     revalidateCellStats(cell.id)
     revalidateCell(cell.id)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -1992,7 +2129,22 @@ export function ProjectWorkspace() {
     if (!project?.id || !historyCellId) return
     const cell = getActiveCell(historyCellId)
     if (!cell) return
-    applyOptimisticTargetEdit(cell.id, { value: entry.value })
+    let promoted = entry.valueHtml !== undefined
+      ? { value: entry.value, valueHtml: entry.valueHtml }
+      : { value: entry.value, valueHtml: undefined }
+    if (hasIdmlCellMetadata(cell.metadata)) {
+      try {
+        const normalized = normalizeProtectedCompletion(cell, entry.valueHtml ?? entry.value)
+        promoted = { value: normalized.value, valueHtml: normalized.valueHtml }
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "This IDML history entry cannot be restored safely.")
+        return
+      }
+    }
+    applyOptimisticTargetEdit(cell.id, {
+      value: promoted.value,
+      ...(promoted.valueHtml !== undefined ? { valueHtml: promoted.valueHtml } : {}),
+    })
     const parentId = resolveTargetCommitParentId(cell)
     const eventId = await emitTargetCellCommit({
       projectId: project.id,
@@ -2001,7 +2153,8 @@ export function ProjectWorkspace() {
       // parentId must be the current chain head so AD-2 makes this the winner.
       parentId,
       sourceEventId: cell.sourceEventId ?? null,
-      value: entry.value,
+      value: promoted.value,
+      ...(promoted.valueHtml !== undefined ? { valueHtml: promoted.valueHtml } : {}),
       author: currentUsername,
       targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
     })
@@ -3716,11 +3869,43 @@ export function ProjectWorkspace() {
   // keeps own writes authoritative), then one outbox flush for the batch.
   const handleReplaceAll = useCallback(async (payload: ReplaceAllPayload) => {
     if (!project?.id || isReadOnly) return
+    const prepared: Array<{
+      cell: CellData
+      value: string
+      valueHtml?: string
+    }> = []
+    // Preflight every IDML replacement before emitting any event so one
+    // cross-slot or stale-anchor failure cannot leave a partially changed
+    // selection.
+    try {
+      for (const diff of payload.diffs) {
+        const cell = getActiveCell(diff.cellId)
+        if (!cell) continue
+        if (hasIdmlMetadata(cell)) {
+          const snapshot = replaceProtectedIdmlText(
+            cell,
+            payload.findQuery,
+            payload.replaceQuery,
+            diff.after,
+          )
+          prepared.push({ cell, ...snapshot })
+        } else {
+          prepared.push({ cell, value: diff.after })
+        }
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Protected IDML replacement was blocked.")
+      return
+    }
     const touched: string[] = []
-    for (const diff of payload.diffs) {
-      const cell = getActiveCell(diff.cellId)
-      if (!cell) continue
-      if (cell.fileId === activeFileId) applyOptimisticTargetEdit(cell.id, { value: diff.after })
+    for (const replacement of prepared) {
+      const { cell } = replacement
+      if (cell.fileId === activeFileId) {
+        applyOptimisticTargetEdit(cell.id, {
+          value: replacement.value,
+          ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
+        })
+      }
       const parentId = resolveTargetCommitParentId(cell)
       const eventId = await emitTargetCellCommit({
         projectId: project.id,
@@ -3728,7 +3913,8 @@ export function ProjectWorkspace() {
         cellId: cell.id,
         parentId,
         sourceEventId: cell.sourceEventId ?? null,
-        value: diff.after,
+        value: replacement.value,
+        ...(replacement.valueHtml ? { valueHtml: replacement.valueHtml } : {}),
         author: currentUsername,
         targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
         searchQuery: payload.findQuery,
@@ -3827,7 +4013,6 @@ export function ProjectWorkspace() {
       if (needsSynthesis(c)) unsynthesized++
     }
     return { untranscribed, unsynthesized }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cellStoreVersion is the reactivity key for getActiveCells
   }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
@@ -3890,7 +4075,7 @@ export function ProjectWorkspace() {
     },
     runExport: openExportFlow,
     // FRO-288: wire batch-validate through the real validation event path.
-    // Called AFTER the user confirms via PrimaryActionButton's confirmation
+    // Called AFTER the user confirms via the workspace-action confirmation
     // dialog (requiresConfirmation in registry.ts). Role floor is enforced
     // server-side; we mirror-check here to avoid queueing guaranteed-403
     // events (same pattern as emitValidationChange in EditorTable).
@@ -3958,10 +4143,33 @@ export function ProjectWorkspace() {
     navigate,
   }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, workspaceAudioByCellId])
 
+  // AQU-661: the dynamic primary-action button was removed; its actions now live
+  // in the ⋯ overflow menu. This preserves the button's confirmation flow —
+  // actions with `requiresConfirmation` route through the ConfirmActionDialog
+  // (rendered below) instead of running immediately.
+  const [pendingActionConfirm, setPendingActionConfirm] = useState<WorkspaceAction | null>(null)
+  const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
+    if (action.comingSoon) return
+    if (action.requiresConfirmation) {
+      setPendingActionConfirm(action)
+    } else {
+      action.run(actionCtx, actionArgs)
+    }
+  }, [actionCtx, actionArgs])
+
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
     lens === "audio" &&
     Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+  // Per-file audio attachments for the Media timeline's missing-clip badge.
+  // Timeline cells carry no attachments, so the badge probe resolves the
+  // selected clip's take from this read. Gated on timeline visibility so no
+  // read fires outside the Media lens; the playback bar keeps its own
+  // independent read (same file bus dedupes them).
+  const { byCellId: timelineAudioByCellId } = useFileAudioAttachments(
+    project?.id ?? null,
+    timelineEditorVisible ? activeFileId : null,
+  )
   const legacyCellsNeeded =
     centerSurface === "rules" ||
     dockTab === "voices" ||
@@ -4038,8 +4246,33 @@ export function ProjectWorkspace() {
       return
     }
     if (!frontierSession?.jwt) return
-    startQueueAtTime({ cells: audioMergedCells, projectId: project.id, session: frontierSession }, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession])
+    // MERGE 2026-07-27: the timeline owns Space in the media lens (the
+    // playback bar stands down while it is claimed), so it must behave like
+    // the bar's own button — start at the highlighted section when there is
+    // one (AQU-666), and mark that explicit so a missing clip is surfaced
+    // there rather than skipped past (AQU-660).
+    const from = timelineSelectedCellId
+      ? audioMergedCells.findIndex((c) => c.id === timelineSelectedCellId)
+      : -1
+    const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
+    if (from >= 0) startQueue(ctx, from, true)
+    else startQueueAtTime(ctx, 0, { play: true })
+  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId])
+
+  // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
+  // active file. Export never hard-blocks on these — the count only drives a
+  // calm, non-blocking advisory in ExportDialog so users stop believing these
+  // "HTML/validation health errors" prevent a download.
+  const activeFileInfractionCount = useMemo(() => {
+    if (infractions.size === 0) return 0
+    let total = 0
+    for (const cell of legacyCells) {
+      const cellInfractions = infractions.get(cell.id)
+      if (!cellInfractions || cellInfractions.length === 0) continue
+      total += partitionInfractions(cellInfractions, cell.waivers).active.length
+    }
+    return total
+  }, [infractions, legacyCells])
 
   const handleCellCommitted = useCallback(async (cellId?: string, committedEventId?: string, parentId?: string | null) => {
     if (cellId && committedEventId) {
@@ -4149,7 +4382,28 @@ export function ProjectWorkspace() {
             ? "Diarize failed"
             : "Diarize"
 
-    const items: OverflowMenuItem[] = [
+    // AQU-661: the primary-action button and its caret dropdown are gone — the
+    // workspace actions (Import, Run AI completions, Export, Batch validate, …)
+    // now lead the ⋯ menu so nothing is lost and the header reads as a single
+    // overflow affordance. Confirmation-gated actions route through
+    // handleWorkspaceAction → ConfirmActionDialog (below).
+    //
+    // Guard: on a file deep-link the first render happens before useProject
+    // resolves, so actionCtx.project is still null (its `project!` is a lie
+    // until then) and the role-gated isAvailable checks would throw
+    // (`null.syncRole`), error-bounding the whole workspace. Render the menu
+    // without action items until the project record lands.
+    const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx).map((a) => ({
+      id: `action-${a.id}`,
+      label: a.label,
+      icon: a.icon,
+      disabled: a.comingSoon,
+      onClick: () => handleWorkspaceAction(a),
+    }))
+
+    const items: OverflowMenuItem[] = [...actionItems]
+    if (actionItems.length > 0) items.push({ id: "sep-actions", type: "separator" })
+    items.push(
       {
         id: "view-settings",
         label: "View settings",
@@ -4163,10 +4417,7 @@ export function ProjectWorkspace() {
         disabled: !activeFileId || !hasUnfinished,
         onClick: handleJumpNextUnfinished,
       },
-    ]
-
-    // Export intentionally absent here — it lives in the primary-action
-    // dropdown (workspace-actions registry), and duplicating it was noise.
+    )
 
     if (canAssignWork && activeFileId) {
       items.push({
@@ -4222,6 +4473,8 @@ export function ProjectWorkspace() {
 
     return items
   }, [
+    actionCtx,
+    handleWorkspaceAction,
     activeFileId,
     hasUnfinished,
     handleJumpNextUnfinished,
@@ -4237,7 +4490,7 @@ export function ProjectWorkspace() {
     isSubtitleFile,
     suggestions.length,
     suggestionsDismissed,
-    project?.suggestionsDismissedAt,
+    project,
     handleReinviteSuggestions,
   ])
 
@@ -4753,13 +5006,19 @@ export function ProjectWorkspace() {
             {project && centerSurface === "editor" && activeFileId && (
               <button
                 type="button"
-                onClick={() => void runCheck()}
+                // SUB-6: toggle semantics — while the drawer is open, clicking
+                // the button closes it (like the other dock toggles) instead of
+                // silently re-running the check. Re-check = close, click again.
+                onClick={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
                 disabled={checkRunning}
+                aria-expanded={checkOpen}
                 className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
                 title={
-                  checkResult
-                    ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
-                    : "Check the open file against the project's rules and term base"
+                  checkOpen
+                    ? "Close file check"
+                    : checkResult
+                      ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+                      : "Check the open file against the project's rules and term base"
                 }
                 aria-label="Check file"
                 data-testid="check-file-button"
@@ -4778,7 +5037,8 @@ export function ProjectWorkspace() {
               </button>
             )}
 
-            <PrimaryActionButton ctx={actionCtx} run={actionArgs} />
+            {/* AQU-661: the dynamic primary-action button was removed — its
+                actions now live in the ⋯ overflow menu (WorkspaceHeader). */}
 
             {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
             <ViewSettingsMenu
@@ -5156,6 +5416,12 @@ export function ProjectWorkspace() {
                       language: isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage,
                     })
                   }}
+                  project={editorProject ?? project ?? undefined}
+                  terminologyConcepts={(editorProject ?? project)?.terminology ?? []}
+                  infractions={infractions}
+                  onSelectCell={setTimelineSelectedCellId}
+                  session={frontierSession ?? null}
+                  audioByCellId={timelineAudioByCellId}
                 />
               ) : (
               <EditorActionsProvider value={editorActionsValue}>
@@ -5348,6 +5614,7 @@ export function ProjectWorkspace() {
                 session={frontierSession ?? null}
                 settings={tts.settings}
                 onActiveCell={jumpToCellId}
+                startCellId={timelineSelectedCellId}
               />
             )}
             <WorkspaceStatusBar
@@ -5359,7 +5626,10 @@ export function ProjectWorkspace() {
                     pendingCount={Math.max(0, outboxPending - outboxFailed)}
                     failureStreak={outboxFailures}
                     failedCount={outboxFailed}
-                    records={outboxRecords}
+                    // SUB-9: all-status feed so quarantined refusals render in
+                    // the inspector (with reason + Retry/Discard) instead of
+                    // the popover claiming "all caught up" beside a failed pill.
+                    records={outboxInspectorRecords}
                     onRetryNow={outboxFlushNow}
                   />
                 </div>
@@ -5562,6 +5832,12 @@ export function ProjectWorkspace() {
           targetLang={activeLane}
           ttsSettings={tts.settings}
           getToken={getTokenForFile}
+          orgId={projectOrg?.id.toString()}
+          onReimport={() => {
+            setExportOpen(false)
+            setImportOpen(true)
+          }}
+          outstandingInfractionCount={activeFileInfractionCount}
         />
       </Suspense>
       <ParallelPassagesPanel
@@ -5596,6 +5872,19 @@ export function ProjectWorkspace() {
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
         current={videoAttachment} onSave={saveVideo}
       />
+      {/* AQU-661: confirmation for workspace actions folded from the removed
+          primary-action dropdown into the ⋯ overflow menu. */}
+      {pendingActionConfirm?.requiresConfirmation && (
+        <ConfirmActionDialog
+          open={true}
+          onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
+          title={pendingActionConfirm.requiresConfirmation.title}
+          description={pendingActionConfirm.requiresConfirmation.description(actionCtx)}
+          confirmLabel={pendingActionConfirm.requiresConfirmation.confirmLabel}
+          checkboxLabel="I understand this change will be attributed to my account."
+          onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
+        />
+      )}
       {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog
         open={pendingDeleteId !== null}

@@ -1,0 +1,31 @@
+{
+  "valueHtml": "<p class=\"indesign-paragraph\" data-paragraph-style=\"ParagraphStyle/Scripture\" data-story-id=\"biblica-story\" data-segment-count=\"2\"><span class=\"idml-segment\" data-segment-index=\"0\" data-character-style=\"CharacterStyle/Vernacular\">In the beginning</span><span class=\"idml-eoc\" data-eoc=\"1\" aria-hidden=\"true\"></span><span class=\"idml-segment\" data-segment-index=\"1\" data-character-style=\"CharacterStyle/Vernacular\"> was the Word</span></p>",
+  "metadata": {
+    "storyId": "biblica-story",
+    "paragraphId": "biblica-p1",
+    "data": {
+      "idmlStructure": {
+        "storyId": "biblica-story",
+        "paragraphId": "biblica-p1",
+        "contentSegments": [
+          "In the beginning",
+          " was the Word"
+        ],
+        "contentSegmentCount": 2,
+        "contentSegmentBreakBefore": [
+          false,
+          false
+        ],
+        "sourceBlockXml": "<ParagraphStyleRange Self=\"biblica-p1\" AppliedParagraphStyle=\"ParagraphStyle/Scripture\"><CharacterStyleRange AppliedCharacterStyle=\"CharacterStyle/Vernacular\"><Content>In the beginning</Content><Content> was the Word</Content></CharacterStyleRange></ParagraphStyleRange>",
+        "paragraphStyleRange": {
+          "appliedParagraphStyle": "ParagraphStyle/Scripture"
+        }
+      },
+      "relationships": {
+        "parentStory": "biblica-story",
+        "storyOrder": 0,
+        "paragraphOrder": 0
+      }
+    }
+  }
+}

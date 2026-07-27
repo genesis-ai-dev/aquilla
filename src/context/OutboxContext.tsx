@@ -28,8 +28,14 @@ export interface OutboxContextValue {
   flushNow: () => void
   /** Re-reads the queue sizes; resolves with the total (pending + failed). */
   refreshPending: () => Promise<number>
-  /** Reactive view of all outbox records for the inspector popover. */
+  /** Reactive view of PENDING outbox records. NOT all records — `failed`
+   *  (quarantined) are excluded (AQU-274): overlay + pending-count consumers
+   *  (useReconcileOnDrain) depend on this reaching zero when the queue drains. */
   records: OutboxRecord[]
+  /** SUB-9: all-status records (pending + failed) for the inspector popover,
+   *  so quarantined refusals stay visible with their reason + Retry/Discard.
+   *  Do NOT use for overlays or pending-count logic. */
+  inspectorRecords: OutboxRecord[]
   staleSiblingCount: number
   staleSiblingEntries: StaleSiblingEntry[]
   clearStaleSiblings: () => void
@@ -83,6 +89,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   })
 
   const records = usePendingOutboxRecords({ enabled: Boolean(jwt), fileId: null })
+  const inspectorRecords = usePendingOutboxRecords({ enabled: Boolean(jwt), fileId: null, includeFailed: true })
 
   const value = useMemo<OutboxContextValue>(
     () => ({
@@ -92,6 +99,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       flushNow,
       refreshPending,
       records,
+      inspectorRecords,
       staleSiblingCount,
       staleSiblingEntries,
       clearStaleSiblings,
@@ -104,6 +112,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       flushNow,
       refreshPending,
       records,
+      inspectorRecords,
       staleSiblingCount,
       staleSiblingEntries,
       clearStaleSiblings,

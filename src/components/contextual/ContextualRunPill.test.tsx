@@ -89,6 +89,23 @@ describe("ContextualRunPill", () => {
     expect(screen.getByText("Watching for changes")).toBeInTheDocument()
   })
 
+  it("steer trigger: present while running and parked, absent when idle", () => {
+    // Idle — no run, nothing to direct.
+    const { unmount } = render(<ContextualRunPill projectId="p1" fileId="file-1" />)
+    expect(screen.queryByRole("button", { name: "Direct the run" })).not.toBeInTheDocument()
+    unmount()
+
+    setContextualTransport(makeTransport())
+    applyRemoteFrame(frame("running", { done: 1, total: 10 }))
+    const running = render(<ContextualRunPill projectId="p1" fileId="file-1" />)
+    expect(screen.getByRole("button", { name: "Direct the run" })).toBeInTheDocument()
+    running.unmount()
+
+    applyRemoteFrame(frame("parked", { done: 10, total: 10 }))
+    render(<ContextualRunPill projectId="p1" fileId="file-1" />)
+    expect(screen.getByRole("button", { name: "Direct the run" })).toBeInTheDocument()
+  })
+
   it("failed: red summary with dismiss", () => {
     applyRemoteFrame(frame("failed", { done: 6, total: 10, failed: 4 }))
     render(<ContextualRunPill projectId="p1" fileId="file-1" />)

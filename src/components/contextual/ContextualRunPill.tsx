@@ -24,6 +24,7 @@ import {
   useContextualRunState,
 } from "@/lib/contextual/run-store"
 import { installContextualTransport } from "@/lib/contextual/transport"
+import { ContextualSteering } from "./ContextualSteering"
 
 interface PillProps {
   projectId: string
@@ -55,7 +56,19 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
   const state = useContextualRunState()
   const progress = useContextualRunProgress()
 
-  const { available, status, phase, spanLabel } = state
+  const { available, status, phase, spanLabel, runId, activeDirections } = state
+
+  // "Direct the run" popover — only meaningful while a run exists to steer
+  // (running/pausing/paused/parked); idle, starting, failed and terminated
+  // states have nothing listening for directions.
+  const steer = runId ? (
+    <ContextualSteering
+      projectId={projectId}
+      fileId={fileId}
+      runId={runId}
+      directions={activeDirections}
+    />
+  ) : null
 
   // Idle (no run) and terminated (run is over, can start fresh) share the
   // icon-only Play affordance.
@@ -94,6 +107,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
       <div className={PILL_BASE} data-testid="contextual-run-pill">
         <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
         <span className="text-muted-foreground">Finishing this passage…</span>
+        {steer}
       </div>
     )
   }
@@ -118,6 +132,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
             {progress.done}/{progress.total}
           </span>
         )}
+        {steer}
         <AppTooltip content="Stop this run">
           <Button
             type="button"
@@ -138,6 +153,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
       <div className={PILL_BASE} data-testid="contextual-run-pill">
         <Eye className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-muted-foreground">Watching for changes</span>
+        {steer}
         <AppTooltip content="Stop watching">
           <Button
             type="button"
@@ -214,6 +230,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
       <span className="tabular-nums text-muted-foreground">
         {progress.done}/{progress.total}
       </span>
+      {steer}
     </div>
   )
 }

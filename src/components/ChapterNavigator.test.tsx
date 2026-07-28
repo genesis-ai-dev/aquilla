@@ -27,8 +27,10 @@ describe("ChapterNavigator", () => {
     expect(trigger).toHaveTextContent("Matthew 1")
     expect(trigger).toHaveTextContent("Verses 1–25")
     expect(trigger).toHaveClass("w-56")
+    expect(trigger).toHaveClass("flex")
+    expect(trigger).toHaveClass("items-center")
     expect(screen.getByText("Matthew 1")).toHaveClass("whitespace-nowrap")
-    expect(screen.getByText("Verses 1–25")).toHaveClass("justify-self-center")
+    expect(screen.getByText("Verses 1–25")).toHaveClass("truncate")
     expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
   })
 

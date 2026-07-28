@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
 import { Search as SearchIcon, X, ChevronDown, Pencil, BookOpen } from "lucide-react"
-import { toast } from "sonner"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
@@ -16,13 +15,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { AppTooltip } from "@/components/ui/tooltip"
-import {
-  downloadSourceFile,
-  SourceExportError,
-} from "@/lib/sync/source-export"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
-
-const EXPORTABLE_FILE_TYPES: ReadonlySet<FileReference["type"]> = new Set(["usfm"])
+import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -54,6 +48,8 @@ interface Props {
   onOpenGlossary?: () => void
   /** True when the glossary surface is the active center surface (for highlight). */
   glossaryActive?: boolean
+  /** When set, opens inline rename for the given file (sidebar + file-options menu). */
+  renameSignal?: { fileId: string; nonce: number } | null
 }
 
 export function ExpandableFileList({
@@ -61,13 +57,16 @@ export function ExpandableFileList({
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  onOpenGlossary, glossaryActive,
+  onOpenGlossary, glossaryActive, renameSignal,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
     `codex:sidebar:corpus-collapsed:${projectId}`,
   )
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
+  useEffect(() => {
+    if (renameSignal?.fileId) setEditingFileId(renameSignal.fileId)
+  }, [renameSignal?.fileId, renameSignal?.nonce])
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const { requestScrollToSection } = useEditorScroll()
@@ -223,7 +222,7 @@ export function ExpandableFileList({
                             onMove={() => onMove(file.id)}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onExportSource={
-                              EXPORTABLE_FILE_TYPES.has(file.type) && canExportByOrgPolicy
+                              canExportSourceFile(file, canExportByOrgPolicy)
                                 ? () => { void exportFile(file) }
                                 : undefined
                             }
@@ -264,21 +263,12 @@ export function ExpandableFileList({
   )
 
   async function exportFile(file: FileReference) {
-    const name = /\.(sfm|usfm)$/i.test(file.name) ? file.name : `${file.name}.SFM`
-    try {
-      await downloadSourceFile({
-        projectId, fileId: file.id, downloadName: name, getToken: getTokenForFile, targetLang,
-      })
-      toast.success(`Exported ${name}`)
-    } catch (err) {
-      const msg =
-        err instanceof SourceExportError && err.status === 404
-          ? "This file was imported before round-trip export was wired up. Re-import to enable it."
-          : err instanceof Error
-            ? `Export failed: ${err.message}`
-            : "Export failed."
-      toast.error(msg)
-    }
+    await exportSourceFile({
+      projectId,
+      file,
+      getToken: getTokenForFile,
+      targetLang,
+    })
   }
 
 }

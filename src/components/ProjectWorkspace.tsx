@@ -112,14 +112,14 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, ListChecks, Mic, Plus } from "lucide-react"
+import { Film, Scale, MessagesSquare, Share2, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookMarked, BookOpen, Users, UserCheck, Eye, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
 import { toast } from "sonner"
-import { Spinner } from "@/components/ui/spinner"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
 import type { ContextChip } from "@/lib/agent/context-chip"
-import { CheckFindingsDrawer, checkScopeSummary } from "./CheckFindingsDrawer"
+import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
+import { FileChapterToolbar } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
@@ -133,7 +133,6 @@ import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
-import { EditorModeToggle } from "./EditorModeToggle"
 import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
@@ -153,6 +152,7 @@ import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
+import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
@@ -811,6 +811,7 @@ export function ProjectWorkspace() {
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
+  const fileOptionsAnchorRef = useRef<HTMLButtonElement>(null)
   // Holds a cell to scroll to once cells are loaded after a restore-location
   // navigation (or an AQU-646 media→text trace, which also flashes). Set by
   // the restore effect / deep-link / switchLens; consumed by the effect that
@@ -3606,6 +3607,7 @@ export function ProjectWorkspace() {
   )
 
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
+  const [renameSignal, setRenameSignal] = useState<{ fileId: string; nonce: number } | null>(null)
   const [moveCorpus, setMoveCorpus] = useState("")
   const existingCorpusMarkers = useMemo(() => {
     const set = new Set<string>()
@@ -4338,7 +4340,9 @@ export function ProjectWorkspace() {
     }
   }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, getTokenForFile, tts.settings, tts.saveTts])
 
-  const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
+  const fileMenuItems = useMemo((): OverflowMenuItem[] => {
+    if (!activeFileId) return []
+
     const diarizeLabel =
       diarizePhase === "starting" || diarizePhase === "running"
         ? "Diarizing…"
@@ -4348,24 +4352,15 @@ export function ProjectWorkspace() {
             ? "Diarize failed"
             : "Diarize"
 
-    // AQU-661: the primary-action button and its caret dropdown are gone — the
-    // workspace actions (Import, Run AI completions, Export, Batch validate, …)
-    // now lead the ⋯ menu so nothing is lost and the header reads as a single
-    // overflow affordance. Confirmation-gated actions route through
-    // handleWorkspaceAction → ConfirmActionDialog (below).
-    //
-    // Guard: on a file deep-link the first render happens before useProject
-    // resolves, so actionCtx.project is still null (its `project!` is a lie
-    // until then) and the role-gated isAvailable checks would throw
-    // (`null.syncRole`), error-bounding the whole workspace. Render the menu
-    // without action items until the project record lands.
-    const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx).map((a) => ({
-      id: `action-${a.id}`,
-      label: a.label,
-      icon: a.icon,
-      disabled: a.comingSoon,
-      onClick: () => handleWorkspaceAction(a),
-    }))
+    const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx)
+      .filter((a) => a.id !== "import-new" && a.id !== "agent-input")
+      .map((a) => ({
+        id: `action-${a.id}`,
+        label: a.label,
+        icon: a.icon,
+        disabled: a.comingSoon,
+        onClick: () => handleWorkspaceAction(a),
+      }))
 
     const items: OverflowMenuItem[] = [...actionItems]
     if (actionItems.length > 0) items.push({ id: "sep-actions", type: "separator" })
@@ -4374,18 +4369,21 @@ export function ProjectWorkspace() {
         id: "view-settings",
         label: "View settings",
         icon: Eye,
-        onClick: () => viewSettingsRef.current?.open(),
+        onClick: () => {
+          // Let the file-options dropdown close before anchoring the popover.
+          requestAnimationFrame(() => viewSettingsRef.current?.open())
+        },
       },
       {
         id: "next-unfinished",
         label: "Next unfinished",
         icon: ArrowRight,
-        disabled: !activeFileId || !hasUnfinished,
+        disabled: !hasUnfinished,
         onClick: handleJumpNextUnfinished,
       },
     )
 
-    if (canAssignWork && activeFileId) {
+    if (canAssignWork) {
       items.push({
         id: "assign-work",
         label: "Assign work",
@@ -4402,8 +4400,6 @@ export function ProjectWorkspace() {
         disabled: diarizeBusy,
         onClick: handleDiarize,
       })
-      // AQU-646: single-speaker alternative to diarize — adopt the imported
-      // file's speaker as a cast voice (reference extracted from the clip).
       items.push({
         id: "adopt-speaker-voice",
         label: adoptingSpeaker ? "Extracting voice…" : "Use file's speaker as a voice",
@@ -4437,28 +4433,100 @@ export function ProjectWorkspace() {
       items.push(...contextual)
     }
 
+    items.push({ id: "sep-file-actions", type: "separator" })
+    items.push(
+      {
+        id: "file-rename",
+        label: "Rename",
+        icon: Pencil,
+        onClick: () => setRenameSignal({ fileId: activeFileId, nonce: Date.now() }),
+      },
+      {
+        id: "file-move",
+        label: "Move to corpus…",
+        icon: FolderInput,
+        onClick: () => {
+          setMoveTargetId(activeFileId)
+          setMoveCorpus(activeFile?.corpusMarker ?? "")
+        },
+      },
+    )
+    if (activeFile && canExportSourceFile(activeFile, canExportByOrgPolicy)) {
+      items.push({
+        id: "file-export-source",
+        label: "Export source (.SFM)",
+        icon: Download,
+        onClick: () => {
+          if (!projectId) return
+          void exportSourceFile({
+            projectId,
+            file: activeFile,
+            getToken: getTokenForFile,
+            targetLang: activeLane,
+          })
+        },
+      })
+    }
+    if (currentRoleLevel >= ROLE.PROJECT_LEAD) {
+      items.push({ id: "sep-file-delete", type: "separator" })
+      items.push({
+        id: "file-delete",
+        label: "Delete",
+        icon: Trash2,
+        destructive: true,
+        onClick: () => setPendingDeleteId(activeFileId),
+      })
+    }
+
     return items
   }, [
     actionCtx,
-    handleWorkspaceAction,
+    activeFile,
     activeFileId,
-    hasUnfinished,
-    handleJumpNextUnfinished,
-    canAssignWork,
-    lens,
-    canDiarize,
-    diarizePhase,
-    diarizeError,
-    diarizeBusy,
-    handleDiarize,
+    activeLane,
     adoptingSpeaker,
+    canAssignWork,
+    canDiarize,
+    canExportByOrgPolicy,
+    currentRoleLevel,
+    diarizeBusy,
+    diarizeError,
+    diarizePhase,
+    getTokenForFile,
     handleAdoptSpeakerVoice,
+    handleDiarize,
+    handleJumpNextUnfinished,
+    handleReinviteSuggestions,
+    handleWorkspaceAction,
+    hasUnfinished,
     isSubtitleFile,
+    lens,
+    project,
+    projectId,
     suggestions.length,
     suggestionsDismissed,
-    project,
-    handleReinviteSuggestions,
   ])
+
+  const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
+    // Project-scoped overflow (Import is a visible button beside ⋯).
+    if (project === null) return []
+    return getVisibleActions(workspaceActions, actionCtx)
+      .filter((a) => a.id === "agent-input")
+      .map((a) => ({
+        id: `action-${a.id}`,
+        label: a.label,
+        icon: a.icon,
+        disabled: a.comingSoon,
+        onClick: () => handleWorkspaceAction(a),
+      }))
+  }, [actionCtx, handleWorkspaceAction, project])
+
+  const handleHeaderImport = useCallback(() => {
+    const importAction = workspaceActions.find((a) => a.id === "import-new")
+    if (!importAction || !project) return
+    if (!importAction.isAvailable(actionCtx)) return
+    handleWorkspaceAction(importAction)
+  }, [actionCtx, handleWorkspaceAction, project])
 
   if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {
@@ -4798,6 +4866,7 @@ export function ProjectWorkspace() {
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
+                  renameSignal={renameSignal}
                   onOpenGlossary={() => navigate(`/project/${projectId}/terminology`)}
                   glossaryActive={centerSurface === "terminology"}
                 />
@@ -4915,6 +4984,7 @@ export function ProjectWorkspace() {
           <WorkspaceHeader
             project={project}
             extraMenuItems={workspaceHeaderMenuItems}
+            onImport={project ? handleHeaderImport : undefined}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
           >
@@ -4957,93 +5027,8 @@ export function ProjectWorkspace() {
               </>
             )}
 
-            {project && centerSurface === "editor" && activeFileId ? (
-              <>
-                {/* AQU-602: the active-lane switcher moved into the editor's
-                    TARGET language tag (see EditorTable header) — no separate
-                    header control. */}
-                <EditorModeToggle
-                  lens={lens}
-                  onChange={(l) => {
-                    switchLens(l)
-                    // Surface the Voices tab when entering the Audio lens.
-                    if (l === "audio") setDockTab("voices")
-                  }}
-                  timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-                />
-              </>
-            ) : null}
-
-            {/* Phase 0.5: deterministic "Check file" entry point. Title doubles
-                as the last-run summary so the result is visible at the button. */}
-            {project && centerSurface === "editor" && activeFileId && (
-              <AppTooltip
-                content={
-                  checkOpen
-                    ? "Close file check"
-                    : checkResult
-                      ? `Last check: ${checkResult.totalFindingCount} issue${checkResult.totalFindingCount === 1 ? "" : "s"} · ${checkScopeSummary(checkResult)} · ${new Date(checkResult.ranAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
-                      : "Check the open file against the project's rules and term base"
-                }
-              >
-                <button
-                  type="button"
-                  // SUB-6: toggle semantics — while the drawer is open, clicking
-                  // the button closes it (like the other dock toggles) instead of
-                  // silently re-running the check. Re-check = close, click again.
-                  onClick={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
-                  disabled={checkRunning}
-                  aria-expanded={checkOpen}
-                  className="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent disabled:opacity-60"
-                  aria-label="Check file"
-                  data-testid="check-file-button"
-                >
-                  {checkRunning
-                    ? <Spinner className="size-3" />
-                    : <ListChecks className="h-3 w-3" />}
-                  Check file
-                  {checkResult && !checkRunning && (
-                    <span className={checkResult.totalFindingCount > 0
-                      ? "rounded-md bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
-                      : "rounded-md bg-green-100 px-1.5 text-[10px] font-semibold text-green-800 dark:bg-green-900/50 dark:text-green-300"}>
-                      {checkResult.totalFindingCount}
-                    </span>
-                  )}
-                </button>
-              </AppTooltip>
-            )}
-
-            {/* AQU-661: the dynamic primary-action button was removed — its
-                actions now live in the ⋯ overflow menu (WorkspaceHeader). */}
-
-            {/* FRO-331: hidden trigger — opened from ⋯ menu; keeps RTL hint anchored here. */}
-            <ViewSettingsMenu
-              ref={viewSettingsRef}
-              hideTrigger
-              fileOpen={Boolean(activeFileId)}
-              lineNumbersEnabled={fileMeta.lineNumbersEnabled}
-              sourceDirectionMode={fileMeta.sourceDirectionMode}
-              targetDirectionMode={fileMeta.targetDirectionMode}
-              sourceAutoDirectionSummary={activeFileDirectionSummary.source}
-              targetAutoDirectionSummary={activeFileDirectionSummary.target}
-              directionWarningScope={activeFile?.id ?? null}
-              cellLabelsEnabled={cellLabelsEnabled}
-              footnoteViewMode={footnoteViewMode}
-              onFootnoteViewModeChange={setFootnoteViewMode}
-              tnSidebarEnabled={tnSidebarVisible}
-              sourceFontSize={fontSizes.source}
-              targetFontSize={fontSizes.target}
-              onLineNumbersChange={fileMeta.setLineNumbersEnabled}
-              onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
-              onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
-              onCellLabelsChange={setCellLabelsEnabled}
-              onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
-              onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
-              onTnSidebarChange={(v) => {
-                setTnSidebarVisible(v)
-                if (projectId) writeTnSidebarVisible(projectId, v)
-              }}
-            />
+            {/* AQU-661: file-scoped actions live in the chapter-row File options
+                menu; Import is a header button beside ⋯ (Agent input, etc.). */}
           </WorkspaceHeader>
         }
         aboveCard={
@@ -5470,6 +5455,52 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
+            chapterNavTrailing={activeFileId ? (
+              <FileChapterToolbar
+                lens={lens}
+                onLensChange={(l) => {
+                  switchLens(l)
+                  if (l === "audio") setDockTab("voices")
+                }}
+                timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+                checkOpen={checkOpen}
+                checkRunning={checkRunning}
+                checkResult={checkResult}
+                onCheckToggle={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
+                menuItems={fileMenuItems}
+                fileOptionsAnchorRef={fileOptionsAnchorRef}
+                viewSettingsMenu={(
+                  <ViewSettingsMenu
+                    ref={viewSettingsRef}
+                    anchor={fileOptionsAnchorRef}
+                    hideTrigger
+                    fileOpen={Boolean(activeFileId)}
+                    lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+                    sourceDirectionMode={fileMeta.sourceDirectionMode}
+                    targetDirectionMode={fileMeta.targetDirectionMode}
+                    sourceAutoDirectionSummary={activeFileDirectionSummary.source}
+                    targetAutoDirectionSummary={activeFileDirectionSummary.target}
+                    directionWarningScope={activeFile?.id ?? null}
+                    cellLabelsEnabled={cellLabelsEnabled}
+                    footnoteViewMode={footnoteViewMode}
+                    onFootnoteViewModeChange={setFootnoteViewMode}
+                    tnSidebarEnabled={tnSidebarVisible}
+                    sourceFontSize={fontSizes.source}
+                    targetFontSize={fontSizes.target}
+                    onLineNumbersChange={fileMeta.setLineNumbersEnabled}
+                    onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
+                    onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
+                    onCellLabelsChange={setCellLabelsEnabled}
+                    onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
+                    onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
+                    onTnSidebarChange={(v) => {
+                      setTnSidebarVisible(v)
+                      if (projectId) writeTnSidebarVisible(projectId, v)
+                    }}
+                  />
+                )}
+              />
+            ) : undefined}
           />
               </EditorActionsProvider>
               )}

@@ -1,5 +1,5 @@
-// Segmented "Text | Audio" lens switch in the workspace header. Both lenses
-// read the SAME cell list. For non-time-ordered files the toggle is local
+// Segmented "Text | Audio" lens switch in the chapter navigation row (beside
+// Check file). Both lenses read the SAME cell list. For non-time-ordered files the toggle is local
 // state over one mounted editor, so scroll/selection carry over directly; for
 // time-ordered (media) files the editors swap and the workspace TRACES the
 // current cell across the switch instead (AQU-646 — media→text scrolls+flashes

@@ -1,6 +1,7 @@
-import type { ComponentType } from "react"
+import type { ComponentType, Ref } from "react"
+import type { VariantProps } from "class-variance-authority"
 import { MoreHorizontal } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,10 +19,22 @@ export interface OverflowMenuItem {
   icon?: ComponentType<{ className?: string }>
   onClick?: () => void
   disabled?: boolean
+  destructive?: boolean
 }
 
 interface Props {
   items: OverflowMenuItem[]
+  /** Ghost icon in app chrome (default) or outline for editor toolbars. */
+  triggerVariant?: "ghost" | "outline"
+  triggerSize?: NonNullable<VariantProps<typeof buttonVariants>["size"]>
+  triggerClassName?: string
+  tooltip?: string
+  ariaLabel?: string
+  testId?: string
+  /** Skip tooltip wrapper so the trigger can sit inside a ButtonGroup. */
+  inButtonGroup?: boolean
+  /** Anchor for popovers opened from this menu (e.g. View settings). */
+  triggerRef?: Ref<HTMLButtonElement>
 }
 
 /**
@@ -29,36 +42,68 @@ interface Props {
  * (Members, Settings, Close Project, etc.) collapse here so the top bar stops
  * scaling sideways with every new feature.
  */
-export function OverflowMenu({ items }: Props) {
+function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
+  return (
+    <DropdownMenuContent align="end" className="min-w-48">
+      <DropdownMenuGroup>
+        {items.map((item) =>
+          item.type === "separator" ? (
+            <DropdownMenuSeparator key={item.id} />
+          ) : (
+            <DropdownMenuItem
+              key={item.id}
+              disabled={item.disabled}
+              variant={item.destructive ? "destructive" : "default"}
+              onClick={item.onClick}
+            >
+              {item.icon && <item.icon className="h-4 w-4" />}
+              <span>{item.label}</span>
+            </DropdownMenuItem>
+          ),
+        )}
+      </DropdownMenuGroup>
+    </DropdownMenuContent>
+  )
+}
+
+export function OverflowMenu({
+  items,
+  triggerVariant = "ghost",
+  triggerSize = "icon",
+  triggerClassName,
+  tooltip = "More",
+  ariaLabel = "More",
+  testId,
+  inButtonGroup = false,
+  triggerRef,
+}: Props) {
+  if (items.length === 0) return null
+
+  const trigger = (
+    <DropdownMenuTrigger
+      render={
+        <Button
+          ref={triggerRef}
+          variant={triggerVariant}
+          size={triggerSize}
+          className={triggerClassName}
+          aria-label={ariaLabel}
+          data-testid={testId}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      }
+    />
+  )
+
   return (
     <DropdownMenu>
-      <AppTooltip content="More">
-        <DropdownMenuTrigger
-          render={
-            <Button variant="ghost" size="icon" aria-label="More">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          }
-        />
-      </AppTooltip>
-      <DropdownMenuContent align="end" className="min-w-48">
-        <DropdownMenuGroup>
-          {items.map((item) =>
-            item.type === "separator" ? (
-              <DropdownMenuSeparator key={item.id} />
-            ) : (
-              <DropdownMenuItem
-                key={item.id}
-                disabled={item.disabled}
-                onClick={item.onClick}
-              >
-                {item.icon && <item.icon className="h-4 w-4" />}
-                <span>{item.label}</span>
-              </DropdownMenuItem>
-            ),
-          )}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
+      {inButtonGroup ? trigger : (
+        <AppTooltip content={tooltip}>
+          {trigger}
+        </AppTooltip>
+      )}
+      <OverflowMenuPanel items={items} />
     </DropdownMenu>
   )
 }

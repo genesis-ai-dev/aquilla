@@ -1,4 +1,4 @@
-import { useState, forwardRef, useImperativeHandle, type ReactNode } from "react"
+import { useState, forwardRef, useImperativeHandle, type ReactNode, type RefObject } from "react"
 import { AlertTriangle, Eye, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -24,6 +24,8 @@ export interface ViewSettingsMenuHandle {
 }
 
 interface ViewSettingsMenuProps {
+  /** When set, the popover anchors to this element instead of the eye trigger. */
+  anchor?: RefObject<HTMLElement | null>
   /** When true, the eye trigger is visually hidden — open via ref/imperative handle. */
   hideTrigger?: boolean
   fileOpen: boolean
@@ -58,6 +60,7 @@ const FOOTNOTE_OPTIONS: { value: FootnoteViewMode; label: string }[] = [
 ]
 
 export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsMenuProps>(function ViewSettingsMenu({
+  anchor,
   hideTrigger = false,
   fileOpen,
   lineNumbersEnabled,
@@ -111,12 +114,8 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   }
 
   return (
-    // AQU-358: when the trigger is hidden (opened from the ⋯ menu) this wrapper
-    // is a zero-width flex child sitting between the primary-action button and the
-    // ⋯ menu; the parent's `gap-1` then renders on *both* sides of it, doubling the
-    // visible gap before the ⋯. Pull it back by one gap step so the ⋯ sits tight
-    // against the action button while the wrapper still anchors the warning popover.
-    <div className={cn("relative flex items-center", hideTrigger && "-ml-1")}>
+    // When anchored to the file-options ⋯ button, skip the header-only gap hack.
+    <div className={cn("relative flex items-center", hideTrigger && !anchor && "-ml-1")}>
       {showMismatchWarning && mismatch && (
         <div
           className={cn(
@@ -167,22 +166,26 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
         </div>
       )}
       <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-        <AppTooltip content="View settings">
-          <PopoverTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="View settings"
-                className={cn(hideTrigger ? "sr-only" : "relative")}
-              >
-                <Eye className="h-4 w-4" />
-              </Button>
-            }
-          />
-        </AppTooltip>
+        {!anchor && (
+          <AppTooltip content="View settings">
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="View settings"
+                  className={cn(hideTrigger ? "sr-only" : "relative")}
+                >
+                  <Eye className="h-4 w-4" />
+                </Button>
+              }
+            />
+          </AppTooltip>
+        )}
         <PopoverContent
+          anchor={anchor}
           align="end"
+          side="bottom"
           sideOffset={4}
           data-testid="view-settings-popover"
           className="w-72"

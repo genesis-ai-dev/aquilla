@@ -16,8 +16,8 @@ test("import dialog enables TMX, Macula, and Translation Notes routes", async ({
   await dash.openProject(name)
 
   // Open the import dialog — lands on the type-selector screen.
-  const importBtn = alice.getByRole("button", {
-    name: /^Import(?: a file)?$/i,
+  const importBtn = alice.getByRole("banner").getByRole("button", {
+    name: /^Import$/i,
   })
   await expect(importBtn).toBeVisible({ timeout: 10_000 })
   await importBtn.click()

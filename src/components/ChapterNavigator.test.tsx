@@ -23,9 +23,28 @@ function chapterSearch() {
 describe("ChapterNavigator", () => {
   it("keeps the current chapter and verse range visible", () => {
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={() => {}} />)
-    expect(screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })).toHaveTextContent("Verses 1–25")
+    const trigger = screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })
+    expect(trigger).toHaveTextContent("Verses 1–25")
+    expect(trigger).toHaveClass("w-56")
     expect(screen.getByText("Verses 1–25")).toHaveClass("justify-self-center")
     expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
+  })
+
+  it("keeps the chapter trigger at a fixed width for long book names", () => {
+    const longNameChapters: ChapterNavigationItem[] = [
+      {
+        label: "REV 20",
+        displayLabel: "Revelation 20",
+        verseRange: "1–15",
+        translated: 0,
+        validated: 0,
+        total: 15,
+      },
+    ]
+    render(<ChapterNavigator chapters={longNameChapters} activeLabel="REV 20" onSelect={() => {}} />)
+    expect(
+      screen.getByRole("combobox", { name: /Current chapter: Revelation 20/ }),
+    ).toHaveClass("w-56")
   })
 
   it("moves to the next chapter with one click", () => {

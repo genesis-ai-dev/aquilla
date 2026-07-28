@@ -84,6 +84,11 @@ export interface AquillaDb {
   batchPipelined?<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]>
   exec(query: string): Promise<{ count: number; duration: number }>
   close(): Promise<void>
+  /** Run a callback on one Postgres connection and commit all of its queries
+   * atomically. Optional for lightweight test doubles; production PostgresDb
+   * always implements it. The callback receives a transaction-bound handle,
+   * so it must not call transaction() recursively. */
+  transaction?<T>(fn: (tx: AquillaDb) => Promise<T>): Promise<T>
   /** Thread a user identity into every query on the returned handle (see
    *  PostgresDb.withUser) so RLS backstop policies apply. Optional — many
    *  test doubles implement only prepare/batch/exec/close; identity-sensitive
@@ -260,6 +265,17 @@ export class PostgresDb implements AquillaDb {
   async batchPipelined<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]> {
     const run = (tx: PgExecutor): Promise<AquillaResult<T>[]> =>
       Promise.all(stmts.map((s) => (s as PgStatement)._on(tx).all<T>()))
+    if (this.mode.kind === "none") {
+      return this.executor.begin(run)
+    }
+    return withIdentity(this.executor, this.mode, run)
+  }
+
+  /** Run arbitrary dependent statements in one transaction. Unlike batch(),
+   * this supports reading a generated id and binding it into later statements. */
+  async transaction<T>(fn: (tx: AquillaDb) => Promise<T>): Promise<T> {
+    const run = (tx: PgExecutor): Promise<T> =>
+      fn(new PostgresDb(tx, { kind: "none" }))
     if (this.mode.kind === "none") {
       return this.executor.begin(run)
     }

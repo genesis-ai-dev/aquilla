@@ -1,14 +1,22 @@
-// Regression guard for the "Saved but empty" sparkle bug.
+// Regression guards for empty completions that used to reach the editor
+// looking like success.
 //
-// A source cell carrying a USFM footnote made the model return an empty
-// completion (the old prompt embedded footnote instructions inside `Source:`,
-// contradicting the system prompt's "final source line only" rule), and
-// completeSingle committed that empty string and resolved `true` — so the
-// sparkle flow showed "Saved" over an empty target. This file pins the fixed
-// contract at the level where the bug escaped (the hook), with only fetch
-// stubbed:
+// AQU-685 ("silent no-show"): a single-cell completion succeeds at the HTTP
+// level but the model returns no content (empty/whitespace body, or a
+// streamed 200 that carried only an error/usage frame). The hook must NOT
+// commit an empty draft and silently clear the spinner — the cell's
+// `completing` entry becomes "error" and an `errors` message is set, so the
+// UI renders a visible error instead of a blank cell.
+//
+// "Saved but empty" sparkle bug (D11 never-commit-empty): a source cell
+// carrying a USFM footnote made the model return an empty completion (the
+// old prompt embedded footnote instructions inside `Source:`, contradicting
+// the system prompt's "final source line only" rule), and completeSingle
+// committed that empty string and resolved `true` — so the sparkle flow
+// showed "Saved" over an empty target. This file pins the fixed contract at
+// the level where the bug escaped (the hook), with only fetch stubbed:
 //   - an empty/whitespace model result is NEVER committed; completeSingle
-//     resolves false and records a per-cell error (D11 never-commit-empty);
+//     resolves false and records a per-cell error;
 //   - a footnoted cell's well-shaped reply is committed with real \f...\f*
 //     markers rebuilt from the model's [n] lines — not [n] placeholder text;
 //   - a footnote reply with no translated base counts as empty;
@@ -44,12 +52,10 @@ vi.mock("@/lib/completion/batch-completion", () => ({
   getBatchCompletionSignal: vi.fn(() => new AbortController().signal),
   cancelBatchCompletion: vi.fn(),
 }))
-vi.mock("@/lib/completion/compress-examples", () => ({
-  compressExampleSource: (src: string) => src,
-  dedupeExamples: (exs: unknown[]) => exs,
-  dropPrecedingContextDuplicates: (exs: unknown[]) => exs,
-  dropValidatedPairDuplicates: (exs: unknown[]) => exs,
-}))
+// NB: compress-examples is intentionally NOT mocked — the real module is cheap
+// and deterministic on the empty example set these tests use. (A partial mock
+// that omits an export makes completeSingle throw for an unrelated reason and
+// masks what we're actually guarding here.)
 
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -86,6 +92,8 @@ const FOOTNOTE_CELL: MinimalCell = {
 const searchMock = vi.fn().mockResolvedValue([])
 const searchPassagesMock = vi.fn().mockResolvedValue([])
 
+// res.body:null makes complete() fall through to res.json(); `content` drives
+// what the model "returns". body:null path returns content.trim() || "".
 function mockFetchOk(content: string) {
   const fetchMock = vi.fn().mockImplementation(() =>
     Promise.resolve({
@@ -109,12 +117,12 @@ function renderCompletion(commitMock: ReturnType<typeof vi.fn>, cell: MinimalCel
   )
 }
 
-describe("completeSingle never commits an empty draft (D11)", () => {
+describe("completeSingle never commits an empty draft (AQU-685 / D11)", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it("resolves false, skips the commit, and records an error when the model returns nothing", async () => {
+  it("resolves false, skips the commit, and surfaces a visible error when the model returns nothing", async () => {
     mockFetchOk("")
     const commitMock = vi.fn().mockResolvedValue(undefined)
     const { result } = renderCompletion(commitMock, PLAIN_CELL)
@@ -124,13 +132,16 @@ describe("completeSingle never commits an empty draft (D11)", () => {
       outcome = await result.current.completeSingle(PLAIN_CELL as never)
     })
 
+    // The empty completion must never be persisted as a translation…
     expect(outcome).toBe(false)
     expect(commitMock).not.toHaveBeenCalled()
+    // …and the failure is surfaced visibly rather than silently cleared.
+    expect(result.current.completing.get("cell-1")).toBe("error")
     expect(result.current.errors.get("cell-1")).toBeTruthy()
   })
 
-  it("treats a whitespace-only result as empty", async () => {
-    mockFetchOk("  \n  ")
+  it("treats a whitespace-only completion as a failure (no blank draft committed)", async () => {
+    mockFetchOk("   \n  ")
     const commitMock = vi.fn().mockResolvedValue(undefined)
     const { result } = renderCompletion(commitMock, PLAIN_CELL)
 
@@ -141,6 +152,24 @@ describe("completeSingle never commits an empty draft (D11)", () => {
 
     expect(outcome).toBe(false)
     expect(commitMock).not.toHaveBeenCalled()
+    expect(result.current.completing.get("cell-1")).toBe("error")
+  })
+
+  it("commits normally and sets no error when the model returns real content", async () => {
+    mockFetchOk("Une traduction")
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(commitMock, PLAIN_CELL)
+
+    let outcome: boolean | undefined
+    await act(async () => {
+      outcome = await result.current.completeSingle(PLAIN_CELL as never)
+    })
+
+    expect(outcome).toBe(true)
+    expect(commitMock).toHaveBeenCalledTimes(1)
+    expect(commitMock.mock.calls[0][1]).toBe("Une traduction")
+    expect(result.current.completing.get("cell-1")).toBeUndefined()
+    expect(result.current.errors.get("cell-1")).toBeUndefined()
   })
 })
 
@@ -192,6 +221,7 @@ describe("completeSingle on a footnoted source cell", () => {
 
     expect(outcome).toBe(false)
     expect(commitMock).not.toHaveBeenCalled()
+    expect(result.current.completing.get("cell-1")).toBe("error")
     expect(result.current.errors.get("cell-1")).toBeTruthy()
   })
 })

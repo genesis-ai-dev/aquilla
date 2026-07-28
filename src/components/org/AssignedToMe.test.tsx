@@ -52,8 +52,8 @@ describe("AssignedToMe", () => {
     // One org-level request (GET /orgs/:orgId/assignments/mine) replaces the
     // old per-project fan-out — rows arrive with projectName attached.
     mockGetMy.mockResolvedValue([
-      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: "2026-06-30", note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
-      { assignmentId: "a2", projectId: "pb", projectName: "Mark", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 5, createdAt: 100 },
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: "2026-06-30", note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", scopeKind: "chapters", scopeLabel: "Mark · MRK 1", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 5, createdAt: 100 },
     ])
     renderInbox()
 
@@ -69,8 +69,8 @@ describe("AssignedToMe", () => {
   // into the project at that lane (?lane=<tag>); the default lane ('') does not.
   it("renders a lane chip and appends ?lane= for a lane-pinned assignment", async () => {
     mockGetMy.mockResolvedValue([
-      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
-      { assignmentId: "a2", projectId: "pb", projectName: "Mark", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
     ])
     renderInbox()
 
@@ -115,7 +115,7 @@ describe("AssignedToMe", () => {
   // ProjectsList.tsx for the full explanation of the flex chain this depends on.
   it("renders the list in a scrollable container (h-full + overflow-y-auto, no clipping)", async () => {
     mockGetMy.mockResolvedValue([
-      { assignmentId: "a1", projectId: "pa", projectName: "John", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
     ])
     renderInbox()
     await waitFor(() => expect(screen.getAllByText("John").length).toBeGreaterThan(0))

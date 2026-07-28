@@ -166,6 +166,13 @@ export async function getProjectAssignmentRoster(
 export interface MyAssignment {
   assignmentId: string
   projectId: string
+  /**
+   * AQU-690: the file the assignment's scope resolved to (one of its resolved
+   * cells' files), so the Editor's "My assignments" click can open the right
+   * file. Mirrors the workload read's `file_id` subquery; null only when the
+   * scope resolved to zero cells.
+   */
+  fileId: string | null
   scopeKind: string
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
@@ -192,7 +199,9 @@ export async function getMyAssignments(
             a.target_lang AS target_lang,
             a.deadline AS deadline, a.note AS note,
             a.cells_total AS cells_total, a.created_at AS created_at,
-            ${CELLS_DONE_SUBQUERY} AS cells_done
+            ${CELLS_DONE_SUBQUERY} AS cells_done,
+            (SELECT ac.file_id FROM assignment_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
       WHERE a.project_id = ? AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -210,11 +219,13 @@ export async function getMyAssignments(
       cells_total: number
       created_at: number
       cells_done: number
+      file_id: string | null
     }>()
 
   return (rows.results ?? []).map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
+    fileId: r.file_id,
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
@@ -250,7 +261,9 @@ export async function getMyAssignmentsAcrossOrg(
             a.target_lang AS target_lang,
             a.deadline AS deadline, a.note AS note,
             a.cells_total AS cells_total, a.created_at AS created_at,
-            ${CELLS_DONE_SUBQUERY} AS cells_done
+            ${CELLS_DONE_SUBQUERY} AS cells_done,
+            (SELECT ac.file_id FROM assignment_cells ac
+              WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
       WHERE p.org_id = ? AND p.archived_at IS NULL
@@ -271,12 +284,14 @@ export async function getMyAssignmentsAcrossOrg(
       cells_total: number
       created_at: number
       cells_done: number
+      file_id: string | null
     }>()
 
   return (rows.results ?? []).map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
+    fileId: r.file_id,
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",

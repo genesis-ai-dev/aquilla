@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType }
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft, Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
-  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug,
+  SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
 } from "lucide-react"
 import { Menu } from "@base-ui/react/menu"
 import { Button } from "@/components/ui/button"
@@ -56,6 +56,7 @@ import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategyS
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
+import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
@@ -808,6 +809,7 @@ export function ProjectSettings() {
     // Monday.com board sync — cloud (synced) projects only: the link lives on
     // the server against the project's org connection.
     { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
+    { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -893,6 +895,13 @@ export function ProjectSettings() {
       description: "Monday.com board sync",
       icon: Plug,
       sectionIds: ["section-monday"],
+    },
+    {
+      id: "experimental",
+      label: "Experimental",
+      description: "Early features, this device only",
+      icon: FlaskConical,
+      sectionIds: ["section-experimental"],
     },
   ]
 
@@ -1769,6 +1778,10 @@ export function ProjectSettings() {
             isCloudProject={isCloudProject}
             onRevalidate={revalidateMetrics}
           />
+        )}
+
+        {sectionsToRender.some((s) => s.id === "section-experimental") && id && (
+          <ExperimentalFlagsSection projectId={id} serverProject={project ?? undefined} />
         )}
 
         </main>

@@ -31,7 +31,29 @@ export const RESET_REQUEST_MAX_PER_IDENTIFIER = 3
 // primitive (see routes/contact.ts).
 export const CONTACT_MAX_PER_IP = 5
 
-export type RateLimitKind = "login" | "password_reset_request" | "contact"
+// [Pen test] Auth & session mgmt (2026-07-27): POST /api/v2/admin/elevation/verify
+// had no attempt limiting at all — a caller already holding a valid (e.g.
+// stolen) platform-admin JWT could brute-force the 6-digit step-up code with
+// unlimited guesses inside its 10-minute lifetime. Scoped per-user (only an
+// ADMIN_EMAILS-allowlisted account can reach this route in the first place),
+// counting failures only so a legitimate admin retyping a code never locks
+// themselves out.
+export const ADMIN_ELEVATION_VERIFY_MAX_FAILURES = 10
+
+// [Pen test] Auth & session mgmt (2026-07-27): POST /api/v2/auth/register had
+// no throttle at all — scriptable account-creation flooding and, combined
+// with the 409 "User already exists" response, a fast email/username
+// enumeration oracle. Scoped per-IP rather than per-identifier (the whole
+// point of the abuse is trying many identifiers), wide enough that a shared
+// office/campus IP signing up several real accounts never trips it.
+export const REGISTER_MAX_PER_IP = 15
+
+export type RateLimitKind =
+  | "login"
+  | "password_reset_request"
+  | "contact"
+  | "admin_elevation_verify"
+  | "register"
 
 /** Roughly 1-in-50 calls also prunes stale rows so the table stays bounded
  *  without a scheduled job. Cheap (indexed on created_at via the lookup

@@ -2,9 +2,8 @@
 // `sub` = username) against AQUILLA_PG and stashes the hydrated user on the
 // Hono context.
 //
-// Adapted from frontier-server/cloudflare/src/middleware/auth.ts. The
-// Hetzner fallback path is gone — codex-web users always live in
-// frontier-db-v2 by the time they reach this worker.
+// Adapted from frontier-server/cloudflare/src/middleware/auth.ts. Hydration is
+// always Neon-only; the optional legacy bridge runs before token issuance.
 
 import type { Context, Next } from "hono"
 import type { Env, Variables } from "../types"

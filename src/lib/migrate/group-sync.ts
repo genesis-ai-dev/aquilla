@@ -57,7 +57,7 @@ export async function syncGroupsToNeon(
 ): Promise<GroupSyncResult> {
   const doFetch = http.fetchFn ?? fetch
 
-  // 1) Walk the tree once: placement index + raw members per group.
+  // 1) Walk the tree once: placement index + effective members per group.
   const tops = await listTopLevelGroups(creds)
   const placeIdx = new Map<string, Placement>()
   const subgroups: GitLabSubgroupNode[] = []

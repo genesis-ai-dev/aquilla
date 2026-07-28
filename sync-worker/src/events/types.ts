@@ -416,6 +416,10 @@ export interface EventPayloads {
     scope: CommentScope
     body: string // markdown OK
     parentCommentId: string | null // null = top-level; non-null = reply
+    // AQU-692: snapshot of the cell's target text at thread-creation time, so the
+    // client can render the "Translation changed since this thread was created"
+    // badge. Root threads only; null/absent = unknown baseline (no badge).
+    createdForTranslated?: string | null
   }
   'comment.edit': {
     commentId: string

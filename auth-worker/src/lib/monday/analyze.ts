@@ -6,6 +6,7 @@
 
 import type { Env } from "../../types"
 import { getPlatformSettingsCached } from "../platform-settings"
+import { openRouterUsage } from "../llm-vendor"
 import {
   sanitizeMapping,
   METRIC_KEYS,
@@ -152,7 +153,7 @@ async function callLlm(env: Env, model: string, prompt: string): Promise<string>
       temperature: 0.2,
       stream: false,
       response_format: { type: "json_object" },
-      usage: { include: true },
+      ...openRouterUsage(env.OPENROUTER_BASE_URL),
     }),
   })
   if (!upstream.ok) {

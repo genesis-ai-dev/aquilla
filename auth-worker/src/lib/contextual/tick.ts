@@ -37,6 +37,7 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
 import { loadLintRules, type LintRule } from "../agent/lint"
+import { openRouterUsage } from "../llm-vendor"
 import { deriveSpanSeeds } from "./segment"
 import { lintSpanDraft } from "./lint-node"
 import { runSpan, EXAMPLES_TARGET } from "./pipeline"
@@ -112,7 +113,7 @@ export function makeLlmCall(cfg: {
         ],
         max_tokens: req.maxTokens,
         temperature: req.temperature,
-        usage: { include: true },
+        ...openRouterUsage(cfg.url),
       }),
       ...(cfg.signal ? { signal: cfg.signal } : {}),
     })

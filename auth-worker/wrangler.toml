@@ -304,7 +304,7 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
-LEGACY_USER_MIGRATION_ENABLED = "false"
+LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://gitlab.frontierrnd.com"
 # AQU-AGENT §6 — intentionally unset until the development sandbox has a

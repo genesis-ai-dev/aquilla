@@ -87,6 +87,19 @@ sourceLinking.post(
       return c.json({ error: "source project not found" }, 404)
     }
 
+    // [Pen test] AQU authz review: linking only ever checked the caller's
+    // role on the downstream project. Without this check, any user who
+    // owns (or leads) some project of their own — trivially true for
+    // every authenticated user, since creating a project grants owner
+    // (700) — could link it to ANY other project id on the platform and
+    // clone/mirror its source cells, with no membership, invite, or
+    // interaction from the target project. The caller must have at least
+    // viewer access to the source project too.
+    const sourceRole = await resolveProjectRoleIncludingArchived(c.env, user, sourceProjectId)
+    if (!sourceRole) {
+      return c.json({ error: "not found or no access to source project" }, 403)
+    }
+
     // Cycle check: starting at the prospective source, walk its source
     // chain upstream. If we ever encounter `projectId`, accepting the link
     // would create a cycle.

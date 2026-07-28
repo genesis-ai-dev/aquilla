@@ -27,6 +27,7 @@ import {
   LOGIN_MAX_FAILURES_PER_IDENTIFIER,
   LOGIN_MAX_FAILURES_PER_IP,
   recordAuthEvent,
+  REGISTER_MAX_PER_IP,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
 import {
@@ -138,6 +139,26 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
         503,
       )
     }
+
+    // [Pen test] Auth & session mgmt (2026-07-27): unthrottled, so a scripted
+    // caller could flood account creation or use the 409 "User already
+    // exists" response as a fast per-IP enumeration oracle across many
+    // guessed emails/usernames. Recorded regardless of outcome (like
+    // password-reset-request) and checked before the DB uniqueness lookup.
+    const ipIdent = ipIdentifier(clientIp(c))
+    const recentRegistrations = await countRecentEvents(
+      c.env.AQUILLA_PG,
+      "register",
+      ipIdent,
+      { onlyFailures: false },
+    )
+    if (recentRegistrations >= REGISTER_MAX_PER_IP) {
+      return c.json(
+        { detail: "Too many registration attempts. Please try again later.", error: "Too many attempts" },
+        429,
+      )
+    }
+    await recordAuthEvent(c.env.AQUILLA_PG, "register", ipIdent, true)
 
     // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
     // already exists so we never mint case-twin accounts that then collide in

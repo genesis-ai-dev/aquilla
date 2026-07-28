@@ -24,13 +24,15 @@ describe("ChapterNavigator", () => {
   it("keeps the current chapter and verse range visible", () => {
     render(<ChapterNavigator chapters={chapters} activeLabel="MAT 1" onSelect={() => {}} />)
     const trigger = screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })
+    expect(trigger).toHaveTextContent("Matthew 1")
     expect(trigger).toHaveTextContent("Verses 1–25")
     expect(trigger).toHaveClass("w-56")
+    expect(screen.getByText("Matthew 1")).toHaveClass("whitespace-nowrap")
     expect(screen.getByText("Verses 1–25")).toHaveClass("justify-self-center")
     expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
   })
 
-  it("keeps the chapter trigger at a fixed width for long book names", () => {
+  it("keeps the chapter trigger at a fixed width and shows the full book name", () => {
     const longNameChapters: ChapterNavigationItem[] = [
       {
         label: "REV 20",
@@ -42,9 +44,10 @@ describe("ChapterNavigator", () => {
       },
     ]
     render(<ChapterNavigator chapters={longNameChapters} activeLabel="REV 20" onSelect={() => {}} />)
-    expect(
-      screen.getByRole("combobox", { name: /Current chapter: Revelation 20/ }),
-    ).toHaveClass("w-56")
+    const trigger = screen.getByRole("combobox", { name: /Current chapter: Revelation 20/ })
+    expect(trigger).toHaveClass("w-56")
+    expect(trigger).toHaveTextContent("Revelation 20")
+    expect(screen.getByText("Revelation 20")).toHaveClass("whitespace-nowrap")
   })
 
   it("moves to the next chapter with one click", () => {

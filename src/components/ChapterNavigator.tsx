@@ -236,12 +236,12 @@ export function ChapterNavigator({
             render={
               <Button
                 variant="outline"
-                className="grid w-56 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 [&>svg:last-child]:justify-self-end"
+                className="grid w-56 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 [&>svg:last-child]:justify-self-end"
                 aria-label={`Current chapter: ${active.displayLabel}. Choose chapter`}
               />
             }
           >
-            <span className="truncate text-left font-semibold">{active.displayLabel}</span>
+            <span className="whitespace-nowrap text-left font-semibold">{active.displayLabel}</span>
             <span className="truncate justify-self-center text-xs font-normal text-muted-foreground">
               {activeSummary}
             </span>

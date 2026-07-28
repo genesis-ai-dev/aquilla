@@ -2,7 +2,13 @@ import JSZip from "jszip"
 import { describe, expect, it } from "vitest"
 import { inspectIdml } from "./archive.js"
 import { IdmlError } from "./errors.js"
-import { exportIdml, parseIdml, validateExport } from "./engine.js"
+import {
+  exportIdml,
+  parseIdml,
+  partitionIdmlUnitAtLineBreaks,
+  validateExport,
+} from "./engine.js"
+import { validateIdmlTranslation } from "./html.js"
 import { upgradeLegacyIdmlMetadata } from "./legacy.js"
 import type { IdmlTranslation, IdmlTranslationUnit } from "./types.js"
 import { makeIdml, mixedStoryXml } from "./test-helpers/idml-fixture.js"
@@ -331,6 +337,22 @@ describe("IDML structural parser", () => {
       generic.units.map((unit) => unit.locator),
     )
     expect(biblica.manifest.profile).toBe("biblica")
+  })
+
+  it("exposes the applied paragraph style so semantic adapters can classify paragraphs", async () => {
+    const parsed = await parseIdml(await makeIdml())
+
+    const styled = parsed.units.find((unit) => unit.locator.elementId === "p1")
+    expect(styled?.paragraphStyleId).toBe("ParagraphStyle/Body")
+    // Paragraphs without an applied style, and non-paragraph units, stay absent
+    // rather than inventing a default.
+    expect(parsed.units.find((unit) => unit.locator.elementId === "p2")?.paragraphStyleId)
+      .toBeUndefined()
+    expect(
+      parsed.units.find((unit) => unit.locator.scope === "custom-variable")?.paragraphStyleId,
+    ).toBeUndefined()
+    // Parse-time context only: the persisted v2 metadata shape is unchanged.
+    expect(styled?.metadata).not.toHaveProperty("paragraphStyleId")
   })
 
   it("derives note, endnote, text-path, and master-story scopes from structural evidence", async () => {
@@ -924,6 +946,80 @@ describe("strict surgical IDML export", () => {
       }),
     ).rejects.toMatchObject({ name: "AbortError" })
     expect(progress).toEqual([0, 1])
+  })
+})
+
+describe("partitionIdmlUnitAtLineBreaks", () => {
+  const listParagraph = [
+    '<ParagraphStyleRange Self="list1" AppliedParagraphStyle="ParagraphStyle/List">',
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body">',
+    "<Content>one</Content><Br/><Content>two</Content><Content> also two</Content><Br/><Content>three</Content>",
+    "</CharacterStyleRange>",
+    "</ParagraphStyleRange>",
+  ].join("")
+
+  async function parseListFixture(): Promise<{
+    bytes: Uint8Array
+    unit: IdmlTranslationUnit
+  }> {
+    const bytes = await makeIdml({
+      "Stories/Story_u1.xml": `<?xml version="1.0" encoding="UTF-8"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1">${listParagraph}</Story></idPkg:Story>`,
+    })
+    return { bytes, unit: unitById((await parseIdml(bytes)).units, "list1") }
+  }
+
+  it("splits a paragraph into one unit per line, each owning its own slots and anchors", async () => {
+    const { unit } = await parseListFixture()
+    const lines = partitionIdmlUnitAtLineBreaks(unit)
+
+    expect(lines.map((line) => line.sourceText)).toEqual(["one", "two also two", "three"])
+    expect(lines.map((line) => line.locator.part)).toEqual([0, 1, 2])
+    expect(lines.map((line) => [...line.locator.slotIndexes])).toEqual([[0], [1, 2], [3]])
+    // Each line's ids, slot indexes and anchor hash describe only its own slots,
+    // so the editor protects the line a translator actually sees.
+    expect(new Set(lines.map((line) => line.id)).size).toBe(3)
+    expect(lines[1]!.slots.map((slot) => slot.index)).toEqual([0, 1])
+    expect(lines.map((line) => line.metadata.slotCount)).toEqual([1, 2, 1])
+    // The anchor hash covers a line's own slots, not the whole paragraph's, so a
+    // translator can only be held to the anchors in front of them.
+    for (const line of lines) {
+      expect(line.metadata.anchorSequenceHash).not.toBe(unit.metadata.anchorSequenceHash)
+    }
+    // The line breaks separate lines rather than belonging to one, so no line
+    // carries a break anchor a translator could delete.
+    expect(lines.flatMap((line) => line.protectedTokens)).toEqual([])
+    for (const line of lines) {
+      expect(validateIdmlTranslation(line.sourceHtml, line.sourceHtml, line.metadata))
+        .toMatchObject({ valid: true })
+    }
+  })
+
+  it("returns the unit unchanged when it holds no interior line break", async () => {
+    const parsed = await parseIdml(await makeIdml())
+    const trailingBreak = unitById(parsed.units, "p1")
+
+    // p1's only Br sits after its last slot: there is no second line to split off.
+    expect(trailingBreak.protectedTokens.some((token) => token.kind === "br")).toBe(true)
+    expect(partitionIdmlUnitAtLineBreaks(trailingBreak)).toEqual([trailingBreak])
+  })
+
+  it("exports partitioned lines back into the single paragraph they came from", async () => {
+    const { bytes, unit } = await parseListFixture()
+    const lines = partitionIdmlUnitAtLineBreaks(unit)
+    // A discarded line — a structural one in a real document — keeps its source
+    // text, because export only rewrites the slots a translation claims.
+    const translated = [lines[0]!, lines[2]!].map((line) => translationFor(
+      line,
+      line.sourceHtml.replace(/>[^<>]+</g, (match) => match.toUpperCase()),
+    ))
+
+    const exported = await exportIdml(bytes, translated, { strict: true })
+    const story = await memberText(exported.bytes, "Stories/Story_u1.xml")
+
+    expect(story).toContain("<Content>ONE</Content><Br/><Content>two</Content>")
+    expect(story).toContain("<Content> also two</Content><Br/><Content>THREE</Content>")
+    expect(exported.report).toMatchObject({ translated: 1, rejected: 0, missing: 0 })
+    expect(await validateExport(exported.bytes, (await parseIdml(bytes)).manifest)).toEqual([])
   })
 })
 

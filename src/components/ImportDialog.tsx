@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
-  BookImage, BookA, Search, Cloud,
+  BookImage, BookA, BookOpen, Search, Cloud,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -39,6 +39,7 @@ import {
   importHelloao,
   importMacula,
   importTranslationNotes,
+  importBiblicaStudyNotes,
   prepareParatextProject,
   commitParatextProject,
   importParatextAsTarget,
@@ -51,6 +52,7 @@ import {
   type EBibleMatchResult,
   type MaculaProgress,
   type TnProgress,
+  type BiblicaProgress,
   type ParatextImportProgress,
   type SourceCellRef,
   type ImportResult,
@@ -108,7 +110,7 @@ import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs"
 
 interface ImportDialogProps {
   open: boolean
@@ -473,6 +475,7 @@ export function ImportDialog({
                   : screen === "dcs" ? "Door43 (DCS)"
                   : screen === "macula" ? "Macula Hebrew + Greek"
                   : screen === "tn" ? "Translation Notes (TSV)"
+                  : screen === "biblica" ? "Biblica Study Bible Notes"
                   : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
                   : screen === "labels" ? "Cell Labels / Cast"
                   : screen === "paired" ? "Paired Translation Import"
@@ -612,6 +615,19 @@ export function ImportDialog({
           <TnPanel
             projectId={projectId}
             username={username}
+            getToken={getToken}
+            onImported={async (ref) => {
+              await handleChildImported([ref])
+            }}
+          />
+        )}
+
+        {screen === "biblica" && (
+          <BiblicaPanel
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
             getToken={getToken}
             onImported={async (ref) => {
               await handleChildImported([ref])
@@ -832,6 +848,8 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     description: "Re-upload a template to label existing cells with cast names." },
   { id: "tn", title: "Translation Notes", hint: "TSV", icon: StickyNote, badge: "beta",
     description: "unfoldingWord notes, shown beside the matching verse as you translate." },
+  { id: "biblica", title: "Biblica Study Bible Notes", hint: "IDML", icon: BookOpen, badge: "beta",
+    description: "Study notes from an InDesign study Bible — imports the notes only and leaves the scripture untouched." },
   { id: "obs", title: "Open Bible Stories", hint: "door43", icon: BookImage, badge: "beta",
     description: "Narrative stories with reference images, from unfoldingWord/door43." },
   { id: "dcs", title: "Door43 (DCS)", hint: "upstream", icon: Cloud, badge: "beta",
@@ -3286,6 +3304,130 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
                   style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
                 />
               </div>
+            </>
+          )}
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="flex justify-end">
+        <Button onClick={handleImport} disabled={!file || importing}>
+          {importing ? "Importing…" : "Import"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Biblica Study Bible Notes (IDML) panel
+// ---------------------------------------------------------------------------
+
+interface BiblicaPanelProps {
+  projectId: string
+  username: string
+  sourceLanguage?: string
+  targetLanguage?: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (ref: FileReference) => void | Promise<void>
+}
+
+function BiblicaPanel({
+  projectId,
+  username,
+  sourceLanguage,
+  targetLanguage,
+  getToken,
+  onImported,
+}: BiblicaPanelProps) {
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState<BiblicaProgress | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+
+  async function handleImport() {
+    if (!file || importing) return
+    setImporting(true)
+    setError(null)
+    setProgress({ phase: "parse" })
+    try {
+      const ref = await importBiblicaStudyNotes(
+        file,
+        {
+          projectId,
+          author: username,
+          ...(sourceLanguage ? { sourceLanguage } : {}),
+          ...(targetLanguage ? { targetLanguage } : {}),
+          getToken,
+        },
+        setProgress,
+      )
+      await onImported(ref)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setImporting(false)
+      setProgress(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-xs text-muted-foreground">
+        Upload the InDesign (.idml) package for a Biblica study Bible. Only the study
+        notes are imported — the Bible text is skipped, because it comes from the
+        published scripture files rather than being retyped here. Each note keeps its
+        InDesign formatting locked, and the notes carry the book and chapter range they
+        belong to so they stay in step with the passage. Lists that InDesign holds in a
+        single paragraph — cross-references, glossaries, outlines — arrive as one cell
+        per line.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {file ? file.name : "Choose study Bible IDML file"}
+          <input
+            type="file"
+            className="hidden"
+            accept=".idml"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null
+              setFile(f)
+              setError(null)
+            }}
+            disabled={importing}
+          />
+        </Button>
+        {file && !importing && (
+          <p className="text-xs text-muted-foreground">
+            {file.name} — {(file.size / 1024 / 1024).toFixed(2)} MB
+          </p>
+        )}
+      </div>
+      {progress && (
+        <div className="text-xs text-muted-foreground">
+          {progress.phase === "parse" && (
+            <p>
+              Reading the InDesign package…
+              {progress.idml?.total
+                ? ` (${progress.idml.completed} / ${progress.idml.total})`
+                : ""}
+            </p>
+          )}
+          {progress.phase === "save" && progress.cellsTotal && (
+            <>
+              <p>
+                Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} notes
+              </p>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
+                />
+              </div>
+              {progress.verseUnitCount ? (
+                <p className="mt-1.5">
+                  {progress.verseUnitCount.toLocaleString()} scripture paragraphs skipped.
+                </p>
+              ) : null}
             </>
           )}
         </div>

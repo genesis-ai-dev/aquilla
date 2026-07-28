@@ -133,6 +133,15 @@ export interface IdmlTranslationUnit {
   readonly slots: readonly IdmlTextSlot[]
   readonly protectedTokens: readonly IdmlProtectedToken[]
   readonly diagnostics: readonly IdmlDiagnostic[]
+  /**
+   * `AppliedParagraphStyle` of the originating ParagraphStyleRange. Semantic
+   * adapters (e.g. Biblica study-note selection) classify paragraphs by style,
+   * which no other unit field carries. Absent for custom-variable units.
+   *
+   * Parse-time context only: it is deliberately outside `metadata`, so the
+   * persisted v2 cell shape and the anchor hash are unaffected.
+   */
+  readonly paragraphStyleId?: string
 }
 
 export interface IdmlManifestMember {

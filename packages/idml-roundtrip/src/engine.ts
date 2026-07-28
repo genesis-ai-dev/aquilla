@@ -1194,6 +1194,7 @@ async function extractParagraphUnit(
     slotElements.map((entry) => entry.slot),
     tokens,
     diagnostics,
+    getAttribute(paragraph, "AppliedParagraphStyle"),
   )
   return { extraction: { unit, slotElements }, diagnostics }
 }
@@ -1798,6 +1799,7 @@ async function createUnit(
   slots: readonly IdmlTextSlot[],
   protectedTokens: readonly IdmlProtectedToken[],
   diagnostics: readonly IdmlDiagnostic[],
+  paragraphStyleId?: string,
 ): Promise<IdmlTranslationUnit> {
   const metadata: IdmlFormatMetadataV2 = {
     version: 2,
@@ -1806,7 +1808,7 @@ async function createUnit(
     protectedTokenCount: protectedTokens.length,
     anchorSequenceHash: computeIdmlAnchorSequenceHash(slots, protectedTokens),
   }
-  const id = `${locator.memberPath}#${locator.elementPath}:part-${locator.part}`
+  const id = unitIdForLocator(locator)
   const draft: IdmlTranslationUnit = {
     id,
     order,
@@ -1817,8 +1819,69 @@ async function createUnit(
     slots: [...slots],
     protectedTokens: [...protectedTokens],
     diagnostics: [...diagnostics],
+    ...(paragraphStyleId ? { paragraphStyleId } : {}),
   }
   return { ...draft, sourceHtml: renderIdmlUnitHtml(draft) }
+}
+
+function unitIdForLocator(locator: IdmlLocator): string {
+  return `${locator.memberPath}#${locator.elementPath}:part-${locator.part}`
+}
+
+/**
+ * Split one paragraph unit at its literal line breaks (`<Br/>`).
+ *
+ * Publishers routinely set a list — cross-references, glossary entries — as a
+ * single paragraph whose items are separated by line breaks. Presented as one
+ * translation unit, a translator has to work the whole list in one cell. A
+ * caller that knows a document is shaped that way can opt into one unit per
+ * line; nothing about the package changes.
+ *
+ * Each returned unit is a real projection of the same paragraph: it owns an
+ * exact `part` index and slot range with recomputed anchors, which is the same
+ * shape `exportIdml` accepts and merges back into the one paragraph the parts
+ * came from. Slots in lines the caller then discards keep their source text.
+ *
+ * A unit with no interior line break is returned unchanged.
+ */
+export function partitionIdmlUnitAtLineBreaks(
+  unit: IdmlTranslationUnit,
+): readonly IdmlTranslationUnit[] {
+  const boundaries = [...new Set(
+    unit.protectedTokens
+      .filter((token) => token.kind === "br")
+      .map((token) => token.position)
+      .filter((position) => position > 0 && position < unit.slots.length),
+  )].sort((left, right) => left - right)
+  if (boundaries.length === 0) return [unit]
+
+  const starts = [0, ...boundaries]
+  const parts: IdmlTranslationUnit[] = []
+  for (let index = 0; index < starts.length; index += 1) {
+    const locator: IdmlLocator = {
+      ...unit.locator,
+      part: index,
+      slotIndexes: unit.locator.slotIndexes.slice(
+        starts[index]!,
+        starts[index + 1] ?? unit.slots.length,
+      ),
+    }
+    const projected = projectUnitForLocator(unit, locator)
+    if (!projected) {
+      throw new IdmlError(
+        "ANCHOR_INVALID",
+        `IDML unit ${unit.id} could not be partitioned at its line breaks`,
+      )
+    }
+    // The projection keeps the parent's identity and text because export only
+    // reads its slots and anchors. A part that becomes a cell needs its own.
+    parts.push({
+      ...projected.unit,
+      id: unitIdForLocator(locator),
+      sourceText: sourceTextFromSlots(projected.unit.slots, projected.unit.protectedTokens),
+    })
+  }
+  return parts
 }
 
 function sourceTextFromSlots(

@@ -48,6 +48,7 @@ import {
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
+import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
 import { extractHtmlStrings } from "./parsers/html"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
@@ -1184,6 +1185,114 @@ export async function importTranslationNotes(
     type: "tsv",
     createdAt: new Date().toISOString(),
     cellCount: cells.length,
+  }
+}
+
+/** Distinguishes a notes-only Biblica import from a whole-package IDML import. */
+export const BIBLICA_NOTES_PROFILE_ID = "builtin:biblica-study-notes"
+
+export type BiblicaImportPhase = "parse" | "save"
+export interface BiblicaProgress {
+  phase: BiblicaImportPhase
+  /** Engine parse progress, while the package is being read. */
+  idml?: IdmlProgress
+  cellsEnqueued?: number
+  cellsTotal?: number
+  /** Paragraphs left out because they are scripture rather than notes. */
+  verseUnitCount?: number
+}
+
+/**
+ * Import the study notes from a Biblica study-Bible IDML package.
+ *
+ * The package parses through the same shared v2 engine as a plain IDML import,
+ * so cells keep their protected anchors, exact locators, and preserved source
+ * bytes — strict IDML export still works. Only the note paragraphs become cells:
+ * the Bible text is set from the publisher's scripture files, so importing it
+ * here would ask translators to retype scripture they must not edit.
+ */
+export async function importBiblicaStudyNotes(
+  file: File,
+  ctx: ImportContext,
+  onProgress?: (p: BiblicaProgress) => void,
+): Promise<FileReference> {
+  if (!/\.idml$/i.test(file.name)) {
+    throw new Error("Biblica study notes import expects an InDesign .idml package.")
+  }
+  assertSourceUploadByteLength(file.size)
+  onProgress?.({ phase: "parse" })
+
+  // The worker transfers (detaches) its input, so the preserved source artifact
+  // is read from the File a second time rather than shared with the parse buffer.
+  const parseBuffer = await file.arrayBuffer()
+  assertIdmlPackageBytes(parseBuffer, file.name)
+  const { strings, bookCodes, skipped } = await extractBiblicaStudyNoteStrings(
+    parseBuffer,
+    undefined,
+    {
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      onProgress: (idml) => onProgress?.({ phase: "parse", idml }),
+    },
+  )
+
+  if (strings.length === 0) {
+    throw new Error(
+      `${file.name} parsed successfully but contained no study notes. `
+        + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes document.",
+    )
+  }
+
+  const name = file.name.replace(/\.idml$/i, "").replace(/[-_]?notes$/i, "").trim() || file.name
+  const normalized = normalizeTranslatableStrings(strings, {
+    fileName: name,
+    fileType: "idml",
+    profileId: BIBLICA_NOTES_PROFILE_ID,
+    profileVersion: "1",
+    fidelity: "content-only",
+  })
+
+  onProgress?.({
+    phase: "save",
+    cellsEnqueued: 0,
+    cellsTotal: strings.length,
+    verseUnitCount: skipped.verseUnitCount,
+  })
+
+  const { ref } = await emitParsedFile(
+    {
+      name,
+      originalName: file.name,
+      strings,
+      rawBytes: await file.arrayBuffer(),
+      rawSourceFormat: "idml",
+      roundTripFidelity: "content-only",
+      ...(bookCodes.length === 1 ? { bookCode: bookCodes[0] } : {}),
+    },
+    "idml",
+    {
+      ...ctx,
+      onCellEnqueued: (uploaded, total) => {
+        ctx.onCellEnqueued?.(uploaded, total)
+        onProgress?.({
+          phase: "save",
+          cellsEnqueued: uploaded,
+          cellsTotal: total,
+          verseUnitCount: skipped.verseUnitCount,
+        })
+      },
+    },
+    normalized,
+  )
+  return ref
+}
+
+/** IDML is a UCF/ZIP package — reject anything that is not one before parsing. */
+function assertIdmlPackageBytes(bytes: ArrayBuffer, fileName: string): void {
+  const header = new Uint8Array(bytes.slice(0, 4))
+  if (header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
+    throw new Error(
+      `${fileName} is not a valid IDML package. IDML files are ZIP archives and start with "PK".`,
+    )
   }
 }
 

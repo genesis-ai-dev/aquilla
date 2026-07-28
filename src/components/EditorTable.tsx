@@ -710,6 +710,8 @@ interface EditorTableProps {
   onVisibleFootnotesChange?: (entries: VisibleFootnoteEntry[]) => void
   /** Called after a target footnote is created so the parent can reveal footnotes. */
   onFootnoteCreated?: () => void
+  /** Optional controls on the right of the chapter navigation row. */
+  chapterNavTrailing?: React.ReactNode
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -749,6 +751,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleRefChange,
   onVisibleFootnotesChange,
   onFootnoteCreated,
+  chapterNavTrailing,
 }, ref) {
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
   // repair path treats any hand-edited source cell as damage and overwrites
@@ -1903,13 +1906,22 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        {chapterNavigationItems.length > 0 && activeChapterLabel ? (
-          <div className="flex items-center justify-center border-b border-border bg-background/90 px-4 py-2 backdrop-blur-xl">
-            <ChapterNavigator
-              chapters={chapterNavigationItems}
-              activeLabel={activeChapterLabel}
-              onSelect={handleChapterSelect}
-            />
+        {(chapterNavigationItems.length > 0 && activeChapterLabel) || chapterNavTrailing ? (
+          <div className="relative flex items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-4 pr-2 backdrop-blur-xl">
+            {chapterNavigationItems.length > 0 && activeChapterLabel ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div className="pointer-events-auto">
+                  <ChapterNavigator
+                    chapters={chapterNavigationItems}
+                    activeLabel={activeChapterLabel}
+                    onSelect={handleChapterSelect}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {chapterNavTrailing ? (
+              <div className="relative z-10 flex shrink-0 items-center">{chapterNavTrailing}</div>
+            ) : null}
           </div>
         ) : null}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>

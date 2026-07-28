@@ -4764,6 +4764,53 @@ export function ProjectWorkspace() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const fileChapterToolbar = activeFileId ? (
+    <FileChapterToolbar
+      lens={lens}
+      onLensChange={(l) => {
+        switchLens(l)
+        if (l === "audio") setDockTab("voices")
+      }}
+      timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
+      checkOpen={checkOpen}
+      checkRunning={checkRunning}
+      checkResult={checkResult}
+      onCheckToggle={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
+      menuItems={fileMenuItems}
+      fileOptionsAnchorRef={fileOptionsAnchorRef}
+      viewSettingsMenu={(
+        <ViewSettingsMenu
+          ref={viewSettingsRef}
+          anchor={fileOptionsAnchorRef}
+          hideTrigger
+          fileOpen={Boolean(activeFileId)}
+          lineNumbersEnabled={fileMeta.lineNumbersEnabled}
+          sourceDirectionMode={fileMeta.sourceDirectionMode}
+          targetDirectionMode={fileMeta.targetDirectionMode}
+          sourceAutoDirectionSummary={activeFileDirectionSummary.source}
+          targetAutoDirectionSummary={activeFileDirectionSummary.target}
+          directionWarningScope={activeFile?.id ?? null}
+          cellLabelsEnabled={cellLabelsEnabled}
+          footnoteViewMode={footnoteViewMode}
+          onFootnoteViewModeChange={setFootnoteViewMode}
+          tnSidebarEnabled={tnSidebarVisible}
+          sourceFontSize={fontSizes.source}
+          targetFontSize={fontSizes.target}
+          onLineNumbersChange={fileMeta.setLineNumbersEnabled}
+          onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
+          onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
+          onCellLabelsChange={setCellLabelsEnabled}
+          onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
+          onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
+          onTnSidebarChange={(v) => {
+            setTnSidebarVisible(v)
+            if (projectId) writeTnSidebarVisible(projectId, v)
+          }}
+        />
+      )}
+    />
+  ) : null
+
   return (
     <EditorScrollProvider>
       {/* ScrollToGroupHandler must live inside EditorScrollProvider so it can call useEditorScroll */}
@@ -5351,52 +5398,9 @@ export function ProjectWorkspace() {
                 onSetupNeeded={handleAiSetupNeeded}
               />
             )}
-            {activeFileId ? (
+            {activeFileId && lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
               <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-4 pr-2 backdrop-blur-xl">
-                <FileChapterToolbar
-                  lens={lens}
-                  onLensChange={(l) => {
-                    switchLens(l)
-                    if (l === "audio") setDockTab("voices")
-                  }}
-                  timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
-                  checkOpen={checkOpen}
-                  checkRunning={checkRunning}
-                  checkResult={checkResult}
-                  onCheckToggle={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
-                  menuItems={fileMenuItems}
-                  fileOptionsAnchorRef={fileOptionsAnchorRef}
-                  viewSettingsMenu={(
-                    <ViewSettingsMenu
-                      ref={viewSettingsRef}
-                      anchor={fileOptionsAnchorRef}
-                      hideTrigger
-                      fileOpen={Boolean(activeFileId)}
-                      lineNumbersEnabled={fileMeta.lineNumbersEnabled}
-                      sourceDirectionMode={fileMeta.sourceDirectionMode}
-                      targetDirectionMode={fileMeta.targetDirectionMode}
-                      sourceAutoDirectionSummary={activeFileDirectionSummary.source}
-                      targetAutoDirectionSummary={activeFileDirectionSummary.target}
-                      directionWarningScope={activeFile?.id ?? null}
-                      cellLabelsEnabled={cellLabelsEnabled}
-                      footnoteViewMode={footnoteViewMode}
-                      onFootnoteViewModeChange={setFootnoteViewMode}
-                      tnSidebarEnabled={tnSidebarVisible}
-                      sourceFontSize={fontSizes.source}
-                      targetFontSize={fontSizes.target}
-                      onLineNumbersChange={fileMeta.setLineNumbersEnabled}
-                      onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
-                      onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
-                      onCellLabelsChange={setCellLabelsEnabled}
-                      onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
-                      onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
-                      onTnSidebarChange={(v) => {
-                        setTnSidebarVisible(v)
-                        if (projectId) writeTnSidebarVisible(projectId, v)
-                      }}
-                    />
-                  )}
-                />
+                {fileChapterToolbar}
               </div>
             ) : null}
             <div className="min-h-0 flex-1">
@@ -5503,6 +5507,7 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
+            chapterNavTrailing={fileChapterToolbar ?? undefined}
           />
               </EditorActionsProvider>
               )}

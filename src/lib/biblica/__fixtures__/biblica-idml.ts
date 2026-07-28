@@ -82,6 +82,17 @@ export function noteList(
   )
 }
 
+/**
+ * A multi-sentence note block, the shape of a real study note on a passage.
+ * Each sentence is long enough to earn its own cell, and the second starts
+ * inside the same paragraph run — the split IDML itself cannot express.
+ */
+const NOTE_BLOCK_SENTENCES = [
+  "2:4\u20137 The garden account retells the creation of humanity from ground level. ",
+  "The man is formed from the dust before any rain has fallen on the land. ",
+  "Eden is planted for him, and the river that waters it flows out to the wider world.",
+] as const
+
 export const SAMPLE_NOTES = {
   preface: "Genesis introduces the story of beginnings.",
   afterChapterOne: "1:1 God alone creates; the heavens and the earth are not rivals.",
@@ -94,12 +105,14 @@ export const SAMPLE_NOTES = {
     "Theophilus: Luke 1:1\u20134.",
     "Gospel: Matthew 1:1\u201317.",
   ],
+  noteBlockSentences: NOTE_BLOCK_SENTENCES,
+  noteBlock: NOTE_BLOCK_SENTENCES.join(""),
 } as const
 
 /**
  * A book whose notes exercise every label case: a preface before any verse, a
- * single-chapter range, a multi-chapter range, a chapter-label heading, and a
- * line-broken reference list.
+ * single-chapter range, a multi-chapter range, a chapter-label heading, a
+ * line-broken reference list, and a multi-sentence note block.
  */
 export const biblicaSampleStory: readonly string[] = [
   paragraph("p-bk", "meta%3abk", run(PLAIN, "GEN")),
@@ -116,6 +129,7 @@ export const biblicaSampleStory: readonly string[] = [
   paragraph("p-cl", "intro%3ahead%3acl", run(PLAIN, SAMPLE_NOTES.psalmHeading)),
   note("p-n3", SAMPLE_NOTES.psalmNote, "intro%3ad_h"),
   noteList("p-n4", SAMPLE_NOTES.referenceList),
+  note("p-n5", SAMPLE_NOTES.noteBlock),
 ]
 
 export function makeBiblicaIdml(

@@ -4,13 +4,21 @@ import { inspectIdml } from "./archive.js"
 import { IdmlError } from "./errors.js"
 import {
   exportIdml,
+  mergeIdmlSliceTargetHtml,
   parseIdml,
   partitionIdmlUnitAtLineBreaks,
+  projectIdmlUnitToLocator,
+  sliceIdmlUnit,
   validateExport,
 } from "./engine.js"
 import { validateIdmlTranslation } from "./html.js"
 import { upgradeLegacyIdmlMetadata } from "./legacy.js"
-import type { IdmlTranslation, IdmlTranslationUnit } from "./types.js"
+import type {
+  IdmlSliceTranslation,
+  IdmlTranslation,
+  IdmlTranslationUnit,
+  IdmlUnitSlice,
+} from "./types.js"
 import { makeIdml, mixedStoryXml } from "./test-helpers/idml-fixture.js"
 
 describe("IDML structural parser", () => {
@@ -1022,6 +1030,157 @@ describe("partitionIdmlUnitAtLineBreaks", () => {
     expect(await validateExport(exported.bytes, (await parseIdml(bytes)).manifest)).toEqual([])
   })
 })
+
+describe("sliceIdmlUnit / mergeIdmlSliceTargetHtml", () => {
+  // Three sentences over three character styles, where the middle sentence
+  // starts inside the first slot and ends at the close of the second — the case
+  // a slot-boundary split cannot express.
+  const noteParagraph = [
+    '<ParagraphStyleRange Self="note1" AppliedParagraphStyle="ParagraphStyle/Note">',
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content>First sentence. Second </Content></CharacterStyleRange>',
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Italic"><Content>sentence spans styles.</Content></CharacterStyleRange>',
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Body"><Content> Third sentence.</Content></CharacterStyleRange>',
+    "</ParagraphStyleRange>",
+  ].join("")
+  const CUTS = [16, 45]
+
+  async function parseNoteFixture(): Promise<{
+    bytes: Uint8Array
+    unit: IdmlTranslationUnit
+  }> {
+    const bytes = await makeIdml({
+      "Stories/Story_u1.xml": `<?xml version="1.0" encoding="UTF-8"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1">${noteParagraph}</Story></idPkg:Story>`,
+    })
+    return { bytes, unit: unitById((await parseIdml(bytes)).units, "note1") }
+  }
+
+  /** Translate every slice slot by upper-casing it, the way a translator would replace text. */
+  function translateSlice(slice: IdmlUnitSlice): IdmlSliceTranslation {
+    const targetHtml = slice.unit.sourceHtml.replace(/>[^<>]+</g, (match) => match.toUpperCase())
+    const validation = validateIdmlTranslation(
+      slice.unit.sourceHtml,
+      targetHtml,
+      slice.unit.metadata,
+    )
+    expect(validation.valid).toBe(true)
+    return { ranges: slice.ranges, slotTexts: validation.slots }
+  }
+
+  it("cuts inside slots and leaves each slice a self-consistent editable unit", async () => {
+    const { unit } = await parseNoteFixture()
+    const slices = sliceIdmlUnit(unit, CUTS)
+
+    expect(slices.map((slice) => slice.unit.sourceText)).toEqual([
+      "First sentence. ",
+      "Second sentence spans styles.",
+      " Third sentence.",
+    ])
+    // The middle sentence owns the tail of slot 0 and all of slot 1, so it keeps
+    // both character styles instead of flattening them into one run.
+    expect(slices[1]!.ranges).toEqual([
+      { slot: 0, start: 16, end: 23 },
+      { slot: 1, start: 0, end: 22 },
+    ])
+    expect(slices[1]!.unit.slots.map((slot) => slot.characterStyleId)).toEqual([
+      "CharacterStyle/Body",
+      "CharacterStyle/Italic",
+    ])
+    expect(new Set(slices.map((slice) => slice.unit.id)).size).toBe(3)
+    for (const slice of slices) {
+      // Self-consistent: the slice's own anchors validate on their own, which is
+      // what the editor and AI drafting check against.
+      expect(validateIdmlTranslation(
+        slice.unit.sourceHtml,
+        slice.unit.sourceHtml,
+        slice.unit.metadata,
+      )).toMatchObject({ valid: true })
+      expect(slice.unit.metadata.slotCount).toBe(slice.unit.slots.length)
+      // A slice is not an exportable unit; it deliberately keeps its owner's
+      // locator so the exporter can find the block the group belongs to.
+      expect(slice.unit.locator).toEqual(unit.locator)
+    }
+  })
+
+  it("merges slice translations back into the owner and exports one paragraph", async () => {
+    const { bytes, unit } = await parseNoteFixture()
+    const slices = sliceIdmlUnit(unit, CUTS)
+    const targetHtml = mergeIdmlSliceTargetHtml(unit, slices.map(translateSlice))
+
+    const exported = await exportIdml(bytes, [translationFor(unit, targetHtml)], { strict: true })
+    const story = await memberText(exported.bytes, "Stories/Story_u1.xml")
+
+    // Each original Content run is rewritten in place, so the paragraph's style
+    // structure survives a translation that crossed its runs.
+    expect(story).toContain("<Content>FIRST SENTENCE. SECOND </Content>")
+    expect(story).toContain("<Content>SENTENCE SPANS STYLES.</Content>")
+    expect(story).toContain("<Content> THIRD SENTENCE.</Content>")
+    expect(exported.report).toMatchObject({ translated: 1, rejected: 0, missing: 0 })
+    expect(await validateExport(exported.bytes, (await parseIdml(bytes)).manifest)).toEqual([])
+  })
+
+  it("keeps the publisher's text for slices that are untranslated or absent", async () => {
+    const { unit } = await parseNoteFixture()
+    const slices = sliceIdmlUnit(unit, CUTS)
+
+    // Middle slice left untranslated, last slice not submitted at all.
+    const merged = mergeIdmlSliceTargetHtml(unit, [
+      translateSlice(slices[0]!),
+      { ranges: slices[1]!.ranges, slotTexts: [undefined, undefined] },
+    ])
+    const slots = validateIdmlTranslation(unit.sourceHtml, merged, unit.metadata).slots
+
+    expect(slots).toEqual([
+      "FIRST SENTENCE. Second ",
+      "sentence spans styles.",
+      " Third sentence.",
+    ])
+  })
+
+  it("returns the unit whole when no cut falls inside it", async () => {
+    const { unit } = await parseNoteFixture()
+
+    for (const cuts of [[], [0], [slotTextLength(unit)], [-5, 9999]]) {
+      const slices = sliceIdmlUnit(unit, cuts)
+      expect(slices).toHaveLength(1)
+      expect(slices[0]!.unit).toBe(unit)
+      expect(slices[0]!.ranges).toEqual([
+        { slot: 0, start: 0, end: 23 },
+        { slot: 1, start: 0, end: 22 },
+        { slot: 2, start: 0, end: 16 },
+      ])
+    }
+  })
+
+  it("refuses to merge overlapping slices or ranges the source no longer has", async () => {
+    const { unit } = await parseNoteFixture()
+    const slices = sliceIdmlUnit(unit, CUTS)
+    const first = translateSlice(slices[0]!)
+
+    expect(() => mergeIdmlSliceTargetHtml(unit, [first, first])).toThrow(/overlap/)
+    expect(() => mergeIdmlSliceTargetHtml(unit, [{
+      ranges: [{ slot: 0, start: 0, end: 999 }],
+      slotTexts: ["too long"],
+    }])).toThrow(/source package has changed/)
+  })
+
+  it("re-derives the unit a stored locator addresses, for merging at export time", async () => {
+    const { unit } = await parseNoteFixture()
+
+    // The whole paragraph round-trips through its own locator…
+    const owner = projectIdmlUnitToLocator(unit, unit.locator)
+    expect(owner?.sourceHtml).toBe(unit.sourceHtml)
+    expect(owner?.metadata).toEqual(unit.metadata)
+    // …and a locator naming slots the paragraph does not have is stale, not a crash.
+    expect(projectIdmlUnitToLocator(unit, {
+      ...unit.locator,
+      slotIndexes: [7, 8],
+    })).toBeUndefined()
+  })
+})
+
+function slotTextLength(unit: IdmlTranslationUnit): number {
+  return unit.slots.reduce((total, slot) => total + slot.text.length, 0)
+}
 
 function unitById(
   units: readonly IdmlTranslationUnit[],

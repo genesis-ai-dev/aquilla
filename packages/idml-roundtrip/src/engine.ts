@@ -23,10 +23,13 @@ import type {
   IdmlProtectedTokenKind,
   IdmlScope,
   IdmlSemanticProfile,
+  IdmlSliceRange,
+  IdmlSliceTranslation,
   IdmlSourceManifest,
   IdmlTextSlot,
   IdmlTranslation,
   IdmlTranslationUnit,
+  IdmlUnitSlice,
 } from "./types.js"
 import {
   decodeXmlBytes,
@@ -1882,6 +1885,200 @@ export function partitionIdmlUnitAtLineBreaks(
     })
   }
   return parts
+}
+
+/**
+ * Re-derive the unit a locator addresses from the paragraph it belongs to.
+ *
+ * An exporter holds cells whose locator may name a slot range of a paragraph
+ * (part 0 of a whole paragraph, or one line of a split one) and needs the unit
+ * that range describes — with the anchors and source HTML `exportIdml` will
+ * validate against. Returns `undefined` when the locator no longer describes a
+ * slot range of `unit`, which is a stale locator rather than a merge failure.
+ */
+export function projectIdmlUnitToLocator(
+  unit: IdmlTranslationUnit,
+  locator: IdmlLocator,
+): IdmlTranslationUnit | undefined {
+  const projected = projectUnitForLocator(unit, locator)
+  if (!projected) return undefined
+  return {
+    ...projected.unit,
+    id: unitIdForLocator(locator),
+    sourceText: sourceTextFromSlots(projected.unit.slots, projected.unit.protectedTokens),
+  }
+}
+
+/** Total length of a unit's slot text, the coordinate space slice cuts use. */
+function slotTextLength(unit: IdmlTranslationUnit): number {
+  return unit.slots.reduce((total, slot) => total + slot.text.length, 0)
+}
+
+/**
+ * Cut one unit into smaller editable slices at arbitrary text offsets.
+ *
+ * A whole note block is one IDML paragraph, and a translator asked to work it
+ * as a single cell has to hold every sentence at once. Line breaks are the only
+ * boundary the package itself provides (see `partitionIdmlUnitAtLineBreaks`);
+ * anything finer, such as a sentence, falls inside a slot and therefore cannot
+ * be a locator of its own. So a slice is deliberately *not* an exportable unit:
+ * it is a self-consistent unit for editing plus the owner ranges it came from,
+ * and `mergeIdmlSliceTargetHtml` rebuilds the owner's translation from the set.
+ *
+ * `cutPoints` are offsets into the unit's concatenated slot text
+ * (`unit.slots.map((slot) => slot.text).join("")`). Offsets at or outside the
+ * ends are ignored, and a unit with no interior cut is returned whole.
+ */
+export function sliceIdmlUnit(
+  unit: IdmlTranslationUnit,
+  cutPoints: readonly number[],
+): readonly IdmlUnitSlice[] {
+  const total = slotTextLength(unit)
+  const cuts = [...new Set(cutPoints)]
+    .filter((cut) => Number.isSafeInteger(cut) && cut > 0 && cut < total)
+    .sort((left, right) => left - right)
+  if (cuts.length === 0) {
+    return [{ unit, ranges: unit.slots.map((slot, position) => ({
+      slot: position,
+      start: 0,
+      end: slot.text.length,
+    })) }]
+  }
+
+  const bounds = [0, ...cuts, total]
+  const slices: IdmlUnitSlice[] = []
+  for (let index = 0; index + 1 < bounds.length; index += 1) {
+    const slice = sliceUnitRange(unit, bounds[index]!, bounds[index + 1]!, total)
+    // Slices of one unit share its locator, so their ids — which become cell
+    // ids — have to carry the slice ordinal to stay distinct and reproducible.
+    slices.push({ ...slice, unit: { ...slice.unit, id: `${unit.id}:slice-${index}` } })
+  }
+  return slices
+}
+
+function sliceUnitRange(
+  unit: IdmlTranslationUnit,
+  from: number,
+  to: number,
+  total: number,
+): IdmlUnitSlice {
+  const ranges: IdmlSliceRange[] = []
+  const slots: IdmlTextSlot[] = []
+  // Slot boundary offsets, so protected tokens can be placed by the same
+  // coordinates as the text cuts.
+  const boundaries: number[] = [0]
+  let offset = 0
+
+  for (const [position, slot] of unit.slots.entries()) {
+    const slotStart = offset
+    offset += slot.text.length
+    boundaries.push(offset)
+
+    // An empty slot has no length to overlap, so it belongs to the one slice
+    // that spans its position rather than to both of its neighbours.
+    const owned = slot.text.length === 0
+      ? (from <= slotStart && slotStart < to) || (slotStart === to && to === total)
+      : Math.min(to, offset) > Math.max(from, slotStart)
+    if (!owned) continue
+
+    const start = Math.max(from, slotStart) - slotStart
+    const end = Math.min(to, offset) - slotStart
+    ranges.push({ slot: position, start, end })
+    slots.push({ ...slot, index: slots.length, text: slot.text.slice(start, end) })
+  }
+
+  const protectedTokens = unit.protectedTokens
+    .filter((token) => {
+      const boundary = boundaries[token.position]
+      if (boundary === undefined) return false
+      if (token.position === 0) return from === 0
+      if (token.position === unit.slots.length) return to === total
+      // An interior token anchors a boundary between two slots this slice owns
+      // whole; a token sitting exactly on a cut belongs to neither side.
+      return boundary > from && boundary < to
+    })
+    .map((token, index): IdmlProtectedToken => {
+      // A token sits before the owner slot at its position; in the slice it sits
+      // before that slot's new position, or after the last slot when trailing.
+      const position = ranges.findIndex((range) => range.slot === token.position)
+      return { ...token, index, position: position < 0 ? slots.length : position }
+    })
+
+  const metadata: IdmlFormatMetadataV2 = {
+    version: 2,
+    slotCount: slots.length,
+    editableSlotIndexes: slots.filter((slot) => slot.editable).map((slot) => slot.index),
+    protectedTokenCount: protectedTokens.length,
+    anchorSequenceHash: computeIdmlAnchorSequenceHash(slots, protectedTokens),
+  }
+  const draft: IdmlTranslationUnit = {
+    ...unit,
+    sourceText: sourceTextFromSlots(slots, protectedTokens),
+    sourceHtml: "",
+    metadata,
+    slots,
+    protectedTokens,
+  }
+  return {
+    unit: { ...draft, sourceHtml: renderIdmlUnitHtml(draft) },
+    ranges,
+  }
+}
+
+/**
+ * Rebuild one owner unit's target HTML from the translations of its slices.
+ *
+ * This is the inverse of `sliceIdmlUnit` and the reason slicing is safe: the
+ * package never sees the slices. Ranges a caller drops, and slices with no
+ * translation, keep the owner's source text, so a partly translated block
+ * exports as a mix rather than losing the publisher's words.
+ */
+export function mergeIdmlSliceTargetHtml(
+  unit: IdmlTranslationUnit,
+  slices: readonly IdmlSliceTranslation[],
+): string {
+  const fragmentsBySlot = new Map<number, { start: number; end: number; text?: string }[]>()
+  for (const slice of slices) {
+    for (const [position, range] of slice.ranges.entries()) {
+      const slot = unit.slots[range.slot]
+      if (
+        !slot
+        || range.start < 0
+        || range.end < range.start
+        || range.end > slot.text.length
+      ) {
+        throw new IdmlError(
+          "LOCATOR_STALE",
+          `IDML slice range does not fit unit ${unit.id}; the source package has changed`,
+        )
+      }
+      const fragments = fragmentsBySlot.get(range.slot) ?? []
+      const text = slice.slotTexts[position]
+      fragments.push({ start: range.start, end: range.end, ...(text === undefined ? {} : { text }) })
+      fragmentsBySlot.set(range.slot, fragments)
+    }
+  }
+
+  const slots = unit.slots.map((slot, position): IdmlTextSlot => {
+    const fragments = (fragmentsBySlot.get(position) ?? [])
+      .sort((left, right) => left.start - right.start)
+    let cursor = 0
+    let text = ""
+    for (const fragment of fragments) {
+      if (fragment.start < cursor) {
+        throw new IdmlError(
+          "ANCHOR_INVALID",
+          `IDML slices overlap on slot ${position} of unit ${unit.id}`,
+        )
+      }
+      text += slot.text.slice(cursor, fragment.start)
+      text += fragment.text ?? slot.text.slice(fragment.start, fragment.end)
+      cursor = fragment.end
+    }
+    return { ...slot, text: text + slot.text.slice(cursor) }
+  })
+
+  return renderIdmlUnitHtml({ ...unit, slots })
 }
 
 function sourceTextFromSlots(

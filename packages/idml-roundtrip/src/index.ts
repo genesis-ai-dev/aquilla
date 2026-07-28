@@ -8,6 +8,9 @@ export {
   exportIdml,
   validateExport,
   partitionIdmlUnitAtLineBreaks,
+  projectIdmlUnitToLocator,
+  sliceIdmlUnit,
+  mergeIdmlSliceTargetHtml,
 } from "./engine.js"
 export { renderIdmlUnitHtml, validateIdmlTranslation } from "./html.js"
 export { upgradeLegacyIdmlMetadata } from "./legacy.js"

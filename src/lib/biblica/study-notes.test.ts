@@ -76,6 +76,10 @@ describe("Biblica study-note selection", () => {
       [SAMPLE_NOTES.referenceList[0], "2"],
       [SAMPLE_NOTES.referenceList[1], "2"],
       [SAMPLE_NOTES.referenceList[2], "2"],
+      // The note block is one paragraph; each sentence is its own cell.
+      [SAMPLE_NOTES.noteBlockSentences[0], "2"],
+      [SAMPLE_NOTES.noteBlockSentences[1], "2"],
+      [SAMPLE_NOTES.noteBlockSentences[2], "2"],
     ])
     expect(selection.notes.every((entry) => entry.bookCode === "GEN")).toBe(true)
 
@@ -84,8 +88,62 @@ describe("Biblica study-note selection", () => {
     expect(selection.verseUnitCount).toBe(5)
     // The book marker and the running header are neither scripture nor notes.
     expect(selection.otherUnitCount).toBe(2)
-    // 6 note paragraphs + 5 scripture + 2 furniture: no parsed unit is unclassified.
-    expect(parsed.units).toHaveLength(6 + selection.verseUnitCount + selection.otherUnitCount)
+    // 7 note paragraphs + 5 scripture + 2 furniture: no parsed unit is unclassified.
+    expect(parsed.units).toHaveLength(7 + selection.verseUnitCount + selection.otherUnitCount)
+  })
+
+  it("cuts a multi-sentence note block into one cell per sentence, with the ranges to rejoin it", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      note("p-block", SAMPLE_NOTES.noteBlock),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual([...SAMPLE_NOTES.noteBlockSentences])
+    // A sentence is finer than IDML can address, so every cell keeps the
+    // paragraph's own locator and says which part of it it holds instead.
+    const paragraphLocator = parsed.units[1]!.locator
+    expect(selection.notes.every((entry) => (
+      entry.unit.locator.elementPath === paragraphLocator.elementPath
+      && entry.unit.locator.part === paragraphLocator.part
+    ))).toBe(true)
+    expect(new Set(selection.notes.map((entry) => entry.unit.id)).size).toBe(3)
+    // The ranges tile the paragraph's single slot exactly, in order: nothing is
+    // duplicated and nothing is lost, which is what export relies on.
+    const [first, second, third] = SAMPLE_NOTES.noteBlockSentences
+    expect(selection.notes.map((entry) => entry.rejoin)).toEqual([
+      { index: 0, count: 3, ranges: [{ slot: 0, start: 0, end: first.length }] },
+      {
+        index: 1,
+        count: 3,
+        ranges: [{ slot: 0, start: first.length, end: first.length + second.length }],
+      },
+      {
+        index: 2,
+        count: 3,
+        ranges: [{
+          slot: 0,
+          start: first.length + second.length,
+          end: first.length + second.length + third.length,
+        }],
+      },
+    ])
+    expect(first.length + second.length + third.length).toBe(SAMPLE_NOTES.noteBlock.length)
+  })
+
+  it("leaves a note that is one sentence as a single whole cell", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      note("p-n", SAMPLE_NOTES.preface),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes).toHaveLength(1)
+    // No rejoin bucket means the cell is the whole unit its locator names, which
+    // is what every IDML cell was before slicing existed.
+    expect(selection.notes[0]!.rejoin).toBeUndefined()
+    expect(selection.notes[0]!.unit).toBe(parsed.units[1])
   })
 
   it("gives each line of a list paragraph its own cell over its own slots", async () => {

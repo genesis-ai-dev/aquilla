@@ -57,7 +57,7 @@ function importBodies(requests: Array<{ url: string; init?: RequestInit }>) {
     .filter((request) => request.url.endsWith("/import"))
     .map((request) => JSON.parse(String(request.init?.body)) as {
       file?: { fileType?: string; kind?: string; parserVersion?: string; bookCode?: string }
-      cells?: Array<{ value: string; metadata?: Record<string, unknown> }>
+      cells?: Array<{ cellId: string; value: string; metadata?: Record<string, unknown> }>
       complete?: boolean
       publishEventId?: string
     })
@@ -78,7 +78,7 @@ describe("Biblica study-notes import", () => {
     expect(ref.type).toBe("idml")
     // The trailing "-notes" is dropped so the file reads as the book it covers.
     expect(ref.name).toBe("Genesis")
-    expect(ref.cellCount).toBe(8)
+    expect(ref.cellCount).toBe(11)
 
     const bodies = importBodies(requests)
     const meta = bodies.find((body) => body.file)?.file
@@ -98,6 +98,8 @@ describe("Biblica study-notes import", () => {
       SAMPLE_NOTES.psalmNote,
       // A list set as one paragraph is committed as one cell per line.
       ...SAMPLE_NOTES.referenceList,
+      // A multi-sentence note block is committed as one cell per sentence.
+      ...SAMPLE_NOTES.noteBlockSentences,
     ])
 
     // Scripture must never reach the project as a translatable cell.
@@ -126,7 +128,7 @@ describe("Biblica study-notes import", () => {
 
     const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
     expect(cells.map((cell) => (cell.metadata?.biblica as { chapterLabel?: string })?.chapterLabel))
-      .toEqual(["Preface", "1", "2-3", "2", "2", "2", "2", "2"])
+      .toEqual(["Preface", "1", "2-3", "2", "2", "2", "2", "2", "2", "2", "2"])
     for (const cell of cells) {
       expect(cell.metadata?.idml).toMatchObject({ version: 2 })
       expect(cell.metadata?.aquillaImport).toMatchObject({
@@ -149,6 +151,41 @@ describe("Biblica study-notes import", () => {
     ))
     expect(new Set(addresses.map((address) => address?.blockPath)).size).toBe(1)
     expect(addresses.map((address) => address?.segment)).toEqual([1, 2, 3])
+  })
+
+  it("commits the sentences of a note block as distinct cells that can be rejoined", async () => {
+    const requests = captureRequests()
+
+    await importBiblicaStudyNotes(await biblicaFile(), {
+      projectId: "p1",
+      author: "alice",
+      getToken: async () => "tok",
+    })
+
+    const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
+    const sentenceCells = cells.filter((cell) => (
+      (SAMPLE_NOTES.noteBlockSentences as readonly string[]).includes(cell.value)
+    ))
+    expect(sentenceCells).toHaveLength(3)
+
+    // A sentence is not addressable in IDML, so all three share one document
+    // address — and therefore need distinct cell and unit keys of their own.
+    const imports = sentenceCells.map((cell) => cell.metadata?.aquillaImport as {
+      unitKey?: string
+      address?: { blockPath?: string; segment?: number }
+    })
+    expect(new Set(imports.map((entry) => (
+      `${entry.address?.blockPath}#${entry.address?.segment}`
+    ))).size).toBe(1)
+    expect(new Set(imports.map((entry) => entry.unitKey)).size).toBe(3)
+    expect(new Set(sentenceCells.map((cell) => cell.cellId)).size).toBe(3)
+
+    // The bucket export needs to put the block back together is persisted.
+    expect(sentenceCells.map((cell) => cell.metadata?.idmlRejoin)).toEqual([
+      { version: 1, index: 0, count: 3, ranges: [expect.objectContaining({ slot: 0 })] },
+      { version: 1, index: 1, count: 3, ranges: [expect.objectContaining({ slot: 0 })] },
+      { version: 1, index: 2, count: 3, ranges: [expect.objectContaining({ slot: 0 })] },
+    ])
   })
 
   it("rejects an oversized package before buffering or creating server state", async () => {

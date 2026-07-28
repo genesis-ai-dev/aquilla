@@ -31,6 +31,10 @@ describe("Biblica study-notes parser adapter", () => {
       [SAMPLE_NOTES.referenceList[0], "GEN 2"],
       [SAMPLE_NOTES.referenceList[1], "GEN 2"],
       [SAMPLE_NOTES.referenceList[2], "GEN 2"],
+      // One cell per sentence of the note block.
+      [SAMPLE_NOTES.noteBlockSentences[0], "GEN 2"],
+      [SAMPLE_NOTES.noteBlockSentences[1], "GEN 2"],
+      [SAMPLE_NOTES.noteBlockSentences[2], "GEN 2"],
     ])
     expect(bookCodes).toEqual(["GEN"])
     expect(skipped).toEqual({ verseUnitCount: 5, otherUnitCount: 2 })
@@ -46,6 +50,26 @@ describe("Biblica study-notes parser adapter", () => {
     expect(strings[1].metadata?.biblica).toMatchObject({
       paragraphStyle: "ParagraphStyle/intro%3aipi",
     })
+  })
+
+  it("carries the rejoin ranges only on cells that are part of a sliced note block", async () => {
+    const buffer = await makeBiblicaIdml()
+    const parsed = await parseIdml(buffer)
+    const { strings } = await extractBiblicaStudyNoteStrings(buffer, async () => parsed)
+
+    const sentences = strings.filter((cell) => (
+      SAMPLE_NOTES.noteBlockSentences.some((sentence) => cell.original === sentence)
+    ))
+    expect(sentences).toHaveLength(3)
+    expect(sentences.map((cell) => cell.metadata?.idmlRejoin)).toEqual([
+      { version: 1, index: 0, count: 3, ranges: [expect.objectContaining({ slot: 0, start: 0 })] },
+      { version: 1, index: 1, count: 3, ranges: [expect.any(Object)] },
+      { version: 1, index: 2, count: 3, ranges: [expect.any(Object)] },
+    ])
+    // Whole-unit cells carry no bucket, so nothing changes for them on export.
+    for (const cell of strings.filter((candidate) => !sentences.includes(candidate))) {
+      expect(cell.metadata?.idmlRejoin).toBeUndefined()
+    }
   })
 
   it("keeps every cell's identity and protected anchors identical to its selected unit", async () => {

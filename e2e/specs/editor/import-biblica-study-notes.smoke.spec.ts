@@ -16,6 +16,12 @@ const REFERENCE_LIST = [
   "Creation: Genesis 1:1-2:25.",
   "Covenant: Genesis 12:1-9.",
 ] as const
+/** One InDesign paragraph holding several sentences of commentary. */
+const NOTE_BLOCK_SENTENCES = [
+  "1:1-2:3 The account of creation is told as a week of work. ",
+  "Each day is introduced by the same formula and closed by an evening refrain.",
+] as const
+const NOTE_BLOCK = NOTE_BLOCK_SENTENCES.join("")
 
 const PLAIN = "$ID/[No character style]"
 
@@ -32,8 +38,9 @@ function paragraph(self: string, paragraphStyle: string, inner: string): string 
 
 /**
  * A Biblica study-Bible page: a `meta:bk` book marker, an `intro:*` note before
- * any scripture, one fully marked-up verse, a note about that chapter, and a
- * reference list set as a single line-broken paragraph.
+ * any scripture, one fully marked-up verse, a note about that chapter, a
+ * reference list set as a single line-broken paragraph, and a multi-sentence
+ * note block.
  */
 async function writeBiblicaFixture(filePath: string): Promise<void> {
   const zip = new JSZip()
@@ -67,6 +74,7 @@ async function writeBiblicaFixture(filePath: string): Promise<void> {
           + REFERENCE_LIST.map((line) => `<Content>${line}</Content>`).join("<Br/>")
           + `</CharacterStyleRange>`,
       ),
+      paragraph("p-n2", "intro%3aip", run(PLAIN, NOTE_BLOCK)),
       "</Story></idPkg:Story>",
     ].join(""),
     { compression: "DEFLATE", createFolders: false },
@@ -97,7 +105,7 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await ws.waitForEditor()
 
   const rows = alice.locator("[data-cell-id]")
-  await expect(rows).toHaveCount(4, { timeout: 15_000 })
+  await expect(rows).toHaveCount(6, { timeout: 15_000 })
   await expect(ws.cellRow(0)).toContainText(PREFACE_NOTE)
   await expect(ws.cellRow(1)).toContainText(CHAPTER_ONE_NOTE)
 
@@ -106,6 +114,12 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await expect(ws.cellRow(2)).toContainText(REFERENCE_LIST[0])
   await expect(ws.cellRow(2)).not.toContainText(REFERENCE_LIST[1])
   await expect(ws.cellRow(3)).toContainText(REFERENCE_LIST[1])
+
+  // A note block is one InDesign paragraph too, and arrives as one cell per
+  // sentence; export merges the sentences back into that paragraph.
+  await expect(ws.cellRow(4)).toContainText(NOTE_BLOCK_SENTENCES[0].trim())
+  await expect(ws.cellRow(4)).not.toContainText(NOTE_BLOCK_SENTENCES[1])
+  await expect(ws.cellRow(5)).toContainText(NOTE_BLOCK_SENTENCES[1])
 
   // The whole point of this importer: the Bible text is not imported for
   // translation, even though it was present in the package.

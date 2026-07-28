@@ -144,6 +144,41 @@ export interface IdmlTranslationUnit {
   readonly paragraphStyleId?: string
 }
 
+/**
+ * The character range of one owner slot that a slice owns.
+ *
+ * `slot` is the slot's position in the owner unit (slot positions and
+ * `IdmlTextSlot.index` always coincide within a unit). Offsets are indexes into
+ * that slot's source text, so a slice may own part of a slot — which is what
+ * lets a caller cut a paragraph at sentence boundaries rather than only between
+ * slots.
+ */
+export interface IdmlSliceRange {
+  readonly slot: number
+  readonly start: number
+  readonly end: number
+}
+
+/**
+ * One editor-sized piece of a unit: a self-consistent unit a translator can
+ * edit, plus the owner ranges needed to merge its translation back.
+ */
+export interface IdmlUnitSlice {
+  readonly unit: IdmlTranslationUnit
+  readonly ranges: readonly IdmlSliceRange[]
+}
+
+/** A slice's translated slot text, ready to be merged back into its owner. */
+export interface IdmlSliceTranslation {
+  readonly ranges: readonly IdmlSliceRange[]
+  /**
+   * Target text per slice slot, in slice-slot order. `undefined` keeps the
+   * owner's source text for that range, so an untranslated slice never blanks
+   * out text a publisher shipped.
+   */
+  readonly slotTexts: readonly (string | undefined)[]
+}
+
 export interface IdmlManifestMember {
   readonly path: string
   readonly sha256: string

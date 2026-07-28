@@ -3379,7 +3379,8 @@ function BiblicaPanel({
         InDesign formatting locked, and the notes carry the book and chapter range they
         belong to so they stay in step with the passage. Lists that InDesign holds in a
         single paragraph — cross-references, glossaries, outlines — arrive as one cell
-        per line.
+        per line, and a longer note block arrives as one cell per sentence. Export puts
+        each block back together as InDesign set it.
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>

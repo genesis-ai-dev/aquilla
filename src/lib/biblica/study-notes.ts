@@ -7,17 +7,28 @@
  * scripture files, not translated here. Verse runs are still walked, because
  * they are what tells us which book and chapter each note section belongs to.
  *
- * Note paragraphs are split at their line breaks, because Biblica sets lists —
- * cross-references, glossary entries, outlines — as a single paragraph with a
- * `<Br/>` between items. One cell per line is what a translator works in.
+ * Note paragraphs are split twice, because a Biblica note paragraph is rarely
+ * one unit of translation work:
+ *
+ * 1. At line breaks, because Biblica sets lists — cross-references, glossary
+ *    entries, outlines — as a single paragraph with a `<Br/>` between items.
+ * 2. At sentence boundaries within each line, so a multi-sentence note block
+ *    becomes one cell per sentence.
  *
  * This is a presentation filter over parsed units — it never reinterprets the
- * package. Every emitted note is an engine projection of its paragraph, so
- * protected-HTML editing and strict IDML export keep working on the original
- * bytes, with the parts of a split paragraph merged back on export.
+ * package. Every emitted note is an engine projection or slice of its paragraph,
+ * so protected-HTML editing keeps working on the original bytes: line parts are
+ * real locators the engine merges on export, and sentence slices carry the
+ * `rejoin` ranges the exporter uses to rebuild their line first.
  */
 
-import { partitionIdmlUnitAtLineBreaks, type IdmlTranslationUnit } from "@aquilla/idml-roundtrip"
+import {
+  partitionIdmlUnitAtLineBreaks,
+  sliceIdmlUnit,
+  type IdmlSliceRange,
+  type IdmlTranslationUnit,
+} from "@aquilla/idml-roundtrip"
+import { biblicaSentenceCutPoints } from "./sentence-cuts"
 import {
   bookCodeFromParagraphText,
   computeChapterRangeLabel,
@@ -34,14 +45,26 @@ import {
 
 export interface BiblicaStudyNote {
   /**
-   * The cell's unit: one line of a note paragraph, or the whole paragraph when
-   * it holds no line break.
+   * The cell's unit: one sentence of a note line, one whole line, or the whole
+   * paragraph when it holds neither a line break nor a sentence boundary.
    */
   readonly unit: IdmlTranslationUnit
+  /**
+   * Set when the unit is one sentence of a larger line, which the exporter has
+   * to rebuild before handing the line to the engine. Absent when the unit is
+   * the whole thing its locator addresses.
+   */
+  readonly rejoin?: BiblicaNoteRejoin
   /** Book the note belongs to, when the document has named one yet. */
   readonly bookCode?: string
   /** Chapter-range label for the note's section: "Preface", "3", or "1-2". */
   readonly chapterLabel: string
+}
+
+export interface BiblicaNoteRejoin {
+  readonly index: number
+  readonly count: number
+  readonly ranges: readonly IdmlSliceRange[]
 }
 
 export interface BiblicaStudyNoteSelection {
@@ -131,6 +154,11 @@ function opensSpanningVerse(scan: UnitScan): string | undefined {
   const last = scan.verses[scan.verses.length - 1]
   if (!last) return undefined
   return scan.metaVerseCounts.get(last.verse) === 1 ? last.verse : undefined
+}
+
+/** The coordinate space sentence cuts are expressed in: slot text, nothing else. */
+function slotText(unit: IdmlTranslationUnit): string {
+  return unit.slots.map((slot) => slot.text).join("")
 }
 
 function noteHasVisibleText(unit: IdmlTranslationUnit): boolean {
@@ -256,11 +284,20 @@ export function selectBiblicaStudyNotes(
       ) {
         continue
       }
-      notes.push({
-        unit: line,
-        ...(currentBook ? { bookCode: currentBook } : {}),
-        chapterLabel: currentLabel,
-      })
+      // Then one cell per sentence. Slices are kept whole and in order, however
+      // little text a slice holds, because their ranges have to tile the line for
+      // the exporter to rebuild it.
+      const slices = sliceIdmlUnit(line, biblicaSentenceCutPoints(slotText(line)))
+      for (const [index, slice] of slices.entries()) {
+        notes.push({
+          unit: slice.unit,
+          ...(slices.length > 1
+            ? { rejoin: { index, count: slices.length, ranges: slice.ranges } }
+            : {}),
+          ...(currentBook ? { bookCode: currentBook } : {}),
+          chapterLabel: currentLabel,
+        })
+      }
     }
   }
 

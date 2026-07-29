@@ -418,6 +418,30 @@ export async function migrateLegacyUserForLogin(
   runtime: LegacyMigrationRuntime,
   fetchFn: typeof fetch = fetch,
 ): Promise<LegacyMigrationResult | null> {
+  const source = await verifyLegacyUserForLogin(
+    identifier,
+    password,
+    runtime,
+    fetchFn,
+  )
+  if (!source) return null
+  return migrateLegacyUserCandidate(db, source, runtime, "jit")
+}
+
+/**
+ * Resolve and authenticate a D1-only identity without contacting GitLab.
+ *
+ * The web login handshake calls this before returning `migration_required`,
+ * so the UI only describes migration after valid legacy credentials have been
+ * established and immediately before the continuation begins GitLab access
+ * reconciliation.
+ */
+export async function verifyLegacyUserForLogin(
+  identifier: string,
+  password: string,
+  runtime: LegacyMigrationRuntime,
+  fetchFn: typeof fetch = fetch,
+): Promise<LegacyUserRow | null> {
   let matches: LegacyUserRow[]
   try {
     matches = await findLegacyUsersByIdentifier(runtime.d1, identifier, fetchFn)
@@ -474,5 +498,5 @@ export async function migrateLegacyUserForLogin(
       "frontier-db-v2 identity validation is unavailable",
     )
   }
-  return migrateLegacyUserCandidate(db, source, runtime, "jit")
+  return source
 }

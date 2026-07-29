@@ -113,15 +113,26 @@ describe("Login page — rendering", () => {
 })
 
 describe("Login page — success path", () => {
-  it("explains first-time account migration while sign-in is pending", async () => {
+  it("only explains migration after the login service confirms it", async () => {
     let resolveLogin!: (session: { username: string; jwt: string }) => void
-    mockLogin.mockReturnValue(new Promise((resolve) => {
+    let announceMigration!: () => void
+    mockLogin.mockImplementation((
+      _username: string,
+      _password: string,
+      options: { onMigrationRequired: () => void },
+    ) => new Promise((resolve) => {
       resolveLogin = resolve
+      announceMigration = options.onMigrationRequired
     }))
     renderLogin()
 
     fillLogin("alice", "secret")
     await submitLogin()
+
+    expect(screen.getByRole("button", { name: "Signing in…" })).toBeDisabled()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+
+    act(() => announceMigration())
 
     expect(screen.getByRole("button", {
       name: "Setting up your account and permissions…",
@@ -146,7 +157,13 @@ describe("Login page — success path", () => {
     await submitLogin()
 
     await waitFor(() => {
-      expect(mockLogin).toHaveBeenCalledWith("alice", "secret")
+      expect(mockLogin).toHaveBeenCalledWith(
+        "alice",
+        "secret",
+        expect.objectContaining({
+          onMigrationRequired: expect.any(Function),
+        }),
+      )
     })
     expect(navigate).toHaveBeenCalledWith("/", { replace: true })
   })
@@ -215,7 +232,11 @@ describe("Login page — next param", () => {
     fillLogin("alice", "secret")
     await submitLogin()
 
-    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
+    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith(
+      "alice",
+      "secret",
+      expect.objectContaining({ onMigrationRequired: expect.any(Function) }),
+    ))
     // Should navigate to /projects (the decoded ?next= value)
     expect(navigate).toHaveBeenCalledWith("/projects", { replace: true })
   })
@@ -227,7 +248,11 @@ describe("Login page — next param", () => {
     fillLogin("alice", "secret")
     await submitLogin()
 
-    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
+    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith(
+      "alice",
+      "secret",
+      expect.objectContaining({ onMigrationRequired: expect.any(Function) }),
+    ))
     expect(navigate).toHaveBeenCalledWith("/", { replace: true })
   })
 
@@ -245,7 +270,11 @@ describe("Login page — next param", () => {
     fillLogin("alice", "secret")
     await submitLogin()
 
-    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"))
+    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith(
+      "alice",
+      "secret",
+      expect.objectContaining({ onMigrationRequired: expect.any(Function) }),
+    ))
     // Must NOT navigate to the external URL — falls back to /
     expect(navigate).toHaveBeenCalledWith("/", { replace: true })
   })

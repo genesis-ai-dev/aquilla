@@ -5,14 +5,34 @@ test.beforeEach(async () => {
   await resetBackend()
 })
 
-test("pending sign-in explains first-time account and permission migration", async ({ page }) => {
-  let releaseLogin!: () => void
-  const loginHeld = new Promise<void>((resolve) => {
-    releaseLogin = resolve
+test("sign-in only explains migration after the server confirms it", async ({ page }) => {
+  let releaseHandshake!: () => void
+  const handshakeHeld = new Promise<void>((resolve) => {
+    releaseHandshake = resolve
   })
+  let releaseMigration!: () => void
+  const migrationHeld = new Promise<void>((resolve) => {
+    releaseMigration = resolve
+  })
+  let confirmContinuation!: () => void
+  const continuationSeen = new Promise<void>((resolve) => {
+    confirmContinuation = resolve
+  })
+  let requestCount = 0
 
   await page.route("**/api/v2/auth/token", async (route) => {
-    await loginHeld
+    requestCount += 1
+    if (requestCount === 1) {
+      await handshakeHeld
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "migration_required" }),
+      })
+      return
+    }
+    confirmContinuation()
+    await migrationHeld
     await route.fulfill({
       status: 401,
       contentType: "application/json",
@@ -25,6 +45,11 @@ test("pending sign-in explains first-time account and permission migration", asy
   await page.getByRole("textbox", { name: "Password" }).fill("legacy-password")
   await page.getByRole("button", { name: "Sign in" }).click()
 
+  await expect(page.getByRole("button", { name: "Signing in…" })).toBeVisible()
+  await expect(page.getByRole("status")).toHaveCount(0)
+
+  releaseHandshake()
+  await continuationSeen
   await expect(page.getByRole("button", {
     name: "Setting up your account and permissions…",
   })).toBeVisible()
@@ -32,6 +57,6 @@ test("pending sign-in explains first-time account and permission migration", asy
     "First-time sign-in may take a moment while we securely migrate your account.",
   )
 
-  releaseLogin()
+  releaseMigration()
   await expect(page.getByText("Invalid username or password")).toBeVisible()
 })

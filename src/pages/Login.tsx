@@ -35,6 +35,7 @@ export function Login() {
   const next = rawNext.startsWith("/") ? rawNext : "/"
 
   const [mode, setMode] = useState<Mode>("login")
+  const [isMigrating, setIsMigrating] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   const form = useForm({
@@ -42,8 +43,11 @@ export function Login() {
     validators: { onSubmit: loginSchema },
     onSubmit: async ({ value }) => {
       clearSubmitError()
+      setIsMigrating(false)
       try {
-        await login(value.username, value.password)
+        await login(value.username, value.password, {
+          onMigrationRequired: () => setIsMigrating(true),
+        })
         navigate(next, { replace: true })
       } catch (err) {
         setSubmitError(err instanceof FrontierAuthError ? err.message : "Login failed")
@@ -134,17 +138,21 @@ export function Login() {
                     className="w-full"
                     disabled={isSubmitting}
                     aria-describedby={
-                      isSubmitting ? "login-account-setup-note" : undefined
+                      isSubmitting && isMigrating
+                        ? "login-account-setup-note"
+                        : undefined
                     }
                   >
                     {isSubmitting && (
                       <Spinner data-icon="inline-start" aria-hidden="true" />
                     )}
                     {isSubmitting
-                      ? "Setting up your account and permissions…"
+                      ? isMigrating
+                        ? "Setting up your account and permissions…"
+                        : "Signing in…"
                       : "Sign in"}
                   </Button>
-                  {isSubmitting && (
+                  {isSubmitting && isMigrating && (
                     <p
                       id="login-account-setup-note"
                       role="status"

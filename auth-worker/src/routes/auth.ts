@@ -32,7 +32,9 @@ import {
 } from "../utils/rate-limit"
 import {
   LegacyUserMigrationError,
+  migrateLegacyUserCandidate,
   migrateLegacyUserForLogin,
+  verifyLegacyUserForLogin,
   type LegacyMigrationRuntime,
 } from "../services/legacy-user-migration"
 
@@ -74,6 +76,11 @@ const loginSchema = z.object({
   // Can be username or email.
   username: z.string(),
   password: z.string(),
+  // Opt-in web handshake: establish valid D1 credentials before telling the
+  // browser that the continuation will contact GitLab. Other API clients keep
+  // the original one-request login behavior.
+  migration_handshake: z.boolean().optional(),
+  continue_migration: z.boolean().optional(),
 })
 
 const passwordResetRequestSchema = z.object({
@@ -266,7 +273,12 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
 // keep working — matches the legacy frontier-server.
 auth.post("/token", async (c) => {
   const contentType = c.req.header("content-type") || ""
-  let body: { username?: string; password?: string } = {}
+  let body: {
+    username?: string
+    password?: string
+    migration_handshake?: boolean
+    continue_migration?: boolean
+  } = {}
 
   try {
     if (contentType.includes("application/json")) {
@@ -293,7 +305,12 @@ auth.post("/token", async (c) => {
   if (!validated.success) {
     return c.json({ error: "Invalid request body" }, 400)
   }
-  const { username, password } = validated.data
+  const {
+    username,
+    password,
+    migration_handshake: migrationHandshake,
+    continue_migration: continueMigration,
+  } = validated.data
   const identifier = loginIdentifier(username)
   const ipIdent = ipIdentifier(clientIp(c))
 
@@ -337,12 +354,33 @@ auth.post("/token", async (c) => {
       try {
         const runtime = legacyMigrationRuntime(c.env)
         if (runtime) {
-          const migrated = await migrateLegacyUserForLogin(
-            c.env.AQUILLA_PG,
-            username,
-            password,
-            runtime,
-          )
+          const source = migrationHandshake
+            ? await verifyLegacyUserForLogin(username, password, runtime)
+            : null
+          if (source && source.gitlab_user_id == null) {
+            throw new LegacyUserMigrationError(
+              "unresolved-access",
+              "legacy user has no GitLab identity",
+            )
+          }
+          if (source && !continueMigration) {
+            return c.json({ status: "migration_required" }, 202)
+          }
+          const migrated = migrationHandshake
+            ? source
+              ? await migrateLegacyUserCandidate(
+                  c.env.AQUILLA_PG,
+                  source,
+                  runtime,
+                  "jit",
+                )
+              : null
+            : await migrateLegacyUserForLogin(
+                c.env.AQUILLA_PG,
+                username,
+                password,
+                runtime,
+              )
           if (migrated) {
             user = await jwtService.getUserByUsername(migrated.username)
             if (!user) {

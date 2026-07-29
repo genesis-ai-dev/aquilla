@@ -14,6 +14,7 @@ import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
+import { openRouterExtras } from "../lib/llm-vendor"
 import { resolveProjectRole } from "../services/project-permissions"
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
@@ -154,8 +155,7 @@ imports.post(
           temperature: 0,
           max_tokens: 1200,
           stream: false,
-          usage: { include: true },
-          reasoning: { effort: "none" },
+          ...openRouterExtras(c.env.OPENROUTER_BASE_URL),
           response_format: { type: "json_object" },
         }),
         signal: c.req.raw.signal,

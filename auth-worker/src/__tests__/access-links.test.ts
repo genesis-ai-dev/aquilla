@@ -173,6 +173,26 @@ describe("POST /api/v2/access-links/:token/redeem", () => {
     expect(row?.locked_until).not.toBeNull()
   })
 
+  it("counts every failed attempt exactly once under concurrent guesses (no lost updates)", async () => {
+    // [Pen test] Auth & session mgmt (2026-07-27): the old read-then-write
+    // (SELECT failed_attempts, then UPDATE with the value read earlier) let
+    // parallel guesses race the counter — several requests could read the
+    // same value before any of them wrote the increment back, undercounting
+    // failures. Firing N concurrent wrong-PIN redemptions must land exactly N
+    // increments.
+    const token = await setup("4821")
+    const N = 8
+    const results = await Promise.all(Array.from({ length: N }, () => redeem(token, "0000")))
+    for (const r of results) expect(r.status).toBe(401)
+
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT failed_attempts FROM project_access_links WHERE token = ?",
+    )
+      .bind(token)
+      .first<{ failed_attempts: number }>()
+    expect(row?.failed_attempts).toBe(N)
+  })
+
   it("resets the attempt counter on a successful redemption", async () => {
     const token = await setup("4821")
     await redeem(token, "0000") // one failure

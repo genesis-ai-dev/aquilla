@@ -105,4 +105,26 @@ describe("step-up elevation flow", () => {
     }
     expect((await requestCode(jwt)).status).toBe(429)
   })
+
+  it("rate-limits repeated wrong-code guesses on /verify (429 after the cap)", async () => {
+    // [Pen test] Auth & session mgmt (2026-07-27): verify previously had no
+    // attempt limiting at all — a caller holding a valid (non-elevated) admin
+    // JWT could brute-force the 6-digit code with unlimited guesses inside
+    // its TTL. A wrong code must eventually 429 rather than keep 400ing.
+    await seedUser(7, "root")
+    const jwt = await jwtFor("root")
+    await requestCode(jwt)
+
+    let sawRateLimited = false
+    for (let i = 0; i < 15; i++) {
+      const res = await verifyCode(jwt, "111111")
+      if (res.status === 429) {
+        sawRateLimited = true
+        expect((await res.json()) as { error: string }).toMatchObject({ error: "rate_limited" })
+        break
+      }
+      expect(res.status).toBe(400)
+    }
+    expect(sawRateLimited).toBe(true)
+  })
 })

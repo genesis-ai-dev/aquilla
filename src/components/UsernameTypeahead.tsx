@@ -11,6 +11,22 @@ import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 
+/**
+ * AQU-734: multi-select wiring. When passed, each search result renders as a
+ * checkbox row reflecting `stagedUsernames` (lowercased) instead of a
+ * single-pick row, toggling keeps the dropdown open (staging accumulates
+ * across searches), and Enter stages the free-typed value. The parent owns the
+ * staged set + chips; this component only surfaces the search + toggle affordances.
+ */
+export interface MultiSelectConfig {
+  /** Lowercased usernames currently staged, used to render the checked state. */
+  stagedUsernames: ReadonlySet<string>
+  /** Toggle a searched user in/out of the staged set. */
+  onToggleResult: (u: UserSearchResult) => void
+  /** Stage whatever is currently typed (Enter key). Parent clears `raw`. */
+  onStageTyped: () => void
+}
+
 export type RecipientMode = "username" | "email"
 
 export interface RecipientValue {
@@ -38,6 +54,8 @@ interface Props {
   excludedUserIds?: readonly number[]
   /** Scope search to related users. Disable for org membership, where any Aquilla user can be added. */
   scopedSearch?: boolean
+  /** AQU-734: enable checkbox multi-select. Absent = legacy single-pick. */
+  multiSelect?: MultiSelectConfig
 }
 
 /**
@@ -70,6 +88,7 @@ export function UsernameTypeahead({
   placeholder,
   excludedUserIds = [],
   scopedSearch = true,
+  multiSelect,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState<{
@@ -224,6 +243,20 @@ export function UsernameTypeahead({
             disabled={disabled}
             value={value.raw}
             onChange={(e) => handleChange(e.target.value)}
+            onKeyDown={(e) => {
+              // AQU-734: in multi-select mode Enter stages the typed value as a
+              // chip rather than submitting a single add. Only fire when there's
+              // something to stage so an empty Enter is a no-op.
+              if (
+                multiSelect &&
+                e.key === "Enter" &&
+                value.mode === "username" &&
+                value.raw.trim().length > 0
+              ) {
+                e.preventDefault()
+                multiSelect.onStageTyped()
+              }
+            }}
             onFocus={() => value.mode === "username" && setOpen(true)}
             placeholder={
               placeholder?.[value.mode] ??
@@ -305,6 +338,40 @@ export function UsernameTypeahead({
           {visibleResults.length > 0 && (
             <ul className="py-0.5">
               {visibleResults.map((u) => {
+                if (multiSelect) {
+                  // AQU-734: checkbox row. The whole row is one control acting as
+                  // a checkbox (role+aria-checked) so its accessible name is the
+                  // username and there's no nested-interactive nesting. Toggling
+                  // keeps the dropdown open so several people accumulate.
+                  const checked = multiSelect.stagedUsernames.has(
+                    u.username.toLowerCase(),
+                  )
+                  return (
+                    <li key={u.id}>
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={checked}
+                        onClick={() => multiSelect.onToggleResult(u)}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted ${
+                          checked ? "bg-muted/60" : ""
+                        }`}
+                      >
+                        <span
+                          aria-hidden
+                          className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border ${
+                            checked
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-input"
+                          }`}
+                        >
+                          {checked && <Check className="h-3 w-3" />}
+                        </span>
+                        <span className="truncate">{u.username}</span>
+                      </button>
+                    </li>
+                  )
+                }
                 const isSelected =
                   value.resolved?.id === u.id && value.resolved?.username === u.username
                 return (

@@ -74,7 +74,7 @@ function baseProps() {
     members: [contributor()],
     roleOptions: ROLE_OPTIONS,
     newMemberDefaultRole: 400,
-    onAdd: async () => ({ ok: true }),
+    onAdd: async () => [],
     onRemove: noop,
     callerUserId: 1,
   }

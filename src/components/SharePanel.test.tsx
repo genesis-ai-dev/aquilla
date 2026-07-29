@@ -40,6 +40,7 @@ vi.mock("@/hooks/useProjectMembers", () => ({
     rosterHidden: false,
     refresh: vi.fn(),
     add: vi.fn(),
+    addMany: vi.fn(async () => []),
     remove: vi.fn(),
     changeRole: vi.fn(),
   }),

@@ -26,6 +26,7 @@ vi.mock("@/lib/frontier/orgs", () => ({
   ]),
   listOrgMembers: vi.fn(async () => []),
   addOrgMember: vi.fn(async () => null),
+  addOrgMembers: vi.fn(async () => []),
   removeOrgMember: vi.fn(async () => undefined),
   listOrgMemberProjects: vi.fn(async () => []),
   listPendingOrgInvites: vi.fn(async () => null),
@@ -122,6 +123,7 @@ describe("MembersPage — AQU-485 roster visibility", () => {
       rosterHidden: true,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
+      addMany: vi.fn(async () => []),
       remove: vi.fn(async () => {}),
       listMemberProjects: vi.fn(async () => []),
     })

@@ -30,6 +30,7 @@ import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
+import type { MemberGrantResult } from "@/lib/frontier/members"
 import { useActiveOrg } from "@/context/OrgContext"
 
 type MembersTab = "roster" | "matrix"
@@ -139,7 +140,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const { activeOrg } = useActiveOrg()
   // AQU-326: the External-collaborators governance view is maintainer+ only.
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
-  const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, remove, listMemberProjects, refresh } =
+  const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
   const { projects: accessibleProjects, refresh: refreshProjects } = useAccessibleProjects()
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
@@ -250,6 +251,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
                   panelMembers={panelMembers}
                   listMemberProjects={listMemberProjects}
                   add={add}
+                  addMany={addMany}
                   remove={remove}
                   callerUserId={callerUserId}
                   callerOrgRoleLevel={activeOrg?.role.level ?? null}
@@ -329,6 +331,8 @@ interface RosterProps {
   panelMembers: MembersPanelMember[]
   listMemberProjects: (userId: number) => Promise<OrgMemberProject[]>
   add: (username: string, role: number) => Promise<unknown>
+  /** AQU-734: batch grant for the multi-select Add flow. */
+  addMany: (members: Array<{ username: string; role: number }>) => Promise<MemberGrantResult[]>
   remove: (userId: number) => Promise<void>
   callerUserId: number | null
   /** AQU-427: the current user's org-level role, forwarded to MemberAccessRow
@@ -341,6 +345,7 @@ function RosterWithProjectChips({
   orgId,
   panelMembers,
   add,
+  addMany,
   callerUserId,
   callerOrgRoleLevel,
   onRequestRemove,
@@ -358,11 +363,13 @@ function RosterWithProjectChips({
           callerUserId={callerUserId}
           callerMaxRole={ROLE.MAINTAINER}
           scopedUserSearch={false}
-          onAdd={async (username, role) => {
-            const result = await add(username, role)
-            return result
-              ? { ok: true }
-              : { ok: false, error: "Could not add user. Username may not exist." }
+          onAdd={async (usernames, role) => {
+            const results = await addMany(usernames.map((username) => ({ username, role })))
+            return results.map((r) => ({
+              username: r.username,
+              ok: r.ok,
+              error: r.error?.message,
+            }))
           }}
           onRemove={(userId) => {
             const target = panelMembers.find((m) => m.userId === userId)

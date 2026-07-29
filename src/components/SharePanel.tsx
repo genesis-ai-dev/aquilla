@@ -112,7 +112,7 @@ function MembersTab({ projectId }: { projectId: string }) {
   const callerUsername = session?.username ?? null
   const jwt = session?.jwt ?? null
 
-  const { members, isLoading, error, add, remove } = useProjectMembers(projectId)
+  const { members, isLoading, error, add, addMany, remove } = useProjectMembers(projectId)
 
   // AQU-285 (F-A4): derive callerMaxRole from the caller's own effective role
   // in the members list so the role picker never offers what the server 403s.
@@ -222,9 +222,13 @@ function MembersTab({ projectId }: { projectId: string }) {
           newMemberDefaultRole={ROLE.CONTRIBUTOR}
           callerUserId={callerUserId}
           callerMaxRole={callerMaxRole}
-          onAdd={async (username, role) => {
-            const result = await add(username, role)
-            return result ? { ok: true } : { ok: false, error: "No user with that username" }
+          onAdd={async (usernames, role) => {
+            const results = await addMany(usernames.map((username) => ({ username, role })))
+            return results.map((r) => ({
+              username: r.username,
+              ok: r.ok,
+              error: r.error?.message,
+            }))
           }}
           onRemove={remove}
           onChangeRole={async (username, role) => { await add(username, role) }}

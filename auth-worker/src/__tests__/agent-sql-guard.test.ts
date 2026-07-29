@@ -140,6 +140,49 @@ describe("guardSql — rejects", () => {
   it("rejects unknown aliases", () => {
     reject("SELECT 1 WHERE project_id = :project AND cell_id = '#c9'", /unknown alias #c9/)
   })
+
+  // AQU pen-test finding (2026-07-29): an unreferenced ("decoy") CTE is still
+  // valid SQL — Postgres computes and discards it — so planting
+  // `project_id = :project` in a CTE the main query never reads used to
+  // satisfy the whole-string scoping check while the real SELECT returned
+  // completely unscoped rows from a table with no RLS backstop (`users`,
+  // including password_hash — see the next test).
+  it("rejects a decoy CTE used to fake project scoping for an unrelated table", () => {
+    reject(
+      "WITH _x AS (SELECT project_id FROM cells WHERE project_id = :project) SELECT id, username FROM users",
+      /project_id = :project/,
+    )
+  })
+
+  it("still requires scoping when the decoy CTE targets a different unscoped table", () => {
+    reject(
+      "WITH _x AS (SELECT project_id FROM cells WHERE project_id = :project) SELECT * FROM agent_runs",
+      /project_id = :project/,
+    )
+  })
+
+  it("rejects password_hash through this tool regardless of scoping", () => {
+    reject(
+      "SELECT password_hash FROM users WHERE project_id = :project",
+      /password_hash.*not allowed/,
+    )
+  })
+})
+
+describe("guardSql — reachable-CTE scoping still allows legitimate shapes", () => {
+  it("allows a referenced CTE whose own body filters by an aliased project_id (assignments cookbook shape)", () => {
+    const r = guard(
+      "WITH members AS (SELECT u.id, u.username FROM project_members pm JOIN users u ON u.id = pm.user_id WHERE pm.project_id = :project) SELECT * FROM members",
+    )
+    expect(r.ok).toBe(true)
+  })
+
+  it("allows chained CTEs where only an earlier CTE carries the scoping filter", () => {
+    const r = guard(
+      "WITH scoped AS (SELECT cell_id FROM cells WHERE project_id = :project), counted AS (SELECT count(*) AS n FROM scoped) SELECT n FROM counted",
+    )
+    expect(r.ok).toBe(true)
+  })
 })
 
 describe("runGuardedSql — execution against Postgres", () => {

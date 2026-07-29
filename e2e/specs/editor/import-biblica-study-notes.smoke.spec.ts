@@ -98,7 +98,12 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await dash.openProject(name)
 
   const ws = new Workspace(alice)
-  await ws.importViaSpecializedPanel(/Biblica Study Bible Notes/i, fixture)
+  await ws.importViaSpecializedPanel(/Biblica Study Bible Notes/i, fixture, async (dialog) => {
+    // Sentence split is opt-out; the default keeps note blocks one cell per sentence.
+    await expect(dialog.getByRole("checkbox", {
+      name: /Split long notes into one cell per sentence/i,
+    })).toBeChecked()
+  })
 
   // The importer drops the "-notes" suffix, so the file reads as its book.
   await ws.openFileBySubstring("genesis")
@@ -115,7 +120,7 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await expect(ws.cellRow(2)).not.toContainText(REFERENCE_LIST[1])
   await expect(ws.cellRow(3)).toContainText(REFERENCE_LIST[1])
 
-  // A note block is one InDesign paragraph too, and arrives as one cell per
+  // With the split option on (default), a note block arrives as one cell per
   // sentence; export merges the sentences back into that paragraph.
   await expect(ws.cellRow(4)).toContainText(NOTE_BLOCK_SENTENCES[0].trim())
   await expect(ws.cellRow(4)).not.toContainText(NOTE_BLOCK_SENTENCES[1])

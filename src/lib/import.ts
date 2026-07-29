@@ -1211,10 +1211,19 @@ export interface BiblicaProgress {
  * the Bible text is set from the publisher's scripture files, so importing it
  * here would ask translators to retype scripture they must not edit.
  */
+export interface BiblicaImportOptions {
+  /**
+   * When true (default), cut long note lines into one cell per sentence.
+   * When false, each line stays a single cell (lists still split per line).
+   */
+  splitSentences?: boolean
+}
+
 export async function importBiblicaStudyNotes(
   file: File,
   ctx: ImportContext,
   onProgress?: (p: BiblicaProgress) => void,
+  options?: BiblicaImportOptions,
 ): Promise<FileReference> {
   if (!/\.idml$/i.test(file.name)) {
     throw new Error("Biblica study notes import expects an InDesign .idml package.")
@@ -1232,6 +1241,9 @@ export async function importBiblicaStudyNotes(
     {
       ...(ctx.signal ? { signal: ctx.signal } : {}),
       onProgress: (idml) => onProgress?.({ phase: "parse", idml }),
+      ...(options?.splitSentences !== undefined
+        ? { splitSentences: options.splitSentences }
+        : {}),
     },
   )
 

@@ -11,6 +11,11 @@ import type { TranslatableString } from "./types"
 export interface BiblicaStudyNotesParseOptions {
   signal?: AbortSignal
   onProgress?: (progress: IdmlProgress) => void
+  /**
+   * When true (default), cut long note lines into one cell per sentence.
+   * When false, each line stays a single cell (lists still split per line).
+   */
+  splitSentences?: boolean
 }
 
 export interface BiblicaStudyNotesParseResult {
@@ -33,8 +38,15 @@ export async function extractBiblicaStudyNoteStrings(
   parse: IdmlParseExecutor = parseIdmlInWorker,
   options?: BiblicaStudyNotesParseOptions,
 ): Promise<BiblicaStudyNotesParseResult> {
-  const result = await parse(buffer, "generic", options)
-  const selection = selectBiblicaStudyNotes(result.units)
+  const result = await parse(buffer, "generic", {
+    ...(options?.signal ? { signal: options.signal } : {}),
+    ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
+  })
+  const selection = selectBiblicaStudyNotes(result.units, {
+    ...(options?.splitSentences !== undefined
+      ? { splitSentences: options.splitSentences }
+      : {}),
+  })
 
   const bookCodes: string[] = []
   const strings = selection.notes.map((note) => {

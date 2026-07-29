@@ -3343,6 +3343,9 @@ function BiblicaPanel({
   const [progress, setProgress] = useState<BiblicaProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
+  // On by default: long note blocks are easier to draft as one sentence per cell.
+  // Uncheck to keep each InDesign line as a single larger cell.
+  const [splitSentences, setSplitSentences] = useState(true)
 
   async function handleImport() {
     if (!file || importing) return
@@ -3360,6 +3363,7 @@ function BiblicaPanel({
           getToken,
         },
         setProgress,
+        { splitSentences },
       )
       await onImported(ref)
     } catch (err) {
@@ -3378,9 +3382,9 @@ function BiblicaPanel({
         published scripture files rather than being retyped here. Each note keeps its
         InDesign formatting locked, and the notes carry the book and chapter range they
         belong to so they stay in step with the passage. Lists that InDesign holds in a
-        single paragraph — cross-references, glossaries, outlines — arrive as one cell
-        per line, and a longer note block arrives as one cell per sentence. Export puts
-        each block back together as InDesign set it.
+        single paragraph — cross-references, glossaries, outlines — always arrive as one
+        cell per line. Optionally, longer note blocks can also be split into one cell per
+        sentence; export puts each block back together as InDesign set it.
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
@@ -3402,6 +3406,22 @@ function BiblicaPanel({
             {file.name} — {(file.size / 1024 / 1024).toFixed(2)} MB
           </p>
         )}
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={splitSentences}
+            disabled={importing}
+            onCheckedChange={(checked) => setSplitSentences(checked === true)}
+            aria-label="Split long notes into one cell per sentence"
+          />
+          <span className="flex flex-col gap-0.5">
+            <span>Split long notes into one cell per sentence</span>
+            <span className="text-xs text-muted-foreground">
+              Leave unchecked to import each note line as one larger cell. Lists still
+              split per line either way.
+            </span>
+          </span>
+        </label>
       </div>
       {progress && (
         <div className="text-xs text-muted-foreground">

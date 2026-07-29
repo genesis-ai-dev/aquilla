@@ -92,6 +92,21 @@ describe("Biblica study-note selection", () => {
     expect(parsed.units).toHaveLength(7 + selection.verseUnitCount + selection.otherUnitCount)
   })
 
+  it("keeps a multi-sentence note block as one cell when sentence splitting is off", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      note("p-block", SAMPLE_NOTES.noteBlock),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { splitSentences: false })
+
+    expect(selection.notes).toHaveLength(1)
+    expect(selection.notes[0]!.unit.sourceText).toBe(SAMPLE_NOTES.noteBlock)
+    expect(selection.notes[0]!.rejoin).toBeUndefined()
+    // Lists still split per line — this fixture has no list; the whole block
+    // is simply the one line-cell its paragraph already is.
+    expect(selection.notes[0]!.unit).toBe(parsed.units[1])
+  })
+
   it("cuts a multi-sentence note block into one cell per sentence, with the ranges to rejoin it", async () => {
     const parsed = await parseIdml(await makeBiblicaIdml([
       paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),

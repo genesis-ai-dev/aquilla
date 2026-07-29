@@ -72,6 +72,18 @@ describe("Biblica study-notes parser adapter", () => {
     }
   })
 
+  it("keeps the note block whole when sentence splitting is turned off", async () => {
+    const buffer = await makeBiblicaIdml()
+    const parsed = await parseIdml(buffer)
+    const { strings } = await extractBiblicaStudyNoteStrings(buffer, async () => parsed, {
+      splitSentences: false,
+    })
+
+    expect(strings.map((cell) => cell.original)).toContain(SAMPLE_NOTES.noteBlock)
+    expect(strings.some((cell) => cell.original === SAMPLE_NOTES.noteBlockSentences[0])).toBe(false)
+    expect(strings.every((cell) => cell.metadata?.idmlRejoin === undefined)).toBe(true)
+  })
+
   it("keeps every cell's identity and protected anchors identical to its selected unit", async () => {
     const buffer = await makeBiblicaIdml()
     const parsed = await parseIdml(buffer)

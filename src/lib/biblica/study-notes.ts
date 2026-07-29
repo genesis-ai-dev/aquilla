@@ -7,13 +7,11 @@
  * scripture files, not translated here. Verse runs are still walked, because
  * they are what tells us which book and chapter each note section belongs to.
  *
- * Note paragraphs are split twice, because a Biblica note paragraph is rarely
- * one unit of translation work:
- *
- * 1. At line breaks, because Biblica sets lists — cross-references, glossary
- *    entries, outlines — as a single paragraph with a `<Br/>` between items.
- * 2. At sentence boundaries within each line, so a multi-sentence note block
- *    becomes one cell per sentence.
+ * Note paragraphs are always split at line breaks, because Biblica sets lists —
+ * cross-references, glossary entries, outlines — as a single paragraph with a
+ * `<Br/>` between items. Sentence splitting within each line is optional
+ * (`splitSentences`, on by default): when enabled, a multi-sentence note block
+ * becomes one cell per sentence; when off, each line stays one cell.
  *
  * This is a presentation filter over parsed units — it never reinterprets the
  * package. Every emitted note is an engine projection or slice of its paragraph,
@@ -73,6 +71,14 @@ export interface BiblicaStudyNoteSelection {
   readonly verseUnitCount: number
   /** Units skipped because they are neither scripture nor a note (headers, TOC). */
   readonly otherUnitCount: number
+}
+
+export interface SelectBiblicaStudyNotesOptions {
+  /**
+   * When true (default), cut each line at sentence boundaries so long note
+   * blocks arrive as one cell per sentence. When false, each line is one cell.
+   */
+  readonly splitSentences?: boolean
 }
 
 interface UnitScan {
@@ -170,7 +176,9 @@ function noteHasVisibleText(unit: IdmlTranslationUnit): boolean {
 
 export function selectBiblicaStudyNotes(
   units: readonly IdmlTranslationUnit[],
+  options?: SelectBiblicaStudyNotesOptions,
 ): BiblicaStudyNoteSelection {
+  const splitSentences = options?.splitSentences !== false
   const notes: BiblicaStudyNote[] = []
   let verseUnitCount = 0
   let otherUnitCount = 0
@@ -284,7 +292,16 @@ export function selectBiblicaStudyNotes(
       ) {
         continue
       }
-      // Then one cell per sentence. Slices are kept whole and in order, however
+      if (!splitSentences) {
+        notes.push({
+          unit: line,
+          ...(currentBook ? { bookCode: currentBook } : {}),
+          chapterLabel: currentLabel,
+        })
+        continue
+      }
+
+      // One cell per sentence. Slices are kept whole and in order, however
       // little text a slice holds, because their ranges have to tile the line for
       // the exporter to rebuild it.
       const slices = sliceIdmlUnit(line, biblicaSentenceCutPoints(slotText(line)))

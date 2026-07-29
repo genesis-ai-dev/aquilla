@@ -78,6 +78,11 @@ export class Workspace {
   async importViaSpecializedPanel(
     optionName: RegExp,
     filePath: string | FilePayload,
+    /**
+     * Optional panel setup after the file is chosen and before Import —
+     * assert or toggle importer options (e.g. Biblica sentence split).
+     */
+    configure?: (dialog: Locator) => Promise<void>,
   ): Promise<void> {
     await this.dismissSetupChecklist()
     await this.openImportDialog()
@@ -92,6 +97,8 @@ export class Workspace {
     const chooseBtn = dialog.getByRole("button", { name: /^Choose .*file$/i }).first()
     await expect(chooseBtn).toBeVisible({ timeout: 5_000 })
     await chooseBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    if (configure) await configure(dialog)
 
     const importBtn = dialog.getByRole("button", { name: /^Import$/i }).last()
     await expect(importBtn).toBeEnabled({ timeout: 5_000 })

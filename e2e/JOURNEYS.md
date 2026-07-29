@@ -71,7 +71,7 @@
 | Editor      | Corpus rename inline edit                             | `e2e/specs/editor/sidebar-corpus-rename.smoke.spec.ts`        |   ✅   |
 | Editor      | Video attachment dialog fill + Save URL               | `e2e/specs/editor/video-attachment-save-url.smoke.spec.ts`    |   ✅   |
 | Editor      | Specialized import routes enable TMX, Macula, Translation Notes, and Biblica study notes | `e2e/specs/editor/import-specialized-options.smoke.spec.ts` | ✅ |
-| Editor      | Biblica Study Bible Notes import: IDML package → note cells only, scripture skipped, line-broken lists split per line, note blocks split per sentence, notes editable | `e2e/specs/editor/import-biblica-study-notes.smoke.spec.ts` | ✅ |
+| Editor      | Biblica Study Bible Notes import: IDML package → note cells only, scripture skipped, line-broken lists split per line, optional one-cell-per-sentence split (on by default), notes editable | `e2e/specs/editor/import-biblica-study-notes.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist coming-soon items visible             | `e2e/specs/editor/setup-checklist-coming-soon-items.smoke.spec.ts` | ✅ |
 | Validation  | Remove validation (unvalidate cell)                   | `e2e/specs/validation/cell-unvalidate.smoke.spec.ts`          |   ✅   |
 | Rules       | Org rule inline edit (pencil button expands editor)   | `e2e/specs/rules/org-rule-edit.smoke.spec.ts`                 |   ✅   |

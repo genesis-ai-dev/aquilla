@@ -153,6 +153,31 @@ describe("Biblica study-notes import", () => {
     expect(addresses.map((address) => address?.segment)).toEqual([1, 2, 3])
   })
 
+  it("commits a multi-sentence note block as one cell when sentence splitting is off", async () => {
+    const requests = captureRequests()
+
+    await importBiblicaStudyNotes(
+      await biblicaFile(),
+      { projectId: "p1", author: "alice", getToken: async () => "tok" },
+      undefined,
+      { splitSentences: false },
+    )
+
+    const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
+    expect(cells.map((cell) => cell.value)).toEqual([
+      SAMPLE_NOTES.preface,
+      SAMPLE_NOTES.afterChapterOne,
+      SAMPLE_NOTES.afterChaptersTwoToThree,
+      SAMPLE_NOTES.psalmHeading,
+      SAMPLE_NOTES.psalmNote,
+      ...SAMPLE_NOTES.referenceList,
+      SAMPLE_NOTES.noteBlock,
+    ])
+    expect(cells).toHaveLength(9)
+    const block = cells.find((cell) => cell.value === SAMPLE_NOTES.noteBlock)
+    expect(block?.metadata?.idmlRejoin).toBeUndefined()
+  })
+
   it("commits the sentences of a note block as distinct cells that can be rejoined", async () => {
     const requests = captureRequests()
 

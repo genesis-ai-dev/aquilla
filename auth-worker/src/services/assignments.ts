@@ -48,6 +48,14 @@ export interface OrgAssignmentRow {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
+  /**
+   * AQU-729: display name of the lane this assignment belongs to — the pinned
+   * lane's own name, or (for a default-lane assignment, target_lang = '') the
+   * project's default target language. null only when the default lane itself
+   * has no configured target language. Display-only: `targetLang` remains the
+   * routing key ('' = default), this is what the assignee reads.
+   */
+  laneLabel: string | null
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -70,6 +78,7 @@ export async function getOrgAssignmentWorkload(
             u.username         AS assignee_username,
             a.scope_label      AS scope_label,
             a.target_lang      AS target_lang,
+            ps.target_language AS project_target_language,
             a.cells_total      AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
@@ -78,6 +87,7 @@ export async function getOrgAssignmentWorkload(
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
        LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN project_settings ps ON ps.project_id = a.project_id
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -91,6 +101,7 @@ export async function getOrgAssignmentWorkload(
       assignee_username: string | null
       scope_label: string
       target_lang: string
+      project_target_language: string | null
       cells_total: number
       cells_done: number
       deadline: string | null
@@ -106,10 +117,29 @@ export async function getOrgAssignmentWorkload(
     username: r.assignee_username,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneLabel: resolveLaneLabel(r.target_lang, r.project_target_language),
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     deadline: r.deadline,
   }))
+}
+
+/**
+ * AQU-729: the human-readable lane a saved assignment belongs to. A pinned
+ * assignment (target_lang non-empty) reads its own lane name; a default-lane
+ * assignment (target_lang '') falls back to the project's default target
+ * language so the assignee can always tell which language they're working in.
+ * null only when the default lane has no configured target language (nothing
+ * meaningful to show).
+ */
+function resolveLaneLabel(
+  targetLang: string | null,
+  projectTargetLanguage: string | null,
+): string | null {
+  const pinned = (targetLang ?? "").trim()
+  if (pinned) return pinned
+  const fallback = (projectTargetLanguage ?? "").trim()
+  return fallback || null
 }
 
 /**
@@ -177,6 +207,13 @@ export interface MyAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' = default lane. */
   targetLang: string
+  /**
+   * AQU-729: display name of the lane (pinned lane's name, or the project's
+   * default target language for a default-lane assignment). null only when the
+   * default lane has no configured target language. Display-only — `targetLang`
+   * stays the routing key ('' = default).
+   */
+  laneLabel: string | null
   deadline: string | null
   note: string | null
   cellsTotal: number
@@ -197,12 +234,14 @@ export async function getMyAssignments(
     `SELECT a.assignment_id AS assignment_id, a.project_id AS project_id,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
+            ps.target_language AS project_target_language,
             a.deadline AS deadline, a.note AS note,
             a.cells_total AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             (SELECT ac.file_id FROM assignment_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
+       LEFT JOIN project_settings ps ON ps.project_id = a.project_id
       WHERE a.project_id = ? AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
       ORDER BY a.created_at DESC`,
@@ -214,6 +253,7 @@ export async function getMyAssignments(
       scope_kind: string
       scope_label: string
       target_lang: string
+      project_target_language: string | null
       deadline: string | null
       note: string | null
       cells_total: number
@@ -229,6 +269,7 @@ export async function getMyAssignments(
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneLabel: resolveLaneLabel(r.target_lang, r.project_target_language),
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,
@@ -259,6 +300,7 @@ export async function getMyAssignmentsAcrossOrg(
             p.name AS project_name,
             a.scope_kind AS scope_kind, a.scope_label AS scope_label,
             a.target_lang AS target_lang,
+            ps.target_language AS project_target_language,
             a.deadline AS deadline, a.note AS note,
             a.cells_total AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
@@ -266,6 +308,7 @@ export async function getMyAssignmentsAcrossOrg(
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
        JOIN projects p ON p.id = a.project_id
+       LEFT JOIN project_settings ps ON ps.project_id = a.project_id
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND a.assignee_user_id = ?
         AND a.unassigned_at IS NULL AND a.completed_at IS NULL
@@ -279,6 +322,7 @@ export async function getMyAssignmentsAcrossOrg(
       scope_kind: string
       scope_label: string
       target_lang: string
+      project_target_language: string | null
       deadline: string | null
       note: string | null
       cells_total: number
@@ -295,6 +339,7 @@ export async function getMyAssignmentsAcrossOrg(
     scopeKind: r.scope_kind,
     scopeLabel: r.scope_label,
     targetLang: r.target_lang ?? "",
+    laneLabel: resolveLaneLabel(r.target_lang, r.project_target_language),
     deadline: r.deadline,
     note: r.note,
     cellsTotal: r.cells_total,

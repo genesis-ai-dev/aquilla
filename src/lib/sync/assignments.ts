@@ -40,6 +40,13 @@ export interface OrgWorkloadAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
+  /**
+   * AQU-729: display name of the lane — the pinned lane, or the project's
+   * default target language for a default-lane assignment. Absent/null when the
+   * default lane has no configured target language. Display-only; use
+   * `targetLang` for routing/deep-links.
+   */
+  laneLabel?: string | null
   cellsTotal: number
   cellsDone: number
   deadline: string | null
@@ -59,6 +66,13 @@ export interface MyAssignment {
   scopeLabel: string
   /** AQU-538 (§3.5): target-language lane. '' / absent = default lane. */
   targetLang?: string
+  /**
+   * AQU-729: display name of the lane — the pinned lane, or the project's
+   * default target language for a default-lane assignment. Absent/null when the
+   * default lane has no configured target language. Display-only; use
+   * `targetLang` for routing/deep-links.
+   */
+  laneLabel?: string | null
   deadline: string | null
   note: string | null
   cellsTotal: number

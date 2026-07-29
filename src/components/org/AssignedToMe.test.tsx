@@ -65,19 +65,26 @@ describe("AssignedToMe", () => {
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
   })
 
-  // AQU-538 (§3.5): a lane-pinned assignment shows a lane chip and deep-links
-  // into the project at that lane (?lane=<tag>); the default lane ('') does not.
-  it("renders a lane chip and appends ?lane= for a lane-pinned assignment", async () => {
+  // AQU-729: the lane chip renders from laneLabel for EVERY assignment — the
+  // pinned lane's name, or the project's default target language for a
+  // default-lane assignment — so the assignee can always tell which language the
+  // work is in. Deep-link routing still keys off targetLang: only a pinned lane
+  // appends ?lane=; a default-lane assignment opens the project at its default
+  // lane even though it shows a language chip. Supersedes AQU-538 (§3.5).
+  it("renders the lane chip from laneLabel for pinned and default-lane assignments; ?lane= only for pinned", async () => {
     mockGetMy.mockResolvedValue([
-      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
-      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", scopeKind: "books", scopeLabel: "John scope", targetLang: "es", laneLabel: "es", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", laneLabel: "World English", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100 },
     ])
     renderInbox()
 
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
-    // The lane chip renders the tag for the pinned lane only.
+    // Both assignments show a language chip — the pinned lane and the
+    // default-lane fallback (the AQU-729 fix).
     expect(screen.getByText("es")).toBeInTheDocument()
-    // The pinned assignment's link carries ?lane=es; the default-lane one doesn't.
+    expect(screen.getByText("World English")).toBeInTheDocument()
+    // The pinned assignment's link carries ?lane=es; the default-lane one still
+    // doesn't (laneLabel is display-only, targetLang drives routing).
     const esLink = screen.getByText("John scope").closest("a")
     expect(esLink?.getAttribute("href")).toContain("?lane=es")
     const defLink = screen.getByText("Mark scope").closest("a")

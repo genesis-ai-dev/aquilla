@@ -19,6 +19,7 @@ function makeAssignment(overrides: Partial<MyAssignment> = {}): MyAssignment {
     scopeKind: "books",
     scopeLabel: "Genesis",
     targetLang: "",
+    laneLabel: null,
     deadline: null,
     note: null,
     cellsTotal: 10,
@@ -60,17 +61,26 @@ describe("ProjectAssignedToMe", () => {
     expect(screen.getByText("100%")).toBeTruthy()
   })
 
-  // AQU-538 (§3.5): a lane-pinned assignment renders a lane chip; the default
-  // lane ('') renders none.
-  it("renders a lane chip only for a lane-pinned assignment", async () => {
+  // AQU-729: the lane chip renders from laneLabel — the pinned lane's name, or
+  // (for a default-lane assignment) the project's default target language
+  // resolved server-side — so the assignee can always tell which language the
+  // work is in. A default-lane assignment with NO resolvable language (laneLabel
+  // null) renders no chip. Supersedes the AQU-538 "pinned lanes only" behavior.
+  it("renders the lane chip from laneLabel for pinned and default-lane assignments", async () => {
     mockGetMyAssignments.mockResolvedValue([
-      makeAssignment({ assignmentId: "asgn-es", scopeLabel: "Genesis", targetLang: "es" }),
-      makeAssignment({ assignmentId: "asgn-def", scopeLabel: "Exodus", targetLang: "" }),
+      makeAssignment({ assignmentId: "asgn-sw", scopeLabel: "Genesis", targetLang: "Swahili", laneLabel: "Swahili" }),
+      // Default lane, but the project has a target language → the assignee still
+      // sees which language (this is the AQU-729 fix).
+      makeAssignment({ assignmentId: "asgn-def", scopeLabel: "Exodus", targetLang: "", laneLabel: "World English" }),
+      // Default lane with no configured language → no chip.
+      makeAssignment({ assignmentId: "asgn-none", scopeLabel: "Leviticus", targetLang: "", laneLabel: null }),
     ])
     render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
     await waitFor(() => expect(screen.getByText("Genesis")).toBeTruthy())
-    // The pinned lane's tag renders as a chip; there is exactly one "es".
-    expect(screen.getByText("es")).toBeTruthy()
+    expect(screen.getByText("Swahili")).toBeTruthy()
+    expect(screen.getByText("World English")).toBeTruthy()
+    // Leviticus row has no lane chip — only its scope label is present.
+    expect(screen.getByText("Leviticus")).toBeTruthy()
   })
 
   it("passes the whole assignment to onJumpToAssignment when a row is clicked", async () => {

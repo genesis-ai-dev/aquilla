@@ -173,6 +173,81 @@ describe("GET /api/v2/projects/:projectId/assignments/mine", () => {
   })
 })
 
+// AQU-729: an assignment saved with the dialog's preselected "default" target
+// language (target_lang '') must (a) still reach its assignee — no read filters
+// on lane — and (b) surface a lane label so the assignee can tell which language
+// they're being asked to work in. Regression guards for both the visibility and
+// the missing-lane-label defects reported on the Biblica call.
+describe("AQU-729: default-lane assignments — visibility + lane label", () => {
+  it("returns a default-lane ('') assignment in the project inbox with laneLabel = the project's default target language", async () => {
+    await seedOrgWithAssignments()
+    // as-anna was created with no explicit lane (target_lang defaults to '' —
+    // the "default" case). Give the project a configured target language.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"targetLanguage":"World English"}')`,
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; targetLang: string; laneLabel: string | null }>
+    }
+    const asAnna = body.assignments.find((a) => a.assignmentId === "as-anna")
+    // Visibility (AC-1): the default-lane assignment is present at all.
+    expect(asAnna).toBeDefined()
+    // targetLang stays the routing key ('' = default); laneLabel is the display
+    // name the assignee reads (AC-2).
+    expect(asAnna?.targetLang).toBe("")
+    expect(asAnna?.laneLabel).toBe("World English")
+  })
+
+  it("keeps a pinned-lane assignment's own lane as its laneLabel (AC-3, no regression)", async () => {
+    await seedOrgWithAssignments()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"targetLanguage":"World English"}')`,
+    ).run()
+    // A second OPEN assignment for anna, explicitly pinned to Swahili.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, created_by, created_at) VALUES
+        ('as-anna-sw', 'pa', 2, 'books', 'Genesis', 'Swahili', 0, 1, 1300)`,
+    ).run()
+    const res = await app.request(
+      "/api/v2/orgs/1/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; targetLang: string; laneLabel: string | null }>
+    }
+    const byId = Object.fromEntries(body.assignments.map((a) => [a.assignmentId, a]))
+    // Pinned lane reads its own name; the default-lane sibling falls back to the
+    // project language — both are visible in the same org-wide inbox.
+    expect(byId["as-anna-sw"]).toMatchObject({ targetLang: "Swahili", laneLabel: "Swahili" })
+    expect(byId["as-anna"]).toMatchObject({ targetLang: "", laneLabel: "World English" })
+  })
+
+  it("laneLabel is null for a default-lane assignment when the project has no configured target language", async () => {
+    await seedOrgWithAssignments()
+    // No project_settings row for 'pa' → target_language is null → nothing to show.
+    const res = await app.request(
+      "/api/v2/projects/pa/assignments/mine",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      assignments: Array<{ assignmentId: string; laneLabel: string | null }>
+    }
+    const asAnna = body.assignments.find((a) => a.assignmentId === "as-anna")
+    expect(asAnna).toBeDefined()
+    expect(asAnna?.laneLabel).toBeNull()
+  })
+})
+
 describe("GET /api/v2/projects/:projectId/files/:fileId/chapters", () => {
   it("returns distinct source-cell chapters, natural-sorted; 403s a non-member", async () => {
     await seedUser(1, "wendi")

@@ -84,9 +84,11 @@ export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: num
                 <div className="flex items-center gap-2">
                   <p className="truncate font-medium">{a.username ?? `User ${a.assigneeUserId}`}</p>
                   <span className="shrink-0 truncate text-xs text-muted-foreground">{a.projectName}</span>
-                  {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
-                  {a.targetLang && (
-                    <Badge variant="outline" className="shrink-0">{a.targetLang}</Badge>
+                  {/* AQU-729: lane chip for EVERY assignment — the pinned lane,
+                      or the project's default target language for a default-lane
+                      assignment (AQU-538 showed it only when pinned). */}
+                  {a.laneLabel && (
+                    <Badge variant="outline" className="shrink-0">{a.laneLabel}</Badge>
                   )}
                 </div>
                 <p className="truncate text-xs text-muted-foreground">{a.scopeLabel}</p>

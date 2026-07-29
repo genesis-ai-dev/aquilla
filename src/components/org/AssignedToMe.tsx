@@ -87,9 +87,13 @@ export function AssignedToMe() {
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{a.scopeLabel}</p>
                       <span className="shrink-0 text-xs text-muted-foreground">{a.projectName}</span>
-                      {/* AQU-538 (§3.5): lane chip when the assignment is pinned to a lane. */}
-                      {a.targetLang && (
-                        <Badge variant="outline" className="shrink-0">{a.targetLang}</Badge>
+                      {/* AQU-729: lane chip for EVERY assignment — the pinned
+                          lane, or the project's default target language for a
+                          default-lane assignment, so the assignee can tell which
+                          language the work is in (AQU-538 showed it only when
+                          pinned). Deep-link routing still keys off targetLang. */}
+                      {a.laneLabel && (
+                        <Badge variant="outline" className="shrink-0">{a.laneLabel}</Badge>
                       )}
                       {a.deadline && (
                         <Badge variant="secondary" className="shrink-0">

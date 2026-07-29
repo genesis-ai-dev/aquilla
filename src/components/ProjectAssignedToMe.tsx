@@ -102,10 +102,14 @@ export function ProjectAssignedToMe({
                     <div className="flex items-center justify-between gap-1">
                       <span className="flex min-w-0 items-center gap-1">
                         <span className="truncate text-xs font-medium leading-tight">{a.scopeLabel}</span>
-                        {/* AQU-538 (§3.5): lane chip when pinned to a lane. */}
-                        {a.targetLang && (
+                        {/* AQU-729: lane chip for EVERY assignment — the pinned
+                            lane, or the project's default target language for a
+                            default-lane assignment, so the assignee can always
+                            tell which language they're being asked to work in
+                            (AQU-538 previously showed it only for pinned lanes). */}
+                        {a.laneLabel && (
                           <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] leading-none">
-                            {a.targetLang}
+                            {a.laneLabel}
                           </Badge>
                         )}
                       </span>

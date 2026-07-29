@@ -145,9 +145,9 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
-# AQU-713 rollout gate. Keep false until the production dry-run succeeds and
-# all three migration secrets above have been provisioned.
-LEGACY_USER_MIGRATION_ENABLED = "false"
+# AQU-713 legacy identity bridge. Production enables JIT migration by default;
+# all three migration secrets above must be provisioned before deployment.
+LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — sandbox worker (aquilla-agent-sandbox) base URL for the agent's
@@ -230,7 +230,7 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
-LEGACY_USER_MIGRATION_ENABLED = "false"
+LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"

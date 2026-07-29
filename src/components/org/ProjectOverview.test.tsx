@@ -808,7 +808,12 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     const openButton = await screen.findByRole("button", { name: "Open project" })
     fireEvent.click(openButton)
 
-    expect(navigate).toHaveBeenCalledWith("/project/p1")
+    // AQU-737: Open project now routes through useOpenWorkspace (navigate wrapped
+    // in a transition so the button can spin); it still navigates to the
+    // workspace, forwarding an optional NavigateOptions arg.
+    expect(
+      navigate.mock.calls.some((call: unknown[]) => call[0] === "/project/p1"),
+    ).toBe(true)
   })
 })
 

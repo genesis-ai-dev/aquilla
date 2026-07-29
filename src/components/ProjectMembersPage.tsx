@@ -10,12 +10,13 @@
 //   - "Revoke all access" with grant-path enumeration + typed confirmation
 
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useParams } from "react-router-dom"
 import {
   ArrowLeft, UserPlus, LinkIcon, ShieldOff, RefreshCcw,
   AlertTriangle, Copy, Lock, Users, Check,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
@@ -27,6 +28,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrgOptional } from "@/context/OrgContext"
@@ -69,7 +71,9 @@ type ActiveTab = "members" | "invite"
 
 export function ProjectMembersPage() {
   const { id: projectId } = useParams<{ id: string }>()
-  const navigate = useNavigate()
+  // AQU-737: the workspace route is lazy; surface the load on Back to project so
+  // it spins + disables instead of sitting idle and re-clickable.
+  const { open: openWorkspace, isPending: backPending } = useOpenWorkspace()
   const [tab, setTab] = useState<ActiveTab>("members")
 
   if (!projectId) return null
@@ -82,9 +86,11 @@ export function ProjectMembersPage() {
           variant="ghost"
           size="sm"
           className="gap-1.5 text-muted-foreground"
-          onClick={() => navigate(`/project/${projectId}`)}
+          onClick={() => openWorkspace(`/project/${projectId}`)}
+          disabled={backPending}
+          aria-busy={backPending || undefined}
         >
-          <ArrowLeft className="h-4 w-4" />
+          {backPending ? <Spinner className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
           Back to project
         </Button>
         <div className="flex items-center gap-2 text-sm font-medium">

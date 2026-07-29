@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, Navigate } from "react-router-dom"
+import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import {
   ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users, FolderOpen, Filter,
 } from "lucide-react"
@@ -47,6 +48,9 @@ export function Dashboard() {
   const [_pendingLifecycleId, setPendingLifecycleId] = useState<string | null>(null)
   const { session } = useFrontierSession()
   const navigate = useNavigate()
+  // AQU-737: opening a project card is a lazy-route + cloud-download hop; drive
+  // the clicked card's spinner/disabled state off the real transition pending.
+  const { open: openWorkspace, isOpening } = useOpenWorkspace()
   const brand = useBrand()
 
   useEffect(() => {
@@ -325,7 +329,8 @@ export function Dashboard() {
                 <ProjectCard
                   key={p.id}
                   project={p}
-                  onClick={() => navigate(`/project/${p.id}`)}
+                  onClick={() => openWorkspace(`/project/${p.id}`)}
+                  pending={isOpening(`/project/${p.id}`)}
                   canTrash={canTrash(p)}
                   onTrash={() => setPendingTrashId(p.id)}
                   canToggleLifecycle={canToggleLifecycle(p)}
@@ -369,7 +374,8 @@ export function Dashboard() {
                 <ProjectCard
                   key={cp.id}
                   project={minimalProjectRecord(cp)}
-                  onClick={() => navigate(`/project/${cp.id}`)}
+                  onClick={() => openWorkspace(`/project/${cp.id}`)}
+                  pending={isOpening(`/project/${cp.id}`)}
                 />
               ))}
             </div>

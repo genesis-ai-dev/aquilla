@@ -5,7 +5,9 @@ import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
@@ -553,6 +555,9 @@ function OverflowItem({ onClick, disabled, className, children }: {
 export function ProjectOverview() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
+  // AQU-737: the workspace is a lazy route; surface the load on the Open project
+  // button so it spins + disables instead of sitting idle and re-clickable.
+  const { open: openWorkspace, isPending: openPending } = useOpenWorkspace()
   const { project, status, refresh, pm } = useProject(id)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -1018,8 +1023,20 @@ export function ProjectOverview() {
                     <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" onClick={() => navigate(`/project/${id}`)}>
-                      Open project
+                    <Button
+                      size="sm"
+                      onClick={() => openWorkspace(`/project/${id}`)}
+                      disabled={openPending}
+                      aria-busy={openPending || undefined}
+                    >
+                      {openPending ? (
+                        <>
+                          <Spinner className="size-4" />
+                          Opening…
+                        </>
+                      ) : (
+                        "Open project"
+                      )}
                     </Button>
                     {isOwner && isArchived && (
                       <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>

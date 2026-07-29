@@ -326,6 +326,7 @@ describe("atomic legacy-user login migration", () => {
   it("rolls back identity and earlier memberships when a target disappears mid-transaction", async () => {
     await seedAccessTargets()
     const passwordHash = await hashPasswordWerkzeugScrypt("correct-password")
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     const source = {
       id: 701,
       username: "AtomicUser",
@@ -345,6 +346,21 @@ describe("atomic legacy-user login migration", () => {
       conflicts: [],
       confirmedMembershipCount: 1,
     }, "jit")).rejects.toMatchObject({ code: "dependency" })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[legacy-user-migration] atomic apply failed",
+      {
+        stage: "team-memberships",
+        code: "unknown",
+        constraint: undefined,
+        table: undefined,
+      },
+    )
+    const serializedLog = JSON.stringify(errorSpy.mock.calls)
+    expect(serializedLog).not.toContain(source.username)
+    expect(serializedLog).not.toContain(source.email)
+    expect(serializedLog).not.toContain(source.password_hash)
+    errorSpy.mockRestore()
 
     expect(await env.AQUILLA_PG.prepare(
       "SELECT COUNT(*) AS n FROM users WHERE LOWER(username) = 'atomicuser'",

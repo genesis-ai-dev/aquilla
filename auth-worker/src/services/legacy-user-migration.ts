@@ -211,6 +211,34 @@ function isUniqueViolation(error: unknown): boolean {
     String(candidate?.message ?? error).includes("duplicate key value")
 }
 
+type MigrationApplyStage =
+  | "transaction-start"
+  | "identity-check"
+  | "user-insert"
+  | "provenance-insert"
+  | "org-memberships"
+  | "team-memberships"
+  | "project-memberships"
+  | "activity-log"
+
+function logSanitizedApplyFailure(
+  stage: MigrationApplyStage,
+  error: unknown,
+): void {
+  const candidate = error as {
+    code?: unknown
+    constraint?: unknown
+    table?: unknown
+  }
+  console.error("[legacy-user-migration] atomic apply failed", {
+    stage,
+    code: typeof candidate?.code === "string" ? candidate.code : "unknown",
+    constraint:
+      typeof candidate?.constraint === "string" ? candidate.constraint : undefined,
+    table: typeof candidate?.table === "string" ? candidate.table : undefined,
+  })
+}
+
 export async function applyLegacyUserMigration(
   db: AquillaDb,
   source: LegacyUserRow,
@@ -237,8 +265,10 @@ export async function applyLegacyUserMigration(
     )
   }
 
+  let stage: MigrationApplyStage = "transaction-start"
   try {
     return await db.transaction(async (tx) => {
+      stage = "identity-check"
       const existing = await tx.prepare(
         `SELECT id, username, email
            FROM users
@@ -259,6 +289,7 @@ export async function applyLegacyUserMigration(
         )
       }
 
+      stage = "user-insert"
       const inserted = await tx.prepare(
         `INSERT INTO users (
            username, email, password_hash, preferences, created_at, updated_at
@@ -278,6 +309,7 @@ export async function applyLegacyUserMigration(
       }
       const userId = Number(inserted.id)
 
+      stage = "provenance-insert"
       await tx.prepare(
         `INSERT INTO legacy_identity_links (
            source, source_user_id, neon_user_id, source_username, source_email,
@@ -293,6 +325,7 @@ export async function applyLegacyUserMigration(
         importedVia,
       ).run()
 
+      stage = "org-memberships"
       for (const membership of access.orgMemberships) {
         const org = await tx.prepare(
           "SELECT id FROM organizations WHERE legacy_uuid = ?",
@@ -306,6 +339,7 @@ export async function applyLegacyUserMigration(
         ).bind(org.id, userId, membership.roleLevel).run()
       }
 
+      stage = "team-memberships"
       for (const teamUuid of access.teamUuids) {
         const team = await tx.prepare(
           "SELECT id FROM groups WHERE legacy_uuid = ?",
@@ -318,6 +352,7 @@ export async function applyLegacyUserMigration(
         ).bind(team.id, userId).run()
       }
 
+      stage = "project-memberships"
       for (const membership of access.projectMemberships) {
         const project = await tx.prepare(
           "SELECT id FROM projects WHERE id = ?",
@@ -331,6 +366,7 @@ export async function applyLegacyUserMigration(
         ).bind(project.id, userId, membership.roleLevel).run()
       }
 
+      stage = "activity-log"
       await tx.prepare(
         `INSERT INTO activity_logs (user_id, activity_type, description)
          VALUES (?, 'legacy_user_migrated', 'Imported from frontier-db-v2')`,
@@ -348,6 +384,7 @@ export async function applyLegacyUserMigration(
         "legacy identity collided during migration",
       )
     }
+    logSanitizedApplyFailure(stage, error)
     throw new LegacyUserMigrationError(
       "dependency",
       "atomic legacy user migration failed",

@@ -127,6 +127,8 @@ export const DEFAULT_SYSTEM_PROMPT =
   "- Output ONLY the {targetLanguage} translation of the final source line — nothing else.\n" +
   "- No commentary, explanations, labels, headers, markdown, language names, or restated source text. Just the translated text."
 
+export const DEFAULT_COMPLETION_MAX_TOKENS = 4096
+
 // VITE_CHAT_BASE points at the chat-completion proxy. Since 2026-05-26 this
 // is the aquilla-identity worker (mounted at api.aquilla.app/chat — the
 // former aquilla-chat-worker was folded in to consolidate the JWT secret).

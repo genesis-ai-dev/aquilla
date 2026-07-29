@@ -340,6 +340,9 @@ projects.get("/", authMiddleware, async (c) => {
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, o.name AS org_name, p.archived_at, p.is_active,
             p.source_project_id,
+            -- AQU-507: designated project manager (aliased pmu to avoid the
+            -- project_members pm alias below; adds no positional bind).
+            p.pm_user_id, pmu.username AS pm_username,
             -- AQU-696: when the caller was granted access, for the "New" badge
             -- on newly-shared projects. Honest coalesce of the direct-membership
             -- grant and the group grant (a group-granted project has no pm row,
@@ -369,6 +372,8 @@ projects.get("/", authMiddleware, async (c) => {
        FROM projects p
        LEFT JOIN organizations o
          ON o.id = p.org_id
+       LEFT JOIN users pmu
+         ON pmu.id = p.pm_user_id
        LEFT JOIN project_members pm
          ON pm.project_id = p.id AND pm.user_id = ?
        LEFT JOIN org_members om
@@ -413,6 +418,8 @@ projects.get("/", authMiddleware, async (c) => {
       archived_at: string | null
       is_active: boolean
       source_project_id: string | null
+      pm_user_id: number | null
+      pm_username: string | null
       granted_at: string | null
       role_level: number
       role_source: "creator" | "override" | "org" | "group"
@@ -452,6 +459,12 @@ projects.get("/", authMiddleware, async (c) => {
         // AQU-696: null for own/creator projects (no grant row) — the client
         // treats absence as "not new".
         grantedAt: row.granted_at,
+        // AQU-507: designated PM (null = unassigned). FK guarantees a username
+        // whenever pm_user_id is set; guard defensively regardless.
+        pm:
+          row.pm_user_id != null && row.pm_username != null
+            ? { id: row.pm_user_id, username: row.pm_username }
+            : null,
         role,
         files: filesByProject.get(row.id) ?? [],
       }
@@ -474,9 +487,11 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.archived_by, p.is_active,
             p.source_project_id, p.source_link_mode, p.source_link_consumes,
             p.source_link_gate, p.source_link_cursor,
+            p.pm_user_id, pmu.username AS pm_username,
             u.username AS archived_by_username
        FROM projects p
        LEFT JOIN users u ON u.id = p.archived_by
+       LEFT JOIN users pmu ON pmu.id = p.pm_user_id
       WHERE p.id = ?`,
   )
     .bind(projectId)
@@ -493,6 +508,8 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       source_link_consumes: string | null
       source_link_gate: string | null
       source_link_cursor: number | string | null
+      pm_user_id: number | null
+      pm_username: string | null
     }>()
 
   if (!row) return c.json({ error: "not found" }, 404)
@@ -518,6 +535,11 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     sourceLinkConsumes: row.source_link_consumes,
     sourceLinkGate: row.source_link_gate,
     sourceLinkCursor: row.source_link_cursor != null ? Number(row.source_link_cursor) : null,
+    // AQU-507: designated PM (null = unassigned).
+    pm:
+      row.pm_user_id != null && row.pm_username != null
+        ? { id: row.pm_user_id, username: row.pm_username }
+        : null,
     role: { level: role.level, name: role.name, source: role.source },
     files,
   })
@@ -644,6 +666,55 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
     .bind(deadline, projectId)
     .run()
   return c.json({ ok: true, deadlineAt: deadline })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// PATCH /api/v2/projects/:projectId/pm — set/clear the Project Manager
+// (maintainer+). AQU-507.
+// ──────────────────────────────────────────────────────────────────────────
+
+const pmBody = z.object({ pmUserId: z.number().int().nullable() })
+projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "not found or no access" }, 403)
+  // AQU-507: naming who is responsible for a project is an administrative act
+  // (mirrors the deadline gate), so it sits above PROJECT_LEAD.
+  if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
+  const { pmUserId } = c.req.valid("json")
+
+  const project = await c.env.AQUILLA_PG.prepare(
+    "SELECT created_by, org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ created_by: number; org_id: number | null }>()
+  if (!project) return c.json({ error: "project not found" }, 404)
+
+  let pm: { id: number; username: string } | null = null
+  if (pmUserId != null) {
+    // AQU-507: the PM must actually have access to the project they manage —
+    // reject a target with no effective membership rather than storing a PM
+    // who can't open the project they supposedly oversee.
+    const members = await listEffectiveProjectMembers(
+      c.env,
+      projectId,
+      project.org_id,
+      project.created_by,
+    )
+    const match = members.find((m) => m.userId === pmUserId)
+    if (!match) {
+      return c.json({ error: "pm must be a member of the project" }, 400)
+    }
+    pm = { id: match.userId, username: match.username }
+  }
+
+  await c.env.AQUILLA_PG.prepare(
+    "UPDATE projects SET pm_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+  )
+    .bind(pmUserId, projectId)
+    .run()
+  return c.json({ ok: true, pm })
 })
 
 // ──────────────────────────────────────────────────────────────────────────

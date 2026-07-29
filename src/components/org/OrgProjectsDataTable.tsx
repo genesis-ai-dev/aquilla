@@ -43,7 +43,7 @@ function activityLabel(project: PortfolioProject, now: number): string | null {
   return null
 }
 
-type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name"
+type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
 
 function lensToSorting(lens: ProjectLens) {
   switch (lens) {
@@ -57,6 +57,10 @@ function lensToSorting(lens: ProjectLens) {
       return [{ id: "translated", desc: true }] as const
     case "name":
       return [{ id: "name", desc: false }] as const
+    case "pm":
+      // AQU-507: ascending by PM username; the column's sortingFn keeps
+      // unassigned rows last regardless of direction.
+      return [{ id: "pm", desc: false }] as const
   }
 }
 
@@ -298,6 +302,29 @@ export function OrgProjectsDataTable({
         ),
       },
       {
+        // AQU-507: designated Project Manager. Sortable; unassigned rows sort
+        // last (see sortingFn) so scanning "by PM" surfaces owned projects first.
+        id: "pm",
+        accessorFn: (p) => p.pm?.username ?? "",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="PM" />,
+        sortingFn: (a, b) => {
+          const av = a.original.pm?.username ?? null
+          const bv = b.original.pm?.username ?? null
+          if (av && bv) return av.localeCompare(bv)
+          if (av) return -1
+          if (bv) return 1
+          return 0
+        },
+        cell: ({ row }) => {
+          const username = row.original.pm?.username
+          return username ? (
+            <div className="truncate text-left text-xs text-muted-foreground">{username}</div>
+          ) : (
+            <div className="truncate text-left text-xs text-muted-foreground/60">Unassigned</div>
+          )
+        },
+      },
+      {
         id: "edited",
         accessorFn: (p) => p.lastEditAt ?? null,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
@@ -388,7 +415,9 @@ export function OrgProjectsDataTable({
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
           const p = row.original
-          return `${p.name} ${p.orgName ?? ""}`.toLowerCase().includes(q)
+          // AQU-507: match PM username too, so the search box satisfies the
+          // "filter by PM" half of the AC without a separate filter control.
+          return `${p.name} ${p.orgName ?? ""} ${p.pm?.username ?? ""}`.toLowerCase().includes(q)
         }}
         toolbar={(table) => (
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">

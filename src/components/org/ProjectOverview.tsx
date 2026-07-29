@@ -9,10 +9,11 @@ import { ButtonGroup } from "@/components/ui/button-group"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
+import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
-import { setProjectDeadline } from "@/lib/sync/cloud-projects"
+import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
@@ -552,9 +553,14 @@ function OverflowItem({ onClick, disabled, className, children }: {
 export function ProjectOverview() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { project, status, refresh } = useProject(id)
+  const { project, status, refresh, pm } = useProject(id)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  // AQU-507: candidate PMs = the project's effective members. Only fetched for
+  // maintainer+ (the only role that can assign a PM); viewers never trigger the
+  // roster read.
+  const canManagePm = (project?.syncRole?.level ?? 0) >= 600
+  const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
   const { activeOrgId } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
@@ -573,6 +579,10 @@ export function ProjectOverview() {
   const [files, setFiles] = useState<FileSummary[]>([])
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
+  // AQU-507: PM assignment dialog. `pmSelection` holds the picker value (a
+  // stringified userId, or "" for unassigned) while the dialog is open.
+  const [pmDialogOpen, setPmDialogOpen] = useState(false)
+  const [pmSelection, setPmSelection] = useState<string>("")
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
@@ -849,6 +859,21 @@ export function ProjectOverview() {
       await setProjectDeadline(jwt, id, value)
       await loadRow()
       setDeadlineDialogOpen(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function savePm(pmUserId: number | null) {
+    if (!jwt) return
+    setBusy(true)
+    setError(null)
+    try {
+      await setProjectPm(jwt, id, pmUserId)
+      await refresh()
+      setPmDialogOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -1573,6 +1598,95 @@ export function ProjectOverview() {
                       type="button"
                       disabled={busy || !deadlineDate}
                       onClick={() => saveDeadline(deadlineDate ? dateToDeadlineString(deadlineDate) : null)}
+                    >
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* ── Project manager card (AQU-507) ── */}
+              <div className="rounded-xl border bg-card p-5">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Project manager</h2>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  {pm ? (
+                    <span className="font-medium" data-testid="overview-pm-name">{pm.username}</span>
+                  ) : (
+                    <span className="text-muted-foreground" data-testid="overview-pm-name">Unassigned</span>
+                  )}
+                  {canManage && (
+                    <ButtonGroup>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        data-testid="overview-pm-edit"
+                        onClick={() => {
+                          setPmSelection(pm ? String(pm.id) : "")
+                          setPmDialogOpen(true)
+                        }}
+                      >
+                        {pm ? "Change" : "Assign"}
+                      </Button>
+                      {pm && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => savePm(null)}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </ButtonGroup>
+                  )}
+                </div>
+              </div>
+
+              <Dialog open={pmDialogOpen} onOpenChange={setPmDialogOpen}>
+                <DialogContent className="sm:max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>{pm ? "Change project manager" : "Assign project manager"}</DialogTitle>
+                    <DialogDescription>
+                      The project manager is responsible for this project. They must be a member
+                      of the project.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="project-pm">Project manager</FieldLabel>
+                      <Select value={pmSelection} onValueChange={(v) => setPmSelection(v ?? "")}>
+                        <SelectTrigger id="project-pm" aria-label="Project manager">
+                          <SelectValue placeholder="Select a member" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="">Unassigned</SelectItem>
+                            {pmCandidates.map((m) => (
+                              <SelectItem key={m.userId} value={String(m.userId)}>
+                                {m.username}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </FieldGroup>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => setPmDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => savePm(pmSelection === "" ? null : Number(pmSelection))}
                     >
                       Save
                     </Button>

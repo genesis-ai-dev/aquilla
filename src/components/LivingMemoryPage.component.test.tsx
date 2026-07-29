@@ -112,7 +112,7 @@ describe("LivingMemoryPage — purpose copy", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({ ...mockProjectSettingsReturn })
@@ -141,7 +141,7 @@ describe("LivingMemoryPage — empty states", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -185,7 +185,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -211,7 +211,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -233,7 +233,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -260,7 +260,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -282,7 +282,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({

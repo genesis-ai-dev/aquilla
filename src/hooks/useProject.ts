@@ -113,6 +113,10 @@ export function useProject(projectId: string) {
   // key off a value that's allowed to be missing or behind. `roleLevel` here
   // is the fresh, guaranteed-non-null value from the resolve that just ran.
   const [roleLevel, setRoleLevel] = useState<number | null>(null)
+  // AQU-507: the project's designated PM from THIS load's resolve. null =
+  // unassigned or not-yet-resolved; the overview's PM card reads it and
+  // refresh()es after an assignment.
+  const [pm, setPm] = useState<{ id: number; username: string } | null>(null)
   const hasLoaded = useRef(false)
   const { session, loading: sessionLoading } = useFrontierSession()
 
@@ -144,6 +148,7 @@ export function useProject(projectId: string) {
       if (!result.ok) {
         setProject(null)
         setRoleLevel(null)
+        setPm(null)
         // AQU-346: "forbidden" (403 — access revoked / never granted) renders
         // a clean "you no longer have access" state, distinct from a
         // genuinely missing project.
@@ -161,6 +166,7 @@ export function useProject(projectId: string) {
       if (cancelled) return
       setProject(hydrated)
       setRoleLevel(result.project.role.level)
+      setPm(result.project.pm ?? null)
       setStatus("ready")
       hasLoaded.current = true
     })()
@@ -198,6 +204,8 @@ export function useProject(projectId: string) {
      *  unsynced/local-only). Prefer this over `project.syncRole?.level` for
      *  any gate that isn't itself server-revalidated. */
     roleLevel,
+    /** AQU-507: the project's designated PM (null = unassigned / unresolved). */
+    pm,
     refresh,
     /** Persist project-wide settings (incl. synced voice profiles) to the server. */
     patchSettings,

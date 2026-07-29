@@ -151,7 +151,7 @@ export function activityStatus(p: PortfolioProject, now: number): ActivityStatus
 
 type StatusFilter = "all" | "stalled" | "attention" | "overdue"
 
-type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name"
+type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
 
 const PROJECT_LENS_STORAGE_KEY = "org:all-projects:view"
 
@@ -202,9 +202,9 @@ function ProjectTableName({ name }: { name: string }) {
     </span>
   )
 }
-const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-translated", "most-progress", "name"]
+const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-translated", "most-progress", "name", "pm"]
 
-type PortfolioProjectRow = PortfolioProject & {
+export type PortfolioProjectRow = PortfolioProject & {
   orgId?: number
   orgName?: string | null
 }
@@ -257,9 +257,16 @@ const PROJECT_LENSES: { value: ProjectLens; label: string; description: string; 
     description: "Projects sorted alphabetically",
     empty: "No projects yet.",
   },
+  {
+    // AQU-507: group projects by their designated Project Manager.
+    value: "pm",
+    label: "Project manager",
+    description: "Projects grouped by their designated project manager",
+    empty: "No projects yet.",
+  },
 ]
 
-function readProjectLens(): ProjectLens {
+export function readProjectLens(): ProjectLens {
   try {
     const stored = localStorage.getItem(PROJECT_LENS_STORAGE_KEY)
     return PROJECT_LENS_VALUES.includes(stored as ProjectLens) ? stored as ProjectLens : "recent"
@@ -314,7 +321,7 @@ function deadlineTooltip(project: PortfolioProjectRow, status: "overdue" | "soon
   )
 }
 
-function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, now: number): PortfolioProjectRow[] {
+export function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, now: number): PortfolioProjectRow[] {
   return [...projects].sort((a, b) => {
     switch (lens) {
       case "recent":
@@ -325,6 +332,16 @@ function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, 
         return translatedPct(b) - translatedPct(a) || a.name.localeCompare(b.name)
       case "name":
         return a.name.localeCompare(b.name)
+      case "pm": {
+        // AQU-507: group by PM username; unassigned projects sort *last* (they
+        // are noise for someone scanning by who's responsible), then by name.
+        const an = a.pm?.username ?? null
+        const bn = b.pm?.username ?? null
+        if (an && bn) return an.localeCompare(bn) || a.name.localeCompare(b.name)
+        if (an) return -1
+        if (bn) return 1
+        return a.name.localeCompare(b.name)
+      }
       case "attention":
         return attentionRank(b, now) - attentionRank(a, now) || a.name.localeCompare(b.name)
     }
@@ -731,6 +748,19 @@ export function OrgHome() {
   const avgAudioPct =
     projects.length > 0 ? projects.reduce((sum, p) => sum + audioPct(p), 0) / projects.length : 0
   const roleByProjectId = new Map(accessibleProjects.map((project) => [project.id, project.role]))
+  // AQU-507: the portfolio feed (which backs these rows) has no PM dimension;
+  // merge it in from the accessible-projects feed (the list endpoint), keyed by
+  // project id — the same join the Role column already relies on. A project not
+  // in the feed keeps whatever the row already had (typically absent ⇒
+  // unassigned), never crashing.
+  const pmByProjectId = new Map(
+    accessibleProjects.map((project) => [project.id, project.pm ?? null]),
+  )
+  const projectsWithPm: PortfolioProjectRow[] = projects.map((project) =>
+    pmByProjectId.has(project.id)
+      ? { ...project, pm: pmByProjectId.get(project.id) ?? null }
+      : project,
+  )
   // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
   // target language. The accessible-projects feed joins per-file language hints;
   // take the first non-empty target language as the project's default. Absent →
@@ -794,8 +824,14 @@ export function OrgHome() {
 
   // Filter bar — narrows the listed projects only; the rollup strip above
   // continues to reflect the full portfolio.
-  const filteredProjects = projects.filter((p) => {
-    if (projectQuery && !p.name.toLowerCase().includes(projectQuery.toLowerCase())) return false
+  const filteredProjects = projectsWithPm.filter((p) => {
+    if (projectQuery) {
+      // AQU-507: the search box also matches PM username, satisfying the
+      // "filter by PM" half of the AC for the all-orgs list.
+      const q = projectQuery.toLowerCase()
+      const haystack = `${p.name} ${p.pm?.username ?? ""}`.toLowerCase()
+      if (!haystack.includes(q)) return false
+    }
     switch (statusFilter) {
       case "stalled":
         return activityStatus(p, now) === "stalled"
@@ -813,7 +849,7 @@ export function OrgHome() {
     now,
   )
 
-  const statusFilteredProjects = projects.filter((p) => {
+  const statusFilteredProjects = projectsWithPm.filter((p) => {
     switch (statusFilter) {
       case "stalled":
         return activityStatus(p, now) === "stalled"

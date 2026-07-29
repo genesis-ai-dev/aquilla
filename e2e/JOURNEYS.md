@@ -121,6 +121,7 @@
 | Auth        | Forgot password flow opens reset form                 | `e2e/specs/orgs/account-add-forgot-password.smoke.spec.ts` + `account-reset-password-form.smoke.spec.ts` | ✅ |
 | Auth        | Dev-only logout route clears session → /onboarding    | `e2e/specs/auth/dev-logout-route.smoke.spec.ts`               |   ✅   |
 | Auth        | D1-only first login atomically imports identity, organization, inherited teams, projects, and exact roles | `e2e/specs/auth/legacy-user-first-login.smoke.spec.ts` | ✅ |
+| Auth        | Pending sign-in explains first-time account and permission migration | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` | ✅ |
 | Onboarding  | Wizard renders name step and advances                 | `e2e/specs/projects/onboarding-wizard.smoke.spec.ts` + `onboarding-name-step.smoke.spec.ts` + `onboarding-privacy-continue.smoke.spec.ts` + `onboarding-project-step.smoke.spec.ts` | ✅ |
 | Onboarding  | ReadyStep "Start Translating" navigates to project    | `e2e/specs/projects/onboarding-ready-step.smoke.spec.ts`      |   ✅   |
 | Projects    | Archive and restore project                           | `e2e/specs/projects/archive.smoke.spec.ts`                    |   ✅   |

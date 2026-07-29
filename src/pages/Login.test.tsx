@@ -113,6 +113,31 @@ describe("Login page — rendering", () => {
 })
 
 describe("Login page — success path", () => {
+  it("explains first-time account migration while sign-in is pending", async () => {
+    let resolveLogin!: (session: { username: string; jwt: string }) => void
+    mockLogin.mockReturnValue(new Promise((resolve) => {
+      resolveLogin = resolve
+    }))
+    renderLogin()
+
+    fillLogin("alice", "secret")
+    await submitLogin()
+
+    expect(screen.getByRole("button", {
+      name: "Setting up your account and permissions…",
+    })).toBeDisabled()
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "First-time sign-in may take a moment while we securely migrate your account.",
+    )
+
+    await act(async () => {
+      resolveLogin({ username: "alice", jwt: "tok" })
+    })
+    await waitFor(() => {
+      expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+    })
+  })
+
   it("calls login and navigates to / on success", async () => {
     mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
     renderLogin()

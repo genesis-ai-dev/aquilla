@@ -124,10 +124,40 @@ export function Login() {
               />
             </FieldGroup>
             {submitError && <FieldError>{submitError}</FieldError>}
-            <Button type="submit" form="login-form" className="w-full">
-              {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-              {form.state.isSubmitting ? "Signing in…" : "Sign in"}
-            </Button>
+            <form.Subscribe
+              selector={(state) => state.isSubmitting}
+              children={(isSubmitting) => (
+                <>
+                  <Button
+                    type="submit"
+                    form="login-form"
+                    className="w-full"
+                    disabled={isSubmitting}
+                    aria-describedby={
+                      isSubmitting ? "login-account-setup-note" : undefined
+                    }
+                  >
+                    {isSubmitting && (
+                      <Spinner data-icon="inline-start" aria-hidden="true" />
+                    )}
+                    {isSubmitting
+                      ? "Setting up your account and permissions…"
+                      : "Sign in"}
+                  </Button>
+                  {isSubmitting && (
+                    <p
+                      id="login-account-setup-note"
+                      role="status"
+                      aria-live="polite"
+                      className="text-center text-xs text-muted-foreground"
+                    >
+                      First-time sign-in may take a moment while we securely
+                      migrate your account.
+                    </p>
+                  )}
+                </>
+              )}
+            />
           </form>
         )}
 

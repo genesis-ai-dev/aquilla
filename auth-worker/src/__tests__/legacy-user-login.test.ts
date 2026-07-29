@@ -269,6 +269,7 @@ describe("atomic legacy-user login migration", () => {
   it("a GitLab failure rolls back the entire migration", async () => {
     await seedAccessTargets()
     const passwordHash = await hashPasswordWerkzeugScrypt("correct-password")
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     const source = {
       id: 700,
       username: "Cleiton",
@@ -295,6 +296,16 @@ describe("atomic legacy-user login migration", () => {
     )
 
     expect(response.status).toBe(503)
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[legacy-user-migration] login migration failed",
+      {
+        code: "dependency",
+        reason: "GitLab access topology is unavailable",
+      },
+    )
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(source.username)
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(source.email)
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(source.password_hash)
     expect(await env.AQUILLA_PG.prepare(
       "SELECT COUNT(*) AS n FROM users WHERE LOWER(username) = 'cleiton'",
     ).first<number>("n")).toBe(0)

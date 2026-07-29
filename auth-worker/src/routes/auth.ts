@@ -359,6 +359,10 @@ auth.post("/token", async (c) => {
         }
       } catch (error) {
         if (error instanceof LegacyUserMigrationError) {
+          console.error("[legacy-user-migration] login migration failed", {
+            code: error.code,
+            reason: error.message,
+          })
           if (error.code === "conflict") {
             return c.json(
               { error: "Account migration requires support" },

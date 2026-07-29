@@ -60,6 +60,7 @@ import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
+import { handleBookAffirmationsReadRequest } from "./events/book-affirmations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
@@ -278,6 +279,8 @@ const worker = {
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
+    const bookAffirmationsReadResponse = await handleBookAffirmationsReadRequest(request, env)
+    if (bookAffirmationsReadResponse) return withCors(bookAffirmationsReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
     // /search/passages must be checked BEFORE /search — PATH_RE for /search is

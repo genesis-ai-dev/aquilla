@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, SlidersHorizontal } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, SlidersHorizontal, CheckCircle2, AlertTriangle } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
@@ -22,7 +22,7 @@ import { MembersTab } from "@/components/ProjectMembersPage"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
-import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
+import { fetchProjectFiles, fetchAllFileCells, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import {
   progressToCanonicalRollup,
@@ -36,6 +36,9 @@ import { sortFiles, filterFilesByName, FILE_SORT_MODES, type FileSortMode } from
 import { progressRowsToCsv, progressCsvFilename } from "@/lib/progress/progress-csv"
 import { downloadBlob } from "@/lib/export/export-service"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
+import { useBookAffirmations } from "@/hooks/useBookAffirmations"
+import type { BookAffirmation } from "@/lib/sync/book-affirmations"
+import { buildBookPunchList, type BookPunchList } from "@/lib/progress/book-punchlist"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
 import {
@@ -405,30 +408,223 @@ function ChapterRow({
   )
 }
 
+// AQU-727: per-book affirmation controls threaded from ProjectOverview.
+interface BookAffirmControls {
+  /** Representative file for routing the affirm event + fetching the punch list. */
+  fileId: string
+  affirmation: BookAffirmation | undefined
+  canAffirm: boolean
+  onAffirm: (bookCode: string, fileId: string) => Promise<void>
+  onUnaffirm: (bookCode: string, fileId: string) => Promise<void>
+  loadPunchList: (fileId: string, bookCode: string) => Promise<BookPunchList>
+  onJumpToCell: (fileId: string, cellId: string) => void
+}
+
+// File-level affirmation context (the per-book affirmation is resolved from the
+// map inside FileCanonicalRollup, since one file rollup renders many books).
+interface FileBookAffirm {
+  fileId: string
+  affirmations: Map<string, BookAffirmation>
+  canAffirm: boolean
+  onAffirm: (bookCode: string, fileId: string) => Promise<void>
+  onUnaffirm: (bookCode: string, fileId: string) => Promise<void>
+  loadPunchList: (fileId: string, bookCode: string) => Promise<BookPunchList>
+  onJumpToCell: (fileId: string, cellId: string) => void
+}
+
+/** AQU-727: the unvalidated-verse punch list for an affirmed book, grouped by
+ *  last editor. Loads on mount; each verse chip jumps to the cell in the editor. */
+function BookPunchListPanel({
+  fileId,
+  bookCode,
+  loadPunchList,
+  onJumpToCell,
+}: {
+  fileId: string
+  bookCode: string
+  loadPunchList: (fileId: string, bookCode: string) => Promise<BookPunchList>
+  onJumpToCell: (fileId: string, cellId: string) => void
+}) {
+  const [punch, setPunch] = useState<BookPunchList | null>(null)
+  const [state, setState] = useState<"loading" | "error" | "loaded">("loading")
+
+  const load = useCallback(async () => {
+    setState("loading")
+    try {
+      setPunch(await loadPunchList(fileId, bookCode))
+      setState("loaded")
+    } catch {
+      setState("error")
+    }
+  }, [fileId, bookCode, loadPunchList])
+
+  useEffect(() => { void load() }, [load])
+
+  if (state === "loading") {
+    return <p className="ml-5 py-1 text-[10px] text-muted-foreground">Loading unvalidated verses…</p>
+  }
+  if (state === "error") {
+    return (
+      <button type="button" className="ml-5 py-1 text-[10px] text-destructive underline" onClick={() => void load()}>
+        Couldn’t load unvalidated verses. Retry
+      </button>
+    )
+  }
+  if (!punch || punch.totalUnvalidated === 0) {
+    return <p className="ml-5 py-1 text-[10px] text-muted-foreground">Every verse in this book is validated.</p>
+  }
+  return (
+    <div className="ml-5 mt-0.5 mb-1 border-l pl-3" data-testid="book-punchlist" aria-label={`${bookCode} unvalidated verses`}>
+      {punch.groups.map((g) => (
+        <div key={g.editor ?? "__untranslated__"} className="mb-1">
+          <p className="text-[10px] font-medium text-muted-foreground">
+            {g.editor ?? "Never translated"} · {g.count}
+          </p>
+          <ul className="mt-0.5 flex flex-wrap gap-1">
+            {g.cells.map((c) => (
+              <li key={c.cellId}>
+                <button
+                  type="button"
+                  data-testid="punchlist-cell"
+                  title={`Jump to ${c.ref}`}
+                  onClick={() => onJumpToCell(fileId, c.cellId)}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] tabular-nums hover:ring-2 hover:ring-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    c.filled
+                      ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {c.ref.startsWith(`${bookCode} `) ? c.ref.slice(bookCode.length + 1) : c.ref}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function BookRow({
   book,
   loadVerses,
+  affirm,
 }: {
   book: BookRollup
   loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+  affirm: BookAffirmControls
 }) {
   const [open, setOpen] = useState(false)
+  const [punchOpen, setPunchOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const affirmation = affirm.affirmation
+  const unvalidated = Math.max(0, book.cellCount - book.approvedCount)
+  // An affirmed book that isn't 100% validated is a discrepancy to resolve —
+  // exactly the "you said done, but these verses were never validated" signal.
+  const hasDiscrepancy = affirmation != null && unvalidated > 0
+
+  const handleAffirm = useCallback(async () => {
+    setBusy(true)
+    try {
+      await affirm.onAffirm(book.book, affirm.fileId)
+      setPunchOpen(true)
+    } catch {
+      /* the hook exposes isError; keep the row interactive on failure */
+    } finally {
+      setBusy(false)
+    }
+  }, [affirm, book.book])
+
+  const handleUnaffirm = useCallback(async () => {
+    setBusy(true)
+    try {
+      await affirm.onUnaffirm(book.book, affirm.fileId)
+      setPunchOpen(false)
+    } catch {
+      /* no-op — keep interactive */
+    } finally {
+      setBusy(false)
+    }
+  }, [affirm, book.book])
+
   return (
     <li>
-      <button
-        type="button"
-        data-testid="book-row"
-        className="flex w-full items-center gap-2 py-0.5 text-left text-xs font-medium hover:text-foreground"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
-        <span className="w-10 shrink-0">{book.book}</span>
-        <MiniRollupBar filledPct={book.filledPct} approvedPct={book.approvedPct} />
-        <span className="text-[10px] tabular-nums text-muted-foreground">
-          {book.filledCount}/{book.approvedCount}/{book.cellCount}
-        </span>
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          data-testid="book-row"
+          className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left text-xs font-medium hover:text-foreground"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+          <span className="w-10 shrink-0">{book.book}</span>
+          <MiniRollupBar filledPct={book.filledPct} approvedPct={book.approvedPct} />
+          <span className="text-[10px] tabular-nums text-muted-foreground">
+            {book.filledCount}/{book.approvedCount}/{book.cellCount}
+          </span>
+        </button>
+        {affirmation != null ? (
+          <span className="flex shrink-0 items-center gap-1">
+            <AppTooltip content={`Marked done by ${affirmation.affirmedByLabel}`}>
+              <span
+                data-testid="book-affirmed-badge"
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                  hasDiscrepancy
+                    ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                    : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+                )}
+              >
+                {hasDiscrepancy ? <AlertTriangle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
+                Done
+              </span>
+            </AppTooltip>
+            {affirm.canAffirm && (
+              <button
+                type="button"
+                data-testid="unmark-book-done"
+                className="text-[10px] text-muted-foreground underline hover:text-foreground disabled:opacity-50"
+                onClick={() => void handleUnaffirm()}
+                disabled={busy}
+              >
+                Undo
+              </button>
+            )}
+          </span>
+        ) : affirm.canAffirm ? (
+          <button
+            type="button"
+            data-testid="mark-book-done"
+            className="shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-accent/40 disabled:opacity-50"
+            onClick={() => void handleAffirm()}
+            disabled={busy}
+          >
+            Mark done
+          </button>
+        ) : null}
+      </div>
+      {hasDiscrepancy && (
+        <button
+          type="button"
+          data-testid="book-punchlist-toggle"
+          className="ml-5 mt-0.5 flex items-center gap-1 text-[10px] text-amber-700 underline hover:text-amber-800 dark:text-amber-400"
+          onClick={() => setPunchOpen((v) => !v)}
+          aria-expanded={punchOpen}
+        >
+          {unvalidated} verse{unvalidated === 1 ? "" : "s"} marked done but never validated
+        </button>
+      )}
+      {hasDiscrepancy && punchOpen && (
+        <BookPunchListPanel
+          fileId={affirm.fileId}
+          bookCode={book.book}
+          loadPunchList={affirm.loadPunchList}
+          onJumpToCell={affirm.onJumpToCell}
+        />
+      )}
       {open && (
         <ul className="ml-5 mt-0.5" aria-label={`${book.book} chapters`}>
           {book.chapters.map((c) => (
@@ -452,12 +648,15 @@ function FileCanonicalRollup({
   error,
   onRetry,
   loadVerses,
+  bookAffirm,
 }: {
   rollup: FileRollup | undefined
   loading: boolean
   error: boolean
   onRetry: () => void
   loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
+  /** AQU-727: per-file book-affirmation controls (undefined = feature off). */
+  bookAffirm: FileBookAffirm | undefined
 }) {
   if (loading) {
     return <p className="ml-7 mt-1 text-xs text-muted-foreground">Loading chapter breakdown…</p>
@@ -489,7 +688,21 @@ function FileCanonicalRollup({
   return (
     <ul className="ml-7 mt-1 border-l pl-3" data-testid="canonical-rollup-books" aria-label="Chapter breakdown">
       {rollup.books.map((b) => (
-        <BookRow key={b.book} book={b} loadVerses={loadVerses} />
+        <BookRow
+          key={b.book}
+          book={b}
+          loadVerses={loadVerses}
+          affirm={{
+            fileId: bookAffirm?.fileId ?? "",
+            affirmation: bookAffirm?.affirmations.get(b.book),
+            canAffirm: bookAffirm?.canAffirm ?? false,
+            onAffirm: bookAffirm?.onAffirm ?? (async () => {}),
+            onUnaffirm: bookAffirm?.onUnaffirm ?? (async () => {}),
+            loadPunchList:
+              bookAffirm?.loadPunchList ?? (async () => ({ bookCode: b.book, totalUnvalidated: 0, groups: [] })),
+            onJumpToCell: bookAffirm?.onJumpToCell ?? (() => {}),
+          }}
+        />
       ))}
     </ul>
   )
@@ -787,6 +1000,43 @@ export function ProjectOverview() {
     setRollupErrors({})
     chapterVerseRequests.current.clear()
   }, [fileLane])
+
+  // AQU-727: book-done affirmations + the unvalidated-verse punch list. The
+  // affirmation state is read project-wide (any member sees it); affirming is
+  // gated to project-lead (500+) via `canAssign` below at the call site.
+  const {
+    affirmations: bookAffirmations,
+    affirm: affirmBookDone,
+    unaffirm: unaffirmBookDone,
+  } = useBookAffirmations({
+    projectId: id || null,
+    jwt,
+    author: session?.username ?? "",
+    projectName: project?.name,
+    getToken: getMemberActivityToken,
+  })
+
+  // Fetch a book's target+source cells and compute its unvalidated-verse punch
+  // list (grouped by last editor). Loaded on demand when a punch list expands —
+  // never on the hot progress path.
+  const loadBookPunchList = useCallback(
+    async (fileId: string, bookCode: string): Promise<BookPunchList> => {
+      if (!jwt) throw new Error("session unavailable")
+      const tok = await fetchSyncToken(jwt, id, fileId, { projectName: project?.name })
+      const rows = await fetchAllFileCells(id, fileId, tok.token)
+      return buildBookPunchList(rows, bookCode)
+    },
+    [id, jwt, project?.name],
+  )
+
+  // Jump-to-cell: deep-link into the file editor scrolled to the cell (the same
+  // ?cellId= mechanism CommentsPage uses — ProjectWorkspace consumes it).
+  const jumpToBookCell = useCallback(
+    (fileId: string, cellId: string) => {
+      navigate(`/project/${id}/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
+    },
+    [id, navigate],
+  )
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
@@ -1468,6 +1718,15 @@ export function ProjectOverview() {
                                   error={rollupErrors[f.fileId] ?? false}
                                   onRetry={() => void loadFileRollup(f)}
                                   loadVerses={(sectionKey) => loadChapterVerses(f.fileId, sectionKey)}
+                                  bookAffirm={{
+                                    fileId: f.fileId,
+                                    affirmations: bookAffirmations,
+                                    canAffirm: canAssign,
+                                    onAffirm: affirmBookDone,
+                                    onUnaffirm: unaffirmBookDone,
+                                    loadPunchList: loadBookPunchList,
+                                    onJumpToCell: jumpToBookCell,
+                                  }}
                                 />
                               )}
                             </li>

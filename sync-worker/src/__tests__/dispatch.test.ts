@@ -59,6 +59,8 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     },
     'link.cursor.advance': { upstreamProjectId: 'proj-up', fromSeq: 0, toSeq: 1, cellCount: 1 },
     'target.cell.repin': { sourceEventId: 'evt-src-1', expectedTargetEventId: 'evt-tgt-1' },
+    'book.affirm': { bookCode: 'GEN' },
+    'book.unaffirm': { bookCode: 'GEN' },
   }
 
   const raw = {
@@ -67,7 +69,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     kind,
     projectId: 'proj-a',
     fileId: 'file-x',
-    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' ? undefined : 'cell-1',
+    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' || kind === 'book.affirm' || kind === 'book.unaffirm' ? undefined : 'cell-1',
     parentId: null,
     author: 'alice',
     payload: payloads[kind],

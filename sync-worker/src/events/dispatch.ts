@@ -21,6 +21,7 @@ import { handleFileVideoSet } from './handlers/file-video-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
+import { handleBookAffirmEvent, type BookAffirmEventKind } from './handlers/book-affirm-events'
 import type { DispatchResult } from './handlers/types'
 
 export type { DispatchResult } from './handlers/types'
@@ -189,6 +190,17 @@ export function dispatchEvent(
         result: handleAssignmentEvent(
           db,
           authed as AuthorizedEvent<AssignmentEventKind>,
+          serverTs,
+        ),
+      }
+
+    case 'book.affirm':
+    case 'book.unaffirm':
+      return {
+        ok: true,
+        result: handleBookAffirmEvent(
+          db,
+          authed as AuthorizedEvent<BookAffirmEventKind>,
           serverTs,
         ),
       }

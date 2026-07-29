@@ -113,6 +113,16 @@ export type EventKind =
   // a translator's concurrent re-commit makes this a no-op instead of
   // clobbering a fresher pin (the route reports skips for bulk repin).
   | 'target.cell.repin'
+  // AQU-727: "mark book done" affirmation. Project-level, non-chain-mutating —
+  // a Project Lead (500+) asserts a whole book is finished. Keyed on
+  // (project_id, book_code), NOT file_id (a book can span files and a file can
+  // span books). Purely ADVISORY: it never locks cells, blocks writes, or gates
+  // export; its only effect is to surface the book's still-unvalidated verses as
+  // a punch list (the "catch human error" signal from the feedback). Carries a
+  // real fileId on the envelope for auth/routing (like assignment.*), but the
+  // affirmed unit lives in the payload's book_code.
+  | 'book.affirm'
+  | 'book.unaffirm'
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -479,6 +489,23 @@ export interface EventPayloads {
   }
   'assignment.unassign': {
     assignmentId: string
+  }
+
+  // ── AQU-727: book-done affirmation (project-level, non-chain-mutating) ─────
+  // A Project Lead affirms a whole book is finished. Keyed on
+  // (project_id, book_code); the envelope's fileId is only a routing/auth
+  // handle (any file in the project the caller can mint a token for). The
+  // projection upserts one book_affirmations row per (project, book), guarded
+  // so a re-affirm refreshes the author/timestamp idempotently. Advisory only.
+  'book.affirm': {
+    /** Canonical book token, e.g. "GEN" — derived from cells' canonical_ref. */
+    bookCode: string
+    /** Optional note the lead attaches when affirming. */
+    note?: string | null
+  }
+  // Withdraw a prior affirmation. Deletes the (project, book) row.
+  'book.unaffirm': {
+    bookCode: string
   }
 
   // ── AD-9 source-link lifecycle (project-level, non-chain-mutating) ─────────

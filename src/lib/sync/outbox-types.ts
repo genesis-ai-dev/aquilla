@@ -71,6 +71,11 @@ export type OutboxEventKind =
   // state and value are untouched. Guarded server-side by
   // expectedTargetEventId (silent no-op if a translator re-committed).
   | "target.cell.repin"
+  // AQU-727: "mark book done" affirmation (project-level, non-chain-mutating;
+  // project-lead 500+). Keyed on (project, book_code); the envelope carries a
+  // real fileId for auth/routing only. Purely advisory — locks/gates nothing.
+  | "book.affirm"
+  | "book.unaffirm"
 
 // ── Comment scope ─────────────────────────────────────────────────────────
 
@@ -345,6 +350,17 @@ export interface OutboxEventPayloads {
   }
   "assignment.unassign": {
     assignmentId: string
+  }
+
+  // AQU-727: book-done affirmation. Project-level, non-chain-mutating. Keyed on
+  // (project, book_code); the envelope's fileId is a routing/auth handle only.
+  "book.affirm": {
+    /** Canonical book token, e.g. "GEN" — derived from cells' canonical_ref. */
+    bookCode: string
+    note?: string | null
+  }
+  "book.unaffirm": {
+    bookCode: string
   }
 
   // AQU-438: Cast/character label assignment.

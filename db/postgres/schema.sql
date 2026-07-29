@@ -615,6 +615,20 @@ CREATE TABLE assignment_cells (
     PRIMARY KEY (assignment_id, file_id, cell_id)
 );
 
+-- AQU-727: "mark book done" affirmations (projection of book.affirm events).
+-- Advisory sign-off keyed on (project_id, book_code). See migration
+-- 0072_book_affirmations.sql for the full rationale + RLS policy.
+CREATE TABLE book_affirmations (
+    project_id        TEXT NOT NULL,
+    book_code         TEXT NOT NULL,
+    affirmed_by       BIGINT NOT NULL,
+    affirmed_by_label TEXT NOT NULL,
+    event_id          TEXT NOT NULL,
+    affirmed_at       BIGINT NOT NULL,
+    note              TEXT,
+    PRIMARY KEY (project_id, book_code)
+);
+
 CREATE TABLE diarization_jobs (
     id           TEXT PRIMARY KEY,
     project_id   TEXT NOT NULL,

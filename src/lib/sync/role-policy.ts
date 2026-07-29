@@ -68,6 +68,11 @@ const REQUIRED_ROLE: Record<string, number> = {
   // as validating (spec §12). Bulk repin is gated higher (project_lead 500)
   // in the review-panel UI itself, not here.
   "target.cell.repin": ROLE.REVIEWER,
+
+  // AQU-727: affirming/withdrawing a "book done" sign-off is a project-lead
+  // (500+) gesture — same authority bar as assignment.*. Mirrors the server.
+  "book.affirm": ROLE.PROJECT_LEAD,
+  "book.unaffirm": ROLE.PROJECT_LEAD,
 }
 
 /**

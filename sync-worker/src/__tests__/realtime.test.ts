@@ -254,10 +254,10 @@ describe('parseRealtimeMessage — invalid inputs return null', () => {
 // ---------------------------------------------------------------------------
 
 describe('PROJECTION_TABLES', () => {
-  it('contains exactly 10 entries, matching the ProjectionTable union arity', () => {
+  it('contains exactly 11 entries, matching the ProjectionTable union arity', () => {
     // If you add a new ProjectionTable variant, update PROJECTION_TABLES too.
     // This test catches the drift.
-    const expectedArity = 10 // events | cells | files | cell_validators | cell_waivers | cell_audio | comments | cell_backtranslations | assignments | assignment_cells
+    const expectedArity = 11 // events | cells | files | cell_validators | cell_waivers | cell_audio | comments | cell_backtranslations | assignments | assignment_cells | book_affirmations
     expect(PROJECTION_TABLES.size).toBe(expectedArity)
   })
 })

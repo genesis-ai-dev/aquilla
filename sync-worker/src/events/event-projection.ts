@@ -305,7 +305,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'book_affirmations'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -1378,6 +1378,18 @@ case 'cell.audio.attach': {
       // never reach this projector; this case exists only for exhaustiveness.
       throw new Error(
         `buildEventProjectionStmts: ${event.kind} is projected by handleAssignmentEvent, not here (event id: ${event.id})`,
+      )
+    }
+
+    case 'book.affirm':
+    case 'book.unaffirm': {
+      // AQU-727: book-done affirmation projection is built directly in
+      // handlers/book-affirm-events.ts because it needs claims.userId for
+      // `affirmed_by` (a BIGINT), which PersistedEvent does not carry — it
+      // only has `author` (username). These kinds route to handleBookAffirmEvent
+      // and never reach this projector; this case exists only for exhaustiveness.
+      throw new Error(
+        `buildEventProjectionStmts: ${event.kind} is projected by handleBookAffirmEvent, not here (event id: ${event.id})`,
       )
     }
 

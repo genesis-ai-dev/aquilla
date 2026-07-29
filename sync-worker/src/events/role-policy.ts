@@ -130,6 +130,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // (project_lead 500) at the route/UI layer, not here — a single repin's
   // event-kind floor stays reviewer.
   'target.cell.repin': ROLE.REVIEWER,
+
+  // AQU-727: affirming a book "done" is a Project Lead (500+) gesture — a
+  // sign-off on a whole book's completeness. Advisory only, but the authority
+  // to make the assertion matches assignment.* (the other project-lead-level
+  // managerial action). Withdrawing an affirmation is the same authority.
+  'book.affirm': ROLE.PROJECT_LEAD,
+  'book.unaffirm': ROLE.PROJECT_LEAD,
 }
 
 export function requiredRoleFor(kind: EventKind): number {

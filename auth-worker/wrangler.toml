@@ -149,7 +149,7 @@ ENVIRONMENT = "production"
 # all three migration secrets above have been provisioned.
 LEGACY_USER_MIGRATION_ENABLED = "false"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
+GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — sandbox worker (aquilla-agent-sandbox) base URL for the agent's
 # code-exec tools. Left UNSET at top level until the sandbox worker is deployed:
 # the harness degrades to a clear "sandbox unavailable" tool error when absent,
@@ -232,7 +232,7 @@ DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
 LEGACY_USER_MIGRATION_ENABLED = "false"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
+GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
@@ -306,7 +306,7 @@ DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
+GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — intentionally unset until the development sandbox has a
 # stable deployed URL. `127.0.0.1` here would mean the deployed auth Worker's
 # own runtime, not a developer laptop. Local dev-stack injects either its
@@ -384,7 +384,7 @@ DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
 LEGACY_USER_MIGRATION_ENABLED = "false"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
+GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).

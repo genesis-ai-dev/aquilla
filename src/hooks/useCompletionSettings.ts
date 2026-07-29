@@ -1,6 +1,6 @@
 import { useCallback } from "react"
 import { getProject, updateProject } from "@/lib/store/project-index"
-import { DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, resolveProvider } from "@/lib/completion/completion-service"
+import { DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, resolveProvider } from "@/lib/completion/completion-service"
 import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
 
 /**
@@ -22,7 +22,7 @@ export function buildCompletionSettings(
     endpoint: overrides.endpoint ?? base?.endpoint ?? "",
     apiKey: overrides.apiKey ?? base?.apiKey,
     model: overrides.model ?? base?.model ?? "",
-    maxTokens: overrides.maxTokens ?? base?.maxTokens ?? 512,
+    maxTokens: overrides.maxTokens ?? base?.maxTokens ?? DEFAULT_COMPLETION_MAX_TOKENS,
     temperature: overrides.temperature ?? base?.temperature ?? 0.3,
     systemPrompt: overrides.systemPrompt ?? base?.systemPrompt ?? "",
     llmHealthPenalty: overrides.llmHealthPenalty ?? base?.llmHealthPenalty ?? 0.1,

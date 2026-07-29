@@ -37,7 +37,7 @@ import { DisabledFieldTooltip } from "./ProjectSettings/DisabledFieldTooltip"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
-import { fetchModels, resolveProvider } from "@/lib/completion/completion-service"
+import { DEFAULT_COMPLETION_MAX_TOKENS, fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
@@ -166,7 +166,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     endpoint: project.completionSettings?.endpoint ?? "",
     apiKey: project.completionSettings?.apiKey ?? "",
     model: project.completionSettings?.model ?? "",
-    maxTokens: project.completionSettings?.maxTokens ?? 512,
+    maxTokens: project.completionSettings?.maxTokens ?? DEFAULT_COMPLETION_MAX_TOKENS,
     temperature: project.completionSettings?.temperature ?? 0.3,
     systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
@@ -294,7 +294,7 @@ export function ProjectSettings() {
   const [apiKey, setApiKey] = useState("")
   const [presetId, setPresetId] = useState<string>("local")
   const [model, setModel] = useState("")
-  const [maxTokens, setMaxTokens] = useState(512)
+  const [maxTokens, setMaxTokens] = useState(DEFAULT_COMPLETION_MAX_TOKENS)
   const [temperature, setTemperature] = useState(0.3)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)

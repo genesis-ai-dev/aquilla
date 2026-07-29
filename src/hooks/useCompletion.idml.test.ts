@@ -8,7 +8,7 @@ import {
 } from "@aquilla/idml-roundtrip"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { useCompletion } from "./useCompletion"
 
@@ -44,7 +44,7 @@ const SETTINGS: CompletionSettings = {
   provider: "custom",
   endpoint: "http://localhost:9999",
   model: "test-model",
-  maxTokens: 512,
+  maxTokens: DEFAULT_COMPLETION_MAX_TOKENS,
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
 }
@@ -90,7 +90,9 @@ describe("useCompletion IDML protected-output boundary", () => {
     )
     const request = JSON.parse(bodies[0]!) as {
       messages: Array<{ role: string; content: string }>
+      max_tokens: number
     }
+    expect(request.max_tokens).toBe(DEFAULT_COMPLETION_MAX_TOKENS)
     expect(request.messages[0]?.content).toContain("IDML protected-anchor output contract")
     expect(request.messages.at(-1)?.content).toContain(unit.sourceHtml)
   })

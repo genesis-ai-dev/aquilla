@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { useNavigate, useParams } from "react-router-dom"
-import { Check, ChevronDown, FolderGit2, Search, Users } from "lucide-react"
+import { ChevronDown, FolderGit2, Search, Users, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -24,7 +24,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { humanRoleName } from "@/lib/frontier/roles"
 import {
   getTeam,
-  addTeamMember,
+  addTeamMembers,
   removeTeamMember,
   deleteTeam,
   updateTeam,
@@ -145,9 +145,12 @@ export function TeamDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  // Add member UI state
+  // Add member UI state — multi-select (AQU-735): stage several org members as
+  // chips and grant them all in one batch request.
   const [addingMember, setAddingMember] = useState(false)
-  const [selectedUsername, setSelectedUsername] = useState("")
+  const [stagedUsernames, setStagedUsernames] = useState<string[]>([])
+  const [addBusy, setAddBusy] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
 
   const refetch = useCallback(async () => {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
@@ -185,12 +188,18 @@ export function TeamDetail() {
     [orgMembers, team?.members],
   )
 
-  useEffect(() => {
-    if (!selectedUsername) return
-    if (!availableOrgMembers.some((member) => member.username === selectedUsername)) {
-      setSelectedUsername("")
-    }
-  }, [availableOrgMembers, selectedUsername])
+  const toggleStaged = useCallback((username: string) => {
+    setAddError(null)
+    setStagedUsernames((prev) =>
+      prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username],
+    )
+  }, [])
+
+  function closeAddMember() {
+    setAddingMember(false)
+    setStagedUsernames([])
+    setAddError(null)
+  }
 
   async function handleDelete() {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
@@ -203,12 +212,33 @@ export function TeamDetail() {
     }
   }
 
-  async function handleAddMember() {
-    if (!jwt || activeOrgId == null || groupIdNum == null || !selectedUsername) return
-    await addTeamMember(jwt, activeOrgId, groupIdNum, selectedUsername)
-    setAddingMember(false)
-    setSelectedUsername("")
-    await refetch()
+  async function handleAddMembers() {
+    if (!jwt || activeOrgId == null || groupIdNum == null || stagedUsernames.length === 0) return
+    setAddBusy(true)
+    setAddError(null)
+    try {
+      // ONE batch request — the endpoint is non-atomic and returns per-person
+      // results in request order, so one rejected person never sinks the rest.
+      const results = await addTeamMembers(jwt, activeOrgId, groupIdNum, stagedUsernames)
+      await refetch()
+      const failures = results.filter((r) => !r.ok)
+      if (failures.length === 0) {
+        closeAddMember()
+        return
+      }
+      // Keep only the people who failed staged for a retry; drop the successes.
+      // Name each failure with its reason — no silent all-or-nothing.
+      setStagedUsernames(failures.map((f) => f.username))
+      setAddError(
+        failures
+          .map((f) => `${f.username} (${f.error?.message ?? "couldn't be added"})`)
+          .join(", "),
+      )
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : "Couldn't add members.")
+    } finally {
+      setAddBusy(false)
+    }
   }
 
   async function handleRemoveMember(userId: number) {
@@ -420,7 +450,7 @@ export function TeamDetail() {
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => { setAddingMember(true); setSelectedUsername("") }}
+                        onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
                       >
                         Add member
                       </Button>
@@ -428,32 +458,60 @@ export function TeamDetail() {
                   }
                 >
                   {isAdmin && (
-                    <Dialog open={addingMember} onOpenChange={(o) => { if (!o) { setAddingMember(false); setSelectedUsername("") } }}>
+                    <Dialog open={addingMember} onOpenChange={(o) => { if (!o) closeAddMember() }}>
                       <DialogContent className="max-w-md">
                         <DialogHeader>
-                          <DialogTitle>Add member to &apos;{team.name}&apos;</DialogTitle>
+                          <DialogTitle>Add members to &apos;{team.name}&apos;</DialogTitle>
                         </DialogHeader>
-                        <TeamMemberCombobox
-                          members={availableOrgMembers}
-                          value={selectedUsername}
-                          onChange={setSelectedUsername}
-                          disabled={availableOrgMembers.length === 0}
-                        />
-                        {availableOrgMembers.length === 0 && (
-                          <p className="text-xs text-muted-foreground">
-                            All org members are already in this team.
-                          </p>
-                        )}
+                        <div className="space-y-2">
+                          <TeamMemberCombobox
+                            members={availableOrgMembers}
+                            staged={stagedUsernames}
+                            onToggle={toggleStaged}
+                            disabled={availableOrgMembers.length === 0}
+                          />
+                          {stagedUsernames.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {stagedUsernames.map((username) => (
+                                <span
+                                  key={username}
+                                  className="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"
+                                >
+                                  {username}
+                                  <button
+                                    type="button"
+                                    aria-label={`Remove ${username}`}
+                                    onClick={() => toggleStaged(username)}
+                                    className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                                  >
+                                    <X className="h-3 w-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {availableOrgMembers.length === 0 && stagedUsernames.length === 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              All org members are already in this team.
+                            </p>
+                          )}
+                          {addError && (
+                            <p role="alert" className="text-xs text-destructive">
+                              Couldn&apos;t add: {addError}
+                            </p>
+                          )}
+                        </div>
                         <DialogFooter>
-                          <Button type="button" variant="outline" onClick={() => { setAddingMember(false); setSelectedUsername("") }}>
+                          <Button type="button" variant="outline" onClick={closeAddMember}>
                             Cancel
                           </Button>
                           <Button
                             type="button"
-                            onClick={handleAddMember}
-                            disabled={!selectedUsername || availableOrgMembers.length === 0}
+                            onClick={handleAddMembers}
+                            disabled={stagedUsernames.length === 0 || addBusy}
                           >
-                            Add
+                            {addBusy && <Spinner data-icon="inline-start" />}
+                            {addBusy ? "Adding…" : "Add"}
                           </Button>
                         </DialogFooter>
                       </DialogContent>
@@ -669,20 +727,26 @@ export function TeamDetail() {
   )
 }
 
+/**
+ * Multi-select org-member picker (AQU-735). Each available org member is a
+ * checkbox row; checking accumulates the person in `staged` (rendered as
+ * removable chips by the caller). The popover stays open on toggle so several
+ * people can be picked in one pass, and typing filters the list without
+ * dropping anyone already checked.
+ */
 function TeamMemberCombobox({
   members,
-  value,
-  onChange,
+  staged,
+  onToggle,
   disabled,
 }: {
   members: OrgMember[]
-  value: string
-  onChange: (username: string) => void
+  staged: string[]
+  onToggle: (username: string) => void
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
-  const selectedMember = members.find((member) => member.username === value)
   const filteredMembers = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
     if (!normalizedQuery) return members
@@ -696,11 +760,10 @@ function TeamMemberCombobox({
     if (nextOpen) setQuery("")
   }
 
-  function handlePick(username: string) {
-    onChange(username)
-    setOpen(false)
-    setQuery("")
-  }
+  const triggerLabel =
+    staged.length === 0
+      ? "Search members..."
+      : `${staged.length} selected`
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -709,7 +772,7 @@ function TeamMemberCombobox({
           <button
             type="button"
             role="combobox"
-            aria-label="Member to add"
+            aria-label="Members to add"
             aria-expanded={open}
             aria-controls="team-member-combobox-list"
             disabled={disabled}
@@ -717,8 +780,8 @@ function TeamMemberCombobox({
           />
         }
       >
-        <span className={selectedMember ? "truncate" : "truncate text-muted-foreground"}>
-          {selectedMember?.username ?? "Search members..."}
+        <span className={staged.length > 0 ? "truncate" : "truncate text-muted-foreground"}>
+          {triggerLabel}
         </span>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
       </PopoverTrigger>
@@ -741,7 +804,7 @@ function TeamMemberCombobox({
         </InputGroup>
         <div
           id="team-member-combobox-list"
-          role="listbox"
+          role="group"
           aria-label="Org members"
           className="max-h-56 overflow-y-auto rounded-md border bg-background p-1"
         >
@@ -751,23 +814,21 @@ function TeamMemberCombobox({
             </p>
           ) : (
             filteredMembers.map((member) => {
-              const isSelected = member.username === value
+              const checked = staged.includes(member.username)
               return (
-                <button
+                <label
                   key={member.userId}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${
-                    isSelected ? "bg-muted/60" : ""
-                  }`}
-                  onClick={() => handlePick(member.username)}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
                 >
+                  <input
+                    type="checkbox"
+                    aria-label={member.username}
+                    checked={checked}
+                    onChange={() => onToggle(member.username)}
+                    className="h-4 w-4 shrink-0 rounded border-input accent-primary"
+                  />
                   <span className="truncate">{member.username}</span>
-                  {isSelected && (
-                    <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                  )}
-                </button>
+                </label>
               )
             })
           )}

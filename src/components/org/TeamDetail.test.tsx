@@ -15,7 +15,7 @@ vi.mock("@/lib/frontier/orgs", () => ({
   addOrgMember: (...a: unknown[]) => addOrgMember(...a),
 }))
 const getTeam = vi.fn()
-const addTeamMember = vi.fn()
+const addTeamMembers = vi.fn()
 const removeTeamMember = vi.fn()
 const deleteTeam = vi.fn()
 const updateTeam = vi.fn()
@@ -24,7 +24,7 @@ const changeProjectRole = vi.fn()
 const detachProject = vi.fn()
 vi.mock("@/lib/frontier/teams", () => ({
   getTeam: (...a: unknown[]) => getTeam(...a),
-  addTeamMember: (...a: unknown[]) => addTeamMember(...a),
+  addTeamMembers: (...a: unknown[]) => addTeamMembers(...a),
   removeTeamMember: (...a: unknown[]) => removeTeamMember(...a),
   deleteTeam: (...a: unknown[]) => deleteTeam(...a),
   updateTeam: (...a: unknown[]) => updateTeam(...a),
@@ -72,7 +72,8 @@ beforeEach(() => {
     { userId: 3, username: "Ben", role: { level: 100, name: "viewer" } },
   ])
   getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
-  addTeamMember.mockResolvedValue({ userId: 2, username: "anna" })
+  addTeamMembers.mockReset()
+  addTeamMembers.mockResolvedValue([])
   removeTeamMember.mockResolvedValue(undefined)
   deleteTeam.mockResolvedValue(undefined)
   updateTeam.mockResolvedValue({ id: 10, name: "WA2", description: null })
@@ -108,24 +109,65 @@ describe("TeamDetail project management", () => {
 })
 
 describe("TeamDetail admin management", () => {
-  it("adds a member via the org-member picker", async () => {
+  it("multi-selects several org members and adds them in ONE batch request (AQU-735)", async () => {
+    addTeamMembers.mockResolvedValue([
+      { username: "Ben", ok: true },
+      { username: "zara", ok: true },
+    ])
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
-    const picker = screen.getByRole("combobox", { name: /member to add/i })
+    const picker = screen.getByRole("combobox", { name: /members to add/i })
     expect(picker).toHaveTextContent("Search members...")
     fireEvent.click(picker)
-    expect(screen.queryByRole("option", { name: /^anna$/ })).toBeNull()
-    const options = await screen.findAllByRole("option")
-    expect(options.map((option) => option.textContent)).toEqual(["Ben", "zara"])
+    // anna is already in the team — never offered as a checkbox.
+    expect(screen.queryByRole("checkbox", { name: /^anna$/ })).toBeNull()
+    // Check Ben, then narrow the search to zara — Ben must stay staged.
+    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
+    expect(screen.getByRole("button", { name: /remove Ben/i })).toBeInTheDocument()
     fireEvent.change(screen.getByRole("textbox", { name: /search org members/i }), {
-      target: { value: "be" },
+      target: { value: "za" },
     })
-    expect(screen.queryByRole("option", { name: /^zara$/ })).toBeNull()
-    const benOption = screen.getByRole("option", { name: /^Ben$/ })
-    fireEvent.click(benOption)
+    expect(screen.queryByRole("checkbox", { name: /^Ben$/ })).toBeNull()
+    expect(screen.getByRole("button", { name: /remove Ben/i })).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole("checkbox", { name: /^zara$/ }))
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
-    await waitFor(() => expect(addTeamMember).toHaveBeenCalledWith("jwt", 1, 10, "Ben"))
+    // ONE batch call carrying both usernames — no client-side fan-out.
+    await waitFor(() => expect(addTeamMembers).toHaveBeenCalledTimes(1))
+    expect(addTeamMembers).toHaveBeenCalledWith("jwt", 1, 10, ["Ben", "zara"])
+  })
+
+  it("Add is disabled until someone is staged, and removing the last chip re-disables it", async () => {
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
+    expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
+    fireEvent.click(screen.getByRole("combobox", { name: /members to add/i }))
+    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
+    expect(screen.getByRole("button", { name: /^add$/i })).toBeEnabled()
+    fireEvent.click(screen.getByRole("button", { name: /remove Ben/i }))
+    expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
+    expect(addTeamMembers).not.toHaveBeenCalled()
+  })
+
+  it("reports partial failure per person: valid grants land, the failure is named and kept staged", async () => {
+    addTeamMembers.mockResolvedValue([
+      { username: "Ben", ok: true },
+      { username: "zara", ok: false, error: { code: "not_org_member", message: "not an org member" } },
+    ])
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
+    fireEvent.click(screen.getByRole("combobox", { name: /members to add/i }))
+    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
+    fireEvent.click(await screen.findByRole("checkbox", { name: /^zara$/ }))
+    await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
+    await waitFor(() =>
+      expect(screen.getByText(/zara \(not an org member\)/)).toBeInTheDocument(),
+    )
+    // zara (failed) stays staged for a retry; Ben (succeeded) is dropped.
+    expect(screen.getByRole("button", { name: /remove zara/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /remove Ben/i })).toBeNull()
   })
 
   it("removes a member", async () => {

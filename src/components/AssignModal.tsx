@@ -93,6 +93,15 @@ interface AssignModalProps {
    */
   defaultLane?: string
   /**
+   * AQU-728: display name of the default ('') lane — the project's own default
+   * target language (e.g. "Portuguese"). The default lane IS a real language
+   * lane, so the lane select must label it with this name rather than a generic
+   * "Default language"; without it a Portuguese-default project renders no
+   * "Portuguese" option and preselecting the launching default lane reads as
+   * "default". Falls back to "Default language" when unknown/empty.
+   */
+  defaultLaneLabel?: string
+  /**
    * The project's effective roster (already fetched by parent via
    * useProjectMembers). This includes people who only reach the project
    * through an org-wide role (AD-12 max-wins), so the assignee picker filters
@@ -152,6 +161,7 @@ export function AssignModal({
   projectFiles,
   targetLanes,
   defaultLane = "",
+  defaultLaneLabel,
   members,
   roleLevel,
   allowSelfAssignment = false,
@@ -246,11 +256,17 @@ export function AssignModal({
   const laneItems = useMemo(() => {
     const extra = targetLanes ?? []
     if (extra.length === 0) return [] as { value: string; label: string }[]
+    // AQU-728: the '' lane IS a real language — the project's own default
+    // target language. Label it with that language's name (e.g. "Portuguese")
+    // so every lane, including the default, is listed by name and preselecting
+    // the launching default lane reads as the language, not "default". Only
+    // fall back to the generic label when the default language is unknown.
+    const defaultLabel = defaultLaneLabel?.trim() || "Default language"
     return [
-      { value: "", label: "Default language" },
+      { value: "", label: defaultLabel },
       ...extra.map((lane) => ({ value: lane, label: lane })),
     ]
-  }, [targetLanes])
+  }, [targetLanes, defaultLaneLabel])
   // fileId -> named group label (excludes the synthetic "Ungrouped" bucket),
   // used to prefix each bulk-created assignment's scopeLabel so a PM can see
   // which season an individually-removable row came from.

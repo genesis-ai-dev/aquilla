@@ -5641,6 +5641,7 @@ export function ProjectWorkspace() {
           projectFiles={projectFiles}
           targetLanes={project.targetLanes}
           defaultLane={activeLane}
+          defaultLaneLabel={activeTargetLanguage ?? ""}
           members={projectMembers}
           roleLevel={currentRoleLevel}
           allowSelfAssignment={allowSelfAssignment}

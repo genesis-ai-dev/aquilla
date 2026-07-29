@@ -1,121 +1,236 @@
 #!/usr/bin/env tsx
-// Idempotent frontier-db-v2 → aquilla-db user import.
+// AQU-713: atomic frontier-db-v2 → Neon identity + access migration.
 //
-// Migrated events carry the original Frontier usernames as `author`; importing
-// the legacy users makes that attribution resolve to real accounts. Dedup is by
-// username + email (aquilla-db's two UNIQUE keys), so re-runs insert nothing.
+// Dry-run is the default. Writes require --apply:
+//   npx tsx scripts/migrate-users.ts
+//   npx tsx scripts/migrate-users.ts --apply
+//   npx tsx scripts/migrate-users.ts --apply --limit 25
 //
-// Reads frontier-db-v2 over the remote D1 API (read-only). Writes go to either
-// the local dev aquilla-db or PROD — and only with --apply.
-//
-//   npx tsx scripts/migrate-users.ts                       # read source, report (safe)
-//   npx tsx scripts/migrate-users.ts --target remote       # + read prod, show the plan
-//   npx tsx scripts/migrate-users.ts --target remote --apply   # WRITE to prod aquilla-db
-//   npx tsx scripts/migrate-users.ts --target local --apply    # WRITE to local dev D1
-//
-// Auth: uses your existing `wrangler login` session (same account that owns
-// frontier-db-v2 + aquilla-db). NOTE: --target local runs `wrangler d1 execute
-// --local` against .wrangler-dev-state, which contends with a running
-// `pnpm dev`; stop the dev stack first if you target local.
+// Required environment:
+//   NEON_PG_*                     target Neon connection
+//   FRONTIER_D1_ACCOUNT_ID
+//   FRONTIER_D1_DATABASE_ID
+//   FRONTIER_D1_API_TOKEN         D1 Read only
+//   FRONTIER_TOKEN + GITLAB_URL   trusted GitLab administrator credential
 
-import { execFileSync } from "node:child_process"
-import fs from "node:fs"
-import os from "node:os"
-import path from "node:path"
-import { planUserImport, type SourceUser, type ExistingUser } from "../src/lib/migrate/users"
+import type { Client } from "pg"
+import { neonClient } from "./pg"
+import {
+  PostgresDb,
+  type PgExecutor,
+} from "../db/shim/postgres"
+import {
+  listAllLegacyUsers,
+  type FrontierD1Config,
+  type LegacyUserRow,
+} from "../auth-worker/src/services/frontier-d1"
+import {
+  LegacyUserMigrationError,
+  applyLegacyUserMigration,
+  assertSupportedLegacyHash,
+  loadExistingAccessTargets,
+  loadGitLabAccessTopology,
+  prepareLegacyUserAccess,
+} from "../auth-worker/src/services/legacy-user-migration"
+import { resolveCredentialsFromEnv } from "../src/lib/migrate/gitlab/auth"
+import {
+  planUserImport,
+  type ExistingUser,
+  type SourceUser,
+} from "../src/lib/migrate/users"
 
-const FRONTIER_DB = "frontier-db-v2"
-const AQUILLA_PG = "aquilla-db"
-const PERSIST = ".wrangler-dev-state"
-const INSERT_CHUNK = 100
-
-function d1Query<T>(db: string, sql: string, remote: boolean): T[] {
-  const args = ["d1", "execute", db, remote ? "--remote" : "--local", "--json"]
-  if (!remote) args.push("--persist-to", PERSIST)
-  args.push("--command", sql)
-  const out = execFileSync("wrangler", args, { encoding: "utf8", maxBuffer: 128 * 1024 * 1024 })
-  const start = out.indexOf("[")
-  if (start < 0) throw new Error(`unexpected wrangler output: ${out.slice(0, 200)}`)
-  const parsed = JSON.parse(out.slice(start)) as Array<{ results: T[] }>
-  return parsed[0]?.results ?? []
+interface Args {
+  apply: boolean
+  limit: number | null
 }
 
-function sqlStr(s: string | null | undefined): string {
-  return `'${(s ?? "").replace(/'/g, "''")}'`
+function parseArgs(argv = process.argv.slice(2)): Args {
+  let apply = false
+  let limit: number | null = null
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--apply") {
+      apply = true
+      continue
+    }
+    if (argv[i] === "--limit") {
+      const parsed = Number(argv[++i])
+      if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+        throw new Error("--limit requires a positive integer")
+      }
+      limit = parsed
+      continue
+    }
+    throw new Error(`unknown argument: ${argv[i]}`)
+  }
+  return { apply, limit }
 }
 
-function applyInserts(db: string, users: SourceUser[], remote: boolean): void {
-  const now = new Date().toISOString().replace("T", " ").replace(/\..+/, "")
-  const lines: string[] = []
-  for (let i = 0; i < users.length; i += INSERT_CHUNK) {
-    const values = users
-      .slice(i, i + INSERT_CHUNK)
-      .map(
-        (u) =>
-          `(${sqlStr(u.username)}, ${sqlStr(u.email)}, ${sqlStr(u.password_hash)}, ${sqlStr(u.created_at ?? now)}, ${sqlStr(u.updated_at ?? now)})`,
-      )
-      .join(",\n")
-    lines.push(
-      `INSERT INTO users (username, email, password_hash, created_at, updated_at) VALUES\n${values};`,
+function d1ConfigFromEnv(): FrontierD1Config {
+  const accountId = process.env.FRONTIER_D1_ACCOUNT_ID?.trim()
+  const databaseId = process.env.FRONTIER_D1_DATABASE_ID?.trim()
+  const apiToken = process.env.FRONTIER_D1_API_TOKEN?.trim()
+  if (!accountId || !databaseId || !apiToken) {
+    throw new Error(
+      "FRONTIER_D1_ACCOUNT_ID, FRONTIER_D1_DATABASE_ID, and " +
+      "FRONTIER_D1_API_TOKEN (D1 Read only) are required",
     )
   }
-  const tmp = path.join(os.tmpdir(), `migrate-users-${users.length}.sql`)
-  fs.writeFileSync(tmp, lines.join("\n"))
-  const args = ["d1", "execute", db, remote ? "--remote" : "--local", "--file", tmp]
-  if (!remote) args.push("--persist-to", PERSIST)
-  execFileSync("wrangler", args, { stdio: "inherit" })
-  fs.unlinkSync(tmp)
+  return { accountId, databaseId, apiToken }
 }
 
-function main() {
-  const argv = process.argv.slice(2)
-  const apply = argv.includes("--apply")
-  const ti = argv.indexOf("--target")
-  const target = ti >= 0 ? argv[ti + 1] : undefined
-  const remoteTarget = target === "remote"
+function pgExecutor(client: Client): PgExecutor {
+  const executor: PgExecutor = {
+    async run(sql, params) {
+      const result = await client.query<Record<string, unknown>>(sql, params)
+      return { rows: result.rows, rowCount: result.rowCount ?? result.rows.length }
+    },
+    async begin<T>(fn: (tx: PgExecutor) => Promise<T>): Promise<T> {
+      await client.query("BEGIN")
+      try {
+        const result = await fn(executor)
+        await client.query("COMMIT")
+        return result
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      }
+    },
+  }
+  return executor
+}
 
-  console.log(`Reading users from ${FRONTIER_DB} (remote, read-only)…`)
-  const src = d1Query<SourceUser>(
-    FRONTIER_DB,
-    "SELECT username, email, password_hash, created_at, updated_at FROM users",
-    true,
-  )
-  console.log(`  ${src.length} legacy users`)
-  console.log("  sample:", src.slice(0, 5).map((u) => `${u.username} <${u.email}>`).join(", "))
+const identityKey = (user: Pick<SourceUser, "username" | "email">): string =>
+  `${user.username.trim().toLowerCase()}\u0000${user.email.trim().toLowerCase()}`
 
-  if (!target) {
-    console.log(
-      "\n[no --target] source read only. Re-run with --target local|remote to compute the dedup plan.",
+function sourceForPlan(
+  planned: SourceUser[],
+  source: LegacyUserRow[],
+): LegacyUserRow[] {
+  const keys = new Set(planned.map(identityKey))
+  return source.filter((user) => keys.has(identityKey(user)))
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs()
+  const d1 = d1ConfigFromEnv()
+  const gitlab = await resolveCredentialsFromEnv()
+  const client = neonClient()
+  await client.connect()
+  const db = new PostgresDb(pgExecutor(client))
+
+  const counts = {
+    source: 0,
+    alreadyPresent: 0,
+    conflicted: 0,
+    unsupportedHash: 0,
+    unresolved: 0,
+    planned: 0,
+    imported: 0,
+    idempotent: 0,
+    failed: 0,
+  }
+
+  try {
+    const [source, existingRows] = await Promise.all([
+      listAllLegacyUsers(d1),
+      db.prepare(
+        "SELECT id, username, email FROM users ORDER BY id",
+      ).all<ExistingUser & { id: number }>(),
+    ])
+    counts.source = source.length
+    const identityPlan = planUserImport(
+      source,
+      existingRows.results,
     )
-    return
-  }
+    counts.alreadyPresent = identityPlan.alreadyPresent
+    counts.conflicted = identityPlan.conflicts.length
 
-  console.log(`Reading existing users from ${AQUILLA_PG} (${remoteTarget ? "remote / PROD" : "local dev"})…`)
-  const existing = d1Query<ExistingUser>(AQUILLA_PG, "SELECT username, email FROM users", remoteTarget)
-  console.log(`  ${existing.length} existing`)
+    let candidates = sourceForPlan(identityPlan.toInsert, source)
+    const supported: LegacyUserRow[] = []
+    for (const candidate of candidates) {
+      try {
+        assertSupportedLegacyHash(candidate.password_hash)
+        if (candidate.gitlab_user_id == null) {
+          counts.unresolved++
+          continue
+        }
+        supported.push(candidate)
+      } catch (error) {
+        if (
+          error instanceof LegacyUserMigrationError &&
+          error.code === "unsupported-hash"
+        ) {
+          counts.unsupportedHash++
+          continue
+        }
+        throw error
+      }
+    }
+    candidates = args.limit == null ? supported : supported.slice(0, args.limit)
 
-  const plan = planUserImport(src, existing)
-  console.log(
-    `\nPlan → insert ${plan.toInsert.length}, already present ${plan.alreadyPresent}, conflicts ${plan.conflicts.length}`,
-  )
-  if (plan.conflicts.length) {
-    console.log("  first conflicts:")
-    for (const c of plan.conflicts.slice(0, 5)) console.log(`    ${c.username} <${c.email}> — ${c.reason}`)
-  }
+    if (candidates.length === 0) {
+      console.log(JSON.stringify({
+        mode: args.apply ? "apply" : "dry-run",
+        ...counts,
+      }))
+      return
+    }
 
-  if (!apply) {
-    console.log("\n[dry-run] no writes. Re-run with --apply to insert the new users.")
-    return
+    // Load topology and target identities once. Per-user work only queries the
+    // GitLab direct-membership endpoint, then runs the shared pure planner.
+    const context = {
+      topology: await loadGitLabAccessTopology(gitlab),
+      existing: await loadExistingAccessTargets(db),
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const access = await prepareLegacyUserAccess(candidate, gitlab, context)
+        counts.planned++
+        if (!args.apply) continue
+        const result = await applyLegacyUserMigration(
+          db,
+          candidate,
+          access,
+          "scheduled",
+        )
+        if (result.created) counts.imported++
+        else counts.idempotent++
+      } catch (error) {
+        if (
+          error instanceof LegacyUserMigrationError &&
+          error.code === "conflict"
+        ) {
+          counts.conflicted++
+        } else if (
+          error instanceof LegacyUserMigrationError &&
+          error.code === "unresolved-access"
+        ) {
+          counts.unresolved++
+        } else {
+          counts.failed++
+        }
+        // Do not emit source ids, usernames, emails, password hashes, tokens,
+        // or exception details. Aggregate counts below are the operator report.
+        console.error("legacy user candidate status=skipped")
+      }
+    }
+
+    console.log(JSON.stringify({
+      mode: args.apply ? "apply" : "dry-run",
+      ...counts,
+    }))
+    if (counts.failed > 0) process.exitCode = 1
+  } finally {
+    await client.end()
   }
-  if (plan.toInsert.length === 0) {
-    console.log("\nNothing to insert — already idempotent.")
-    return
-  }
-  console.log(
-    `\n${remoteTarget ? "⚠️  WRITING TO PROD aquilla-db" : "Writing to local dev aquilla-db"} — ${plan.toInsert.length} users…`,
-  )
-  applyInserts(AQUILLA_PG, plan.toInsert, remoteTarget)
-  console.log("✓ Done. Re-run without --apply to confirm 0 remain.")
 }
 
-main()
+main().catch((error) => {
+  console.error(
+    error instanceof Error
+      ? `legacy user migration failed: ${error.message}`
+      : "legacy user migration failed",
+  )
+  process.exit(1)
+})

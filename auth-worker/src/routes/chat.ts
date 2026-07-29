@@ -22,6 +22,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
+import { openRouterExtras } from "../lib/llm-vendor"
 import {
   AB_OUTCOMES,
   pickAbArm,
@@ -110,7 +111,7 @@ async function resolveChatOrgId(
   }
 }
 
-function buildOpenRouterBody(request: ChatRequest, model: string): string {
+function buildOpenRouterBody(request: ChatRequest, model: string, env: Env): string {
   const messages = request.messages.map((m) => ({
     role: m.role,
     content: m.content,
@@ -121,8 +122,7 @@ function buildOpenRouterBody(request: ChatRequest, model: string): string {
     temperature: request.temperature,
     stream: request.stream,
     max_tokens: request.max_tokens,
-    usage: { include: true },
-    reasoning: { effort: "none" },
+    ...openRouterExtras(env.OPENROUTER_BASE_URL),
     ...(request.response_format && { response_format: request.response_format }),
   })
 }
@@ -175,7 +175,7 @@ chat.post(
           Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: buildOpenRouterBody(request, model),
+        body: buildOpenRouterBody(request, model, c.env),
       })
       const latencyMs = Date.now() - startedAt
 

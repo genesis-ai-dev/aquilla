@@ -175,6 +175,30 @@ export function mergeServerProjectWithLocalCache(
     ...(local.suggestionsDismissedAt
       ? { suggestionsDismissedAt: local.suggestionsDismissedAt }
       : {}),
+    // AQU-695: the setup-checklist dismissal is a client-local IDB overlay
+    // (written by useSetupChecklist.dismiss → patchProject). The server never
+    // stores it, so without carrying it through here the merged project the
+    // workspace renders always sees `undefined` and the dismissal is dropped
+    // on every load — the chip and auto-open never learn it was dismissed.
+    ...(local.setupChecklistDismissed
+      ? { setupChecklistDismissed: local.setupChecklistDismissed }
+      : {}),
+    // AQU-701: the voice/transcription skip is a device-local flag with no
+    // server column; without this overlay every refetch drops it.
+    ...(local.aiSetupSkipped !== undefined
+      ? { aiSetupSkipped: local.aiSetupSkipped }
+      : {}),
+    // AQU-701: voice settings chosen in the setup checklist (provider, BYOK
+    // gemini key) are written to the device-local record; carry them across
+    // server refetches, letting server-synced keys win where present.
+    ...(local.ttsSettings
+      ? { ttsSettings: { ...local.ttsSettings, ...server.ttsSettings } }
+      : {}),
+    // Experimental flags are device-local by design (src/lib/features/flags.ts)
+    // — the server record never carries them, so the local overlay wins.
+    ...(local.experimentalFlags !== undefined
+      ? { experimentalFlags: local.experimentalFlags }
+      : {}),
   }
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react"
-import { HelpCircle, ExternalLink, Mail, BookOpen, Map } from "lucide-react"
+import { HelpCircle, ExternalLink, Mail, BookOpen, Map, ChevronDown } from "lucide-react"
 import { Discord } from "@/components/icons/Discord"
+import { cn } from "@/lib/utils"
 import { useProductTourContext } from "@/context/ProductTourContext"
 import {
   DropdownMenu,
@@ -41,12 +42,20 @@ export function HelpMenu() {
         render={
           <button
             type="button"
+            aria-label="Help & community menu"
             className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-popup-open:bg-accent/60 data-popup-open:text-foreground"
           />
         }
       >
         <HelpCircle className="h-3.5 w-3.5" aria-hidden />
         Help &amp; community
+        <ChevronDown
+          className={cn(
+            "ml-auto h-3.5 w-3.5 opacity-50 transition-transform",
+            open && "rotate-180",
+          )}
+          aria-hidden
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         className="w-(--anchor-width) rounded-lg"

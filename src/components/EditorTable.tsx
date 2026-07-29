@@ -4877,9 +4877,15 @@ function EditorRow({
   // validators popover) renders to the LEFT of the TARGET editing cell — see the
   // target column below — instead of in the far-left gutter beside the source.
   // A reviewer no longer has to cross the screen from the target to validate.
-  const validationControl = hasContent ? (
-    <div className="flex shrink-0 items-start pt-1">
-      {hasValidatorInfo ? (
+  // AQU-687: reserve a stable-width gutter for the validation control whether or
+  // not the cell has content yet. Collapsing this slot to `null` for empty cells
+  // made the target editor snap narrower the instant a prediction/draft filled
+  // the cell (hasContent flips true → the 24px button + gap appears). Keeping a
+  // fixed `w-6` slot at all times holds the editor width steady.
+  const validationControl = (
+    <div data-testid="validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
+      {hasContent ? (
+        hasValidatorInfo ? (
         <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
           <PopoverTrigger
             openOnHover
@@ -4940,9 +4946,10 @@ function EditorRow({
               : undefined,
           )}
         </AppTooltip>
-      )}
+        )
+      ) : null}
     </div>
-  ) : null
+  )
   const cellStateLabel =
     cell.status === "validated" ? "validated" :
     cell.status === "empty" ? "empty" :

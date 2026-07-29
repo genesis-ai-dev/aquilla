@@ -91,6 +91,9 @@ name = "EMAIL"
 #                        (aquilla-agent-sandbox). AQU-AGENT §2/§6. Unset →
 #                        run_code/load_artifact/read_sandbox_file return a clear
 #                        "sandbox unavailable" tool error (the run still runs).
+#   FRONTIER_D1_DATABASE_ID — source frontier-db-v2 UUID.
+#   FRONTIER_D1_API_TOKEN   — source token scoped to D1 Read only.
+#   GITLAB_ADMIN_TOKEN      — trusted service token for access reconstruction.
 # Plain vars: see types.ts for the full list.
 #
 # Outbound email (password reset + project invites) goes through Cloudflare
@@ -142,6 +145,11 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
+# AQU-713 rollout gate. Keep false until the production dry-run succeeds and
+# all three migration secrets above have been provisioned.
+LEGACY_USER_MIGRATION_ENABLED = "false"
+FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
+GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — sandbox worker (aquilla-agent-sandbox) base URL for the agent's
 # code-exec tools. Left UNSET at top level until the sandbox worker is deployed:
 # the harness degrades to a clear "sandbox unavailable" tool error when absent,
@@ -222,6 +230,9 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
+LEGACY_USER_MIGRATION_ENABLED = "false"
+FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
+GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
@@ -293,6 +304,9 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
+LEGACY_USER_MIGRATION_ENABLED = "true"
+FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
+GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — intentionally unset until the development sandbox has a
 # stable deployed URL. `127.0.0.1` here would mean the deployed auth Worker's
 # own runtime, not a developer laptop. Local dev-stack injects either its
@@ -368,6 +382,9 @@ BASE_URL = "https://staging.aquilla.app"
 SYNC_WORKER_URL = "https://api.staging.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
+LEGACY_USER_MIGRATION_ENABLED = "false"
+FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
+GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).
@@ -406,6 +423,7 @@ BASE_URL = "http://127.0.0.1:5173"
 # returns without SYNC_WORKER_URL... this just pointed it at the wrong worker).
 SYNC_WORKER_URL = "http://127.0.0.1:8789"
 ENVIRONMENT = "development"
+LEGACY_USER_MIGRATION_ENABLED = "false"
 ADMIN_EMAILS = "alice@example.test"
 # A deployed e2e worker must use an explicitly provisioned remote sandbox.
 # Local e2e is started through scripts/dev-stack.ts, which injects the paired

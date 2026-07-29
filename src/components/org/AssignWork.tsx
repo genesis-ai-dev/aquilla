@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from "react"
-import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
-import { compareByCanonicalBookOrder } from "@/lib/file-labeling/bible-book-names"
+import { fetchProjectRoster, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 import { canSubmitAssignment } from "@/lib/sync/role-policy"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   DatePicker,
   dateToDeadlineString,
@@ -26,16 +27,33 @@ import {
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
- * chapter scope to an org member. Collapsed to an "Assign…" button until
+ * chapter scope to a project member. Collapsed to an "Assign…" button until
  * opened; emits one assignment.create on submit. Book scope = whole file;
- * chapter scope = a real chapter picked from the file's chapter dropdown
- * (the canonical_ref prefix, e.g. "GEN 1", matched server-side via LIKE).
+ * chapter scope = one or more real chapters checked from the file's chapter
+ * list (each the canonical_ref prefix, e.g. "GEN 1", matched server-side via
+ * LIKE). AQU-677: post-editors work contiguous chapter runs, so the chapter
+ * picker is multi-select — every checked chapter lands in a single
+ * assignment.create's `scope[]` (one assignment, one deadline, one progress
+ * bar across the run). Checking none = whole book; the member selector stays
+ * single-select.
  */
+/**
+ * AQU-678: the "Book" dropdown must list every book fully spelled out and in
+ * canonical position, matching the sidebar. A file's `name` can be an
+ * abbreviation or a locale rename (two data sources — see the issue), so we
+ * resolve the canonical English book name from its stable `bookCode` when we
+ * have one and fall back to the raw `name` for non-scripture files. Sorting on
+ * the resolved label keeps a book like Ezekiel in its canonical slot even when
+ * its file name is a non-canonical abbreviation the ordinal lookup can't match.
+ */
+function bookLabel(f: { name: string; bookCode?: string }): string {
+  return (f.bookCode ? getBookName(f.bookCode) : undefined) ?? f.name
+}
+
 export interface AssignWorkProps {
   projectId: string
   /** Files in the project (book = one file). */
-  files: { id: string; name: string }[]
-  orgId: number
+  files: { id: string; name: string; bookCode?: string }[]
   jwt: string
   /** Manager's username — stamped as the event author (server re-verifies). */
   author: string
@@ -53,7 +71,6 @@ const DEFAULT_ROLE_LEVEL = 500
 export function AssignWork({
   projectId,
   files,
-  orgId,
   jwt,
   author,
   roleLevel = DEFAULT_ROLE_LEVEL,
@@ -63,45 +80,80 @@ export function AssignWork({
 }: AssignWorkProps) {
   const isSelfAssignMode = roleLevel < DEFAULT_ROLE_LEVEL
   const [open, setOpen] = useState(false)
-  const [members, setMembers] = useState<OrgMember[]>([])
+  const [members, setMembers] = useState<ProjectMember[]>([])
   const [assigneeId, setAssigneeId] = useState<number | "">(
     isSelfAssignMode && callerUserId != null ? callerUserId : "",
   )
   const [fileId, setFileId] = useState(files[0]?.id ?? "")
-  const [chapter, setChapter] = useState("")
+  const [selectedChapters, setSelectedChapters] = useState<string[]>([])
   const [chapters, setChapters] = useState<string[]>([])
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // AQU-582: list books in canonical Bible reading order (Genesis → Revelation)
-  // rather than the incoming prop order, matching the sidebar and the Assign
-  // modal. Non-book files fall back to alphabetic via the shared comparator.
+  // AQU-582 / AQU-678: list books in canonical Bible reading order (Genesis →
+  // Revelation) rather than the incoming prop order, matching the sidebar and
+  // the Assign modal, and label each with its fully spelled-out canonical name
+  // (via bookLabel) so abbreviations don't leak through. Sorting on the resolved
+  // label keeps every book in its canonical slot; non-book files fall back to
+  // alphabetic via the shared comparator.
   const sortedFiles = useMemo(
-    () => [...files].sort((a, b) => compareByCanonicalBookOrder(a.name, b.name)),
+    () =>
+      files
+        .map((f) => ({ ...f, label: bookLabel(f) }))
+        .sort((a, b) => compareByCanonicalBookOrder(a.label, b.label)),
     [files],
   )
 
+  // AQU-676: fetch the project's effective roster (same source AssignModal's
+  // hosts use), not the org roster — an org roster both floods the picker with
+  // org-baseline-only people and misses project-only invitees (AQU-474).
+  // Roster-hidden / no-access resolve to an empty list, failing closed.
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    listOrgMembers(jwt, orgId)
-      .then((m) => { if (!cancelled) setMembers(m) })
+    fetchProjectRoster(jwt, projectId)
+      .then((r) => { if (!cancelled) setMembers(r.kind === "ok" ? r.members : []) })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
     return () => { cancelled = true }
-  }, [open, jwt, orgId])
+  }, [open, jwt, projectId])
 
-  // Load the selected file's chapters for the dropdown; reset the picked
-  // chapter when the file changes so a stale chapter can't leak across books.
+  // AQU-676: the assignee picker must list only the project's own members,
+  // never everyone with org-baseline access. partitionMembers (AQU-454) keeps
+  // only members with a project-specific path (override / group / creator);
+  // org-baseline-only members drop out. Self-assign mode is exempt (the caller
+  // claims work for themselves) — it filters the raw roster to the caller.
+  const eligibleMembers = useMemo(
+    () => partitionMembers(members).projectMembers,
+    [members],
+  )
+
+  // Load the selected file's chapters for the picker; clear the checked
+  // chapters when the file changes so stale chapters can't leak across books.
   useEffect(() => {
     if (!open || !fileId) return
     let cancelled = false
-    setChapter("")
+    setSelectedChapters([])
     getFileChapters(jwt, projectId, fileId)
       .then((cs) => { if (!cancelled) setChapters(cs) })
       .catch(() => { if (!cancelled) setChapters([]) })
     return () => { cancelled = true }
   }, [open, fileId, jwt, projectId])
+
+  // Keep the checked chapters in canonical (server-natural-sorted) order
+  // regardless of click order — drives both the scope[] and the label.
+  const orderedChosen = useMemo(
+    () => chapters.filter((ch) => selectedChapters.includes(ch)),
+    [chapters, selectedChapters],
+  )
+  const allChaptersChecked =
+    chapters.length > 0 && orderedChosen.length === chapters.length
+
+  function toggleChapter(ch: string, checked: boolean) {
+    setSelectedChapters((prev) =>
+      checked ? [...prev, ch] : prev.filter((c) => c !== ch),
+    )
+  }
 
   async function submit() {
     if (assigneeId === "") {
@@ -112,15 +164,27 @@ export function AssignWork({
       setError("Choose a file.")
       return
     }
+    // AQU-676 defense-in-depth: the picker already hides org-baseline-only
+    // members, but re-check on submit so a stale/forced selection can't route
+    // an assignment to someone outside the project.
+    if (!isSelfAssignMode && !eligibleMembers.some((m) => m.userId === Number(assigneeId))) {
+      setError("You can only assign work to a project member.")
+      return
+    }
     if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, Number(assigneeId))) {
       setError("You can only assign work to yourself.")
       return
     }
-    const fileName = files.find((f) => f.id === fileId)?.name ?? "file"
-    const chap = chapter.trim()
-    const scopeKind = chap ? "chapters" : "books"
-    const scope = chap ? [{ fileId, chapter: chap }] : [{ fileId }]
-    const scopeLabel = chap ? `${fileName} · ${chap}` : fileName
+    // AQU-678: label the assignment with the spelled-out canonical book name.
+    const fileName = sortedFiles.find((f) => f.id === fileId)?.label ?? "file"
+    // AQU-677: zero checked chapters = whole book (unchanged single-book path);
+    // one or more = a single chapters-scope assignment listing every chapter.
+    const chosen = orderedChosen
+    const scopeKind = chosen.length > 0 ? "chapters" : "books"
+    const scope =
+      chosen.length > 0 ? chosen.map((ch) => ({ fileId, chapter: ch })) : [{ fileId }]
+    const scopeLabel =
+      chosen.length > 0 ? `${fileName} · ${chosen.join(", ")}` : fileName
     const deadline = deadlineDate ? dateToDeadlineString(deadlineDate) : ""
     setBusy(true)
     setError(null)
@@ -136,7 +200,7 @@ export function AssignWork({
         scopeLabel,
         deadline: deadline || null,
       })
-      setChapter("")
+      setSelectedChapters([])
       setDeadlineDate(undefined)
       setOpen(false)
       onAssigned?.()
@@ -169,7 +233,8 @@ export function AssignWork({
                       .map((m) => ({ value: String(m.userId), label: `${m.username} (you)` }))
                   : [
                       { value: "", label: "Select member…" },
-                      ...members.map((m) => ({ value: String(m.userId), label: m.username })),
+                      // AQU-676: project members only — org-baseline-only people are excluded.
+                      ...eligibleMembers.map((m) => ({ value: String(m.userId), label: m.username })),
                     ]
               }
               value={assigneeId === "" ? "" : String(assigneeId)}
@@ -190,7 +255,7 @@ export function AssignWork({
                   ) : (
                     <>
                       <SelectItem value="">Select member…</SelectItem>
-                      {members.map((m) => (
+                      {eligibleMembers.map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>{m.username}</SelectItem>
                       ))}
                     </>
@@ -207,7 +272,7 @@ export function AssignWork({
           <Field>
             <FieldLabel htmlFor="assign-work-book">Book</FieldLabel>
             <Select
-              items={sortedFiles.map((f) => ({ value: f.id, label: f.name }))}
+              items={sortedFiles.map((f) => ({ value: f.id, label: f.label }))}
               value={fileId}
               onValueChange={(v) => setFileId(v ?? "")}
               disabled={busy}
@@ -218,35 +283,63 @@ export function AssignWork({
               <SelectContent>
                 <SelectGroup>
                   {sortedFiles.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>
                   ))}
                 </SelectGroup>
               </SelectContent>
             </Select>
           </Field>
           <Field>
-            <FieldLabel htmlFor="assign-work-chapter">Chapter</FieldLabel>
-            <Select
-              items={[
-                { value: "", label: "Whole book" },
-                ...chapters.map((ch) => ({ value: ch, label: ch })),
-              ]}
-              value={chapter}
-              onValueChange={(v) => setChapter(v ?? "")}
-              disabled={busy}
-            >
-              <SelectTrigger id="assign-work-chapter" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="">Whole book</SelectItem>
+            <FieldLabel htmlFor="assign-work-chapters">Chapters</FieldLabel>
+            {chapters.length === 0 ? (
+              <FieldDescription>
+                Whole book — this file has no chapters to narrow to.
+              </FieldDescription>
+            ) : (
+              <>
+                <div
+                  className="mb-1 flex items-center justify-between text-xs text-muted-foreground"
+                >
+                  <span>
+                    {orderedChosen.length === 0
+                      ? "Whole book (none checked)"
+                      : `${orderedChosen.length} chapter${orderedChosen.length === 1 ? "" : "s"} selected`}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto px-1 py-0 text-xs"
+                    disabled={busy}
+                    onClick={() =>
+                      setSelectedChapters(allChaptersChecked ? [] : [...chapters])
+                    }
+                  >
+                    {allChaptersChecked ? "Clear all" : "Select all"}
+                  </Button>
+                </div>
+                <div
+                  id="assign-work-chapters"
+                  role="group"
+                  aria-label="Chapters"
+                  className="max-h-40 overflow-y-auto rounded-md border p-2"
+                >
                   {chapters.map((ch) => (
-                    <SelectItem key={ch} value={ch}>{ch}</SelectItem>
+                    <label
+                      key={ch}
+                      className="flex cursor-pointer items-center gap-2 py-1 text-sm"
+                    >
+                      <Checkbox
+                        checked={selectedChapters.includes(ch)}
+                        onCheckedChange={(c) => toggleChapter(ch, c === true)}
+                        disabled={busy}
+                      />
+                      {ch}
+                    </label>
                   ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+                </div>
+              </>
+            )}
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-deadline">Deadline (optional)</FieldLabel>

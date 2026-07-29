@@ -1,5 +1,44 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { deriveChecklistState, wasSetupAutoShown, markSetupAutoShown } from "./useSetupChecklist"
+import {
+  deriveChecklistState,
+  deriveAiModelsReady,
+  isSetupInProgress,
+  markSetupInProgress,
+  clearSetupInProgress,
+} from "./useSetupChecklist"
+
+const ready = { kind: "ready" } as const
+const idle = { kind: "idle" } as const
+
+describe("deriveAiModelsReady", () => {
+  // AQU-701 follow-up: Whisper/Kokoro caches are device-global, so their mere
+  // presence must not flip a project's voice step green — that left the step
+  // permanently complete and made the skip link look like it did nothing.
+  it("AQU-701: device-cached models alone do NOT complete the step (no explicit provider)", () => {
+    expect(deriveAiModelsReady(undefined, { kokoro: ready, mms: ready })).toBe(false)
+    expect(deriveAiModelsReady({}, { kokoro: ready, mms: ready })).toBe(false)
+  })
+
+  it("kokoro: explicit choice + cached model completes; a missing cache does not", () => {
+    expect(deriveAiModelsReady({ provider: "kokoro" }, { kokoro: ready, mms: idle })).toBe(true)
+    expect(deriveAiModelsReady({ provider: "kokoro" }, { kokoro: idle, mms: idle })).toBe(false)
+  })
+
+  it("mms: explicit choice + cached model completes; the kokoro cache doesn't count", () => {
+    expect(deriveAiModelsReady({ provider: "mms" }, { kokoro: idle, mms: ready })).toBe(true)
+    expect(deriveAiModelsReady({ provider: "mms" }, { kokoro: ready, mms: idle })).toBe(false)
+  })
+
+  it("gemini: completes on a saved key, never on local caches", () => {
+    expect(deriveAiModelsReady({ provider: "gemini", apiKey: "AIzaExampleKey123456789012" }, { kokoro: idle, mms: idle })).toBe(true)
+    expect(deriveAiModelsReady({ provider: "gemini" }, { kokoro: ready, mms: ready })).toBe(false)
+    expect(deriveAiModelsReady({ provider: "gemini", apiKey: "   " }, { kokoro: ready, mms: ready })).toBe(false)
+  })
+
+  it("hosted omnivoice: the explicit choice alone completes — no download or key needed", () => {
+    expect(deriveAiModelsReady({ provider: "omnivoice" }, { kokoro: idle, mms: idle })).toBe(true)
+  })
+})
 
 describe("deriveChecklistState", () => {
   it("returns all incomplete when project has no settings", () => {
@@ -42,6 +81,19 @@ describe("deriveChecklistState", () => {
     expect(state.aiModels).toBe(true)
   })
 
+  // AQU-701: an explicit "we don't use voice/transcription" skip counts the
+  // voice & transcription step as handled so the checklist stops nagging.
+  it("AQU-701: marks aiModels complete when the step is skipped, even if models aren't ready", () => {
+    const state = deriveChecklistState({}, 0, false, 0, true)
+    expect(state.aiModels).toBe(true)
+    expect(state.totalCount).toBe(4)
+    expect(state.completedCount).toBe(1)
+  })
+
+  it("AQU-701: leaves aiModels incomplete when neither ready nor skipped", () => {
+    expect(deriveChecklistState({}, 0, false, 0, false).aiModels).toBe(false)
+  })
+
   it("counts completed items correctly", () => {
     const state = deriveChecklistState(
       { endpoint: "x", model: "m", maxTokens: 512, temperature: 0.3, systemPrompt: "y", llmHealthPenalty: 0.1 },
@@ -62,41 +114,37 @@ describe("deriveChecklistState", () => {
   })
 })
 
-describe("wasSetupAutoShown / markSetupAutoShown", () => {
-  // AQU-244: localStorage helpers for auto-surface shown-once tracking.
+describe("isSetupInProgress / markSetupInProgress / clearSetupInProgress", () => {
+  // AQU-694: per-project localStorage helpers that record the user is mid-setup
+  // so a browser refresh can restore the drawer — WITHOUT ever auto-opening a
+  // checklist the user never engaged with.
   beforeEach(() => {
     // Clear only the keys this test group uses so other tests are unaffected.
-    localStorage.removeItem("codex.setupAutoShown.p-unit-1")
-    localStorage.removeItem("codex.setupAutoShown.p-unit-2")
+    localStorage.removeItem("codex.setupInProgress.p-unit-1")
+    localStorage.removeItem("codex.setupInProgress.p-unit-2")
   })
 
-  it("AQU-244: returns false before first mark, true after", () => {
-    expect(wasSetupAutoShown("p-unit-1")).toBe(false)
-    markSetupAutoShown("p-unit-1")
-    expect(wasSetupAutoShown("p-unit-1")).toBe(true)
+  it("AQU-694: returns false before first mark, true after, false after clear", () => {
+    expect(isSetupInProgress("p-unit-1")).toBe(false)
+    markSetupInProgress("p-unit-1")
+    expect(isSetupInProgress("p-unit-1")).toBe(true)
+    // Clear models the flow ending (dismiss or completion) — restore stops.
+    clearSetupInProgress("p-unit-1")
+    expect(isSetupInProgress("p-unit-1")).toBe(false)
   })
 
-  it("AQU-244: different projects have independent shown flags", () => {
-    markSetupAutoShown("p-unit-1")
-    expect(wasSetupAutoShown("p-unit-2")).toBe(false)
+  it("AQU-694: no auto-open — a project the user never opened has no flag", () => {
+    markSetupInProgress("p-unit-1")
+    // p-unit-2 was never opened, so it must not inherit p-unit-1's flag.
+    expect(isSetupInProgress("p-unit-2")).toBe(false)
   })
 
-  // AQU-244: the shouldAutoOpen guard reads wasSetupAutoShown() directly at
-  // render time — NOT via mirrored state — so project A→B switches don't
-  // inherit A's stale flag. Verify the raw helpers compose correctly for the
-  // scenario the panel described:
-  //   - Switch to already-shown project → wasSetupAutoShown returns true →
-  //     shouldAutoOpen would be false → no pop, flag NOT burned.
-  it("AQU-244: already-shown project returns true immediately (no state lag)", () => {
-    markSetupAutoShown("p-unit-1")
-    // Simulates switching back to the same project: reading at render time
-    // returns true immediately, no React state update cycle needed.
-    expect(wasSetupAutoShown("p-unit-1")).toBe(true)
-  })
-
-  it("AQU-244: unshown project returns false even after another project is marked", () => {
-    markSetupAutoShown("p-unit-1")
-    // B was never shown — switching A→B should NOT inherit A's flag.
-    expect(wasSetupAutoShown("p-unit-2")).toBe(false)
+  it("AQU-694: scoping holds — flags are independent per project", () => {
+    markSetupInProgress("p-unit-1")
+    markSetupInProgress("p-unit-2")
+    clearSetupInProgress("p-unit-1")
+    // Clearing A must not clear B.
+    expect(isSetupInProgress("p-unit-1")).toBe(false)
+    expect(isSetupInProgress("p-unit-2")).toBe(true)
   })
 })

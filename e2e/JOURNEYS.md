@@ -40,6 +40,7 @@
 | AI          | Rapid sparkle sequences (regenerate, edit-then-sparkle, lane repeats) never dead-letter as stale siblings | `e2e/specs/ai/completion-races.spec.ts` (spec-local mock LLM) | |
 | AI          | Paragraph pilcrow button drafts all cells of a paragraph as one unit (mock LLM) | `e2e/specs/ai/paragraph-draft.smoke.spec.ts` | ✅ |
 | AI          | Agent drafts open file → workbench accept-all lands in editor → undo restores pre-draft text | `e2e/specs/ai/agent-draft.spec.ts` (mock OpenRouter via e2e-up)     |        |
+| AI          | Contextual run: enable flag, play pill → autonomous run parks with staged drafts + scene briefs; steer via "Direct the run" popover (queued-direction chip) | `e2e/specs/contextual/run-pill.smoke.spec.ts` (server-side mock LLM via [[ctx]] markers) | ✅ |
 | Editor      | Import dialog escalates an unsupported container to the isolated parser, previews normalized source/target units, then commits through ImportService | `e2e/specs/agent-import.spec.ts` (container-gated with `AGENT_SANDBOX_E2E=1`) | |
 | Collab      | File propagates from alice to bob                    | `e2e/specs/collab/file-propagation.smoke.spec.ts` (API project bootstrap)  | ✅ |
 | Collab      | Concurrent cell edit propagates alice → bob          | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` (API project bootstrap)   | ✅ |
@@ -119,6 +120,8 @@
 | Auth        | Login form show/hide password toggle                  | `e2e/specs/orgs/login-form-show-hide-password.smoke.spec.ts`  |   ✅   |
 | Auth        | Forgot password flow opens reset form                 | `e2e/specs/orgs/account-add-forgot-password.smoke.spec.ts` + `account-reset-password-form.smoke.spec.ts` | ✅ |
 | Auth        | Dev-only logout route clears session → /onboarding    | `e2e/specs/auth/dev-logout-route.smoke.spec.ts`               |   ✅   |
+| Auth        | D1-only first login atomically imports identity, organization, inherited teams, projects, and exact roles | `e2e/specs/auth/legacy-user-first-login.smoke.spec.ts` | ✅ |
+| Auth        | Server-confirmed first-time migration changes pending sign-in copy | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` | ✅ |
 | Onboarding  | Wizard renders name step and advances                 | `e2e/specs/projects/onboarding-wizard.smoke.spec.ts` + `onboarding-name-step.smoke.spec.ts` + `onboarding-privacy-continue.smoke.spec.ts` + `onboarding-project-step.smoke.spec.ts` | ✅ |
 | Onboarding  | ReadyStep "Start Translating" navigates to project    | `e2e/specs/projects/onboarding-ready-step.smoke.spec.ts`      |   ✅   |
 | Projects    | Archive and restore project                           | `e2e/specs/projects/archive.smoke.spec.ts`                    |   ✅   |
@@ -195,6 +198,8 @@
 | Editor      | Video attachment remove clears saved URL              | `e2e/specs/editor/video-attachment-dialog.smoke.spec.ts`      |   ✅   |
 | Editor      | Setup checklist drawer expands items + skip           | `e2e/specs/editor/setup-checklist.smoke.spec.ts` + `setup-checklist-item-expand.smoke.spec.ts` + `setup-checklist-skip.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist AI models section expand              | `e2e/specs/editor/setup-checklist-ai-models-expand.smoke.spec.ts` |   ✅   |
+| Editor      | Setup checklist voice step skip + Set up anyway (AQU-701) | `e2e/specs/editor/setup-checklist-voice-skip.smoke.spec.ts` |   ✅   |
+| Editor      | Setup checklist survives refresh mid-setup (no auto-open) | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |   ✅   |
 | Editor      | Setup checklist invite creates share link             | `e2e/specs/editor/setup-checklist-invite-create-link.smoke.spec.ts` |   ✅   |
 | Editor      | AI setup dialog opens and configures provider         | `e2e/specs/editor/ai-setup-dialog.smoke.spec.ts` + `ai-setup-dialog-custom-provider.smoke.spec.ts` | ✅ |
 | Editor      | AI completion dialog opens (mock LLM)                 | `e2e/specs/editor/ai-completion-dialog.smoke.spec.ts`         |   ✅   |

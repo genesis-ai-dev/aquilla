@@ -13,6 +13,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline } from "@/lib/sync/cloud-projects"
+import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
@@ -555,6 +556,16 @@ export function ProjectOverview() {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { activeOrgId } = useActiveOrg()
+
+  // AQU-696: landing on a project's overview counts as "opening" it — this is
+  // the page a shared-projects row links to. Recording it here clears the
+  // "New" badge for that user, persisted in localStorage across sessions.
+  // Keyed on the session username so it survives sign-out (unlike the IDB
+  // project index, which is wiped on logout/account switch).
+  useEffect(() => {
+    const uname = session?.username
+    if (uname && id) markProjectOpened(uname, id)
+  }, [session?.username, id])
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1648,7 +1659,6 @@ export function ProjectOverview() {
                       <AssignWork
                         projectId={id}
                         files={project?.files ?? []}
-                        orgId={activeOrgId}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
                         onAssigned={handleAssigned}

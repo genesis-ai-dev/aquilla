@@ -1297,7 +1297,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       >
         <div
           data-testid="formatting-bubble-menu"
-          className="flex gap-0.5 rounded-lg bg-card p-0.5"
+          className="relative z-40 flex gap-0.5 rounded-lg bg-card p-0.5"
           onMouseDown={handleFormattingToolbarMouseDown}
         >
           <AppTooltip content="Bold (Cmd+B)">

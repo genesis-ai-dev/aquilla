@@ -68,6 +68,12 @@ export interface UseCommentsApi {
     scope: CommentScope
     body: string
     parentCommentId?: string | null
+    /**
+     * AQU-692: snapshot of the cell's current target text, captured only when
+     * opening a new root thread on a cell. Powers the "Translation changed
+     * since this thread was created" badge. Omit for replies / non-cell scopes.
+     */
+    createdForTranslated?: string | null
   }) => Promise<string>
   editComment: (commentId: string, body: string) => Promise<void>
   deleteComment: (commentId: string) => Promise<void>
@@ -202,10 +208,12 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       scope: commentScope,
       body,
       parentCommentId = null,
+      createdForTranslated,
     }: {
       scope: CommentScope
       body: string
       parentCommentId?: string | null
+      createdForTranslated?: string | null
     }): Promise<string> => {
       const pid = projectRef.current
       if (!pid) return ''
@@ -217,6 +225,9 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
         commentScope.kind === 'cell' || commentScope.kind === 'file'
           ? commentScope.fileId
           : PROJECT_SENTINEL_FILE_ID
+      // AQU-692: only a root thread carries a target-text snapshot; a reply
+      // (parentCommentId set) never gets a stale badge, so leave it null.
+      const snapshot = parentCommentId ? null : createdForTranslated ?? null
       await enqueueEvent({
         kind: 'comment.create',
         projectId: pid,
@@ -228,6 +239,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
           scope: commentScope,
           body,
           parentCommentId: parentCommentId ?? null,
+          createdForTranslated: snapshot,
         },
       })
       // Optimistic update: add locally before the server round-trip.
@@ -249,6 +261,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
+        createdForTranslated: snapshot,
       }
       mutationSeqRef.current++
       optimisticRef.current.set(commentId, optimisticRecord)

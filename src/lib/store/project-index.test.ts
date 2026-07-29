@@ -10,6 +10,7 @@ import {
   restoreProject,
   storeOriginalFile,
   getOriginalFile,
+  mergeServerProjectWithLocalCache,
   _resetDbForTesting,
 } from "./project-index"
 import type { ProjectRecord } from "../parsers/types"
@@ -79,6 +80,21 @@ describe("project-index", () => {
     const retrieved = await getOriginalFile("file1")
     expect(retrieved).toBeDefined()
     expect(new Uint8Array(retrieved!)).toEqual(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]))
+  })
+})
+
+describe("mergeServerProjectWithLocalCache — device-local overlays", () => {
+  it("carries experimentalFlags from the local record onto the server record", () => {
+    const server = makeProject({ id: "p1" })
+    const local = makeProject({ id: "p1", experimentalFlags: { contextualTranslation: true } })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.experimentalFlags).toEqual({ contextualTranslation: true })
+  })
+
+  it("no local record / no local flags → server record untouched", () => {
+    const server = makeProject({ id: "p1" })
+    expect(mergeServerProjectWithLocalCache(server, undefined).experimentalFlags).toBeUndefined()
+    expect(mergeServerProjectWithLocalCache(server, makeProject({ id: "p1" })).experimentalFlags).toBeUndefined()
   })
 })
 
@@ -227,5 +243,82 @@ describe("project-index trash", () => {
     expect(result.remote.kind).toBe("forbidden")
     const fetched = await getProject("p6")
     expect(fetched?.deletedAt).toBe("2026-04-23T12:00:00Z")
+  })
+})
+
+describe("mergeServerProjectWithLocalCache — client-local overlays", () => {
+  // AQU-695: the server never persists the setup-checklist dismissal; it lives
+  // only in the local IDB record. The merge must carry it through so a project
+  // dismissed on a prior visit still reads dismissed after a reload/navigation.
+  it("carries setupChecklistDismissed from the local cache onto the server record", () => {
+    const server = makeProject({ id: "p1", setupChecklistDismissed: undefined })
+    const local = makeProject({ id: "p1", setupChecklistDismissed: true })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.setupChecklistDismissed).toBe(true)
+  })
+
+  it("does not fabricate a dismissal when the local cache has none (negative case)", () => {
+    const server = makeProject({ id: "p1" })
+    const local = makeProject({ id: "p1" })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.setupChecklistDismissed).toBeUndefined()
+  })
+
+  it("leaves the server record untouched when there is no local cache", () => {
+    const server = makeProject({ id: "p1" })
+    const merged = mergeServerProjectWithLocalCache(server, undefined)
+    expect(merged.setupChecklistDismissed).toBeUndefined()
+  })
+
+  it("carries the local dismissal alongside the existing suggestionsDismissedAt overlay", () => {
+    const server = makeProject({ id: "p1" })
+    const local = makeProject({
+      id: "p1",
+      setupChecklistDismissed: true,
+      suggestionsDismissedAt: "2026-07-24T00:00:00Z",
+    })
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.setupChecklistDismissed).toBe(true)
+    expect(merged.suggestionsDismissedAt).toBe("2026-07-24T00:00:00Z")
+  })
+
+  it("AQU-701: carries the local aiSetupSkipped flag onto the server record", () => {
+    const server = makeProject({ id: "s1" })
+    const local = { ...server, aiSetupSkipped: true }
+    expect(mergeServerProjectWithLocalCache(server, local).aiSetupSkipped).toBe(true)
+  })
+
+  it("AQU-701: carries an explicit false (Set up anyway) so the step re-arms", () => {
+    const server = makeProject({ id: "s2" })
+    const local = { ...server, aiSetupSkipped: false }
+    expect(mergeServerProjectWithLocalCache(server, local).aiSetupSkipped).toBe(false)
+  })
+
+  it("leaves aiSetupSkipped unset when the local cache has no opinion", () => {
+    const server = makeProject({ id: "s3" })
+    expect(mergeServerProjectWithLocalCache(server, { ...server }).aiSetupSkipped).toBeUndefined()
+    expect(mergeServerProjectWithLocalCache(server, undefined).aiSetupSkipped).toBeUndefined()
+  })
+
+  it("AQU-701: keeps device-local ttsSettings (provider + gemini key) across refetches", () => {
+    const server = makeProject({ id: "s4" })
+    const local = {
+      ...server,
+      ttsSettings: { provider: "gemini" as const, apiKey: "AIzaLocalKey1234567890123" },
+    }
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.ttsSettings?.provider).toBe("gemini")
+    expect(merged.ttsSettings?.apiKey).toBe("AIzaLocalKey1234567890123")
+  })
+
+  it("AQU-701: server-synced ttsSettings keys win, device-only apiKey still survives", () => {
+    const server = makeProject({ id: "s5", ttsSettings: { provider: "kokoro" as const } })
+    const local = {
+      ...server,
+      ttsSettings: { provider: "gemini" as const, apiKey: "AIzaLocalKey1234567890123" },
+    }
+    const merged = mergeServerProjectWithLocalCache(server, local)
+    expect(merged.ttsSettings?.provider).toBe("kokoro")
+    expect(merged.ttsSettings?.apiKey).toBe("AIzaLocalKey1234567890123")
   })
 })

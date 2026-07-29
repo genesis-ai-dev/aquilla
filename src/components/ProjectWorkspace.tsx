@@ -33,6 +33,10 @@ import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/l
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import { isFlagEnabled } from "@/lib/features/flags"
+import { isDiscourseFile } from "@/lib/contextual/discourse-file"
+import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
+import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
@@ -345,9 +349,10 @@ export function ProjectWorkspace() {
     })
   }, [activeOrgId, isAllOrgs, navigate])
   const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel } = useProject(projectId!)
-  // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt)
-  // live in IDB; merge them onto the server-fetched record on load and after
-  // each local patch so rename suggestions don't loop on every open.
+  // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
+  // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
+  // load and after each local patch so rename suggestions don't loop on every
+  // open and the voice/transcription skip survives refetches.
   const [clientProject, setClientProject] = useState<ProjectRecord | null>(null)
 
   useEffect(() => {
@@ -1671,11 +1676,15 @@ export function ProjectWorkspace() {
 
   const addThread = useCallback(async (cellId: string, text: string) => {
     if (!project?.id || !activeFileId) return
+    // AQU-692: snapshot the cell's current target text so the thread's "stale"
+    // badge only fires when the translation genuinely changes afterwards.
+    const createdForTranslated = getActiveCell(cellId)?.translated ?? ""
     await addCommentEvent({
       scope: { kind: "cell", fileId: activeFileId, cellId },
       body: text,
+      createdForTranslated,
     })
-  }, [project?.id, activeFileId, addCommentEvent])
+  }, [project?.id, activeFileId, addCommentEvent, getActiveCell])
 
   const addMessage = useCallback(async (cellId: string, threadId: string, text: string) => {
     if (!project?.id || !activeFileId) return
@@ -2710,20 +2719,48 @@ export function ProjectWorkspace() {
     setCheckOpen(false)
   }, [activeFileId])
 
-  // FRO-192: jump to the first cell matching an assignment's scopeLabel.
-  // Uses the same globalReferences prefix match as assignmentsByCellId build.
-  const jumpToScopeLabel = useCallback((scopeLabel: string) => {
+  // FRO-192: resolve the first cell index matching an assignment's scopeLabel
+  // (chapter section). -1 when nothing matches (e.g. a book-scope label with no
+  // chapter sections) — callers fall back to the top of the file.
+  const resolveScopeLabelIndex = useCallback((scopeLabel: string): number => {
     const chapterPart = scopeLabel.split(" in ")[0]?.trim() ?? scopeLabel
     const chapters = chapterPart.split(",").map((s) => s.trim()).filter(Boolean)
-    let idx = -1
     for (const ch of chapters) {
-      idx = cellStore.findIndexBySection(ch)
-      if (idx >= 0) break
+      const idx = cellStore.findIndexBySection(ch)
+      if (idx >= 0) return idx
     }
-    // If no chapter match, try scopeLabel against file name (book scope)
-    if (idx < 0) idx = 0  // scroll to top as best effort
-    editorRef.current?.scrollToCellIndex(idx)
+    return -1
   }, [cellStore])
+
+  // AQU-690: jump to an assignment from the "My assignments" panel — open its
+  // file, switch to its lane, then scroll to its first cell. Order matters: the
+  // lane sets the (lane-filtered) target column, and when the assignment lives
+  // in a different file its cells load asynchronously after the switch, so the
+  // scroll is deferred (same pending-ref pattern as the presence-peer jump
+  // above) until the target file's cells arrive. A same-file click scrolls
+  // immediately (section indexes are source-derived, so lane-stable).
+  const pendingScopeScrollRef = useRef<{ fileId: string; scopeLabel: string } | null>(null)
+  const jumpToAssignment = useCallback((a: MyAssignment) => {
+    setActiveLane(a.targetLang ?? "")
+    if (a.fileId && a.fileId !== activeFileId) {
+      pendingScopeScrollRef.current = { fileId: a.fileId, scopeLabel: a.scopeLabel }
+      workspaceTabs.openFile(a.fileId)
+      return
+    }
+    const idx = readAtVersion(cellStoreVersion, () => resolveScopeLabelIndex(a.scopeLabel))
+    editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
+  }, [activeFileId, cellStoreVersion, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
+
+  // Consume a parked assignment scroll once the target file's cells have
+  // loaded (AQU-690; mirrors the presence-peer deferred jump).
+  useEffect(() => {
+    const pending = pendingScopeScrollRef.current
+    if (!pending || pending.fileId !== activeFileId) return
+    if (cellStore.getCellCount() === 0) return
+    pendingScopeScrollRef.current = null
+    const idx = readAtVersion(cellStoreVersion, () => resolveScopeLabelIndex(pending.scopeLabel))
+    editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
+  }, [activeFileId, cellStore, cellStoreVersion, resolveScopeLabelIndex])
 
   // ── last-location: write on file change ──────────────────────────────────
   // Persist the active file whenever it changes so a fresh open resumes here.
@@ -3075,6 +3112,13 @@ export function ProjectWorkspace() {
               // snapshot and keep row validation UI in sync.
               cellStore.setMaxServerSeq(null)
               revalidateCellsRef.current()
+            } else if (msg.t === "contextual.activity") {
+              // Slice D2: live contextual-run progress. The run-store is a
+              // module store — feed the frame straight in; the pill re-renders
+              // via useSyncExternalStore. Lossy: a missed frame self-heals on
+              // the next attachContextualRun snapshot.
+              if (msg.project !== pid) return
+              applyContextualFrame(msg.frame)
             } else if (msg.t === "link.upstream-changed") {
               // FRO-479: an upstream live-link project committed lane-relevant
               // changes. Refetch staleness immediately; the handler debounces
@@ -3436,9 +3480,21 @@ export function ProjectWorkspace() {
     void commitTrayFootnoteText(cellId, updated)
   }, [commitTrayFootnoteText, getActiveCell])
 
-  const { state: checklistState, dismissed: checklistDismissed, dismiss: dismissChecklist, refreshShares: refreshChecklistShares } = useSetupChecklist(project ?? null)
+  const {
+    state: checklistState,
+    dismissed: checklistDismissed,
+    dismiss: dismissChecklist,
+    refreshShares: refreshChecklistShares,
+    markInProgress: markChecklistInProgress,
+    clearInProgress: clearChecklistInProgress,
+    wasInProgress: checklistWasInProgress,
+  } = useSetupChecklist(project ?? null)
   const [checklistOpen, setChecklistOpen] = useState(false)
   const [showChipTooltip, setShowChipTooltip] = useState(false)
+  // AQU-693: set true while an import launched from the setup checklist's step 1
+  // is on screen, so the drawer is reopened (not dismissed) once that import
+  // dialog closes — whether the import succeeded, was cancelled, or errored.
+  const [resumeChecklistAfterImport, setResumeChecklistAfterImport] = useState(false)
 
   // Open setup once only when onboarding explicitly lands in the new project.
   // Ordinary project visits, refreshes, and collaborators opening the same
@@ -3452,6 +3508,40 @@ export function ProjectWorkspace() {
       state: null,
     })
   }, [location.hash, location.pathname, location.search, location.state, navigate])
+
+  // AQU-694: while the drawer is open, record that the user is mid-setup so a
+  // browser refresh can restore it. The temporary hide-behind-import path
+  // (AQU-693) sets checklistOpen=false WITHOUT dismissing, and deliberately does
+  // not clear the flag here — the setup flow is still alive underneath the
+  // import dialog and must survive a mid-import refresh.
+  useEffect(() => {
+    if (checklistOpen && project?.id) markChecklistInProgress()
+  }, [checklistOpen, project?.id, markChecklistInProgress])
+
+  // AQU-694: restore the setup checklist after a browser refresh, but ONLY when
+  // the user was demonstrably mid-setup on this project (the flag above is set
+  // solely by the user opening the drawer). This is not an auto-open: a project
+  // never opened, or one the user dismissed, has no flag and stays closed.
+  // Guarded per-project id so closing the drawer doesn't re-trigger it and a
+  // project switch re-evaluates for the new project.
+  const restoredChecklistForRef = useRef<string | null>(null)
+  useEffect(() => {
+    const pid = project?.id
+    if (!pid) return
+    if (restoredChecklistForRef.current === pid) return
+    restoredChecklistForRef.current = pid
+    if (checklistWasInProgress && !checklistDismissed) {
+      setChecklistOpen(true)
+    }
+  }, [project?.id, checklistWasInProgress, checklistDismissed])
+
+  // AQU-694: finishing every setup step ends the flow — clear the mid-setup flag
+  // so a later refresh does not reopen the (now complete) checklist.
+  useEffect(() => {
+    if (project?.id && checklistState.completedCount >= checklistState.totalCount) {
+      clearChecklistInProgress()
+    }
+  }, [project?.id, checklistState.completedCount, checklistState.totalCount, clearChecklistInProgress])
 
   const handleChecklistOpenChange = useCallback((next: boolean) => {
     setChecklistOpen(next)
@@ -4688,7 +4778,7 @@ export function ProjectWorkspace() {
                   <ProjectAssignedToMe
                     projectId={project.id}
                     jwt={jwt}
-                    onJumpToScopeLabel={jumpToScopeLabel}
+                    onJumpToAssignment={jumpToAssignment}
                     refreshKey={assignmentsRefreshKey}
                   />
                 )}
@@ -4697,6 +4787,11 @@ export function ProjectWorkspace() {
                     transient onboarding state out of the action header. The
                     account switcher now lives in the dock footer (LeftDock) so
                     it's present in every tab, not just this Files panel. */}
+                {/* AQU-695: once dismissed, the chip must stay reachable (so the
+                    user can bring the checklist back without dev tools) but be
+                    visibly de-emphasised — no progress count, dimmed — so a
+                    dismissed user is not presented the same prominent "Setup: n/N"
+                    affordance as someone who has not dismissed. */}
                 {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
                   <div className="mt-auto border-t px-2 pb-2 pt-2">
                     <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
@@ -4704,12 +4799,14 @@ export function ProjectWorkspace() {
                         render={
                           <button
                             onClick={() => { setShowChipTooltip(false); setChecklistOpen(true) }}
-                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium hover:bg-accent hover:text-foreground ${checklistDismissed ? "text-muted-foreground/50" : "text-muted-foreground"}`}
                           />
                         }
                       >
                         <ClipboardList className="h-3 w-3" />
-                        Setup: {checklistState.completedCount}/{checklistState.totalCount}
+                        {checklistDismissed
+                          ? "Setup"
+                          : `Setup: ${checklistState.completedCount}/${checklistState.totalCount}`}
                       </TooltipTrigger>
                       <TooltipContent side="right">
                         Reopen the setup checklist anytime from here.
@@ -5231,6 +5328,16 @@ export function ProjectWorkspace() {
                 />
               </div>
             )}
+            {/* Contextual drafting pill (flag-gated, discourse files only) —
+                absolute inside this relative wrapper so it vanishes on
+                non-editor surfaces; z-30 = floating-chip layer (AppShell). */}
+            {project && activeFile && isFlagEnabled(project, "contextualTranslation") && isDiscourseFile(activeFile) && (
+              <ContextualRunPillMount
+                projectId={project.id}
+                fileId={activeFile.id}
+                onSetupNeeded={handleAiSetupNeeded}
+              />
+            )}
             <div className="min-h-0 flex-1">
               {lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
                 <TimelineEditor
@@ -5505,7 +5612,15 @@ export function ProjectWorkspace() {
             void dismissChecklist()
             setChecklistOpen(false)
           }}
-          onOpenImport={() => setImportOpen(true)}
+          onOpenImport={() => {
+            // AQU-693: hide the checklist WITHOUT persisting a dismissal
+            // (setChecklistOpen bypasses handleChecklistOpenChange, which is the
+            // dismissal path), and remember to reopen it once the import dialog
+            // closes. Using step 1 must not silently abandon the setup flow.
+            setResumeChecklistAfterImport(true)
+            setChecklistOpen(false)
+            setImportOpen(true)
+          }}
         />
       )}
       {project && (
@@ -5571,7 +5686,17 @@ export function ProjectWorkspace() {
       )}
       <Suspense fallback={null}>
         {/* FRO-287 glue: existingFiles activates the re-import collision guard. */}
-        <ImportDialog open={importOpen} onOpenChange={setImportOpen}
+        <ImportDialog open={importOpen} onOpenChange={(next) => {
+            setImportOpen(next)
+            // AQU-693: when an import launched from the setup checklist closes
+            // (success, cancel, or error), return the user to the still-live
+            // checklist — step 1 now reflects its true state — instead of
+            // leaving them stranded in the editor with the flow silently gone.
+            if (!next && resumeChecklistAfterImport) {
+              setResumeChecklistAfterImport(false)
+              setChecklistOpen(true)
+            }
+          }}
           projectId={project.id}
           username={currentUsername}
           getToken={getTokenForFile}

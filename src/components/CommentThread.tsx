@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { CommentThread as ThreadData } from "@/lib/parsers/types"
-import { renderCommentHtml } from "@/lib/comments/comment-helpers"
+import { renderCommentHtml, isThreadStale } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
 import { cn } from "@/lib/utils"
 
@@ -30,7 +30,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
     if (typeof window === "undefined") return ""
     try { return localStorage.getItem(storageKey) ?? "" } catch { return "" }
   })
-  const isStale = thread.createdForTranslated !== currentTranslated
+  const isStale = isThreadStale(thread.createdForTranslated, currentTranslated)
 
   // Persist draft to localStorage whenever it changes
   useEffect(() => {

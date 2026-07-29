@@ -1,3 +1,24 @@
+/**
+ * AQU-692: decide whether a comment thread's amber "stale" badge should show.
+ *
+ * A thread is stale only when the target text has genuinely changed since the
+ * thread was created — i.e. we have a real snapshot of what the translation was
+ * at creation time and it differs from the current translation.
+ *
+ * `createdForTranslated` is the snapshot captured on `comment.create`. It is
+ * `null`/`undefined` for an *unknown baseline*: threads created before this was
+ * captured, and threads imported from a git project. In that case we must show
+ * NO badge rather than compare against an empty string (which would flag every
+ * translated cell's threads as stale forever — the original bug).
+ */
+export function isThreadStale(
+  createdForTranslated: string | null | undefined,
+  currentTranslated: string,
+): boolean {
+  if (createdForTranslated == null) return false // unknown baseline → no badge
+  return createdForTranslated !== currentTranslated
+}
+
 export function extractMentions(text: string): string[] {
   const mentions = new Set<string>()
   const re = /(?:^|\s)@([a-zA-Z][a-zA-Z0-9_]*)/g

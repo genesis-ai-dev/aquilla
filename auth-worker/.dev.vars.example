@@ -24,10 +24,15 @@ SYNC_SECRET_KEY="test-sync-secret-key"
 # worker's own port.
 SYNC_WORKER_URL="http://127.0.0.1:8789"
 
-# GitLab admin token used for user provisioning + PAT minting during register/login.
-# Without these, /register returns 503; /token still works for existing users
-# but the GitLab token refresh is skipped.
-GITLAB_URL="https://gitlab.frontierrnd.com"
+# AQU-713 one-way legacy identity bridge. Keep disabled unless all source
+# credentials are set. FRONTIER_D1_API_TOKEN must be scoped to D1 Read only.
+LEGACY_USER_MIGRATION_ENABLED="false"
+FRONTIER_D1_ACCOUNT_ID="6a80496d1e59948a9cbaa3c643ba81d7"
+FRONTIER_D1_DATABASE_ID=""
+FRONTIER_D1_API_TOKEN=""
+# Local test override only. Leave unset when talking to Cloudflare.
+# FRONTIER_D1_API_BASE_URL="http://127.0.0.1:9460/client/v4"
+GITLAB_URL="https://git.genesisrnd.com"
 GITLAB_ADMIN_TOKEN=""
 
 # Email goes through the Cloudflare Email Service `send_email` binding, which

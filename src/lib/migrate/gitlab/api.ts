@@ -376,12 +376,14 @@ export async function listDescendantGroups(
   return listPaged<GitLabGroupRaw>(creds, `groups/${groupId}/descendant_groups`)
 }
 
-/** Direct members of a group (NOT inherited — use for both orgs and teams). */
+/** Effective members of a group, including memberships inherited from every
+ * ancestor. The full importer must use the same ancestry semantics as the
+ * single-user planner; `/members` alone silently drops parent-group access. */
 export async function listGroupMembers(
   creds: GitLabCredentials,
   groupId: number,
 ): Promise<GitLabMemberRaw[]> {
-  return listPaged<GitLabMemberRaw>(creds, `groups/${groupId}/members`)
+  return listPaged<GitLabMemberRaw>(creds, `groups/${groupId}/members/all`)
 }
 
 /** A GitLab user (subset). `email` is only populated for an admin token. */
@@ -389,6 +391,25 @@ export interface GitLabUserRaw {
   id: number
   username: string
   email: string | null
+}
+
+/** Direct group/project membership returned by the admin user-memberships API.
+ * Inherited group access is intentionally absent; callers resolve ancestry
+ * against listTopLevelGroups/listDescendantGroups. */
+export interface GitLabUserMembershipRaw {
+  source_id: number
+  source_type: "Namespace" | "Project"
+  access_level: number
+}
+
+export async function listUserMemberships(
+  creds: GitLabCredentials,
+  userId: number,
+): Promise<GitLabUserMembershipRaw[]> {
+  return listPaged<GitLabUserMembershipRaw>(
+    creds,
+    `users/${encodeURIComponent(String(userId))}/memberships`,
+  )
 }
 
 /**

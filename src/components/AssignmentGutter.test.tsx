@@ -50,6 +50,7 @@ function makeAssignment(overrides: Partial<MyAssignment> = {}): MyAssignment {
   return {
     assignmentId: "asgn-1",
     projectId: "proj-1",
+    fileId: "file-1",
     scopeKind: "books",
     scopeLabel: "Genesis",
     deadline: null,

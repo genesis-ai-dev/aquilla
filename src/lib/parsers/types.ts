@@ -347,6 +347,13 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
+  /**
+   * AQU-701: set when the user explicitly skips the voice & transcription setup
+   * step ("we don't use voice or transcription"). Marks that step complete in
+   * the setup checklist so a team that never wants voice/transcription isn't
+   * nagged as "not set up". Cleared when they opt back in from the step.
+   */
+  aiSetupSkipped?: boolean
   /** ISO timestamp set when the user dismisses the "your project is still using
    * default AI instructions" nudge, OR when they actually customize the system
    * prompt. Either way, we stop nagging. */
@@ -665,7 +672,12 @@ export interface CommentThread {
   createdAt: string
   resolvedAt?: string
   resolvedBy?: string
-  createdForTranslated: string
+  /**
+   * AQU-692: snapshot of the target text when the thread was created, used to
+   * decide the "Translation changed since this thread was created" badge.
+   * `null` = unknown baseline (legacy thread or git-imported) → never stale.
+   */
+  createdForTranslated: string | null
   messages: CommentMessage[]
 }
 

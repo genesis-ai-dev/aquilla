@@ -41,6 +41,10 @@
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
 import type { TargetPresenceSelection } from "./presence-store"
+import type {
+  ContextualFrame,
+  ContextualRunStatus,
+} from "@/lib/contextual/run-store"
 
 const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
@@ -81,6 +85,10 @@ export type ProjectWsServerMessage =
       fileIds: string[]
       cellIds: string[]
     }
+  /** Contextual translation pipeline activity (slice D2). LOSSY — never
+   *  load-bearing; the run-store mirror re-hydrates from the transport
+   *  snapshot on file open. `frame` feeds `applyRemoteFrame` directly. */
+  | { t: "contextual.activity"; project: string; frame: ContextualFrame }
 
 /**
  * True when an `event.applied` frame is the echo of a write THIS client just
@@ -452,6 +460,12 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     if (typeof m.project !== "string" || typeof m.userId !== "string") return null
     return { t: "member.removed", project: m.project, userId: m.userId }
   }
+  if (t === "contextual.activity") {
+    if (typeof m.project !== "string") return null
+    const frame = parseContextualFrame(m.frame)
+    if (!frame) return null
+    return { t: "contextual.activity", project: m.project, frame }
+  }
   if (t === "link.upstream-changed") {
     if (
       typeof m.project !== "string" ||
@@ -469,6 +483,77 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       untilSeq: m.untilSeq,
       fileIds: m.fileIds.filter((f): f is string => typeof f === "string"),
       cellIds: m.cellIds.filter((c): c is string => typeof c === "string"),
+    }
+  }
+  return null
+}
+
+// Statuses a `contextual.run.state` frame may carry — the broadcast subset of
+// ContextualRunStatus (client-only phases "idle"/"starting"/"pausing" never
+// arrive over the wire). Mirrors sync-worker/src/contextual-frames.ts.
+const CONTEXTUAL_FRAME_STATUSES: ReadonlySet<string> = new Set([
+  "running", "paused", "parked", "done", "failed", "terminated",
+])
+
+/** Defensive parse of the `frame` payload of a `contextual.activity` message.
+ * Field names must match run-store's frame interfaces exactly. */
+function parseContextualFrame(value: unknown): ContextualFrame | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const f = value as Record<string, unknown>
+  if (typeof f.runId !== "string" || f.runId.length === 0) return null
+  if (f.type === "contextual.run.state") {
+    if (
+      typeof f.fileId !== "string" ||
+      typeof f.status !== "string" ||
+      !CONTEXTUAL_FRAME_STATUSES.has(f.status) ||
+      typeof f.done !== "number" ||
+      typeof f.total !== "number" ||
+      (f.failed !== undefined && typeof f.failed !== "number")
+    ) {
+      return null
+    }
+    return {
+      type: "contextual.run.state",
+      runId: f.runId,
+      fileId: f.fileId,
+      status: f.status as Exclude<ContextualRunStatus, "idle" | "starting" | "pausing">,
+      done: f.done,
+      total: f.total,
+      ...(typeof f.failed === "number" ? { failed: f.failed } : {}),
+    }
+  }
+  if (f.type === "contextual.scene") {
+    if (
+      typeof f.sceneBriefId !== "string" ||
+      typeof f.spanLabel !== "string" ||
+      typeof f.ambiguityCount !== "number"
+    ) {
+      return null
+    }
+    return {
+      type: "contextual.scene",
+      runId: f.runId,
+      sceneBriefId: f.sceneBriefId,
+      spanLabel: f.spanLabel,
+      ambiguityCount: f.ambiguityCount,
+    }
+  }
+  if (f.type === "contextual.span") {
+    if (
+      typeof f.spanLabel !== "string" ||
+      typeof f.staged !== "number" ||
+      typeof f.skipped !== "number" ||
+      typeof f.verdictSummary !== "string"
+    ) {
+      return null
+    }
+    return {
+      type: "contextual.span",
+      runId: f.runId,
+      spanLabel: f.spanLabel,
+      staged: f.staged,
+      skipped: f.skipped,
+      verdictSummary: f.verdictSummary,
     }
   }
   return null

@@ -30,6 +30,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
+import { readPersistedSession } from "./auth-state"
 import { createProjectServerSide } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
@@ -41,11 +42,10 @@ const SYNC_BASE = `http://${process.env.VITE_SYNC_WORKER_HOST ?? "127.0.0.1:8788
 
 const DEFAULT_FIXTURE = path.resolve(__dirname, "../fixtures/sample.md")
 
-/** Read the JWT ensureAuthState persisted for this user (the multi-user
- * fixtures mint it before any test body runs, so the sidecar always exists). */
+/** Read the JWT ensureAuthState persisted for this stack and user (the
+ * multi-user fixtures mint it before any test body runs). */
 export async function jwtFor(username: "alice" | "bob" | "carol"): Promise<string> {
-  const raw = await fs.readFile(path.resolve(__dirname, `../.auth/${username}.json`), "utf8")
-  return (JSON.parse(raw) as { jwt: string }).jwt
+  return (await readPersistedSession(username)).jwt
 }
 
 export interface SeededProject {
@@ -68,8 +68,8 @@ async function mintSyncToken(jwt: string, projectId: string, fileId: string): Pr
 }
 
 /** Create a project and import a markdown fixture entirely server-side.
- * `jwt` comes from the fixture's session (e2e/.auth/<user>.json is written by
- * ensureAuthState; pass `session.jwt` or re-read the sidecar). */
+ * `jwt` comes from the fixture's session (the stack-namespaced sidecar is
+ * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
   jwt: string,
   opts: { name?: string; fixturePath?: string } = {},

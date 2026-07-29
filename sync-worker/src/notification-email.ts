@@ -65,13 +65,29 @@ export interface NotificationEnv {
   EMAIL_FROM?: string
 }
 
+/** Escape user-controlled strings (display name / project name / comment
+ *  excerpt) before interpolating them into notification-email HTML — a
+ *  username or comment body is attacker-influenced. Mirrors
+ *  auth-worker/src/services/email.ts escapeHtml — keep in sync. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 function buildNotificationHtml(p: NotificationEmailPayload): string {
+  const authorDisplayName = escapeHtml(p.authorDisplayName)
+  const projectName = escapeHtml(p.projectName)
   const headline =
     p.kind === 'mention'
-      ? `${p.authorDisplayName} mentioned you in <strong>${p.projectName}</strong>`
-      : `${p.authorDisplayName} replied to a thread in <strong>${p.projectName}</strong>`
-  const truncated =
-    p.excerpt.length > 200 ? p.excerpt.slice(0, 197) + '…' : p.excerpt
+      ? `${authorDisplayName} mentioned you in <strong>${projectName}</strong>`
+      : `${authorDisplayName} replied to a thread in <strong>${projectName}</strong>`
+  const truncated = escapeHtml(
+    p.excerpt.length > 200 ? p.excerpt.slice(0, 197) + '…' : p.excerpt,
+  )
   return `
     <html>
       <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
@@ -109,10 +125,14 @@ export async function sendNotificationEmail(
 ): Promise<void> {
   if (!env.EMAIL) return
   const from = env.EMAIL_FROM ?? 'noreply@support.aquilla.app'
+  // Strip CR/LF so an attacker-controlled display name/project name can't
+  // inject extra headers into the outbound message via the subject line.
+  const authorForSubject = payload.authorDisplayName.replace(/[\r\n]+/g, ' ')
+  const projectForSubject = payload.projectName.replace(/[\r\n]+/g, ' ')
   const subject =
     payload.kind === 'mention'
-      ? `${payload.authorDisplayName} mentioned you in ${payload.projectName}`
-      : `New reply in ${payload.projectName}`
+      ? `${authorForSubject} mentioned you in ${projectForSubject}`
+      : `New reply in ${projectForSubject}`
   const html = buildNotificationHtml(payload)
   const text =
     payload.kind === 'mention'

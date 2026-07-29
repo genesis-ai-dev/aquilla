@@ -37,6 +37,10 @@ import {
   verifyLegacyUserForLogin,
   type LegacyMigrationRuntime,
 } from "../services/legacy-user-migration"
+import {
+  hasLegacyIdentityCollision,
+  type FrontierD1Config,
+} from "../services/frontier-d1"
 
 /** Append to activity_logs. Best-effort: a logging failure is swallowed so it
  *  never fails the caller's request; awaited (not fire-and-forget) so the
@@ -106,28 +110,43 @@ interface ResetTokenRow {
   expires_at: string
 }
 
-function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
+function legacyD1Config(
+  env: AuthHonoEnv["Bindings"],
+): FrontierD1Config | null {
   if (String(env.LEGACY_USER_MIGRATION_ENABLED).toLowerCase() !== "true") {
     return null
   }
   const accountId = env.FRONTIER_D1_ACCOUNT_ID?.trim()
   const databaseId = env.FRONTIER_D1_DATABASE_ID?.trim()
   const apiToken = env.FRONTIER_D1_API_TOKEN?.trim()
-  const gitlabUrl = env.GITLAB_URL?.trim().replace(/\/+$/, "")
-  const gitlabToken = env.GITLAB_ADMIN_TOKEN?.trim()
-  if (!accountId || !databaseId || !apiToken || !gitlabUrl || !gitlabToken) {
+  if (!accountId || !databaseId || !apiToken) {
     throw new LegacyUserMigrationError(
       "dependency",
-      "legacy user migration is enabled but not fully configured",
+      "legacy identity protection is enabled but D1 is not fully configured",
     )
   }
   return {
-    d1: {
-      accountId,
-      databaseId,
-      apiToken,
-      apiBaseUrl: env.FRONTIER_D1_API_BASE_URL?.trim() || undefined,
-    },
+    accountId,
+    databaseId,
+    apiToken,
+    apiBaseUrl: env.FRONTIER_D1_API_BASE_URL?.trim() || undefined,
+  }
+}
+
+function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
+  const d1 = legacyD1Config(env)
+  if (!d1) return null
+
+  const gitlabUrl = env.GITLAB_URL?.trim().replace(/\/+$/, "")
+  const gitlabToken = env.GITLAB_ADMIN_TOKEN?.trim()
+  if (!gitlabUrl || !gitlabToken) {
+    throw new LegacyUserMigrationError(
+      "dependency",
+      "legacy user migration is enabled but GitLab is not fully configured",
+    )
+  }
+  return {
+    d1,
     gitlab: { gitlabUrl, gitlabToken, accessToken: "" },
   }
 }
@@ -182,6 +201,35 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       return c.json(
         { detail: "User already exists", error: "User already exists" },
         409,
+      )
+    }
+
+    // AQU-713: while the one-way identity bridge is enabled, D1 remains the
+    // authority for legacy identity reservations. Reject either a legacy
+    // username or legacy email before hashing or inserting anything into the
+    // Neon users table. The response deliberately matches the Neon duplicate
+    // response so callers cannot distinguish which datastore owns the identity.
+    try {
+      const d1 = legacyD1Config(c.env)
+      if (d1 && await hasLegacyIdentityCollision(d1, username, email)) {
+        return c.json(
+          { detail: "User already exists", error: "User already exists" },
+          409,
+        )
+      }
+    } catch {
+      // Fail closed: creating an identity while the legacy reservation source
+      // is unavailable could permanently shadow a user awaiting JIT migration.
+      // Keep logs free of submitted identifiers, credentials, and raw errors.
+      console.error(
+        "[legacy-user-migration] registration identity check unavailable",
+      )
+      return c.json(
+        {
+          detail: "Registration is temporarily unavailable. Please try again.",
+          error: "Registration temporarily unavailable",
+        },
+        503,
       )
     }
 

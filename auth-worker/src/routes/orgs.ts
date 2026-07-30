@@ -422,6 +422,13 @@ orgs.get("/:orgId/groups/:groupId", async (c) => {
   if (role == null) return c.json({ error: "not an org member" }, 403)
   const detail = await getOrgGroupDetail(c.env, orgId, groupId)
   if (!detail) return c.json({ error: "group not found" }, 404)
+  // AQU-748: a team's member list is only visible to maintainers+ (600+) or to
+  // members of that team. A regular contributor must not see the membership of
+  // teams they don't belong to. (Distinct 404 vs 403 would let a non-member probe
+  // which team ids exist, so mirror the not-found response.)
+  if (role < ROLE.MAINTAINER && !detail.members.some((m) => m.userId === user.id)) {
+    return c.json({ error: "group not found" }, 404)
+  }
   return c.json(detail)
 })
 

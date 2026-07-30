@@ -462,6 +462,14 @@ export function ProjectWorkspace() {
     [projectFiles],
   )
 
+  // AQU-744: current visible file ids, readable from the long-lived WS
+  // message handler without re-subscribing on every inventory change. A
+  // `file.progress.updated` frame naming an id missing from this set is a
+  // staged import's reveal — the trigger to re-pull the file list.
+  const projectFileIds = useMemo(() => new Set(projectFiles.map((f) => f.id)), [projectFiles])
+  const projectFileIdsRef = useRef(projectFileIds)
+  projectFileIdsRef.current = projectFileIds
+
   const project = useMemo<ProjectRecord | null>(() => {
     if (!hydratedProject) return null
     if (projectFiles === hydratedProject.files) return hydratedProject
@@ -2958,7 +2966,7 @@ export function ProjectWorkspace() {
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler } =
+      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, fileInventoryChanged } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
@@ -3107,10 +3115,15 @@ export function ProjectWorkspace() {
                 // network failure. Do not turn a realtime hint into an
                 // unhandled rejection.
               })
-              // The first import chunk owns file.create. Refresh the project
-              // inventory so remote users see the new row immediately; later
-              // bulk chunks do not cause an editor-wide reload storm.
-              if (msg.fileCreated) {
+              // AQU-744: staged imports (AQU-635) create the file tombstoned
+              // and reveal it only at finalize — so "new row in the visible
+              // inventory" is signalled either by the server's flag or by this
+              // frame referencing a file this client has never seen (the
+              // membership check also covers pre-AQU-744 workers, whose reveal
+              // frames still say fileCreated: false). Later bulk chunks emit
+              // no frames at all, so large imports still cause no editor-wide
+              // reload storm.
+              if (fileInventoryChanged(msg, projectFileIdsRef.current)) {
                 refresh()
               } else if (activeFileIdRef.current === msg.file) {
                 // The bulk uploader emits this final frame only after every

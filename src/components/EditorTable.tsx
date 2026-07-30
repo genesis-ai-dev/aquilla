@@ -4857,8 +4857,10 @@ function EditorRow({
     preventBaseUIHandler?: () => void
   }
   const renderValidationButton = (onClick?: () => void) => (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-xs"
       data-showcase="cell.health"
       // FRO-297: button role + aria-pressed so screen readers announce the
       // validated/unvalidated toggle state. aria-label provides full context.
@@ -4883,9 +4885,7 @@ function EditorRow({
         ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
       }}
       className={cn(
-        "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
-        "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
-        "hover:bg-muted/80",
+        "relative rounded-full",
         validationColorClass,
         vs === "none" && "hover:text-green-500",
         vs === "others" && "hover:text-green-500",
@@ -4901,11 +4901,11 @@ function EditorRow({
         style={{ position: "absolute", inset: 0, margin: "auto" }}
       />
       <ValidationIcon
-        className="relative h-3.5 w-3.5"
+        className="relative size-3.5"
         strokeWidth={2.5}
         {...(vs === "others" ? { fill: "currentColor" } : {})}
       />
-    </button>
+    </Button>
   )
   // AQU-592: the validation control (health ring + validate toggle, with the
   // validators popover) renders to the LEFT of the TARGET editing cell — see the

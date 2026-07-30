@@ -39,6 +39,7 @@ export interface OutboxContextValue {
   staleSiblingEntries: StaleSiblingEntry[]
   clearStaleSiblings: () => void
   staleSourceCount: number
+  clearStaleSource: () => void
 }
 
 const OutboxContext = createContext<OutboxContextValue | null>(null)
@@ -79,6 +80,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
     staleSiblingEntries,
     clearStaleSiblings,
     staleSourceCount,
+    clearStaleSource,
   } = useOutboxFlusher({
     // Drains whenever a session exists — independent of the current route, so
     // the backlog clears on the org dashboard too, not just inside a project.
@@ -103,6 +105,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       staleSiblingEntries,
       clearStaleSiblings,
       staleSourceCount,
+      clearStaleSource,
     }),
     [
       pendingCount,
@@ -116,6 +119,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       staleSiblingEntries,
       clearStaleSiblings,
       staleSourceCount,
+      clearStaleSource,
     ],
   )
 

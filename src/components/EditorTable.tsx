@@ -33,7 +33,7 @@ import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { deriveParagraphs } from "@/lib/parsers/paragraphs"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
@@ -98,7 +98,7 @@ import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
-import { ChapterNavigator, type ChapterNavigationItem } from "./ChapterNavigator"
+import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -113,15 +113,12 @@ import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
-  chapterLabelFromCanonical,
   importDisplayLabel,
   verseLabelFromCanonical,
 } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
   resolveActiveChapterLabel,
-  rowMatchesChapterHeading,
-  sectionLabelAtViewportStart,
 } from "@/lib/chapter-navigation"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import {
@@ -162,11 +159,19 @@ import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
-import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
+import {
+  hasMeaningfulRichText,
+  prepareReadOnlyRichTextHtml,
+  sanitizeIdmlEditorHtml,
+} from "@/lib/richtext/editor-content"
 import {
   resolveIdmlEditorConfiguration,
   validateIdmlEditorCommit,
 } from "@/lib/richtext/idml-editor"
+import {
+  idmlPointerSelectionFromPoint,
+  type IdmlPointerSelection,
+} from "@/lib/richtext/idml-caret"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 import {
   useCellPresence,
@@ -531,6 +536,7 @@ export interface AudioLensContext {
 interface EditorTableProps {
   project: ProjectRecord
   cellStore: CellStore
+  fileType?: FileType
   username: string
   /**
    * AQU-538: the active target LANE. Threaded down to each row so target-side
@@ -714,7 +720,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
@@ -774,6 +780,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [chapterNavigationSelection, setChapterNavigationSelection] = useState<{
     fileId: string | null
     label: string
+    subsectionKey?: string
   } | null>(null)
   const clearChapterNavigationSelection = useCallback(() => {
     setChapterNavigationSelection(null)
@@ -1011,6 +1018,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         return
       }
       pm.focus()
+      // Ordinary rich-text cells: put the native caret at the end so Tab/↑/↓
+      // land where the user expects to keep typing. IDML cells must NOT use
+      // selectNodeContents/collapse — empty protected slots render a browser
+      // trailing <br>, so "end" paints on a phantom second line and desyncs
+      // ProseMirror's selection (typed characters then insert in reverse).
+      // TranslatedEditor.onFocus places the caret inside the first editable slot.
+      if (pm.querySelector("[data-idml-version]")) return
       const sel = window.getSelection()
       if (sel) {
         const range = document.createRange()
@@ -1411,59 +1425,77 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [cellStore])
 
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const currentSectionLabel = useMemo(() => {
-    const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
-    const baseLabel = sectionLabelAtViewportStart(
-      displayCellIds,
-      visibleIndex,
-      (cellId) => cellStore.getSectionLabelForCellId(cellId),
-    )
-    const nextSection = cellStore.getNavigationIndex().find(
-      (entry) => entry.firstIndex > visibleIndex,
-    )
-    const cellId = displayCellIds[visibleIndex]
-    const cell = cellId ? cellStore.getCellView(cellId) : null
-    const nextDisplayLabel = chapterLabelFromCanonical(nextSection?.label)
-    if (
-      nextSection
-      && nextDisplayLabel
-      && cell
-      && rowMatchesChapterHeading([cell.original, cell.translated], nextDisplayLabel)
-    ) {
-      return nextSection.label
-    }
-    return baseLabel
-  }, [cellStore, cellStoreVersion, chapterVisibleIndex, displayCellIds, firstVisibleIndex])
+  const milestoneNavigation = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(displayCellIds)),
+  [cellStore, cellStoreVersion, displayCellIds])
 
-  const chapterNavigationItems = useMemo<ChapterNavigationItem[]>(() =>
+  const milestoneKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of milestoneNavigation) {
+      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
+    }
+    return map
+  }, [milestoneNavigation])
+
+  const idmlMilestoneNavigation = useMemo(() =>
+    fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
+      const view = cellStore.getCellView(entry.firstCellId)
+      return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
+    })),
+  [cellStore, cellStoreVersion, fileType, milestoneNavigation])
+
+  const currentMilestoneKey = useMemo(() => {
+    const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
+    const cellId = displayCellIds[visibleIndex]
+    return milestoneKeyByCellId.get(cellId ?? "") ?? milestoneNavigation[0]?.key ?? ""
+  }, [chapterVisibleIndex, displayCellIds, firstVisibleIndex, milestoneKeyByCellId, milestoneNavigation])
+
+  const milestoneNavigationItems = useMemo<MilestoneNavigationItem[]>(() =>
     readAtVersion(cellStoreVersion, () => {
-      const navigation = cellStore.getNavigationIndex()
-      const summaries = cellStore.getAllSummaries()
-      return navigation
-        .map((entry, index) => {
-          const displayLabel = chapterLabelFromCanonical(entry.label)
-          if (looksLikeUuid(entry.label) || !displayLabel) return null
-          const endIndex = navigation[index + 1]?.firstIndex ?? summaries.length
-          const verseLabels = summaries
-            .slice(entry.firstIndex, endIndex)
-            .map((cell) => verseLabelFromCanonical(cell.group))
-            .filter((label): label is string => Boolean(label))
-          const firstVerse = verseLabels[0] ?? null
-          const lastVerse = verseLabels[verseLabels.length - 1] ?? null
-          return {
-            label: entry.label,
-            displayLabel,
-            verseRange: firstVerse && lastVerse
-              ? firstVerse === lastVerse ? firstVerse : `${firstVerse}–${lastVerse}`
-              : null,
-            translated: entry.translated,
-            validated: entry.validated,
-            total: entry.total,
-          }
-        })
-        .filter((entry): entry is ChapterNavigationItem => entry !== null)
+      return milestoneNavigation.map((entry) => {
+        const verseLabels = entry.cellIds
+          .map((cellId) => verseLabelFromCanonical(cellStore.getCellView(cellId)?.group))
+          .filter((label): label is string => Boolean(label))
+        const firstVerse = verseLabels[0] ?? null
+        const lastVerse = verseLabels[verseLabels.length - 1] ?? null
+        const range = firstVerse && lastVerse
+          ? firstVerse === lastVerse ? firstVerse : `${firstVerse}–${lastVerse}`
+          : null
+        const unitName = entry.kind === "time-range" ? "segment" : "cell"
+        const description = entry.kind === "story" && range
+          ? `Frames ${range}`
+          : (
+            entry.kind === "chapter"
+            || entry.kind === "chapter-range"
+            || entry.kind === "preface"
+          ) && range
+            ? `Verses ${range}`
+            : `${entry.total} ${unitName}${entry.total === 1 ? "" : "s"}`
+        return {
+          key: entry.key,
+          kind: entry.kind,
+          label: entry.label,
+          shortLabel: entry.shortLabel,
+          description,
+          translated: entry.translated,
+          validated: entry.validated,
+          total: entry.total,
+          ...(idmlMilestoneNavigation
+            ? {
+                subsections: entry.subsections.map((subsection) => ({
+                  key: subsection.key,
+                  label: subsection.label,
+                  firstCellId: subsection.firstCellId,
+                  translated: subsection.translated,
+                  validated: subsection.validated,
+                  total: subsection.total,
+                })),
+              }
+            : {}),
+        }
+      })
     }),
-  [cellStore, cellStoreVersion])
+  [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
 
   // AQU-610: sequential (non-scripture) numbering counts only *numbered*
   // (non-paratext) cells, so the count starts at 1 at the first real content
@@ -1532,14 +1564,31 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion, displayCellIds])
 
+  const subsectionKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    if (!idmlMilestoneNavigation) return map
+    for (const entry of milestoneNavigation) {
+      for (const subsection of entry.subsections) {
+        for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
+      }
+    }
+    return map
+  }, [idmlMilestoneNavigation, milestoneNavigation])
+  const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+  const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
   const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
     ? chapterNavigationSelection.label
     : null
   const activeChapterLabel = resolveActiveChapterLabel(
-    chapterNavigationItems.map((chapter) => chapter.label),
-    currentSectionLabel,
+    milestoneNavigationItems.map((milestone) => milestone.key),
+    currentMilestoneKey,
     selectedChapterLabel,
   )
+  const activeSubsectionKey = (
+    chapterNavigationSelection?.fileId === audioFileId
+    && chapterNavigationSelection.label === activeChapterLabel
+    && chapterNavigationSelection.subsectionKey
+  ) || currentSubsectionKey
 
   const handleChapterListPointerDownCapture = useCallback((event: React.PointerEvent) => {
     // Touch/pen gestures and a mouse press on the scroll container indicate
@@ -1569,10 +1618,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
   }, [clearChapterNavigationSelection])
 
-  const handleChapterSelect = useCallback((label: string) => {
-    const index = cellStore.findIndexBySection(label)
+  const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
+    const entry = milestoneNavigation.find((candidate) => candidate.key === key)
+    const subsection = entry?.subsections.find((candidate) => candidate.key === subsectionKey)
+    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
     if (index < 0) return
-    setChapterNavigationSelection({ fileId: audioFileId, label })
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsection ? { subsectionKey: subsection.key } : {}),
+    })
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     void listRef.current?.scrollToIndex({
@@ -1580,7 +1635,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       viewPosition: 0,
       animated: true,
     })
-  }, [audioFileId, cellStore])
+  }, [audioFileId, milestoneNavigation])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -1759,7 +1814,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
-          scriptureNumbering={chapterNavigationItems.length > 0}
+          scriptureNumbering={milestoneNavigationItems.every((item) => (
+            item.kind === "chapter"
+            || item.kind === "chapter-range"
+            || item.kind === "preface"
+          ))}
           cellLabelsEnabled={cellLabelsEnabled}
           sourceDirectionMode={sourceDirectionMode}
           targetDirectionMode={targetDirectionMode}
@@ -1847,7 +1906,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionAvailable,
     isCompletionConfigured,
     isTimeOrdered,
-    chapterNavigationItems.length,
+    milestoneNavigationItems,
     sequentialNumberByCellId,
     lineNumbersEnabled,
     micDenied,
@@ -1900,11 +1959,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        {chapterNavigationItems.length > 0 && activeChapterLabel && (
+        {milestoneNavigationItems.length > 0 && activeChapterLabel && (
           <div className="border-b border-border bg-background/90 px-4 py-2 backdrop-blur-xl">
-            <ChapterNavigator
-              chapters={chapterNavigationItems}
-              activeLabel={activeChapterLabel}
+            <MilestoneNavigator
+              items={milestoneNavigationItems}
+              activeKey={activeChapterLabel}
+              activeSubsectionKey={activeSubsectionKey}
               onSelect={handleChapterSelect}
             />
           </div>
@@ -3202,6 +3262,20 @@ function TargetRichHtml({
   )
 }
 
+function TargetIdmlHtml({ html }: { html: string }) {
+  const safeHtml = useMemo(() => sanitizeIdmlEditorHtml(html), [html])
+  const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
+  return (
+    <div
+      // Keep canonical slot identities in the read surface so a pointer click
+      // can survive the subsequent ProseMirror remount without flattening
+      // ambiguous adjacent style runs into one text offset.
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={innerHtml}
+    />
+  )
+}
+
 function TargetReadText({
   text,
   ranges,
@@ -3581,6 +3655,7 @@ function EditorRow({
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
+  const pendingIdmlPointerSelectionRef = useRef<IdmlPointerSelection | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -4256,8 +4331,9 @@ function EditorRow({
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
-  const requestTargetEdit = useCallback(() => {
+  const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
     if (!editable || isLoading || lockHolderLabel) return
+    pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
     onActivateEditor(cell.id)
   }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
 
@@ -4295,6 +4371,8 @@ function EditorRow({
       }
       if (document.activeElement !== pm) {
         pm.focus()
+        // See focusCellEditorByIndex: native caret-at-end breaks empty IDML slots.
+        if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return
         const sel = window.getSelection()
         if (sel) {
           const range = document.createRange()
@@ -4313,7 +4391,7 @@ function EditorRow({
         onReleaseCell?.(cell.id)
       }
     }
-  }, [isEditorActive, cell.id, onReleaseCell])
+  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
@@ -5327,6 +5405,13 @@ function EditorRow({
               {validationControl}
             <div
               data-cell-type="target"
+              onClick={(event) => {
+                if (isEditorActive) return
+                event.stopPropagation()
+                requestTargetEdit(idmlConfiguration
+                  ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
+                  : null)
+              }}
               className={cn(
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
                 hasInlineFootnotes && "min-h-0 py-0.5",
@@ -5341,6 +5426,10 @@ function EditorRow({
                     initialPlain={visibleTranslated}
                     initialHtml={visibleTranslatedHtml}
                     idmlConfiguration={idmlConfiguration}
+                    initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
+                    onInitialIdmlSelectionApplied={() => {
+                      pendingIdmlPointerSelectionRef.current = null
+                    }}
                     onIdmlValidationError={setWriteError}
                     // AQU-667: only authoritative when we're not masking it with a
                     // local human draft — then `visibleTranslated` IS cell.translated.
@@ -5393,14 +5482,16 @@ function EditorRow({
                     lang={project.targetLanguage || undefined}
                     tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
                     className={cn(
-                      "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+                      "relative min-h-[40px] w-full flex-1 cursor-text whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
                       "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
                       showCompletionOverlay && "opacity-30 transition-opacity",
                       !visibleTranslated?.trim() && "text-muted-foreground/60",
                     )}
                     onClick={(event) => {
                       event.stopPropagation()
-                      requestTargetEdit()
+                      requestTargetEdit(idmlConfiguration
+                        ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
+                        : null)
                     }}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter") return
@@ -5414,6 +5505,8 @@ function EditorRow({
                         <span data-remote-presence-draft>
                           {remoteDraftText || "\u200b"}
                         </span>
+                      ) : idmlConfiguration && visibleTranslatedHtml ? (
+                        <TargetIdmlHtml html={visibleTranslatedHtml} />
                       ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
                           html={visibleTranslatedHtml}

@@ -944,18 +944,18 @@ export function ProjectWorkspace() {
     staleSiblingEntries: outboxStaleSiblingEntries,
     clearStaleSiblings: clearStaleSiblings,
     staleSourceCount: outboxStaleSourceCount,
+    clearStaleSource: clearOutboxStaleSource,
   } = useOutbox()
   // F5/F6: dismiss the notification banners after the user has seen them.
   // For stale siblings the banner is also dismissed implicitly when the
   // user clicks "View in history" (we navigate them to the conflict — they
   // shouldn't have to dismiss separately).
-  const [staleSourceBannerDismissed, setStaleSourceBannerDismissed] = useState(0)
   // FRO-274: write-failure banner for BT persist failures (outbox enqueue
   // fails — IndexedDB unavailable, quota exceeded, etc.).
   const [btWriteError, setBtWriteError] = useState<string | null>(null)
   const showStaleSiblingBanner =
     outboxStaleSiblingCount > 0 && outboxStaleSiblingEntries.length > 0
-  const showStaleSourceBanner = outboxStaleSourceCount > staleSourceBannerDismissed
+  const showStaleSourceBanner = outboxStaleSourceCount > 0
   // AQU-633: a validate (or other target write) the server refused with a 403.
   // Surface the reason so it isn't a silent flip-then-revert behind the pill.
   // AQU-633: derive the "reason" banner from the outbox's quarantined 403
@@ -1184,12 +1184,33 @@ export function ProjectWorkspace() {
   // FRO-477 (§6) — upstreamStaleCellIds surfaces inherited (ancestor-chain)
   // staleness alongside the existing direct staleCellIds; both flatten to
   // per-row booleans inside EditorTable the same way.
-  const { staleCellIds, upstreamStaleCellIds, revalidate: revalidateStaleSource, syncNow: syncStaleSourceNow } = useStaleSourceCells({
+  const {
+    staleCellIds,
+    upstreamStaleCellIds,
+    lastSuccessfulFetchKey: staleSourceFetchKey,
+    revalidate: revalidateStaleSource,
+    syncNow: syncStaleSourceNow,
+  } = useStaleSourceCells({
     projectId: project?.id ?? null,
     fileId: activeFileId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
   })
+  // The outbox warning is an immediate, provisional signal from the write
+  // response. Clear it once the authoritative content-aware read for this
+  // exact file says no cells are stale. Previously the count only increased,
+  // so a corrected/re-pinned file kept showing the old warning forever.
+  useEffect(() => {
+    if (!project?.id || !activeFileId) return
+    if (staleSourceFetchKey !== `${project.id}\u0000${activeFileId}`) return
+    if (staleCellIds.size === 0) clearOutboxStaleSource()
+  }, [
+    activeFileId,
+    clearOutboxStaleSource,
+    project?.id,
+    staleCellIds,
+    staleSourceFetchKey,
+  ])
   // FRO-479: the WS connect effect's onMessage closure is created once, before
   // staleness state settles — route link.upstream-changed frames through a ref
   // so the handler always reaches the latest revalidate (which piggybacks the
@@ -5187,7 +5208,7 @@ export function ProjectWorkspace() {
                 <span>Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.</span>
                 <button
                   type="button"
-                  onClick={() => setStaleSourceBannerDismissed(outboxStaleSourceCount)}
+                  onClick={clearOutboxStaleSource}
                   className="ml-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
                 >
                   Dismiss
@@ -5380,6 +5401,7 @@ export function ProjectWorkspace() {
               <TooltipDelegationBoundary>
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
+            fileType={activeFile?.type}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}

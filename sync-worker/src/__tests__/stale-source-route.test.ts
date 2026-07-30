@@ -118,6 +118,118 @@ describe("stale-source route — clone mode short-circuit", () => {
   })
 })
 
+describe("stale-source route — content-aware source revisions", () => {
+  async function seedTranslatedCell(t: TestDb): Promise<string> {
+    await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'B', 1)`, [PROJECT])
+    await apply(t, {
+      id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: null, parentId: null,
+      kind: "file.create", author: "importer", payload: { name: "F", fileType: "idml" }, clientTs: 1, serverTs: 1, serverSeq: 1,
+    })
+    const sourceEventId = nextId()
+    await apply(t, {
+      id: sourceEventId, schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: "cell-1", parentId: null,
+      kind: "source.cell.create", author: "importer",
+      payload: { cellId: "cell-1", value: "Unchanged source", metadata: { aquillaImport: { unitKey: "story:1" } } },
+      clientTs: 1, serverTs: 1, serverSeq: 2,
+    })
+    // buildEventProjectionStmts projects cells only; stale-source also reads
+    // the pinned source event payload, so persist that event-log row explicitly.
+    await t.pg.query(
+      `INSERT INTO events (
+         id, schema_version, project_id, file_id, cell_id, kind, author,
+         payload, client_ts, server_ts, parent_id, server_seq
+       ) VALUES ($1, 1, $2, $3, 'cell-1', 'source.cell.create', 'importer',
+         $4, 1, 1, NULL, 2)`,
+      [
+        sourceEventId,
+        PROJECT,
+        FILE,
+        JSON.stringify({
+          cellId: "cell-1",
+          value: "Unchanged source",
+          metadata: { aquillaImport: { unitKey: "story:1" } },
+        }),
+      ],
+    )
+    await apply(t, {
+      id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: "cell-1", parentId: sourceEventId,
+      kind: "target.cell.commit", author: "translator",
+      payload: { value: "Traduction", sourceEventId },
+      clientTs: 1, serverTs: 1, serverSeq: 3,
+    })
+    return sourceEventId
+  }
+
+  it("does not mark an equal-text metadata revision stale", async () => {
+    const t = await makeTestDb()
+    try {
+      const sourceEventId = await seedTranslatedCell(t)
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: "cell-1", parentId: sourceEventId,
+        kind: "source.cell.create", author: "importer",
+        payload: {
+          cellId: "cell-1",
+          value: "Unchanged source",
+          metadata: { aquillaImport: { unitKey: "story:1", milestone: { key: "story:1" } } },
+        },
+        clientTs: 2, serverTs: 2, serverSeq: 4,
+      })
+
+      const body = await (await request(t, PROJECT, FILE, await makeToken())).json() as {
+        staleCellIds: string[]
+      }
+      expect(body.staleCellIds).not.toContain("cell-1")
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("does not compare a target with the same cell id in another file", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedTranslatedCell(t)
+      const otherFile = "file-y"
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: otherFile, cellId: null, parentId: null,
+        kind: "file.create", author: "importer", payload: { name: "Other", fileType: "idml" },
+        clientTs: 2, serverTs: 2, serverSeq: 4,
+      })
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: otherFile, cellId: "cell-1", parentId: null,
+        kind: "source.cell.create", author: "importer",
+        payload: { cellId: "cell-1", value: "Different source in another IDML file" },
+        clientTs: 2, serverTs: 2, serverSeq: 5,
+      })
+
+      const body = await (await request(t, PROJECT, FILE, await makeToken())).json() as {
+        staleCellIds: string[]
+      }
+      expect(body.staleCellIds).not.toContain("cell-1")
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("still marks a genuinely changed source text stale", async () => {
+    const t = await makeTestDb()
+    try {
+      const sourceEventId = await seedTranslatedCell(t)
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: FILE, cellId: "cell-1", parentId: sourceEventId,
+        kind: "source.cell.commit", author: "lead", payload: { value: "Changed source" },
+        clientTs: 2, serverTs: 2, serverSeq: 4,
+      })
+
+      const body = await (await request(t, PROJECT, FILE, await makeToken())).json() as {
+        staleCellIds: string[]
+      }
+      expect(body.staleCellIds).toContain("cell-1")
+    } finally {
+      await t.close()
+    }
+  })
+})
+
 describe("stale-source route — behindSeq lane-relevance", () => {
   it("is null when the live link is caught up", async () => {
     const t = await makeTestDb()

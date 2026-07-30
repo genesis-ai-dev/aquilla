@@ -220,6 +220,12 @@ export function extractPoStrings(content: string): TranslatableString[] {
           context,
           group: `${msgid}#${n}`,
           type: "text",
+          metadata: {
+            po: {
+              ...(e.msgctxt !== undefined ? { msgctxt: e.msgctxt } : {}),
+              ...(e.references[0] ? { sourceReference: e.references[0] } : {}),
+            },
+          },
         })
       }
     } else {
@@ -230,6 +236,12 @@ export function extractPoStrings(content: string): TranslatableString[] {
         context,
         group: e.msgctxt !== undefined ? `${msgid}\u0004${e.msgctxt}` : msgid,
         type: "text",
+        metadata: {
+          po: {
+            ...(e.msgctxt !== undefined ? { msgctxt: e.msgctxt } : {}),
+            ...(e.references[0] ? { sourceReference: e.references[0] } : {}),
+          },
+        },
       })
     }
   }

@@ -58,7 +58,82 @@ const BANNED_FUNCTIONS = [
   "pg_notify", "dblink", "lo_import", "lo_export", "pg_reload_conf",
 ] as const
 
+// Columns with no legitimate read use through this tool, banned outright
+// regardless of project scoping (AQU pen-test finding, 2026-07-29): `users`
+// has no RLS backstop (db/postgres/migrations/0034 doesn't cover it), so a
+// scoping-check bypass — see reachableScopingText() below — would otherwise
+// be able to exfiltrate every credential on the platform in one query. The
+// assignments/project_members cookbook (docs.ts) only ever selects
+// username/id/role_level from `users`, never this column.
+const BANNED_COLUMNS = ["password_hash"] as const
+
 const KNOWN_VARS = ["project", "user", "file", "cell"] as const
+
+/**
+ * When `masked` is a `WITH … SELECT`, restrict :project-scoping evidence to
+ * text actually reachable from the final query: the main query itself, plus
+ * the bodies of any CTEs it (transitively) references. Non-WITH queries pass
+ * through unchanged.
+ *
+ * WHY (AQU pen-test finding, 2026-07-29): an unreferenced CTE is still valid
+ * SQL — Postgres computes and discards it — so a "decoy" CTE like
+ *   WITH _x AS (SELECT project_id FROM cells WHERE project_id = :project)
+ *   SELECT * FROM users
+ * used to satisfy the whole-string :project check in guardSql() below while
+ * the actual returned rows (from `users`, which has no RLS backstop) were
+ * completely unscoped. Restricting the check to reachable text closes this
+ * shape. It does NOT (and, as text analysis, cannot) verify that a
+ * *referenced* CTE actually correlates with every table it's joined
+ * against — the same residual gap the module-level comment already documents
+ * for RLS-backed tables (`cells c1 JOIN cells c2 ON 1=1`) applies here too;
+ * RLS is the real backstop where it exists, and BANNED_COLUMNS above closes
+ * the worst-case impact (credential exfiltration) where it doesn't.
+ *
+ * Fails closed on any shape it can't confidently parse — e.g. an unbalanced
+ * CTE body returns "" (no reachable text at all) rather than trusting an
+ * ambiguous string.
+ */
+function reachableScopingText(masked: string): string {
+  const withMatch = /^with\s+/i.exec(masked)
+  if (!withMatch) return masked
+  let rest = masked.slice(withMatch[0].length).replace(/^recursive\s+/i, "")
+
+  const ctes = new Map<string, string>()
+  for (;;) {
+    rest = rest.replace(/^[\s,]+/, "")
+    const head = /^([A-Za-z_][A-Za-z0-9_]*)\s*(?:\([^()]*\))?\s*as\s*\(/i.exec(rest)
+    if (!head) break
+    const name = head[1].toLowerCase()
+    let depth = 1
+    let j = head[0].length
+    while (j < rest.length && depth > 0) {
+      if (rest[j] === "(") depth++
+      else if (rest[j] === ")") depth--
+      j++
+    }
+    if (depth !== 0) return "" // unbalanced parens — fail closed
+    ctes.set(name, rest.slice(head[0].length, j - 1))
+    rest = rest.slice(j)
+  }
+  const mainQuery = rest
+
+  const referenced = new Set<string>()
+  const queue = [mainQuery]
+  while (queue.length > 0) {
+    const text = queue.pop() as string
+    for (const [name, body] of ctes) {
+      if (referenced.has(name)) continue
+      if (new RegExp(`\\b${name}\\b`, "i").test(text)) {
+        referenced.add(name)
+        queue.push(body)
+      }
+    }
+  }
+
+  let reachable = mainQuery
+  for (const name of referenced) reachable += " " + ctes.get(name)
+  return reachable
+}
 
 /**
  * Validate one model-authored SQL string and bind its variables/aliases.
@@ -110,6 +185,12 @@ export function guardSql(
       return { ok: false, error: `function "${fn}" is not allowed` }
     }
   }
+  for (const col of BANNED_COLUMNS) {
+    const re = new RegExp(`\\b${col}\\b`, "i")
+    if (re.test(masked)) {
+      return { ok: false, error: `column "${col}" is not allowed through this tool` }
+    }
+  }
 
   // Project scoping is mandatory (v1 app-level RLS) — EXCEPT pure catalog
   // introspection: a query whose only table references are information_schema
@@ -130,7 +211,10 @@ export function guardSql(
   // text analysis.
   const PROJECT_EQ_RE =
     /(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?project_id\s*=\s*(?<!:):project\b|(?<!:):project\b\s*=\s*(?:[a-zA-Z_][a-zA-Z0-9_]*\.)?project_id\b/i
-  if (!catalogOnly && !PROJECT_EQ_RE.test(masked)) {
+  // Scoped to text reachable from the final query (see reachableScopingText
+  // doc comment) so a decoy, unreferenced CTE can't fake project scoping for
+  // a table the main query actually reads.
+  if (!catalogOnly && !PROJECT_EQ_RE.test(reachableScopingText(masked))) {
     return {
       ok: false,
       error: "query must filter on project_id = :project (all reads are project-scoped)",

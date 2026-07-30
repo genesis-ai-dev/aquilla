@@ -26,7 +26,7 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
@@ -81,7 +81,7 @@ export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = {
   provider: "frontier",
   endpoint: "",
   model: "",
-  maxTokens: 512,
+  maxTokens: DEFAULT_COMPLETION_MAX_TOKENS,
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   llmHealthPenalty: 0.1,

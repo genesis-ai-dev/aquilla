@@ -449,6 +449,35 @@ export class Workspace {
     await this.commitTargetCellEdit(index, expectedText)
   }
 
+  /**
+   * AQU-740: type a draft into an IDML target, then Backspace it away again.
+   * Deleting a slot's final character used to let the browser drop the emptied
+   * slot span, which the round-trip guard refused — the character stuck and
+   * the "protected formatting" banner appeared. The cell must end exactly as
+   * it started (untranslated, no commit), with every protected anchor intact.
+   */
+  async deleteIdmlDraftToEmpty(
+    index: number,
+    draft: string,
+    expectedSlotCount: number,
+  ): Promise<void> {
+    const target = await this.activateTargetCell(index)
+    await this.page.keyboard.type(draft)
+    await expect(target).toContainText(draft)
+
+    for (let press = 0; press < draft.length; press += 1) {
+      await this.page.keyboard.press("Backspace")
+    }
+    await expect(target).toHaveText("")
+    // The protected anchors must survive the emptied draft.
+    await expect(target.locator("span[data-idml-slot]")).toHaveCount(expectedSlotCount)
+    await expect(
+      this.page.getByText(/This edit would remove protected InDesign formatting/i),
+    ).toHaveCount(0)
+    await this.page.keyboard.press("Escape")
+    await expect(target).toBeHidden()
+  }
+
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
     const target = await this.activateTargetCell(index)

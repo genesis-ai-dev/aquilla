@@ -100,6 +100,12 @@ test("IDML import, protected edit, and strict artifact export preserve original 
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)
 
+  // AQU-740: deleting a slot's final character must not trip the protected-
+  // formatting guard (native deletion used to drop the emptied slot span).
+  // The second cell is typed into and backspaced empty again, ending exactly
+  // as it started — untranslated — so the export assertions below still hold.
+  await ws.deleteIdmlDraftToEmpty(1, "xy", 2)
+
   // A lossless re-import can advance the source event for IDML structure while
   // retaining exactly the same translatable source text. That must preserve
   // the target without raising the source-changed warning (AQU-741).

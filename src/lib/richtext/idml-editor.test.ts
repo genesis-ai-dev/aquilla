@@ -7,7 +7,9 @@ import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 import {
   IDML_SLOT_NODE_NAME,
   IDML_TOKEN_NODE_NAME,
+  editableIdmlRangesIn,
   hasIdmlCellMetadata,
+  idmlDeletionRange,
   idmlEditablePlainOffsetPosition,
   idmlEditableSlotOffsetPosition,
   idmlEditorExtensions,
@@ -258,5 +260,63 @@ describe("IDML ProseMirror transaction guard", () => {
 
     expect(editor.state.doc.toJSON()).toEqual(before)
     expect(rejected).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-740: deletion cannot be left to the browser — removing a slot's last
+// character makes it drop the emptied span, which the guard refuses as anchor
+// removal, so deletion ranges are computed against the document instead.
+describe("IDML deletion ranges", () => {
+  it("confines a range to the editable slots it covers", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+
+    // A whole-document range keeps only the editable slot's text: the tab token
+    // and the locked "LOCK" slot are structure, not the translator's content.
+    expect(editableIdmlRangesIn(editor.state.doc, 0, editor.state.doc.content.size))
+      .toEqual([{ from: slotStart, to: slotEnd }])
+    // A range covering only protected anchors has nothing to write over.
+    expect(editableIdmlRangesIn(editor.state.doc, slotEnd + 1, editor.state.doc.content.size))
+      .toEqual([])
+  })
+
+  it("deletes within a slot and never past its protected edges", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+    const rangeAt = (
+      position: number,
+      direction: "backward" | "forward",
+      granularity: "character" | "word" | "line" = "character",
+    ) => {
+      editor.commands.setTextSelection(position)
+      return idmlDeletionRange(editor.state.doc, editor.state.selection, direction, granularity)
+    }
+
+    expect(rangeAt(slotEnd, "backward")).toEqual({ from: slotEnd - 1, to: slotEnd })
+    expect(rangeAt(slotStart, "forward")).toEqual({ from: slotStart, to: slotStart + 1 })
+    // Backspace at the slot start and Delete at its end would take protected
+    // structure with them, so they delete nothing at all.
+    expect(rangeAt(slotStart, "backward")).toBeNull()
+    expect(rangeAt(slotEnd, "forward")).toBeNull()
+    // "Alpha one" — one word back from the end.
+    expect(rangeAt(slotEnd, "backward", "word")).toEqual({ from: slotEnd - 3, to: slotEnd })
+    expect(rangeAt(slotEnd, "backward", "line")).toEqual({ from: slotStart, to: slotEnd })
+  })
+
+  it("steps over a whole grapheme rather than half a surrogate pair", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slot = editor.state.doc.nodeAt(slotStart - 1)!
+    editor.commands.insertContentAt(
+      { from: slotStart, to: slotStart + slot.content.size },
+      "👍🏽",
+    )
+    const emojiEnd = slotStart + (editor.state.doc.nodeAt(slotStart - 1)?.content.size ?? 0)
+    editor.commands.setTextSelection(emojiEnd)
+
+    expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "backward", "character"))
+      .toEqual({ from: slotStart, to: emojiEnd })
   })
 })

@@ -1,6 +1,6 @@
 import { Extension, Node as TiptapNode, mergeAttributes } from "@tiptap/core"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { Plugin } from "@tiptap/pm/state"
+import { Plugin, type Selection } from "@tiptap/pm/state"
 import {
   validateIdmlTranslation,
   type IdmlDiagnostic,
@@ -119,6 +119,147 @@ export function idmlEditablePlainOffsetPosition(
     return true
   })
   return requested
+}
+
+interface EditableSlotRange {
+  /** First text position inside the slot. */
+  start: number
+  /** Last text position inside the slot (equals `start` while it is empty). */
+  end: number
+}
+
+function editableSlotRanges(doc: ProseMirrorNode): EditableSlotRange[] {
+  const ranges: EditableSlotRange[] = []
+  doc.descendants((node, position) => {
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (node.attrs.editable === true) {
+      ranges.push({ start: position + 1, end: position + 1 + node.content.size })
+    }
+    return false
+  })
+  return ranges
+}
+
+export interface IdmlRange {
+  from: number
+  to: number
+}
+
+/**
+ * The parts of `[from, to]` that lie in editable slot text — the only content a
+ * translator owns. Protected tokens and locked slots fall out, so a selection
+ * spanning them can be cleared without touching the IDML structure.
+ */
+export function editableIdmlRangesIn(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+): IdmlRange[] {
+  return editableSlotRanges(doc)
+    .map((range) => ({ from: Math.max(from, range.start), to: Math.min(to, range.end) }))
+    .filter((range) => range.from < range.to)
+}
+
+function editableSlotAt(
+  doc: ProseMirrorNode,
+  position: number,
+): { start: number; node: ProseMirrorNode } | null {
+  let found: { start: number; node: ProseMirrorNode } | null = null
+  doc.descendants((node, nodePosition) => {
+    if (found) return false
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    const start = nodePosition + 1
+    if (
+      node.attrs.editable === true
+      && position >= start
+      && position <= start + node.content.size
+    ) {
+      found = { start, node }
+    }
+    return false
+  })
+  return found
+}
+
+/**
+ * A slot holds only text and hard breaks, so its content maps 1:1 onto a string
+ * — one ProseMirror position per character, with a hard break counting as "\n".
+ */
+function slotPlainText(slot: ProseMirrorNode): string {
+  let text = ""
+  slot.forEach((child) => {
+    text += child.isText ? child.text ?? "" : child.type.name === "hardBreak" ? "\n" : ""
+  })
+  return text
+}
+
+function segmentBoundaries(text: string, granularity: "grapheme" | "word"): number[] {
+  const boundaries = [0]
+  const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity })
+    : null
+  if (segmenter) {
+    for (const { segment } of segmenter.segment(text)) {
+      boundaries.push((boundaries[boundaries.length - 1] ?? 0) + segment.length)
+    }
+    return boundaries
+  }
+  // Code points keep surrogate pairs intact where Intl.Segmenter is missing.
+  for (const codePoint of text) {
+    boundaries.push((boundaries[boundaries.length - 1] ?? 0) + codePoint.length)
+  }
+  return boundaries
+}
+
+function lineBoundaries(text: string): number[] {
+  const boundaries = [0]
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "\n") boundaries.push(index + 1)
+  }
+  boundaries.push(text.length)
+  return boundaries
+}
+
+export type IdmlDeleteDirection = "backward" | "forward"
+export type IdmlDeleteGranularity = "character" | "word" | "line"
+
+/**
+ * AQU-740: the range a Backspace/Delete press should remove, expressed in
+ * ProseMirror positions and confined to one editable slot.
+ *
+ * IDML deletes cannot be left to the browser. Removing a slot's last character
+ * makes the browser drop the emptied `<span>`, which reaches ProseMirror as
+ * "an anchor disappeared" and is refused by the round-trip guard — so the final
+ * character of every slot was undeletable. Computing the range ourselves keeps
+ * the empty slot (legal, and how an untranslated unit already looks) and never
+ * lets the DOM diverge from the document.
+ *
+ * Returns null when there is nothing deletable, e.g. Backspace at a slot's
+ * start, where the neighbour is protected structure.
+ */
+export function idmlDeletionRange(
+  doc: ProseMirrorNode,
+  selection: Selection,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): IdmlRange | null {
+  if (!selection.empty) return { from: selection.from, to: selection.to }
+  const position = selection.from
+  const slot = editableSlotAt(doc, position)
+  if (!slot) return null
+  const text = slotPlainText(slot.node)
+  const offset = position - slot.start
+  const boundaries = granularity === "line"
+    ? lineBoundaries(text)
+    : segmentBoundaries(text, granularity === "word" ? "word" : "grapheme")
+  if (direction === "backward") {
+    const previous = boundaries.filter((boundary) => boundary < offset).pop()
+    if (previous === undefined) return null
+    return { from: slot.start + previous, to: position }
+  }
+  const next = boundaries.find((boundary) => boundary > offset)
+  if (next === undefined) return null
+  return { from: position, to: slot.start + next }
 }
 
 export function isEditableIdmlSelection(selection: {

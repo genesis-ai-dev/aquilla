@@ -106,10 +106,9 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
 
   const ws = new Workspace(alice)
   await ws.importViaSpecializedPanel(/Biblica Study Bible Notes/i, fixture, async (dialog) => {
-    // Sentence split is opt-out; the default keeps note blocks one cell per sentence.
     await expect(dialog.getByRole("checkbox", {
       name: /Split long notes into one cell per sentence/i,
-    })).toBeChecked()
+    })).not.toBeChecked()
   })
 
   // The importer drops the "-notes" suffix, so the file reads as its book.
@@ -117,7 +116,7 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await ws.waitForEditor()
 
   const rows = alice.locator("[data-cell-id]")
-  await expect(rows).toHaveCount(7, { timeout: 15_000 })
+  await expect(rows).toHaveCount(6, { timeout: 15_000 })
   await expect(ws.cellRow(0)).toContainText(GLOBAL_PREFACE_NOTE)
   await expect(ws.cellRow(1)).toContainText(PREFACE_NOTE)
   await expect(ws.cellRow(2)).toContainText(CHAPTER_ONE_NOTE)
@@ -128,11 +127,9 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await expect(ws.cellRow(3)).not.toContainText(REFERENCE_LIST[1])
   await expect(ws.cellRow(4)).toContainText(REFERENCE_LIST[1])
 
-  // With the split option on (default), a note block arrives as one cell per
-  // sentence; export merges the sentences back into that paragraph.
+  // With sentence splitting off (default), the note block stays one cell.
   await expect(ws.cellRow(5)).toContainText(NOTE_BLOCK_SENTENCES[0].trim())
-  await expect(ws.cellRow(5)).not.toContainText(NOTE_BLOCK_SENTENCES[1])
-  await expect(ws.cellRow(6)).toContainText(NOTE_BLOCK_SENTENCES[1])
+  await expect(ws.cellRow(5)).toContainText(NOTE_BLOCK_SENTENCES[1])
 
   // Notes retain Biblica's richer Preface/chapter grouping in the universal
   // navigator while verse paragraphs remain protected source structure.

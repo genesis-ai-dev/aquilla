@@ -10,7 +10,7 @@
  * Note paragraphs are always split at line breaks, because Biblica sets lists —
  * cross-references, glossary entries, outlines — as a single paragraph with a
  * `<Br/>` between items. Sentence splitting within each line is optional
- * (`splitSentences`, on by default): when enabled, a multi-sentence note block
+ * (`splitSentences`, off by default): when enabled, a multi-sentence note block
  * becomes one cell per sentence; when off, each line stays one cell.
  *
  * This is a presentation filter over parsed units — it never reinterprets the
@@ -75,7 +75,7 @@ export interface BiblicaStudyNoteSelection {
 
 export interface SelectBiblicaStudyNotesOptions {
   /**
-   * When true (default), cut each line at sentence boundaries so long note
+   * When true, cut each line at sentence boundaries so long note
    * blocks arrive as one cell per sentence. When false, each line is one cell.
    */
   readonly splitSentences?: boolean
@@ -178,7 +178,7 @@ export function selectBiblicaStudyNotes(
   units: readonly IdmlTranslationUnit[],
   options?: SelectBiblicaStudyNotesOptions,
 ): BiblicaStudyNoteSelection {
-  const splitSentences = options?.splitSentences !== false
+  const splitSentences = options?.splitSentences === true
   const notes: BiblicaStudyNote[] = []
   let verseUnitCount = 0
   let otherUnitCount = 0

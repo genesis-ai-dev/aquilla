@@ -4122,9 +4122,6 @@ export function ProjectWorkspace() {
         for (const cell of validatable) revalidateCell(cell.id)
       })()
     },
-    runAgentInput: () => {
-      console.info("agent-input triggered (placeholder runner)")
-    },
     runImportIntoFile: () => {
       if (!activeFileId) return
       setFileImportOpen(true)
@@ -4353,7 +4350,7 @@ export function ProjectWorkspace() {
             : "Diarize"
 
     const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx)
-      .filter((a) => a.id !== "import-new" && a.id !== "agent-input")
+      .filter((a) => a.id !== "import-new")
       .map((a) => ({
         id: `action-${a.id}`,
         label: a.label,
@@ -4506,20 +4503,6 @@ export function ProjectWorkspace() {
     suggestions.length,
     suggestionsDismissed,
   ])
-
-  const workspaceHeaderMenuItems = useMemo((): OverflowMenuItem[] => {
-    // Project-scoped overflow (Import is a visible button beside ⋯).
-    if (project === null) return []
-    return getVisibleActions(workspaceActions, actionCtx)
-      .filter((a) => a.id === "agent-input")
-      .map((a) => ({
-        id: `action-${a.id}`,
-        label: a.label,
-        icon: a.icon,
-        disabled: a.comingSoon,
-        onClick: () => handleWorkspaceAction(a),
-      }))
-  }, [actionCtx, handleWorkspaceAction, project])
 
   const handleHeaderImport = useCallback(() => {
     const importAction = workspaceActions.find((a) => a.id === "import-new")
@@ -5030,7 +5013,6 @@ export function ProjectWorkspace() {
         header={
           <WorkspaceHeader
             project={project}
-            extraMenuItems={workspaceHeaderMenuItems}
             onImport={project ? handleHeaderImport : undefined}
             overviewHref={projectId ? `/projects/${projectId}` : undefined}
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
@@ -5075,7 +5057,7 @@ export function ProjectWorkspace() {
             )}
 
             {/* AQU-661: file-scoped actions live in the chapter-row File options
-                menu; Import is a header button beside ⋯ (Agent input, etc.). */}
+                menu; Import is a header button. */}
           </WorkspaceHeader>
         }
         aboveCard={

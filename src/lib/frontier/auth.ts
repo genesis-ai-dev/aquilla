@@ -19,7 +19,11 @@ export const AUTH_BASE =
 export const FRONTIER_BASE = AUTH_BASE;
 
 import type { FrontierSession } from "./types";
-import { saveSession } from "./session-store";
+import {
+  listSessionsNeedingEmail,
+  patchSessionEmails,
+  saveSession,
+} from "./session-store";
 
 export class FrontierAuthError extends Error {
   public status: number;
@@ -71,7 +75,7 @@ export async function register(args: RegisterArgs): Promise<FrontierSession> {
     throw new FrontierAuthError(message, res.status);
   }
   const data = (await res.json()) as AuthResponse;
-  return finalizeSession(args.username, data);
+  return finalizeSession(args.username, data, args.email);
 }
 
 /**
@@ -309,18 +313,60 @@ export function isJwtExpired(token: string | null | undefined, skewSeconds = 30)
   }
 }
 
-async function finalizeSession(loginIdentifier: string, data: AuthResponse): Promise<FrontierSession> {
+/** Best-effort email from GET /auth/me — JWTs only carry `sub` today. */
+async function resolveAccountEmail(jwt: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(`${AUTH_BASE}/api/v2/auth/me`, {
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as { email?: unknown };
+    return typeof body.email === "string" && body.email.length > 0
+      ? body.email
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Backfill `email` onto every stored account that is missing it. Called when
+ * the account switcher opens so each logged-in row can show its address.
+ * Writes once, then notifies session subscribers.
+ */
+export async function hydrateSessionEmails(): Promise<void> {
+  const needing = await listSessionsNeedingEmail();
+  if (needing.length === 0) return;
+  const updates: Record<string, string> = {};
+  await Promise.all(
+    needing.map(async ({ key, jwt }) => {
+      const email = await resolveAccountEmail(jwt);
+      if (email) updates[key] = email;
+    }),
+  );
+  await patchSessionEmails(updates);
+}
+
+async function finalizeSession(
+  loginIdentifier: string,
+  data: AuthResponse,
+  emailHint?: string,
+): Promise<FrontierSession> {
   // Resolve the canonical username from the JWT's `sub` claim.
   // The server always mints the token with the user record's username (not
   // the email the caller may have typed). Falling back to loginIdentifier
   // preserves backward-compat for any edge case where decoding fails.
   const claims = jwtClaims(data.access_token);
   const resolvedUsername = claims.sub ?? loginIdentifier;
+  const email =
+    claims.email ??
+    emailHint ??
+    (await resolveAccountEmail(data.access_token));
   const session: FrontierSession = {
     jwt: data.access_token,
     username: resolvedUsername,
     createdAt: new Date().toISOString(),
-    ...(claims.email ? { email: claims.email } : {}),
+    ...(email ? { email } : {}),
   };
   await saveSession(session);
   return session;

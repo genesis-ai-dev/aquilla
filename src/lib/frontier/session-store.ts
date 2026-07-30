@@ -129,6 +129,31 @@ export async function listSessions(): Promise<SessionSummary[]> {
   }))
 }
 
+/**
+ * Sessions whose email is not yet stored (legacy logins — JWT has no email
+ * claim). Used to backfill via GET /auth/me per account JWT.
+ */
+export async function listSessionsNeedingEmail(): Promise<Array<{ key: string; jwt: string }>> {
+  const env = await readEnvelope()
+  return Object.entries(env.sessions)
+    .filter(([, s]) => !s.email)
+    .map(([key, s]) => ({ key, jwt: s.jwt }))
+}
+
+/** Batch-write emails onto existing sessions; no-op when nothing changes. */
+export async function patchSessionEmails(updates: Record<string, string>): Promise<void> {
+  if (Object.keys(updates).length === 0) return
+  const env = await readEnvelope()
+  let changed = false
+  for (const [key, email] of Object.entries(updates)) {
+    const existing = env.sessions[key]
+    if (!existing || !email || existing.email === email) continue
+    env.sessions[key] = { ...existing, email }
+    changed = true
+  }
+  if (changed) await writeEnvelope(env)
+}
+
 export async function addSession(s: FrontierSession): Promise<void> {
   const env = await readEnvelope()
   const key = sessionKey(s)

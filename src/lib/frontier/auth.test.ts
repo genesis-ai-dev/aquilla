@@ -80,9 +80,15 @@ describe("login with email resolves canonical username from JWT sub", () => {
       .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const fakeJwt = `header.${payload}.sig`;
 
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ access_token: fakeJwt, token_type: "bearer" }), { status: 200 })
-    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/auth/me")) {
+        return new Response(JSON.stringify({
+          id: 1, username: "alice", email: "alice@example.com", preferences: {},
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ access_token: fakeJwt, token_type: "bearer" }), { status: 200 });
+    });
 
     // User logs in using their email address
     const session = await login({ username: "alice@example.com", password: "pw" });
@@ -92,9 +98,42 @@ describe("login with email resolves canonical username from JWT sub", () => {
     // (keyed by username) populates immediately without a relaunch.
     expect(session.username).toBe("alice");
     expect(session.username).not.toBe("alice@example.com");
+    expect(session.email).toBe("alice@example.com");
 
     const stored = await (await import("./session-store")).loadSession();
     expect(stored?.username).toBe("alice");
+    expect(stored?.email).toBe("alice@example.com");
+  });
+});
+
+describe("hydrateSessionEmails", () => {
+  beforeEach(async () => {
+    const { _resetDbForTesting } = await import("./session-store");
+    await _resetDbForTesting();
+    vi.restoreAllMocks();
+  });
+
+  it("backfills email onto every stored account missing it", async () => {
+    const { addSession, listSessions } = await import("./session-store");
+    const { hydrateSessionEmails } = await import("./auth");
+
+    await addSession({ jwt: "jwt-a", username: "keeandev", createdAt: "2026-01-01T00:00:00Z" });
+    await addSession({ jwt: "jwt-b", username: "Keean", createdAt: "2026-01-01T00:00:00Z" });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      const headers = new Headers((init as RequestInit | undefined)?.headers);
+      const auth = headers.get("Authorization") ?? "";
+      const email = auth.includes("jwt-a") ? "keeandev@example.com" : "keean@example.com";
+      return new Response(JSON.stringify({
+        id: 1, username: "x", email, preferences: {},
+      }), { status: 200 });
+    });
+
+    await hydrateSessionEmails();
+    const list = await listSessions();
+    const byUser = Object.fromEntries(list.map((s) => [s.username, s.email]));
+    expect(byUser.keeandev).toBe("keeandev@example.com");
+    expect(byUser.Keean).toBe("keean@example.com");
   });
 });
 

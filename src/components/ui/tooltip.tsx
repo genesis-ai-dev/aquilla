@@ -87,7 +87,9 @@ function AppTooltip({
   disabled?: boolean
   className?: string
 }) {
-  if (disabled || !content) return children
+  // Empty content → no tooltip chrome. Keep the early return: callers that
+  // pass no content never toggle it, so remounting the child is fine.
+  if (!content) return children
 
   // Clear native `title` so the browser tooltip doesn't compete with ours.
   const trigger =
@@ -95,8 +97,13 @@ function AppTooltip({
       ? cloneElement(children, { title: undefined } as Record<string, string | undefined>)
       : children
 
+  // IMPORTANT: when `disabled` toggles (e.g. CreditsDial suppresses the
+  // tooltip while its popover is open), keep the Tooltip tree mounted and
+  // pass `disabled` through. Early-returning `children` remounts the trigger
+  // — and if that trigger is a PopoverTrigger, the popover flashes at (0,0)
+  // until the new anchor is measured.
   return (
-    <Tooltip>
+    <Tooltip disabled={disabled}>
       <TooltipTrigger render={trigger} delay={delay} />
       <TooltipContent side={side} className={className}>
         {content}

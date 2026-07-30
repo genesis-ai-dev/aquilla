@@ -87,22 +87,24 @@ export function AgentDockPanel({
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">AI Agent</span>
         <span className="ml-auto flex items-center gap-1">
-          {credits && <CreditsDial {...credits} />}
+          {/* When the workbench owns the session, its header shows the dial —
+              a second copy here would compete for the same click/popover. */}
+          {credits && !expanded && <CreditsDial {...credits} />}
+          {onExpand && !expanded && (
+            <AppTooltip content="Open full-screen workbench">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={onExpand}
+                className="text-muted-foreground"
+                aria-label="Open full-screen workbench"
+              >
+                <Maximize2 />
+              </Button>
+            </AppTooltip>
+          )}
         </span>
-        {onExpand && !expanded && (
-          <AppTooltip content="Open full-screen workbench">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              onClick={onExpand}
-              className="ml-auto text-muted-foreground"
-              aria-label="Open full-screen workbench"
-            >
-              <Maximize2 />
-            </Button>
-          </AppTooltip>
-        )}
       </div>
 
       {expanded ? (

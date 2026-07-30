@@ -67,7 +67,9 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {/* Suppressed while the popover is open: it sits over the same anchor and
-          the popover already spells out the breakdown. */}
+          the popover already spells out the breakdown. AppTooltip must stay
+          mounted (disabled={open}) — unmounting remounts PopoverTrigger and
+          flashes the popover at the top-left until the new anchor measures. */}
       <AppTooltip content={summary} disabled={open}>
         <PopoverTrigger
           render={
@@ -76,11 +78,11 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
               onClick={refresh}
               data-testid="credits-dial"
               aria-label={summary}
-              className="flex items-center rounded-full border bg-background p-1 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+              className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground"
             />
           }
         >
-          <svg viewBox="0 0 12 12" className="h-4 w-4 -rotate-90" aria-hidden>
+          <svg viewBox="0 0 12 12" className="size-4 -rotate-90" aria-hidden>
             <circle
               cx="6"
               cy="6"

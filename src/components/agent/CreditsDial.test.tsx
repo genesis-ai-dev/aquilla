@@ -87,13 +87,15 @@ describe("CreditsDial — maintainer view", () => {
     expect(ring.getAttribute("stroke-dasharray") ?? "").not.toContain("NaN")
   })
 
-  it("draws the ring as a chip-backed 16px gauge, still with no inline number", async () => {
+  it("draws a bare 16px ring (no bordered chip), still with no inline number", async () => {
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
     renderWithTooltips(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
     const dial = await screen.findByTestId("credits-dial")
-    expect(dial.querySelector("svg")?.getAttribute("class")).toContain("h-4")
-    expect(dial.className).toContain("rounded-full")
-    // The heavier treatment is styling only — the ring still stands alone (AQU-671).
+    expect(dial.querySelector("svg")?.getAttribute("class")).toContain("size-4")
+    // Ring only — no outer bordered/bg chip around the SVG gauge.
+    expect(dial.className).not.toContain("border")
+    expect(dial.className).not.toContain("rounded-full")
+    expect(dial.className).not.toContain("shadow-sm")
     expect(dial.textContent).not.toContain("150 cr")
     expect(dial).toHaveAttribute("aria-label", "Agent credits used today: 150 cr")
     // The thicker arc must stay inside the 12x12 box: r + stroke/2 <= 6.
@@ -101,6 +103,17 @@ describe("CreditsDial — maintainer view", () => {
     const r = Number(ring.getAttribute("r"))
     const stroke = Number(ring.getAttribute("stroke-width"))
     expect(r + stroke / 2).toBeLessThanOrEqual(6)
+  })
+
+  it("keeps the popover trigger mounted when opening (no AppTooltip remount flash)", async () => {
+    mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
+    renderWithTooltips(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    const dial = await screen.findByTestId("credits-dial")
+    fireEvent.click(dial)
+    await screen.findByTestId("credits-dial-popover")
+    // Same trigger node must still be in the document — remounting it is what
+    // flashed the popover at (0,0) before the new anchor measured.
+    expect(screen.getByTestId("credits-dial")).toBe(dial)
   })
 
   it("opens a popover with agent + all-rail day/week detail on click", async () => {

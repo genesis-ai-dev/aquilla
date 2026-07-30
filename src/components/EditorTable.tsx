@@ -5076,7 +5076,7 @@ function EditorRow({
             and target columns is the validation button. In-flow rather than
             absolutely positioned: it claims its own 24px track, so it can
             never overlap the line number at narrow widths. */}
-        <div className="flex items-start justify-center pt-4">
+        <div className="flex h-full items-center justify-center self-stretch">
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
               the drag-selection affordance (onPointerDown) uses setSelection()

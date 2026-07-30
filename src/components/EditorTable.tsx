@@ -127,6 +127,7 @@ import {
   resolveTextDirection,
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
+import { summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
 import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
@@ -4613,11 +4614,14 @@ function EditorRow({
   const labelText = castName ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
-  // The cell number tints by worst severity. That's the whole signal — the
-  // concrete issue list lives in the expansion's Issues tab, not in a hover
-  // popover here. (Replaced the old severity stripe / warning triangle / dot;
-  // the cast label moved to the target column header lane so it isn't squished
-  // into this 44px gutter.)
+  // The cell number tints by worst severity — that's the at-a-glance signal.
+  // AQU-757: the tint alone said nothing ("Doesn't say squat" — Joel), so
+  // hovering the flagged number now surfaces every active validator/rule on the
+  // cell (check name + plain-language reason) in a tooltip; the full list with
+  // resolve/dismiss controls still lives in the expansion's Issues tab. (This
+  // replaced the old severity stripe / warning triangle / dot; the cast label
+  // moved to the target column header lane so it isn't squished into this 44px
+  // gutter.)
   const hasAnyIssue = infractionCount > 0 || cellNeedsAttention
   const numberLabel = cellNumberLabel({
     lineNumbersEnabled,
@@ -4629,7 +4633,30 @@ function EditorRow({
     contentNumber,
     displayLabel: importDisplayLabel(cell.metadata),
   })
-  const numberPill = numberLabel === null ? null : (
+  // Explanation for the number-pill tint. Every active infraction (built-in
+  // integrity checks and user/terminology rules alike, since they all reduce to
+  // RuleInfraction) is listed by name + reason. A cell that only tints because
+  // its confidence is low (no infraction) gets the validation hint instead.
+  const issueSummary = cellInfractions.length > 0
+    ? summarizeCellIssues(cellInfractions, (ruleId) => ruleMap.get(ruleId)?.name)
+    : []
+  const issueTooltipContent = hasAnyIssue ? (
+    <div className="max-w-[15rem] space-y-1 text-left">
+      {issueSummary.length > 0 ? (
+        issueSummary.map((line) => (
+          <div key={line.ruleId} className="leading-snug">
+            <span className="font-medium">{line.name}</span>
+            <span className="text-muted-foreground"> — {line.reason}</span>
+          </div>
+        ))
+      ) : (
+        <div className="leading-snug text-muted-foreground">
+          Not yet validated — confidence is low. Validate this cell to clear the flag.
+        </div>
+      )}
+    </div>
+  ) : null
+  const numberPillInner = numberLabel === null ? null : (
     <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
       <CellNumberPill
         number={numberLabel}
@@ -4638,6 +4665,11 @@ function EditorRow({
       />
     </span>
   )
+  const numberPill = numberPillInner && issueTooltipContent ? (
+    <AppTooltip content={issueTooltipContent} side="right">
+      {numberPillInner}
+    </AppTooltip>
+  ) : numberPillInner
 
   // ── Hover / focus state for the floating action rail ─────────────────────
   // Browser focus is exclusive, as is the pointer's hovered row. Deriving

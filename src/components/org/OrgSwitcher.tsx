@@ -1,11 +1,16 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Building2, Check, ChevronDown, Plus } from "lucide-react"
+import { Building2, Check, ChevronDown, Plus, SearchIcon } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { RoleLabel } from "@/components/RoleLabel"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +22,15 @@ import {
 
 const ORG_MENU_ITEM_CLASS =
   "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5"
+
+/** ~10 org rows (py-1.5 + text-sm ≈ 2rem each). */
+const ORG_LIST_MAX_HEIGHT_CLASS = "max-h-80"
+
+function orgMatchesSearch(name: string, query: string): boolean {
+  const normalized = query.trim().toLocaleLowerCase()
+  if (!normalized) return true
+  return name.toLocaleLowerCase().includes(normalized)
+}
 
 function OrgMark({
   name,
@@ -66,11 +80,8 @@ export function OrgSwitcher() {
   const navigate = useNavigate()
 
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
-
-  // AQU-473: a project-only invitee has zero member orgs but may still have
-  // guest orgs to switch into — don't hide the whole switcher for them.
-  if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
 
   // AQU-624: a guest org isn't a membership, so it can't become the `activeOrg`
   // without misrepresenting the caller's role (AQU-473). Instead we treat the
@@ -94,6 +105,28 @@ export function OrgSwitcher() {
     : isAllOrgs
       ? "All organizations"
       : activeOrg?.name ?? "Workspace"
+
+  const filteredOrgs = useMemo(
+    () => orgs.filter((o) => orgMatchesSearch(o.name ?? "Workspace", search)),
+    [orgs, search],
+  )
+  const filteredGuestOrgs = useMemo(
+    () => guestOrgs.filter((g) => orgMatchesSearch(g.name ?? `Org #${g.id}`, search)),
+    [guestOrgs, search],
+  )
+  const showAllOrgsRow =
+    showAllOrgs && orgMatchesSearch("All organizations", search)
+  const listEmpty =
+    !showAllOrgsRow && filteredOrgs.length === 0 && filteredGuestOrgs.length === 0
+
+  // AQU-473: a project-only invitee has zero member orgs but may still have
+  // guest orgs to switch into — don't hide the whole switcher for them.
+  if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
+
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen)
+    if (!nextOpen) setSearch("")
+  }
 
   function handleAllOrgs() {
     setAllOrgs()
@@ -136,7 +169,7 @@ export function OrgSwitcher() {
 
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger
           render={
             <button
@@ -150,64 +183,99 @@ export function OrgSwitcher() {
           <span className="truncate font-medium">{title}</span>
           <ChevronDown className="ml-auto size-4 opacity-50" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-72 rounded-lg" align="start" side="bottom" sideOffset={4}>
-          <DropdownMenuGroup>
-            {showAllOrgs && (
-              <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={handleAllOrgs}>
-                <OrgMark name="All organizations" allOrgs />
-                <span className="truncate">All organizations</span>
-                <span className="flex shrink-0 items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground">All projects</span>
-                  {!guestSelected && isAllOrgs && <Check className="size-4 opacity-60" />}
-                </span>
-              </DropdownMenuItem>
+        <DropdownMenuContent
+          className="w-72 overflow-hidden rounded-lg p-0"
+          align="start"
+          side="bottom"
+          sideOffset={4}
+        >
+          {/* Borderless search — matches keean-changes ChapterNavigator ComboboxInput. */}
+          <InputGroup className="h-8 w-auto rounded-none border-0 bg-transparent shadow-none outline-none ring-0 *:data-[slot=input-group-addon]:pl-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!">
+            <InputGroupAddon align="inline-start">
+              <SearchIcon className="size-4 text-muted-foreground" />
+            </InputGroupAddon>
+            <InputGroupInput
+              placeholder="Find an organization…"
+              aria-label="Find an organization"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </InputGroup>
+          <DropdownMenuSeparator className="mx-0 my-0" />
+          <div
+            role="presentation"
+            className={`${ORG_LIST_MAX_HEIGHT_CLASS} overflow-y-auto overscroll-contain p-1 scrollbar-thin`}
+          >
+            {listEmpty ? (
+              <p className="px-2 py-4 text-center text-sm text-muted-foreground">
+                No organizations found.
+              </p>
+            ) : (
+              <>
+                <DropdownMenuGroup>
+                  {showAllOrgsRow && (
+                    <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={handleAllOrgs}>
+                      <OrgMark name="All organizations" allOrgs />
+                      <span className="truncate">All organizations</span>
+                      <span className="flex shrink-0 items-center gap-1.5">
+                        <span className="text-xs text-muted-foreground">All projects</span>
+                        {!guestSelected && isAllOrgs && <Check className="size-4 opacity-60" />}
+                      </span>
+                    </DropdownMenuItem>
+                  )}
+                  {filteredOrgs.map((o) => {
+                    const name = o.name ?? "Workspace"
+                    const selected = !guestSelected && activeOrgId === o.id
+                    return (
+                      <DropdownMenuItem
+                        key={o.id}
+                        className={ORG_MENU_ITEM_CLASS}
+                        onClick={() => handleActiveOrg(o.id)}
+                      >
+                        <OrgMark name={name} />
+                        <span className="truncate">{name}</span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <RoleLabel name={o.role.name} className="text-xs text-muted-foreground" />
+                          {selected && <Check className="size-4 opacity-60" />}
+                        </span>
+                      </DropdownMenuItem>
+                    )
+                  })}
+                </DropdownMenuGroup>
+                {filteredGuestOrgs.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator className="mx-0 my-1" />
+                    <DropdownMenuGroup data-testid="guest-orgs">
+                      {filteredGuestOrgs.map((g) => (
+                        <DropdownMenuItem
+                          key={g.id}
+                          className={ORG_MENU_ITEM_CLASS}
+                          onClick={() => handleGuestOrg(g)}
+                        >
+                          <OrgMark name={g.name ?? `Org #${g.id}`} />
+                          <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            <RoleLabel name="guest" className="text-xs text-muted-foreground" />
+                            {selectedGuestOrgId === g.id && <Check className="size-4 opacity-60" />}
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </>
+                )}
+              </>
             )}
-            {orgs.map((o) => {
-              const name = o.name ?? "Workspace"
-              const selected = !guestSelected && activeOrgId === o.id
-              return (
-                <DropdownMenuItem
-                  key={o.id}
-                  className={ORG_MENU_ITEM_CLASS}
-                  onClick={() => handleActiveOrg(o.id)}
-                >
-                  <OrgMark name={name} />
-                  <span className="truncate">{name}</span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    <RoleLabel name={o.role.name} className="text-xs text-muted-foreground" />
-                    {selected && <Check className="size-4 opacity-60" />}
-                  </span>
-                </DropdownMenuItem>
-              )
-            })}
-          </DropdownMenuGroup>
-          {guestOrgs.length > 0 && (
-            <>
-              <DropdownMenuSeparator className="mx-0 my-1" />
-              <DropdownMenuGroup data-testid="guest-orgs">
-                {guestOrgs.map((g) => (
-                  <DropdownMenuItem
-                    key={g.id}
-                    className={ORG_MENU_ITEM_CLASS}
-                    onClick={() => handleGuestOrg(g)}
-                  >
-                    <OrgMark name={g.name ?? `Org #${g.id}`} />
-                    <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      <RoleLabel name="guest" className="text-xs text-muted-foreground" />
-                      {selectedGuestOrgId === g.id && <Check className="size-4 opacity-60" />}
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </>
-          )}
-          <DropdownMenuSeparator className="mx-0 my-1" />
-          <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={openCreateDialog}>
-            <OrgMark name="Create" create />
-            <span className="truncate text-muted-foreground">Create</span>
-            <span aria-hidden />
-          </DropdownMenuItem>
+          </div>
+          <DropdownMenuSeparator className="mx-0 my-0" />
+          <div role="presentation" className="p-1">
+            <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={openCreateDialog}>
+              <OrgMark name="Create" create />
+              <span className="truncate text-muted-foreground">Create</span>
+              <span aria-hidden />
+            </DropdownMenuItem>
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
 

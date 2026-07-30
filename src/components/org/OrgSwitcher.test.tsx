@@ -54,6 +54,30 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
   })
 
+  it("search filters orgs and keeps Create outside the scroll list", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } },
+      { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+      { id: 3, name: "Zebra Corp", role: { level: 100, name: "viewer" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Organization switcher: All organizations" }).click()
+    })
+
+    const search = screen.getByRole("textbox", { name: /find an organization/i })
+    expect(search).toBeInTheDocument()
+    fireEvent.change(search, { target: { value: "zebra" } })
+
+    expect(screen.getByText("Zebra Corp")).toBeInTheDocument()
+    expect(screen.queryByText("Come and See")).not.toBeInTheDocument()
+    expect(screen.queryByText("Side Org")).not.toBeInTheDocument()
+    // Create stays pinned below the scrollable org list.
+    expect(screen.getByRole("menuitem", { name: /^create$/i })).toBeInTheDocument()
+  })
+
   it("create org: opens dialog, types name, submits, calls createOrg", async () => {
     listMyOrgs
       .mockResolvedValueOnce([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])

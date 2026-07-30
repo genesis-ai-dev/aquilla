@@ -10,7 +10,6 @@ import {
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { ChevronDown, ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -114,10 +113,6 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   return { singular: "milestone", plural: "Milestones" }
 }
 
-function isScriptureMilestone(kind: ImportMilestoneKind): boolean {
-  return kind === "chapter" || kind === "chapter-range" || kind === "preface"
-}
-
 function percent(part: number, total: number): number {
   return total > 0 ? Math.round((part / total) * 100) : 0
 }
@@ -138,13 +133,11 @@ function ProgressSummary({ translated, validated, total }: {
 function VirtualizedMilestoneList({
   activeRowKey,
   expandedKey,
-  scriptureNavigation,
   open,
   virtualizerRef,
 }: {
   activeRowKey: string
   expandedKey: string
-  scriptureNavigation: boolean
   open: boolean
   virtualizerRef: RefObject<MilestoneListVirtualizer | null>
 }) {
@@ -248,26 +241,12 @@ function VirtualizedMilestoneList({
                   </>
                 ) : (
                   <>
-                    <span className="flex min-w-0 flex-1 items-center gap-2.5">
-                      {/* Scripture labels already carry the chapter/range, so a
-                          shortLabel badge would only repeat it. */}
-                      {!scriptureNavigation ? (
-                        <Badge
-                          variant={isActive ? "default" : "outline"}
-                          className="w-10 shrink-0 justify-center overflow-hidden rounded-full px-1.5 tabular-nums"
-                          aria-hidden="true"
-                          data-milestone-badge
-                        >
-                          {row.milestone.shortLabel}
-                        </Badge>
-                      ) : null}
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium tabular-nums">
-                          {row.milestone.label}
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {row.milestone.description}
-                        </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium tabular-nums">
+                        {row.milestone.label}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        {row.milestone.description}
                       </span>
                     </span>
                     <ProgressSummary {...row.milestone} />
@@ -310,7 +289,6 @@ export function MilestoneNavigator({
   const [expandedKey, setExpandedKey] = useState(activeKey)
   const virtualizerRef = useRef<MilestoneListVirtualizer | null>(null)
   const vocabulary = useMemo(() => vocabularyFor(items), [items])
-  const scriptureNavigation = items.every((item) => isScriptureMilestone(item.kind))
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
@@ -477,7 +455,6 @@ export function MilestoneNavigator({
                 <VirtualizedMilestoneList
                   activeRowKey={activeRowKey}
                   expandedKey={expandedKey}
-                  scriptureNavigation={scriptureNavigation}
                   open={open}
                   virtualizerRef={virtualizerRef}
                 />

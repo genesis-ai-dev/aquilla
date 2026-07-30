@@ -143,8 +143,6 @@ describe("MilestoneNavigator", () => {
     expect(pickerSearch("slide")).toBeInTheDocument()
     expect(pickerSearch("slide")).toHaveAttribute("placeholder", "Find a slide…")
     expect(screen.getByRole("group", { name: "Slides" })).toBeInTheDocument()
-    expect(screen.getByRole("option", { name: /Welcome / }).querySelector("[data-milestone-badge]"))
-      .toHaveTextContent("1")
   })
 
   it("shows and navigates IDML subsection ranges like Codex Editor", () => {
@@ -201,7 +199,7 @@ describe("MilestoneNavigator", () => {
     expect(onSelect).toHaveBeenCalledWith("story:u44d21", "story:u44d21:range:c1")
   })
 
-  it("does not repeat Scripture ranges in a badge and book-qualified label", () => {
+  it("shows the book-qualified label once without a numeric badge", () => {
     const ranges: MilestoneNavigationItem[] = [{
       key: "biblica:ISA:2-5",
       kind: "chapter-range",

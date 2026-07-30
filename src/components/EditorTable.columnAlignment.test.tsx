@@ -158,7 +158,9 @@ describe("EditorTable — source/target first-line alignment", () => {
     expect(spacer.className).toContain("h-4")
     expect(spacer.className).toContain("mb-1")
 
-    const gutter = spacer.parentElement
+    // Combined select/badges/number gutter owns the vertical padding; the
+    // spacer sits inside the number slot (select | badges+number group).
+    const gutter = spacer.parentElement?.parentElement?.parentElement
     expect(gutter?.className).toContain("py-1.5")
   })
 

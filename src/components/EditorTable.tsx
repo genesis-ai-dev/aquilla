@@ -1382,15 +1382,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useEffect(() => stopSelectionDrag, [stopSelectionDrag])
 
-  // Grid layout: [select+badges] [number] [source] [target]. The first track
-  // holds the multi-select control plus a flex-col stack of status badges
-  // (comments / stale / synth) to its right; the 44px track is the verse/
-  // line number alone. There is no right gutter — the floating action rail
-  // (sparkle / mic / tts / comment / expand) is absolutely positioned at the
-  // row's right edge so it doesn't claim layout space when collapsed. The
-  // target column reserves pr-9 so the ever-present expand chevron never
-  // overlaps text.
-  const gridCols = "grid-cols-[minmax(24px,max-content)_44px_1fr_1fr]"
+  // Grid layout: [gutter] [source] [target]. The gutter is one fixed track
+  // holding select + status-badges (flex-col) + verse number in a tight
+  // flex row (gap-0.5) — tighter than three gap-2 grid tracks, while the
+  // fixed width keeps Source header-aligned. No right gutter; the floating
+  // action rail is absolutely positioned. Target reserves pr-9 for the
+  // expand chevron.
+  const gridCols = "grid-cols-[84px_1fr_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1703,18 +1701,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </span>
         )}
         {showParagraphBoundary && (
-          <div className={`grid ${gridCols} border-t border-border/60`}>
-            {/* Skip the multi-select track so the pilcrow stays in the number
-                gutter, aligned with the line numbers below it. */}
-            <div aria-hidden="true" />
-            <AppTooltip content="New paragraph">
-              <div
-                data-testid="paragraph-boundary-indicator"
-                className="flex items-center justify-center py-1"
-              >
-                <Pilcrow className="h-3 w-3 text-muted-foreground" />
+          <div className={`grid ${gridCols} border-t border-border/60 pl-2.5 pr-4`}>
+            {/* Pilcrow sits in the number slot of the combined gutter so it
+                stays aligned with line numbers below. */}
+            <div className="flex items-center py-1">
+              <div className="w-5 shrink-0" aria-hidden="true" />
+              <div className="ml-2 flex min-w-0 flex-1 items-center gap-0.5">
+                <div className="w-5 shrink-0" aria-hidden="true" />
+                <AppTooltip content="New paragraph">
+                  <div
+                    data-testid="paragraph-boundary-indicator"
+                    className="flex min-w-0 flex-1 items-center justify-center"
+                  >
+                    <Pilcrow className="h-3 w-3 text-muted-foreground" />
+                  </div>
+                </AppTooltip>
               </div>
-            </AppTooltip>
+            </div>
           </div>
         )}
         <MemoizedRow
@@ -1931,13 +1934,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             ) : null}
           </div>
         ) : null}
-        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
-          {/* Unlabeled tracks: select+status-badges, then the number gutter. */}
-          <div aria-hidden="true" />
+        <div className={cn("grid gap-2 border-b border-border pl-2.5 pr-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
+          {/* Unlabeled track: combined select + badges + number gutter. */}
           <div aria-hidden="true" />
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 pl-2">
             {audioLens ? "Controls" : "Source"}
             {!audioLens && project.sourceLanguage && (
               <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
@@ -2270,7 +2272,7 @@ interface MemoizedRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[minmax(24px,max-content)_44px_1fr_1fr]"
+  gridCols: "grid-cols-[84px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2655,7 +2657,7 @@ interface EditorRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[minmax(24px,max-content)_44px_1fr_1fr]"
+  gridCols: "grid-cols-[84px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -5035,7 +5037,7 @@ function EditorRow({
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
-          "group relative grid gap-2 px-4 py-2 transition-colors duration-150 ease-out",
+          "group relative grid gap-2 pl-2.5 pr-4 py-2 transition-colors duration-150 ease-out",
           // The mic-permission help is anchored in the action rail. While it
           // is open, this row must become its own higher stacking layer and
           // allow the popover to escape the row; otherwise neighbouring rows
@@ -5078,12 +5080,10 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
-        {/* Select + status-badges column — the row's FIRST grid cell, to the
-            left of the number gutter. Select stays on its own; status badges
-            (comments / stale / synth errors) stack in a flex-col to its right,
-            still left of the verse number. In-flow rather than absolutely
-            positioned so they never overlap the line number at narrow widths. */}
-        <div className="flex h-full items-stretch justify-center gap-0.5 self-stretch">
+        {/* Combined left gutter — select sits near the left edge (row uses
+            pl-2.5); ml-2 opens space before the badge stack, then a tight
+            gap to the verse number. Fixed track keeps Source header-aligned. */}
+        <div className="flex h-full items-start self-stretch py-1.5">
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
               the drag-selection affordance (onPointerDown) uses setSelection()
@@ -5098,7 +5098,8 @@ function EditorRow({
                    single-cell selection gives immediate visual feedback, then
                    the SelectionBar ("X selected" pill) appears for discoverability.
               See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
-          <div className="flex items-center justify-center">
+          <div className="flex w-5 shrink-0 flex-col items-center">
+            <div className="mb-1 h-4 shrink-0" aria-hidden />
             <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
               <button
                 type="button"
@@ -5124,21 +5125,13 @@ function EditorRow({
               </button>
             </AppTooltip>
           </div>
-          {/* Status badges — vertically stacked, level with the first source
-              line (same strip spacer the number gutter uses). */}
-          {((isStaleSource || isUpstreamStaleSource) && hasContent) ||
-          isSynthBusy ||
-          isSynthError ||
-          (onOpenComments && openCommentCount > 0) ? (
+          {/* Badges + verse number — ml-2 opens space after the select. */}
+          <div className="ml-2 flex min-w-0 flex-1 items-start gap-0.5">
             <div
               data-testid="gutter-status-badges"
-              className="flex flex-col items-center gap-0.5 py-1.5"
+              className="flex w-5 shrink-0 flex-col items-center gap-0.5"
             >
               <div className="mb-1 h-4 shrink-0" aria-hidden />
-              {/* Stale-source indicator. Both flags are already resolved
-                  per-row booleans (see isStaleSource's doc comment) — the
-                  singleton Set(s) just adapt them to the indicator's
-                  managed-mode membership-set contract. */}
               {(isStaleSource || isUpstreamStaleSource) && hasContent && (
                 <StaleSourceIndicator
                   cellId={cell.id}
@@ -5166,18 +5159,13 @@ function EditorRow({
                 </AppTooltip>
               )}
             </div>
-          ) : null}
-        </div>
-        {/* Number gutter — verse / line number alone (severity tint). Status
-            badges live in the select column to the left of this track. */}
-        <div className="flex h-full w-full flex-col items-center py-1.5">
-          {/* Mirrors the source column's context strip (h-4 + mb-1). The strip
-              offsets the source text but not this column, so without the same
-              reservation here the number rides above the first line it
-              annotates. Same mirror the target header lane provides. */}
-          <div data-testid="gutter-strip-spacer" className="mb-1 h-4" aria-hidden />
-          <div className="flex w-full items-start justify-center">
-            {numberPill}
+            {/* Verse / line number (severity tint). */}
+            <div className="flex min-w-0 flex-1 flex-col items-center">
+              <div data-testid="gutter-strip-spacer" className="mb-1 h-4" aria-hidden />
+              <div className="flex w-full items-start justify-center">
+                {numberPill}
+              </div>
+            </div>
           </div>
         </div>
 

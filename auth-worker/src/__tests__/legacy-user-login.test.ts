@@ -51,13 +51,16 @@ function migrationEnv() {
   }
 }
 
-function installSuccessfulSourceFetch(passwordHash: string): ReturnType<typeof vi.fn> {
+function installSuccessfulSourceFetch(
+  passwordHash: string,
+  gitlabUserId: number | null = 77,
+): ReturnType<typeof vi.fn> {
   const source = {
     id: 700,
     username: "Cleiton",
     email: "cleiton@example.com",
     password_hash: passwordHash,
-    gitlab_user_id: 77,
+    gitlab_user_id: gitlabUserId,
     created_at: "2026-07-01 12:00:00",
     updated_at: "2026-07-02 12:00:00",
     // A real D1 row has this field. The bridge's SELECT and parser must ignore it.
@@ -167,6 +170,84 @@ describe("atomic legacy-user login migration", () => {
     expect(projectMember?.role_level).toBe(400)
   })
 
+  it("reports migration before the opt-in continuation contacts GitLab", async () => {
+    await seedAccessTargets()
+    const passwordHash = await hashPasswordWerkzeugScrypt("correct-password")
+    const sourceFetch = installSuccessfulSourceFetch(passwordHash)
+    const credentials = {
+      username: "cleiton@example.com",
+      password: "correct-password",
+      migration_handshake: true,
+    }
+
+    const handshake = await app.request(
+      "/api/v2/auth/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(credentials),
+      },
+      migrationEnv(),
+    )
+
+    expect(handshake.status).toBe(202)
+    expect(await handshake.json()).toEqual({ status: "migration_required" })
+    expect(sourceFetch.mock.calls.map(([input]) => String(input))).toEqual([
+      expect.stringContaining("api.cloudflare.com/client/v4"),
+      expect.stringContaining("api.cloudflare.com/client/v4"),
+    ])
+    expect(await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*) AS n FROM users WHERE LOWER(username) = 'cleiton'",
+    ).first<number>("n")).toBe(0)
+
+    sourceFetch.mockClear()
+    const continuation = await app.request(
+      "/api/v2/auth/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...credentials,
+          continue_migration: true,
+        }),
+      },
+      migrationEnv(),
+    )
+
+    expect(continuation.status).toBe(200)
+    expect(await continuation.json()).toMatchObject({ token_type: "bearer" })
+    expect(sourceFetch.mock.calls.some(([input]) =>
+      String(input).includes("/api/v4/"),
+    )).toBe(true)
+  })
+
+  it("does not announce migration when no GitLab identity can be reconciled", async () => {
+    const passwordHash = await hashPasswordWerkzeugScrypt("correct-password")
+    const sourceFetch = installSuccessfulSourceFetch(passwordHash, null)
+
+    const response = await app.request(
+      "/api/v2/auth/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: "cleiton@example.com",
+          password: "correct-password",
+          migration_handshake: true,
+        }),
+      },
+      migrationEnv(),
+    )
+
+    expect(response.status).toBe(503)
+    expect(sourceFetch.mock.calls.every(([input]) =>
+      String(input).includes("api.cloudflare.com/client/v4"),
+    )).toBe(true)
+    expect(await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*) AS n FROM users WHERE LOWER(username) = 'cleiton'",
+    ).first<number>("n")).toBe(0)
+  })
+
   it("does not call D1 or accept a legacy credential when a Neon identity exists", async () => {
     const neonHash = await hashPasswordWerkzeugScrypt("neon-password")
     await env.AQUILLA_PG.prepare(
@@ -181,7 +262,11 @@ describe("atomic legacy-user login migration", () => {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: "cleiton", password: "legacy-password" }),
+        body: JSON.stringify({
+          username: "cleiton",
+          password: "legacy-password",
+          migration_handshake: true,
+        }),
       },
       migrationEnv(),
     )
@@ -269,6 +354,7 @@ describe("atomic legacy-user login migration", () => {
   it("a GitLab failure rolls back the entire migration", async () => {
     await seedAccessTargets()
     const passwordHash = await hashPasswordWerkzeugScrypt("correct-password")
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     const source = {
       id: 700,
       username: "Cleiton",
@@ -295,6 +381,16 @@ describe("atomic legacy-user login migration", () => {
     )
 
     expect(response.status).toBe(503)
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[legacy-user-migration] login migration failed",
+      {
+        code: "dependency",
+        reason: "GitLab access topology is unavailable",
+      },
+    )
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(source.username)
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(source.email)
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain(source.password_hash)
     expect(await env.AQUILLA_PG.prepare(
       "SELECT COUNT(*) AS n FROM users WHERE LOWER(username) = 'cleiton'",
     ).first<number>("n")).toBe(0)
@@ -326,6 +422,7 @@ describe("atomic legacy-user login migration", () => {
   it("rolls back identity and earlier memberships when a target disappears mid-transaction", async () => {
     await seedAccessTargets()
     const passwordHash = await hashPasswordWerkzeugScrypt("correct-password")
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     const source = {
       id: 701,
       username: "AtomicUser",
@@ -345,6 +442,21 @@ describe("atomic legacy-user login migration", () => {
       conflicts: [],
       confirmedMembershipCount: 1,
     }, "jit")).rejects.toMatchObject({ code: "dependency" })
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[legacy-user-migration] atomic apply failed",
+      {
+        stage: "team-memberships",
+        code: "unknown",
+        constraint: undefined,
+        table: undefined,
+      },
+    )
+    const serializedLog = JSON.stringify(errorSpy.mock.calls)
+    expect(serializedLog).not.toContain(source.username)
+    expect(serializedLog).not.toContain(source.email)
+    expect(serializedLog).not.toContain(source.password_hash)
+    errorSpy.mockRestore()
 
     expect(await env.AQUILLA_PG.prepare(
       "SELECT COUNT(*) AS n FROM users WHERE LOWER(username) = 'atomicuser'",

@@ -45,6 +45,17 @@ describe("extractTextFromDocx", () => {
     const zipped = zipSync({ "unrelated.xml": strToU8("<foo/>") })
     expect(() => extractTextFromDocx(zipped)).toThrow(/word\/document\.xml/)
   })
+
+  // AQU pen-test finding (2026-07-29): unzipSync() with no size guard would
+  // fully inflate whatever word/document.xml declares, even gigabytes from a
+  // tiny upload (a zip bomb). The filter-based size check must reject before
+  // any inflation happens for the oversized entry.
+  it("rejects a word/document.xml whose declared inflated size exceeds the safety cap (zip-bomb guard)", () => {
+    const huge = "a".repeat(21 * 1024 * 1024) // 21 MB inflated — over the 20 MB cap
+    const xml = `<w:document><w:body><w:p><w:r><w:t>${huge}</w:t></w:r></w:p></w:body></w:document>`
+    const zipped = zipSync({ "word/document.xml": strToU8(xml) }, { level: 9 })
+    expect(() => extractTextFromDocx(zipped)).toThrow(/zip bomb|size limit/)
+  })
 })
 
 // ── PDF fixtures ─────────────────────────────────────────────────────────────

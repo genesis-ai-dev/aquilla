@@ -22,6 +22,42 @@ describe("login", () => {
     expect((await loadSession())?.jwt).toBe("jwt-1");
   });
 
+  it("announces a confirmed migration before continuing login", async () => {
+    const onMigrationRequired = vi.fn();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ status: "migration_required" }), {
+          status: 202,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          access_token: "jwt-migrated",
+          token_type: "bearer",
+        }), { status: 200 }),
+      );
+
+    const session = await login(
+      { username: "legacy", password: "pw" },
+      { onMigrationRequired },
+    );
+
+    expect(onMigrationRequired).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchSpy.mock.calls[0]?.[1]?.body))).toEqual({
+      username: "legacy",
+      password: "pw",
+      migration_handshake: true,
+    });
+    expect(JSON.parse(String(fetchSpy.mock.calls[1]?.[1]?.body))).toEqual({
+      username: "legacy",
+      password: "pw",
+      migration_handshake: true,
+      continue_migration: true,
+    });
+    expect(session.jwt).toBe("jwt-migrated");
+  });
+
   it("throws FrontierAuthError on 401", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ detail: "bad creds" }), { status: 401 })

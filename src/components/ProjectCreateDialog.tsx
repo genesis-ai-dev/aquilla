@@ -141,6 +141,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   const { projects: discoveredProjects } = useProjectsForNavigation(suppliedProjects == null)
   const linkableProjects = suppliedProjects ?? discoveredProjects
   const [open, setOpen] = useState(false)
+  // AQU-712: one stable project id per dialog session, minted when the dialog
+  // opens and re-minted when it closes (or after a successful create that keeps
+  // the dialog open). Reusing the same id across submit attempts within a
+  // session — double-click, or an error-then-retry after the server actually
+  // committed the row — lets the server's `ON CONFLICT(id) DO NOTHING` dedup
+  // land the retry on the same row instead of creating a duplicate project.
+  const draftProjectId = useRef(uuid())
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
   const [submitWarning, setSubmitWarning] = useState<string | null>(null)
 
@@ -172,7 +179,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       }
 
       const project: ProjectRecord = {
-        id: uuid(),
+        id: draftProjectId.current,
         name: value.name.trim(),
         sourceLanguage: value.sourceLanguage.trim(),
         targetLanguage: value.shape === "source-only" ? "" : value.targetLanguage.trim(),
@@ -246,7 +253,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       if (extraLanguagesFailed) {
         // The project exists and onCreated already fired — leave the dialog
         // open just long enough for the warning to be readable rather than
-        // rolling anything back.
+        // rolling anything back. This create succeeded, so a subsequent submit
+        // in the still-open dialog is a NEW project: mint a fresh draft id so
+        // it doesn't false-dedup onto the row we just created (AQU-712).
+        draftProjectId.current = uuid()
         setSubmitWarning(EXTRA_LANGUAGES_WARNING)
       } else {
         setOpen(false)
@@ -259,6 +269,12 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     form.reset()
     clearSubmitError()
     setSubmitWarning(null)
+    // Preserve the existing array reference when there is nothing to reset.
+    setExtraLanguages((prev) => (prev.length === 0 ? prev : []))
+    // AQU-712: closing the dialog ends the session — mint a fresh draft id so
+    // the next time it opens starts a brand-new project (no false dedup onto a
+    // project created in a previous session).
+    draftProjectId.current = uuid()
   }, [open, form, clearSubmitError])
 
   function pickShape(next: ProjectShape) {
@@ -280,6 +296,11 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           id="project-create-form"
           onSubmit={(e) => {
             e.preventDefault()
+            // Guard the Enter-key path too: a disabled submit button already
+            // blocks re-entrant clicks, but implicit form submission can still
+            // fire while a create is in flight. Bail so one dialog pass creates
+            // exactly one project (AQU-711).
+            if (form.state.isSubmitting) return
             void form.handleSubmit()
           }}
           className="contents"
@@ -559,11 +580,20 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           </DialogBody>
 
           <form.Subscribe
-            selector={(state) => state.values.shape}
-            children={(shape) => (
-              <Button type="submit" form="project-create-form" className="h-9 w-full shrink-0">
-                {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-                {form.state.isSubmitting
+            // Track isSubmitting alongside shape: subscribing to shape alone
+            // left the button reading a stale isSubmitting, so it never
+            // disabled or showed the spinner during a slow create and each
+            // extra click created another project (AQU-711).
+            selector={(state) => [state.values.shape, state.isSubmitting] as const}
+            children={([shape, isSubmitting]) => (
+              <Button
+                type="submit"
+                form="project-create-form"
+                disabled={isSubmitting}
+                className="h-9 w-full shrink-0"
+              >
+                {isSubmitting && <Spinner data-icon="inline-start" />}
+                {isSubmitting
                   ? (shape === "linked-target" ? "Creating & linking…" : "Creating…")
                   : (shape === "linked-target" ? "Create & Link" : "Create Project")}
               </Button>

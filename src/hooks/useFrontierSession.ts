@@ -1,6 +1,10 @@
 import { useCallback, useEffect } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { login as doLogin, register as doRegister } from "@/lib/frontier/auth"
+import {
+  login as doLogin,
+  register as doRegister,
+  type LoginOptions,
+} from "@/lib/frontier/auth"
 import { clearSession, clearAuthHint } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
 import { useAccounts } from "@/hooks/useAccounts"
@@ -21,8 +25,12 @@ export function useFrontierSession() {
   const { active, loading } = useAccounts()
   const qc = useQueryClient()
 
-  const login = useCallback(async (username: string, password: string) => {
-    const session = await doLogin({ username, password })
+  const login = useCallback(async (
+    username: string,
+    password: string,
+    options?: LoginOptions,
+  ) => {
+    const session = await doLogin({ username, password }, options)
     const distinctId = await sha256Hex(session.username)
     posthog.identify(distinctId)
     posthog.capture("user logged in")

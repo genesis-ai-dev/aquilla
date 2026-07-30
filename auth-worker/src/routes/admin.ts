@@ -27,8 +27,31 @@ import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-sett
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import { sendAdminElevationCodeEmail } from "../services/email"
+import {
+  ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
+  countRecentEvents,
+  recordAuthEvent,
+} from "../utils/rate-limit"
 
 const admin = new Hono<AuthHonoEnv>()
+
+/**
+ * A 6-digit code drawn uniformly from 000000-999999 via the Web Crypto CSPRNG.
+ * Rejection-sampled so the modulo doesn't bias low values (2^32 isn't a
+ * multiple of 1_000_000): `Math.random()` was used here previously, which is
+ * not cryptographically secure and is unsuitable for a security step-up code.
+ */
+function randomSixDigitCode(): string {
+  const RANGE = 1_000_000
+  const MAX_UNBIASED = Math.floor(0x1_0000_0000 / RANGE) * RANGE
+  const buf = new Uint32Array(1)
+  let n: number
+  do {
+    crypto.getRandomValues(buf)
+    n = buf[0]
+  } while (n >= MAX_UNBIASED)
+  return String(n % RANGE).padStart(6, "0")
+}
 
 // auth first (hydrate user), then the platform-admin gate. Order matters:
 // the gate reads c.get("user").
@@ -89,7 +112,7 @@ admin.post("/elevation/request", async (c) => {
     )
   }
 
-  const code = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0")
+  const code = randomSixDigitCode()
   const ttlMin = Number(c.env.ELEVATION_TTL_MINUTES ?? 10)
   const expiresAt = new Date(Date.now() + ttlMin * 60_000).toISOString()
   await c.env.AQUILLA_PG.prepare(
@@ -115,6 +138,25 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
   const user = c.get("user")
   const { code } = c.req.valid("json")
 
+  // [Pen test] Auth & session mgmt (2026-07-27): this endpoint had no attempt
+  // limiting — a caller already holding a valid (e.g. stolen) non-elevated
+  // admin JWT could brute-force the 6-digit code with unlimited guesses
+  // inside its ~10-minute window. Scoped per-user identifier, matching the
+  // pattern used for POST /auth/token.
+  const identifier = `user:${user.id}`
+  const recentFailures = await countRecentEvents(
+    c.env.AQUILLA_PG,
+    "admin_elevation_verify",
+    identifier,
+    { onlyFailures: true },
+  )
+  if (recentFailures >= ADMIN_ELEVATION_VERIFY_MAX_FAILURES) {
+    return c.json(
+      { error: "rate_limited", message: "Too many attempts. Please try again later." },
+      429,
+    )
+  }
+
   const match = await c.env.AQUILLA_PG.prepare(
     `SELECT id FROM admin_elevation_codes
       WHERE user_id = ? AND code = ? AND expires_at > now()
@@ -123,6 +165,7 @@ admin.post("/elevation/verify", zValidator("json", elevationVerifySchema), async
     .bind(user.id, code)
     .first<{ id: number }>()
   if (!match) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "admin_elevation_verify", identifier, false)
     return c.json(
       { error: "invalid_code", message: "That code is invalid or has expired." },
       400,

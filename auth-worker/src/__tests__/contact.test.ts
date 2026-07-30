@@ -28,7 +28,7 @@ function makeEmailMock() {
   return { binding: { send } as unknown as Env["EMAIL"], sent, send }
 }
 
-function submit(
+async function submit(
   body: Record<string, unknown>,
   overrides: Partial<Env> = {},
   headers: Record<string, string> = {},

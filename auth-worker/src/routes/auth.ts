@@ -27,11 +27,14 @@ import {
   LOGIN_MAX_FAILURES_PER_IDENTIFIER,
   LOGIN_MAX_FAILURES_PER_IP,
   recordAuthEvent,
+  REGISTER_MAX_PER_IP,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
 import {
   LegacyUserMigrationError,
+  migrateLegacyUserCandidate,
   migrateLegacyUserForLogin,
+  verifyLegacyUserForLogin,
   type LegacyMigrationRuntime,
 } from "../services/legacy-user-migration"
 
@@ -73,6 +76,11 @@ const loginSchema = z.object({
   // Can be username or email.
   username: z.string(),
   password: z.string(),
+  // Opt-in web handshake: establish valid D1 credentials before telling the
+  // browser that the continuation will contact GitLab. Other API clients keep
+  // the original one-request login behavior.
+  migration_handshake: z.boolean().optional(),
+  continue_migration: z.boolean().optional(),
 })
 
 const passwordResetRequestSchema = z.object({
@@ -138,6 +146,26 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
         503,
       )
     }
+
+    // [Pen test] Auth & session mgmt (2026-07-27): unthrottled, so a scripted
+    // caller could flood account creation or use the 409 "User already
+    // exists" response as a fast per-IP enumeration oracle across many
+    // guessed emails/usernames. Recorded regardless of outcome (like
+    // password-reset-request) and checked before the DB uniqueness lookup.
+    const ipIdent = ipIdentifier(clientIp(c))
+    const recentRegistrations = await countRecentEvents(
+      c.env.AQUILLA_PG,
+      "register",
+      ipIdent,
+      { onlyFailures: false },
+    )
+    if (recentRegistrations >= REGISTER_MAX_PER_IP) {
+      return c.json(
+        { detail: "Too many registration attempts. Please try again later.", error: "Too many attempts" },
+        429,
+      )
+    }
+    await recordAuthEvent(c.env.AQUILLA_PG, "register", ipIdent, true)
 
     // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
     // already exists so we never mint case-twin accounts that then collide in
@@ -245,7 +273,12 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
 // keep working — matches the legacy frontier-server.
 auth.post("/token", async (c) => {
   const contentType = c.req.header("content-type") || ""
-  let body: { username?: string; password?: string } = {}
+  let body: {
+    username?: string
+    password?: string
+    migration_handshake?: boolean
+    continue_migration?: boolean
+  } = {}
 
   try {
     if (contentType.includes("application/json")) {
@@ -272,7 +305,12 @@ auth.post("/token", async (c) => {
   if (!validated.success) {
     return c.json({ error: "Invalid request body" }, 400)
   }
-  const { username, password } = validated.data
+  const {
+    username,
+    password,
+    migration_handshake: migrationHandshake,
+    continue_migration: continueMigration,
+  } = validated.data
   const identifier = loginIdentifier(username)
   const ipIdent = ipIdentifier(clientIp(c))
 
@@ -316,12 +354,33 @@ auth.post("/token", async (c) => {
       try {
         const runtime = legacyMigrationRuntime(c.env)
         if (runtime) {
-          const migrated = await migrateLegacyUserForLogin(
-            c.env.AQUILLA_PG,
-            username,
-            password,
-            runtime,
-          )
+          const source = migrationHandshake
+            ? await verifyLegacyUserForLogin(username, password, runtime)
+            : null
+          if (source && source.gitlab_user_id == null) {
+            throw new LegacyUserMigrationError(
+              "unresolved-access",
+              "legacy user has no GitLab identity",
+            )
+          }
+          if (source && !continueMigration) {
+            return c.json({ status: "migration_required" }, 202)
+          }
+          const migrated = migrationHandshake
+            ? source
+              ? await migrateLegacyUserCandidate(
+                  c.env.AQUILLA_PG,
+                  source,
+                  runtime,
+                  "jit",
+                )
+              : null
+            : await migrateLegacyUserForLogin(
+                c.env.AQUILLA_PG,
+                username,
+                password,
+                runtime,
+              )
           if (migrated) {
             user = await jwtService.getUserByUsername(migrated.username)
             if (!user) {
@@ -338,6 +397,10 @@ auth.post("/token", async (c) => {
         }
       } catch (error) {
         if (error instanceof LegacyUserMigrationError) {
+          console.error("[legacy-user-migration] login migration failed", {
+            code: error.code,
+            reason: error.message,
+          })
           if (error.code === "conflict") {
             return c.json(
               { error: "Account migration requires support" },

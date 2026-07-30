@@ -21,17 +21,39 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { unzipSync } from "fflate"
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 // 2 MB
+// word/document.xml inflated size cap (AQU pen-test finding, 2026-07-29): a
+// small deflate-based zip can decompress to gigabytes before this route ever
+// looks at its content — unlike the client-side import path (zip-safety.ts),
+// this server-side unzip had no per-entry size guard. 20 MB of XML is far
+// more than any real document.xml produces; fflate's `filter` option lets us
+// check the declared inflated size before it inflates anything, so an
+// oversized (or unrelated) entry never gets decompressed at all.
+const MAX_DOCX_XML_BYTES = 20 * 1024 * 1024 // 20 MB
 
 const parseDocument = new Hono<AuthHonoEnv>()
 
 // ── DOCX helpers ─────────────────────────────────────────────────────────────
 
 export function extractTextFromDocx(bytes: Uint8Array): string {
+  let documentXmlTooLarge = false
   let files: ReturnType<typeof unzipSync>
   try {
-    files = unzipSync(bytes)
+    files = unzipSync(bytes, {
+      filter(file) {
+        if (file.name !== "word/document.xml") return false
+        if (file.originalSize > MAX_DOCX_XML_BYTES) {
+          documentXmlTooLarge = true
+          return false
+        }
+        return true
+      },
+    })
   } catch {
     throw new Error("DOCX file appears to be corrupt (could not unzip).")
+  }
+
+  if (documentXmlTooLarge) {
+    throw new Error("word/document.xml exceeds the safe size limit — file may be a zip bomb.")
   }
 
   const xmlBytes = files["word/document.xml"]

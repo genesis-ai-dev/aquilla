@@ -107,6 +107,29 @@ export async function findLegacyUsersByIdentifier(
   return rows.map(parseLegacyUser)
 }
 
+/**
+ * Reserve legacy identities during Aquilla registration without reading any
+ * credential or GitLab fields. A single D1 query checks the proposed username
+ * and email against their corresponding case-insensitive legacy identifiers.
+ */
+export async function hasLegacyIdentityCollision(
+  config: FrontierD1Config,
+  username: string,
+  email: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<boolean> {
+  const rows = await queryFrontierD1<{ id: unknown }>(
+    config,
+    `SELECT id
+       FROM users
+      WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)
+      LIMIT 1`,
+    [username.trim(), email.trim()],
+    fetchFn,
+  )
+  return rows.length > 0
+}
+
 export async function listLegacyUsersPage(
   config: FrontierD1Config,
   afterId: number,

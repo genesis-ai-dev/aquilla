@@ -449,6 +449,32 @@ describe("useOutboxFlusher", () => {
     expect(result.current.pendingCount).toBe(3)
   })
 
+  it("clears a provisional stale-source warning after authoritative reconciliation", async () => {
+    Object.defineProperty(navigator, "locks", {
+      value: undefined,
+      configurable: true,
+    })
+    let emitted = false
+    mockFlush.mockImplementation(async (deps) => {
+      if (!emitted) {
+        emitted = true
+        deps.onStaleSource?.([{ id: "target-1", currentSourceEventId: "source-2" }])
+      }
+      return NOTHING
+    })
+
+    const { result } = renderHook(() =>
+      useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.staleSourceCount).toBe(1)
+
+    act(() => result.current.clearStaleSource())
+    expect(result.current.staleSourceCount).toBe(0)
+  })
+
   // -- drainCycle: loop-until-drained pure helper ----------------------------
 
   describe("drainCycle (bounded drain loop)", () => {

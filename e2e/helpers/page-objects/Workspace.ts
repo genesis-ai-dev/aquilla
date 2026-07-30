@@ -68,12 +68,48 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
-  /** Shared import prologue: dismiss the setup checklist, open the
-   * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
-    // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
-    // project, and the modal sheet intercepts workspace clicks. Pre-mark it
-    // as already-shown for this project, then dismiss it if it beat us to it.
+  /**
+   * Import through a specialized importer's own panel (Biblica, Macula,
+   * Translation Notes …). These panels commit from their own Import button
+   * instead of the shared preview/confirm boundary.
+   *
+   * `optionName` matches the landing card, e.g. /Biblica Study Bible Notes/i.
+   */
+  async importViaSpecializedPanel(
+    optionName: RegExp,
+    filePath: string | FilePayload,
+    /**
+     * Optional panel setup after the file is chosen and before Import —
+     * assert or toggle importer options (e.g. Biblica sentence split).
+     */
+    configure?: (dialog: Locator) => Promise<void>,
+  ): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+
+    const dialog = this.page.getByRole("dialog")
+    const option = dialog.getByRole("button", { name: optionName }).first()
+    await expect(option).toBeVisible({ timeout: 8_000 })
+    await option.click()
+
+    // Each specialized panel labels its picker after the format it accepts, so
+    // scope to the panel's own file input rather than any input on the page.
+    const chooseBtn = dialog.getByRole("button", { name: /^Choose .*file$/i }).first()
+    await expect(chooseBtn).toBeVisible({ timeout: 5_000 })
+    await chooseBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    if (configure) await configure(dialog)
+
+    const importBtn = dialog.getByRole("button", { name: /^Import$/i }).last()
+    await expect(importBtn).toBeEnabled({ timeout: 5_000 })
+    await importBtn.click()
+    await this.waitForImportSettled()
+  }
+
+  /** AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
+   * project, and the modal sheet intercepts workspace clicks. Pre-mark it as
+   * already-shown for this project, then dismiss it if it beat us to it. */
+  private async dismissSetupChecklist(): Promise<void> {
     const projectId = this.page.url().match(/\/project\/([^/?#]+)/)?.[1]
     if (projectId) {
       await this.page.evaluate(
@@ -86,6 +122,12 @@ export class Workspace {
       await skipChecklist.click()
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
+  }
+
+  /** Shared import prologue: dismiss the setup checklist, open the
+   * ImportDialog's Upload Files panel, and select `filePath`. */
+  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
+    await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
     // Use the card's accessible button name rather than a case-sensitive text
     // locator; the product label is "Upload files".
@@ -211,9 +253,7 @@ export class Workspace {
   async openFileBySubstring(nameSubstring: string): Promise<void> {
     await this.page
       .locator("aside")
-      .locator("div")
-      .filter({ hasText: new RegExp(nameSubstring, "i") })
-      .filter({ has: this.page.locator('button[aria-label="File actions"]') })
+      .getByRole("button", { name: new RegExp(nameSubstring, "i") })
       .first()
       .click()
   }
@@ -253,14 +293,22 @@ export class Workspace {
     await row.scrollIntoViewIfNeeded()
 
     const target = this.editableTarget(index)
+    let activatedFromReadView = false
     if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
       const readView = this.targetReadView(index)
       await expect(readView).toBeVisible({ timeout: 10_000 })
       await readView.click()
+      activatedFromReadView = true
     }
 
     await expect(target).toBeVisible({ timeout: 10_000 })
-    await target.click()
+    // A read-view click is the user's one activation. Clicking the newly
+    // mounted editor again normalizes IDML's caret through handleClick and can
+    // hide focus-placement regressions that only occur on first activation.
+    if (!activatedFromReadView) {
+      await target.click()
+    }
+    await expect(target).toBeFocused({ timeout: 10_000 })
     return target
   }
 
@@ -295,6 +343,111 @@ export class Workspace {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
     await this.commitTargetCellEdit(index, text)
+  }
+
+  /**
+   * Reproduce the IDML pointer path from AQU-740: activate a tall empty target
+   * from below its text line, type, click that same blank area again, and keep
+   * typing. Both clicks must resolve to the real single-line caret.
+   */
+  async editIdmlCellFromBlankArea(
+    index: number,
+    firstText: string,
+    secondText: string,
+  ): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const column = this.targetColumn(index)
+    const initialBox = await column.boundingBox()
+    expect(initialBox).not.toBeNull()
+    expect(initialBox!.height).toBeGreaterThan(60)
+
+    const blankPosition = {
+      x: Math.max(4, initialBox!.width / 2),
+      y: initialBox!.height - 4,
+    }
+    await column.click({ position: blankPosition })
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await this.page.keyboard.type(firstText)
+
+    const caretTop = async (): Promise<number> => target.evaluate((surface) => {
+      const selection = surface.ownerDocument.getSelection()
+      if (!selection || selection.rangeCount === 0) throw new Error("IDML caret is missing")
+      const range = selection.getRangeAt(0)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return rect.top
+    })
+    const textLineTop = await caretTop()
+
+    const activeBox = await target.boundingBox()
+    expect(activeBox).not.toBeNull()
+    expect(activeBox!.height).toBeGreaterThan(60)
+    await target.click({
+      position: {
+        x: Math.max(4, activeBox!.width / 2),
+        y: activeBox!.height - 4,
+      },
+    })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    expect(Math.abs((await caretTop()) - textLineTop)).toBeLessThan(5)
+
+    await this.page.keyboard.type(secondText)
+    await this.commitTargetCellEdit(index, `${firstText}${secondText}`)
+  }
+
+  /**
+   * Activate a populated IDML cell at an exact read-view text offset. This exercises
+   * the read-view → ProseMirror remount boundary from a single real pointer
+   * click; a second editor click would hide activation-placement regressions.
+   */
+  async editIdmlCellAtTextOffset(
+    index: number,
+    textOffset: number,
+    insertedText: string,
+    expectedText: string,
+  ): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const readView = this.targetReadView(index)
+    await expect(readView).toBeVisible({ timeout: 10_000 })
+
+    const point = await readView.evaluate((element, offset) => {
+      const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      let remaining = offset
+      let node: Text | null = null
+      let nodeOffset = 0
+      while (walker.nextNode()) {
+        const candidate = walker.currentNode as Text
+        if (remaining <= candidate.data.length) {
+          node = candidate
+          nodeOffset = remaining
+          break
+        }
+        remaining -= candidate.data.length
+      }
+      if (!node) throw new Error(`IDML slot has no text position at offset ${offset}`)
+      const range = element.ownerDocument.createRange()
+      range.setStart(node, nodeOffset)
+      range.collapse(true)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return { x: rect.left, y: rect.top + Math.max(1, rect.height / 2) }
+    }, textOffset)
+
+    await this.page.mouse.click(point.x, point.y)
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await expect.poll(() => target.evaluate((surface) => {
+      const editor = (surface as HTMLElement & {
+        editor?: { state: { selection: { $from: { parentOffset: number } } } }
+      }).editor
+      return editor?.state.selection.$from.parentOffset ?? -1
+    })).toBe(textOffset)
+
+    await this.page.keyboard.type(insertedText)
+    await this.commitTargetCellEdit(index, expectedText)
   }
 
   /** Replace the complete target value, then wait for its authoritative commit. */

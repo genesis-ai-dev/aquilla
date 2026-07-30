@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
+import { DEFAULT_COMPLETION_MAX_TOKENS } from "@/lib/completion/completion-service"
 import type { CompletionSettings } from "@/lib/parsers/types"
 
 // AQU-408: the AI Settings panel's Save Changes handler funnels every
@@ -60,6 +61,7 @@ describe("buildCompletionSettings — AQU-408 retrieval-tuning keys", () => {
 
   it("falls back to spec defaults when neither base nor overrides set a field", () => {
     const merged = buildCompletionSettings(undefined, {})
+    expect(merged.maxTokens).toBe(DEFAULT_COMPLETION_MAX_TOKENS)
     expect(merged.top_k).toBe(15)
     expect(merged.contextSize).toBe("medium")
     expect(merged.useOnlyValidatedExamples).toBe(true)

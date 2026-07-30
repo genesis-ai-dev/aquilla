@@ -37,7 +37,7 @@ export function CheckFileButton({
     >
       {checkRunning
         ? <Spinner data-icon="inline-start" className="size-4" />
-        : <ListChecks data-icon="inline-start" className="text-primary" />}
+        : <ListChecks data-icon="inline-start" />}
       Check file
       {checkResult && !checkRunning && (
         <span className={checkResult.totalFindingCount > 0

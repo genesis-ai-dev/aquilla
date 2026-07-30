@@ -214,6 +214,31 @@ describe("TerminologyPage", () => {
     })
   })
 
+  // ── AQU-749: a failed save must surface, never silently no-op ─────────────
+
+  it("surfaces an explicit error (and keeps the dialog open) when the save is rejected", async () => {
+    // addConcept produces a project; the server write is rejected (below the
+    // Maintainer floor). Before AQU-749 the outcome was ignored: the dialog
+    // closed and the concept silently vanished with the total stuck at 0.
+    const saved = makeConcept()
+    vi.mocked(addConcept).mockReturnValueOnce(makeProjectWithConcepts([saved]))
+    mockPatchSettings.mockResolvedValueOnce({ kind: "blocked", reason: "role" })
+
+    renderPage()
+    await fillAndSubmitAddDialog("πνεῦμα", "spirit")
+
+    // The write was attempted…
+    await waitFor(() => expect(mockPatchSettings).toHaveBeenCalled())
+
+    // …and an explicit error is shown inside the still-open dialog.
+    const dialog = await screen.findByRole("dialog", { hidden: true })
+    await waitFor(() => {
+      expect(within(dialog).getByText(/Maintainer role or higher/i)).toBeInTheDocument()
+    })
+    // Dialog stays open so the user can retry — not silently dismissed.
+    expect(within(dialog).getByRole("button", { name: /^Add concept$/ })).toBeInTheDocument()
+  })
+
   // ── Delete (AQU-291: gated by checkbox-confirm) ───────────────────────────
 
   it("does NOT call deleteConcept immediately when delete button is clicked (AQU-291)", async () => {

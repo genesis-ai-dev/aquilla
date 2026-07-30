@@ -899,8 +899,35 @@ export function TerminologyPage() {
 
   // ── Persist helper ─────────────────────────────────────────────────────────
 
+  // AQU-749: patchSettings never rejects — it resolves a discriminated
+  // PatchOutcome. Ignoring it made every failed save (role-blocked, offline,
+  // version conflict, network/server error) look like success: the dialog
+  // closed, but the concept was never stored and the total stayed at 0 with no
+  // message. Surface a non-ok outcome as a thrown Error so callers (the add/
+  // edit dialog, import, merge, review queue) show an explicit failure instead
+  // of a silent no-op.
   async function persistConcepts(updatedConcepts: Concept[]) {
-    await patchSettings({ terminology: updatedConcepts })
+    const outcome = await patchSettings({ terminology: updatedConcepts })
+    switch (outcome.kind) {
+      case "ok":
+        return
+      case "conflict":
+        throw new Error(
+          "The term base was changed elsewhere and your view was refreshed. Re-open and re-apply your change.",
+        )
+      case "blocked":
+        throw new Error(
+          outcome.reason === "offline"
+            ? "You're offline — reconnect to save term base changes."
+            : "You need the Maintainer role or higher to change the term base.",
+        )
+      case "error":
+        throw new Error(
+          outcome.message
+            ? `Saving the term base failed: ${outcome.message}`
+            : "Saving the term base failed. Please try again.",
+        )
+    }
   }
 
   // ── Export helpers ─────────────────────────────────────────────────────────

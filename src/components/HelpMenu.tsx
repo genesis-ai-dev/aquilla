@@ -71,10 +71,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               {/* AQU-699: advertise that the trigger expands, so the Tour housed
                   inside it stays discoverable. Omitted when collapsed to an icon. */}
               <ChevronDown
-                className={cn(
-                  "ml-auto h-3.5 w-3.5 opacity-50 transition-transform",
-                  open && "rotate-180",
-                )}
+                className="ml-auto h-3.5 w-3.5 opacity-50"
                 aria-hidden
               />
             </>

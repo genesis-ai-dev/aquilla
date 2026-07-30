@@ -395,10 +395,10 @@ export class Workspace {
     await fileOptionsBtn.click()
   }
 
-  /** View settings live in the file options overflow menu. */
+  /** Editor settings live in the file options overflow menu. */
   async openViewSettingsMenu(): Promise<void> {
     await this.openFileOverflowMenu()
-    await this.page.getByRole("menuitem", { name: /View settings/i }).click()
+    await this.page.getByRole("menuitem", { name: /Editor settings/i }).click()
   }
 
   /** Export lives in the file options overflow menu. */

@@ -167,13 +167,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
       )}
       <Popover open={menuOpen} onOpenChange={setMenuOpen}>
         {!anchor && (
-          <AppTooltip content="View settings">
+          <AppTooltip content="Editor settings">
             <PopoverTrigger
               render={
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="View settings"
+                  aria-label="Editor settings"
                   className={cn(hideTrigger ? "sr-only" : "relative")}
                 >
                   <Eye className="h-4 w-4" />
@@ -190,7 +190,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           data-testid="view-settings-popover"
           className="w-72"
         >
-          <PopoverTitle className="sr-only">View settings</PopoverTitle>
+          <PopoverTitle className="sr-only">Editor settings</PopoverTitle>
 
           <FieldGroup className="gap-3">
             <SwitchRow

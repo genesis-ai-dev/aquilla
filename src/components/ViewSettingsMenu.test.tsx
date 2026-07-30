@@ -36,7 +36,7 @@ describe("ViewSettingsMenu popover", () => {
   it("opens as a popover and toggles line numbers without dismissing", () => {
     const handlers = renderViewSettings({ lineNumbersEnabled: true })
 
-    fireEvent.click(screen.getByRole("button", { name: "View settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
 
     const panel = screen.getByTestId("view-settings-popover")
     expect(panel).toBeTruthy()
@@ -53,7 +53,7 @@ describe("ViewSettingsMenu popover", () => {
   it("changes source direction via the tabs", () => {
     const handlers = renderViewSettings()
 
-    fireEvent.click(screen.getByRole("button", { name: "View settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
     const sourceTabs = screen.getByRole("tablist", { name: "Source direction" })
     fireEvent.click(within(sourceTabs).getByRole("tab", { name: "RTL" }))
 
@@ -71,7 +71,7 @@ describe("ViewSettingsMenu direction display", () => {
   it("opens direction tabs without a resolved-direction badge", () => {
     renderViewSettings({ targetAutoDirectionSummary: "mixed" })
 
-    fireEvent.click(screen.getByRole("button", { name: "View settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
 
     expect(screen.getByRole("tablist", { name: "Target direction" })).toBeTruthy()
     expect(screen.queryByText("AUTO MIXED")).toBeNull()

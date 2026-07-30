@@ -4367,7 +4367,7 @@ export function ProjectWorkspace() {
     items.push(
       {
         id: "view-settings",
-        label: "View settings",
+        label: "Editor settings",
         icon: Eye,
         onClick: () => {
           // Let the file-options dropdown close before anchoring the popover.

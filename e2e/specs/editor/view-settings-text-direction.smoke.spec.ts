@@ -4,7 +4,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * ViewSettingsMenu — text direction modes.
  *
- * The popover (opened via header ⋯ → "View settings", FRO-331) exposes explicit
+ * The popover (opened via File options ⋯ → "Editor settings", FRO-331) exposes explicit
  * Auto / LTR / RTL tabs for the source and target columns.
  */
 test("view settings text direction Source mode can force RTL and return to Auto", async ({ alice }) => {

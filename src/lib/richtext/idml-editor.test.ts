@@ -46,12 +46,37 @@ const CONFIGURATION = {
   context: { sourceHtml: SOURCE_HTML, metadata: METADATA },
 } satisfies IdmlEditorConfiguration
 
+const SINGLE_SLOT_SOURCE =
+  `<p data-idml-version="2">`
+  + `<span data-idml-slot="0" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">Alpha</span>`
+  + `</p>`
+
+const SINGLE_SLOT_CONFIGURATION = {
+  kind: "ready",
+  context: {
+    sourceHtml: SINGLE_SLOT_SOURCE,
+    metadata: {
+      version: 2,
+      slotCount: 1,
+      editableSlotIndexes: [0],
+      protectedTokenCount: 0,
+      anchorSequenceHash: createHash("sha256")
+        .update(`slot:0:editable:${STYLE_BODY}`)
+        .digest("hex"),
+    },
+  },
+} satisfies IdmlEditorConfiguration
+
 const editors: Editor[] = []
 afterEach(() => {
   for (const editor of editors.splice(0)) editor.destroy()
 })
 
-function createEditor(onRejected = vi.fn(), html = SOURCE_HTML): Editor {
+function createEditor(
+  onRejected = vi.fn(),
+  html = SOURCE_HTML,
+  context = CONFIGURATION.context,
+): Editor {
   const editor = new Editor({
     content: html,
     extensions: [
@@ -66,7 +91,7 @@ function createEditor(onRejected = vi.fn(), html = SOURCE_HTML): Editor {
         horizontalRule: false,
       }),
       ...idmlEditorExtensions({
-        context: CONFIGURATION.context,
+        context,
         onRejected,
       }),
     ],
@@ -318,5 +343,43 @@ describe("IDML deletion ranges", () => {
 
     expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "backward", "character"))
       .toEqual({ from: slotStart, to: emojiEnd })
+  })
+})
+
+// AQU-740: ProseMirror only appends its trailing-break compensation to
+// textblocks; inline IDML slots miss it, so the caret after a trailing <br>
+// had no layout box and the browser painted the cursor at the first line.
+describe("IDML trailing break caret box", () => {
+  it("renders a caret box for a trailing hard break and drops it when text follows", () => {
+    const editor = createEditor(vi.fn(), SINGLE_SLOT_SOURCE, SINGLE_SLOT_CONFIGURATION.context)
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+    expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeNull()
+
+    editor.view.dispatch(editor.state.tr.insert(slotEnd, editor.state.schema.nodes.hardBreak.create()))
+    expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeTruthy()
+    // The widget is view-only: exactly the one real break serializes.
+    const serialized = serializeIdmlEditorDocument(editor.state.doc)
+    expect(serialized?.match(/<br>/g)).toHaveLength(1)
+    expect(validateIdmlTranslation(
+      SINGLE_SLOT_SOURCE,
+      serialized!,
+      SINGLE_SLOT_CONFIGURATION.context.metadata,
+    ).valid).toBe(true)
+
+    editor.view.dispatch(editor.state.tr.insertText("x", slotEnd + 1))
+    expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeNull()
+  })
+
+  it("adds no synthetic break while rendered content follows the hard break", () => {
+    // Default fixture: the locked "LOCK" slot renders after slot 0, so the
+    // break already has a following line box to give the caret.
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+
+    editor.view.dispatch(editor.state.tr.insert(slotEnd, editor.state.schema.nodes.hardBreak.create()))
+    expect(editor.view.dom.querySelector("span[data-idml-slot=\"0\"] br")).toBeTruthy()
+    expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeNull()
   })
 })

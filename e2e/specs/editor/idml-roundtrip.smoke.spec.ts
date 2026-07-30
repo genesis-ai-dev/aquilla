@@ -105,6 +105,10 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   // The second cell is typed into and backspaced empty again, ending exactly
   // as it started — untranslated — so the export assertions below still hold.
   await ws.deleteIdmlDraftToEmpty(1, "xy", 2)
+  // AQU-740: a line break typed at a slot's end keeps a caret line box, so the
+  // cursor no longer parks at the cell's first line after Enter. Also ends
+  // with the cell untranslated.
+  await ws.verifyIdmlTrailingBreakCaret(1)
 
   // A lossless re-import can advance the source event for IDML structure while
   // retaining exactly the same translatable source text. That must preserve

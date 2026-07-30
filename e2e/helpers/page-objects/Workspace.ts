@@ -478,6 +478,46 @@ export class Workspace {
     await expect(target).toBeHidden()
   }
 
+  /**
+   * AQU-740: a line break typed at the end of an IDML slot must keep a caret
+   * line box. Without the synthetic trailing-break compensation the empty last
+   * line had no height and the browser parked the visible cursor back at the
+   * cell's first line. Types a draft with a break, asserts the compensation
+   * and the extra line box, then deletes everything back so the cell ends
+   * exactly as it started (untranslated, no commit).
+   */
+  async verifyIdmlTrailingBreakCaret(index: number): Promise<void> {
+    const target = await this.activateTargetCell(index)
+    await this.page.keyboard.type("xy")
+    await expect(target).toContainText("xy")
+    const paragraphHeight = () => target.evaluate((element) => {
+      const paragraph = element.querySelector("p")
+      if (!paragraph) throw new Error("IDML paragraph missing")
+      return paragraph.getBoundingClientRect().height
+    })
+    const heightBefore = await paragraphHeight()
+
+    await this.page.keyboard.press("Enter")
+    await expect(target.locator(".idml-trailing-break")).toHaveCount(1)
+    // The empty new line must own real height — that is the caret's line box.
+    await expect.poll(paragraphHeight).toBeGreaterThan(heightBefore * 1.5)
+
+    // The next character lands after the break and retires the compensation.
+    await this.page.keyboard.type("z")
+    await expect(target.locator(".idml-trailing-break")).toHaveCount(0)
+
+    // x, y, break, z — four presses back to an untranslated cell.
+    for (let press = 0; press < 4; press += 1) {
+      await this.page.keyboard.press("Backspace")
+    }
+    await expect(target).toHaveText("")
+    await expect(
+      this.page.getByText(/This edit would remove protected InDesign formatting/i),
+    ).toHaveCount(0)
+    await this.page.keyboard.press("Escape")
+    await expect(target).toBeHidden()
+  }
+
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
     const target = await this.activateTargetCell(index)

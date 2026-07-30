@@ -420,6 +420,44 @@ describe("TranslatedEditor — protected IDML mode", () => {
     )
   })
 
+  // AQU-740: a trailing hard break inside an inline slot has no layout box, so
+  // the visible caret fell back to the cell's first line until the next
+  // keystroke. The view compensates with a synthetic trailing <br> widget.
+  it("gives a trailing line break a caret box without serializing it", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-trailing-break"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    act(() => {
+      fireEvent.focus(surface)
+      for (const character of "ab") fireEvent.keyDown(surface, { key: character })
+      fireEvent.keyDown(surface, { key: "Enter" })
+    })
+    expect(surface.querySelector("span[data-idml-slot=\"0\"] br")).toBeTruthy()
+    expect(surface.querySelector(".idml-trailing-break")).toBeTruthy()
+
+    act(() => { fireEvent.keyDown(surface, { key: "c" }) })
+    expect(surface.querySelector(".idml-trailing-break")).toBeNull()
+
+    act(() => fireEvent.blur(surface))
+    const committed = onCommit.mock.calls[0]?.[0] as { value: string; valueHtml: string }
+    expect(committed.value).toBe("ab\nc\t")
+    expect(committed.valueHtml.match(/<br>/g)).toHaveLength(1)
+    expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
+  })
+
   it("clears every editable slot on a select-all delete", async () => {
     const onCommit = vi.fn()
     const onIdmlValidationError = vi.fn()

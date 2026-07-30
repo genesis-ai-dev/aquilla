@@ -1,6 +1,7 @@
 import { Extension, Node as TiptapNode, mergeAttributes } from "@tiptap/core"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { Plugin, type Selection } from "@tiptap/pm/state"
+import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import {
   validateIdmlTranslation,
   type IdmlDiagnostic,
@@ -682,6 +683,75 @@ export function serializeIdmlEditorDocument(doc: ProseMirrorNode): string | null
   return `${html}</p>`
 }
 
+/**
+ * AQU-740: where the paragraph needs a synthetic trailing `<br>` so the caret
+ * keeps a layout box, or null.
+ *
+ * ProseMirror appends `<br class="ProseMirror-trailingBreak">` to a textblock
+ * whose content ends in a hard break — without it, the caret position after a
+ * trailing `<br>` has no line box and the browser paints the cursor at the
+ * block's first line instead ("the cursor sticks at the beginning while I
+ * type"). IDML slots are inline nodes, not textblocks, so they never receive
+ * that compensation. This finds the paragraph's last box-producing child and,
+ * when it is an editable slot ending in a hard break, returns the position of
+ * that slot's content end. Empty slots and non-break protected tokens render
+ * no line box of their own and are skipped; a protected `br` token already
+ * ends the flow with its own break, where a second `<br>` would paint a
+ * spurious blank line.
+ */
+function idmlTrailingBreakPosition(doc: ProseMirrorNode): number | null {
+  if (doc.childCount !== 1) return null
+  const paragraph = doc.child(0)
+  if (paragraph.type.name !== IDML_PARAGRAPH_NODE_NAME) return null
+  for (let index = paragraph.childCount - 1; index >= 0; index -= 1) {
+    const child = paragraph.child(index)
+    if (child.type.name === IDML_TOKEN_NODE_NAME) {
+      if ((child.attrs.tokenKind as IdmlProtectedTokenKind) === "br") return null
+      continue
+    }
+    if (child.type.name !== IDML_SLOT_NODE_NAME) return null
+    if (child.content.size === 0) continue
+    const last = child.child(child.childCount - 1)
+    if (last.type.name !== "hardBreak" || child.attrs.editable !== true) return null
+    let position = 1
+    for (let sibling = 0; sibling < index; sibling += 1) {
+      position += paragraph.child(sibling).nodeSize
+    }
+    return position + 1 + child.content.size
+  }
+  return null
+}
+
+export function createIdmlTrailingBreakExtension(): Extension {
+  return Extension.create({
+    name: "idmlTrailingBreak",
+    addProseMirrorPlugins() {
+      return [new Plugin({
+        props: {
+          decorations(state) {
+            const position = idmlTrailingBreakPosition(state.doc)
+            if (position === null) return DecorationSet.empty
+            return DecorationSet.create(state.doc, [
+              // A zero-width space, not a second <br>: it gives the empty last
+              // line a text box for the caret without terminating another line
+              // (Chrome draws a spurious third line for double breaks inside an
+              // inline span). side 1 keeps the widget after the caret position
+              // so typed text lands before it; the stable key reuses the DOM
+              // node across redraws.
+              Decoration.widget(position, () => {
+                const compensation = document.createElement("span")
+                compensation.className = "idml-trailing-break"
+                compensation.textContent = "\u200b"
+                return compensation
+              }, { side: 1, key: "idml-trailing-break" }),
+            ])
+          },
+        },
+      })]
+    },
+  })
+}
+
 export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptions): Extension {
   return Extension.create({
     name: "idmlTransactionGuard",
@@ -719,6 +789,7 @@ export function idmlEditorExtensions(options: IdmlGuardOptions) {
     IdmlParagraph,
     IdmlSlot,
     IdmlToken,
+    createIdmlTrailingBreakExtension(),
     createIdmlGuardExtension(options),
   ]
 }

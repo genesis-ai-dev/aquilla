@@ -27,7 +27,7 @@ import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "l
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
@@ -222,6 +222,13 @@ interface TranslatedEditorProps {
    */
   aiDrafted?: boolean
   onCommit: (snapshot: TranslatedEditorCommit) => void
+  /**
+   * AQU-746: keystrokes a fast typist enters after clicking a cell but before
+   * this editor has mounted + focused are buffered by the parent row (they have
+   * no editor to land in yet). On focus, once the caret is placed, this editor
+   * drains the buffer into the document so the first character(s) are never lost.
+   */
+  pendingInputRef?: MutableRefObject<string>
   onFocus?: () => void
   onBlur?: () => void
   onSelectionChange?: (selection: TargetPresenceSelection | null) => void
@@ -313,6 +320,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onIdmlValidationError,
   aiDrafted = false,
   onCommit,
+  pendingInputRef,
   onFocus,
   onBlur,
   onSelectionChange,
@@ -1001,6 +1009,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         if (position !== null) editor.commands.setTextSelection(position)
       }
       onFocus?.()
+      // AQU-746: drain any keystrokes the parent row buffered while this editor
+      // was mounting/focusing (a fast typist after a click). The caret is now
+      // placed — IDML at its protected slot position above, plain at end via the
+      // insert path — so replaying preserves order and lands where a normal edit
+      // would. Route through the same insertion logic as live typing.
+      const buffered = pendingInputRef?.current
+      if (buffered) {
+        pendingInputRef.current = ""
+        if (idmlContext) {
+          replaceIdmlSelectionWithPlainText(editor.view, buffered)
+        } else {
+          // Insert as a literal text node (not HTML) so characters like "<" or
+          // "&" are preserved verbatim rather than parsed as markup. Buffered
+          // content is printable single keys only — never a newline.
+          editor.chain().focus("end").insertContent({ type: "text", text: buffered }).run()
+        }
+      }
       publishSelection(editor)
     },
     onBlur({ editor }) {

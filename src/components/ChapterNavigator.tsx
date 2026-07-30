@@ -20,59 +20,97 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
+import type { ImportMilestoneKind } from "../../shared/import-contract"
 
-export interface ChapterNavigationItem {
+export interface MilestoneNavigationItem {
+  key: string
+  kind: ImportMilestoneKind
   label: string
-  displayLabel: string
-  verseRange: string | null
+  shortLabel: string
+  description: string
   translated: number
   validated: number
   total: number
 }
 
-export function chapterMatchesSearch(chapter: ChapterNavigationItem, query: string): boolean {
+export function milestoneMatchesSearch(item: MilestoneNavigationItem, query: string): boolean {
   const normalizedQuery = query.trim().toLocaleLowerCase()
   if (!normalizedQuery) return true
 
-  if (/^\d+$/.test(normalizedQuery)) {
-    const chapterNumber = chapter.label.match(/\s(\d+)$/)?.[1]
-      ?? chapter.displayLabel.match(/\s(\d+)$/)?.[1]
-    return chapterNumber === normalizedQuery
+  if (/^\d+(?:[-–]\d+)?$/.test(normalizedQuery)) {
+    return item.shortLabel.toLocaleLowerCase().replace("–", "-")
+      === normalizedQuery.replace("–", "-")
   }
 
-  return `${chapter.displayLabel} ${chapter.label}`.toLocaleLowerCase().includes(normalizedQuery)
+  return `${item.label} ${item.shortLabel} ${item.description}`
+    .toLocaleLowerCase()
+    .includes(normalizedQuery)
 }
 
-export function ChapterNavigator({
-  chapters,
-  activeLabel,
+interface NavigationVocabulary {
+  singular: string
+  plural: string
+  description: string
+}
+
+function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVocabulary {
+  const kinds = new Set(items.map((item) => item.kind))
+  if ([...kinds].every((kind) => (
+    kind === "chapter" || kind === "chapter-range" || kind === "preface"
+  ))) {
+    return {
+      singular: "chapter",
+      plural: "Chapters",
+      description: "Choose a chapter or passage range to jump to its first cell.",
+    }
+  }
+  if (kinds.size === 1 && kinds.has("slide")) {
+    return { singular: "slide", plural: "Slides", description: "Choose a slide to jump to its first cell." }
+  }
+  if (kinds.size === 1 && kinds.has("story")) {
+    return { singular: "story", plural: "Stories", description: "Choose a story to jump to its first frame." }
+  }
+  if (kinds.size === 1 && kinds.has("section")) {
+    return { singular: "section", plural: "Sections", description: "Choose a section to jump to its heading." }
+  }
+  if (kinds.size === 1 && kinds.has("time-range")) {
+    return { singular: "time range", plural: "Time ranges", description: "Choose a time range to jump to its first segment." }
+  }
+  if (kinds.size === 1 && kinds.has("part")) {
+    return { singular: "part", plural: "Parts", description: "Choose a part to jump to its first cell." }
+  }
+  if (kinds.size === 1 && kinds.has("group")) {
+    return { singular: "group", plural: "Groups", description: "Choose a group to jump to its first cell." }
+  }
+  return { singular: "milestone", plural: "Milestones", description: "Choose a milestone to jump to its first cell." }
+}
+
+export function MilestoneNavigator({
+  items,
+  activeKey,
   onSelect,
 }: {
-  chapters: ChapterNavigationItem[]
-  activeLabel: string
-  onSelect: (label: string) => void
+  items: MilestoneNavigationItem[]
+  activeKey: string
+  onSelect: (key: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
-  const matchedActiveIndex = chapters.findIndex((chapter) => chapter.label === activeLabel)
+  const vocabulary = useMemo(() => vocabularyFor(items), [items])
+  const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
-  const active = chapters[activeIndex]
+  const active = items[activeIndex]
   const canGoPrevious = activeIndex > 0
-  const canGoNext = activeIndex >= 0 && activeIndex < chapters.length - 1
-
-  const activeSummary = useMemo(() => {
-    if (!active) return ""
-    return active.verseRange ? `Verses ${active.verseRange}` : `${active.total} cells`
-  }, [active])
-  const filteredChapters = useMemo(
-    () => chapters.filter((chapter) => chapterMatchesSearch(chapter, search)),
-    [chapters, search],
+  const canGoNext = activeIndex >= 0 && activeIndex < items.length - 1
+  const filteredItems = useMemo(
+    () => items.filter((item) => milestoneMatchesSearch(item, search)),
+    [items, search],
   )
 
-  if (!active || chapters.length === 0) return null
+  if (!active || items.length === 0) return null
 
-  const choose = (label: string) => {
-    onSelect(label)
+  const choose = (key: string) => {
+    onSelect(key)
     setOpen(false)
     setSearch("")
   }
@@ -83,14 +121,14 @@ export function ChapterNavigator({
   }
 
   return (
-    <nav aria-label="Chapter navigation" className="flex items-center justify-center">
-      <ButtonGroup aria-label="Move between chapters" className="shadow-xs">
+    <nav aria-label="Milestone navigation" className="flex items-center justify-center">
+      <ButtonGroup aria-label={`Move between ${vocabulary.plural.toLocaleLowerCase()}`} className="shadow-xs">
         <Button
           variant="outline"
           size="icon"
           disabled={!canGoPrevious}
-          aria-label="Previous chapter"
-          onClick={() => choose(chapters[activeIndex - 1].label)}
+          aria-label={`Previous ${vocabulary.singular}`}
+          onClick={() => choose(items[activeIndex - 1].key)}
         >
           <ChevronLeft />
         </Button>
@@ -100,59 +138,63 @@ export function ChapterNavigator({
               <Button
                 variant="outline"
                 className="grid min-w-56 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2"
-                aria-label={`Current chapter: ${active.displayLabel}. Choose chapter`}
+                aria-label={`Current ${vocabulary.singular}: ${active.label}. Choose ${vocabulary.singular}`}
               />
             }
           >
-            <span className="truncate text-left font-semibold">{active.displayLabel}</span>
+            <span className="truncate text-left font-semibold">{active.label}</span>
             <span className="justify-self-center text-xs font-normal text-muted-foreground">
-              {activeSummary}
+              {active.description}
             </span>
             <ChevronDown data-icon="inline-end" className="justify-self-end" />
           </PopoverTrigger>
           <PopoverContent align="center" className="w-80 gap-0 overflow-hidden p-0">
             <PopoverHeader className="px-3 py-2.5">
-              <PopoverTitle>Go to chapter</PopoverTitle>
-              <PopoverDescription>Choose a chapter to jump to its first verse.</PopoverDescription>
+              <PopoverTitle>Go to {vocabulary.singular}</PopoverTitle>
+              <PopoverDescription>{vocabulary.description}</PopoverDescription>
             </PopoverHeader>
             <Separator />
-            <Command label="Find a chapter" className="rounded-none! p-1" shouldFilter={false}>
+            <Command label={`Find a ${vocabulary.singular}`} className="rounded-none! p-1" shouldFilter={false}>
               <CommandInput
-                placeholder="Find a chapter…"
+                placeholder={`Find a ${vocabulary.singular}…`}
                 value={search}
                 onValueChange={setSearch}
               />
               <CommandList>
-                <CommandEmpty>No chapters found.</CommandEmpty>
-                <CommandGroup heading="Chapters">
-                  {filteredChapters.map((chapter) => {
-                    const selected = chapter.label === active.label
-                    const translatedPercent = chapter.total > 0
-                      ? Math.round((chapter.translated / chapter.total) * 100)
+                <CommandEmpty>No {vocabulary.plural.toLocaleLowerCase()} found.</CommandEmpty>
+                <CommandGroup heading={vocabulary.plural}>
+                  {filteredItems.map((item) => {
+                    const selected = item.key === active.key
+                    const translatedPercent = item.total > 0
+                      ? Math.round((item.translated / item.total) * 100)
+                      : 0
+                    const validatedPercent = item.total > 0
+                      ? Math.round((item.validated / item.total) * 100)
                       : 0
                     return (
                       <CommandItem
-                        key={chapter.label}
-                        value={`${chapter.displayLabel} ${chapter.label}`}
+                        key={item.key}
+                        value={`${item.label} ${item.shortLabel}`}
                         data-checked={selected || undefined}
-                        onSelect={() => choose(chapter.label)}
+                        onSelect={() => choose(item.key)}
                         className="min-h-11"
                       >
                         <Badge
                           variant={selected ? "default" : "outline"}
-                          className="size-6 rounded-full p-0 tabular-nums"
+                          className="min-w-6 rounded-full px-1.5 tabular-nums"
                           aria-hidden="true"
                         >
-                          {chapter.displayLabel.match(/\d+$/)?.[0]}
+                          {item.shortLabel}
                         </Badge>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{chapter.displayLabel}</span>
+                          <span className="block truncate font-medium">{item.label}</span>
                           <span className="block text-xs text-muted-foreground">
-                            {chapter.verseRange ? `Verses ${chapter.verseRange}` : `${chapter.total} cells`}
+                            {item.description}
                           </span>
                         </span>
-                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                          {translatedPercent}% translated
+                        <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                          <span className="block">{translatedPercent}% translated</span>
+                          <span className="block">{validatedPercent}% validated</span>
                         </span>
                       </CommandItem>
                     )
@@ -166,8 +208,8 @@ export function ChapterNavigator({
           variant="outline"
           size="icon"
           disabled={!canGoNext}
-          aria-label="Next chapter"
-          onClick={() => choose(chapters[activeIndex + 1].label)}
+          aria-label={`Next ${vocabulary.singular}`}
+          onClick={() => choose(items[activeIndex + 1].key)}
         >
           <ChevronRight />
         </Button>
@@ -175,3 +217,9 @@ export function ChapterNavigator({
     </nav>
   )
 }
+
+/** Compatibility exports for older call sites/tests while the surface remains
+ * in the historic ChapterNavigator module. */
+export type ChapterNavigationItem = MilestoneNavigationItem
+export const chapterMatchesSearch = milestoneMatchesSearch
+export const ChapterNavigator = MilestoneNavigator

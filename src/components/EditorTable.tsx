@@ -98,7 +98,7 @@ import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
-import { ChapterNavigator, type ChapterNavigationItem } from "./ChapterNavigator"
+import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -113,15 +113,12 @@ import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
 import {
   cellNumberLabel,
-  chapterLabelFromCanonical,
   importDisplayLabel,
   verseLabelFromCanonical,
 } from "@/lib/scripture-reference"
 import {
   firstActuallyVisibleIndex,
   resolveActiveChapterLabel,
-  rowMatchesChapterHeading,
-  sectionLabelAtViewportStart,
 } from "@/lib/chapter-navigation"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import {
@@ -1411,59 +1408,58 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [cellStore])
 
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const currentSectionLabel = useMemo(() => {
-    const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
-    const baseLabel = sectionLabelAtViewportStart(
-      displayCellIds,
-      visibleIndex,
-      (cellId) => cellStore.getSectionLabelForCellId(cellId),
-    )
-    const nextSection = cellStore.getNavigationIndex().find(
-      (entry) => entry.firstIndex > visibleIndex,
-    )
-    const cellId = displayCellIds[visibleIndex]
-    const cell = cellId ? cellStore.getCellView(cellId) : null
-    const nextDisplayLabel = chapterLabelFromCanonical(nextSection?.label)
-    if (
-      nextSection
-      && nextDisplayLabel
-      && cell
-      && rowMatchesChapterHeading([cell.original, cell.translated], nextDisplayLabel)
-    ) {
-      return nextSection.label
-    }
-    return baseLabel
-  }, [cellStore, cellStoreVersion, chapterVisibleIndex, displayCellIds, firstVisibleIndex])
+  const milestoneNavigation = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(displayCellIds)),
+  [cellStore, cellStoreVersion, displayCellIds])
 
-  const chapterNavigationItems = useMemo<ChapterNavigationItem[]>(() =>
+  const milestoneKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of milestoneNavigation) {
+      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
+    }
+    return map
+  }, [milestoneNavigation])
+
+  const currentMilestoneKey = useMemo(() => {
+    const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
+    const cellId = displayCellIds[visibleIndex]
+    return milestoneKeyByCellId.get(cellId ?? "") ?? milestoneNavigation[0]?.key ?? ""
+  }, [chapterVisibleIndex, displayCellIds, firstVisibleIndex, milestoneKeyByCellId, milestoneNavigation])
+
+  const milestoneNavigationItems = useMemo<MilestoneNavigationItem[]>(() =>
     readAtVersion(cellStoreVersion, () => {
-      const navigation = cellStore.getNavigationIndex()
-      const summaries = cellStore.getAllSummaries()
-      return navigation
-        .map((entry, index) => {
-          const displayLabel = chapterLabelFromCanonical(entry.label)
-          if (looksLikeUuid(entry.label) || !displayLabel) return null
-          const endIndex = navigation[index + 1]?.firstIndex ?? summaries.length
-          const verseLabels = summaries
-            .slice(entry.firstIndex, endIndex)
-            .map((cell) => verseLabelFromCanonical(cell.group))
-            .filter((label): label is string => Boolean(label))
-          const firstVerse = verseLabels[0] ?? null
-          const lastVerse = verseLabels[verseLabels.length - 1] ?? null
-          return {
-            label: entry.label,
-            displayLabel,
-            verseRange: firstVerse && lastVerse
-              ? firstVerse === lastVerse ? firstVerse : `${firstVerse}–${lastVerse}`
-              : null,
-            translated: entry.translated,
-            validated: entry.validated,
-            total: entry.total,
-          }
-        })
-        .filter((entry): entry is ChapterNavigationItem => entry !== null)
+      return milestoneNavigation.map((entry) => {
+        const verseLabels = entry.cellIds
+          .map((cellId) => verseLabelFromCanonical(cellStore.getCellView(cellId)?.group))
+          .filter((label): label is string => Boolean(label))
+        const firstVerse = verseLabels[0] ?? null
+        const lastVerse = verseLabels[verseLabels.length - 1] ?? null
+        const range = firstVerse && lastVerse
+          ? firstVerse === lastVerse ? firstVerse : `${firstVerse}–${lastVerse}`
+          : null
+        const unitName = entry.kind === "time-range" ? "segment" : "cell"
+        const description = entry.kind === "story" && range
+          ? `Frames ${range}`
+          : (
+            entry.kind === "chapter"
+            || entry.kind === "chapter-range"
+            || entry.kind === "preface"
+          ) && range
+            ? `Verses ${range}`
+            : `${entry.total} ${unitName}${entry.total === 1 ? "" : "s"}`
+        return {
+          key: entry.key,
+          kind: entry.kind,
+          label: entry.label,
+          shortLabel: entry.shortLabel,
+          description,
+          translated: entry.translated,
+          validated: entry.validated,
+          total: entry.total,
+        }
+      })
     }),
-  [cellStore, cellStoreVersion])
+  [cellStore, cellStoreVersion, milestoneNavigation])
 
   // AQU-610: sequential (non-scripture) numbering counts only *numbered*
   // (non-paratext) cells, so the count starts at 1 at the first real content
@@ -1536,8 +1532,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     ? chapterNavigationSelection.label
     : null
   const activeChapterLabel = resolveActiveChapterLabel(
-    chapterNavigationItems.map((chapter) => chapter.label),
-    currentSectionLabel,
+    milestoneNavigationItems.map((milestone) => milestone.key),
+    currentMilestoneKey,
     selectedChapterLabel,
   )
 
@@ -1569,10 +1565,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
   }, [clearChapterNavigationSelection])
 
-  const handleChapterSelect = useCallback((label: string) => {
-    const index = cellStore.findIndexBySection(label)
+  const handleChapterSelect = useCallback((key: string) => {
+    const index = milestoneNavigation.find((entry) => entry.key === key)?.firstIndex ?? -1
     if (index < 0) return
-    setChapterNavigationSelection({ fileId: audioFileId, label })
+    setChapterNavigationSelection({ fileId: audioFileId, label: key })
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     void listRef.current?.scrollToIndex({
@@ -1580,7 +1576,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       viewPosition: 0,
       animated: true,
     })
-  }, [audioFileId, cellStore])
+  }, [audioFileId, milestoneNavigation])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -1759,7 +1755,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
           lineNumbersEnabled={lineNumbersEnabled}
-          scriptureNumbering={chapterNavigationItems.length > 0}
+          scriptureNumbering={milestoneNavigationItems.every((item) => (
+            item.kind === "chapter"
+            || item.kind === "chapter-range"
+            || item.kind === "preface"
+          ))}
           cellLabelsEnabled={cellLabelsEnabled}
           sourceDirectionMode={sourceDirectionMode}
           targetDirectionMode={targetDirectionMode}
@@ -1847,7 +1847,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     isCompletionAvailable,
     isCompletionConfigured,
     isTimeOrdered,
-    chapterNavigationItems.length,
+    milestoneNavigationItems,
     sequentialNumberByCellId,
     lineNumbersEnabled,
     micDenied,
@@ -1900,11 +1900,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        {chapterNavigationItems.length > 0 && activeChapterLabel && (
+        {milestoneNavigationItems.length > 0 && activeChapterLabel && (
           <div className="border-b border-border bg-background/90 px-4 py-2 backdrop-blur-xl">
-            <ChapterNavigator
-              chapters={chapterNavigationItems}
-              activeLabel={activeChapterLabel}
+            <MilestoneNavigator
+              items={milestoneNavigationItems}
+              activeKey={activeChapterLabel}
               onSelect={handleChapterSelect}
             />
           </div>

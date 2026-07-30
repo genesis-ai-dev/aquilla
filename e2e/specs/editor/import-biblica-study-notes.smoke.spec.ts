@@ -126,6 +126,17 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await expect(ws.cellRow(4)).not.toContainText(NOTE_BLOCK_SENTENCES[1])
   await expect(ws.cellRow(5)).toContainText(NOTE_BLOCK_SENTENCES[1])
 
+  // Notes retain Biblica's richer Preface/chapter grouping in the universal
+  // navigator while verse paragraphs remain protected source structure.
+  await expect(alice.getByRole("button", {
+    name: /Current chapter: Genesis Preface/,
+  })).toBeVisible()
+  await alice.getByRole("button", { name: "Next chapter" }).click()
+  await expect(alice.getByRole("button", {
+    name: /Current chapter: Genesis 1/,
+  })).toBeVisible()
+  await expect(ws.cellRow(1)).toBeVisible()
+
   // The whole point of this importer: the Bible text is not imported for
   // translation, even though it was present in the package.
   await expect(alice.getByText(SCRIPTURE)).toHaveCount(0)

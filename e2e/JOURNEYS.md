@@ -25,6 +25,7 @@
 | Editor      | AI-classify unknown text, review recipe, import source + target lane | `e2e/specs/editor/import-ai-recipe.smoke.spec.ts` | ✅ |
 | Editor      | Upload spreadsheet auto-routes to column mapping; headings stay structural and canonical verse refs survive preview/commit | `e2e/specs/editor/import-spreadsheet-mapping.smoke.spec.ts` | ✅ |
 | Editor      | Scripture verse labels match canonical refs; chapter picker and previous/next navigation | `e2e/specs/editor/chapter-navigation.smoke.spec.ts` | ✅ |
+| Editor      | Every non-empty imported file exposes format-aware, searchable milestone navigation | `e2e/specs/editor/milestone-navigation.smoke.spec.ts` | ✅ |
 | Editor      | Commit survives a stale in-flight refetch (no vanish-until-refresh, AQU-247) | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+K search                                         | `e2e/specs/editor/search.smoke.spec.ts` (toolbar) + `search-keyboard-shortcut.smoke.spec.ts` (Ctrl+K) | ✅ |
 | Editor      | Virtualization scroll integrity                      | _gap — Plan 2_                                                |        |

@@ -265,6 +265,12 @@ describe("normalized import manifest", () => {
       unitKey: "scripture:GEN 1:1",
       kind: "verse",
       displayLabel: "1",
+      milestone: {
+        key: "scripture:GEN:1",
+        kind: "chapter",
+        label: "Genesis 1",
+        shortLabel: "1",
+      },
       address: { scheme: "scripture", book: "GEN", chapter: 1, verse: "1" },
       sourceLocator: { kind: "usfm", ref: "GEN 1:1", marker: "v" },
       physicalOrder: 0,

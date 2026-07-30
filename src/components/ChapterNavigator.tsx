@@ -250,32 +250,40 @@ export function MilestoneNavigator({
                             <span className="block">{validatedPercent}% validated</span>
                           </span>
                         </CommandItem>
-                        {expanded && item.subsections?.map((subsection) => {
-                          const subsectionSelected = selected && subsection.key === activeSubsection?.key
-                          const subsectionTranslatedPercent = subsection.total > 0
-                            ? Math.round((subsection.translated / subsection.total) * 100)
-                            : 0
-                          const subsectionValidatedPercent = subsection.total > 0
-                            ? Math.round((subsection.validated / subsection.total) * 100)
-                            : 0
-                          return (
-                            <CommandItem
-                              key={subsection.key}
-                              value={`${item.label} ${subsection.label}`}
-                              data-checked={subsectionSelected || undefined}
-                              onSelect={() => choose(item.key, subsection.key)}
-                              className="min-h-9 pl-12"
-                            >
-                              <span className="min-w-0 flex-1 font-medium tabular-nums">
-                                {subsection.label}
-                              </span>
-                              <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                                <span className="block">{subsectionTranslatedPercent}% translated</span>
-                                <span className="block">{subsectionValidatedPercent}% validated</span>
-                              </span>
-                            </CommandItem>
-                          )
-                        })}
+                        {expanded && item.subsections?.length ? (
+                          <div
+                            data-milestone-subsections
+                            className="relative ml-8 border-l border-border/80 pl-3"
+                          >
+                            {item.subsections.map((subsection) => {
+                              const subsectionSelected = selected && subsection.key === activeSubsection?.key
+                              const subsectionTranslatedPercent = subsection.total > 0
+                                ? Math.round((subsection.translated / subsection.total) * 100)
+                                : 0
+                              const subsectionValidatedPercent = subsection.total > 0
+                                ? Math.round((subsection.validated / subsection.total) * 100)
+                                : 0
+                              return (
+                                <CommandItem
+                                  key={subsection.key}
+                                  value={`${item.label} ${subsection.label}`}
+                                  data-milestone-subsection
+                                  data-checked={subsectionSelected || undefined}
+                                  onSelect={() => choose(item.key, subsection.key)}
+                                  className="relative min-h-9 pl-6 before:absolute before:-left-3 before:top-1/2 before:w-4 before:border-t before:border-border/80"
+                                >
+                                  <span className="min-w-0 flex-1 font-medium tabular-nums">
+                                    {subsection.label}
+                                  </span>
+                                  <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                                    <span className="block">{subsectionTranslatedPercent}% translated</span>
+                                    <span className="block">{subsectionValidatedPercent}% validated</span>
+                                  </span>
+                                </CommandItem>
+                              )
+                            })}
+                          </div>
+                        ) : null}
                       </div>
                     )
                   })}

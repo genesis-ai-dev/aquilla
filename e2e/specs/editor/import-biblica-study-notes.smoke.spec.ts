@@ -8,6 +8,7 @@ const IDML_MIME = "application/vnd.adobe.indesign-idml-package"
 const IDPKG = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
 const STORY_PATH = "Stories/Story_biblica.xml"
 
+const GLOBAL_PREFACE_NOTE = "GEN — General notes prepared for this edition."
 const PREFACE_NOTE = "Genesis introduces the story of beginnings."
 const CHAPTER_ONE_NOTE = "God alone creates the heavens and the earth."
 const SCRIPTURE = "In the beginning God created the heavens and the earth."
@@ -37,10 +38,10 @@ function paragraph(self: string, paragraphStyle: string, inner: string): string 
 }
 
 /**
- * A Biblica study-Bible page: a `meta:bk` book marker, an `intro:*` note before
- * any scripture, one fully marked-up verse, a note about that chapter, a
- * reference list set as a single line-broken paragraph, and a multi-sentence
- * note block.
+ * A Biblica study-Bible page: a document-level note before `meta:bk`, a
+ * book-level note before any scripture, one fully marked-up verse, a note about
+ * that chapter, a reference list set as a single line-broken paragraph, and a
+ * multi-sentence note block.
  */
 async function writeBiblicaFixture(filePath: string): Promise<void> {
   const zip = new JSZip()
@@ -55,6 +56,7 @@ async function writeBiblicaFixture(filePath: string): Promise<void> {
     [
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`,
       `<idPkg:Story ${IDPKG}><Story Self="u200">`,
+      paragraph("p-global-pref", "intro%3aip", run(PLAIN, GLOBAL_PREFACE_NOTE)),
       paragraph("p-bk", "meta%3abk", run(PLAIN, "GEN")),
       paragraph("p-pref", "intro%3aip", run(PLAIN, PREFACE_NOTE)),
       paragraph(
@@ -110,24 +112,33 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await ws.waitForEditor()
 
   const rows = alice.locator("[data-cell-id]")
-  await expect(rows).toHaveCount(6, { timeout: 15_000 })
-  await expect(ws.cellRow(0)).toContainText(PREFACE_NOTE)
-  await expect(ws.cellRow(1)).toContainText(CHAPTER_ONE_NOTE)
+  await expect(rows).toHaveCount(7, { timeout: 15_000 })
+  await expect(ws.cellRow(0)).toContainText(GLOBAL_PREFACE_NOTE)
+  await expect(ws.cellRow(1)).toContainText(PREFACE_NOTE)
+  await expect(ws.cellRow(2)).toContainText(CHAPTER_ONE_NOTE)
 
   // The reference list is one InDesign paragraph, but a translator works a line
   // at a time, so each line arrives as its own cell.
-  await expect(ws.cellRow(2)).toContainText(REFERENCE_LIST[0])
-  await expect(ws.cellRow(2)).not.toContainText(REFERENCE_LIST[1])
-  await expect(ws.cellRow(3)).toContainText(REFERENCE_LIST[1])
+  await expect(ws.cellRow(3)).toContainText(REFERENCE_LIST[0])
+  await expect(ws.cellRow(3)).not.toContainText(REFERENCE_LIST[1])
+  await expect(ws.cellRow(4)).toContainText(REFERENCE_LIST[1])
 
   // With the split option on (default), a note block arrives as one cell per
   // sentence; export merges the sentences back into that paragraph.
-  await expect(ws.cellRow(4)).toContainText(NOTE_BLOCK_SENTENCES[0].trim())
-  await expect(ws.cellRow(4)).not.toContainText(NOTE_BLOCK_SENTENCES[1])
-  await expect(ws.cellRow(5)).toContainText(NOTE_BLOCK_SENTENCES[1])
+  await expect(ws.cellRow(5)).toContainText(NOTE_BLOCK_SENTENCES[0].trim())
+  await expect(ws.cellRow(5)).not.toContainText(NOTE_BLOCK_SENTENCES[1])
+  await expect(ws.cellRow(6)).toContainText(NOTE_BLOCK_SENTENCES[1])
 
   // Notes retain Biblica's richer Preface/chapter grouping in the universal
   // navigator while verse paragraphs remain protected source structure.
+  await expect(alice.getByRole("button", {
+    name: /Current chapter: Preface/,
+  })).toBeVisible()
+  await alice.getByRole("button", { name: /Current chapter: Preface/ }).click()
+  await expect(alice.getByRole("option", { name: /^1–1 / }))
+    .toHaveAttribute("data-milestone-subsection")
+  await alice.keyboard.press("Escape")
+  await alice.getByRole("button", { name: "Next chapter" }).click()
   await expect(alice.getByRole("button", {
     name: /Current chapter: Genesis Preface/,
   })).toBeVisible()
@@ -135,15 +146,15 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await expect(alice.getByRole("button", {
     name: /Current chapter: Genesis 1/,
   })).toBeVisible()
-  await expect(ws.cellRow(1)).toBeVisible()
+  await expect(ws.cellRow(2)).toBeVisible()
 
   // The whole point of this importer: the Bible text is not imported for
   // translation, even though it was present in the package.
   await expect(alice.getByText(SCRIPTURE)).toHaveCount(0)
 
   // Notes stay editable as normal target cells.
-  await ws.editCell(0, "La Genèse raconte les commencements.")
-  await expect(ws.cellRow(0)).toContainText("La Genèse raconte les commencements.")
+  await ws.editCell(0, "Notes générales.")
+  await expect(ws.cellRow(0)).toContainText("Notes générales.")
   await expect(
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)

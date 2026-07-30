@@ -115,6 +115,12 @@ describe("MilestoneNavigator", () => {
       .toBeInTheDocument()
     expect(screen.getByRole("option", { name: /51–100 10% translated 0% validated/ }))
       .toHaveAttribute("data-checked", "true")
+    const subsection = screen.getByRole("option", {
+      name: /51–100 10% translated 0% validated/,
+    })
+    expect(subsection).toHaveAttribute("data-milestone-subsection")
+    expect(subsection.parentElement).toHaveAttribute("data-milestone-subsections")
+    expect(subsection.parentElement).toHaveClass("ml-8", "border-l")
     fireEvent.click(screen.getByText("101–117"))
     expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c102")
   })

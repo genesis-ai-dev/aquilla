@@ -223,7 +223,11 @@ export function selectBiblicaStudyNotes(
       currentLabel = null
     }
 
-    if (!currentBook) {
+    // Some packages omit meta:bk and name the book in a structural running
+    // heading instead. Never infer a book from an editable note itself: a
+    // document-level preface may begin with "ISA — …" and must remain the
+    // standalone Preface until the real book boundary arrives.
+    if (!currentBook && !isBiblicaNoteSectionStyle(paragraphStyle)) {
       const fallback = bookCodeFromParagraphText(unit.sourceText)
       if (fallback) currentBook = fallback
     }

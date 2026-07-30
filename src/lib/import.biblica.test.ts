@@ -272,7 +272,16 @@ describe("Biblica study-notes import", () => {
     })
 
     expect(ref.cellCount).toBe(1)
+    const cell = importBodies(requests).flatMap((body) => body.cells ?? [])[0]
     const meta = importBodies(requests).find((body) => body.file)?.file
     expect(meta?.bookCode).toBeUndefined()
+    expect(cell?.metadata?.aquillaImport).toMatchObject({
+      milestone: {
+        key: "biblica:unknown:Preface",
+        kind: "preface",
+        label: "Preface",
+        shortLabel: "P",
+      },
+    })
   })
 })

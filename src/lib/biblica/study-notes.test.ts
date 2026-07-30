@@ -233,6 +233,32 @@ describe("Biblica study-note selection", () => {
     expect(selection.notes[0].bookCode).toBe("RUT")
   })
 
+  it("keeps a document preface separate even when its note text begins with a book code", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      note("p-global", "ISA — Notes prepared for this edition."),
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "ISA")),
+      note("p-book", "Isaiah introduces the prophetic collection."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => ({
+      text: entry.unit.sourceText,
+      bookCode: entry.bookCode,
+      chapterLabel: entry.chapterLabel,
+    }))).toEqual([
+      {
+        text: "ISA — Notes prepared for this edition.",
+        bookCode: undefined,
+        chapterLabel: "Preface",
+      },
+      {
+        text: "Isaiah introduces the prophetic collection.",
+        bookCode: "ISA",
+        chapterLabel: "Preface",
+      },
+    ])
+  })
+
   it("resets book, chapter, and label state at each new book", () => {
     const units = [
       syntheticUnit("ParagraphStyle/meta%3abk", [["GEN", PLAIN]], 0),

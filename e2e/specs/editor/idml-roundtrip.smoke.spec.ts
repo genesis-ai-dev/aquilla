@@ -105,6 +105,9 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await ws.waitForEditor()
   await expect(ws.cellRow(0)).toContainText("Chapitre Un — suite")
   await expect(alice.getByTestId("stale-source-indicator")).toHaveCount(0)
+  await expect(
+    alice.getByText(/Source text changed since your last edit/i),
+  ).toHaveCount(0)
 
   await ws.openExportDialog()
 

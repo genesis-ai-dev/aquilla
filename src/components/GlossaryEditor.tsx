@@ -3,8 +3,8 @@
  *
  * One row per concept (source left, primary rendering right), grouped by
  * lifecycle: suggested (draft) at top as pending rows, active in the middle,
- * archived (deprecated) hidden behind a toggle. A persistent append row adds
- * new terms. Persistence is patchSettings({ terminology }); all concept
+ * archived (deprecated) hidden behind a toggle. Add term opens a create dialog.
+ * Persistence is patchSettings({ terminology }); all concept
  * mutations reuse the pure helpers in lib/terminology/store.
  *
  * The Concept[] model is unchanged, so blots / prompt-injection / violation
@@ -12,9 +12,18 @@
  */
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert } from "lucide-react"
+import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Field, FieldLabel } from "@/components/ui/field"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { useProject } from "@/hooks/useProject"
 import { useProjectCells } from "@/hooks/useProjectCells"
@@ -122,6 +131,7 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
   const [view, setView] = useState<"glossary" | "violations">("glossary")
   const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null)
   const [suggestRequested, setSuggestRequested] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const [newSource, setNewSource] = useState("")
   const [newRendering, setNewRendering] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -257,7 +267,16 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
     setError(null)
     setNewSource("")
     setNewRendering("")
+    setAddOpen(false)
   }, [project, canManage, persist, newSource, newRendering])
+
+  function handleAddOpenChange(open: boolean) {
+    setAddOpen(open)
+    if (!open) {
+      setNewSource("")
+      setNewRendering("")
+    }
+  }
 
   const handleSuggest = useCallback(() => {
     if (!guard()) return
@@ -402,7 +421,58 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
           <ShieldAlert data-icon="inline-start" />
           {view === "violations" ? "Back to glossary" : "Violations"}
         </Button>
+        {canManage && view === "glossary" && (
+          <Button size="sm" onClick={() => setAddOpen(true)} aria-label="Add term">
+            <Plus data-icon="inline-start" />
+            Add term
+          </Button>
+        )}
       </header>
+
+      <Dialog open={addOpen} onOpenChange={handleAddOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add term</DialogTitle>
+            <DialogDescription>
+              Create a source term and its preferred rendering for this project glossary.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <Field>
+              <FieldLabel htmlFor="glossary-new-source">Source term</FieldLabel>
+              <Input
+                id="glossary-new-source"
+                value={newSource}
+                placeholder="New source term…"
+                onChange={(e) => setNewSource(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
+                autoFocus
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="glossary-new-rendering">Rendering</FieldLabel>
+              <Input
+                id="glossary-new-rendering"
+                value={newRendering}
+                placeholder="rendering"
+                onChange={(e) => setNewRendering(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
+              />
+            </Field>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => handleAddOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddTerm}
+              disabled={!newSource.trim() || !newRendering.trim()}
+            >
+              Add term
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {error && (
         <div className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">{error}</div>
@@ -471,38 +541,8 @@ export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = 
 
         {active.length === 0 && suggested.length === 0 && (
           <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-            No terms yet. Add one below, or use “Suggest terms”.
+            No terms yet. Add one with “Add term”, or use “Suggest terms”.
           </p>
-        )}
-
-        {/* Append row */}
-        {canManage && (
-          <div className="flex items-center gap-3 border-t bg-muted/20 px-3 py-2">
-            <span className="w-4" />
-            <Input
-              value={newSource}
-              placeholder="New source term…"
-              className="h-8 flex-1 text-sm"
-              onChange={(e) => setNewSource(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
-            />
-            <Input
-              value={newRendering}
-              placeholder="rendering"
-              className="h-8 flex-1 text-sm"
-              onChange={(e) => setNewRendering(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddTerm()}
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleAddTerm}
-              aria-label="Add term"
-              disabled={!newSource.trim() || !newRendering.trim()}
-            >
-              Add
-            </Button>
-          </div>
         )}
 
         {/* Archived toggle + rows */}

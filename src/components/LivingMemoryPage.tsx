@@ -222,7 +222,7 @@ function CellList({ cells }: { cells: LivingMemoryCell[] }) {
   )
 }
 
-// ── Entry form (inline add / edit) ─────────────────────────────────────────
+// ── Entry form (used in add dialog + inline edit) ───────────────────────────
 
 interface EntryFormProps {
   initialText?: string
@@ -325,7 +325,7 @@ function AuthoredEntriesSection({
         <h2 className="text-xs font-semibold text-muted-foreground flex-1">
           {title}
         </h2>
-        {canEdit && !adding && (
+        {canEdit && (
           <Button
             size="sm"
             variant="ghost"
@@ -342,16 +342,23 @@ function AuthoredEntriesSection({
 
       <p className="text-xs text-muted-foreground mb-3 leading-relaxed">{description}</p>
 
-      {adding && (
-        <div className="mb-3">
+      <Dialog
+        open={adding}
+        onOpenChange={(open: boolean) => { if (!open) setAdding(false) }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add {title.toLowerCase()} entry</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </DialogHeader>
           <EntryForm
             onSave={(text) => { onAdd(text); setAdding(false) }}
             onCancel={() => setAdding(false)}
           />
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
-      {filtered.length === 0 && !adding ? (
+      {filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/60 px-4 py-5 flex flex-col gap-1.5">
           <p className="text-xs text-muted-foreground/60 italic">{placeholder}</p>
           <p className="text-xs text-muted-foreground/50">

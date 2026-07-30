@@ -276,7 +276,7 @@ export function LeftDock({
           isOpen ? "flex flex-col gap-1 px-2 pb-1" : "flex flex-col items-center gap-1 pb-1",
         )}
       >
-        <HelpMenu compact={!isOpen} />
+        <HelpMenu compact={!isOpen} showTour={false} />
         <div data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" compact={!isOpen} />
         </div>

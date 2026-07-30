@@ -25,6 +25,19 @@ describe("HelpMenu", () => {
     expect(trigger.contains(chevron)).toBe(true)
   })
 
+  it("hides Take the tour when showTour is false", async () => {
+    render(
+      <MemoryRouter>
+        <HelpMenu showTour={false} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /help & community/i }))
+    await waitFor(() => {
+      expect(screen.getByText("Discord server")).toBeInTheDocument()
+    })
+    expect(screen.queryByText("Take the tour")).not.toBeInTheDocument()
+  })
+
   it("opens the menu and keeps the Tour reachable through it", async () => {
     renderHelpMenu()
     fireEvent.click(screen.getByRole("button", { name: /help & community/i }))

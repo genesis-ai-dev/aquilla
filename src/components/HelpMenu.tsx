@@ -26,13 +26,15 @@ const SUPPORT_EMAIL =
 interface HelpMenuProps {
   /** Icon-only trigger for the collapsed dock rail. */
   compact?: boolean
+  /** Org-level tour entry; hidden in the project editor dock. */
+  showTour?: boolean
 }
 
 /**
  * Global help + community affordance. Docs, community, contact, and report
  * (AQU-307) live here so the left rail stays uncluttered.
  */
-export function HelpMenu({ compact = false }: HelpMenuProps) {
+export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
   const [open, setOpen] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
   const { openTour } = useProductTourContext()
@@ -85,10 +87,12 @@ export function HelpMenu({ compact = false }: HelpMenuProps) {
           sideOffset={4}
         >
           <DropdownMenuGroup>
-            <DropdownMenuItem onClick={handleTour}>
-              <Map />
-              Take the tour
-            </DropdownMenuItem>
+            {showTour ? (
+              <DropdownMenuItem onClick={handleTour}>
+                <Map />
+                Take the tour
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem
               render={
                 <a

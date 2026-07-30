@@ -269,8 +269,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
     form.reset()
     clearSubmitError()
     setSubmitWarning(null)
-    // Preserve the existing array reference when there is nothing to reset.
-    setExtraLanguages((prev) => (prev.length === 0 ? prev : []))
     // AQU-712: closing the dialog ends the session — mint a fresh draft id so
     // the next time it opens starts a brand-new project (no false dedup onto a
     // project created in a previous session).

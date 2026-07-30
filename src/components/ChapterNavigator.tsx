@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, CornerDownRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -100,6 +100,10 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   return { singular: "milestone", plural: "Milestones", description: "Choose a milestone to jump to its first cell." }
 }
 
+function isScriptureMilestone(kind: ImportMilestoneKind): boolean {
+  return kind === "chapter" || kind === "chapter-range" || kind === "preface"
+}
+
 export function MilestoneNavigator({
   items,
   activeKey,
@@ -115,6 +119,7 @@ export function MilestoneNavigator({
   const [search, setSearch] = useState("")
   const [expandedKey, setExpandedKey] = useState(activeKey)
   const vocabulary = useMemo(() => vocabularyFor(items), [items])
+  const scriptureNavigation = items.every((item) => isScriptureMilestone(item.kind))
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
@@ -194,8 +199,11 @@ export function MilestoneNavigator({
             </span>
             <ChevronDown data-icon="inline-end" className="justify-self-end" />
           </PopoverTrigger>
-          <PopoverContent align="center" className="w-80 gap-0 overflow-hidden p-0">
-            <PopoverHeader className="px-3 py-2.5">
+          <PopoverContent
+            align="center"
+            className="w-[min(24rem,calc(100vw-1rem))] gap-0 overflow-hidden p-0"
+          >
+            <PopoverHeader className="px-4 py-3">
               <PopoverTitle>Go to {vocabulary.singular}</PopoverTitle>
               <PopoverDescription>{vocabulary.description}</PopoverDescription>
             </PopoverHeader>
@@ -230,22 +238,27 @@ export function MilestoneNavigator({
                               choose(item.key)
                             }
                           }}
-                          className="min-h-11"
+                          className="grid min-h-12 grid-cols-[minmax(0,1fr)_7.5rem_1rem] items-center gap-3 px-3"
                         >
-                          <Badge
-                            variant={selected ? "default" : "outline"}
-                            className="min-w-6 rounded-full px-1.5 tabular-nums"
-                            aria-hidden="true"
-                          >
-                            {item.shortLabel}
-                          </Badge>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate font-medium">{item.label}</span>
-                            <span className="block text-xs text-muted-foreground">
-                              {item.description}
+                          <span className="flex min-w-0 items-center gap-2.5">
+                            {!scriptureNavigation ? (
+                              <Badge
+                                variant={selected ? "default" : "outline"}
+                                className="w-10 shrink-0 justify-center overflow-hidden rounded-full px-1.5 tabular-nums"
+                                aria-hidden="true"
+                                data-milestone-badge
+                              >
+                                {item.shortLabel}
+                              </Badge>
+                            ) : null}
+                            <span className="min-w-0">
+                              <span className="block truncate font-medium">{item.label}</span>
+                              <span className="block text-xs text-muted-foreground">
+                                {item.description}
+                              </span>
                             </span>
                           </span>
-                          <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                          <span className="w-[7.5rem] justify-self-end text-right text-xs tabular-nums text-muted-foreground">
                             <span className="block">{translatedPercent}% translated</span>
                             <span className="block">{validatedPercent}% validated</span>
                           </span>
@@ -253,7 +266,7 @@ export function MilestoneNavigator({
                         {expanded && item.subsections?.length ? (
                           <div
                             data-milestone-subsections
-                            className="relative ml-8 border-l border-border/80 pl-3"
+                            className="space-y-0.5 px-2 pb-1 pl-6"
                           >
                             {item.subsections.map((subsection) => {
                               const subsectionSelected = selected && subsection.key === activeSubsection?.key
@@ -270,12 +283,16 @@ export function MilestoneNavigator({
                                   data-milestone-subsection
                                   data-checked={subsectionSelected || undefined}
                                   onSelect={() => choose(item.key, subsection.key)}
-                                  className="relative min-h-9 pl-6 before:absolute before:-left-3 before:top-1/2 before:w-4 before:border-t before:border-border/80"
+                                  className="grid min-h-9 grid-cols-[minmax(0,1fr)_7.5rem_1rem] items-center gap-3 rounded-md px-3"
                                 >
-                                  <span className="min-w-0 flex-1 font-medium tabular-nums">
-                                    {subsection.label}
+                                  <span className="flex min-w-0 items-center gap-2 text-xs font-medium tabular-nums">
+                                    <CornerDownRight
+                                      aria-hidden="true"
+                                      className="size-3.5 shrink-0 text-muted-foreground"
+                                    />
+                                    <span className="truncate">Cells {subsection.label}</span>
                                   </span>
-                                  <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                                  <span className="w-[7.5rem] justify-self-end text-right text-xs tabular-nums text-muted-foreground">
                                     <span className="block">{subsectionTranslatedPercent}% translated</span>
                                     <span className="block">{subsectionValidatedPercent}% validated</span>
                                   </span>

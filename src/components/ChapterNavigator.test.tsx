@@ -111,18 +111,44 @@ describe("MilestoneNavigator", () => {
     expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c2")
 
     fireEvent.click(screen.getByRole("button", { name: /Current story: Story u363/ }))
-    expect(screen.getByRole("option", { name: /1–50 100% translated 10% validated/ }))
+    expect(screen.getByRole("option", { name: /Cells 1–50 100% translated 10% validated/ }))
       .toBeInTheDocument()
-    expect(screen.getByRole("option", { name: /51–100 10% translated 0% validated/ }))
+    expect(screen.getByRole("option", { name: /Cells 51–100 10% translated 0% validated/ }))
       .toHaveAttribute("data-checked", "true")
     const subsection = screen.getByRole("option", {
-      name: /51–100 10% translated 0% validated/,
+      name: /Cells 51–100 10% translated 0% validated/,
     })
     expect(subsection).toHaveAttribute("data-milestone-subsection")
     expect(subsection.parentElement).toHaveAttribute("data-milestone-subsections")
-    expect(subsection.parentElement).toHaveClass("ml-8", "border-l")
-    fireEvent.click(screen.getByText("101–117"))
+    expect(subsection.parentElement).toHaveClass("pl-6")
+    expect(subsection.parentElement).not.toHaveClass("border-l")
+    fireEvent.click(screen.getByText("Cells 101–117"))
     expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c102")
+  })
+
+  it("does not repeat Scripture ranges in a badge and book-qualified label", () => {
+    const ranges: MilestoneNavigationItem[] = [{
+      key: "biblica:ISA:2-5",
+      kind: "chapter-range",
+      label: "Isaiah 2–5",
+      shortLabel: "2–5",
+      description: "16 cells",
+      translated: 0,
+      validated: 0,
+      total: 16,
+      subsections: [
+        { key: "biblica:ISA:2-5:1-16", label: "1–16", firstCellId: "c1", translated: 0, validated: 0, total: 16 },
+      ],
+    }]
+
+    render(<MilestoneNavigator items={ranges} activeKey="biblica:ISA:2-5" onSelect={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: /Current chapter: Isaiah 2–5/ }))
+
+    const parent = screen.getByRole("option", { name: /Isaiah 2–5 16 cells/ })
+    expect(parent.querySelector("[data-milestone-badge]")).toBeNull()
+    expect(parent.textContent?.match(/2–5/g)).toHaveLength(1)
+    expect(screen.getByRole("option", { name: /Cells 1–16 0% translated 0% validated/ }))
+      .toBeInTheDocument()
   })
 
   it("keeps duplicate labels independently selectable by stable key", () => {

@@ -135,7 +135,7 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
     name: /Current chapter: Preface/,
   })).toBeVisible()
   await alice.getByRole("button", { name: /Current chapter: Preface/ }).click()
-  await expect(alice.getByRole("option", { name: /^1–1 / }))
+  await expect(alice.getByRole("option", { name: /^Cells 1–1 / }))
     .toHaveAttribute("data-milestone-subsection")
   await alice.keyboard.press("Escape")
   await alice.getByRole("button", { name: "Next chapter" }).click()

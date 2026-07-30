@@ -240,6 +240,56 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(onCommit).not.toHaveBeenCalled()
   })
 
+  it("keeps the target editor LTR when the IDML locked source anchors are RTL (AQU-740)", async () => {
+    // A cell whose editable slot is empty but whose locked (non-editable) slot
+    // still carries strong-RTL Hebrew source — the exact reported shape.
+    const HEBREW_SOURCE = "אבגד"
+    const rtlSourceHtml =
+      `<p data-idml-version="2">`
+      + `<span data-idml-slot="0" data-idml-character-style="CharacterStyle/Body" data-idml-protected="slot">${HEBREW_SOURCE}</span>`
+      + `<span data-idml-token="0" data-idml-token-kind="tab" data-idml-protected="token" contenteditable="false"></span>`
+      + `<span data-idml-slot="1" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot" contenteditable="false">${HEBREW_SOURCE}</span>`
+      + `</p>`
+    const rtlMetadata: IdmlFormatMetadataV2 = {
+      version: 2,
+      slotCount: 2,
+      editableSlotIndexes: [0],
+      protectedTokenCount: 1,
+      anchorSequenceHash: createHash("sha256").update([
+        "slot:0:editable:CharacterStyle/Body",
+        "token:0:tab",
+        "slot:1:locked:CharacterStyle/Bold",
+      ].join("\u0000")).digest("hex"),
+    }
+    const rtlConfiguration: IdmlEditorConfiguration = {
+      kind: "ready",
+      context: { sourceHtml: rtlSourceHtml, metadata: rtlMetadata },
+    }
+    // Empty target: editable slot cleared, locked slot keeps its RTL source.
+    const emptyTargetHtml = rtlSourceHtml.replace(`>${HEBREW_SOURCE}</span>`, "></span>")
+
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-rtl-source"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={rtlConfiguration}
+        directionMode="auto"
+        textDirection="ltr"
+        onCommit={vi.fn()}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.click(surface)
+    })
+    // Without the fix, auto-detection reads the locked RTL source and flips the
+    // whole target editor to dir="rtl".
+    expect(surface.getAttribute("dir")).toBe("ltr")
+  })
+
   it("pastes ordinary rich HTML as slot text without importing markup or anchors", async () => {
     const onCommit = vi.fn()
     const { container } = render(

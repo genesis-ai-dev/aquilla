@@ -164,6 +164,7 @@ import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
 import {
+  idmlEditableTextFromHtml,
   resolveIdmlEditorConfiguration,
   validateIdmlEditorCommit,
 } from "@/lib/richtext/idml-editor"
@@ -3613,10 +3614,17 @@ function EditorRow({
   const targetCellDirection = useMemo(
     () => resolveTextDirection(
       targetDirectionMode,
-      showCompletionOverlay ? (completionPreview ?? "") : (visibleTranslatedHtml ?? visibleTranslated),
+      // AQU-740: for IDML cells the stored target HTML embeds SOURCE text in
+      // its locked slots, so detect direction from translator-owned editable
+      // slots only — otherwise an RTL source forces the LTR target right-to-left.
+      showCompletionOverlay
+        ? (completionPreview ?? "")
+        : idmlConfiguration
+          ? idmlEditableTextFromHtml(visibleTranslatedHtml)
+          : (visibleTranslatedHtml ?? visibleTranslated),
       targetTextDirection,
     ),
-    [targetDirectionMode, targetTextDirection, showCompletionOverlay, completionPreview, visibleTranslatedHtml, visibleTranslated],
+    [targetDirectionMode, targetTextDirection, showCompletionOverlay, completionPreview, visibleTranslatedHtml, visibleTranslated, idmlConfiguration],
   )
   const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
   const mayHaveFootnotes = hasSourceFootnoteMarker || hasTargetFootnoteMarker

@@ -68,6 +68,43 @@ export function idmlEditableSlotPosition(
   return requested ?? firstEditable
 }
 
+/**
+ * Concatenates only translator-owned (editable slot) text from a live IDML
+ * editor document. IDML target cells retain their SOURCE text inside the
+ * non-editable ("locked") protected slots, so text-direction auto-detection
+ * must ignore those anchors — otherwise an RTL source forces an LTR target
+ * editor to render right-to-left (AQU-740).
+ */
+export function idmlEditableText(doc: ProseMirrorNode): string {
+  let text = ""
+  doc.descendants((node) => {
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (node.attrs.editable === true) text += node.textContent
+    return false
+  })
+  return text
+}
+
+/**
+ * The HTML-string counterpart of {@link idmlEditableText}: pulls translator-owned
+ * text out of a stored IDML target HTML by skipping every `contenteditable="false"`
+ * (locked, source-carrying) slot. Used for read-side direction detection where no
+ * live ProseMirror document is available (AQU-740).
+ */
+export function idmlEditableTextFromHtml(html: string | undefined | null): string {
+  if (!html || typeof document === "undefined") return ""
+  const template = document.createElement("template")
+  template.innerHTML = html
+  let text = ""
+  for (const slot of template.content.querySelectorAll<HTMLElement>(
+    "span[data-idml-protected=\"slot\"]",
+  )) {
+    if (slot.getAttribute("contenteditable") === "false") continue
+    text += slot.textContent ?? ""
+  }
+  return text
+}
+
 export function isEditableIdmlSelection(selection: {
   $from: { depth: number; node: (depth: number) => ProseMirrorNode }
   $to: { depth: number; node: (depth: number) => ProseMirrorNode }

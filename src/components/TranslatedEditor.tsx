@@ -36,6 +36,7 @@ import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
   idmlEditableSlotPosition,
+  idmlEditableText,
   idmlDiagnosticMessage,
   idmlEditorExtensions,
   isEditableIdmlSelection,
@@ -461,13 +462,19 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   // gone, so `.commands`/`.view` dereferences crash the workspace boundary.
   const applyEditorDirection = useCallback((editorInstance: TiptapEditor | null) => {
     if (!editorInstance || editorInstance.isDestroyed) return
+    // AQU-740: IDML target docs carry SOURCE text in their locked protected
+    // slots, so auto-detection must read only the translator-owned editable
+    // slots — otherwise an RTL source pins the LTR target editor right-to-left.
+    const detectionText = idmlContext
+      ? idmlEditableText(editorInstance.state.doc)
+      : editorInstance.getText()
     const next = directionModeRef.current === "auto"
-      ? detectStrongTextDirection(editorInstance.getText()) ?? textDirectionRef.current
+      ? detectStrongTextDirection(detectionText) ?? textDirectionRef.current
       : textDirectionRef.current
     editorInstance.view.dom.setAttribute("dir", next)
     if (lang) editorInstance.view.dom.setAttribute("lang", lang)
     else editorInstance.view.dom.removeAttribute("lang")
-  }, [lang])
+  }, [lang, idmlContext])
   const publishSelection = useCallback((editorInstance: TiptapEditor | null) => {
     if (!editorInstance || isReadOnlyRef.current) return
     const { selection, doc } = editorInstance.state

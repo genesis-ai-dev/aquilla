@@ -8,6 +8,8 @@ import {
   IDML_SLOT_NODE_NAME,
   IDML_TOKEN_NODE_NAME,
   hasIdmlCellMetadata,
+  idmlEditableText,
+  idmlEditableTextFromHtml,
   idmlEditorExtensions,
   prepareIdmlEditorContent,
   resolveIdmlEditorConfiguration,
@@ -245,5 +247,46 @@ describe("IDML ProseMirror transaction guard", () => {
 
     expect(editor.state.doc.toJSON()).toEqual(before)
     expect(rejected).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("IDML translator-owned text for direction detection (AQU-740)", () => {
+  // U+05E9 U+05DC U+05D5 U+05DD = "שלום" (Hebrew, strong RTL)
+  const HEBREW = "שלום"
+  // U+05D0 U+05D1 = "אב" (Hebrew, strong RTL) used as locked SOURCE text
+  const HEBREW_SOURCE = "אב"
+
+  function targetHtml(editableText: string, lockedText: string): string {
+    return (
+      `<p data-idml-version="2">`
+      + `<span data-idml-slot="0" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">${editableText}</span>`
+      + `<span data-idml-token="0" data-idml-token-kind="tab" data-idml-protected="token" contenteditable="false"></span>`
+      + `<span data-idml-slot="1" data-idml-character-style="${STYLE_LOCKED}" data-idml-protected="slot" contenteditable="false">${lockedText}</span>`
+      + `</p>`
+    )
+  }
+
+  it("idmlEditableTextFromHtml returns editable slot text and skips locked source anchors", () => {
+    expect(idmlEditableTextFromHtml(targetHtml(HEBREW, "LOCK"))).toBe(HEBREW)
+  })
+
+  it("idmlEditableTextFromHtml is empty for an untranslated cell even when the locked source is RTL", () => {
+    // The reported AQU-740 shape: editable slot empty, locked slot carries RTL
+    // source. Detection must NOT see the source, or the LTR target flips to RTL.
+    expect(idmlEditableTextFromHtml(targetHtml("", HEBREW_SOURCE))).toBe("")
+  })
+
+  it("idmlEditableTextFromHtml tolerates empty/undefined input", () => {
+    expect(idmlEditableTextFromHtml("")).toBe("")
+    expect(idmlEditableTextFromHtml(undefined)).toBe("")
+    expect(idmlEditableTextFromHtml(null)).toBe("")
+  })
+
+  it("idmlEditableText(doc) ignores locked slots that carry RTL source text", () => {
+    const untranslated = createEditor(vi.fn(), targetHtml("", HEBREW_SOURCE))
+    expect(idmlEditableText(untranslated.state.doc)).toBe("")
+
+    const translated = createEditor(vi.fn(), targetHtml(HEBREW, "LOCK"))
+    expect(idmlEditableText(translated.state.doc)).toBe(HEBREW)
   })
 })

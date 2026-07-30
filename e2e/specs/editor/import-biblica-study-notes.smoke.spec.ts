@@ -152,6 +152,35 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   // translation, even though it was present in the package.
   await expect(alice.getByText(SCRIPTURE)).toHaveCount(0)
 
+  // AQU-742: the model may return plain prose even though the source carries
+  // protected IDML anchors. The client must reconstruct the one editable slot
+  // into canonical HTML, commit the draft, and leave the row in a terminal
+  // non-pulsing state.
+  const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
+  expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+  await alice.evaluate(({ endpoint }) => {
+    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+      endpoint,
+      model: "mock-model",
+      apiKey: "",
+    }))
+  }, { endpoint: `${llmBase}/v1` })
+  await alice.reload()
+  await ws.waitForEditor()
+  const aiRow = ws.cellRow(2)
+  await aiRow.hover()
+  const sparkle = aiRow.locator(
+    "[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']",
+  ).first()
+  await expect(sparkle).toBeVisible()
+  await sparkle.click()
+  await expect(aiRow.locator('[data-cell-type="target"]'))
+    .toContainText("Traducción de prueba", { timeout: 15_000 })
+  await expect(aiRow).not.toHaveAttribute("data-ai-translating", "true")
+  await expect(
+    alice.getByText(/AI draft changed a protected IDML anchor/i),
+  ).toHaveCount(0)
+
   // Notes stay editable as normal target cells.
   await ws.editCell(0, "Notes générales.")
   await expect(ws.cellRow(0)).toContainText("Notes générales.")

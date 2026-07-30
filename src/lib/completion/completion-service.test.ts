@@ -323,7 +323,7 @@ describe("resolveProvider", () => {
 describe("complete", () => {
   const fetchMock = vi.fn()
   beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
-  afterEach(() => { vi.unstubAllGlobals() })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
   function okJson(body: unknown): Response {
     return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } })
@@ -460,6 +460,31 @@ describe("complete", () => {
     await expect(
       complete({ settings: { ...BASE, provider: "custom", endpoint: "" }, session: null, messages: msg }),
     ).rejects.toThrow(/No custom endpoint/)
+  })
+
+  it("terminates a hung completion request with a retryable timeout error", async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementationOnce((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        const signal = init.signal
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"))
+        }, { once: true })
+      }),
+    )
+    const pending = complete({
+      settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "x" },
+      session: null,
+      messages: msg,
+      timeoutMs: 25,
+    })
+    const rejection = expect(pending).rejects.toThrow(
+      "The AI request timed out. Please try again.",
+    )
+
+    await vi.advanceTimersByTimeAsync(25)
+
+    await rejection
   })
 
   // Helper to build a streaming Response from a sequence of byte chunks.

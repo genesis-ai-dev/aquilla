@@ -23,7 +23,13 @@ export function HealthRing({ health, size = 20, strokeWidth = 2.5, className, st
   return (
     <div className={className} style={{ position: "relative", width: size, height: size, ...style }}>
       {showRing && (
-        <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        // Inline width/height beat Button's `[&_svg:not([class*='size-'])]:size-*`
+        // rule, which otherwise crushes rings nested in icon buttons.
+        <svg
+          width={size}
+          height={size}
+          style={{ width: size, height: size, transform: "rotate(-90deg)" }}
+        >
           {/* Background track */}
           <circle
             cx={size / 2}

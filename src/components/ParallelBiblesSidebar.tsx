@@ -232,12 +232,12 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
           onClick={onToggle}
           aria-label="Show parallel bibles"
           className={cn(
-            "flex h-full w-7 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "flex h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
             className,
           )}
         >
           <BookMarked className="h-4 w-4" />
-          <span className="text-[10px] font-medium [writing-mode:vertical-rl]">
+          <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
             Bibles
           </span>
         </button>

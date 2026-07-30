@@ -69,14 +69,15 @@ export function normalizeProtectedCompletion(
     normalizedHtml,
     metadata,
   )
-  // A model can translate the prose correctly while dropping an empty
-  // protected token/span from the surrounding HTML. For the common IDML and
-  // Biblica shape — exactly one editable slot — the mapping is unambiguous:
-  // take only the generated translation and insert it into a known-good
-  // canonical template. Multi-slot cells still fail closed because guessing
-  // how translated text maps across style boundaries would be lossy.
-  if (!validation.valid && metadata.editableSlotIndexes.length === 1) {
-    normalizedHtml = repairSingleEditableSlotCompletion(
+  // Models sometimes preserve every editable slot identity and its translated
+  // prose while changing a protected attribute (for example
+  // adding contenteditable="false" to an editable slot) or dropping a
+  // structural-only token.
+  // Rebuild those responses from a known-good template, copying only the text
+  // from each expected editable slot. If an expected multi-slot identity is
+  // missing or duplicated, the mapping is ambiguous and still fails closed.
+  if (!validation.valid) {
+    normalizedHtml = repairEditableSlotCompletion(
       cell,
       generated,
       metadata,
@@ -141,7 +142,7 @@ function idmlMetadata(cell: IdmlCompletionCell): IdmlFormatMetadataV2 | undefine
   return candidate as IdmlFormatMetadataV2
 }
 
-function repairSingleEditableSlotCompletion(
+function repairEditableSlotCompletion(
   cell: IdmlCompletionCell,
   generated: string,
   metadata: IdmlFormatMetadataV2,
@@ -151,8 +152,7 @@ function repairSingleEditableSlotCompletion(
       `Cell ${cell.id} requires protected IDML reconstruction in a browser.`,
     )
   }
-  const editableIndex = metadata.editableSlotIndexes[0]
-  if (editableIndex === undefined) {
+  if (metadata.editableSlotIndexes.length === 0) {
     throw new IdmlCompletionError(
       `Cell ${cell.id} has no editable IDML slot for the AI draft.`,
     )
@@ -160,23 +160,31 @@ function repairSingleEditableSlotCompletion(
 
   const generatedContainer = document.createElement("div")
   generatedContainer.innerHTML = stripMarkdownFence(generated)
-  const generatedSlot = generatedContainer.querySelector<HTMLElement>(
-    `span[data-idml-slot="${editableIndex}"]`,
-  )
-  // If the response looks like the protected protocol but even the editable
-  // slot identity is gone, its prose cannot be distinguished safely from
-  // protected literal content. Do not guess.
-  if (!generatedSlot && generatedContainer.querySelector("[data-idml-version], [data-idml-slot], [data-idml-token]")) {
-    throw new IdmlCompletionError(
-      `The AI draft changed a protected IDML anchor in cell ${cell.id}; nothing was saved.`,
+  const translatedSlots = new Map<number, string>()
+  for (const editableIndex of metadata.editableSlotIndexes) {
+    const matches = generatedContainer.querySelectorAll<HTMLElement>(
+      `span[data-idml-slot="${editableIndex}"]`,
+    )
+    if (matches.length === 1) {
+      translatedSlots.set(editableIndex, textWithLineBreaks(matches[0]!))
+    }
+  }
+
+  // Plain output has no slot identity. It is safe only when exactly one slot
+  // can receive it; a multi-slot paragraph cannot be repartitioned reliably.
+  if (
+    translatedSlots.size === 0
+    && metadata.editableSlotIndexes.length === 1
+    && !generatedContainer.querySelector("[data-idml-version], [data-idml-slot], [data-idml-token]")
+  ) {
+    translatedSlots.set(
+      metadata.editableSlotIndexes[0]!,
+      textWithLineBreaks(generatedContainer),
     )
   }
-  const translatedText = generatedSlot
-    ? textWithLineBreaks(generatedSlot)
-    : textWithLineBreaks(generatedContainer)
-  if (!translatedText.trim()) {
+  if (translatedSlots.size !== metadata.editableSlotIndexes.length) {
     throw new IdmlCompletionError(
-      `The AI returned no text inside the editable IDML slot for cell ${cell.id}; nothing was saved.`,
+      `The AI draft changed a protected IDML anchor in cell ${cell.id}; nothing was saved.`,
     )
   }
 
@@ -189,15 +197,17 @@ function repairSingleEditableSlotCompletion(
       `Cell ${cell.id} does not contain one canonical IDML paragraph.`,
     )
   }
-  const slot = paragraph.querySelector<HTMLElement>(
-    `span[data-idml-slot="${editableIndex}"]`,
-  )
-  if (!slot) {
-    throw new IdmlCompletionError(
-      `Cell ${cell.id} is missing protected IDML slot ${editableIndex}.`,
+  for (const editableIndex of metadata.editableSlotIndexes) {
+    const slot = paragraph.querySelector<HTMLElement>(
+      `span[data-idml-slot="${editableIndex}"]`,
     )
+    if (!slot) {
+      throw new IdmlCompletionError(
+        `Cell ${cell.id} is missing protected IDML slot ${editableIndex}.`,
+      )
+    }
+    replaceSlotText(slot, translatedSlots.get(editableIndex) ?? "")
   }
-  replaceSlotText(slot, translatedText)
   return paragraph.outerHTML
 }
 

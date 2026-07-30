@@ -68,7 +68,12 @@ async function writeBiblicaFixture(filePath: string): Promise<void> {
           + run(PLAIN, SCRIPTURE)
           + run("meta%3av", "1"),
       ),
-      paragraph("p-n1", "intro%3aipi", run(PLAIN, CHAPTER_ONE_NOTE)),
+      paragraph(
+        "p-n1",
+        "intro%3aipi",
+        run(PLAIN, "God alone creates ")
+          + run("Bold", "the heavens and the earth."),
+      ),
       paragraph(
         "p-list",
         "intro%3aili1",
@@ -152,10 +157,10 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   // translation, even though it was present in the package.
   await expect(alice.getByText(SCRIPTURE)).toHaveCount(0)
 
-  // AQU-742: the model may return plain prose even though the source carries
-  // protected IDML anchors. The client must reconstruct the one editable slot
-  // into canonical HTML, commit the draft, and leave the row in a terminal
-  // non-pulsing state.
+  // AQU-742: reproduce the real replace failure — an existing multi-style
+  // target, followed by a model response that keeps every slot identity/text
+  // but adds contenteditable="false" to an editable slot. The client must
+  // rebuild canonical HTML from those slots and leave the row terminal.
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
   await alice.evaluate(({ endpoint }) => {
@@ -167,6 +172,34 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   }, { endpoint: `${llmBase}/v1` })
   await alice.reload()
   await ws.waitForEditor()
+  await ws.editCell(2, "Traduction existante.")
+  await alice.route("**/v1/chat/completions", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue()
+      return
+    }
+    const body = route.request().postDataJSON() as {
+      messages?: Array<{ content?: string }>
+    }
+    const prompt = body.messages?.map((message) => message.content ?? "").join("\n") ?? ""
+    const start = prompt.indexOf('<p data-idml-version="2">')
+    const end = prompt.indexOf("</p>", start)
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const canonical = prompt.slice(start, end + 4)
+    const damaged = canonical.replace(
+      'data-idml-protected="slot"',
+      'data-idml-protected="slot" contenteditable="false"',
+    )
+    expect(damaged).not.toBe(canonical)
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        choices: [{ message: { role: "assistant", content: damaged } }],
+      }),
+    })
+  })
   const aiRow = ws.cellRow(2)
   await aiRow.hover()
   const sparkle = aiRow.locator(
@@ -174,8 +207,9 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   ).first()
   await expect(sparkle).toBeVisible()
   await sparkle.click()
+  await alice.getByRole("button", { name: /Replace|Overwrite|Continue/i }).click()
   await expect(aiRow.locator('[data-cell-type="target"]'))
-    .toContainText("Traducción de prueba", { timeout: 15_000 })
+    .toContainText(CHAPTER_ONE_NOTE, { timeout: 15_000 })
   await expect(aiRow).not.toHaveAttribute("data-ai-translating", "true")
   await expect(
     alice.getByText(/AI draft changed a protected IDML anchor/i),

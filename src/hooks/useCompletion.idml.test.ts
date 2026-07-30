@@ -139,6 +139,55 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(result.current.completing.get(cell.id)).toBeUndefined()
     expect(result.current.errors.get(cell.id)).toBeUndefined()
   })
+
+  it("repairs a replace draft whose editable slot attribute changed before committing", async () => {
+    const unit = await parsedUnit()
+    const cell = completionCell(unit)
+    const existingHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Ancien" : "texte",
+      })),
+    })
+    cell.translated = "Ancien\ntexte"
+    cell.translatedHtml = existingHtml
+    const generated = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Nouveau" : "texte",
+      })),
+    })
+    const damaged = generated.replace(
+      'data-idml-protected="slot"',
+      'data-idml-protected="slot" contenteditable="false"',
+    )
+    expect(damaged).not.toBe(generated)
+    mockCompletion(damaged, [])
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(cell, commit)
+
+    let saved = false
+    await act(async () => {
+      saved = await result.current.completeSingle(cell as never, undefined, {
+        regenerate: true,
+      })
+    })
+
+    expect(saved).toBe(true)
+    expect(commit).toHaveBeenCalledTimes(1)
+    const committedHtml = commit.mock.calls[0]?.[1] as string
+    expect(committedHtml).toContain("Nouveau")
+    expect(committedHtml).not.toContain('contenteditable="false"')
+    expect(validateIdmlTranslation(
+      unit.sourceHtml,
+      committedHtml,
+      unit.metadata,
+    ).valid).toBe(true)
+    expect(result.current.completing.get(cell.id)).toBeUndefined()
+    expect(result.current.errors.get(cell.id)).toBeUndefined()
+  })
 })
 
 function renderCompletion(cell: ReturnType<typeof completionCell>, commit: ReturnType<typeof vi.fn>) {

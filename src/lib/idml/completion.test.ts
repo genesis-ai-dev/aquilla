@@ -87,7 +87,32 @@ describe("IDML AI completion contract", () => {
     ).valid).toBe(true)
   })
 
-  it("rejects plain output, changed anchors, and arbitrary markup without committing", async () => {
+  it("reconstructs a multi-slot draft when slot identities survive a protected editability change", async () => {
+    const unit = await parsedUnit()
+    const generated = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Les livres" : "des prophètes",
+      })),
+    })
+    const damaged = generated.replace(
+      'data-idml-protected="slot"',
+      'data-idml-protected="slot" contenteditable="false"',
+    )
+    expect(damaged).not.toBe(generated)
+
+    const normalized = normalizeProtectedCompletion(cellFor(unit), damaged)
+
+    expect(normalized.value).toBe("Les livres\ndes prophètes")
+    expect(validateIdmlTranslation(
+      unit.sourceHtml,
+      normalized.valueHtml!,
+      unit.metadata,
+    ).valid).toBe(true)
+  })
+
+  it("rejects ambiguous multi-slot output with missing or duplicate editable anchors", async () => {
     const unit = await parsedUnit()
     const cell = cellFor(unit)
     const valid = renderIdmlUnitHtml({
@@ -97,7 +122,10 @@ describe("IDML AI completion contract", () => {
     const invalid = [
       "plain translated text",
       valid.replace('data-idml-slot="0"', 'data-idml-slot="9"'),
-      valid.replace("</p>", "<script>bad()</script></p>"),
+      valid.replace(
+        "</p>",
+        '<span data-idml-slot="0" data-idml-character-style="CharacterStyle/Plain" data-idml-protected="slot">duplicate</span></p>',
+      ),
     ]
 
     for (const generated of invalid) {

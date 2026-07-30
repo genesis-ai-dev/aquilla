@@ -54,6 +54,8 @@ export interface UseStaleSourceCellsResult {
   ancestorBehind: boolean
   isLoading: boolean
   isError: boolean
+  /** Project/file key for the most recent successful authoritative read. */
+  lastSuccessfulFetchKey: string | null
   /** Manual refetch — call after target commits or known upstream edits. */
   revalidate: () => void
   /** QA-BUG-2: awaits POST /link/sync, THEN revalidates staleness. Callers
@@ -132,6 +134,7 @@ export function useStaleSourceCells(
   const [ancestorBehind, setAncestorBehind] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
+  const [lastSuccessfulFetchKey, setLastSuccessfulFetchKey] = useState<string | null>(null)
 
   /** Reset every derived field to its empty/quiet steady state — used on
    *  disable, auth-retry exhaustion, and transient fetch errors (staleness
@@ -143,6 +146,7 @@ export function useStaleSourceCells(
     setUpstreamStaleCellIds(EMPTY)
     setBehindSeq(null)
     setAncestorBehind(false)
+    setLastSuccessfulFetchKey(null)
   }, [])
   const generationRef = useRef(0)
   const projectRef = useRef(projectId)
@@ -223,6 +227,7 @@ export function useStaleSourceCells(
       setUpstreamStaleCellIds(new Set(body.upstreamStaleCellIds ?? []))
       setBehindSeq(body.behindSeq ?? null)
       setAncestorBehind(body.ancestorBehind ?? false)
+      setLastSuccessfulFetchKey(`${pid}\u0000${fid}`)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -304,6 +309,7 @@ export function useStaleSourceCells(
     ancestorBehind,
     isLoading,
     isError,
+    lastSuccessfulFetchKey,
     revalidate: doFetch,
     syncNow,
   }

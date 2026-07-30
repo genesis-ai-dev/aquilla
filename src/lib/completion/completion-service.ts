@@ -560,6 +560,8 @@ export interface CompleteOptions {
   onChunk?: (text: string) => void
   /** If provided, the in-flight fetch and stream are aborted when signalled. */
   signal?: AbortSignal
+  /** Request watchdog. Override only in focused tests. */
+  timeoutMs?: number
   /** Called when the response carries an X-AB-* model-experiment assignment. */
   onAbAssignment?: (ab: AbAssignment) => void
 }
@@ -596,47 +598,86 @@ export async function complete(options: CompleteOptions): Promise<string> {
   const projectId =
     provider === "frontier" ? activeProjectIdFromPath(window.location.pathname) : null
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify({
-      model: effectiveSettings.model || "default",
-      messages: options.messages,
-      max_tokens: effectiveSettings.maxTokens,
-      temperature: effectiveSettings.temperature,
-      stream: useStream,
-      ...(projectId && { projectId }),
-    }),
-    signal: options.signal,
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    // Frontier returns 402 when subscription/credits are exhausted; surface message.
-    if (provider === "frontier" && res.status === 402) {
-      throw new Error(`Frontier AI limit reached: ${text || "Out of credits."}`)
-    }
-    throw new Error(`Completion failed: ${res.status} ${text}`)
-  }
-
-  // A/B experiment assignment (frontier default-model traffic only): surface
-  // it so the caller can attribute the eventual accept/edit gesture. Optional
-  // chaining: some test stubs fake fetch without a headers object.
-  const abRequestId = res.headers?.get("X-AB-Request-Id")
-  if (abRequestId && options.onAbAssignment) {
-    const arm = res.headers.get("X-AB-Arm")
-    options.onAbAssignment({
-      requestId: abRequestId,
-      arm: arm === "challenger" ? "challenger" : "champion",
-      model: res.headers.get("X-AB-Model") ?? "",
+  const request = completionRequestSignal(options.signal, options.timeoutMs)
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({
+        model: effectiveSettings.model || "default",
+        messages: options.messages,
+        max_tokens: effectiveSettings.maxTokens,
+        temperature: effectiveSettings.temperature,
+        stream: useStream,
+        ...(projectId && { projectId }),
+      }),
+      signal: request.signal,
     })
-  }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      // Frontier returns 402 when subscription/credits are exhausted; surface message.
+      if (provider === "frontier" && res.status === 402) {
+        throw new Error(`Frontier AI limit reached: ${text || "Out of credits."}`)
+      }
+      throw new Error(`Completion failed: ${res.status} ${text}`)
+    }
 
-  if (useStream && options.onChunk && res.body) {
-    return consumeStream(res.body, options.onChunk, options.signal)
-  }
+    // A/B experiment assignment (frontier default-model traffic only): surface
+    // it so the caller can attribute the eventual accept/edit gesture. Optional
+    // chaining: some test stubs fake fetch without a headers object.
+    const abRequestId = res.headers?.get("X-AB-Request-Id")
+    if (abRequestId && options.onAbAssignment) {
+      const arm = res.headers.get("X-AB-Arm")
+      options.onAbAssignment({
+        requestId: abRequestId,
+        arm: arm === "challenger" ? "challenger" : "champion",
+        model: res.headers.get("X-AB-Model") ?? "",
+      })
+    }
 
-  const data = await res.json()
-  return data.choices[0]?.message?.content?.trim() || ""
+    if (useStream && options.onChunk && res.body) {
+      return consumeStream(res.body, options.onChunk, request.signal)
+    }
+
+    const data = await res.json()
+    return data.choices[0]?.message?.content?.trim() || ""
+  } catch (error) {
+    if (request.didTimeout()) {
+      throw new Error("The AI request timed out. Please try again.")
+    }
+    throw error
+  } finally {
+    request.dispose()
+  }
+}
+
+const COMPLETION_REQUEST_TIMEOUT_MS = 120_000
+
+function completionRequestSignal(
+  externalSignal?: AbortSignal,
+  timeoutMs = COMPLETION_REQUEST_TIMEOUT_MS,
+): {
+  signal: AbortSignal
+  didTimeout: () => boolean
+  dispose: () => void
+} {
+  const controller = new AbortController()
+  let timedOut = false
+  const forwardAbort = () => controller.abort(externalSignal?.reason)
+  if (externalSignal?.aborted) forwardAbort()
+  else externalSignal?.addEventListener("abort", forwardAbort, { once: true })
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    dispose: () => {
+      clearTimeout(timer)
+      externalSignal?.removeEventListener("abort", forwardAbort)
+    },
+  }
 }
 
 /**

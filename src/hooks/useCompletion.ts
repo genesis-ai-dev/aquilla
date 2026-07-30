@@ -379,10 +379,10 @@ export function useCompletion(
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.
       const llmAuthor = modelName
-      normalizeProtectedCompletion(cell, finalText)
+      const completed = normalizeProtectedCompletion(cell, finalText)
       await commitCompletedCell?.(
         cell,
-        finalText,
+        completed.valueHtml ?? completed.value,
         llmAuthor,
         draftProvenance(
           "single",
@@ -405,6 +405,7 @@ export function useCompletion(
       // rethrows after reverting its optimistic patch). Record the error and
       // report failure so the caller does not show a "Saved" confirmation.
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
       setCompleting((p) => new Map(p).set(cell.id, "error"))
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
       return false
@@ -630,10 +631,10 @@ export function useCompletion(
           if (text !== undefined && text.trim()) {
             if (commitCompletedCell) {
               try {
-                normalizeProtectedCompletion(cell, text)
+                const completed = normalizeProtectedCompletion(cell, text)
                 await commitCompletedCell(
                   cell,
-                  text,
+                  completed.valueHtml ?? completed.value,
                   llmAuthor,
                   draftProvenance(
                     "batch",
@@ -892,10 +893,10 @@ export function useCompletion(
         if (!idmlCompletionSystemAddendum([cell])) {
           setPreviews((p) => new Map(p).set(cellId, text))
         }
-        normalizeProtectedCompletion(cell, text)
+        const completed = normalizeProtectedCompletion(cell, text)
         await commitCompletedCell?.(
           cell,
-          text,
+          completed.valueHtml ?? completed.value,
           llmAuthor,
           draftProvenance(
             "paragraph",

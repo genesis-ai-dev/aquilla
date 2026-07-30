@@ -21,6 +21,7 @@ function row(
   value: string,
   canonicalRef: string | null,
   endorsementCount = 0,
+  metadata?: Record<string, unknown>,
 ): CellRow {
   return {
     cellId,
@@ -37,6 +38,7 @@ function row(
     validated: endorsementCount >= 2,
     wordCount: value ? 1 : 0,
     endorsementCount,
+    metadata: metadata ?? null,
   }
 }
 
@@ -183,5 +185,46 @@ describe("CellStore progress selectors", () => {
     expect(store.getPendingProgressEventIds()).toEqual(["commit-1", "validate-1"])
     store.setPendingProgressEventIds([])
     expect(store.getPendingProgressEventIds()).toEqual([])
+  })
+
+  it("breaks a large IDML milestone into 50-cell navigation subsections with progress", () => {
+    const store = new CellStore()
+    store.reset("project", "file")
+    store.setRuntime({
+      projectId: "project",
+      fileId: "file",
+      username: "alice",
+      requiredValidations: 1,
+      auditStats: new Map(),
+    })
+    const ids = Array.from({ length: 117 }, (_, index) => `idml-${index + 1}`)
+    const metadata = {
+      aquillaImport: {
+        milestone: {
+          key: "story:Stories/Story_u363.xml:u363",
+          kind: "story",
+          label: "Story u363",
+          shortLabel: "363",
+        },
+      },
+      idml: { version: 2 },
+    }
+    store.replaceRows(ids.flatMap((id, index) => [
+      row(id, "source", `Source ${index + 1}`, null, 0, metadata),
+      row(id, "target", index < 55 ? `Target ${index + 1}` : "", null, index < 5 ? 2 : 0),
+    ]), { full: true })
+
+    const [story] = store.getNavigationIndex(ids)
+    expect(story?.subsections.map((subsection) => ({
+      label: subsection.label,
+      firstIndex: subsection.firstIndex,
+      total: subsection.total,
+      translated: subsection.translated,
+      validated: subsection.validated,
+    }))).toEqual([
+      { label: "1–50", firstIndex: 0, total: 50, translated: 50, validated: 5 },
+      { label: "51–100", firstIndex: 50, total: 50, translated: 5, validated: 0 },
+      { label: "101–117", firstIndex: 100, total: 17, translated: 0, validated: 0 },
+    ])
   })
 })

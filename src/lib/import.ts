@@ -1038,7 +1038,12 @@ export async function importMacula(
   }
 
   // Build bulk cells (no speaker pairs needed for Macula).
-  const { cells } = buildBulkCellsWithSpeakers(strings)
+  const { cells } = buildBulkCellsWithSpeakers(strings, {
+    fileName: bookCode,
+    fileType: "usfm",
+    profileId: "builtin:macula-bible",
+    profileVersion: "1",
+  })
   const fileId = uuidv7()
 
   // Derive a display name: bookCode is the USFM book code (e.g. "GEN").
@@ -1153,7 +1158,12 @@ export async function importTranslationNotes(
     )
   }
 
-  const { cells } = buildBulkCellsWithSpeakers(strings)
+  const { cells } = buildBulkCellsWithSpeakers(strings, {
+    fileName: file.name,
+    fileType: "tsv",
+    profileId: "builtin:translation-notes",
+    profileVersion: "1",
+  })
   const fileId = uuidv7()
 
   onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: cells.length, skippedCount })
@@ -1396,8 +1406,17 @@ export function buildBulkCellsWithSpeakers(
  * `anchorCellId` and threading timecodes when present. Exported so tests can
  * exercise the mapping in isolation.
  */
-export function buildBulkCells(strings: TranslatableString[]): BulkImportCell[] {
-  return buildBulkCellsWithSpeakers(strings).cells
+export function buildBulkCells(
+  strings: TranslatableString[],
+  options: {
+    fileName?: string
+    fileType?: FileType
+    profileId?: string
+    profileVersion?: string
+    normalizedFile?: NormalizedImportFile
+  } = {},
+): BulkImportCell[] {
+  return buildBulkCellsWithSpeakers(strings, options).cells
 }
 
 export interface EmitParsedFileResult {

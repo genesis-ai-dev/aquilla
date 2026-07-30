@@ -252,9 +252,7 @@ export class Workspace {
   async openFileBySubstring(nameSubstring: string): Promise<void> {
     await this.page
       .locator("aside")
-      .locator("div")
-      .filter({ hasText: new RegExp(nameSubstring, "i") })
-      .filter({ has: this.page.locator('button[aria-label="File actions"]') })
+      .getByRole("button", { name: new RegExp(nameSubstring, "i") })
       .first()
       .click()
   }
@@ -294,14 +292,22 @@ export class Workspace {
     await row.scrollIntoViewIfNeeded()
 
     const target = this.editableTarget(index)
+    let activatedFromReadView = false
     if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
       const readView = this.targetReadView(index)
       await expect(readView).toBeVisible({ timeout: 10_000 })
       await readView.click()
+      activatedFromReadView = true
     }
 
     await expect(target).toBeVisible({ timeout: 10_000 })
-    await target.click()
+    // A read-view click is the user's one activation. Clicking the newly
+    // mounted editor again normalizes IDML's caret through handleClick and can
+    // hide focus-placement regressions that only occur on first activation.
+    if (!activatedFromReadView) {
+      await target.click()
+    }
+    await expect(target).toBeFocused({ timeout: 10_000 })
     return target
   }
 
@@ -336,6 +342,111 @@ export class Workspace {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
     await this.commitTargetCellEdit(index, text)
+  }
+
+  /**
+   * Reproduce the IDML pointer path from AQU-740: activate a tall empty target
+   * from below its text line, type, click that same blank area again, and keep
+   * typing. Both clicks must resolve to the real single-line caret.
+   */
+  async editIdmlCellFromBlankArea(
+    index: number,
+    firstText: string,
+    secondText: string,
+  ): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const column = this.targetColumn(index)
+    const initialBox = await column.boundingBox()
+    expect(initialBox).not.toBeNull()
+    expect(initialBox!.height).toBeGreaterThan(60)
+
+    const blankPosition = {
+      x: Math.max(4, initialBox!.width / 2),
+      y: initialBox!.height - 4,
+    }
+    await column.click({ position: blankPosition })
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await this.page.keyboard.type(firstText)
+
+    const caretTop = async (): Promise<number> => target.evaluate((surface) => {
+      const selection = surface.ownerDocument.getSelection()
+      if (!selection || selection.rangeCount === 0) throw new Error("IDML caret is missing")
+      const range = selection.getRangeAt(0)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return rect.top
+    })
+    const textLineTop = await caretTop()
+
+    const activeBox = await target.boundingBox()
+    expect(activeBox).not.toBeNull()
+    expect(activeBox!.height).toBeGreaterThan(60)
+    await target.click({
+      position: {
+        x: Math.max(4, activeBox!.width / 2),
+        y: activeBox!.height - 4,
+      },
+    })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    expect(Math.abs((await caretTop()) - textLineTop)).toBeLessThan(5)
+
+    await this.page.keyboard.type(secondText)
+    await this.commitTargetCellEdit(index, `${firstText}${secondText}`)
+  }
+
+  /**
+   * Activate a populated IDML cell at an exact read-view text offset. This exercises
+   * the read-view → ProseMirror remount boundary from a single real pointer
+   * click; a second editor click would hide activation-placement regressions.
+   */
+  async editIdmlCellAtTextOffset(
+    index: number,
+    textOffset: number,
+    insertedText: string,
+    expectedText: string,
+  ): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const readView = this.targetReadView(index)
+    await expect(readView).toBeVisible({ timeout: 10_000 })
+
+    const point = await readView.evaluate((element, offset) => {
+      const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      let remaining = offset
+      let node: Text | null = null
+      let nodeOffset = 0
+      while (walker.nextNode()) {
+        const candidate = walker.currentNode as Text
+        if (remaining <= candidate.data.length) {
+          node = candidate
+          nodeOffset = remaining
+          break
+        }
+        remaining -= candidate.data.length
+      }
+      if (!node) throw new Error(`IDML slot has no text position at offset ${offset}`)
+      const range = element.ownerDocument.createRange()
+      range.setStart(node, nodeOffset)
+      range.collapse(true)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return { x: rect.left, y: rect.top + Math.max(1, rect.height / 2) }
+    }, textOffset)
+
+    await this.page.mouse.click(point.x, point.y)
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await expect.poll(() => target.evaluate((surface) => {
+      const editor = (surface as HTMLElement & {
+        editor?: { state: { selection: { $from: { parentOffset: number } } } }
+      }).editor
+      return editor?.state.selection.$from.parentOffset ?? -1
+    })).toBe(textOffset)
+
+    await this.page.keyboard.type(insertedText)
+    await this.commitTargetCellEdit(index, expectedText)
   }
 
   /** Replace the complete target value, then wait for its authoritative commit. */

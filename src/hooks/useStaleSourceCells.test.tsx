@@ -53,6 +53,7 @@ describe("useStaleSourceCells", () => {
       useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken }),
     )
     await waitFor(() => expect(result.current.staleCellIds.size).toBe(3))
+    expect(result.current.lastSuccessfulFetchKey).toBe("p1\u0000f1")
     expect(result.current.staleCellIds.has("c1")).toBe(true)
     expect(result.current.staleCellIds.has("c2")).toBe(false)
     expect(result.current.isError).toBe(false)

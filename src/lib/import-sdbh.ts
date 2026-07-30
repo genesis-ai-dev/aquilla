@@ -99,7 +99,12 @@ export async function importSdbh(
   for (let i = 0; i < files.length; i++) {
     const parsedFile = files[i]
     const fileId = uuidv7()
-    const cells = buildBulkCells(parsedFile.strings)
+    const cells = buildBulkCells(parsedFile.strings, {
+      fileName: parsedFile.name,
+      fileType: "sdbh",
+      profileId: "builtin:sdbh",
+      profileVersion: "1",
+    })
     const targets: TargetCommit[] = []
     if (localized) {
       for (const cell of cells) {

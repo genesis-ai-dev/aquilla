@@ -74,7 +74,7 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
           />
         }
       >
-        <svg viewBox="0 0 12 12" className="size-4 h-4 w-4 -rotate-90" aria-hidden style={{ width: 16, height: 16 }}>
+        <svg viewBox="0 0 12 12" className="h-4 w-4 -rotate-90" aria-hidden>
           <circle
             cx="6"
             cy="6"

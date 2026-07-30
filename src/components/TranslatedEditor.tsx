@@ -79,6 +79,21 @@ export const PRESENCE_WORD_BATCH_SIZE = 2
 /** Keep presence frames lightweight even if a malformed/imported cell is huge. */
 export const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
+function placeDomCaretAtProseMirrorPosition(view: EditorView, position: number): void {
+  const selection = view.dom.ownerDocument.getSelection()
+  if (!selection) return
+  const mapped = view.domAtPos(position)
+  const range = view.dom.ownerDocument.createRange()
+  try {
+    range.setStart(mapped.node, mapped.offset)
+  } catch {
+    return
+  }
+  range.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
 function presenceWords(text: string): string[] {
   // Unicode letters/numbers/marks keep this useful outside English. Treat
   // apostrophes and hyphens inside a token as part of the same word so one
@@ -618,14 +633,6 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         const requestedSlot = clickedSlot !== null && clickedSlot !== undefined
           ? Number(clickedSlot)
           : undefined
-        const selectedSlot = view.state.selection.$from.parent.type.name === "idmlSlot"
-          ? Number(view.state.selection.$from.parent.attrs.slot)
-          : undefined
-        if (
-          requestedSlot !== undefined
-          && requestedSlot === selectedSlot
-          && isEditableIdmlSelection(view.state.selection)
-        ) return false
         const resolvedClick = view.state.doc.resolve(pos)
         const position = (
           Number.isSafeInteger(requestedSlot)
@@ -634,11 +641,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           && resolvedClick.parent.attrs.editable === true
         )
           ? pos
-          : idmlEditableSlotPosition(
-              view.state.doc,
-              Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
-              "end",
-            )
+            : idmlEditableSlotPosition(
+                view.state.doc,
+                Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+                "end",
+              )
         if (position === null) return false
         view.dispatch(
           view.state.tr
@@ -646,10 +653,42 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             .scrollIntoView(),
         )
         view.focus()
+        // A same-position transaction does not force ProseMirror to repaint
+        // the browser selection. Map the authoritative PM position back into
+        // the slot DOM so a click in a tall blank well cannot leave the native
+        // caret on the contenteditable's phantom trailing line.
+        placeDomCaretAtProseMirrorPosition(view, position)
         event.preventDefault()
         return true
       },
       handleDOMEvents: {
+        mousedown(view, event) {
+          if (!idmlContext) return false
+          const target = event.target instanceof HTMLElement
+            ? event.target.closest<HTMLElement>("[data-idml-slot]")
+            : null
+          // Direct text/slot clicks retain their precise browser coordinates.
+          // Only blank space owned by the tall editor well needs clamping.
+          if (target) return false
+          const selectedSlot = isEditableIdmlSelection(view.state.selection)
+            ? Number(view.state.selection.$from.parent.attrs.slot)
+            : undefined
+          const position = idmlEditableSlotPosition(
+            view.state.doc,
+            Number.isSafeInteger(selectedSlot) ? selectedSlot : undefined,
+            "end",
+          )
+          if (position === null) return false
+          event.preventDefault()
+          view.dispatch(
+            view.state.tr
+              .setSelection(TextSelection.create(view.state.doc, position))
+              .scrollIntoView(),
+          )
+          view.focus()
+          placeDomCaretAtProseMirrorPosition(view, position)
+          return true
+        },
         click(view, event) {
           if (!idmlContext) return false
           const target = event.target instanceof HTMLElement
@@ -669,6 +708,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               .scrollIntoView(),
           )
           view.focus()
+          placeDomCaretAtProseMirrorPosition(view, position)
           return true
         },
         compositionstart(view) {

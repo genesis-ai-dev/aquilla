@@ -164,6 +164,58 @@ describe("TranslatedEditor — protected IDML mode", () => {
     }))
   })
 
+  it("keeps same-slot pointer clicks inside ProseMirror's real text positions", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-same-slot-click"
+        initialPlain={"asd\tSecond"}
+        initialHtml={SOURCE_HTML.replace(">Source</span>", ">asd</span>")}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={() => {}}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const firstSlot = surface.querySelector("span[data-idml-slot=\"0\"]")!
+    const slotPosition = positionOf(editor, "idmlSlot")
+    const slot = editor.state.doc.nodeAt(slotPosition)!
+
+    act(() => {
+      editor.commands.setTextSelection(slotPosition + 1 + slot.content.size)
+      const nativeSelection = window.getSelection()
+      const nativeRange = document.createRange()
+      nativeRange.selectNodeContents(surface)
+      nativeRange.collapse(false)
+      nativeSelection?.removeAllRanges()
+      nativeSelection?.addRange(nativeRange)
+    })
+    const preventDefault = vi.fn()
+    const clickEvent = {
+      target: firstSlot,
+      preventDefault,
+    } as unknown as MouseEvent
+    let handled: boolean | void = undefined
+    act(() => {
+      handled = editor.view.someProp("handleClick", (handler) => handler(
+        editor.view,
+        slotPosition + 1 + slot.content.size,
+        clickEvent,
+      ))
+    })
+
+    // Returning false from the old same-slot shortcut delegated to the
+    // browser DOM caret, which can land on an IDML slot's phantom trailing br.
+    expect(handled).toBe(true)
+    expect(preventDefault).toHaveBeenCalled()
+    expect(editor.state.selection.$from.parent.type.name).toBe("idmlSlot")
+    expect(editor.state.selection.$from.parent.attrs.slot).toBe(0)
+    const nativeAnchor = window.getSelection()?.anchorNode
+    expect(
+      nativeAnchor === firstSlot || (nativeAnchor ? firstSlot.contains(nativeAnchor) : false),
+    ).toBe(true)
+  })
+
   it("pastes Unicode and line breaks into an empty slot without importing clipboard markup", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML

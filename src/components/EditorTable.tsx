@@ -5381,6 +5381,11 @@ function EditorRow({
               {validationControl}
             <div
               data-cell-type="target"
+              onClick={(event) => {
+                if (isEditorActive) return
+                event.stopPropagation()
+                requestTargetEdit()
+              }}
               className={cn(
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
                 hasInlineFootnotes && "min-h-0 py-0.5",
@@ -5447,7 +5452,7 @@ function EditorRow({
                     lang={project.targetLanguage || undefined}
                     tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
                     className={cn(
-                      "relative min-h-[40px] w-full whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+                      "relative min-h-[40px] w-full flex-1 cursor-text whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
                       "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
                       showCompletionOverlay && "opacity-30 transition-opacity",
                       !visibleTranslated?.trim() && "text-muted-foreground/60",

@@ -8,6 +8,10 @@ const IDML_MIME = "application/vnd.adobe.indesign-idml-package"
 const IDPKG = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
 const UTILITY_STORY_PATH = "Stories/Story_running_header.xml"
 const STORY_PATH = "Stories/Story_u100.xml"
+const TALL_SOURCE = [
+  "Chapter One.",
+  "This deliberately long source paragraph makes the opposite empty target well taller than one line. ".repeat(12),
+].join(" ")
 
 async function writeIdmlFixture(filePath: string): Promise<void> {
   const zip = new JSZip()
@@ -33,7 +37,7 @@ async function writeIdmlFixture(filePath: string): Promise<void> {
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`,
       `<idPkg:Story ${IDPKG}><Story Self="u100">`,
       '<ParagraphStyleRange Self="heading" AppliedParagraphStyle="ParagraphStyle/Heading">',
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Chapter One</Content></CharacterStyleRange>',
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>${TALL_SOURCE}</Content></CharacterStyleRange>`,
       "</ParagraphStyleRange>",
       '<ParagraphStyleRange Self="mixed" AppliedParagraphStyle="ParagraphStyle/Body">',
       '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>the </Content></CharacterStyleRange>',
@@ -78,7 +82,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
     .toBeVisible()
   await alice.keyboard.press("Escape")
 
-  await ws.editCell(0, "Chapitre Un")
+  await ws.editIdmlCellFromBlankArea(0, "Chapitre", " Un")
   // Re-enter the populated IDML target through its read view. The activation
   // fallback must append at the real ProseMirror slot end, not jump to the
   // beginning as the browser-recorded AQU-740 regression did.

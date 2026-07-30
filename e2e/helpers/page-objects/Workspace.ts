@@ -346,6 +346,58 @@ export class Workspace {
     await this.commitTargetCellEdit(index, text)
   }
 
+  /**
+   * Reproduce the IDML pointer path from AQU-740: activate a tall empty target
+   * from below its text line, type, click that same blank area again, and keep
+   * typing. Both clicks must resolve to the real single-line caret.
+   */
+  async editIdmlCellFromBlankArea(
+    index: number,
+    firstText: string,
+    secondText: string,
+  ): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const column = this.targetColumn(index)
+    const initialBox = await column.boundingBox()
+    expect(initialBox).not.toBeNull()
+    expect(initialBox!.height).toBeGreaterThan(60)
+
+    const blankPosition = {
+      x: Math.max(4, initialBox!.width / 2),
+      y: initialBox!.height - 4,
+    }
+    await column.click({ position: blankPosition })
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await this.page.keyboard.type(firstText)
+
+    const caretTop = async (): Promise<number> => target.evaluate((surface) => {
+      const selection = surface.ownerDocument.getSelection()
+      if (!selection || selection.rangeCount === 0) throw new Error("IDML caret is missing")
+      const range = selection.getRangeAt(0)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return rect.top
+    })
+    const textLineTop = await caretTop()
+
+    const activeBox = await target.boundingBox()
+    expect(activeBox).not.toBeNull()
+    expect(activeBox!.height).toBeGreaterThan(60)
+    await target.click({
+      position: {
+        x: Math.max(4, activeBox!.width / 2),
+        y: activeBox!.height - 4,
+      },
+    })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    expect(Math.abs((await caretTop()) - textLineTop)).toBeLessThan(5)
+
+    await this.page.keyboard.type(secondText)
+    await this.commitTargetCellEdit(index, `${firstText}${secondText}`)
+  }
+
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
     const target = await this.activateTargetCell(index)

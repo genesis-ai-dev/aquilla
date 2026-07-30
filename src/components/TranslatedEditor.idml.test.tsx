@@ -87,6 +87,51 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
   })
 
+  it("keeps forward caret order after a native collapse-to-end focus (EditorTable path)", async () => {
+    // EditorTable used to focus IDML cells with selectNodeContents + collapse(false).
+    // On empty protected slots that paints the caret on a phantom second line and
+    // desyncs ProseMirror — each keystroke then prepends, producing reverse text.
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-native-end-focus"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      const sel = window.getSelection()
+      if (sel) {
+        const range = document.createRange()
+        range.selectNodeContents(surface)
+        range.collapse(false)
+        sel.removeAllRanges()
+        sel.addRange(range)
+      }
+      for (const character of "abc") {
+        fireEvent.keyDown(surface, { key: character })
+      }
+      fireEvent.blur(surface)
+    })
+
+    expect(editor.getText()).toBe("abc\t")
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("abc")
+    expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({
+      value: "abc\t",
+      valueHtml: expect.stringContaining(">abc</span>"),
+    }))
+  })
+
   it("pastes Unicode and line breaks into an empty slot without importing clipboard markup", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML

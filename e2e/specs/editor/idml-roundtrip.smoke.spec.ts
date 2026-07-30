@@ -70,6 +70,9 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await expect(alice.locator('[data-paragraph-start="true"]')).toHaveCount(0)
 
   await ws.editCell(0, "Chapitre Un")
+  await expect(
+    alice.getByText(/This edit would remove protected InDesign formatting/i),
+  ).toHaveCount(0)
   await ws.openExportDialog()
 
   const dialog = alice.getByRole("dialog")

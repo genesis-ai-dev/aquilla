@@ -1008,6 +1008,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         return
       }
       pm.focus()
+      // Ordinary rich-text cells: put the native caret at the end so Tab/↑/↓
+      // land where the user expects to keep typing. IDML cells must NOT use
+      // selectNodeContents/collapse — empty protected slots render a browser
+      // trailing <br>, so "end" paints on a phantom second line and desyncs
+      // ProseMirror's selection (typed characters then insert in reverse).
+      // TranslatedEditor.onFocus places the caret inside the first editable slot.
+      if (pm.querySelector("[data-idml-version]")) return
       const sel = window.getSelection()
       if (sel) {
         const range = document.createRange()
@@ -4295,6 +4302,8 @@ function EditorRow({
       }
       if (document.activeElement !== pm) {
         pm.focus()
+        // See focusCellEditorByIndex: native caret-at-end breaks empty IDML slots.
+        if (idmlConfiguration || pm.querySelector("[data-idml-version]")) return
         const sel = window.getSelection()
         if (sel) {
           const range = document.createRange()
@@ -4313,7 +4322,7 @@ function EditorRow({
         onReleaseCell?.(cell.id)
       }
     }
-  }, [isEditorActive, cell.id, onReleaseCell])
+  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)

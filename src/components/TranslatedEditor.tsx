@@ -157,11 +157,18 @@ function replaceIdmlSelectionWithPlainText(
       : []),
   ])
   const replacement = Fragment.fromArray(nodes)
+  // Explicit caret placement: ReplaceStep maps a cursor at `from` with
+  // assoc=-1 back to the *start* of the inserted text. Without setSelection
+  // here, a desynced native DOM caret (EditorTable's selectNodeContents
+  // collapse-to-end on empty IDML slots) keeps inserting at the same offset
+  // and typed characters appear in reverse order.
+  const insertEnd = from + replacement.size
   const transaction = nodes.length > 0
     ? view.state.tr.replaceWith(from, to, replacement)
     : view.state.tr.delete(from, to)
+  transaction.setSelection(TextSelection.create(transaction.doc, nodes.length > 0 ? insertEnd : from))
   view.dispatch(transaction.scrollIntoView())
-  return { from, to: from + replacement.size }
+  return { from, to: insertEnd }
 }
 
 export interface TranslatedEditorHandle {

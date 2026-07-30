@@ -294,14 +294,22 @@ export class Workspace {
     await row.scrollIntoViewIfNeeded()
 
     const target = this.editableTarget(index)
+    let activatedFromReadView = false
     if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
       const readView = this.targetReadView(index)
       await expect(readView).toBeVisible({ timeout: 10_000 })
       await readView.click()
+      activatedFromReadView = true
     }
 
     await expect(target).toBeVisible({ timeout: 10_000 })
-    await target.click()
+    // A read-view click is the user's one activation. Clicking the newly
+    // mounted editor again normalizes IDML's caret through handleClick and can
+    // hide focus-placement regressions that only occur on first activation.
+    if (!activatedFromReadView) {
+      await target.click()
+    }
+    await expect(target).toBeFocused({ timeout: 10_000 })
     return target
   }
 

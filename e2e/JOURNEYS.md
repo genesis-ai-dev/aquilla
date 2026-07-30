@@ -63,7 +63,7 @@
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
 | Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
 | Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
-| Export      | IDML import → protected edit → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
+| Export      | IDML import → single-activation protected edit keeps caret order → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
 | Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
 | Marketing   | Homepage "book a call": Google Calendar booking link + contact form → POST /api/v2/contact/book-call → sent state | `e2e/specs/marketing/book-call.smoke.spec.ts` | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
@@ -72,7 +72,7 @@
 | Editor      | Corpus rename inline edit                             | `e2e/specs/editor/sidebar-corpus-rename.smoke.spec.ts`        |   ✅   |
 | Editor      | Video attachment dialog fill + Save URL               | `e2e/specs/editor/video-attachment-save-url.smoke.spec.ts`    |   ✅   |
 | Editor      | Specialized import routes enable TMX, Macula, Translation Notes, and Biblica study notes | `e2e/specs/editor/import-specialized-options.smoke.spec.ts` | ✅ |
-| Editor      | Biblica Study Bible Notes import: IDML package → note cells only, scripture skipped, line-broken lists split per line, optional one-cell-per-sentence split (on by default), notes editable | `e2e/specs/editor/import-biblica-study-notes.smoke.spec.ts` | ✅ |
+| Editor      | Biblica Study Bible Notes import: IDML package → note cells only, scripture skipped, line-broken lists split per line, optional one-cell-per-sentence split (on by default), notes editable from one activation without protected-format errors | `e2e/specs/editor/import-biblica-study-notes.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist coming-soon items visible             | `e2e/specs/editor/setup-checklist-coming-soon-items.smoke.spec.ts` | ✅ |
 | Validation  | Remove validation (unvalidate cell)                   | `e2e/specs/validation/cell-unvalidate.smoke.spec.ts`          |   ✅   |
 | Rules       | Org rule inline edit (pencil button expands editor)   | `e2e/specs/rules/org-rule-edit.smoke.spec.ts`                 |   ✅   |

@@ -144,4 +144,7 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   // Notes stay editable as normal target cells.
   await ws.editCell(0, "La Genèse raconte les commencements.")
   await expect(ws.cellRow(0)).toContainText("La Genèse raconte les commencements.")
+  await expect(
+    alice.getByText(/This edit would remove protected InDesign formatting/i),
+  ).toHaveCount(0)
 })

@@ -3343,9 +3343,8 @@ function BiblicaPanel({
   const [progress, setProgress] = useState<BiblicaProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
-  // On by default: long note blocks are easier to draft as one sentence per cell.
-  // Uncheck to keep each InDesign line as a single larger cell.
-  const [splitSentences, setSplitSentences] = useState(true)
+  // Off by default: each InDesign line stays one cell unless the translator opts in.
+  const [splitSentences, setSplitSentences] = useState(false)
 
   async function handleImport() {
     if (!file || importing) return

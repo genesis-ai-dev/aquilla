@@ -78,7 +78,7 @@ describe("Biblica study-notes import", () => {
     expect(ref.type).toBe("idml")
     // The trailing "-notes" is dropped so the file reads as the book it covers.
     expect(ref.name).toBe("Genesis")
-    expect(ref.cellCount).toBe(11)
+    expect(ref.cellCount).toBe(9)
 
     const bodies = importBodies(requests)
     const meta = bodies.find((body) => body.file)?.file
@@ -98,8 +98,7 @@ describe("Biblica study-notes import", () => {
       SAMPLE_NOTES.psalmNote,
       // A list set as one paragraph is committed as one cell per line.
       ...SAMPLE_NOTES.referenceList,
-      // A multi-sentence note block is committed as one cell per sentence.
-      ...SAMPLE_NOTES.noteBlockSentences,
+      SAMPLE_NOTES.noteBlock,
     ])
 
     // Scripture must never reach the project as a translatable cell.
@@ -128,7 +127,7 @@ describe("Biblica study-notes import", () => {
 
     const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
     expect(cells.map((cell) => (cell.metadata?.biblica as { chapterLabel?: string })?.chapterLabel))
-      .toEqual(["Preface", "1", "2-3", "2", "2", "2", "2", "2", "2", "2", "2"])
+      .toEqual(["Preface", "1", "2-3", "2", "2", "2", "2", "2", "2"])
     for (const cell of cells) {
       expect(cell.metadata?.idml).toMatchObject({ version: 2 })
       expect(cell.metadata?.aquillaImport).toMatchObject({
@@ -181,11 +180,12 @@ describe("Biblica study-notes import", () => {
   it("commits the sentences of a note block as distinct cells that can be rejoined", async () => {
     const requests = captureRequests()
 
-    await importBiblicaStudyNotes(await biblicaFile(), {
-      projectId: "p1",
-      author: "alice",
-      getToken: async () => "tok",
-    })
+    await importBiblicaStudyNotes(
+      await biblicaFile(),
+      { projectId: "p1", author: "alice", getToken: async () => "tok" },
+      undefined,
+      { splitSentences: true },
+    )
 
     const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
     const sentenceCells = cells.filter((cell) => (

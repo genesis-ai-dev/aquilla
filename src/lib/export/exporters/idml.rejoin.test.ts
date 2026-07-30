@@ -1,10 +1,11 @@
 /**
  * The cut-on-import / rejoin-on-export contract, end to end.
  *
- * A Biblica note block is imported as one cell per sentence, which is finer than
- * IDML can address. These tests run the real importer's output through the real
- * exporter, because that composition — not either half alone — is what decides
- * whether a publisher's file comes back intact.
+ * With sentence splitting on, a Biblica note block is imported as one cell per
+ * sentence, which is finer than IDML can address. These tests run the real
+ * importer's output through the real exporter, because that composition — not
+ * either half alone — is what decides whether a publisher's file comes back
+ * intact.
  */
 
 import JSZip from "jszip"
@@ -30,11 +31,18 @@ const directExecutor: IdmlExportExecutor = {
   validate: (bytes, manifest) => validateExport(bytes, manifest),
 }
 
-/** Import the fixture exactly as the app does, then hand back editable cells. */
+/**
+ * Import the fixture exactly as the app does when the importer's sentence
+ * splitting is switched on. Splitting is opt-in — the default imports whole
+ * paragraphs — and it is the only path that produces the sub-paragraph cells
+ * this rejoin contract exists for.
+ */
 async function importBiblicaCells(): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
   const bytes = await makeBiblicaIdml()
   const parsed = await parseIdml(bytes.slice(0))
-  const { strings } = await extractBiblicaStudyNoteStrings(bytes.slice(0), async () => parsed)
+  const { strings } = await extractBiblicaStudyNoteStrings(bytes.slice(0), async () => parsed, {
+    splitSentences: true,
+  })
   const { cells: bulk } = buildBulkCellsWithSpeakers(strings, {
     fileName: "Genesis-notes.idml",
     fileType: "idml",

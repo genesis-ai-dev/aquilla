@@ -98,11 +98,18 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
   DEFAULT_SYSTEM_PROMPT: "Translate accurately.",
 }))
 
-vi.mock("@/lib/completion/completion-service", () => ({
-  fetchModels: vi.fn().mockResolvedValue([]),
-  resolveProvider: vi.fn(() => "frontier"),
-  FRONTIER_CHAT_URL: "https://api.aquilla.app/chat/api/v1/chat/completions",
-}))
+vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
+  // Partial mock: ProjectSettings and other modules in its render tree read
+  // real constants from this module at module-eval time (FRONTIER_CHAT_URL via
+  // lib/ab/feedback.ts, DEFAULT_COMPLETION_MAX_TOKENS for initial state) —
+  // keep every real export and stub only the network-touching functions.
+  const actual = await importOriginal<typeof import("@/lib/completion/completion-service")>()
+  return {
+    ...actual,
+    fetchModels: vi.fn().mockResolvedValue([]),
+    resolveProvider: vi.fn(() => "frontier"),
+  }
+})
 
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),

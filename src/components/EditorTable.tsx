@@ -5127,37 +5127,42 @@ function EditorRow({
           </div>
           {/* Badges + verse number — ml-2 opens space after the select. */}
           <div className="ml-2 flex min-w-0 flex-1 items-start gap-0.5">
+            {/* Spacer is a sibling of the badge stack (not inside it) so
+                gap-0.5 only spaces stacked badges — a lone badge stays
+                level with the select control, which has no flex gap. */}
             <div
               data-testid="gutter-status-badges"
-              className="flex w-5 shrink-0 flex-col items-center gap-0.5"
+              className="flex w-5 shrink-0 flex-col items-center"
             >
               <div className="mb-1 h-4 shrink-0" aria-hidden />
-              {(isStaleSource || isUpstreamStaleSource) && hasContent && (
-                <StaleSourceIndicator
-                  cellId={cell.id}
-                  staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
-                  upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
-                />
-              )}
-              {(isSynthBusy || isSynthError) && (
-                <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
-              )}
-              {/* AQU-599: persistent "has comment" indicator. Unlike the
-                  action-rail comment button (which only appears on
-                  hover/focus), this icon stays visible whenever the cell
-                  carries an open comment. Clicking opens the comments panel. */}
-              {onOpenComments && openCommentCount > 0 && (
-                <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
-                  <button
-                    type="button"
-                    aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
-                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
-                    onClick={() => onOpenComments(cell.id)}
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
-                  </button>
-                </AppTooltip>
-              )}
+              <div className="flex flex-col items-center gap-0.5">
+                {(isStaleSource || isUpstreamStaleSource) && hasContent && (
+                  <StaleSourceIndicator
+                    cellId={cell.id}
+                    staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
+                    upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
+                  />
+                )}
+                {(isSynthBusy || isSynthError) && (
+                  <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+                )}
+                {/* AQU-599: persistent "has comment" indicator. Unlike the
+                    action-rail comment button (which only appears on
+                    hover/focus), this icon stays visible whenever the cell
+                    carries an open comment. Clicking opens the comments panel. */}
+                {onOpenComments && openCommentCount > 0 && (
+                  <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
+                    <button
+                      type="button"
+                      aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                      onClick={() => onOpenComments(cell.id)}
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
+                    </button>
+                  </AppTooltip>
+                )}
+              </div>
             </div>
             {/* Verse / line number (severity tint). */}
             <div className="flex min-w-0 flex-1 flex-col items-center">

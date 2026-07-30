@@ -6,7 +6,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  * the list.
  *
  * The rules surface refactor replaced the RuleCreateDialog with an inline
- * RuleEditor rendered at the top of the rules surface. The header
+ * RuleEditor rendered at the top of the rules surface. The in-main toolbar
  * "+ Add Rule" button opens it (and disables itself while it is open).
  * The editor contains:
  *   - Input#re-name (Rule name, required)

@@ -63,8 +63,6 @@ import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import { RuleDrawer } from "./RuleDrawer"
 import { RulesSurface } from "./RulesSurface"
-import { RuleImportDialog } from "./RuleImportDialog"
-import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { SharePanel } from "./SharePanel"
@@ -5028,34 +5026,6 @@ export function ProjectWorkspace() {
               />
             )}
 
-            {project && centerSurface === "rules" && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
-                  <BookOpen data-icon="inline-start" />
-                  Terminology
-                </Button>
-                <RuleImportDialog
-                  completionSettings={project.completionSettings}
-                  onAdd={addRule}
-                  projectId={projectId!}
-                />
-                <RuleSuggestFromEditsDialog
-                  completionSettings={project.completionSettings}
-                  onAdd={addRule}
-                  projectId={projectId!}
-                  cells={legacyCells}
-                />
-                <Button
-                  size="sm"
-                  onClick={() => setEditingRuleId("new")}
-                  disabled={editingRuleId !== null}
-                >
-                  <Plus className="size-4" aria-hidden />
-                  Add Rule
-                </Button>
-              </>
-            )}
-
             {/* AQU-661: file-scoped actions live in the chapter-row File options
                 menu; Import is a header button. */}
           </WorkspaceHeader>
@@ -5288,6 +5258,7 @@ export function ProjectWorkspace() {
             setBuiltinOverride={setBuiltinOverride}
             infractions={infractions}
             cells={legacyCells}
+            completionSettings={project.completionSettings}
             orgRules={orgRules}
             canEditOrgRules={canEditOrgSettings}
             patchOrgSettings={patchOrgSettings}

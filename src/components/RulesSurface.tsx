@@ -7,7 +7,7 @@
  */
 import { useState, useMemo, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText, Plus } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText, Plus, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/page"
 import { Input } from "@/components/ui/input"
@@ -21,8 +21,10 @@ import {
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleEditor } from "./RuleEditor"
+import { RuleImportDialog } from "./RuleImportDialog"
+import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { cn } from "@/lib/utils"
-import type { ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
+import type { CompletionSettings, ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
 import type { OrgWideSettings, OrgPatchResult, PromotionRequestResult } from "@/lib/sync/org-settings"
@@ -41,6 +43,7 @@ interface Props {
   setBuiltinOverride: UseRulesReturn["setBuiltinOverride"]
   infractions: Map<string, import("@/lib/parsers/types").RuleInfraction[]>
   cells: CellData[]
+  completionSettings?: CompletionSettings
   orgRules?: TranslationRule[]
   canEditOrgRules?: boolean
   patchOrgSettings?: (partial: OrgWideSettings) => Promise<OrgPatchResult | { kind: "blocked" }>
@@ -81,6 +84,7 @@ export function RulesSurface({
   setBuiltinOverride,
   infractions,
   cells,
+  completionSettings,
   orgRules = [],
   canEditOrgRules = false,
   patchOrgSettings,
@@ -197,8 +201,39 @@ export function RulesSurface({
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
+    <div className="flex h-full flex-col bg-background">
+      {/* In-main toolbar — matches Glossary/Terminology: actions live in the
+          surface, not the workspace header. */}
+      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+        <ScrollText className="h-5 w-5 text-muted-foreground" aria-hidden />
+        <h1 className="flex-1 text-base font-semibold">Rules</h1>
+        <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
+          <BookOpen data-icon="inline-start" />
+          Terminology
+        </Button>
+        <RuleImportDialog
+          completionSettings={completionSettings}
+          onAdd={addRule}
+          projectId={projectId}
+        />
+        <RuleSuggestFromEditsDialog
+          completionSettings={completionSettings}
+          onAdd={addRule}
+          projectId={projectId}
+          cells={cells}
+        />
+        <Button
+          size="sm"
+          onClick={() => setEditingRuleId("new")}
+          disabled={editingRuleId !== null}
+        >
+          <Plus className="size-4" aria-hidden />
+          Add Rule
+        </Button>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
         {editingRuleId === "new" && (
           <RuleEditor
             cells={cells}
@@ -526,6 +561,7 @@ export function RulesSurface({
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     </div>
   )

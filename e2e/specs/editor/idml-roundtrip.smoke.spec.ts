@@ -16,6 +16,7 @@ const TALL_SOURCE = [
 async function writeIdmlFixture(
   filePath: string,
   headingStyle = "ParagraphStyle/Heading",
+  headingText = TALL_SOURCE,
 ): Promise<void> {
   const zip = new JSZip()
   zip.file("mimetype", IDML_MIME, { compression: "STORE", createFolders: false })
@@ -40,7 +41,7 @@ async function writeIdmlFixture(
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`,
       `<idPkg:Story ${IDPKG}><Story Self="u100">`,
       `<ParagraphStyleRange Self="heading" AppliedParagraphStyle="${headingStyle}">`,
-      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>${TALL_SOURCE}</Content></CharacterStyleRange>`,
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>${headingText}</Content></CharacterStyleRange>`,
       "</ParagraphStyleRange>",
       '<ParagraphStyleRange Self="mixed" AppliedParagraphStyle="ParagraphStyle/Body">',
       '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>the </Content></CharacterStyleRange>',
@@ -108,6 +109,21 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await expect(
     alice.getByText(/Source text changed since your last edit/i),
   ).toHaveCount(0)
+
+  // IDML cell locators are file-local and can repeat across packages. A
+  // different file with the same story/paragraph locator must not make this
+  // file's translated row look stale (AQU-741 cross-file collision).
+  const collidingFixture = testInfo.outputPath("other-package.idml")
+  await writeIdmlFixture(
+    collidingFixture,
+    "ParagraphStyle/Heading",
+    "Completely different source at the same IDML locator.",
+  )
+  await ws.importFile(collidingFixture)
+  await ws.openFileBySubstring("protected-roundtrip")
+  await ws.waitForEditor()
+  await expect(ws.cellRow(0)).toContainText("Chapitre Un — suite")
+  await expect(alice.getByTestId("stale-source-indicator")).toHaveCount(0)
 
   await ws.openExportDialog()
 

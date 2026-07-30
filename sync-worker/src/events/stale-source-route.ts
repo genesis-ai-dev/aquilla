@@ -14,6 +14,7 @@
 //   FROM cells t
 //   JOIN cells s
 //     ON s.project_id = COALESCE(:upstream_project_id, t.project_id)
+//    AND s.file_id    = t.file_id
 //    AND s.cell_id    = t.cell_id
 //    AND s.side       = 'source'
 //   WHERE t.project_id      = :project_id
@@ -152,6 +153,7 @@ export async function handleStaleSourceRequest(
     FROM cells t
     JOIN cells s
       ON s.project_id = t.project_id
+     AND s.file_id    = t.file_id
      AND s.cell_id    = t.cell_id
      AND s.side       = 'source'
     LEFT JOIN events pinned

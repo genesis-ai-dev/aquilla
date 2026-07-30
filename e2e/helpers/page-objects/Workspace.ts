@@ -252,9 +252,7 @@ export class Workspace {
   async openFileBySubstring(nameSubstring: string): Promise<void> {
     await this.page
       .locator("aside")
-      .locator("div")
-      .filter({ hasText: new RegExp(nameSubstring, "i") })
-      .filter({ has: this.page.locator('button[aria-label="File actions"]') })
+      .getByRole("button", { name: new RegExp(nameSubstring, "i") })
       .first()
       .click()
   }

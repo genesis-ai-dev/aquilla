@@ -184,6 +184,32 @@ describe("stale-source route — content-aware source revisions", () => {
     }
   })
 
+  it("does not compare a target with the same cell id in another file", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedTranslatedCell(t)
+      const otherFile = "file-y"
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: otherFile, cellId: null, parentId: null,
+        kind: "file.create", author: "importer", payload: { name: "Other", fileType: "idml" },
+        clientTs: 2, serverTs: 2, serverSeq: 4,
+      })
+      await apply(t, {
+        id: nextId(), schemaVersion: 1, projectId: PROJECT, fileId: otherFile, cellId: "cell-1", parentId: null,
+        kind: "source.cell.create", author: "importer",
+        payload: { cellId: "cell-1", value: "Different source in another IDML file" },
+        clientTs: 2, serverTs: 2, serverSeq: 5,
+      })
+
+      const body = await (await request(t, PROJECT, FILE, await makeToken())).json() as {
+        staleCellIds: string[]
+      }
+      expect(body.staleCellIds).not.toContain("cell-1")
+    } finally {
+      await t.close()
+    }
+  })
+
   it("still marks a genuinely changed source text stale", async () => {
     const t = await makeTestDb()
     try {

@@ -101,7 +101,21 @@ export interface CellNavigationEntry {
   translated: number
   validated: number
   total: number
+  subsections: readonly CellNavigationSubsection[]
 }
+
+export interface CellNavigationSubsection {
+  key: string
+  label: string
+  firstCellId: string
+  firstIndex: number
+  cellIds: readonly string[]
+  translated: number
+  validated: number
+  total: number
+}
+
+export const MILESTONE_SUBSECTION_SIZE = 50
 
 export interface CellFootnoteDetails {
   sourceFootnotes: ExtractedFootnote[]
@@ -1076,10 +1090,11 @@ export class CellStore {
         metadata: source?.metadata ?? target?.metadata ?? null,
       }
     }))
-    const entries = derived.orderedMilestones.map((group): CellNavigationEntry => {
+    const displayIndexByCellId = new Map(ids.map((id, index) => [id, index]))
+    const progressFor = (cellIds: readonly string[]) => {
       let translated = 0
       let validated = 0
-      for (const cellId of group.cellIds) {
+      for (const cellId of cellIds) {
         const target = this.targetById.get(cellId)
         const targetValue = this.optimisticEdits.get(cellId)?.value
           ?? this.pendingOverlay.get(cellId)?.value
@@ -1087,6 +1102,23 @@ export class CellStore {
           ?? ""
         if (targetValue.trim()) translated += 1
         if (target?.validated) validated += 1
+      }
+      return { translated, validated, total: cellIds.length }
+    }
+    const entries = derived.orderedMilestones.map((group): CellNavigationEntry => {
+      const progress = progressFor(group.cellIds)
+      const subsections: CellNavigationSubsection[] = []
+      for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
+        const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
+        const firstCellId = cellIds[0]!
+        subsections.push({
+          key: `${group.milestone.key}:range:${firstCellId}`,
+          label: `${offset + 1}–${offset + cellIds.length}`,
+          firstCellId,
+          firstIndex: displayIndexByCellId.get(firstCellId) ?? group.firstIndex,
+          cellIds,
+          ...progressFor(cellIds),
+        })
       }
       return {
         key: group.milestone.key,
@@ -1096,9 +1128,8 @@ export class CellStore {
         firstCellId: group.firstCellId,
         firstIndex: group.firstIndex,
         cellIds: group.cellIds,
-        translated,
-        validated,
-        total: group.cellIds.length,
+        ...progress,
+        subsections,
       }
     })
     return { entries, milestoneByCellId: derived.milestoneByCellId }

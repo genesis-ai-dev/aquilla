@@ -5380,6 +5380,7 @@ export function ProjectWorkspace() {
               <TooltipDelegationBoundary>
               <EditorTable
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
+            fileType={activeFile?.type}
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}

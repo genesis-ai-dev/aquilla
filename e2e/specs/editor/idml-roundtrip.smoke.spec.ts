@@ -69,6 +69,15 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await expect(ws.cellRow(1)).toContainText("the LORD")
   await expect(alice.locator('[data-paragraph-start="true"]')).toHaveCount(0)
 
+  const navigator = alice.getByRole("button", {
+    name: /Current story: Story 1, cells 1–2/,
+  })
+  await expect(navigator).toContainText("(1–2)")
+  await navigator.click()
+  await expect(alice.getByRole("option", { name: /1–2 0% translated 0% validated/ }))
+    .toBeVisible()
+  await alice.keyboard.press("Escape")
+
   await ws.editCell(0, "Chapitre Un")
   await expect(
     alice.getByText(/This edit would remove protected InDesign formatting/i),

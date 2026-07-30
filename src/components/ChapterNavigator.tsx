@@ -31,6 +31,16 @@ export interface MilestoneNavigationItem {
   translated: number
   validated: number
   total: number
+  subsections?: readonly MilestoneNavigationSubsection[]
+}
+
+export interface MilestoneNavigationSubsection {
+  key: string
+  label: string
+  firstCellId: string
+  translated: number
+  validated: number
+  total: number
 }
 
 export function milestoneMatchesSearch(item: MilestoneNavigationItem, query: string): boolean {
@@ -38,11 +48,16 @@ export function milestoneMatchesSearch(item: MilestoneNavigationItem, query: str
   if (!normalizedQuery) return true
 
   if (/^\d+(?:[-–]\d+)?$/.test(normalizedQuery)) {
-    return item.shortLabel.toLocaleLowerCase().replace("–", "-")
-      === normalizedQuery.replace("–", "-")
+    const normalizedNumericQuery = normalizedQuery.replace("–", "-")
+    return [
+      item.shortLabel,
+      ...(item.subsections?.map((subsection) => subsection.label) ?? []),
+    ].some((label) => label.toLocaleLowerCase().replace("–", "-") === normalizedNumericQuery)
   }
 
-  return `${item.label} ${item.shortLabel} ${item.description}`
+  return `${item.label} ${item.shortLabel} ${item.description} ${
+    item.subsections?.map((subsection) => subsection.label).join(" ") ?? ""
+  }`
     .toLocaleLowerCase()
     .includes(normalizedQuery)
 }
@@ -88,20 +103,44 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
 export function MilestoneNavigator({
   items,
   activeKey,
+  activeSubsectionKey,
   onSelect,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
-  onSelect: (key: string) => void
+  activeSubsectionKey?: string
+  onSelect: (key: string, subsectionKey?: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
+  const [expandedKey, setExpandedKey] = useState(activeKey)
   const vocabulary = useMemo(() => vocabularyFor(items), [items])
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
-  const canGoPrevious = activeIndex > 0
-  const canGoNext = activeIndex >= 0 && activeIndex < items.length - 1
+  const activeSubsection = active?.subsections?.find(
+    (subsection) => subsection.key === activeSubsectionKey,
+  ) ?? active?.subsections?.[0]
+  const destinations = useMemo<{ milestoneKey: string; subsectionKey?: string }[]>(
+    () => items.flatMap((item) => (
+    item.subsections?.length
+      ? item.subsections.map((subsection) => ({
+          milestoneKey: item.key,
+          subsectionKey: subsection.key,
+        }))
+      : [{ milestoneKey: item.key }]
+    )),
+    [items],
+  )
+  const activeDestinationIndex = destinations.findIndex((destination) => (
+    destination.milestoneKey === active?.key
+    && (
+      destination.subsectionKey === activeSubsection?.key
+      || (!destination.subsectionKey && !activeSubsection)
+    )
+  ))
+  const canGoPrevious = activeDestinationIndex > 0
+  const canGoNext = activeDestinationIndex >= 0 && activeDestinationIndex < destinations.length - 1
   const filteredItems = useMemo(
     () => items.filter((item) => milestoneMatchesSearch(item, search)),
     [items, search],
@@ -109,15 +148,17 @@ export function MilestoneNavigator({
 
   if (!active || items.length === 0) return null
 
-  const choose = (key: string) => {
-    onSelect(key)
+  const choose = (key: string, subsectionKey?: string) => {
+    if (subsectionKey) onSelect(key, subsectionKey)
+    else onSelect(key)
     setOpen(false)
     setSearch("")
   }
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen)
-    if (!nextOpen) setSearch("")
+    if (nextOpen) setExpandedKey(active.key)
+    else setSearch("")
   }
 
   return (
@@ -128,7 +169,10 @@ export function MilestoneNavigator({
           size="icon"
           disabled={!canGoPrevious}
           aria-label={`Previous ${vocabulary.singular}`}
-          onClick={() => choose(items[activeIndex - 1].key)}
+          onClick={() => {
+            const destination = destinations[activeDestinationIndex - 1]
+            if (destination) choose(destination.milestoneKey, destination.subsectionKey)
+          }}
         >
           <ChevronLeft />
         </Button>
@@ -138,13 +182,15 @@ export function MilestoneNavigator({
               <Button
                 variant="outline"
                 className="grid min-w-56 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2"
-                aria-label={`Current ${vocabulary.singular}: ${active.label}. Choose ${vocabulary.singular}`}
+                aria-label={`Current ${vocabulary.singular}: ${active.label}${
+                  activeSubsection ? `, cells ${activeSubsection.label}` : ""
+                }. Choose ${vocabulary.singular}`}
               />
             }
           >
             <span className="truncate text-left font-semibold">{active.label}</span>
             <span className="justify-self-center text-xs font-normal text-muted-foreground">
-              {active.description}
+              {activeSubsection ? `(${activeSubsection.label})` : active.description}
             </span>
             <ChevronDown data-icon="inline-end" className="justify-self-end" />
           </PopoverTrigger>
@@ -165,6 +211,7 @@ export function MilestoneNavigator({
                 <CommandGroup heading={vocabulary.plural}>
                   {filteredItems.map((item) => {
                     const selected = item.key === active.key
+                    const expanded = expandedKey === item.key
                     const translatedPercent = item.total > 0
                       ? Math.round((item.translated / item.total) * 100)
                       : 0
@@ -172,31 +219,64 @@ export function MilestoneNavigator({
                       ? Math.round((item.validated / item.total) * 100)
                       : 0
                     return (
-                      <CommandItem
-                        key={item.key}
-                        value={`${item.label} ${item.shortLabel}`}
-                        data-checked={selected || undefined}
-                        onSelect={() => choose(item.key)}
-                        className="min-h-11"
-                      >
-                        <Badge
-                          variant={selected ? "default" : "outline"}
-                          className="min-w-6 rounded-full px-1.5 tabular-nums"
-                          aria-hidden="true"
+                      <div key={item.key}>
+                        <CommandItem
+                          value={`${item.label} ${item.shortLabel}`}
+                          data-checked={selected || undefined}
+                          onSelect={() => {
+                            if (item.subsections?.length) {
+                              setExpandedKey(expanded ? "" : item.key)
+                            } else {
+                              choose(item.key)
+                            }
+                          }}
+                          className="min-h-11"
                         >
-                          {item.shortLabel}
-                        </Badge>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{item.label}</span>
-                          <span className="block text-xs text-muted-foreground">
-                            {item.description}
+                          <Badge
+                            variant={selected ? "default" : "outline"}
+                            className="min-w-6 rounded-full px-1.5 tabular-nums"
+                            aria-hidden="true"
+                          >
+                            {item.shortLabel}
+                          </Badge>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium">{item.label}</span>
+                            <span className="block text-xs text-muted-foreground">
+                              {item.description}
+                            </span>
                           </span>
-                        </span>
-                        <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                          <span className="block">{translatedPercent}% translated</span>
-                          <span className="block">{validatedPercent}% validated</span>
-                        </span>
-                      </CommandItem>
+                          <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                            <span className="block">{translatedPercent}% translated</span>
+                            <span className="block">{validatedPercent}% validated</span>
+                          </span>
+                        </CommandItem>
+                        {expanded && item.subsections?.map((subsection) => {
+                          const subsectionSelected = selected && subsection.key === activeSubsection?.key
+                          const subsectionTranslatedPercent = subsection.total > 0
+                            ? Math.round((subsection.translated / subsection.total) * 100)
+                            : 0
+                          const subsectionValidatedPercent = subsection.total > 0
+                            ? Math.round((subsection.validated / subsection.total) * 100)
+                            : 0
+                          return (
+                            <CommandItem
+                              key={subsection.key}
+                              value={`${item.label} ${subsection.label}`}
+                              data-checked={subsectionSelected || undefined}
+                              onSelect={() => choose(item.key, subsection.key)}
+                              className="min-h-9 pl-12"
+                            >
+                              <span className="min-w-0 flex-1 font-medium tabular-nums">
+                                {subsection.label}
+                              </span>
+                              <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                                <span className="block">{subsectionTranslatedPercent}% translated</span>
+                                <span className="block">{subsectionValidatedPercent}% validated</span>
+                              </span>
+                            </CommandItem>
+                          )
+                        })}
+                      </div>
                     )
                   })}
                 </CommandGroup>
@@ -209,7 +289,10 @@ export function MilestoneNavigator({
           size="icon"
           disabled={!canGoNext}
           aria-label={`Next ${vocabulary.singular}`}
-          onClick={() => choose(items[activeIndex + 1].key)}
+          onClick={() => {
+            const destination = destinations[activeDestinationIndex + 1]
+            if (destination) choose(destination.milestoneKey, destination.subsectionKey)
+          }}
         >
           <ChevronRight />
         </Button>

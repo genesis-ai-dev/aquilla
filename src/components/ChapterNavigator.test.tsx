@@ -64,6 +64,61 @@ describe("MilestoneNavigator", () => {
     expect(screen.getByRole("group", { name: "Slides" })).toBeInTheDocument()
   })
 
+  it("shows and navigates IDML subsection ranges like Codex Editor", () => {
+    const stories: MilestoneNavigationItem[] = [
+      {
+        key: "story:u44d21",
+        kind: "story",
+        label: "Story u44d21",
+        shortLabel: "21",
+        description: "1 cell",
+        translated: 0,
+        validated: 0,
+        total: 1,
+        subsections: [
+          { key: "story:u44d21:range:c1", label: "1–1", firstCellId: "c1", translated: 0, validated: 0, total: 1 },
+        ],
+      },
+      {
+        key: "story:u363",
+        kind: "story",
+        label: "Story u363",
+        shortLabel: "363",
+        description: "117 cells",
+        translated: 55,
+        validated: 5,
+        total: 117,
+        subsections: [
+          { key: "story:u363:range:c2", label: "1–50", firstCellId: "c2", translated: 50, validated: 5, total: 50 },
+          { key: "story:u363:range:c52", label: "51–100", firstCellId: "c52", translated: 5, validated: 0, total: 50 },
+          { key: "story:u363:range:c102", label: "101–117", firstCellId: "c102", translated: 0, validated: 0, total: 17 },
+        ],
+      },
+    ]
+    const onSelect = vi.fn()
+    render(
+      <MilestoneNavigator
+        items={stories}
+        activeKey="story:u363"
+        activeSubsectionKey="story:u363:range:c52"
+        onSelect={onSelect}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: /Current story: Story u363, cells 51–100/ }))
+      .toHaveTextContent("(51–100)")
+    fireEvent.click(screen.getByRole("button", { name: "Previous story" }))
+    expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c2")
+
+    fireEvent.click(screen.getByRole("button", { name: /Current story: Story u363/ }))
+    expect(screen.getByRole("option", { name: /1–50 100% translated 10% validated/ }))
+      .toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /51–100 10% translated 0% validated/ }))
+      .toHaveAttribute("data-checked", "true")
+    fireEvent.click(screen.getByText("101–117"))
+    expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c102")
+  })
+
   it("keeps duplicate labels independently selectable by stable key", () => {
     const sections: MilestoneNavigationItem[] = [
       { key: "heading:first", kind: "section", label: "Overview", shortLabel: "1", description: "3 cells", translated: 0, validated: 0, total: 3 },

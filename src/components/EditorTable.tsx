@@ -33,7 +33,7 @@ import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { getCellPref, setCellPref } from "@/lib/store/audio-cell-prefs"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy } from "@/lib/parsers/types"
+import type { TranslationRule, RuleInfraction, ProjectRecord, Voice, ProjectTtsSettings, OrderedBy, FileType } from "@/lib/parsers/types"
 import { deriveParagraphs } from "@/lib/parsers/paragraphs"
 import { hasTiming } from "@/lib/timeline/derive"
 import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
@@ -528,6 +528,7 @@ export interface AudioLensContext {
 interface EditorTableProps {
   project: ProjectRecord
   cellStore: CellStore
+  fileType?: FileType
   username: string
   /**
    * AQU-538: the active target LANE. Threaded down to each row so target-side
@@ -711,7 +712,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
+  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews,
@@ -771,6 +772,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [chapterNavigationSelection, setChapterNavigationSelection] = useState<{
     fileId: string | null
     label: string
+    subsectionKey?: string
   } | null>(null)
   const clearChapterNavigationSelection = useCallback(() => {
     setChapterNavigationSelection(null)
@@ -1427,6 +1429,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return map
   }, [milestoneNavigation])
 
+  const idmlMilestoneNavigation = useMemo(() =>
+    fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
+      const view = cellStore.getCellView(entry.firstCellId)
+      return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
+    })),
+  [cellStore, cellStoreVersion, fileType, milestoneNavigation])
+
   const currentMilestoneKey = useMemo(() => {
     const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
     const cellId = displayCellIds[visibleIndex]
@@ -1463,10 +1472,22 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           translated: entry.translated,
           validated: entry.validated,
           total: entry.total,
+          ...(idmlMilestoneNavigation
+            ? {
+                subsections: entry.subsections.map((subsection) => ({
+                  key: subsection.key,
+                  label: subsection.label,
+                  firstCellId: subsection.firstCellId,
+                  translated: subsection.translated,
+                  validated: subsection.validated,
+                  total: subsection.total,
+                })),
+              }
+            : {}),
         }
       })
     }),
-  [cellStore, cellStoreVersion, milestoneNavigation])
+  [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
 
   // AQU-610: sequential (non-scripture) numbering counts only *numbered*
   // (non-paratext) cells, so the count starts at 1 at the first real content
@@ -1535,6 +1556,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }),
   [cellStore, cellStoreVersion, displayCellIds])
 
+  const subsectionKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    if (!idmlMilestoneNavigation) return map
+    for (const entry of milestoneNavigation) {
+      for (const subsection of entry.subsections) {
+        for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
+      }
+    }
+    return map
+  }, [idmlMilestoneNavigation, milestoneNavigation])
+  const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+  const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
   const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
     ? chapterNavigationSelection.label
     : null
@@ -1543,6 +1576,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     currentMilestoneKey,
     selectedChapterLabel,
   )
+  const activeSubsectionKey = (
+    chapterNavigationSelection?.fileId === audioFileId
+    && chapterNavigationSelection.label === activeChapterLabel
+    && chapterNavigationSelection.subsectionKey
+  ) || currentSubsectionKey
 
   const handleChapterListPointerDownCapture = useCallback((event: React.PointerEvent) => {
     // Touch/pen gestures and a mouse press on the scroll container indicate
@@ -1572,10 +1610,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
   }, [clearChapterNavigationSelection])
 
-  const handleChapterSelect = useCallback((key: string) => {
-    const index = milestoneNavigation.find((entry) => entry.key === key)?.firstIndex ?? -1
+  const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
+    const entry = milestoneNavigation.find((candidate) => candidate.key === key)
+    const subsection = entry?.subsections.find((candidate) => candidate.key === subsectionKey)
+    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
     if (index < 0) return
-    setChapterNavigationSelection({ fileId: audioFileId, label: key })
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsection ? { subsectionKey: subsection.key } : {}),
+    })
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     void listRef.current?.scrollToIndex({
@@ -1912,6 +1956,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             <MilestoneNavigator
               items={milestoneNavigationItems}
               activeKey={activeChapterLabel}
+              activeSubsectionKey={activeSubsectionKey}
               onSelect={handleChapterSelect}
             />
           </div>

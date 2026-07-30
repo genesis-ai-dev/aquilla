@@ -7,8 +7,11 @@ import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 import {
   IDML_SLOT_NODE_NAME,
   IDML_TOKEN_NODE_NAME,
+  editableIdmlRangesIn,
   hasIdmlCellMetadata,
+  idmlDeletionRange,
   idmlEditorExtensions,
+  idmlPlainText,
   isEditableIdmlSelection,
   nearestEditableIdmlSlotPosition,
   prepareIdmlEditorContent,
@@ -292,6 +295,59 @@ describe("IDML caret placement", () => {
     )).toBe(slotStart)
   })
 
+  it("confines a range to the editable slots it covers", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+
+    // A whole-document range keeps only the editable slot's text: the tab token
+    // and the locked "LOCK" slot are structure, not the translator's content.
+    expect(editableIdmlRangesIn(editor.state.doc, 0, editor.state.doc.content.size))
+      .toEqual([{ from: slotStart, to: slotEnd }])
+    // A range covering only protected anchors has nothing to write over.
+    expect(editableIdmlRangesIn(editor.state.doc, slotEnd + 1, editor.state.doc.content.size))
+      .toEqual([])
+  })
+
+  it("deletes within a slot and never past its protected edges", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+    const rangeAt = (
+      position: number,
+      direction: "backward" | "forward",
+      granularity: "character" | "word" | "line" = "character",
+    ) => {
+      editor.commands.setTextSelection(position)
+      return idmlDeletionRange(editor.state.doc, editor.state.selection, direction, granularity)
+    }
+
+    expect(rangeAt(slotEnd, "backward")).toEqual({ from: slotEnd - 1, to: slotEnd })
+    expect(rangeAt(slotStart, "forward")).toEqual({ from: slotStart, to: slotStart + 1 })
+    // Backspace at the slot start and Delete at its end would take protected
+    // structure with them, so they delete nothing at all.
+    expect(rangeAt(slotStart, "backward")).toBeNull()
+    expect(rangeAt(slotEnd, "forward")).toBeNull()
+    // "Alpha one" — one word back from the end.
+    expect(rangeAt(slotEnd, "backward", "word")).toEqual({ from: slotEnd - 3, to: slotEnd })
+    expect(rangeAt(slotEnd, "backward", "line")).toEqual({ from: slotStart, to: slotEnd })
+  })
+
+  it("steps over a whole grapheme rather than half a surrogate pair", () => {
+    const editor = createEditor(vi.fn())
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slot = editor.state.doc.nodeAt(slotStart - 1)!
+    editor.commands.insertContentAt(
+      { from: slotStart, to: slotStart + slot.content.size },
+      "👍🏽",
+    )
+    const emojiEnd = slotStart + (editor.state.doc.nodeAt(slotStart - 1)?.content.size ?? 0)
+    editor.commands.setTextSelection(emojiEnd)
+
+    expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "backward", "character"))
+      .toEqual({ from: slotStart, to: emojiEnd })
+  })
+
   it("pulls a stray caret back into a slot but leaves range selections alone", () => {
     const editor = createEditor(vi.fn(), emptyTargetHtml)
     const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
@@ -304,5 +360,38 @@ describe("IDML caret placement", () => {
     editor.commands.selectAll()
     expect(editor.state.selection.empty).toBe(false)
     expect(editor.state.selection.to).toBe(editor.state.doc.content.size)
+  })
+})
+
+// AQU-740: the plain value feeds QA, which read a unit's own protected tab or
+// line break as whitespace the translator had typed.
+describe("IDML plain text", () => {
+  it("drops protected whitespace at the edges and keeps what was typed", () => {
+    // slot 0 (editable) + tab token + slot 1 (locked "LOCK").
+    const translated = createEditor(vi.fn())
+    const slotStart = nodePosition(translated, IDML_SLOT_NODE_NAME) + 1
+    const slot = translated.state.doc.nodeAt(slotStart - 1)!
+    expect(idmlPlainText(translated.state.doc)).toBe("Alpha one\tLOCK")
+
+    // A trailing space the translator typed is theirs, and stays.
+    translated.commands.insertContentAt(
+      { from: slotStart, to: slotStart + slot.content.size },
+      "Bonjour ",
+    )
+    expect(idmlPlainText(translated.state.doc)).toBe("Bonjour \tLOCK")
+  })
+
+  it("leaves an untranslated unit empty instead of whitespace-only", () => {
+    const empty = createEditor(vi.fn(), prepareIdmlEditorContent(CONFIGURATION, undefined, "").html)
+    // The untranslated slot and the tab token in front of the locked text are
+    // both structure, so the value is the locked scaffolding alone — QA sees no
+    // leading whitespace that nobody typed.
+    expect(idmlPlainText(empty.state.doc)).toBe("LOCK")
+
+    const structureOnly = createEditor(
+      vi.fn(),
+      prepareIdmlEditorContent(CONFIGURATION, undefined, "").html.replace(">LOCK<", "><"),
+    )
+    expect(idmlPlainText(structureOnly.state.doc)).toBe("")
   })
 })

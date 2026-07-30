@@ -4,7 +4,10 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { validateIdmlTranslation, type IdmlFormatMetadataV2 } from "@aquilla/idml-roundtrip"
 import { TranslatedEditor } from "./TranslatedEditor"
-import type { IdmlEditorConfiguration } from "@/lib/richtext/idml-editor"
+import {
+  serializeIdmlEditorDocument,
+  type IdmlEditorConfiguration,
+} from "@/lib/richtext/idml-editor"
 
 const SOURCE_HTML =
   `<p data-idml-version="2">`
@@ -217,7 +220,100 @@ describe("TranslatedEditor — protected IDML mode", () => {
 
     act(() => fireEvent.blur(surface))
     const committed = onCommit.mock.calls[0][0] as { value: string; valueHtml: string }
-    expect(committed.value).toBe("Chapitre\nUn\t")
+    // The protected tab sits at the trailing edge while slot 1 is untranslated,
+    // so it stays out of the value QA checks for stray whitespace.
+    expect(committed.value).toBe("Chapitre\nUn")
+    expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  // AQU-740: the browser's own delete drops the emptied slot span, which the
+  // guard has to refuse as anchor removal — so a slot's last character could
+  // never be deleted, and the cell was left showing the "protected formatting"
+  // banner with one stubborn character in it.
+  it("deletes a slot down to empty, keeping every protected anchor", async () => {
+    const onCommit = vi.fn()
+    const onIdmlValidationError = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-delete-to-empty"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+        onIdmlValidationError={onIdmlValidationError}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      for (const character of "abc") fireEvent.keyDown(surface, { key: character })
+      for (let press = 0; press < 3; press += 1) {
+        fireEvent.keyDown(surface, { key: "Backspace" })
+      }
+    })
+
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("")
+    expect(surface.querySelector("[data-idml-token=\"0\"]")).toBeTruthy()
+    expect(surface.querySelectorAll("span[data-idml-slot]")).toHaveLength(2)
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/protected InDesign formatting/i),
+    )
+
+    // A further Backspace at the slot start has nothing to take but structure.
+    act(() => { fireEvent.keyDown(surface, { key: "Backspace" }) })
+    expect(serializeIdmlEditorDocument(editor.state.doc)).toBe(
+      SOURCE_HTML.replace(">Source</span>", "></span>").replace(">Second</span>", "></span>"),
+    )
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/protected InDesign formatting/i),
+    )
+  })
+
+  it("clears every editable slot on a select-all delete", async () => {
+    const onCommit = vi.fn()
+    const onIdmlValidationError = vi.fn()
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-select-all-delete"
+        initialPlain="Source\tSecond"
+        initialHtml={SOURCE_HTML}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+        onIdmlValidationError={onIdmlValidationError}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      editor.commands.selectAll()
+      fireEvent.keyDown(surface, { key: "Backspace" })
+    })
+
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("")
+    expect(surface.querySelector("span[data-idml-slot=\"1\"]")?.textContent).toBe("")
+    expect(surface.querySelector("[data-idml-token=\"0\"]")).toBeTruthy()
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/protected InDesign formatting/i),
+    )
+
+    // Typing over the same selection replaces the slots rather than prepending.
+    act(() => {
+      editor.commands.selectAll()
+      for (const character of "neuf") fireEvent.keyDown(surface, { key: character })
+      fireEvent.blur(surface)
+    })
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("neuf")
+    const committed = onCommit.mock.calls.at(-1)?.[0] as { value: string; valueHtml: string }
+    expect(committed.value).toBe("neuf")
     expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
   })
 

@@ -132,6 +132,161 @@ function strayCaretPosition(doc: ProseMirrorNode, selection: Selection): number 
   return nearestEditableIdmlSlotPosition(doc, selection.from)
 }
 
+export interface IdmlRange {
+  from: number
+  to: number
+}
+
+/**
+ * The parts of `[from, to]` that lie in editable slot text — the only content a
+ * translator owns. Protected tokens and locked slots fall out, so a selection
+ * spanning them can be cleared without touching the IDML structure.
+ */
+export function editableIdmlRangesIn(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+): IdmlRange[] {
+  return editableSlotRanges(doc)
+    .map((range) => ({ from: Math.max(from, range.start), to: Math.min(to, range.end) }))
+    .filter((range) => range.from < range.to)
+}
+
+function editableSlotAt(
+  doc: ProseMirrorNode,
+  position: number,
+): { start: number; node: ProseMirrorNode } | null {
+  let found: { start: number; node: ProseMirrorNode } | null = null
+  doc.descendants((node, nodePosition) => {
+    if (found) return false
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    const start = nodePosition + 1
+    if (
+      node.attrs.editable === true
+      && position >= start
+      && position <= start + node.content.size
+    ) {
+      found = { start, node }
+    }
+    return false
+  })
+  return found
+}
+
+/**
+ * A slot holds only text and hard breaks, so its content maps 1:1 onto a string
+ * — one ProseMirror position per character, with a hard break counting as "\n".
+ */
+function slotPlainText(slot: ProseMirrorNode): string {
+  let text = ""
+  slot.forEach((child) => {
+    text += child.isText ? child.text ?? "" : child.type.name === "hardBreak" ? "\n" : ""
+  })
+  return text
+}
+
+function segmentBoundaries(text: string, granularity: "grapheme" | "word"): number[] {
+  const boundaries = [0]
+  const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity })
+    : null
+  if (segmenter) {
+    for (const { segment } of segmenter.segment(text)) {
+      boundaries.push((boundaries[boundaries.length - 1] ?? 0) + segment.length)
+    }
+    return boundaries
+  }
+  // Code points keep surrogate pairs intact where Intl.Segmenter is missing.
+  for (const codePoint of text) {
+    boundaries.push((boundaries[boundaries.length - 1] ?? 0) + codePoint.length)
+  }
+  return boundaries
+}
+
+function lineBoundaries(text: string): number[] {
+  const boundaries = [0]
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "\n") boundaries.push(index + 1)
+  }
+  boundaries.push(text.length)
+  return boundaries
+}
+
+/**
+ * AQU-740: the translator-facing plain text of an IDML unit.
+ *
+ * Protected tokens still render as the whitespace they are (a tab token is a
+ * tab), because inside a translation that whitespace is real. At the *edges* it
+ * is not: a unit whose trailing slot is still untranslated ends on its protected
+ * tab or line break, and QA read that structure as "extra whitespace in
+ * translation" on text the translator never typed. Whitespace the translator
+ * did type lives inside a slot and is always kept.
+ */
+export function idmlPlainText(doc: ProseMirrorNode): string {
+  const parts: { text: string; structural: boolean }[] = []
+  doc.descendants((node) => {
+    if (node.type.name === IDML_SLOT_NODE_NAME) {
+      parts.push({ text: slotPlainText(node), structural: false })
+      return false
+    }
+    if (node.type.name === IDML_TOKEN_NODE_NAME) {
+      const kind = node.attrs.tokenKind as IdmlProtectedTokenKind
+      parts.push({ text: kind === "br" ? "\n" : kind === "tab" ? "\t" : "", structural: true })
+      return false
+    }
+    return true
+  })
+  const droppable = (part: { text: string; structural: boolean } | undefined): boolean => (
+    part !== undefined
+    && (part.text.length === 0 || (part.structural && part.text.trim().length === 0))
+  )
+  while (droppable(parts[0])) parts.shift()
+  while (droppable(parts[parts.length - 1])) parts.pop()
+  return parts.map((part) => part.text).join("")
+}
+
+export type IdmlDeleteDirection = "backward" | "forward"
+export type IdmlDeleteGranularity = "character" | "word" | "line"
+
+/**
+ * AQU-740: the range a Backspace/Delete press should remove, expressed in
+ * ProseMirror positions and confined to one editable slot.
+ *
+ * IDML deletes cannot be left to the browser. Removing a slot's last character
+ * makes the browser drop the emptied `<span>`, which reaches ProseMirror as
+ * "an anchor disappeared" and is refused by the round-trip guard — so the final
+ * character of every slot was undeletable. Computing the range ourselves keeps
+ * the empty slot (legal, and how an untranslated unit already looks) and never
+ * lets the DOM diverge from the document.
+ *
+ * Returns null when there is nothing deletable, e.g. Backspace at a slot's
+ * start, where the neighbour is protected structure.
+ */
+export function idmlDeletionRange(
+  doc: ProseMirrorNode,
+  selection: Selection,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): IdmlRange | null {
+  if (!selection.empty) return { from: selection.from, to: selection.to }
+  const position = selection.from
+  const slot = editableSlotAt(doc, position)
+  if (!slot) return null
+  const text = slotPlainText(slot.node)
+  const offset = position - slot.start
+  const boundaries = granularity === "line"
+    ? lineBoundaries(text)
+    : segmentBoundaries(text, granularity === "word" ? "word" : "grapheme")
+  if (direction === "backward") {
+    const previous = boundaries.filter((boundary) => boundary < offset).pop()
+    if (previous === undefined) return null
+    return { from: slot.start + previous, to: position }
+  }
+  const next = boundaries.find((boundary) => boundary > offset)
+  if (next === undefined) return null
+  return { from: position, to: slot.start + next }
+}
+
 export function isEditableIdmlSelection(selection: {
   $from: { depth: number; node: (depth: number) => ProseMirrorNode }
   $to: { depth: number; node: (depth: number) => ProseMirrorNode }

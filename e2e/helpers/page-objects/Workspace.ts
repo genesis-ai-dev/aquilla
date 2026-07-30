@@ -68,12 +68,48 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
-  /** Shared import prologue: dismiss the setup checklist, open the
-   * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
-    // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
-    // project, and the modal sheet intercepts workspace clicks. Pre-mark it
-    // as already-shown for this project, then dismiss it if it beat us to it.
+  /**
+   * Import through a specialized importer's own panel (Biblica, Macula,
+   * Translation Notes …). These panels commit from their own Import button
+   * instead of the shared preview/confirm boundary.
+   *
+   * `optionName` matches the landing card, e.g. /Biblica Study Bible Notes/i.
+   */
+  async importViaSpecializedPanel(
+    optionName: RegExp,
+    filePath: string | FilePayload,
+    /**
+     * Optional panel setup after the file is chosen and before Import —
+     * assert or toggle importer options (e.g. Biblica sentence split).
+     */
+    configure?: (dialog: Locator) => Promise<void>,
+  ): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+
+    const dialog = this.page.getByRole("dialog")
+    const option = dialog.getByRole("button", { name: optionName }).first()
+    await expect(option).toBeVisible({ timeout: 8_000 })
+    await option.click()
+
+    // Each specialized panel labels its picker after the format it accepts, so
+    // scope to the panel's own file input rather than any input on the page.
+    const chooseBtn = dialog.getByRole("button", { name: /^Choose .*file$/i }).first()
+    await expect(chooseBtn).toBeVisible({ timeout: 5_000 })
+    await chooseBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    if (configure) await configure(dialog)
+
+    const importBtn = dialog.getByRole("button", { name: /^Import$/i }).last()
+    await expect(importBtn).toBeEnabled({ timeout: 5_000 })
+    await importBtn.click()
+    await this.waitForImportSettled()
+  }
+
+  /** AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
+   * project, and the modal sheet intercepts workspace clicks. Pre-mark it as
+   * already-shown for this project, then dismiss it if it beat us to it. */
+  private async dismissSetupChecklist(): Promise<void> {
     const projectId = this.page.url().match(/\/project\/([^/?#]+)/)?.[1]
     if (projectId) {
       await this.page.evaluate(
@@ -86,6 +122,12 @@ export class Workspace {
       await skipChecklist.click()
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
+  }
+
+  /** Shared import prologue: dismiss the setup checklist, open the
+   * ImportDialog's Upload Files panel, and select `filePath`. */
+  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
+    await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
     // Use the card's accessible button name rather than a case-sensitive text
     // locator; the product label is "Upload files".

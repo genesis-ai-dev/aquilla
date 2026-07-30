@@ -2,13 +2,11 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * RulesSurface — "+ Add Rule" inline editor creates a rule and adds it to
+ * RulesSurface — "+ Add Rule" create dialog creates a rule and adds it to
  * the list.
  *
- * The rules surface refactor replaced the RuleCreateDialog with an inline
- * RuleEditor rendered at the top of the rules surface. The in-main toolbar
- * "+ Add Rule" button opens it (and disables itself while it is open).
- * The editor contains:
+ * The in-main toolbar "+ Add Rule" button opens a dialog wrapping RuleEditor
+ * (and disables itself while it is open). The editor contains:
  *   - Input#re-name (Rule name, required)
  *   - Input#re-desc (Description, optional)
  *   - Mode / Side / Severity button groups
@@ -16,10 +14,10 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   - "Create rule" submit button (stays enabled; validates on click)
  *
  * This spec: navigate to /project/:id/rules → click "+ Add Rule" → verify
- * the inline editor opens → click Create with missing fields shows errors →
- * fill name + pattern → submit → editor closes → new rule appears.
+ * the create dialog opens → click Create with missing fields shows errors →
+ * fill name + pattern → submit → dialog closes → new rule appears.
  */
-test("Add Rule inline editor creates and displays new rule", async ({ alice }) => {
+test("Add Rule create dialog creates and displays new rule", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `RuleDialog ${Date.now()}`
@@ -36,28 +34,28 @@ test("Add Rule inline editor creates and displays new rule", async ({ alice }) =
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 
-  await expect(alice.getByText("New rule", { exact: true })).toBeVisible({ timeout: 5_000 })
-  await expect(addRuleBtn).toBeDisabled()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await expect(dialog.getByText("New rule", { exact: true })).toBeVisible({ timeout: 5_000 })
 
-  const createBtn = alice.getByRole("button", { name: /^Create rule$/ })
+  const createBtn = dialog.getByRole("button", { name: /^Create rule$/ })
   await expect(createBtn).toBeEnabled()
   await createBtn.click()
-  await expect(alice.getByText(/rule name is required/i)).toBeVisible({ timeout: 2_000 })
+  await expect(dialog.getByText(/rule name is required/i)).toBeVisible({ timeout: 2_000 })
 
-  const nameInput = alice.locator("#re-name")
+  const nameInput = dialog.locator("#re-name")
   await expect(nameInput).toBeVisible({ timeout: 3_000 })
   const ruleName = `no-numbers-${Date.now()}`
   await nameInput.fill(ruleName)
 
   await createBtn.click()
-  await expect(alice.getByText(/pattern is required/i)).toBeVisible({ timeout: 2_000 })
+  await expect(dialog.getByText(/pattern is required/i)).toBeVisible({ timeout: 2_000 })
 
-  await alice.locator("#re-pat").fill("\\d+")
+  await dialog.locator("#re-pat").fill("\\d+")
   await createBtn.click()
 
-  await expect(alice.getByText("New rule", { exact: true })).not.toBeVisible({
-    timeout: 5_000,
-  })
+  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
+  await expect(addRuleBtn).toBeEnabled({ timeout: 3_000 })
 
   await expect(alice.getByText(ruleName)).toBeVisible({ timeout: 5_000 })
 })

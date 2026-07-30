@@ -5279,12 +5279,11 @@ export function ProjectWorkspace() {
             </Suspense>
           </div>
         ) : centerSurface === "memory" ? (
-          // FRO-254: Living Memory page inside the shell.
-          <div className="h-full overflow-y-auto">
-            <Suspense fallback={<LoadingPanel label="Loading living memory" />}>
-              <LivingMemoryPageContent />
-            </Suspense>
-          </div>
+          // FRO-254: Living Memory page inside the shell — page owns its own
+          // toolbar + scroll like Rules/Glossary.
+          <Suspense fallback={<LoadingPanel label="Loading living memory" />}>
+            <LivingMemoryPageContent />
+          </Suspense>
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">

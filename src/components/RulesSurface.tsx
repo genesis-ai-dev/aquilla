@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleEditor } from "./RuleEditor"
@@ -232,10 +232,21 @@ export function RulesSurface({
         </Button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-        {editingRuleId === "new" && (
+      {/* Create project rule — dialog, not inline */}
+      <Dialog
+        open={editingRuleId === "new"}
+        onOpenChange={(open) => { if (!open) setEditingRuleId(null) }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-h-[90vh] max-w-2xl gap-0 overflow-y-auto p-0 sm:max-w-2xl"
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>Create translation rule</DialogTitle>
+            <DialogDescription>Create a project translation rule.</DialogDescription>
+          </DialogHeader>
           <RuleEditor
+            className="rounded-none border-0"
             cells={cells}
             onSave={async (rule) => {
               await addRule(rule)
@@ -243,8 +254,36 @@ export function RulesSurface({
             }}
             onCancel={() => setEditingRuleId(null)}
           />
-        )}
+        </DialogContent>
+      </Dialog>
 
+      {/* Create org rule — dialog, not inline */}
+      <Dialog
+        open={editingOrgRuleId === "new"}
+        onOpenChange={(open) => { if (!open) setEditingOrgRuleId(null) }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-h-[90vh] max-w-2xl gap-0 overflow-y-auto p-0 sm:max-w-2xl"
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>Create org rule</DialogTitle>
+            <DialogDescription>Create an org-scoped translation rule.</DialogDescription>
+          </DialogHeader>
+          <RuleEditor
+            className="rounded-none border-0"
+            cells={cells}
+            onSave={async (rule) => {
+              await addOrgRule(rule)
+              setEditingOrgRuleId(null)
+            }}
+            onCancel={() => setEditingOrgRuleId(null)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
         {usageSummary && (
           <AppTooltip content="LLM usage on this project">
             <p className="text-xs text-muted-foreground">{usageSummary}</p>
@@ -285,18 +324,6 @@ export function RulesSurface({
               </div>
             </CardHeader>
             <CardContent>
-              {editingOrgRuleId === "new" && canEditOrgRules && (
-                <div className="mb-4">
-                  <RuleEditor
-                    cells={cells}
-                    onSave={async (rule) => {
-                      await addOrgRule(rule)
-                      setEditingOrgRuleId(null)
-                    }}
-                    onCancel={() => setEditingOrgRuleId(null)}
-                  />
-                </div>
-              )}
               {orgRules.length === 0 ? (
                 <EmptyState
                   variant="inline"

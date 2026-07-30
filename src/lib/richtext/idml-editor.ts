@@ -1,6 +1,6 @@
 import { Extension, Node as TiptapNode, mergeAttributes } from "@tiptap/core"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
-import { Plugin } from "@tiptap/pm/state"
+import { Plugin, TextSelection, type Selection } from "@tiptap/pm/state"
 import {
   validateIdmlTranslation,
   type IdmlDiagnostic,
@@ -66,6 +66,70 @@ export function idmlEditableSlotPosition(
     return false
   })
   return requested ?? firstEditable
+}
+
+interface EditableSlotRange {
+  /** First text position inside the slot. */
+  start: number
+  /** Last text position inside the slot (equals `start` while it is empty). */
+  end: number
+}
+
+function editableSlotRanges(doc: ProseMirrorNode): EditableSlotRange[] {
+  const ranges: EditableSlotRange[] = []
+  doc.descendants((node, position) => {
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (node.attrs.editable === true) {
+      ranges.push({ start: position + 1, end: position + 1 + node.content.size })
+    }
+    return false
+  })
+  return ranges
+}
+
+/**
+ * AQU-740: maps a caret that landed *outside* every editable slot onto the
+ * closest position inside one.
+ *
+ * An IDML paragraph is a sequence of inline slot/token nodes, so the paragraph
+ * itself holds valid — but useless — text positions between them: the ones
+ * `Selection.atStart` and a DOM "collapse to end of contents" focus both
+ * resolve to. A caret parked there types into no slot at all, so every
+ * keystroke fell back to the start of the first slot and the text came out
+ * reversed.
+ *
+ * Returns null when the caret already sits in an editable slot (or the unit has
+ * none), so callers can treat null as "leave the selection alone".
+ */
+export function nearestEditableIdmlSlotPosition(
+  doc: ProseMirrorNode,
+  position: number,
+): number | null {
+  const ranges = editableSlotRanges(doc)
+  if (ranges.length === 0) return null
+  if (ranges.some((range) => position >= range.start && position <= range.end)) return null
+  // An untranslated unit starts at its first slot regardless of which end of
+  // the paragraph the caret came from — translators read and type forwards.
+  const first = ranges[0]
+  if (!first) return null
+  if (ranges.every((range) => range.end === range.start)) return first.start
+  let best = first.start
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const range of ranges) {
+    const candidate = position < range.start ? range.start : range.end
+    const distance = Math.abs(position - candidate)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = candidate
+    }
+  }
+  return best
+}
+
+/** The caret-inside-a-slot position a stray collapsed selection should take. */
+function strayCaretPosition(doc: ProseMirrorNode, selection: Selection): number | null {
+  if (!selection.empty || isEditableIdmlSelection(selection)) return null
+  return nearestEditableIdmlSlotPosition(doc, selection.from)
 }
 
 export function isEditableIdmlSelection(selection: {
@@ -519,12 +583,45 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
   })
 }
 
+/**
+ * AQU-740: keeps a collapsed caret inside an editable slot. Programmatic focus
+ * (the grid collapses a DOM range to the end of the editor's contents), arrow
+ * keys leaving a slot, and clicks on a protected token all park the caret
+ * between the paragraph's inline nodes, where typing has no slot to land in.
+ * Range selections are left untouched so text can still be selected and copied
+ * across protected anchors.
+ */
+export function createIdmlCaretExtension(): Extension {
+  return Extension.create({
+    name: "idmlCaretGuard",
+    priority: 10_000,
+
+    onCreate() {
+      const { state, view } = this.editor
+      const position = strayCaretPosition(state.doc, state.selection)
+      if (position === null) return
+      view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, position)))
+    },
+
+    addProseMirrorPlugins() {
+      return [new Plugin({
+        appendTransaction(_transactions, _oldState, newState) {
+          const position = strayCaretPosition(newState.doc, newState.selection)
+          if (position === null) return null
+          return newState.tr.setSelection(TextSelection.create(newState.doc, position))
+        },
+      })]
+    },
+  })
+}
+
 export function idmlEditorExtensions(options: IdmlGuardOptions) {
   return [
     IdmlDocument,
     IdmlParagraph,
     IdmlSlot,
     IdmlToken,
+    createIdmlCaretExtension(),
     createIdmlGuardExtension(options),
   ]
 }

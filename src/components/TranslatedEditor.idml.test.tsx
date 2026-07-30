@@ -170,6 +170,57 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
   })
 
+  // AQU-740: the grid focuses a freshly mounted target editor by collapsing a
+  // DOM range to the end of the editor's contents. In an IDML cell that position
+  // sits between the paragraph's inline anchors — inside no slot — so every
+  // keystroke used to be inserted at the first slot's start and the translation
+  // came out reversed, with the caret painted after the protected line break.
+  it("types forwards into the first slot after the grid's focus-to-end", async () => {
+    const onCommit = vi.fn()
+    const onIdmlValidationError = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-focus-to-end"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+        onIdmlValidationError={onIdmlValidationError}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      editor.commands.focus("end")
+    })
+    expect(editor.state.selection.$from.parent.type.name).toBe("idmlSlot")
+    expect(editor.state.selection.$from.parent.attrs.slot).toBe(0)
+
+    act(() => {
+      for (const character of "Chapitre") {
+        fireEvent.keyDown(surface, { key: character })
+      }
+      fireEvent.keyDown(surface, { key: "Enter", code: "Enter" })
+      fireEvent.keyDown(surface, { key: "U" })
+      fireEvent.keyDown(surface, { key: "n" })
+    })
+
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.innerHTML).toBe("Chapitre<br>Un")
+    expect(surface.querySelector("span[data-idml-slot=\"1\"]")?.textContent).toBe("")
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(expect.stringMatching(/Place the caret/i))
+
+    act(() => fireEvent.blur(surface))
+    const committed = onCommit.mock.calls[0][0] as { value: string; valueHtml: string }
+    expect(committed.value).toBe("Chapitre\nUn\t")
+    expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
+  })
+
   it("keeps Enter inside the current slot and commits validator-approved HTML", async () => {
     const onCommit = vi.fn()
     const onEscapeToGrid = vi.fn()

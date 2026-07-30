@@ -9,6 +9,8 @@ import {
   IDML_TOKEN_NODE_NAME,
   hasIdmlCellMetadata,
   idmlEditorExtensions,
+  isEditableIdmlSelection,
+  nearestEditableIdmlSlotPosition,
   prepareIdmlEditorContent,
   resolveIdmlEditorConfiguration,
   serializeIdmlEditorDocument,
@@ -245,5 +247,62 @@ describe("IDML ProseMirror transaction guard", () => {
 
     expect(editor.state.doc.toJSON()).toEqual(before)
     expect(rejected).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-740: the paragraph holds valid text positions *between* its inline
+// slot/token anchors. A caret left in one of those (Selection.atStart/atEnd, the
+// grid's "collapse a DOM range to the end of the editor" focus, a click on a
+// protected token) typed into no slot at all.
+describe("IDML caret placement", () => {
+  const emptyTargetHtml = prepareIdmlEditorContent(CONFIGURATION, undefined, "").html
+
+  it("maps a caret parked outside every slot onto the closest editable position", () => {
+    const editor = createEditor(vi.fn())
+    const slotPosition = nodePosition(editor, IDML_SLOT_NODE_NAME)
+    const slot = editor.state.doc.nodeAt(slotPosition)!
+    const slotStart = slotPosition + 1
+    const slotEnd = slotStart + slot.content.size
+
+    // Positions inside the only editable slot are already usable.
+    expect(nearestEditableIdmlSlotPosition(editor.state.doc, slotStart)).toBeNull()
+    expect(nearestEditableIdmlSlotPosition(editor.state.doc, slotEnd)).toBeNull()
+    // Paragraph start/end and the gap around the locked slot are not.
+    expect(nearestEditableIdmlSlotPosition(editor.state.doc, slotPosition)).toBe(slotStart)
+    expect(nearestEditableIdmlSlotPosition(
+      editor.state.doc,
+      editor.state.doc.content.size,
+    )).toBe(slotEnd)
+  })
+
+  it("starts an untranslated unit at its first editable slot", async () => {
+    const editor = createEditor(vi.fn(), emptyTargetHtml)
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+
+    // TipTap emits `create` on a macrotask, so the initial caret lands a tick
+    // after construction — still well before the editor can be typed into.
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(isEditableIdmlSelection(editor.state.selection)).toBe(true)
+    expect(editor.state.selection.from).toBe(slotStart)
+    // Even a caret asked for at the far end of the paragraph — which is where
+    // the grid's focus-and-collapse lands — comes back to the first slot.
+    expect(nearestEditableIdmlSlotPosition(
+      editor.state.doc,
+      editor.state.doc.content.size,
+    )).toBe(slotStart)
+  })
+
+  it("pulls a stray caret back into a slot but leaves range selections alone", () => {
+    const editor = createEditor(vi.fn(), emptyTargetHtml)
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+
+    editor.commands.focus("end")
+    expect(isEditableIdmlSelection(editor.state.selection)).toBe(true)
+    expect(editor.state.selection.from).toBe(slotStart)
+
+    // Selecting across protected anchors stays intact so text can be copied.
+    editor.commands.selectAll()
+    expect(editor.state.selection.empty).toBe(false)
+    expect(editor.state.selection.to).toBe(editor.state.doc.content.size)
   })
 })

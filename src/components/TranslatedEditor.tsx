@@ -39,6 +39,7 @@ import {
   idmlDiagnosticMessage,
   idmlEditorExtensions,
   isEditableIdmlSelection,
+  nearestEditableIdmlSlotPosition,
   prepareIdmlEditorContent,
   serializeIdmlEditorDocument,
   type IdmlEditorConfiguration,
@@ -141,7 +142,12 @@ function replaceIdmlSelectionWithPlainText(
   requestedRange?: IdmlInsertedRange,
 ): IdmlInsertedRange | null {
   const selection = view.state.selection
-  const fallbackPosition = idmlEditableSlotPosition(view.state.doc)
+  // AQU-740: a caret between the paragraph's inline nodes belongs to no slot.
+  // The caret extension normally pulls it back into one; a selection spanning
+  // protected anchors still lands here, so insert at the closest slot position
+  // rather than always at the first slot.
+  const fallbackPosition = nearestEditableIdmlSlotPosition(view.state.doc, selection.from)
+    ?? idmlEditableSlotPosition(view.state.doc)
   const from = requestedRange?.from
     ?? (isEditableIdmlSelection(selection) ? selection.from : fallbackPosition)
   const to = requestedRange?.to
@@ -160,6 +166,12 @@ function replaceIdmlSelectionWithPlainText(
   const transaction = nodes.length > 0
     ? view.state.tr.replaceWith(from, to, replacement)
     : view.state.tr.delete(from, to)
+  // AQU-740: park the caret after what was just inserted. Position mapping
+  // leaves a caret that sat *before* `from` (paragraph level, outside every
+  // slot) where it was, so each keystroke re-inserted at the same offset and
+  // the text came out reversed.
+  const caret = from + (nodes.length > 0 ? replacement.size : 0)
+  transaction.setSelection(TextSelection.create(transaction.doc, caret))
   view.dispatch(transaction.scrollIntoView())
   return { from, to: from + replacement.size }
 }

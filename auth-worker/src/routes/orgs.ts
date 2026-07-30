@@ -238,7 +238,8 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const uniqueOrgIds = [...new Set(orgIds)]
   if (uniqueOrgIds.length === 0) return c.json({ portfolios: [] })
 
-  if (!isPlatformAdminEmail(c.env, user.email)) {
+  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  if (!isAdmin) {
     const placeholders = uniqueOrgIds.map(() => "?").join(", ")
     const allowed = await c.env.AQUILLA_PG.prepare(
       `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
@@ -249,7 +250,10 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
     }
   }
 
-  const rows = await getOrgPortfolios(c.env, uniqueOrgIds)
+  // AQU-745: scope each org's rollup to the projects this caller can actually
+  // see — a sub-maintainer member must not enumerate every project name in the
+  // org via the dashboard. Maintainer+ / platform admins still see all.
+  const rows = await getOrgPortfolios(c.env, uniqueOrgIds, { userId: user.id, isAdmin })
   const byOrg = new Map<number, typeof rows>()
   for (const row of rows) {
     const list = byOrg.get(row.orgId)
@@ -272,7 +276,11 @@ orgs.get("/:orgId/portfolio", async (c) => {
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
-  const projects = await getOrgPortfolio(c.env, orgId)
+  // AQU-745: filter to the caller's visible projects (creator/direct/group, or
+  // all when Maintainer+/admin) so the org dashboard never leaks project names
+  // a regular member has no access to.
+  const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const projects = await getOrgPortfolio(c.env, orgId, { userId: user.id, isAdmin })
   return c.json({ projects })
 })
 

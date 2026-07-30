@@ -60,7 +60,8 @@ describe("MilestoneNavigator", () => {
     expect(screen.getByRole("button", { name: /Current slide: Welcome/ })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Next slide" })).toBeEnabled()
     fireEvent.click(screen.getByRole("button", { name: /Current slide: Welcome/ }))
-    expect(screen.getByRole("heading", { name: "Go to slide" })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Go to slide" })).not.toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Find a slide" })).toBeInTheDocument()
     expect(screen.getByRole("group", { name: "Slides" })).toBeInTheDocument()
   })
 
@@ -144,6 +145,8 @@ describe("MilestoneNavigator", () => {
     render(<MilestoneNavigator items={ranges} activeKey="biblica:ISA:2-5" onSelect={() => {}} />)
     fireEvent.click(screen.getByRole("button", { name: /Current chapter: Isaiah 2–5/ }))
 
+    expect(screen.queryByText("Go to chapter")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Choose a chapter or passage range/)).not.toBeInTheDocument()
     const parent = screen.getByRole("option", { name: /Isaiah 2–5 16 cells/ })
     expect(parent.querySelector("[data-milestone-badge]")).toBeNull()
     expect(parent.textContent?.match(/2–5/g)).toHaveLength(1)

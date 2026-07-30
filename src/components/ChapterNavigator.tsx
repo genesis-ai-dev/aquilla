@@ -14,12 +14,8 @@ import {
 import {
   Popover,
   PopoverContent,
-  PopoverDescription,
-  PopoverHeader,
-  PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Separator } from "@/components/ui/separator"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 
 export interface MilestoneNavigationItem {
@@ -65,7 +61,6 @@ export function milestoneMatchesSearch(item: MilestoneNavigationItem, query: str
 interface NavigationVocabulary {
   singular: string
   plural: string
-  description: string
 }
 
 function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVocabulary {
@@ -73,31 +68,27 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   if ([...kinds].every((kind) => (
     kind === "chapter" || kind === "chapter-range" || kind === "preface"
   ))) {
-    return {
-      singular: "chapter",
-      plural: "Chapters",
-      description: "Choose a chapter or passage range to jump to its first cell.",
-    }
+    return { singular: "chapter", plural: "Chapters" }
   }
   if (kinds.size === 1 && kinds.has("slide")) {
-    return { singular: "slide", plural: "Slides", description: "Choose a slide to jump to its first cell." }
+    return { singular: "slide", plural: "Slides" }
   }
   if (kinds.size === 1 && kinds.has("story")) {
-    return { singular: "story", plural: "Stories", description: "Choose a story to jump to its first frame." }
+    return { singular: "story", plural: "Stories" }
   }
   if (kinds.size === 1 && kinds.has("section")) {
-    return { singular: "section", plural: "Sections", description: "Choose a section to jump to its heading." }
+    return { singular: "section", plural: "Sections" }
   }
   if (kinds.size === 1 && kinds.has("time-range")) {
-    return { singular: "time range", plural: "Time ranges", description: "Choose a time range to jump to its first segment." }
+    return { singular: "time range", plural: "Time ranges" }
   }
   if (kinds.size === 1 && kinds.has("part")) {
-    return { singular: "part", plural: "Parts", description: "Choose a part to jump to its first cell." }
+    return { singular: "part", plural: "Parts" }
   }
   if (kinds.size === 1 && kinds.has("group")) {
-    return { singular: "group", plural: "Groups", description: "Choose a group to jump to its first cell." }
+    return { singular: "group", plural: "Groups" }
   }
-  return { singular: "milestone", plural: "Milestones", description: "Choose a milestone to jump to its first cell." }
+  return { singular: "milestone", plural: "Milestones" }
 }
 
 function isScriptureMilestone(kind: ImportMilestoneKind): boolean {
@@ -203,11 +194,6 @@ export function MilestoneNavigator({
             align="center"
             className="w-[min(24rem,calc(100vw-1rem))] gap-0 overflow-hidden p-0"
           >
-            <PopoverHeader className="px-4 py-3">
-              <PopoverTitle>Go to {vocabulary.singular}</PopoverTitle>
-              <PopoverDescription>{vocabulary.description}</PopoverDescription>
-            </PopoverHeader>
-            <Separator />
             <Command label={`Find a ${vocabulary.singular}`} className="rounded-none! p-1" shouldFilter={false}>
               <CommandInput
                 placeholder={`Find a ${vocabulary.singular}…`}

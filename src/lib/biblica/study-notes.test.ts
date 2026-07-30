@@ -76,10 +76,7 @@ describe("Biblica study-note selection", () => {
       [SAMPLE_NOTES.referenceList[0], "2"],
       [SAMPLE_NOTES.referenceList[1], "2"],
       [SAMPLE_NOTES.referenceList[2], "2"],
-      // The note block is one paragraph; each sentence is its own cell.
-      [SAMPLE_NOTES.noteBlockSentences[0], "2"],
-      [SAMPLE_NOTES.noteBlockSentences[1], "2"],
-      [SAMPLE_NOTES.noteBlockSentences[2], "2"],
+      [SAMPLE_NOTES.noteBlock, "2"],
     ])
     expect(selection.notes.every((entry) => entry.bookCode === "GEN")).toBe(true)
 
@@ -112,7 +109,7 @@ describe("Biblica study-note selection", () => {
       paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
       note("p-block", SAMPLE_NOTES.noteBlock),
     ]))
-    const selection = selectBiblicaStudyNotes(parsed.units)
+    const selection = selectBiblicaStudyNotes(parsed.units, { splitSentences: true })
 
     expect(selection.notes.map((entry) => entry.unit.sourceText))
       .toEqual([...SAMPLE_NOTES.noteBlockSentences])

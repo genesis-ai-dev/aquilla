@@ -31,10 +31,7 @@ describe("Biblica study-notes parser adapter", () => {
       [SAMPLE_NOTES.referenceList[0], "GEN 2"],
       [SAMPLE_NOTES.referenceList[1], "GEN 2"],
       [SAMPLE_NOTES.referenceList[2], "GEN 2"],
-      // One cell per sentence of the note block.
-      [SAMPLE_NOTES.noteBlockSentences[0], "GEN 2"],
-      [SAMPLE_NOTES.noteBlockSentences[1], "GEN 2"],
-      [SAMPLE_NOTES.noteBlockSentences[2], "GEN 2"],
+      [SAMPLE_NOTES.noteBlock, "GEN 2"],
     ])
     expect(bookCodes).toEqual(["GEN"])
     expect(skipped).toEqual({ verseUnitCount: 5, otherUnitCount: 2 })
@@ -55,7 +52,9 @@ describe("Biblica study-notes parser adapter", () => {
   it("carries the rejoin ranges only on cells that are part of a sliced note block", async () => {
     const buffer = await makeBiblicaIdml()
     const parsed = await parseIdml(buffer)
-    const { strings } = await extractBiblicaStudyNoteStrings(buffer, async () => parsed)
+    const { strings } = await extractBiblicaStudyNoteStrings(buffer, async () => parsed, {
+      splitSentences: true,
+    })
 
     const sentences = strings.filter((cell) => (
       SAMPLE_NOTES.noteBlockSentences.some((sentence) => cell.original === sentence)

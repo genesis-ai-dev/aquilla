@@ -1223,7 +1223,7 @@ export interface BiblicaProgress {
  */
 export interface BiblicaImportOptions {
   /**
-   * When true (default), cut long note lines into one cell per sentence.
+   * When true, cut long note lines into one cell per sentence.
    * When false, each line stays a single cell (lists still split per line).
    */
   splitSentences?: boolean

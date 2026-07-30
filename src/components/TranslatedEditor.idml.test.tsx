@@ -132,6 +132,38 @@ describe("TranslatedEditor — protected IDML mode", () => {
     }))
   })
 
+  it("appends to a populated slot when read-view activation has no pointer selection", async () => {
+    const onCommit = vi.fn()
+    const targetHtml = SOURCE_HTML.replace(">Source</span>", ">asd</span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-populated-activation"
+        initialPlain={"asd\tSecond"}
+        initialHtml={targetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      for (const character of "123") {
+        fireEvent.keyDown(surface, { key: character })
+      }
+      fireEvent.blur(surface)
+    })
+
+    expect(editor.getText()).toBe("asd123\tSecond")
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("asd123")
+    expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({
+      value: "asd123\tSecond",
+      valueHtml: expect.stringContaining(">asd123</span>"),
+    }))
+  })
+
   it("pastes Unicode and line breaks into an empty slot without importing clipboard markup", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML

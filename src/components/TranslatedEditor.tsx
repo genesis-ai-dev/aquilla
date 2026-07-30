@@ -609,7 +609,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         })
         return true
       },
-      handleClick(view, _pos, event) {
+      handleClick(view, pos, event) {
         if (!idmlContext) return false
         const target = event.target instanceof HTMLElement
           ? event.target.closest<HTMLElement>("[data-idml-slot]")
@@ -626,10 +626,19 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           && requestedSlot === selectedSlot
           && isEditableIdmlSelection(view.state.selection)
         ) return false
-        const position = idmlEditableSlotPosition(
-          view.state.doc,
-          Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+        const resolvedClick = view.state.doc.resolve(pos)
+        const position = (
+          Number.isSafeInteger(requestedSlot)
+          && resolvedClick.parent.type.name === "idmlSlot"
+          && Number(resolvedClick.parent.attrs.slot) === requestedSlot
+          && resolvedClick.parent.attrs.editable === true
         )
+          ? pos
+          : idmlEditableSlotPosition(
+              view.state.doc,
+              Number.isSafeInteger(requestedSlot) ? requestedSlot : undefined,
+              "end",
+            )
         if (position === null) return false
         view.dispatch(
           view.state.tr
@@ -916,7 +925,12 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     onFocus({ editor }) {
       applyEditorDirection(editor)
       if (idmlContext && !isEditableIdmlSelection(editor.state.selection)) {
-        const position = idmlEditableSlotPosition(editor.state.doc)
+        // Read-view activation mounts a fresh editor after the original click,
+        // so there is no pointer position to preserve. Use ProseMirror's real
+        // end-of-slot position: populated targets append where users expect,
+        // while empty slots have the same start/end and avoid the browser's
+        // phantom trailing <br> selection.
+        const position = idmlEditableSlotPosition(editor.state.doc, undefined, "end")
         if (position !== null) editor.commands.setTextSelection(position)
       }
       onFocus?.()

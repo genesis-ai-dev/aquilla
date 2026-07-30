@@ -63,7 +63,7 @@
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
 | Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
 | Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
-| Export      | IDML import → story milestone with 50-cell subsection navigation → single-activation protected edit keeps caret order → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
+| Export      | IDML import → story milestone with 50-cell subsection navigation → empty and populated single-activation edits keep caret order → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
 | Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
 | Marketing   | Homepage "book a call": Google Calendar booking link + contact form → POST /api/v2/contact/book-call → sent state | `e2e/specs/marketing/book-call.smoke.spec.ts` | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |

@@ -49,13 +49,14 @@ interface IdmlGuardOptions {
 export function idmlEditableSlotPosition(
   doc: ProseMirrorNode,
   requestedSlot?: number,
+  edge: "start" | "end" = "start",
 ): number | null {
   let firstEditable: number | null = null
   let requested: number | null = null
   doc.descendants((node, position) => {
     if (node.type.name !== IDML_SLOT_NODE_NAME) return true
     if (node.attrs.editable !== true) return false
-    const contentPosition = position + 1
+    const contentPosition = position + 1 + (edge === "end" ? node.content.size : 0)
     firstEditable ??= contentPosition
     if (
       requestedSlot !== undefined

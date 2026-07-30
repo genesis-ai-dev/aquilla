@@ -79,6 +79,11 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await alice.keyboard.press("Escape")
 
   await ws.editCell(0, "Chapitre Un")
+  // Re-enter the populated IDML target through its read view. The activation
+  // fallback must append at the real ProseMirror slot end, not jump to the
+  // beginning as the browser-recorded AQU-740 regression did.
+  await ws.editCell(0, " — suite")
+  await expect(ws.cellRow(0)).toContainText("Chapitre Un — suite")
   await expect(
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)
@@ -100,7 +105,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   const story = await output.file(STORY_PATH)!.async("string")
 
   expect(story).toContain(
-    'AppliedCharacterStyle="CharacterStyle/Plain"><Content>Chapitre Un</Content>',
+    'AppliedCharacterStyle="CharacterStyle/Plain"><Content>Chapitre Un — suite</Content>',
   )
   expect(story).toContain(
     'AppliedCharacterStyle="CharacterStyle/Plain"><Content>the </Content>',

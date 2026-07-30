@@ -1382,13 +1382,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useEffect(() => stopSelectionDrag, [stopSelectionDrag])
 
-  // Grid layout: [left-gutter] [source] [target]. The left 44px gutter holds
-  // only the line number / cell label and the validation pill. There is no
-  // right gutter — the floating action rail (sparkle / mic / tts / comment /
-  // expand) is absolutely positioned at the row's right edge so it doesn't
-  // claim layout space when collapsed. The target column reserves pr-9 so the
-  // ever-present expand chevron never overlaps text.
-  const gridCols = "grid-cols-[24px_44px_1fr_1fr]"
+  // Grid layout: [select+badges] [number] [source] [target]. The first track
+  // holds the multi-select control plus a flex-col stack of status badges
+  // (comments / stale / synth) to its right; the 44px track is the verse/
+  // line number alone. There is no right gutter — the floating action rail
+  // (sparkle / mic / tts / comment / expand) is absolutely positioned at the
+  // row's right edge so it doesn't claim layout space when collapsed. The
+  // target column reserves pr-9 so the ever-present expand chevron never
+  // overlaps text.
+  const gridCols = "grid-cols-[minmax(24px,max-content)_44px_1fr_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1930,7 +1932,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         ) : null}
         <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
-          {/* Unlabeled tracks: the multi-select column, then the number gutter. */}
+          {/* Unlabeled tracks: select+status-badges, then the number gutter. */}
           <div aria-hidden="true" />
           <div aria-hidden="true" />
           {/* In Audio mode the left column carries per-line voice controls, not
@@ -2268,7 +2270,7 @@ interface MemoizedRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[24px_44px_1fr_1fr]"
+  gridCols: "grid-cols-[minmax(24px,max-content)_44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2653,7 +2655,7 @@ interface EditorRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[24px_44px_1fr_1fr]"
+  gridCols: "grid-cols-[minmax(24px,max-content)_44px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -5076,12 +5078,12 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
-        {/* Multi-select column — the row's FIRST grid cell, to the left of the
-            number/validation gutter, so the only affordance between the source
-            and target columns is the validation button. In-flow rather than
-            absolutely positioned: it claims its own 24px track, so it can
-            never overlap the line number at narrow widths. */}
-        <div className="flex h-full items-center justify-center self-stretch">
+        {/* Select + status-badges column — the row's FIRST grid cell, to the
+            left of the number gutter. Select stays on its own; status badges
+            (comments / stale / synth errors) stack in a flex-col to its right,
+            still left of the verse number. In-flow rather than absolutely
+            positioned so they never overlap the line number at narrow widths. */}
+        <div className="flex h-full items-stretch justify-center gap-0.5 self-stretch">
           {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
               no visual feedback and the action bar never appears. Root cause:
               the drag-selection affordance (onPointerDown) uses setSelection()
@@ -5096,78 +5098,86 @@ function EditorRow({
                    single-cell selection gives immediate visual feedback, then
                    the SelectionBar ("X selected" pill) appears for discoverability.
               See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
-          <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
-            <button
-              type="button"
-              role="checkbox"
-              aria-checked={isMultiSelected}
-              aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
-              onPointerDown={onSelectionPointerDown}
-              onClick={(e) => e.stopPropagation()}
-              className={cn(
-                "grid h-5 w-5 place-items-center rounded-md border",
-                "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
-                "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
-                isMultiSelected
-                  ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                  : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
-              )}
+          <div className="flex items-center justify-center">
+            <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={isMultiSelected}
+                aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
+                onPointerDown={onSelectionPointerDown}
+                onClick={(e) => e.stopPropagation()}
+                className={cn(
+                  "grid h-5 w-5 place-items-center rounded-md border",
+                  "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+                  "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+                  isMultiSelected
+                    ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                    : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
+                )}
+              >
+                {isMultiSelected ? (
+                  <Check className="h-3 w-3" strokeWidth={3} />
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                )}
+              </button>
+            </AppTooltip>
+          </div>
+          {/* Status badges — vertically stacked, level with the first source
+              line (same strip spacer the number gutter uses). */}
+          {((isStaleSource || isUpstreamStaleSource) && hasContent) ||
+          isSynthBusy ||
+          isSynthError ||
+          (onOpenComments && openCommentCount > 0) ? (
+            <div
+              data-testid="gutter-status-badges"
+              className="flex flex-col items-center gap-0.5 py-1.5"
             >
-              {isMultiSelected ? (
-                <Check className="h-3 w-3" strokeWidth={3} />
-              ) : (
-                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+              <div className="mb-1 h-4 shrink-0" aria-hidden />
+              {/* Stale-source indicator. Both flags are already resolved
+                  per-row booleans (see isStaleSource's doc comment) — the
+                  singleton Set(s) just adapt them to the indicator's
+                  managed-mode membership-set contract. */}
+              {(isStaleSource || isUpstreamStaleSource) && hasContent && (
+                <StaleSourceIndicator
+                  cellId={cell.id}
+                  staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
+                  upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
+                />
               )}
-            </button>
-          </AppTooltip>
+              {(isSynthBusy || isSynthError) && (
+                <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+              )}
+              {/* AQU-599: persistent "has comment" indicator. Unlike the
+                  action-rail comment button (which only appears on
+                  hover/focus), this icon stays visible whenever the cell
+                  carries an open comment. Clicking opens the comments panel. */}
+              {onOpenComments && openCommentCount > 0 && (
+                <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
+                  <button
+                    type="button"
+                    aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
+                    className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                    onClick={() => onOpenComments(cell.id)}
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
+                  </button>
+                </AppTooltip>
+              )}
+            </div>
+          ) : null}
         </div>
-        {/* Left gutter — a subtle line number plus the row's status
-            affordances, level with the first line of source text. The number is
-            the single issue surface (severity tint + title); no
-            stripe/dot/warning. Multi-select has its own column to the left of
-            this one. */}
+        {/* Number gutter — verse / line number alone (severity tint). Status
+            badges live in the select column to the left of this track. */}
         <div className="flex h-full w-full flex-col items-center py-1.5">
           {/* Mirrors the source column's context strip (h-4 + mb-1). The strip
               offsets the source text but not this column, so without the same
-              reservation here every gutter item rides above the first line it
+              reservation here the number rides above the first line it
               annotates. Same mirror the target header lane provides. */}
           <div data-testid="gutter-strip-spacer" className="mb-1 h-4" aria-hidden />
-          <div className="flex w-full items-start justify-center gap-1">
+          <div className="flex w-full items-start justify-center">
             {numberPill}
-            {/* The validation circle moved next to the TARGET editing cell
-                (AQU-592); the gutter now carries only the line number and the
-                stale-source / synth status affordances. */}
-            {/* Stale-source indicator. Both flags
-                are already resolved per-row booleans (see isStaleSource's doc
-                comment) — the singleton Set(s) just adapt them to the
-                indicator's managed-mode membership-set contract. */}
-            {(isStaleSource || isUpstreamStaleSource) && hasContent && (
-              <StaleSourceIndicator
-                cellId={cell.id}
-                staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
-                upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
-              />
-            )}
-            {(isSynthBusy || isSynthError) && (
-              <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
-            )}
-            {/* AQU-599: persistent "has comment" indicator. Unlike the action-rail
-                comment button (which only appears on hover/focus), this icon stays
-                visible in the gutter whenever the cell carries an open comment, so
-                comments are discoverable without opening each cell. Clicking it
-                opens the comments panel for the cell. */}
-            {onOpenComments && openCommentCount > 0 && (
-              <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
-                <button
-                  type="button"
-                  aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
-                  className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
-                  onClick={() => onOpenComments(cell.id)}
-                >
-                  <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
-                </button>
-              </AppTooltip>
-            )}
           </div>
         </div>
 

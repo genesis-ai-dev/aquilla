@@ -27,7 +27,7 @@ test("archive a project and restore it", async ({ alice }) => {
   await expect(moreBtn).toBeVisible({ timeout: 5_000 })
   await moreBtn.click()
 
-  const archiveItem = alice.getByRole("button", { name: "Archive" })
+  const archiveItem = alice.getByRole("menuitem", { name: "Archive" })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
 

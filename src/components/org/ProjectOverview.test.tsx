@@ -574,7 +574,7 @@ describe("ProjectOverview archive/restore", () => {
     const moreBtn = await screen.findByRole("button", { name: "More actions" })
     fireEvent.click(moreBtn)
 
-    const btn = await screen.findByRole("button", { name: "Archive" })
+    const btn = await screen.findByRole("menuitem", { name: "Archive" })
     fireEvent.click(btn)
 
     await waitFor(() => expect(archiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
@@ -607,6 +607,8 @@ describe("ProjectOverview archive/restore", () => {
       status: "ready",
       refresh,
     })
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
     downloadProjectBundle.mockResolvedValue(undefined)
     renderOverview()
 
@@ -614,7 +616,7 @@ describe("ProjectOverview archive/restore", () => {
     const moreBtn = await screen.findByRole("button", { name: "More actions" })
     fireEvent.click(moreBtn)
 
-    const btn = await screen.findByRole("button", { name: "Download deliverable" })
+    const btn = await screen.findByRole("menuitem", { name: "Download deliverable" })
     fireEvent.click(btn)
     await waitFor(() =>
       expect(downloadProjectBundle).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", fileId: "f1" })),
@@ -627,11 +629,13 @@ describe("ProjectOverview archive/restore", () => {
       status: "ready",
       refresh,
     })
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
     renderOverview()
 
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Download deliverable" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Download deliverable" })).not.toBeInTheDocument()
   })
 })
 

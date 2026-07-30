@@ -25,7 +25,7 @@ test("archived project can be restored back to active projects", async ({ alice 
 
   // Archive via the header overflow menu.
   await alice.getByRole("button", { name: /More actions/i }).click()
-  const archiveItem = alice.getByRole("button", { name: /^Archive$/ })
+  const archiveItem = alice.getByRole("menuitem", { name: /^Archive$/ })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
   await alice.waitForURL(/\/projects$/, { timeout: 10_000 })

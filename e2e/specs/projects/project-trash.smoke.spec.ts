@@ -33,7 +33,7 @@ test("Archive removes project from active projects list", async ({ alice }) => {
 
   // Open the header overflow menu and click "Archive".
   await alice.getByRole("button", { name: /More actions/i }).click()
-  const archiveItem = alice.getByRole("button", { name: /^Archive$/ })
+  const archiveItem = alice.getByRole("menuitem", { name: /^Archive$/ })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
 

@@ -2,11 +2,11 @@ import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * ProjectOverview — OverflowMenu "⋯" button opens Archive / Download actions.
+ * ProjectOverview — ⋯ "More actions" dropdown opens Archive / Download actions.
  *
- * ProjectOverview.tsx renders an OverflowMenu (button aria-label="More actions",
- * text "⋯") when the caller is canManage or isOwner and the project is not
- * archived. The dropdown contains:
+ * ProjectOverview.tsx renders a DropdownMenu (button aria-label="More actions")
+ * when the caller is canManage or isOwner and the project is not archived.
+ * The menu contains:
  *   - "Download deliverable" (disabled when no files)
  *   - "Archive" (available to isOwner)
  *
@@ -31,11 +31,11 @@ test("project overview overflow menu opens with Archive and Download items", asy
   await moreBtn.click()
 
   // Dropdown is open — "Archive" is visible.
-  const archiveItem = alice.getByRole("button", { name: /^Archive$/i })
+  const archiveItem = alice.getByRole("menuitem", { name: /^Archive$/i })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
 
   // "Download deliverable" is also present (may be disabled since no files).
-  const downloadItem = alice.getByRole("button", { name: /Download deliverable/i })
+  const downloadItem = alice.getByRole("menuitem", { name: /Download deliverable/i })
   await expect(downloadItem).toBeVisible({ timeout: 2_000 })
 
   // Click outside to close the dropdown.

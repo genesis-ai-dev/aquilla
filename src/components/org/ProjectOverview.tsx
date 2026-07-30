@@ -59,6 +59,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
@@ -496,58 +497,6 @@ function FileCanonicalRollup({
         <BookRow key={b.book} book={b} loadVerses={loadVerses} />
       ))}
     </ul>
-  )
-}
-
-// ── Overflow menu (archive / download) ───────────────────────────────────────
-
-function OverflowMenu({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", onClickOutside)
-    return () => document.removeEventListener("mousedown", onClickOutside)
-  }, [open])
-
-  return (
-    <div ref={ref} className="relative">
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="outline"
-        aria-label="More actions"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-md border bg-popover shadow-md py-1">
-          {children}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function OverflowItem({ onClick, disabled, className, children }: {
-  onClick: () => void
-  disabled?: boolean
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent/40 disabled:opacity-50 ${className ?? ""}`}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -1007,33 +956,47 @@ export function ProjectOverview() {
                     )}
                     {/* Archive + Download + Lifecycle moved into overflow menu */}
                     {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
-                      <OverflowMenu>
-                        {canManage && (
-                          <OverflowItem
-                            onClick={handleDownloadBundle}
-                            disabled={busy || (project?.files.length ?? 0) === 0}
-                          >
-                            Download deliverable
-                          </OverflowItem>
-                        )}
-                        {canToggleLifecycle && (
-                          <OverflowItem
-                            onClick={handleToggleLifecycle}
-                            disabled={lifecycleBusy}
-                          >
-                            {isFrozen ? "Mark as Active" : "Mark as Inactive"}
-                          </OverflowItem>
-                        )}
-                        {isOwner && (
-                          <OverflowItem
-                            onClick={handleArchive}
-                            disabled={busy}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            Archive
-                          </OverflowItem>
-                        )}
-                      </OverflowMenu>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="outline"
+                              aria-label="More actions"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent align="end" className="min-w-40">
+                          {canManage && (
+                            <DropdownMenuItem
+                              onClick={handleDownloadBundle}
+                              disabled={busy || (project?.files.length ?? 0) === 0}
+                            >
+                              Download deliverable
+                            </DropdownMenuItem>
+                          )}
+                          {canToggleLifecycle && (
+                            <DropdownMenuItem
+                              onClick={handleToggleLifecycle}
+                              disabled={lifecycleBusy}
+                            >
+                              {isFrozen ? "Mark as Active" : "Mark as Inactive"}
+                            </DropdownMenuItem>
+                          )}
+                          {isOwner && (
+                            <DropdownMenuItem
+                              onClick={handleArchive}
+                              disabled={busy}
+                              variant="destructive"
+                            >
+                              Archive
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
                   </div>
                 </div>

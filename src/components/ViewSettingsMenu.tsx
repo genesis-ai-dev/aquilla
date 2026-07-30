@@ -1,5 +1,5 @@
 import { useState, forwardRef, useImperativeHandle, type ReactNode, type RefObject } from "react"
-import { AlertTriangle, Eye, X } from "lucide-react"
+import { AlertTriangle, Settings, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Label } from "@/components/ui/label"
@@ -176,7 +176,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                   aria-label="Editor settings"
                   className={cn(hideTrigger ? "sr-only" : "relative")}
                 >
-                  <Eye className="h-4 w-4" />
+                  <Settings className="h-4 w-4" />
                 </Button>
               }
             />

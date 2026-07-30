@@ -76,6 +76,7 @@ import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
+  MAX_SELECTED,
   clearSelection,
   getSelectedIds,
   getSelectionAnchorId,
@@ -1154,8 +1155,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const focus = clampIndex(focusIndex, list.length)
     if (anchor < 0 || focus < 0) return
 
-    const start = Math.min(anchor, focus)
-    const end = Math.max(anchor, focus)
+    const start = focus >= anchor
+      ? anchor
+      : Math.max(focus, anchor - MAX_SELECTED + 1)
+    const end = focus >= anchor
+      ? Math.min(focus, anchor + MAX_SELECTED - 1)
+      : anchor
     const ids = list.slice(start, end + 1)
     setSelection(ids, list[anchor] ?? ids[0] ?? null)
   }, [])

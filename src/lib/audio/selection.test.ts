@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 
 import {
+  MAX_SELECTED,
   clearSelection,
   getSelectedIds,
   setSelection,
@@ -12,16 +13,16 @@ describe("cell selection", () => {
     clearSelection()
   })
 
-  it("setSelection keeps the full range (no 20-cell cap)", () => {
+  it("setSelection stops at MAX_SELECTED", () => {
     const ids = Array.from({ length: 25 }, (_, i) => `cell-${i}`)
     setSelection(ids)
-    expect(getSelectedIds().size).toBe(25)
+    expect(getSelectedIds().size).toBe(MAX_SELECTED)
   })
 
-  it("toggleSelected can grow past 20 cells", () => {
-    for (let i = 0; i < 22; i += 1) {
+  it("toggleSelected cannot grow past MAX_SELECTED", () => {
+    for (let i = 0; i < MAX_SELECTED + 2; i += 1) {
       toggleSelected(`cell-${i}`)
     }
-    expect(getSelectedIds().size).toBe(22)
+    expect(getSelectedIds().size).toBe(MAX_SELECTED)
   })
 })

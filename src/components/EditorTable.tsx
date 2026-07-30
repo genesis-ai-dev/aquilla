@@ -159,11 +159,19 @@ import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
-import { hasMeaningfulRichText, prepareReadOnlyRichTextHtml } from "@/lib/richtext/editor-content"
+import {
+  hasMeaningfulRichText,
+  prepareReadOnlyRichTextHtml,
+  sanitizeIdmlEditorHtml,
+} from "@/lib/richtext/editor-content"
 import {
   resolveIdmlEditorConfiguration,
   validateIdmlEditorCommit,
 } from "@/lib/richtext/idml-editor"
+import {
+  idmlPointerSelectionFromPoint,
+  type IdmlPointerSelection,
+} from "@/lib/richtext/idml-caret"
 import { findTermMatches } from "@/lib/richtext/terminology-chip-plugin"
 import {
   useCellPresence,
@@ -3254,6 +3262,20 @@ function TargetRichHtml({
   )
 }
 
+function TargetIdmlHtml({ html }: { html: string }) {
+  const safeHtml = useMemo(() => sanitizeIdmlEditorHtml(html), [html])
+  const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
+  return (
+    <div
+      // Keep canonical slot identities in the read surface so a pointer click
+      // can survive the subsequent ProseMirror remount without flattening
+      // ambiguous adjacent style runs into one text offset.
+      // eslint-disable-next-line react/no-danger
+      dangerouslySetInnerHTML={innerHtml}
+    />
+  )
+}
+
 function TargetReadText({
   text,
   ranges,
@@ -3633,6 +3655,7 @@ function EditorRow({
   const rowRef = useRef<HTMLDivElement | null>(null)
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
+  const pendingIdmlPointerSelectionRef = useRef<IdmlPointerSelection | null>(null)
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -4308,8 +4331,9 @@ function EditorRow({
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
-  const requestTargetEdit = useCallback(() => {
+  const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
     if (!editable || isLoading || lockHolderLabel) return
+    pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
     onActivateEditor(cell.id)
   }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
 
@@ -5384,7 +5408,9 @@ function EditorRow({
               onClick={(event) => {
                 if (isEditorActive) return
                 event.stopPropagation()
-                requestTargetEdit()
+                requestTargetEdit(idmlConfiguration
+                  ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
+                  : null)
               }}
               className={cn(
                 "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
@@ -5400,6 +5426,10 @@ function EditorRow({
                     initialPlain={visibleTranslated}
                     initialHtml={visibleTranslatedHtml}
                     idmlConfiguration={idmlConfiguration}
+                    initialIdmlSelection={pendingIdmlPointerSelectionRef.current}
+                    onInitialIdmlSelectionApplied={() => {
+                      pendingIdmlPointerSelectionRef.current = null
+                    }}
                     onIdmlValidationError={setWriteError}
                     // AQU-667: only authoritative when we're not masking it with a
                     // local human draft — then `visibleTranslated` IS cell.translated.
@@ -5459,7 +5489,9 @@ function EditorRow({
                     )}
                     onClick={(event) => {
                       event.stopPropagation()
-                      requestTargetEdit()
+                      requestTargetEdit(idmlConfiguration
+                        ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
+                        : null)
                     }}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter") return
@@ -5473,6 +5505,8 @@ function EditorRow({
                         <span data-remote-presence-draft>
                           {remoteDraftText || "\u200b"}
                         </span>
+                      ) : idmlConfiguration && visibleTranslatedHtml ? (
+                        <TargetIdmlHtml html={visibleTranslatedHtml} />
                       ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
                           html={visibleTranslatedHtml}

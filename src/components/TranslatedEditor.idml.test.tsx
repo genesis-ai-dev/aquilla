@@ -164,6 +164,40 @@ describe("TranslatedEditor — protected IDML mode", () => {
     }))
   })
 
+  it("restores a populated read-view click before typing and preserves IDML spacing", async () => {
+    const onCommit = vi.fn()
+    const onInitialIdmlSelectionApplied = vi.fn()
+    const targetHtml = SOURCE_HTML.replace(">Source</span>", ">one  two</span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-pointer-activation"
+        initialPlain={"one  two\tSecond"}
+        initialHtml={targetHtml}
+        idmlConfiguration={CONFIGURATION}
+        initialIdmlSelection={{ kind: "plain", offset: 5 }}
+        onInitialIdmlSelectionApplied={onInitialIdmlSelectionApplied}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.keyDown(surface, { key: "X" })
+      fireEvent.blur(surface)
+    })
+
+    expect(editor.getText()).toBe("one  Xtwo\tSecond")
+    expect(surface).toHaveClass("whitespace-pre-wrap")
+    expect(onInitialIdmlSelectionApplied).toHaveBeenCalledTimes(1)
+    expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({
+      value: "one  Xtwo\tSecond",
+      valueHtml: expect.stringContaining(">one  Xtwo</span>"),
+    }))
+  })
+
   it("keeps same-slot pointer clicks inside ProseMirror's real text positions", async () => {
     const { container } = render(
       <TranslatedEditor

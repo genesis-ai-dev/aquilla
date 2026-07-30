@@ -396,6 +396,59 @@ export class Workspace {
     await this.commitTargetCellEdit(index, `${firstText}${secondText}`)
   }
 
+  /**
+   * Activate a populated IDML cell at an exact read-view text offset. This exercises
+   * the read-view → ProseMirror remount boundary from a single real pointer
+   * click; a second editor click would hide activation-placement regressions.
+   */
+  async editIdmlCellAtTextOffset(
+    index: number,
+    textOffset: number,
+    insertedText: string,
+    expectedText: string,
+  ): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const readView = this.targetReadView(index)
+    await expect(readView).toBeVisible({ timeout: 10_000 })
+
+    const point = await readView.evaluate((element, offset) => {
+      const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      let remaining = offset
+      let node: Text | null = null
+      let nodeOffset = 0
+      while (walker.nextNode()) {
+        const candidate = walker.currentNode as Text
+        if (remaining <= candidate.data.length) {
+          node = candidate
+          nodeOffset = remaining
+          break
+        }
+        remaining -= candidate.data.length
+      }
+      if (!node) throw new Error(`IDML slot has no text position at offset ${offset}`)
+      const range = element.ownerDocument.createRange()
+      range.setStart(node, nodeOffset)
+      range.collapse(true)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return { x: rect.left, y: rect.top + Math.max(1, rect.height / 2) }
+    }, textOffset)
+
+    await this.page.mouse.click(point.x, point.y)
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await expect.poll(() => target.evaluate((surface) => {
+      const editor = (surface as HTMLElement & {
+        editor?: { state: { selection: { $from: { parentOffset: number } } } }
+      }).editor
+      return editor?.state.selection.$from.parentOffset ?? -1
+    })).toBe(textOffset)
+
+    await this.page.keyboard.type(insertedText)
+    await this.commitTargetCellEdit(index, expectedText)
+  }
+
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
     const target = await this.activateTargetCell(index)

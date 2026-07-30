@@ -36,6 +36,8 @@ import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
   idmlEditableSlotPosition,
+  idmlEditableSlotOffsetPosition,
+  idmlEditablePlainOffsetPosition,
   idmlDiagnosticMessage,
   idmlEditorExtensions,
   isEditableIdmlSelection,
@@ -43,6 +45,7 @@ import {
   serializeIdmlEditorDocument,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
+import type { IdmlPointerSelection } from "@/lib/richtext/idml-caret"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
@@ -204,6 +207,9 @@ interface TranslatedEditorProps {
   initialPlain: string
   /** Strict IDML v2 editing contract. Invalid/future metadata is fail-closed. */
   idmlConfiguration?: IdmlEditorConfiguration | null
+  /** Pointer-derived slot position captured before the read view is replaced. */
+  initialIdmlSelection?: IdmlPointerSelection | null
+  onInitialIdmlSelectionApplied?: () => void
   /** Receives actionable protected-anchor errors for the parent row banner. */
   onIdmlValidationError?: (message: string | null) => void
   /**
@@ -302,6 +308,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   initialHtml,
   initialPlain,
   idmlConfiguration = null,
+  initialIdmlSelection = null,
+  onInitialIdmlSelectionApplied,
   onIdmlValidationError,
   aiDrafted = false,
   onCommit,
@@ -354,6 +362,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => { showFootnoteTooltipsRef.current = showFootnoteTooltips }, [showFootnoteTooltips])
   const onFootnoteHoverRef = useRef(onFootnoteHover)
   useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
+  const initialIdmlSelectionRef = useRef(initialIdmlSelection)
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
   const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
   const idmlCompositionRangeRef = useRef<IdmlInsertedRange | null>(null)
@@ -539,6 +548,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const editor = useEditor({
     editable: !isReadOnly,
     content: initialContent,
+    // IDML click offsets are source-artifact offsets. Preserve every space so
+    // the rendered geometry, DOM range, and ProseMirror position stay aligned.
+    parseOptions: idmlContext ? { preserveWhitespace: "full" } : {},
     extensions: [
       StarterKit.configure({
         ...(idmlContext ? { document: false } : {}),
@@ -592,6 +604,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           compactHeight
             ? "prose prose-sm max-w-none px-1 py-0 leading-snug focus:outline-none"
             : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
+          idmlContext && "whitespace-pre-wrap",
           "rounded-lg transition-colors",
           className
         ),
@@ -964,7 +977,21 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     },
     onFocus({ editor }) {
       applyEditorDirection(editor)
-      if (idmlContext && !isEditableIdmlSelection(editor.state.selection)) {
+      const pointerSelection = initialIdmlSelectionRef.current
+      initialIdmlSelectionRef.current = null
+      if (idmlContext && pointerSelection) {
+        const position = pointerSelection.kind === "slot"
+          ? idmlEditableSlotOffsetPosition(
+              editor.state.doc,
+              pointerSelection.slot,
+              pointerSelection.offset,
+            )
+          : idmlEditablePlainOffsetPosition(editor.state.doc, pointerSelection.offset)
+        const safePosition = position
+          ?? idmlEditableSlotPosition(editor.state.doc, undefined, "end")
+        if (safePosition !== null) editor.commands.setTextSelection(safePosition)
+        onInitialIdmlSelectionApplied?.()
+      } else if (idmlContext && !isEditableIdmlSelection(editor.state.selection)) {
         // Read-view activation mounts a fresh editor after the original click,
         // so there is no pointer position to preserve. Use ProseMirror's real
         // end-of-slot position: populated targets append where users expect,
@@ -1194,7 +1221,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     const wasFocused = editor.isFocused
     lastHydratedPlainRef.current = initialPlain
     lastHydratedContentRef.current = initialContent
-    editor.commands.setContent(initialContent)
+    editor.commands.setContent(initialContent, {
+      parseOptions: idmlContext ? { preserveWhitespace: "full" } : {},
+    })
     // Our own hydration must not schedule a phantom commit: clear any idle timer
     // / pending snapshot the setContent onUpdate may have armed, so a stray
     // commit can't fire the just-absorbed value back through the write path.

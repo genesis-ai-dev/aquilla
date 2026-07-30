@@ -1,5 +1,4 @@
 import type { RefObject, ReactNode } from "react"
-import { ButtonGroup } from "@/components/ui/button-group"
 import { CheckFileButton } from "@/components/CheckFileButton"
 import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
@@ -38,26 +37,22 @@ export function FileChapterToolbar({
         onChange={onLensChange}
         timeOrdered={timeOrdered}
       />
-      <ButtonGroup className="shadow-xs">
-        <CheckFileButton
-          grouped
-          checkOpen={checkOpen}
-          checkRunning={checkRunning}
-          checkResult={checkResult}
-          onToggle={onCheckToggle}
-        />
-        <OverflowMenu
-          inButtonGroup
-          items={menuItems}
-          triggerRef={fileOptionsAnchorRef}
-          triggerVariant="outline"
-          triggerSize="icon"
-          triggerClassName="bg-card"
-          tooltip="File options"
-          ariaLabel="File options"
-          testId="file-options-menu"
-        />
-      </ButtonGroup>
+      <CheckFileButton
+        checkOpen={checkOpen}
+        checkRunning={checkRunning}
+        checkResult={checkResult}
+        onToggle={onCheckToggle}
+      />
+      <OverflowMenu
+        items={menuItems}
+        triggerRef={fileOptionsAnchorRef}
+        triggerVariant="outline"
+        triggerSize="icon"
+        triggerClassName="bg-card shadow-xs"
+        tooltip="File options"
+        ariaLabel="File options"
+        testId="file-options-menu"
+      />
       {viewSettingsMenu}
     </div>
   )

@@ -46,8 +46,15 @@ export function RailButton({
     <div className="relative">
       <button
         type="button"
-        title={tooltip}
-        data-tooltip={import.meta.env.MODE === "test" ? tooltip : undefined}
+        // AQU-755: register as a delegated tooltip trigger so the shared
+        // DelegatedTooltipLayer (mounted by the editor grid's
+        // TooltipDelegationBoundary) shows a styled tooltip on hover AND on
+        // keyboard focus. Native `title` alone never surfaces on focus and was
+        // the reason these rail buttons read as unexplained. `data-tooltip` is
+        // set unconditionally now (it doubles as the e2e/test hook); no `title`,
+        // so the delegated tooltip is the single source and never double-renders.
+        data-slot="tooltip-trigger"
+        data-tooltip={tooltip}
         onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.() }}
         onMouseDown={onMouseDown}
         onMouseEnter={onMouseEnter}

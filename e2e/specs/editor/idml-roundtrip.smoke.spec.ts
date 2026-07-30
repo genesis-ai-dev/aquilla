@@ -13,7 +13,10 @@ const TALL_SOURCE = [
   "This deliberately long source paragraph makes the opposite empty target well taller than one line. ".repeat(12),
 ].join(" ")
 
-async function writeIdmlFixture(filePath: string): Promise<void> {
+async function writeIdmlFixture(
+  filePath: string,
+  headingStyle = "ParagraphStyle/Heading",
+): Promise<void> {
   const zip = new JSZip()
   zip.file("mimetype", IDML_MIME, { compression: "STORE", createFolders: false })
   zip.file(
@@ -36,7 +39,7 @@ async function writeIdmlFixture(filePath: string): Promise<void> {
     [
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`,
       `<idPkg:Story ${IDPKG}><Story Self="u100">`,
-      '<ParagraphStyleRange Self="heading" AppliedParagraphStyle="ParagraphStyle/Heading">',
+      `<ParagraphStyleRange Self="heading" AppliedParagraphStyle="${headingStyle}">`,
       `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>${TALL_SOURCE}</Content></CharacterStyleRange>`,
       "</ParagraphStyleRange>",
       '<ParagraphStyleRange Self="mixed" AppliedParagraphStyle="ParagraphStyle/Body">',
@@ -91,6 +94,18 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await expect(
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)
+
+  // A lossless re-import can advance the source event for IDML structure while
+  // retaining exactly the same translatable source text. That must preserve
+  // the target without raising the source-changed warning (AQU-741).
+  await writeIdmlFixture(fixture, "ParagraphStyle/HeadingReimported")
+  await ws.reimportFile(fixture)
+  await alice.reload()
+  await ws.openFileBySubstring("protected-roundtrip")
+  await ws.waitForEditor()
+  await expect(ws.cellRow(0)).toContainText("Chapitre Un — suite")
+  await expect(alice.getByTestId("stale-source-indicator")).toHaveCount(0)
+
   await ws.openExportDialog()
 
   const dialog = alice.getByRole("dialog")

@@ -1,56 +1,52 @@
 import { describe, it, expect } from "vitest"
 import { findNextUnfinishedIndex } from "./useNextUnfinished"
 
-function mkCell(translated: string, validators: string[]) {
-  return { translated, activeValidators: validators } as any
+function mkCell(translated: string) {
+  return { translated } as any
 }
 
 describe("findNextUnfinishedIndex", () => {
   it("returns -1 for empty list", () => {
-    expect(findNextUnfinishedIndex([], 0, 1)).toBe(-1)
+    expect(findNextUnfinishedIndex([], 0)).toBe(-1)
   })
 
-  it("returns -1 when everything is finished", () => {
-    const cells = [
-      mkCell("done", ["a"]),
-      mkCell("done", ["a"]),
-    ]
-    expect(findNextUnfinishedIndex(cells, 0, 1)).toBe(-1)
+  it("returns -1 when every cell has target text", () => {
+    const cells = [mkCell("done"), mkCell("done")]
+    expect(findNextUnfinishedIndex(cells, 0)).toBe(-1)
   })
 
   it("finds the first untranslated cell after cursor", () => {
-    const cells = [
-      mkCell("done", ["a"]),
-      mkCell("", []),
-      mkCell("done", ["a"]),
-    ]
-    expect(findNextUnfinishedIndex(cells, 0, 1)).toBe(1)
+    const cells = [mkCell("done"), mkCell(""), mkCell("done")]
+    expect(findNextUnfinishedIndex(cells, 0)).toBe(1)
   })
 
-  it("finds the first cell below threshold after cursor", () => {
+  // AQU-738: validation state must NOT make a cell a jump target. With cells
+  // 0–4 translated-but-unvalidated and cell 5 empty, the jump skips straight
+  // past the translated work to the genuinely empty cell.
+  it("skips translated-but-unvalidated cells and lands on the empty one", () => {
     const cells = [
-      mkCell("done", ["a", "b"]),
-      mkCell("done", ["a"]),          // below threshold of 2
-      mkCell("done", ["a", "b"]),
+      mkCell("t1"),
+      mkCell("t2"),
+      mkCell("t3"),
+      mkCell("t4"),
+      mkCell("t5"),
+      mkCell(""),
     ]
-    expect(findNextUnfinishedIndex(cells, 0, 2)).toBe(1)
+    expect(findNextUnfinishedIndex(cells, 0)).toBe(5)
+  })
+
+  it("counts a whitespace-only target as unfinished", () => {
+    const cells = [mkCell("done"), mkCell("   \n\t"), mkCell("done")]
+    expect(findNextUnfinishedIndex(cells, 0)).toBe(1)
   })
 
   it("wraps to start when nothing unfinished after cursor", () => {
-    const cells = [
-      mkCell("", []),                 // unfinished at 0
-      mkCell("done", ["a"]),
-      mkCell("done", ["a"]),
-    ]
-    expect(findNextUnfinishedIndex(cells, 1, 1)).toBe(0)
+    const cells = [mkCell(""), mkCell("done"), mkCell("done")]
+    expect(findNextUnfinishedIndex(cells, 1)).toBe(0)
   })
 
   it("returns -1 when cursor is on the only unfinished cell and nothing else is unfinished", () => {
-    const cells = [
-      mkCell("done", ["a"]),
-      mkCell("", []),
-      mkCell("done", ["a"]),
-    ]
-    expect(findNextUnfinishedIndex(cells, 1, 1)).toBe(-1)
+    const cells = [mkCell("done"), mkCell(""), mkCell("done")]
+    expect(findNextUnfinishedIndex(cells, 1)).toBe(-1)
   })
 })

@@ -1,14 +1,17 @@
 import { useMemo } from "react"
 import type { CellData } from "./useCells"
 
-type UnfinishedCellShape = Pick<CellData, "translated" | "activeValidators">
+type UnfinishedCellShape = Pick<CellData, "translated">
 
-function isUnfinished(
-  cell: UnfinishedCellShape,
-  validationCount: number,
-): boolean {
-  if (!cell.translated || !cell.translated.trim()) return true
-  return (cell.activeValidators?.length ?? 0) < validationCount
+/**
+ * AQU-738: a cell is "unfinished" only when its target text is empty or
+ * whitespace. Validation state must NOT make a cell a jump target — with the
+ * common 1-required-validation setting, treating unvalidated cells as
+ * unfinished walked the translator line-by-line through work they'd already
+ * done instead of taking them to the next untranslated line.
+ */
+function isUnfinished(cell: UnfinishedCellShape): boolean {
+  return !cell.translated || !cell.translated.trim()
 }
 
 /**
@@ -19,13 +22,12 @@ function isUnfinished(
 export function findNextUnfinishedIndex(
   cells: readonly UnfinishedCellShape[],
   fromIndex: number,
-  validationCount: number,
 ): number {
   if (cells.length === 0) return -1
   for (let offset = 1; offset <= cells.length; offset++) {
     const idx = (fromIndex + offset) % cells.length
     if (idx === fromIndex) break
-    if (isUnfinished(cells[idx], validationCount)) return idx
+    if (isUnfinished(cells[idx])) return idx
   }
   return -1
 }
@@ -35,12 +37,12 @@ export function findNextUnfinishedIndex(
  * click. Kept separate from the pure function so the pure path is
  * independently testable.
  */
-export function useNextUnfinished(cells: readonly UnfinishedCellShape[], validationCount: number) {
+export function useNextUnfinished(cells: readonly UnfinishedCellShape[]) {
   return useMemo(() => {
-    const hasAny = cells.some((c) => isUnfinished(c, validationCount))
+    const hasAny = cells.some((c) => isUnfinished(c))
     return {
       hasAny,
-      findNext: (fromIndex: number) => findNextUnfinishedIndex(cells, fromIndex, validationCount),
+      findNext: (fromIndex: number) => findNextUnfinishedIndex(cells, fromIndex),
     }
-  }, [cells, validationCount])
+  }, [cells])
 }

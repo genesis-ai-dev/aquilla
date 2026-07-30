@@ -4,8 +4,9 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * Next-unfinished navigation action.
  *
- * `useNextUnfinished` scans cells for any that are unfinished (no translated
- * text, or fewer than validationCount validators). AQU-331 moved the action
+ * `useNextUnfinished` scans cells for any that are unfinished. AQU-738: a cell
+ * is unfinished ONLY when its target text is empty/whitespace — validation
+ * state never makes a cell a jump target. AQU-331 moved the action
  * from a toolbar button into the workspace header "More" overflow menu as the
  * "Next unfinished" menu item; it is disabled when there is no active file or
  * no unfinished cell. Selecting it scrolls the list to the next

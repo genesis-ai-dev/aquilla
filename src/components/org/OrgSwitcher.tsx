@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Building2, Check, ChevronDown, Plus, SearchIcon } from "lucide-react"
+import { Building2, Check, ChevronDown, Plus, SearchIcon, X } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
@@ -9,6 +9,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
 import {
@@ -19,9 +20,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 
 const ORG_MENU_ITEM_CLASS =
-  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5"
+  // hover: only — Base UI highlight-on-hover would steal focus from the search input.
+  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5 hover:bg-accent"
+
+/** Muted meta (role / "All projects") — `!` beats menu `focus:**:text-accent-foreground`. */
+const ORG_MENU_META_CLASS = "text-xs text-muted-foreground!"
 
 /** ~10 org rows (py-1.5 + text-sm ≈ 2rem each). */
 const ORG_LIST_MAX_HEIGHT_CLASS = "max-h-80"
@@ -51,7 +62,7 @@ function OrgMark({
         menuSafeColor="var(--muted-foreground)"
         fallbackClassName="bg-muted"
       >
-        <Plus className="size-3" />
+        <Plus className="size-3 text-muted-foreground!" aria-hidden />
       </InitialsAvatar>
     )
   }
@@ -62,10 +73,12 @@ function OrgMark({
         size="xs"
         shape="square"
         menuSafe
-        menuSafeColor="var(--primary-foreground)"
+        menuSafeColor="#000"
         fallbackClassName="bg-primary"
       >
-        <Building2 className="size-3" />
+        {/* color on the SVG itself — menu `focus:**:text-accent-foreground` paints
+            descendants light on press; parent color alone cannot beat that. */}
+        <Building2 className="size-3 text-black!" color="#000" aria-hidden />
       </InitialsAvatar>
     )
   }
@@ -82,6 +95,13 @@ export function OrgSwitcher() {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    // Keep typing in the filter; menu open otherwise focuses the first item.
+    queueMicrotask(() => searchInputRef.current?.focus())
+  }, [open])
 
   // AQU-624: a guest org isn't a membership, so it can't become the `activeOrg`
   // without misrepresenting the caller's role (AQU-473). Instead we treat the
@@ -114,8 +134,7 @@ export function OrgSwitcher() {
     () => guestOrgs.filter((g) => orgMatchesSearch(g.name ?? `Org #${g.id}`, search)),
     [guestOrgs, search],
   )
-  const showAllOrgsRow =
-    showAllOrgs && orgMatchesSearch("All organizations", search)
+  const showAllOrgsRow = showAllOrgs && search.trim() === ""
   const listEmpty =
     !showAllOrgsRow && filteredOrgs.length === 0 && filteredGuestOrgs.length === 0
 
@@ -125,7 +144,7 @@ export function OrgSwitcher() {
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen)
-    if (!nextOpen) setSearch("")
+    if (nextOpen) setSearch("")
   }
 
   function handleAllOrgs() {
@@ -169,7 +188,7 @@ export function OrgSwitcher() {
 
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+      <DropdownMenu open={open} onOpenChange={handleOpenChange} highlightItemOnHover={false}>
         <DropdownMenuTrigger
           render={
             <button
@@ -180,47 +199,93 @@ export function OrgSwitcher() {
           }
         >
           <OrgMark name={title} allOrgs={!guestSelected && isAllOrgs} />
-          <span className="truncate font-medium">{title}</span>
+          <span className="truncate">{title}</span>
           <ChevronDown className="ml-auto size-4 opacity-50" />
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          className="w-72 overflow-hidden rounded-lg p-0"
+          className="w-72 overflow-hidden rounded-lg p-0 flex flex-col"
           align="start"
           side="bottom"
           sideOffset={4}
         >
-          {/* Borderless search — matches keean-changes ChapterNavigator ComboboxInput. */}
-          <InputGroup className="h-8 w-auto rounded-none border-0 bg-transparent shadow-none outline-none ring-0 *:data-[slot=input-group-addon]:pl-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!">
-            <InputGroupAddon align="inline-start">
+          {/* Icon column matches list rows: p-1 + px-2 inset, then 1.25rem avatar slot. */}
+          <InputGroup className="h-10 w-auto rounded-none border-0 bg-transparent shadow-none outline-none dark:bg-transparent ring-0 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!">
+            <InputGroupAddon
+              align="inline-start"
+              className="ml-3 w-5 justify-center p-0!"
+            >
               <SearchIcon className="size-4 text-muted-foreground" />
             </InputGroupAddon>
             <InputGroupInput
+              ref={searchInputRef}
               placeholder="Find an organization…"
               aria-label="Find an organization"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  handleOpenChange(false)
+                  return
+                }
+                e.stopPropagation()
+              }}
               onClick={(e) => e.stopPropagation()}
             />
+            {search ? (
+              <InputGroupAddon
+                align="inline-end"
+                // Match Create row inset (list `p-1` + item `px-2`); kill addon’s
+                // default `has-[>button]:mr-[-0.3rem]` that pulls the X flush.
+                className="p-0! pr-2! has-[>button]:mr-0!"
+              >
+                <InputGroupButton
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Clear search"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSearch("")
+                    searchInputRef.current?.focus()
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <X />
+                </InputGroupButton>
+              </InputGroupAddon>
+            ) : null}
           </InputGroup>
           <DropdownMenuSeparator className="mx-0 my-0" />
           <div
             role="presentation"
-            className={`${ORG_LIST_MAX_HEIGHT_CLASS} overflow-y-auto overscroll-contain p-1 scrollbar-thin`}
+            className={`${ORG_LIST_MAX_HEIGHT_CLASS} overflow-y-auto overscroll-contain p-1 scrollbar-thin flex-1 flex flex-col`}
           >
             {listEmpty ? (
-              <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-                No organizations found.
-              </p>
+              <Empty className="min-h-32 border-0 p-4 gap-2">
+                <EmptyHeader>
+                  <EmptyMedia
+                    variant="icon"
+                    className="mb-0 border border-border bg-transparent text-muted-foreground"
+                  >
+                    <SearchIcon />
+                  </EmptyMedia>
+                  <EmptyTitle className="text-muted-foreground font-normal">
+                    No organizations found.
+                  </EmptyTitle>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <>
                 <DropdownMenuGroup>
                   {showAllOrgsRow && (
-                    <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={handleAllOrgs}>
+                    <DropdownMenuItem
+                      className={`${ORG_MENU_ITEM_CLASS} focus:[&_[data-slot=avatar]_svg]:text-black! data-highlighted:[&_[data-slot=avatar]_svg]:text-black!`}
+                      onClick={handleAllOrgs}
+                    >
                       <OrgMark name="All organizations" allOrgs />
                       <span className="truncate">All organizations</span>
                       <span className="flex shrink-0 items-center gap-1.5">
-                        <span className="text-xs text-muted-foreground">All projects</span>
+                        <span className={ORG_MENU_META_CLASS}>All projects</span>
                         {!guestSelected && isAllOrgs && <Check className="size-4 opacity-60" />}
                       </span>
                     </DropdownMenuItem>
@@ -237,7 +302,7 @@ export function OrgSwitcher() {
                         <OrgMark name={name} />
                         <span className="truncate">{name}</span>
                         <span className="flex shrink-0 items-center gap-1.5">
-                          <RoleLabel name={o.role.name} className="text-xs text-muted-foreground" />
+                          <RoleLabel name={o.role.name} className={ORG_MENU_META_CLASS} />
                           {selected && <Check className="size-4 opacity-60" />}
                         </span>
                       </DropdownMenuItem>
@@ -257,7 +322,7 @@ export function OrgSwitcher() {
                           <OrgMark name={g.name ?? `Org #${g.id}`} />
                           <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
                           <span className="flex shrink-0 items-center gap-1.5">
-                            <RoleLabel name="guest" className="text-xs text-muted-foreground" />
+                            <RoleLabel name="guest" className={ORG_MENU_META_CLASS} />
                             {selectedGuestOrgId === g.id && <Check className="size-4 opacity-60" />}
                           </span>
                         </DropdownMenuItem>
@@ -272,7 +337,7 @@ export function OrgSwitcher() {
           <div role="presentation" className="p-1">
             <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={openCreateDialog}>
               <OrgMark name="Create" create />
-              <span className="truncate text-muted-foreground">Create</span>
+              <span className="truncate text-muted-foreground!">Create</span>
               <span aria-hidden />
             </DropdownMenuItem>
           </div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, Trash2, X } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppTooltip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -9,7 +9,10 @@ import {
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { RoleLabel } from "@/components/RoleLabel";
 import { roleDisplayText } from "@/lib/frontier/roles";
-import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
+import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
+import type { UserSearchResult } from "@/hooks/useUserSearch";
+
+export type { MemberAddOutcome } from "@/components/MemberMultiAddRow";
 
 /** AQU-553: a single lane/file scope on a member. */
 export interface MemberScopeValue {
@@ -58,27 +61,6 @@ export interface MembersPanelRoleOption {
   description: string;
 }
 
-/**
- * AQU-734: per-person outcome of a batch add, mirrored from the server's
- * non-atomic `results`. `error` is a human-readable reason for a single failed
- * grant (already a member, unknown user, insufficient permission) — the panel
- * names only the people who failed and keeps them staged for a retry.
- */
-export interface MemberAddOutcome {
-  username: string;
-  ok: boolean;
-  error?: string;
-}
-
-/** AQU-734: a person staged to be added. `id` is set when picked from search. */
-interface StagedRecipient {
-  username: string;
-  id?: number;
-}
-
-const sameName = (a: string, b: string) =>
-  a.trim().toLowerCase() === b.trim().toLowerCase();
-
 interface MembersPanelProps {
   members: MembersPanelMember[];
   roleOptions: MembersPanelRoleOption[];
@@ -111,6 +93,13 @@ interface MembersPanelProps {
    * lane/file scopes editor for scopable members (roleLevel < 500).
    */
   scopeConfig?: MembersPanelScopeConfig;
+  /**
+   * Eligible-colleague rows offered by the add typeahead before any search —
+   * e.g. org members without a direct grant. See UsernameTypeahead.
+   */
+  suggestions?: readonly UserSearchResult[];
+  /** Shown when `suggestions` is provided but empty and nothing is typed. */
+  emptySuggestionsHint?: string;
 }
 
 export function MembersPanel({
@@ -124,106 +113,24 @@ export function MembersPanel({
   callerMaxRole,
   scopedUserSearch = true,
   scopeConfig,
+  suggestions,
+  emptySuggestionsHint,
 }: MembersPanelProps) {
   // AQU-553: the scopes editor is shown only when project context is supplied
   // AND the caller is a lead+ (500). Leads themselves are never scopable, so
   // per-row the editor is further gated on the member being below 500.
   const canManageScopes =
     scopeConfig != null && callerMaxRole >= SCOPE_MANAGE_MIN_ROLE;
-  // Typeahead-mode-only here. Email-mode is for project-link invites
-  // (handled in MultiProjectInviteDialog / SharePanel), not direct
-  // org-membership grants — `addOrgMember` requires a real Frontier
-  // user id, which we don't have for an unsigned-up email yet.
-  const [recipient, setRecipient] = useState<RecipientValue>({
-    mode: "username",
-    raw: "",
-  });
-  // AQU-734: people staged to be granted the role in a single batch Add. The
-  // search box (`recipient`) only holds the current query; picking checkboxes
-  // or pressing Enter accumulates people here so they survive new searches.
-  const [staged, setStaged] = useState<StagedRecipient[]>([]);
-  const [role, setRole] = useState(newMemberDefaultRole);
-  const [adding, setAdding] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
-
-  function stageOne(person: StagedRecipient) {
-    setStaged((prev) =>
-      prev.some((s) => sameName(s.username, person.username)) ? prev : [...prev, person],
-    );
-  }
-
-  function toggleStaged(person: StagedRecipient) {
-    setStaged((prev) =>
-      prev.some((s) => sameName(s.username, person.username))
-        ? prev.filter((s) => !sameName(s.username, person.username))
-        : [...prev, person],
-    );
-    setAddError(null);
-  }
-
-  function removeStaged(username: string) {
-    setStaged((prev) => prev.filter((s) => !sameName(s.username, username)));
-    setAddError(null);
-  }
-
-  function stageTyped() {
-    const name = recipient.raw.trim();
-    if (!name) return;
-    stageOne({ username: name });
-    setRecipient({ mode: "username", raw: "" });
-    setAddError(null);
-  }
-
-  /**
-   * The people a press of Add will grant. When chips are staged, the input is a
-   * search filter and its leftover text is ignored — what you see staged is
-   * what gets added. Only with no chips is the typed text treated as a
-   * free-typed username, so a single typed name still adds without an explicit
-   * Enter (matching the pre-multi-select behavior). To add a free-typed name
-   * alongside checked people, press Enter to stage it as a chip first.
-   */
-  function effectiveStaged(): StagedRecipient[] {
-    if (staged.length > 0) return staged;
-    const name = recipient.raw.trim();
-    return name ? [{ username: name }] : [];
-  }
-
-  async function handleAdd() {
-    const toAdd = effectiveStaged();
-    if (toAdd.length === 0) return;
-    setAdding(true);
-    setAddError(null);
-    let results: MemberAddOutcome[];
-    try {
-      results = await onAdd(
-        toAdd.map((s) => s.username),
-        role,
-      );
-    } catch {
-      setAdding(false);
-      setAddError("Could not add — please try again.");
-      return;
-    }
-    setAdding(false);
-    const succeeded = new Set(
-      results.filter((r) => r.ok).map((r) => r.username.toLowerCase()),
-    );
-    const failures = results.filter((r) => !r.ok);
-    // Keep only the people who failed staged so they can be corrected/retried;
-    // drop everyone who landed. Also clear the leftover search text.
-    setStaged(toAdd.filter((s) => !succeeded.has(s.username.toLowerCase())));
-    setRecipient({ mode: "username", raw: "" });
-    if (failures.length > 0) {
-      setAddError(formatFailures(failures));
-    } else {
-      setRole(newMemberDefaultRole);
-    }
-  }
 
   const grantableRoles = roleOptions.filter((r) => r.level <= callerMaxRole);
-  const existingUserIds = members.map((m) => m.userId);
-  const stagedUsernames = new Set(staged.map((s) => s.username.toLowerCase()));
-  const canAdd = staged.length > 0 || recipient.raw.trim().length > 0;
+  // People in `suggestions` stay searchable/checkable even when they appear in
+  // the roster — an org-access-only member is still grantable an explicit
+  // direct role (AQU-672 eligibility). Everyone else already listed is hidden
+  // from the typeahead as "already a member."
+  const suggestionIds = new Set((suggestions ?? []).map((u) => u.id));
+  const existingUserIds = members
+    .map((m) => m.userId)
+    .filter((id) => !suggestionIds.has(id));
 
   return (
     <div className="flex flex-col gap-4">
@@ -308,88 +215,17 @@ export function MembersPanel({
         })}
       </ul>
 
-      <div className="space-y-2">
-        {staged.length > 0 && (
-          <ul className="flex flex-wrap gap-1.5" aria-label="People to add">
-            {staged.map((s) => (
-              <li key={s.username}>
-                <span className="inline-flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 pl-2.5 pr-1 text-xs">
-                  <span className="max-w-[12rem] truncate">{s.username}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${s.username}`}
-                    onClick={() => removeStaged(s.username)}
-                    disabled={adding}
-                    className="flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_max-content_max-content] sm:items-start">
-          <div className="min-w-0">
-            <UsernameTypeahead
-              value={recipient}
-              onChange={setRecipient}
-              disabled={adding}
-              showModeToggle={false}
-              placeholder={{ username: "Aquilla username" }}
-              excludedUserIds={existingUserIds}
-              scopedSearch={scopedUserSearch}
-              multiSelect={{
-                stagedUsernames,
-                onToggleResult: (u) => toggleStaged({ username: u.username, id: u.id }),
-                onStageTyped: stageTyped,
-              }}
-            />
-          </div>
-          <Select
-            items={grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
-            value={String(role)}
-            onValueChange={(v) => setRole(parseInt(v ?? "", 10))}
-            disabled={adding}
-          >
-            <SelectTrigger aria-label="Role">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {grantableRoles.map((r) => (
-                  <SelectItem key={r.level} value={String(r.level)}>
-                    <RoleLabel name={r.name} />
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Button
-            className="sm:whitespace-nowrap"
-            onClick={handleAdd}
-            disabled={adding || !canAdd}
-          >
-            Add
-          </Button>
-        </div>
-        {addError && <p className="text-xs text-destructive">{addError}</p>}
-      </div>
+      <MemberMultiAddRow
+        roleOptions={grantableRoles}
+        defaultRole={newMemberDefaultRole}
+        onAdd={onAdd}
+        excludedUserIds={existingUserIds}
+        scopedUserSearch={scopedUserSearch}
+        suggestions={suggestions}
+        emptySuggestionsHint={emptySuggestionsHint}
+      />
     </div>
   );
-}
-
-/**
- * AQU-734: turn the failed entries of a batch add into a single honest
- * message that names each person who didn't land and why — so a partial
- * success ("2 of 3 added") never reads as an all-or-nothing failure.
- */
-function formatFailures(failures: MemberAddOutcome[]): string {
-  const parts = failures.map((f) =>
-    f.error ? `${f.username} (${f.error})` : f.username,
-  );
-  const noun = failures.length === 1 ? "person" : "people";
-  return `Couldn't add ${failures.length} ${noun}: ${parts.join(", ")}.`;
 }
 
 /**

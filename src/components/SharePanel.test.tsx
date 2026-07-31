@@ -11,14 +11,45 @@ import type { MembersPanelScopeConfig } from "./MembersPanel"
 
 // ─── Mocks ────────────────────────────────────────────────────────────────
 
-let lastMembersPanelProps: { scopeConfig?: MembersPanelScopeConfig } | null = null
+interface CapturedMembersPanelProps {
+  scopeConfig?: MembersPanelScopeConfig
+  suggestions?: Array<{ id: number; username: string }>
+  emptySuggestionsHint?: string
+}
+
+let lastMembersPanelProps: CapturedMembersPanelProps | null = null
 
 vi.mock("./MembersPanel", () => ({
-  MembersPanel: (props: { scopeConfig?: MembersPanelScopeConfig }) => {
+  MembersPanel: (props: CapturedMembersPanelProps) => {
     lastMembersPanelProps = props
     return null
   },
 }))
+
+// Org context + roster driving the eligible-colleague suggestions (AQU-672
+// parity in the Share modal). Defaults to "no org" so the pre-existing suites
+// keep their original conditions.
+const orgMocks = vi.hoisted(() => ({
+  activeOrgId: null as number | null,
+  roster: [] as Array<{ userId: number; username: string; role: { level: number; name: string } }>,
+}))
+
+vi.mock("@/context/OrgContext", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/context/OrgContext")>()
+  return {
+    ...original,
+    useActiveOrgOptional: () =>
+      orgMocks.activeOrgId == null ? null : { activeOrgId: orgMocks.activeOrgId },
+  }
+})
+
+vi.mock("@/lib/frontier/orgs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/frontier/orgs")>()
+  return {
+    ...original,
+    listOrgMembers: vi.fn(async () => orgMocks.roster),
+  }
+})
 
 const leadMembers = [
   { userId: 1, username: "alice", role: { level: 500, name: "project_lead", source: "override" as const }, secondarySources: [] },
@@ -140,8 +171,9 @@ describe("SharePanel — member scopes wiring", () => {
 
     expect(lastMembersPanelProps?.scopeConfig).toBeUndefined()
     expect(mockFetchProjectSettings).not.toHaveBeenCalled()
-    expect(mockResolveCloudProjectResult).not.toHaveBeenCalled()
     expect(mockFetchMemberScopes).not.toHaveBeenCalled()
+    // resolveCloudProjectResult is NOT asserted quiet here: it also serves
+    // useProjectOrgId (org-member suggestions), which runs for every caller.
   })
 
   it("fetches scopes for scopable (sub-500) members and feeds scopesByUser", async () => {
@@ -193,5 +225,66 @@ describe("SharePanel — member scopes wiring", () => {
     expect(lastMembersPanelProps!.scopeConfig!.lanes).toEqual([
       { value: "", label: "Default" },
     ])
+  })
+})
+
+// AQU-672 parity in the Share modal: the Members tab offers org colleagues as
+// checkbox suggestions before any search. Eligibility = org roster minus
+// project-level grants (direct/team/creator); org-access-only members stay
+// eligible so they can be given an explicit project role.
+describe("SharePanel — eligible org-member suggestions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    lastMembersPanelProps = null
+    mockMembers = leadMembers
+    orgMocks.activeOrgId = 7
+    orgMocks.roster = []
+    mockFetchProjectSettings.mockResolvedValue(null)
+    mockResolveCloudProjectResult.mockResolvedValue({ ok: false })
+    mockFetchMemberScopes.mockResolvedValue([])
+  })
+
+  it("passes org members without a project grant as suggestions", async () => {
+    // alice(1) + bob(2) hold direct grants; dana(5) is org-only → eligible.
+    orgMocks.roster = [
+      { userId: 1, username: "alice", role: { level: 600, name: "maintainer" } },
+      { userId: 2, username: "bob", role: { level: 400, name: "contributor" } },
+      { userId: 5, username: "dana", role: { level: 400, name: "contributor" } },
+    ]
+    renderPanel()
+
+    await waitFor(() => {
+      expect(lastMembersPanelProps?.suggestions).toEqual([{ id: 5, username: "dana" }])
+    })
+    expect(lastMembersPanelProps?.emptySuggestionsHint).toMatch(/already have access/i)
+  })
+
+  it("passes no suggestions without org context (personal project)", async () => {
+    orgMocks.activeOrgId = null
+    renderPanel()
+
+    await waitFor(() => {
+      expect(lastMembersPanelProps).not.toBeNull()
+    })
+    expect(lastMembersPanelProps?.suggestions).toBeUndefined()
+  })
+
+  it("prefers the project's own org over the active-org picker", async () => {
+    // Picker is on org 7 but the project belongs to org 9 — the roster must
+    // come from 9 (the picker may even be on \"All organizations\").
+    mockResolveCloudProjectResult.mockResolvedValue({
+      ok: true,
+      project: { id: "proj-1", name: "P", orgId: 9 },
+    })
+    orgMocks.roster = [
+      { userId: 5, username: "dana", role: { level: 400, name: "contributor" } },
+    ]
+    renderPanel()
+
+    await waitFor(() => {
+      expect(lastMembersPanelProps?.suggestions).toEqual([{ id: 5, username: "dana" }])
+    })
+    const { listOrgMembers } = await import("@/lib/frontier/orgs")
+    expect(vi.mocked(listOrgMembers)).toHaveBeenCalledWith("test-jwt", 9)
   })
 })

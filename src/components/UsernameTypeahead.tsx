@@ -56,6 +56,16 @@ interface Props {
   scopedSearch?: boolean
   /** AQU-734: enable checkbox multi-select. Absent = legacy single-pick. */
   multiSelect?: MultiSelectConfig
+  /**
+   * Eligible people offered as rows before any search fires — e.g. org
+   * colleagues without a direct grant (the AQU-672 Team-detail pattern).
+   * When provided (even empty), the dropdown opens on focus with these rows;
+   * typing narrows them by substring, and 2+ characters merges in server
+   * search results. Absent = dropdown only opens once something is typed.
+   */
+  suggestions?: readonly UserSearchResult[]
+  /** Shown when `suggestions` is provided but empty and nothing is typed. */
+  emptySuggestionsHint?: string
 }
 
 /**
@@ -89,6 +99,8 @@ export function UsernameTypeahead({
   excludedUserIds = [],
   scopedSearch = true,
   multiSelect,
+  suggestions,
+  emptySuggestionsHint,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState<{
@@ -108,19 +120,36 @@ export function UsernameTypeahead({
   const searchMatchesInput = query.trim() === trimmedRaw
   const needsMorePrefix = trimmedRaw.length > 0 && trimmedRaw.length < 2
   const excludedUserIdSet = new Set(excludedUserIds)
+  const byName = (a: UserSearchResult, b: UserSearchResult) =>
+    a.username.localeCompare(b.username, undefined, { sensitivity: "base" })
   const visibleResults = searchMatchesInput
-    ? results
-        .filter((u) => !excludedUserIdSet.has(u.id))
-        .sort((a, b) =>
-          a.username.localeCompare(b.username, undefined, { sensitivity: "base" })
-        )
+    ? results.filter((u) => !excludedUserIdSet.has(u.id)).sort(byName)
     : []
+  // Eligible-colleague rows: the full pool with nothing typed, substring-
+  // narrowed as the user types (mirrors the AQU-672 combobox). Server search
+  // results merge in from 2 characters, deduped by id.
+  const matchingSuggestions = (suggestions ?? [])
+    .filter((u) => !excludedUserIdSet.has(u.id))
+    .filter(
+      (u) =>
+        trimmedRaw.length === 0 ||
+        u.username.toLowerCase().includes(trimmedRaw.toLowerCase())
+    )
+    .sort(byName)
+  const suggestedIds = new Set(matchingSuggestions.map((u) => u.id))
+  const visibleRows =
+    trimmedRaw.length >= 2
+      ? [
+          ...matchingSuggestions,
+          ...visibleResults.filter((u) => !suggestedIds.has(u.id)),
+        ].sort(byName)
+      : matchingSuggestions
   const allMatchesAlreadyAdded =
     !needsMorePrefix &&
     searchMatchesInput &&
     !isLoading &&
     results.length > 0 &&
-    visibleResults.length === 0
+    visibleRows.length === 0
   const searchPendingForInput =
     !needsMorePrefix && trimmedRaw.length >= 2 && (!searchMatchesInput || isLoading)
   const canShowSettledEmptyState =
@@ -128,9 +157,17 @@ export function UsernameTypeahead({
     searchMatchesInput &&
     !isLoading &&
     results.length === 0 &&
+    visibleRows.length === 0 &&
     trimmedRaw.length >= 2
+  const showEmptySuggestionsHint =
+    suggestions != null &&
+    trimmedRaw.length === 0 &&
+    matchingSuggestions.length === 0 &&
+    emptySuggestionsHint != null
   const showSuggestions =
-    value.mode === "username" && open && trimmedRaw.length > 0
+    value.mode === "username" &&
+    open &&
+    (trimmedRaw.length > 0 || suggestions != null)
 
   // Close the dropdown on outside click — typeahead UX expects this.
   useEffect(() => {
@@ -288,13 +325,19 @@ export function UsernameTypeahead({
             width: dropdownPosition.width,
           }}
         >
-          {needsMorePrefix && (
+          {needsMorePrefix && visibleRows.length === 0 && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
               Type at least 2 characters to search.
             </p>
           )}
 
-          {searchPendingForInput && visibleResults.length === 0 && (
+          {showEmptySuggestionsHint && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">
+              {emptySuggestionsHint}
+            </p>
+          )}
+
+          {searchPendingForInput && visibleRows.length === 0 && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
               <Spinner className="size-3" /> Searching…
             </p>
@@ -314,8 +357,22 @@ export function UsernameTypeahead({
           {canShowSettledEmptyState && lastFetchOk && (
             <div className="px-3 py-2">
               <p className="text-[11px] text-muted-foreground">
-                No Aquilla user named "{trimmedRaw}".
+                {multiSelect && scopedSearch
+                  ? // Scoped search only sees org/project-overlap users
+                    // (AQU-321), so a miss is NOT proof the account doesn't
+                    // exist — don't claim it is.
+                    `No match among people who share an org or project with you.`
+                  : `No Aquilla user named "${trimmedRaw}".`}
               </p>
+              {multiSelect && (
+                <button
+                  type="button"
+                  onClick={() => multiSelect.onStageTyped()}
+                  className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                >
+                  Add "{trimmedRaw}" by exact username
+                </button>
+              )}
               {showModeToggle && (
                 <button
                   type="button"
@@ -330,14 +387,25 @@ export function UsernameTypeahead({
           )}
 
           {canShowSettledEmptyState && !lastFetchOk && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">
-              Couldn't search right now — we'll verify the username when you submit.
-            </p>
+            <div className="px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">
+                Couldn't search right now — we'll verify the username when you submit.
+              </p>
+              {multiSelect && (
+                <button
+                  type="button"
+                  onClick={() => multiSelect.onStageTyped()}
+                  className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                >
+                  Add "{trimmedRaw}" by exact username
+                </button>
+              )}
+            </div>
           )}
 
-          {visibleResults.length > 0 && (
+          {visibleRows.length > 0 && (
             <ul className="py-0.5">
-              {visibleResults.map((u) => {
+              {visibleRows.map((u) => {
                 if (multiSelect) {
                   // AQU-734: checkbox row. The whole row is one control acting as
                   // a checkbox (role+aria-checked) so its accessible name is the

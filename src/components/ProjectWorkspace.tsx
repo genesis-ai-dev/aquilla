@@ -1264,10 +1264,16 @@ export function ProjectWorkspace() {
                 0,
               )
             },
-            // Turn this line's take into a reusable Cast character.
+            // Turn this line's take into a reusable Cast character. The clone
+            // modal renders inside the Voices dock panel, and the dock only
+            // mounts the active tab's panel — so surface the Voices tab (which
+            // also expands a collapsed dock) or the modal opens invisibly
+            // (AQU-767). The clone button lives in the Audio lens, so the lens
+            // is already correct here.
             onMakeCharacterFromCell: (cellId) => {
               setMakeCharacterSeedCellId(cellId)
               setMakeCharacterOpen(true)
+              setDockTab("voices")
             },
           }
         : null,

@@ -1978,7 +1978,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         {(milestoneNavigationItems.length > 0 && activeChapterLabel) || chapterNavTrailing ? (
           // Below lg: in-flow left picker + end toolbar. lg+: absolute center
           // over the full header (same midpoint as the table beneath).
-          <div className="relative flex items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-1.5 backdrop-blur-xl">
+          <div className="relative flex items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
             {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
               <div
                 data-chapter-nav-slot=""

@@ -78,31 +78,35 @@ export function FileChapterToolbar({
   }, [smUp, menuItems, checkOpen, checkRunning, checkResult, onCheckToggle])
 
   return (
-    <div className="flex shrink-0 items-center gap-2">
-      <EditorModeToggle
-        lens={lens}
-        onChange={onLensChange}
-        timeOrdered={timeOrdered}
-      />
-      {/* Really small: Check file lives in the ⋯ menu instead. */}
-      <div className="hidden sm:contents">
-        <CheckFileButton
-          checkOpen={checkOpen}
-          checkRunning={checkRunning}
-          checkResult={checkResult}
-          onToggle={onCheckToggle}
+    // Keep the portal-only viewSettingsMenu outside the gap flex — an empty
+    // sibling still consumes gap and pads the ⋯ button away from the edge.
+    <div className="relative flex shrink-0 items-center">
+      <div className="flex items-center gap-2">
+        <EditorModeToggle
+          lens={lens}
+          onChange={onLensChange}
+          timeOrdered={timeOrdered}
+        />
+        {/* Really small: Check file lives in the ⋯ menu instead. */}
+        <div className="hidden sm:contents">
+          <CheckFileButton
+            checkOpen={checkOpen}
+            checkRunning={checkRunning}
+            checkResult={checkResult}
+            onToggle={onCheckToggle}
+          />
+        </div>
+        <OverflowMenu
+          items={overflowItems}
+          triggerRef={fileOptionsAnchorRef}
+          triggerVariant="outline"
+          triggerSize="icon"
+          triggerClassName="bg-card shadow-xs"
+          tooltip="File options"
+          ariaLabel="File options"
+          testId="file-options-menu"
         />
       </div>
-      <OverflowMenu
-        items={overflowItems}
-        triggerRef={fileOptionsAnchorRef}
-        triggerVariant="outline"
-        triggerSize="icon"
-        triggerClassName="bg-card shadow-xs"
-        tooltip="File options"
-        ariaLabel="File options"
-        testId="file-options-menu"
-      />
       {viewSettingsMenu}
     </div>
   )

@@ -41,11 +41,36 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 #
 # Chat: /chat/* on api.aquilla.app is owned by this worker (folded in from
 # the former aquilla-chat-worker on 2026-05-26 — same JWT secret, one
-# worker). OPENROUTER_API_KEY must be set on aquilla-identity (and
-# aquilla-dev-identity for staging) via `wrangler secret put`. The legacy
-# `aquilla.app/api/chat/*` route still lives on codex-chat-worker; once
-# this worker's `api.aquilla.app/chat/*` is verified the legacy route can
-# be detached.
+# worker). The legacy `aquilla.app/api/chat/*` route still lives on
+# codex-chat-worker; once this worker's `api.aquilla.app/chat/*` is verified
+# the legacy route can be detached.
+#
+# ---------------------------------------------------------------------------
+# OPENROUTER_API_KEY — provision PER ENVIRONMENT (AQU-762)
+# ---------------------------------------------------------------------------
+# Every AI surface (chat, translation agent, back-translate, sparkle/AI draft,
+# import classify/sandbox, contextual, Monday analyze) forwards to OpenRouter
+# with this Bearer secret. When it is unset the routes return a 500
+# "OPENROUTER_API_KEY is not configured" and all AI actions fail — this is what
+# broke AI on dev.aquilla.app (AQU-762). There is NO runtime/admin fallback:
+# the admin console (/api/v2/admin/settings) tunes model + budgets only, never
+# the key — it is read straight from env, so it MUST be a Cloudflare secret.
+#
+# Secrets attach to the WORKER NAME, not the wrangler env block, and each
+# deployed environment is a distinct worker — so each needs its own put:
+#
+#   Production  worker aquilla-identity          (top-level + [env.production])
+#     cd auth-worker && wrangler secret put OPENROUTER_API_KEY --env production
+#     # bare `wrangler secret put OPENROUTER_API_KEY` targets the same worker
+#     # name (what CI's code-only `wrangler deploy` publishes).
+#   Development worker aquilla-dev-identity       ([env.development])
+#     cd auth-worker && wrangler secret put OPENROUTER_API_KEY --env development
+#   Staging     worker aquilla-staging-identity   ([env.staging])
+#     cd auth-worker && wrangler secret put OPENROUTER_API_KEY --env staging
+#
+# Local dev/e2e never use a real key: dev-stack.ts / e2e-up.ts inject
+# `--var OPENROUTER_API_KEY:mock` and route to the scripted mock OpenRouter.
+# See docs/STAGING.md → "AI provider key" for the ops runbook.
 
 # auth-worker is the full identity surface and owns the complete schema
 # (identity + orgs + projects + members + invites + file/cell projections).

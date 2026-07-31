@@ -62,6 +62,40 @@ migrations, then checks the staging API health endpoint.
   `822231ade4da4db5b1955702e13d1ac3`; update the Hyperdrive origin connection
   string instead of changing `wrangler.toml`.
 
+## AI provider key (`OPENROUTER_API_KEY`)
+
+Every AI surface — chat, the translation agent, back-translate, sparkle / AI
+draft, import classify/sandbox, contextual, Monday analyze — forwards to
+OpenRouter using the `OPENROUTER_API_KEY` **Cloudflare secret**. When it is
+unset the routes return `500 "OPENROUTER_API_KEY is not configured"` and every
+AI action fails (this was AQU-762 on dev). There is **no runtime or admin
+fallback**: the admin console (`/api/v2/admin/settings`) only tunes the model
+and budgets — the key is read straight from the worker env, so it must be a
+secret on the worker.
+
+Secrets attach to the **worker name**, not the wrangler env block, and each
+deployed environment is a separate worker — so each needs its own
+`wrangler secret put`. Setting it on production does **not** carry over to dev
+or staging.
+
+| Environment | Worker | Provision command (from repo root) |
+| --- | --- | --- |
+| Production | `aquilla-identity` | `cd auth-worker && wrangler secret put OPENROUTER_API_KEY --env production` |
+| Development | `aquilla-dev-identity` | `cd auth-worker && wrangler secret put OPENROUTER_API_KEY --env development` |
+| Staging | `aquilla-staging-identity` | `cd auth-worker && wrangler secret put OPENROUTER_API_KEY --env staging` |
+
+The bare `wrangler secret put OPENROUTER_API_KEY` (no `--env`) targets the same
+`aquilla-identity` worker CI's code-only `wrangler deploy` publishes, i.e.
+production. Local dev/e2e never use a real key — `scripts/dev-stack.ts` and
+`scripts/e2e-up.ts` inject `--var OPENROUTER_API_KEY:mock` and route to the
+scripted mock OpenRouter (`scripts/mock-openrouter.ts`).
+
+To confirm a key is present without exposing it, list the worker's secrets:
+
+```bash
+cd auth-worker && wrangler secret list --env development
+```
+
 ## Verification
 
 After a reset or branch replacement:

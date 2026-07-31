@@ -5,18 +5,40 @@
     <link rel="icon" type="image/svg+xml" href="%BRAND_FAVICON%" />
     %BRAND_ICON_TAGS%
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="%BRAND_DESCRIPTION%" />
-    <meta name="robots" content="noindex, nofollow" />
-    <title>%BRAND_TITLE%</title>
+    <meta
+      name="description"
+      content="Aquilla is free AI Bible translation software — draft, check, and record Scripture in one workspace, with AI assistance built for low-resource languages. Text, audio, and video under one roof."
+    />
+    <link rel="canonical" href="https://aquilla.app/bible-translation" />
+    <title>AI Bible Translation Software — Free for Every Language | Aquilla</title>
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="%BRAND_OG_URL%" />
-    <meta property="og:title" content="%BRAND_TITLE%" />
-    <meta property="og:description" content="%BRAND_DESCRIPTION%" />
+    <meta property="og:url" content="https://aquilla.app/bible-translation" />
+    <meta property="og:title" content="AI Bible Translation Software — Free for Every Language | Aquilla" />
+    <meta
+      property="og:description"
+      content="Draft, check, and record Scripture translations with AI assistance built for low-resource languages. Free for everyone — because the mission comes first."
+    />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="%BRAND_TITLE%" />
-    <meta name="twitter:description" content="%BRAND_DESCRIPTION%" />
+    <meta name="twitter:title" content="AI Bible Translation Software — Free for Every Language | Aquilla" />
+    <meta
+      name="twitter:description"
+      content="Draft, check, and record Scripture translations with AI assistance built for low-resource languages. Free for everyone — because the mission comes first."
+    />
     %BRAND_SOCIAL_IMAGE_TAGS%
     %BRAND_THEME_STYLE%
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Aquilla",
+        "url": "https://aquilla.app/bible-translation",
+        "applicationCategory": "BusinessApplication",
+        "applicationSubCategory": "AI Bible translation software",
+        "operatingSystem": "Web",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "description": "Free AI Bible translation software: one workspace to draft, check, and record Scripture translations in text, audio, and video — with AI assistance that works even for low-resource languages."
+      }
+    </script>
     <script>
       // Paint the ink/paper background immediately so there's no flash before
       // the React homepage mounts. Each visit follows the OS unless the visitor
@@ -50,12 +72,14 @@
       .aq-pre a { display: inline-flex; align-items: center; padding: 13px 24px; border-radius: 12px; text-decoration: none; font-weight: 560; font-size: 15px; }
       .aq-pre .p { background: #6aa6ff; color: #0c1018; }
       .aq-pre .s { border: 1px solid #2a3550; color: #e9edf7; }
+      .aq-pre nav a { display: inline; padding: 0 8px; color: #7db1ff; font-weight: 500; }
       /* No-JS / pre-mount: keep the hero readable under a light OS theme too. */
       @media (prefers-color-scheme: light) {
         .aq-pre { color: #1b2540; background: #f6f8fc; }
         .aq-pre h1 em { color: #2f6fd0; }
         .aq-pre p { color: #4a5570; }
         .aq-pre .s { border-color: #c9d2e6; color: #1b2540; }
+        .aq-pre nav a { color: #2f6fd0; }
       }
     </style>
   </head>
@@ -71,6 +95,13 @@
           <a class="p" href="/onboarding">Create account</a>
           <a class="s" href="/onboarding">Sign in</a>
         </div>
+        <nav aria-label="More from Aquilla">
+          <a href="/">Home</a>
+          <a href="/case-studies/biblica">Biblica case study</a>
+          <a href="/case-studies/come-and-see">Come and See case study</a>
+          <a href="/beta">Public beta</a>
+          <a href="https://help.aquilla.app">Help &amp; docs</a>
+        </nav>
       </main>
     </div>
     <script type="module" src="/src/bt-main.tsx"></script>

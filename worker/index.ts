@@ -63,45 +63,61 @@ export function injectInviteMeta(html: string, origin: string): string {
     .replace(/(<title>)[^<]*(<\/title>)/, `$1${INVITE_TITLE}$2`)
 }
 
+// SEO: only the production host may be indexed. dev.aquilla.app and the
+// *.workers.dev preview serve identical content and would otherwise compete
+// with (or leak ahead of) aquilla.app in search results.
+const CANONICAL_HOST = "aquilla.app"
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const url = new URL(req.url)
-
-    // Bypass: always show a static marketing page regardless of hint state.
-    const staticTarget = STATIC_PAGES[url.pathname]
-    if (staticTarget) {
-      const target = new URL(staticTarget, req.url)
-      return env.ASSETS.fetch(target.toString())
+    const res = await route(req, env)
+    const host = new URL(req.url).hostname
+    if (host !== CANONICAL_HOST && host !== "localhost" && !host.endsWith(".localhost")) {
+      const wrapped = new Response(res.body, res)
+      wrapped.headers.set("X-Robots-Tag", "noindex")
+      return wrapped
     }
-
-    // Root: serve SPA or homepage based on the auth hint cookie.
-    // Must not be CDN-cached (response depends on Cookie header).
-    if (url.pathname === "/") {
-      const cookie = req.headers.get("Cookie") ?? ""
-      const signedIn = /(?:^|;\s*)aq_hint=1(?:;|$)/.test(cookie)
-      const target = new URL(signedIn ? "/index.html" : "/homepage.html", req.url)
-      const asset = await env.ASSETS.fetch(target.toString())
-      const res = new Response(asset.body, asset)
-      res.headers.set("Cache-Control", "private, no-store")
-      return res
-    }
-
-    // Shared invite links (project AND org — AQU-471): serve the SPA shell but
-    // rewrite its social meta so the link unfurls as an invitation. Only HTML
-    // responses are rewritten; hashed assets under these paths pass through.
-    if (url.pathname.startsWith("/join/") || url.pathname.startsWith("/join-org/")) {
-      const asset = await env.ASSETS.fetch(req)
-      const contentType = asset.headers.get("Content-Type") ?? ""
-      if (!contentType.includes("text/html")) return asset
-      const html = await asset.text()
-      const res = new Response(injectInviteMeta(html, url.origin), asset)
-      res.headers.delete("Content-Length") // body length changed after rewrite
-      return res
-    }
-
-    // Everything else: hand off to the static-asset binding.
-    // Workers `not_found_handling = "single-page-application"` rewrites
-    // unknown paths to index.html — React Router handles the rest.
-    return env.ASSETS.fetch(req)
+    return res
   },
+}
+
+async function route(req: Request, env: Env): Promise<Response> {
+  const url = new URL(req.url)
+
+  // Bypass: always show a static marketing page regardless of hint state.
+  const staticTarget = STATIC_PAGES[url.pathname]
+  if (staticTarget) {
+    const target = new URL(staticTarget, req.url)
+    return env.ASSETS.fetch(target.toString())
+  }
+
+  // Root: serve SPA or homepage based on the auth hint cookie.
+  // Must not be CDN-cached (response depends on Cookie header).
+  if (url.pathname === "/") {
+    const cookie = req.headers.get("Cookie") ?? ""
+    const signedIn = /(?:^|;\s*)aq_hint=1(?:;|$)/.test(cookie)
+    const target = new URL(signedIn ? "/index.html" : "/homepage.html", req.url)
+    const asset = await env.ASSETS.fetch(target.toString())
+    const res = new Response(asset.body, asset)
+    res.headers.set("Cache-Control", "private, no-store")
+    return res
+  }
+
+  // Shared invite links (project AND org — AQU-471): serve the SPA shell but
+  // rewrite its social meta so the link unfurls as an invitation. Only HTML
+  // responses are rewritten; hashed assets under these paths pass through.
+  if (url.pathname.startsWith("/join/") || url.pathname.startsWith("/join-org/")) {
+    const asset = await env.ASSETS.fetch(req)
+    const contentType = asset.headers.get("Content-Type") ?? ""
+    if (!contentType.includes("text/html")) return asset
+    const html = await asset.text()
+    const res = new Response(injectInviteMeta(html, url.origin), asset)
+    res.headers.delete("Content-Length") // body length changed after rewrite
+    return res
+  }
+
+  // Everything else: hand off to the static-asset binding.
+  // Workers `not_found_handling = "single-page-application"` rewrites
+  // unknown paths to index.html — React Router handles the rest.
+  return env.ASSETS.fetch(req)
 }

@@ -10,8 +10,8 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *   - (Recent Examples is read-only, not an authored section)
  *
  * AuthoredSection renders a <section aria-label="Standards"> with an "Add"
- * button that opens an inline textarea. Fill and click Save → entry appears.
- * Cancel closes the textarea without adding.
+ * button that opens a create dialog. Fill and click Save → entry appears.
+ * Cancel closes the dialog without adding.
  */
 test("living memory standards section add entry shows text and cancel works", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -27,22 +27,27 @@ test("living memory standards section add entry shows text and cancel works", as
   const standardsSection = alice.locator('section[aria-label="Standards"]')
   await expect(standardsSection).toBeVisible({ timeout: 10_000 })
 
-  // Click Add — inline textarea appears.
+  // Click Add — create dialog appears.
   await standardsSection.getByRole("button", { name: /Add/i }).click()
-  const textarea = standardsSection.locator("textarea").first()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const textarea = dialog.locator("textarea").first()
   await expect(textarea).toBeVisible({ timeout: 3_000 })
 
-  // Cancel closes the textarea.
-  await standardsSection.getByRole("button", { name: /Cancel/i }).click()
-  await expect(textarea).not.toBeVisible({ timeout: 2_000 })
+  // Cancel closes the dialog.
+  await dialog.getByRole("button", { name: /Cancel/i }).click()
+  await expect(dialog).not.toBeVisible({ timeout: 2_000 })
 
   // Re-open, fill, and save.
   await standardsSection.getByRole("button", { name: /Add/i }).click()
-  const textarea2 = standardsSection.locator("textarea").first()
+  const dialog2 = alice.getByRole("dialog")
+  await expect(dialog2).toBeVisible({ timeout: 3_000 })
+  const textarea2 = dialog2.locator("textarea").first()
   await expect(textarea2).toBeVisible({ timeout: 3_000 })
   const entryText = `Standard rule ${Date.now()}`
   await textarea2.fill(entryText)
-  await standardsSection.getByRole("button", { name: /Save/i }).click()
+  await dialog2.getByRole("button", { name: /Save/i }).click()
+  await expect(dialog2).not.toBeVisible({ timeout: 5_000 })
 
   // Entry appears in the section.
   await expect(standardsSection.getByText(entryText).first()).toBeVisible({ timeout: 5_000 })

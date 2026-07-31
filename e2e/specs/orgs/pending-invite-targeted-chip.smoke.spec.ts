@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
@@ -53,7 +53,7 @@ test("targeted invite chip appears on /members when invite has a recipient email
   await alice.keyboard.press("Escape")
 
   // Navigate to /members.
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   // The targeted invite chip with the email badge should be visible.
   const inviteRow = alice.locator("li").filter({ hasText: name }).first()
   const targetedChip = inviteRow.getByText("targeted@example.com")

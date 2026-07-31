@@ -68,14 +68,16 @@ export function SystemPromptNudge({ project, onProjectUpdated, onCustomize }: Sy
       >
         Customize
       </Button>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="icon-xs"
         onClick={() => void dismiss()}
         aria-label="Dismiss"
-        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="text-muted-foreground"
       >
-        <X className="h-3.5 w-3.5" />
-      </button>
+        <X />
+      </Button>
     </div>
   )
 }

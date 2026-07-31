@@ -8,6 +8,7 @@
  * collide with the AQU-170 org-vs-project legibility redesign.
  */
 import { X, FolderX } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -34,13 +35,16 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
           <p className="text-sm font-semibold">{username}</p>
           <p className="text-xs text-muted-foreground">Project access breakdown</p>
         </div>
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={onClose}
           aria-label="Close"
-          className="rounded p-1 hover:bg-muted"
+          className="text-muted-foreground"
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </Button>
       </div>
 
       {/* Body */}

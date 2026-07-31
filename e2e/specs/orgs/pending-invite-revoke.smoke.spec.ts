@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -41,7 +41,7 @@ test("pending invite appears on /members and can be revoked", async ({ alice }) 
   await alice.keyboard.press("Escape")
 
   // Navigate to /members.
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   // The PendingInvitesSection should show the invite row for our project.
   const revokeBtn = alice.getByRole("button", {
     name: new RegExp(`Revoke invitation to ${name}`, "i"),

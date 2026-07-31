@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Sparkles, AlertTriangle, AlertCircle, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
@@ -144,27 +145,30 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
     }
   }
 
+  const triggerTooltip = !canManage
+    ? (deniedReason ?? "You don't have permission to add rules")
+    : isConfigured
+      ? "Analyze validated edits with LLM"
+      : "Configure LLM in settings first"
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogTrigger
-        render={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!isConfigured || !canManage}
-            title={
-              !canManage
-                ? (deniedReason ?? "You don't have permission to add rules")
-                : isConfigured
-                  ? "Analyze validated edits with LLM"
-                  : "Configure LLM in settings first"
+      <AppTooltip content={triggerTooltip}>
+        <span className="inline-flex">
+          <DialogTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!isConfigured || !canManage}
+              />
             }
           >
             <Sparkles className="mr-1 h-3.5 w-3.5" />
             Suggest from edits
-          </Button>
-        }
-      />
+          </DialogTrigger>
+        </span>
+      </AppTooltip>
 
       <DialogContent className="max-w-2xl">
         <DialogHeader>

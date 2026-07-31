@@ -169,12 +169,12 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     const defaultOpen = within(screen.getByTestId("project-lane-row-p1-")).getByRole("link", {
       name: /open/i,
     })
-    expect(defaultOpen.getAttribute("href")).toBe("/project/p1")
+    expect(defaultOpen.getAttribute("href")).toBe("/project/p1/editor")
 
     const esOpen = within(screen.getByTestId("project-lane-row-p1-es")).getByRole("link", {
       name: /open/i,
     })
-    expect(esOpen.getAttribute("href")).toBe("/project/p1?lane=es")
+    expect(esOpen.getAttribute("href")).toBe("/project/p1/editor?lane=es")
   })
 
   it("Assign… on a lane sub-row opens the lane-scoped assign modal", () => {

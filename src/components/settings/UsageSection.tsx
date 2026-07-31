@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { Section } from "@/components/ui/page"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getMyUsage, type MyUsage } from "@/lib/sync/usage"
 
@@ -100,33 +100,32 @@ export function UsageSection() {
     hasHistory
 
   return (
-    <Section
-      title="Usage"
-      description="Your audio and AI activity. No pricing is shown here."
-    >
-      {loading ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
-      ) : !hasAnyData ? (
-        <p className="text-xs text-muted-foreground">No usage recorded yet.</p>
-      ) : (
-        <>
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            <div>
-              <p className="text-xs text-muted-foreground">Audio generated today</p>
-              <p className="text-sm font-medium tabular-nums">
-                {fmtAudioSeconds(today?.audioSeconds ?? 0)}
-              </p>
+    <SettingsGroup label="This week">
+      <SettingsRow label="Activity" block>
+        {loading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : !hasAnyData ? (
+          <p className="text-xs text-muted-foreground">No usage recorded yet.</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-x-6 gap-y-2">
+              <div>
+                <p className="text-xs text-muted-foreground">Audio generated today</p>
+                <p className="text-sm font-medium tabular-nums">
+                  {fmtAudioSeconds(today?.audioSeconds ?? 0)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">AI requests today</p>
+                <p className="text-sm font-medium tabular-nums">
+                  {(today?.ttsRequests ?? 0) + (today?.llmRequests ?? 0)}
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-muted-foreground">AI requests today</p>
-              <p className="text-sm font-medium tabular-nums">
-                {(today?.ttsRequests ?? 0) + (today?.llmRequests ?? 0)}
-              </p>
-            </div>
-          </div>
-          {hasHistory && <MiniBarChart history={data!.history} />}
-        </>
-      )}
-    </Section>
+            {hasHistory && <MiniBarChart history={data!.history} />}
+          </>
+        )}
+      </SettingsRow>
+    </SettingsGroup>
   )
 }

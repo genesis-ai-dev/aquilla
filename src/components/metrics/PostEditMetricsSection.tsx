@@ -132,7 +132,6 @@ function UserTable({ users, activeUser, onSelectUser }: {
                 key={u.author}
                 data-state={isActive ? "selected" : undefined}
                 onClick={() => onSelectUser(isActive ? null : u.author)}
-                className="cursor-pointer"
               >
                 <TableCell className="font-mono text-xs">{u.author}</TableCell>
                 <TableCell className="text-right text-muted-foreground">{u.count}</TableCell>
@@ -321,7 +320,7 @@ export function PostEditMetricsSection({
 
               {/* Weekly trend chart */}
               <div className="mt-4">
-                <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <h4 className="text-xs font-medium text-muted-foreground">
                   Weekly trend
                   {activeUser && (
                     <span className="ml-1 normal-case font-normal">
@@ -347,7 +346,7 @@ export function PostEditMetricsSection({
               {/* By-user table */}
               {metrics.byUser.length > 0 && (
                 <div className="mt-5">
-                  <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <h4 className="text-xs font-medium text-muted-foreground">
                     By reviewer
                     <span className="ml-1 normal-case font-normal text-muted-foreground">
                       (click a row to filter the trend above)

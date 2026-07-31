@@ -90,7 +90,7 @@ export function ProjectCard({
 
   return (
     <Card
-      className={`${isTrashed ? "opacity-70" : "cursor-pointer hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
+      className={`${isTrashed ? "opacity-70" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
       onClick={isTrashed ? undefined : onClick}
       data-testid={isInactive && !isTrashed ? "inactive-project-card" : undefined}
     >

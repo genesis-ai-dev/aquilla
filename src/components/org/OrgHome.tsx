@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
+import { membersPath, orgHomePath } from "@/lib/navigation/org-paths"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
@@ -49,7 +50,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
-import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
 
@@ -369,11 +370,10 @@ export function ProjectTable({
   defaultLaneLabelByProjectId?: Map<string, string>
 }) {
   return (
-    <TooltipDelegationBoundary>
-      <div data-testid="project-table" className="@container/project-table overflow-hidden">
-        <div className="w-full">
+    <div data-testid="project-table" className="@container/project-table overflow-hidden">
+      <div className="w-full">
         <div
-          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm`}
+          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium text-muted-foreground backdrop-blur-sm`}
         >
           <span
             className={cn(
@@ -440,7 +440,7 @@ export function ProjectTable({
                           <span
                             tabIndex={0}
                             data-testid="project-table-deadline-trigger"
-                            className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                            className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                           >
                             <ProjectDeadlineStatuses
                               deadline={dstatus}
@@ -523,9 +523,8 @@ export function ProjectTable({
             )
           })}
         </div>
-        </div>
       </div>
-    </TooltipDelegationBoundary>
+    </div>
   )
 }
 
@@ -771,7 +770,7 @@ export function OrgHome() {
 
   function openOrg(orgId: number) {
     setActiveOrg(orgId)
-    navigate({ pathname: "/", search: `?org=${orgId}` })
+    navigate(orgHomePath(orgId))
   }
 
   function selectProjectLens(lens: ProjectLens) {
@@ -1131,7 +1130,10 @@ export function OrgHome() {
                               linkableProjects={accessibleProjects}
                             />
                           )}
-                          <Button variant="outline" onClick={() => navigate("/members")}>
+                          <Button
+                            variant="outline"
+                            onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
+                          >
                             Invite your team
                           </Button>
                         </div>

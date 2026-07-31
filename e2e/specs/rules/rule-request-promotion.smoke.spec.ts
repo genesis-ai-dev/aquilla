@@ -47,7 +47,7 @@ test("Request promotion button shows Requested state after click", async ({ alic
   // Bob navigates to the rules page.
   await bob.goto(`/project/${projectId}/rules`)
   // Bob creates a rule.
-  const addRuleBtn = bob.getByRole("button", { name: /\+ Add Rule|New rule|Add rule/i }).first()
+  const addRuleBtn = bob.getByRole("button", { name: /Add Rule|New rule|Add rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

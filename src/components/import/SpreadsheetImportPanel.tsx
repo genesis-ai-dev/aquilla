@@ -227,7 +227,7 @@ export function SpreadsheetImportPanel({
           }}
         >
           <p className="text-sm text-muted-foreground">Drop a CSV or XLSX file here, or</p>
-          <label className="cursor-pointer">
+          <label>
             <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
               Choose file
             </span>

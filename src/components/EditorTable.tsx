@@ -18,7 +18,7 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
+import { Badge, badgeVariants } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -324,7 +324,7 @@ function SynthStatusBadge({
         : "Loading voice model"
     return (
       <AppTooltip content={tooltip}>
-        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
           <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
           {isTranslating
             ? "Translating"
@@ -338,7 +338,7 @@ function SynthStatusBadge({
   if (status.kind === "synthesizing") {
     return (
       <AppTooltip content="Generating audio…">
-        <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
           <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
           Voicing
         </span>
@@ -377,7 +377,7 @@ function SynthStatusBadge({
     if (dismissed) {
       return (
         <AppTooltip content="Audio generation failed — click Generate to retry">
-          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-full bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
+          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
             Not voiced
           </span>
         </AppTooltip>
@@ -394,7 +394,7 @@ function SynthStatusBadge({
         trigger={
           <button
             type="button"
-            className="inline-flex max-w-[80px] cursor-pointer items-center gap-1 truncate rounded-full bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+            className="inline-flex max-w-[80px] items-center gap-1 truncate rounded-md bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
           >
             Audio failed
           </button>
@@ -420,7 +420,7 @@ function ValidationHistoryTimeline({
   return (
     <>
       <div className="my-1 h-px bg-border" />
-      <div className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">History</div>
+      <div className="mb-1 px-1 text-xs text-muted-foreground">History</div>
       <ul className="space-y-0.5">
         {historical.map((entry, i) => {
           const snippet = typeof entry.value === "string"
@@ -717,6 +717,8 @@ interface EditorTableProps {
   onVisibleFootnotesChange?: (entries: VisibleFootnoteEntry[]) => void
   /** Called after a target footnote is created so the parent can reveal footnotes. */
   onFootnoteCreated?: () => void
+  /** Optional controls on the right of the chapter navigation row. */
+  chapterNavTrailing?: React.ReactNode
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -756,6 +758,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleRefChange,
   onVisibleFootnotesChange,
   onFootnoteCreated,
+  chapterNavTrailing,
 }, ref) {
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
   // repair path treats any hand-edited source cell as damage and overwrites
@@ -1393,13 +1396,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useEffect(() => stopSelectionDrag, [stopSelectionDrag])
 
-  // Grid layout: [left-gutter] [source] [target]. The left 44px gutter holds
-  // only the line number / cell label and the validation pill. There is no
-  // right gutter — the floating action rail (sparkle / mic / tts / comment /
-  // expand) is absolutely positioned at the row's right edge so it doesn't
-  // claim layout space when collapsed. The target column reserves pr-9 so the
-  // ever-present expand chevron never overlaps text.
-  const gridCols = "grid-cols-[44px_1fr_1fr]"
+  // Grid layout: [gutter] [source] [target]. The gutter is one fixed track
+  // holding select + status-badges (flex-col) + verse number in a tight
+  // flex row (gap-0.5) — tighter than three gap-2 grid tracks, while the
+  // fixed width keeps Source header-aligned. No right gutter; the floating
+  // action rail is absolutely positioned. Target reserves pr-9 for the
+  // expand chevron.
+  const gridCols = "grid-cols-[84px_1fr_1fr]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1748,14 +1751,27 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         )}
       >
         {untimedInTimeLens && (
-          <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400">
+          <span className="pointer-events-none absolute left-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             no timing
           </span>
         )}
         {showParagraphBoundary && (
-          <div className={`grid ${gridCols} border-t border-border/60`}>
-            <div className="flex items-center justify-center py-1" title="New paragraph">
-              <Pilcrow className="h-3 w-3 text-muted-foreground" />
+          <div className={`grid ${gridCols} border-t border-border/60 pl-2.5 pr-4`}>
+            {/* Pilcrow sits in the number slot of the combined gutter so it
+                stays aligned with line numbers below. */}
+            <div className="flex items-center py-1">
+              <div className="w-5 shrink-0" aria-hidden="true" />
+              <div className="ml-2 flex min-w-0 flex-1 items-center gap-0.5">
+                <div className="w-5 shrink-0" aria-hidden="true" />
+                <AppTooltip content="New paragraph">
+                  <div
+                    data-testid="paragraph-boundary-indicator"
+                    className="flex min-w-0 flex-1 items-center justify-center"
+                  >
+                    <Pilcrow className="h-3 w-3 text-muted-foreground" />
+                  </div>
+                </AppTooltip>
+              </div>
             </div>
           </div>
         )}
@@ -1959,26 +1975,57 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        {milestoneNavigationItems.length > 0 && activeChapterLabel && (
-          <div className="border-b border-border bg-background/90 px-4 py-2 backdrop-blur-xl">
-            <MilestoneNavigator
-              items={milestoneNavigationItems}
-              activeKey={activeChapterLabel}
-              activeSubsectionKey={activeSubsectionKey}
-              onSelect={handleChapterSelect}
-            />
+        {(milestoneNavigationItems.length > 0 && activeChapterLabel) || chapterNavTrailing ? (
+          // Below lg: in-flow left picker + end toolbar. lg+: equal flex
+          // balancers keep the picker centered without absolute overlay — the
+          // old inset-0 layer painted under Text/Audio + ⋯ when space was tight.
+          // min-w-24 floors the picker at prev + chevron + next (three size-8s).
+          // gap-2 matches FileChapterToolbar's tabs ↔ ⋯ spacing.
+          <div className="relative flex items-center gap-2 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
+            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+              <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
+            ) : null}
+            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+              <div
+                data-chapter-nav-slot=""
+                className="mr-auto flex min-w-24 max-w-full flex-1 items-center lg:mr-0 lg:flex-none lg:shrink"
+              >
+                <div className="min-w-0 w-full max-w-full lg:w-auto">
+                  <MilestoneNavigator
+                    items={milestoneNavigationItems}
+                    activeKey={activeChapterLabel}
+                    activeSubsectionKey={activeSubsectionKey}
+                    onSelect={handleChapterSelect}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {chapterNavTrailing ? (
+              <div
+                className={
+                  milestoneNavigationItems.length > 0 && activeChapterLabel
+                    ? "flex shrink-0 items-center lg:flex-1 lg:justify-end"
+                    : "ml-auto flex shrink-0 items-center"
+                }
+              >
+                {chapterNavTrailing}
+              </div>
+            ) : milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+              <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
+            ) : null}
           </div>
-        )}
-        <div className={cn("grid gap-2 border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground", gridCols)}>
+        ) : null}
+        <div className={cn("grid gap-2 border-b border-border pl-2.5 pr-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
+          {/* Unlabeled track: combined select + badges + number gutter. */}
           <div aria-hidden="true" />
           {/* In Audio mode the left column carries per-line voice controls, not
               source text, so label it "Controls" (no source-language badge). */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 pl-2">
             {audioLens ? "Controls" : "Source"}
             {!audioLens && project.sourceLanguage && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+              <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                 {project.sourceLanguage}
-              </span>
+              </Badge>
             )}
           </div>
           <div className="flex items-center gap-2 pl-3">
@@ -2012,7 +2059,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                       data-testid="lane-switcher"
                       data-active-lane={activeLane}
                       aria-label="Active translation lane"
-                      className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className={cn(
+                        badgeVariants({ variant: "secondary" }),
+                        "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
+                      )}
                     />
                   }
                 >
@@ -2108,9 +2158,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 <Languages className="h-2.5 w-2.5" />
               </button>
             ) : project.targetLanguage ? (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
+              <Badge variant="secondary" className="text-[10px] font-normal normal-case tracking-normal">
                 {project.targetLanguage}
-              </span>
+              </Badge>
             ) : null}
           </div>
         </div>
@@ -2303,7 +2353,7 @@ interface MemoizedRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[44px_1fr_1fr]"
+  gridCols: "grid-cols-[84px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2688,7 +2738,7 @@ interface EditorRowProps {
   targetDirectionMode: DirectionMode
   sourceTextDirection: TextDirection
   targetTextDirection: TextDirection
-  gridCols: "grid-cols-[44px_1fr_1fr]"
+  gridCols: "grid-cols-[84px_1fr_1fr]"
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
@@ -2821,7 +2871,7 @@ function SourceWithTermLookup({
           concepts={activeConcepts}
           onApply={onTermApply}
         >
-          <span className="cursor-pointer underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
+          <span className="underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
             {word}
           </span>
         </TermLookupPopover>,
@@ -2870,7 +2920,7 @@ function UsfmNoteChip({
   const tooltipContent = (
     <div className="max-w-72 text-xs">
       <div className="mb-0.5 flex items-center gap-1.5">
-        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">{kindLabel}</span>
+        <span className="text-[9px] font-medium text-muted-foreground">{kindLabel}</span>
         {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
       </div>
       <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
@@ -2880,7 +2930,7 @@ function UsfmNoteChip({
     <button
       type="button"
       className={cn(
-        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-md bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
         panelActive ? "cursor-default" : "cursor-help",
       )}
       aria-label={`${kindLabel}${note.ref ? ` ${note.ref}` : ""}`}
@@ -3422,11 +3472,11 @@ function TargetDecoratedText({
           showEvidence={false}
           onRangeClick={onRangeClick}
         />
+        <AppTooltip content={`Managed term: ${match.term}`}>
         <span
           role={onTermChipClick ? "button" : undefined}
           tabIndex={onTermChipClick ? 0 : undefined}
           aria-label={`Managed term: ${match.term}`}
-          title={`Managed term: ${match.term}`}
           data-source-term={match.term}
           className="term-chip term-chip-preferred"
           onClick={onTermChipClick ? (event) => {
@@ -3440,6 +3490,7 @@ function TargetDecoratedText({
             onTermChipClick(match.term, event.currentTarget)
           } : undefined}
         />
+        </AppTooltip>
       </span>,
     )
     cursor = match.end
@@ -3499,22 +3550,22 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
     <div className="mb-2 flex flex-col gap-2" dir="ltr">
       {renderable.map((att, i) =>
         att.type === "video" ? (
-          <video
-            key={i}
-            src={att.url}
-            controls
-            title={att.title}
-            className="max-h-32 rounded border object-contain"
-          />
+          <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
+            <video
+              src={att.url}
+              controls
+              className="max-h-32 rounded border object-contain"
+            />
+          </AppTooltip>
         ) : (
-          <img
-            key={i}
-            src={att.url}
-            alt={att.alt}
-            title={att.title}
-            loading="lazy"
-            className="block max-h-32 rounded border object-contain"
-          />
+          <AppTooltip key={i} content={att.title ?? undefined} disabled={!att.title}>
+            <img
+              src={att.url}
+              alt={att.alt}
+              loading="lazy"
+              className="block max-h-32 rounded border object-contain"
+            />
+          </AppTooltip>
         ),
       )}
     </div>
@@ -4630,7 +4681,15 @@ function EditorRow({
     displayLabel: importDisplayLabel(cell.metadata),
   })
   const numberPill = numberLabel === null ? null : (
-    <span className="flex h-6 items-center" aria-label={`Line ${numberLabel}`}>
+    // Box the digit to the source's first line (fontSize × line-height 1.6,
+    // both set on the source well below) and center it, so the number keeps
+    // riding that line as the reader changes font size. A fixed height only
+    // happens to line up at one size.
+    <span
+      className="flex items-center justify-center leading-none"
+      style={{ height: `calc(${sourceFontSize}px * 1.6)` }}
+      aria-label={`Line ${numberLabel}`}
+    >
       <CellNumberPill
         number={numberLabel}
         plain
@@ -4982,7 +5041,7 @@ function EditorRow({
               className="w-72 rounded-xl p-2"
             >
               <ul className="space-y-0.5">
-                <li className="mb-1 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <li className="mb-1 px-1 text-xs text-muted-foreground">
                   Validated by
                 </li>
                 {displayedValidators.length === 0 ? (
@@ -5077,7 +5136,7 @@ function EditorRow({
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
-          "group relative grid gap-2 px-4 py-2 transition-colors duration-150 ease-out",
+          "group relative grid gap-2 pl-2.5 pr-4 py-2 transition-colors duration-150 ease-out",
           // The mic-permission help is anchored in the action rail. While it
           // is open, this row must become its own higher stacking layer and
           // allow the popover to escape the row; otherwise neighbouring rows
@@ -5120,89 +5179,98 @@ function EditorRow({
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
       >
-        {/* Multi-select control — anchored to the FAR LEFT edge of the row
-            (inside the row's horizontal padding, before the number gutter) so
-            the only affordance between the source and target columns is the
-            validation button. */}
-        {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
-            no visual feedback and the action bar never appears. Root cause:
-            the drag-selection affordance (onPointerDown) uses setSelection()
-            via handleSelectionPointerDown in ProjectWorkspace but the
-            SelectionBar's useSelectedIds() doesn't react — likely because
-            the pointerdown handler only fires on drag (not click) and a
-            single tap does not call toggleSelected. Investigate:
-              1. Does a pointer-drag across two cells actually call setSelection?
-              2. Does SelectionBar mount when activeFileId is set but the bar
-                 doesn't appear because selected.size stays 0?
-              3. Consider adding a click handler that calls toggleSelected so
-                 single-cell selection gives immediate visual feedback, then
-                 the SelectionBar ("X selected" pill) appears for discoverability.
-            See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
-        <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
-          <button
-            type="button"
-            role="checkbox"
-            aria-checked={isMultiSelected}
-            aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
-            onPointerDown={onSelectionPointerDown}
-            onClick={(e) => e.stopPropagation()}
-            className={cn(
-              "absolute left-1 top-10 z-20 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-full border",
-              "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
-              "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
-              isMultiSelected
-                ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
-            )}
-          >
-            {isMultiSelected ? (
-              <Check className="h-3 w-3" strokeWidth={3} />
-            ) : (
-              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-            )}
-          </button>
-        </AppTooltip>
-        {/* Left gutter — a subtle line number sits to the LEFT of the
-            validation circle, both anchored to the top of the card. The number
-            is the single issue surface (severity tint + title); no
-            stripe/dot/warning. Multi-select lives at the far-left row edge so
-            only the validation button sits between source and target. */}
-        <div className="flex h-full w-full flex-wrap items-start justify-center gap-1 pt-5">
-          {numberPill}
-          {/* The validation circle moved next to the TARGET editing cell
-              (AQU-592); the gutter now carries only the line number and the
-              stale-source / synth status affordances. */}
-          {/* Stale-source indicator. Both flags
-              are already resolved per-row booleans (see isStaleSource's doc
-              comment) — the singleton Set(s) just adapt them to the
-              indicator's managed-mode membership-set contract. */}
-          {(isStaleSource || isUpstreamStaleSource) && hasContent && (
-            <StaleSourceIndicator
-              cellId={cell.id}
-              staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
-              upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
-            />
-          )}
-          {(isSynthBusy || isSynthError) && (
-            <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
-          )}
-          {/* AQU-599: persistent "has comment" indicator. Unlike the action-rail
-              comment button (which only appears on hover/focus), this icon stays
-              visible in the gutter whenever the cell carries an open comment, so
-              comments are discoverable without opening each cell. Clicking it
-              opens the comments panel for the cell. */}
-          {onOpenComments && openCommentCount > 0 && (
-            <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
+        {/* Combined left gutter — select sits near the left edge (row uses
+            pl-2.5); ml-2 opens space before the badge stack, then a tight
+            gap to the verse number. Fixed track keeps Source header-aligned. */}
+        <div className="flex h-full items-start self-stretch py-1.5">
+          {/* SWARM-TODO(voice-a5): "Voice together" multi-cell selection gives
+              no visual feedback and the action bar never appears. Root cause:
+              the drag-selection affordance (onPointerDown) uses setSelection()
+              via handleSelectionPointerDown in ProjectWorkspace but the
+              SelectionBar's useSelectedIds() doesn't react — likely because
+              the pointerdown handler only fires on drag (not click) and a
+              single tap does not call toggleSelected. Investigate:
+                1. Does a pointer-drag across two cells actually call setSelection?
+                2. Does SelectionBar mount when activeFileId is set but the bar
+                   doesn't appear because selected.size stays 0?
+                3. Consider adding a click handler that calls toggleSelected so
+                   single-cell selection gives immediate visual feedback, then
+                   the SelectionBar ("X selected" pill) appears for discoverability.
+              See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
+          <div className="flex w-5 shrink-0 flex-col items-center">
+            <div className="mb-1 h-4 shrink-0" aria-hidden />
+            <AppTooltip content={isMultiSelected ? "Selected. Drag up or down to extend the range." : "Select cell. Drag up or down to select a range."} side="right">
               <button
                 type="button"
-                aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
-                className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
-                onClick={() => onOpenComments(cell.id)}
+                role="checkbox"
+                aria-checked={isMultiSelected}
+                aria-label={isMultiSelected ? "Selected cell. Drag to extend selection." : "Select cell. Drag to select a range."}
+                onPointerDown={onSelectionPointerDown}
+                onClick={(e) => e.stopPropagation()}
+                className={cn(
+                  "grid h-5 w-5 place-items-center rounded-md border",
+                  "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+                  "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+                  isMultiSelected
+                    ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                    : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary group-hover:opacity-100",
+                )}
               >
-                <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
+                {isMultiSelected ? (
+                  <Check className="h-3 w-3" strokeWidth={3} />
+                ) : (
+                  <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                )}
               </button>
             </AppTooltip>
-          )}
+          </div>
+          {/* Badges + verse number — ml-2 opens space after the select. */}
+          <div className="ml-2 flex min-w-0 flex-1 items-start gap-0.5">
+            {/* Spacer is a sibling of the badge stack (not inside it) so
+                gap-0.5 only spaces stacked badges — a lone badge stays
+                level with the select control, which has no flex gap. */}
+            <div
+              data-testid="gutter-status-badges"
+              className="flex w-5 shrink-0 flex-col items-center"
+            >
+              <div className="mb-1 h-4 shrink-0" aria-hidden />
+              <div className="flex flex-col items-center gap-0.5">
+                {(isStaleSource || isUpstreamStaleSource) && hasContent && (
+                  <StaleSourceIndicator
+                    cellId={cell.id}
+                    staleCellIds={isStaleSource ? new Set([cell.id]) : new Set()}
+                    upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
+                  />
+                )}
+                {(isSynthBusy || isSynthError) && (
+                  <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+                )}
+                {/* AQU-599: persistent "has comment" indicator. Unlike the
+                    action-rail comment button (which only appears on
+                    hover/focus), this icon stays visible whenever the cell
+                    carries an open comment. Clicking opens the comments panel. */}
+                {onOpenComments && openCommentCount > 0 && (
+                  <AppTooltip content={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`}>
+                    <button
+                      type="button"
+                      aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                      onClick={() => onOpenComments(cell.id)}
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
+                    </button>
+                  </AppTooltip>
+                )}
+              </div>
+            </div>
+            {/* Verse / line number (severity tint). */}
+            <div className="flex min-w-0 flex-1 flex-col items-center">
+              <div data-testid="gutter-strip-spacer" className="mb-1 h-4" aria-hidden />
+              <div className="flex w-full items-start justify-center">
+                {numberPill}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Source column. In Audio mode there's no need for source text to
@@ -5242,10 +5310,13 @@ function EditorRow({
             data-showcase="editor.source"
             ref={sourceColRef}
             className={cn(
-              // The selection control is centered on the physical divider and
-              // protrudes into this column. Reserve enough room for RTL text,
-              // whose first glyph sits against this right edge.
-              "relative flex flex-col pr-4 transition-opacity",
+              // The showcase node IS the text surface so it fills the whole
+              // source column. pr-7 clears the floating pencil.
+              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
+              // Match the target well — same muted fill + ring (not a darker
+              // primary-tinted edit chrome).
+              "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
+              sourceEditing && "bg-muted ring-1 ring-ring/40 ring-inset",
               isSynthBusy && "opacity-70",
             )}
             dir={sourceCellDirection}
@@ -5269,7 +5340,53 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            <div className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
+            {/* Source-edit affordance (project_lead+, non-live projects). Emits
+                source.cell.commit — the template-owner correction that propagates
+                downstream. Read-only source stays the default; editing is explicit.
+                Floated to the column's top-right so it costs no layout, rather
+                than taking a slot in the context line below — that line is
+                reserved for column alignment and is usually empty, so it has no
+                room to spare. */}
+            {canEditSourceForCell ? (
+              <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
+                  aria-pressed={sourceEditing}
+                  onClick={() => setSourceEditing((v) => !v)}
+                  className={cn(
+                    "absolute right-1 top-1 z-10 shrink-0",
+                    sourceEditing
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                  )}
+                >
+                  <Pencil />
+                </Button>
+              </AppTooltip>
+            ) : sourceReadOnlyReasonForCell ? (
+              // Force-locked source lane (DCS pin): keep an explained
+              // affordance where the pencil would be instead of letting it
+              // silently vanish (AQU-615 review nit).
+              <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
+                <span
+                  aria-label="Source is locked"
+                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Lock className="size-3" />
+                </span>
+              </AppTooltip>
+            ) : null}
+            {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
+                mirrors the target column's header lane, and that mirror is what
+                puts the two columns' first text lines on the same baseline. Drop
+                it for context-free cells and every such row's source text rides
+                20px above its translation — the target lane can't be made
+                conditional to match, because it also reserves the strip the
+                floating action rail occupies. */}
+            <div data-testid="source-context-line" className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
@@ -5279,39 +5396,6 @@ function EditorRow({
                   </span>
                 </AppTooltip>
               )}
-              {/* Source-edit affordance (project_lead+, non-live projects). Emits
-                  source.cell.commit — the template-owner correction that propagates
-                  downstream. Read-only source stays the default; editing is explicit. */}
-              {canEditSourceForCell ? (
-                <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
-                  <button
-                    type="button"
-                    aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
-                    aria-pressed={sourceEditing}
-                    onClick={() => setSourceEditing((v) => !v)}
-                    className={cn(
-                      "ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors",
-                      sourceEditing
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground/50 opacity-0 hover:bg-muted/60 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                    )}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                </AppTooltip>
-              ) : sourceReadOnlyReasonForCell ? (
-                // Force-locked source lane (DCS pin): keep an explained
-                // affordance where the pencil would be instead of letting it
-                // silently vanish (AQU-615 review nit).
-                <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
-                  <span
-                    aria-label="Source is locked"
-                    className="ml-auto inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                  >
-                    <Lock className="h-3 w-3" />
-                  </span>
-                </AppTooltip>
-              ) : null}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -5322,9 +5406,12 @@ function EditorRow({
                 onCommit={handleSourceCommit}
                 onBlur={() => setSourceEditing(false)}
                 editable
+                // Size to content like the read surface — compactHeight skips
+                // the h-full / min-h-[40px] stretch that was jumping the row.
+                compactHeight
                 ariaLabel="Edit source text"
                 placeholder="Source text…"
-                className="w-full rounded-lg ring-1 ring-primary/30 focus-within:ring-primary/50"
+                className="w-full !px-0"
               />
             ) : (sourceDraft?.valueHtml || cell.originalHtml) ? (
               <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
@@ -5376,7 +5463,7 @@ function EditorRow({
               the floating action rail a lane of its own instead of letting it
               cover the first line of target text. The cast/character label
               lives here (left side), not squished into the line-number pill. */}
-          <div className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
+          <div data-testid="target-header-lane" className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
             {showCellLabel && (
               <AppTooltip content={labelText} disabled={!labelText}>
                 <span className="max-w-[60%] truncate">
@@ -5587,7 +5674,7 @@ function EditorRow({
                     /* Pre-stream spinner — centered so it doesn't overlap
                        any existing target text peeking through the dimmed
                        editor underneath. */
-                    <div className="m-auto flex items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-muted-foreground">
+                    <div className="m-auto flex items-center gap-1.5 rounded-md bg-card px-2.5 py-1 text-muted-foreground">
                       <Spinner className="size-3.5" aria-hidden />
                       <span>
                         {loadingPhase === "searching"
@@ -6074,36 +6161,50 @@ function EditorRow({
                               ? "Sign in or add an AI model in project settings to generate back-translations"
                               : "Regenerate with AI"
                           }>
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon-xs"
                               disabled={!isBacktranslationConfigured || isBacktranslating}
                               onClick={() => onBacktranslate?.(cell, "regenerate")}
                               aria-label="Regenerate the back-translation"
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                              className="rounded-full text-muted-foreground hover:text-foreground"
                             >
-                              <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
-                            </button>
+                              {isBacktranslating ? (
+                                <Spinner className="size-3.5" />
+                              ) : (
+                                <RefreshCw />
+                              )}
+                            </Button>
                           </AppTooltip>
                         )}
                         {/* Edit — contributor+ only. A quiet icon, not a labelled pill. */}
                         {editable ? (
                           <AppTooltip content="Edit the back-translation">
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon-xs"
                               onClick={handleBtEditStart}
                               aria-label="Edit the back-translation"
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                              className="rounded-full text-muted-foreground hover:text-foreground"
                             >
-                              <Pencil className="h-3 w-3" />
-                            </button>
+                              <Pencil />
+                            </Button>
                           </AppTooltip>
                         ) : (
                           <AppTooltip content="Contributor+ required to edit back-translations">
-                            <span
-                              aria-label="Contributor+ required to edit back-translations"
-                              className="inline-flex h-6 w-6 cursor-not-allowed items-center justify-center rounded-full text-muted-foreground opacity-40"
-                            >
-                              <Pencil className="h-3 w-3" />
+                            <span className="inline-flex">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                disabled
+                                aria-label="Contributor+ required to edit back-translations"
+                                className="rounded-full text-muted-foreground"
+                              >
+                                <Pencil />
+                              </Button>
                             </span>
                           </AppTooltip>
                         )}
@@ -6128,15 +6229,21 @@ function EditorRow({
                             Your translation changed since this was written
                           </span>
                           {editable && (
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="xs"
                               onClick={() => onBacktranslate?.(cell, "refresh")}
                               disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 transition-colors hover:bg-amber-500/25 dark:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="h-auto shrink-0 gap-1 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-500/25 dark:text-amber-200"
                             >
-                              <RefreshCw className={cn("h-3 w-3", isBacktranslating && "animate-spin")} />
+                              {isBacktranslating ? (
+                                <Spinner className="size-3.5" />
+                              ) : (
+                                <RefreshCw />
+                              )}
                               Refresh
-                            </button>
+                            </Button>
                           )}
                         </div>
                       )}
@@ -6155,21 +6262,22 @@ function EditorRow({
                             className="w-full resize-none rounded-lg border border-border bg-background px-3.5 py-3 text-[15px] leading-relaxed text-foreground outline-none focus:ring-1 focus:ring-ring"
                           />
                           <div className="flex items-center justify-end gap-1.5">
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="xs"
                               onClick={handleBtCancel}
-                              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted"
                             >
                               Cancel
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
+                              size="xs"
                               onClick={handleBtSave}
                               disabled={btSaving || !btEditValue.trim()}
-                              className="rounded-full bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {btSaving ? "Saving…" : "Save"}
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       ) : (
@@ -6177,7 +6285,7 @@ function EditorRow({
                            and leading, in a soft well with a gentle tone bar
                            (rhymes with the recording's transcript). */
                         <div className="relative overflow-hidden rounded-xl bg-muted/50 py-3 pr-4 pl-4">
-                          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-full bg-primary/35" />
+                          <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] rounded-md bg-primary/35" />
                           <p className="text-[15px] leading-relaxed text-foreground/90">
                             {cell.backtranslation}
                           </p>
@@ -6194,18 +6302,18 @@ function EditorRow({
                       </p>
                       {editable ? (
                         <>
-                          <button
+                          <Button
                             type="button"
+                            size="sm"
                             onClick={() => onBacktranslate?.(cell, "read-back")}
                             disabled={!isBacktranslationConfigured || isBacktranslating || visibleTranslated.trim().length === 0}
-                            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             {isBacktranslating ? (
-                              <><RefreshCw className="h-3 w-3 animate-spin" /> Reading it back…</>
+                              <><Spinner className="size-3.5" /> Reading it back…</>
                             ) : (
-                              <><Sparkles className="h-3 w-3" /> Read it back with AI</>
+                              <><Sparkles /> Read it back with AI</>
                             )}
-                          </button>
+                          </Button>
                           {!isBacktranslationConfigured && (
                             <p className="text-[11px] text-muted-foreground/70">
                               Sign in or add an AI model in project settings to generate one.
@@ -6551,7 +6659,7 @@ function EditorRow({
                       })}
                       {waivedInfractions.length > 0 && (
                         <>
-                          <div className="mt-2 px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          <div className="mt-2 px-1 text-xs text-muted-foreground">
                             Waived
                           </div>
                           {waivedInfractions.map((inf) => {

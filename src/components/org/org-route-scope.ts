@@ -1,20 +1,14 @@
-const ORG_SCOPED_ROUTE_PREFIXES = [
-  "/assigned",
-  "/members",
-  // AQU-370: the project workspace/editor (`/project/:id`, `/project/:id/file/…`,
-  // settings, etc.) belongs to exactly one org, so switching org — or picking
-  // "All organizations" — from inside it must navigate to the new org's
-  // overview, not silently swap the org context while leaving you on a stale
-  // project route. This prefix is distinct from the plural `/projects` (the
-  // org-level project list) below; neither substring-matches the other.
-  "/project",
-  "/projects",
-  "/settings",
-  "/teams",
-]
+import { parseOrgPath } from "@/lib/navigation/org-paths"
 
+/**
+ * Routes where switching the active org should navigate (not only update
+ * localStorage). Org-shell paths always qualify; flat project/overview paths
+ * still force a leave-to-org-home so you don't keep editing a project after
+ * the chrome says you switched orgs.
+ */
 export function isOrgScopedRoute(pathname: string): boolean {
-  return ORG_SCOPED_ROUTE_PREFIXES.some((prefix) => (
-    pathname === prefix || pathname.startsWith(`${prefix}/`)
-  ))
+  if (parseOrgPath(pathname) != null) return true
+  if (pathname === "/project" || pathname.startsWith("/project/")) return true
+  if (pathname === "/projects" || pathname.startsWith("/projects/")) return true
+  return false
 }

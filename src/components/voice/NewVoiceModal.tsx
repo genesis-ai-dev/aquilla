@@ -351,7 +351,7 @@ function NewVoiceModalBody({
                 {/* Or reuse audio already in the project. */}
                 {takes.length > 0 && (
                   <details open={seededTakePresent} className="rounded-lg border bg-muted/10">
-                    <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+                    <summary className="px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground">
                       Or reuse audio from a line
                     </summary>
                     <div className="space-y-1.5 px-3 pb-3">
@@ -404,12 +404,13 @@ function NewVoiceModalBody({
           {/* Footer */}
           <div className="-mx-5 -mb-5 mt-2 flex flex-wrap items-center gap-2 rounded-b-3xl bg-muted/40 p-5">
             {onMakeDefault && !isDefault && (
-              <Button
-                type="button" size="sm" variant="outline" onClick={onMakeDefault}
-                title="Make this the narrator — used for lines without an explicit speaker."
-              >
-                <Star className="mr-1 h-3.5 w-3.5" /> Make narrator
-              </Button>
+              <AppTooltip content="Make this the narrator — used for lines without an explicit speaker.">
+                <Button
+                  type="button" size="sm" variant="outline" onClick={onMakeDefault}
+                >
+                  <Star className="mr-1 h-3.5 w-3.5" /> Make narrator
+                </Button>
+              </AppTooltip>
             )}
             {isDefault && (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">

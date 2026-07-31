@@ -91,7 +91,7 @@ export function TimelineAddMedia({ onAttachFile, onAttachUrl }: TimelineAddMedia
               size="sm"
               className="mt-2"
               nativeButton={false}
-              render={<label className="cursor-pointer" />}
+              render={<label />}
             >
               Choose media file
               <input

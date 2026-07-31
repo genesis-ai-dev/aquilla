@@ -3,6 +3,9 @@ import { useNavigate, Navigate } from "react-router-dom"
 import {
   ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users, FolderOpen, Filter,
 } from "lucide-react"
+import { toast } from "sonner"
+import { useActiveOrg } from "@/context/OrgContext"
+import { membersPath, orgSettingsPath } from "@/lib/navigation/org-paths"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import {
   listProjects,
@@ -42,10 +45,10 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [pendingTrashId, setPendingTrashId] = useState<string | null>(null)
   const [trashExpanded, setTrashExpanded] = useState(false)
-  const [errorToast, setErrorToast] = useState<string | null>(null)
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("active")
   const [_pendingLifecycleId, setPendingLifecycleId] = useState<string | null>(null)
   const { session } = useFrontierSession()
+  const { activeOrgId } = useActiveOrg()
   const navigate = useNavigate()
   const brand = useBrand()
 
@@ -58,12 +61,6 @@ export function Dashboard() {
       .catch(() => { /* IndexedDB unavailable — render with empty list */ })
       .finally(() => setLoading(false))
   }, [])
-
-  useEffect(() => {
-    if (!errorToast) return
-    const t = setTimeout(() => setErrorToast(null), 4000)
-    return () => clearTimeout(t)
-  }, [errorToast])
 
   // Cloud-side discovery: list every project the user has access to on the
   // server. Dedup against IDB happens at render time (see cloudOnly).
@@ -129,11 +126,11 @@ export function Dashboard() {
       fallbackUsername: session?.username,
     })
     if (result.remote.kind === "forbidden") {
-      setErrorToast(result.remote.message || "Only project owners can move a project to Trash.")
+      toast.error(result.remote.message || "Only project owners can move a project to Trash.")
       return
     }
     if (result.remote.kind === "error") {
-      setErrorToast(`Couldn't move to Trash: ${result.remote.message}`)
+      toast.error(`Couldn't move to Trash: ${result.remote.message}`)
       return
     }
     if (!result.project) return
@@ -148,11 +145,11 @@ export function Dashboard() {
     if (!project) return
     const result = await restoreProject(project, { jwt: session?.jwt ?? null })
     if (result.remote.kind === "forbidden") {
-      setErrorToast(result.remote.message || "Only owners can restore a project.")
+      toast.error(result.remote.message || "Only owners can restore a project.")
       return
     }
     if (result.remote.kind === "error") {
-      setErrorToast(`Couldn't restore: ${result.remote.message}`)
+      toast.error(`Couldn't restore: ${result.remote.message}`)
       return
     }
     if (!result.project) return
@@ -189,7 +186,7 @@ export function Dashboard() {
         prev.map((p) => p.id === projectId ? { ...p, isActive: nextActive } : p),
       )
     } catch (err) {
-      setErrorToast(`Couldn't update project status: ${toUserFacingError(err, "project").message}`)
+      toast.error(`Couldn't update project status: ${toUserFacingError(err, "project").message}`)
     } finally {
       setPendingLifecycleId(null)
     }
@@ -257,8 +254,18 @@ export function Dashboard() {
           <div className="flex shrink-0 items-center gap-2">
             <OverflowMenu
               items={[
-                { id: "members", label: "Members", icon: Users, onClick: () => navigate("/members") },
-                { id: "settings", label: "Settings", icon: SettingsIcon, onClick: () => navigate("/settings") },
+                {
+                  id: "members",
+                  label: "Members",
+                  icon: Users,
+                  onClick: () => activeOrgId != null && navigate(membersPath(activeOrgId)),
+                },
+                {
+                  id: "settings",
+                  label: "Settings",
+                  icon: SettingsIcon,
+                  onClick: () => activeOrgId != null && navigate(orgSettingsPath(activeOrgId)),
+                },
               ]}
             />
             <ProjectCreateDialog onCreated={upsert} />
@@ -325,7 +332,7 @@ export function Dashboard() {
                 <ProjectCard
                   key={p.id}
                   project={p}
-                  onClick={() => navigate(`/project/${p.id}`)}
+                  onClick={() => navigate(`/project/${p.id}/editor`)}
                   canTrash={canTrash(p)}
                   onTrash={() => setPendingTrashId(p.id)}
                   canToggleLifecycle={canToggleLifecycle(p)}
@@ -369,7 +376,7 @@ export function Dashboard() {
                 <ProjectCard
                   key={cp.id}
                   project={minimalProjectRecord(cp)}
-                  onClick={() => navigate(`/project/${cp.id}`)}
+                  onClick={() => navigate(`/project/${cp.id}/editor`)}
                 />
               ))}
             </div>
@@ -420,12 +427,6 @@ export function Dashboard() {
         checkboxLabel="I understand collaborators lose access until the project is restored."
         onConfirm={() => { if (pendingTrashId) handleTrashConfirm(pendingTrashId) }}
       />
-
-      {errorToast && (
-        <div className="fixed bottom-4 right-4 z-60 rounded border bg-destructive px-3 py-2 text-sm text-destructive-foreground shadow-md">
-          {errorToast}
-        </div>
-      )}
     </div>
   )
 }

@@ -7,26 +7,33 @@
 
 import { render, screen } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { FileActionMenu } from "./FileActionMenu"
 
-// The menu is built on the shadcn DropdownMenu (Base UI), which portals to
-// document.body — screen queries see it without any portal stubbing.
+// The menu is built on the shadcn ContextMenu (Base UI), which portals to
+// document.body when open — screen queries see it without any portal stubbing.
+
+function renderMenu(onDelete?: () => void) {
+  return render(
+    <ContextMenu open>
+      <ContextMenuTrigger>trigger</ContextMenuTrigger>
+      <FileActionMenu
+        onRename={vi.fn()}
+        onMove={vi.fn()}
+        onDelete={onDelete}
+      />
+    </ContextMenu>,
+  )
+}
 
 describe("FileActionMenu — delete affordance gating (AQU-271)", () => {
-  const baseProps = {
-    x: 0, y: 0,
-    onClose: vi.fn(),
-    onRename: vi.fn(),
-    onMove: vi.fn(),
-  }
-
   it("hides the Delete item when onDelete is undefined (below project_lead)", () => {
-    render(<FileActionMenu {...baseProps} onDelete={undefined} />)
+    renderMenu(undefined)
     expect(screen.queryByRole("menuitem", { name: /delete/i })).toBeNull()
   })
 
   it("shows the Delete item when onDelete is provided (project_lead+)", () => {
-    render(<FileActionMenu {...baseProps} onDelete={vi.fn()} />)
+    renderMenu(vi.fn())
     expect(screen.getByRole("menuitem", { name: /delete/i })).toBeTruthy()
   })
 })

@@ -4,7 +4,6 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections } from "@/lib/parsers/types"
 import { useSidebarExpansion, usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { FileRow } from "./FileRow"
-import { FileActionMenu } from "./FileActionMenu"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { useEditorScroll } from "@/context/EditorScrollContext"
 import { FileSectionGrid } from "./sidebar/FileSectionGrid"
@@ -16,13 +15,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { AppTooltip } from "@/components/ui/tooltip"
-import {
-  downloadSourceFile,
-  SourceExportError,
-} from "@/lib/sync/source-export"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
-
-const EXPORTABLE_FILE_TYPES: ReadonlySet<FileReference["type"]> = new Set(["usfm"])
+import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -54,6 +48,8 @@ interface Props {
   onOpenGlossary?: () => void
   /** True when the glossary surface is the active center surface (for highlight). */
   glossaryActive?: boolean
+  /** When set, opens inline rename for the given file (sidebar + file-options menu). */
+  renameSignal?: { fileId: string; nonce: number } | null
 }
 
 export function ExpandableFileList({
@@ -61,31 +57,24 @@ export function ExpandableFileList({
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  onOpenGlossary, glossaryActive,
+  onOpenGlossary, glossaryActive, renameSignal,
 }: Props) {
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
     `codex:sidebar:corpus-collapsed:${projectId}`,
   )
-  const [menu, setMenu] = useState<{ fileId: string; x: number; y: number } | null>(null)
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
+  useEffect(() => {
+    if (renameSignal?.fileId) setEditingFileId(renameSignal.fileId)
+  }, [renameSignal?.fileId, renameSignal?.nonce])
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
-  const [exportToast, setExportToast] = useState<{ msg: string; tone: "ok" | "err" } | null>(null)
   const { requestScrollToSection } = useEditorScroll()
 
   useEffect(() => {
     if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
     for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
   }, [activeFileId, expanded, getTokenForFile, projectId])
-
-  // Auto-dismiss the export toast after a few seconds — mirrors the Dashboard
-  // errorToast pattern (no external toast lib in this codebase).
-  useEffect(() => {
-    if (!exportToast) return
-    const t = setTimeout(() => setExportToast(null), 4500)
-    return () => clearTimeout(t)
-  }, [exportToast])
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -159,7 +148,7 @@ export function ExpandableFileList({
             return (
               <div key={group.label}>
                 {showHeader && (
-                  <div className="group/corpus flex items-center gap-1 px-1 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <div className="group/corpus flex items-center gap-1 px-1 pb-1 text-[10px] text-muted-foreground">
                     <button
                       type="button"
                       className="flex flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-left transition-colors hover:text-foreground"
@@ -193,7 +182,7 @@ export function ExpandableFileList({
                     {canEditCorpus && !isEditingCorpus && (
                       <AppTooltip content={`Rename ${group.label}`} side="right">
                         <button
-                          className="rounded-full p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
+                          className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
                           aria-label={`Rename ${group.label}`}
                         >
@@ -229,8 +218,14 @@ export function ExpandableFileList({
                             onEditCancel={() => setEditingFileId(null)}
                             onToggleExpand={() => toggle(file.id)}
                             onSelect={() => onSelectFile(file.id)}
-                            onOpenMenu={(x, y) => setMenu({ fileId: file.id, x, y })}
                             onStartRename={() => setEditingFileId(file.id)}
+                            onMove={() => onMove(file.id)}
+                            onDelete={onDelete ? () => onDelete(file.id) : undefined}
+                            onExportSource={
+                              canExportSourceFile(file, canExportByOrgPolicy)
+                                ? () => { void exportFile(file) }
+                                : undefined
+                            }
                             onApplySuggestion={
                               onApplySuggestion ? () => onApplySuggestion(file.id) : undefined
                             }
@@ -264,52 +259,16 @@ export function ExpandableFileList({
           })}
         </div>
       </div>
-      {menu && (() => {
-        const menuFile = files.find((f) => f.id === menu.fileId)
-        // AQU-253 (a fix): also gate on org policy, not just file type.
-        const canExportFile = !!menuFile && EXPORTABLE_FILE_TYPES.has(menuFile.type) && canExportByOrgPolicy
-        return (
-          <FileActionMenu
-            x={menu.x} y={menu.y}
-            onClose={() => setMenu(null)}
-            onRename={() => setEditingFileId(menu.fileId)}
-            onMove={() => onMove(menu.fileId)}
-            onDelete={onDelete ? () => onDelete(menu.fileId) : undefined}
-            onExportSource={canExportFile ? () => exportFile(menuFile!) : undefined}
-          />
-        )
-      })()}
-      {exportToast && (
-        <div
-          className={cn(
-            "fixed bottom-4 right-4 z-60 max-w-md rounded border px-3 py-2 text-sm shadow-md",
-            exportToast.tone === "err"
-              ? "bg-destructive text-destructive-foreground"
-              : "bg-background text-foreground",
-          )}
-        >
-          {exportToast.msg}
-        </div>
-      )}
     </>
   )
 
   async function exportFile(file: FileReference) {
-    const name = /\.(sfm|usfm)$/i.test(file.name) ? file.name : `${file.name}.SFM`
-    try {
-      await downloadSourceFile({
-        projectId, fileId: file.id, downloadName: name, getToken: getTokenForFile, targetLang,
-      })
-      setExportToast({ msg: `Exported ${name}`, tone: "ok" })
-    } catch (err) {
-      const msg =
-        err instanceof SourceExportError && err.status === 404
-          ? "This file was imported before round-trip export was wired up. Re-import to enable it."
-          : err instanceof Error
-            ? `Export failed: ${err.message}`
-            : "Export failed."
-      setExportToast({ msg, tone: "err" })
-    }
+    await exportSourceFile({
+      projectId,
+      file,
+      getToken: getTokenForFile,
+      targetLang,
+    })
   }
 
 }

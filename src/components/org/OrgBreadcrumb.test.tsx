@@ -27,7 +27,7 @@ function LocationProbe() {
   return <output data-testid="location">{location.pathname}{location.search}</output>
 }
 
-function renderBreadcrumb(ui: React.ReactNode, initialEntry = "/project/project-1") {
+function renderBreadcrumb(ui: React.ReactNode, initialEntry = "/project/project-1/editor") {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       {ui}
@@ -55,8 +55,8 @@ describe("OrgBreadcrumb", () => {
       />,
     )
 
-    expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/?org=all")
-    expect(screen.getByRole("link", { name: "Dev Org" })).toHaveAttribute("href", "/?org=7")
+    expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/orgs/all")
+    expect(screen.getByRole("link", { name: "Dev Org" })).toHaveAttribute("href", "/orgs/7")
     expect(screen.getByRole("link", { name: "Dev Project" })).toHaveAttribute("href", "/projects/project-1")
     expect(screen.getByText("Editor")).toHaveAttribute("aria-current", "page")
   })
@@ -67,24 +67,34 @@ describe("OrgBreadcrumb", () => {
     fireEvent.click(screen.getByRole("link", { name: "All organizations" }))
 
     expect(orgContext.setAllOrgs).toHaveBeenCalledOnce()
-    expect(screen.getByTestId("location")).toHaveTextContent("/?org=all")
+    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/all")
   })
 
   it("renders the all-organizations landing crumb as the current page", () => {
     orgContext.activeOrgId = null
     orgContext.isAllOrgs = true
 
-    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/?org=all")
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/all")
 
     expect(screen.queryByRole("link", { name: "All organizations" })).not.toBeInTheDocument()
     expect(screen.getByText("All organizations")).toHaveAttribute("aria-current", "page")
   })
 
-  it("keeps the breadcrumb on one line so long labels cannot move the header", () => {
+  it("keeps the breadcrumb on one line and scrolls horizontally instead of clipping", () => {
     const { container } = renderBreadcrumb(
       <OrgBreadcrumb section="A very long project name that still stays on one line" />,
     )
 
-    expect(container.querySelector('[data-slot="breadcrumb-list"]')).toHaveClass("flex-nowrap", "overflow-hidden", "whitespace-nowrap")
+    const list = container.querySelector('[data-slot="breadcrumb-list"]')
+    expect(list).toHaveClass(
+      "flex-nowrap",
+      "overflow-x-auto",
+      "overscroll-x-contain",
+      "whitespace-nowrap",
+      "scrollbar-none",
+    )
+    // Edge fades match TabStrip — present even when unused (opacity toggled).
+    const fades = container.querySelectorAll('[data-slot="breadcrumb"] > span[aria-hidden]')
+    expect(fades).toHaveLength(2)
   })
 })

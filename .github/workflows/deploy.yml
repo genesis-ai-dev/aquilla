@@ -139,7 +139,7 @@ jobs:
       - name: Deploy aquilla-web (main/staging/dev)
         id: deploy_prod
         if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
-        uses: cloudflare/wrangler-action@v4
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
@@ -148,7 +148,7 @@ jobs:
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview
         if: steps.decide.outputs.deploy == 'true' && github.event_name == 'pull_request'
-        uses: cloudflare/wrangler-action@v4
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
@@ -156,7 +156,7 @@ jobs:
 
       - name: Comment preview URL on PR
         if: github.event_name == 'pull_request' && steps.decide.outputs.deploy == 'true'
-        uses: marocchino/sticky-pull-request-comment@v3
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3
         with:
           header: pages-preview
           message: |

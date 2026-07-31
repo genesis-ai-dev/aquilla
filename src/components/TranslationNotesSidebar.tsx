@@ -22,6 +22,7 @@ import { useEffect, useState, useCallback } from "react"
 import { fetchProjectFiles, fetchFileCells } from "@/lib/sync/cells-read"
 import { cn } from "@/lib/utils"
 import { BookOpen, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 // Sentinel fileId for project-scoped token mints (no specific file).
 // Must match the "__project__" sentinel used by useComments,
@@ -179,12 +180,12 @@ export function TranslationNotesSidebar({
   return (
     <div
       className={cn(
-        "flex h-full w-72 flex-col border-l bg-background text-sm",
+        "flex h-full w-72 flex-col border-l bg-card text-sm",
         className,
       )}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-2">
+      {/* Header — p-2 matches the other side panels' header strip. */}
+      <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">
           <BookOpen className="h-4 w-4 text-muted-foreground" />
           <span>Translation Notes</span>
@@ -194,14 +195,16 @@ export function TranslationNotesSidebar({
             </span>
           )}
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label="Hide translation notes"
           onClick={onToggle}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+          className="text-muted-foreground"
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </Button>
       </div>
 
       {/* Body */}
@@ -223,7 +226,7 @@ export function TranslationNotesSidebar({
             {[...byFile.values()].map(({ fileName, notes: fileNotes }) => (
               <div key={fileName}>
                 {byFile.size > 1 && (
-                  <div className="sticky top-0 bg-muted/60 px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <div className="sticky top-0 bg-muted/60 px-3 py-1 text-xs text-muted-foreground">
                     {fileName}
                   </div>
                 )}

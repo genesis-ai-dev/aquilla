@@ -1,16 +1,12 @@
 import { Pencil, FolderInput, Trash2, Download } from "lucide-react"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
+  ContextMenuContent,
+  ContextMenuGroup,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu"
 
 interface FileActionMenuProps {
-  x: number
-  y: number
-  onClose: () => void
   onRename: () => void
   onMove: () => void
   /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
@@ -20,49 +16,38 @@ interface FileActionMenuProps {
   onExportSource?: () => void
 }
 
+/**
+ * Context-menu content for a sidebar file row. Must be rendered as a child of
+ * `<ContextMenu>` (alongside a `<ContextMenuTrigger>`).
+ */
 export function FileActionMenu({
-  x, y, onClose, onRename, onMove, onDelete, onExportSource,
+  onRename, onMove, onDelete, onExportSource,
 }: FileActionMenuProps) {
-  // Always-open menu anchored to the click coordinates; the caller unmounts
-  // us via onClose (fired on Escape, outside click, or item selection).
   return (
-    <DropdownMenu open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DropdownMenuContent
-        anchor={{
-          getBoundingClientRect: () =>
-            new DOMRect(x, y, 0, 0),
-        }}
-        align="start"
-        sideOffset={0}
-        className="w-44"
-      >
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => { onRename(); onClose() }}>
-            <Pencil className="h-3.5 w-3.5" /> Rename
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => { onMove(); onClose() }}>
-            <FolderInput className="h-3.5 w-3.5" /> Move to corpus…
-          </DropdownMenuItem>
-          {onExportSource && (
-            <DropdownMenuItem onClick={() => { onExportSource(); onClose() }}>
-              <Download className="h-3.5 w-3.5" /> Export source (.SFM)
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuGroup>
-        {onDelete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => { onDelete(); onClose() }}
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Delete
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </>
+    <ContextMenuContent side="bottom" align="start" alignOffset={0} sideOffset={4} className="w-44">
+      <ContextMenuGroup>
+        <ContextMenuItem onClick={onRename}>
+          <Pencil /> Rename
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onMove}>
+          <FolderInput /> Move to corpus…
+        </ContextMenuItem>
+        {onExportSource && (
+          <ContextMenuItem onClick={onExportSource}>
+            <Download /> Export source (.SFM)
+          </ContextMenuItem>
         )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </ContextMenuGroup>
+      {onDelete && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuGroup>
+            <ContextMenuItem variant="destructive" onClick={onDelete}>
+              <Trash2 /> Delete
+            </ContextMenuItem>
+          </ContextMenuGroup>
+        </>
+      )}
+    </ContextMenuContent>
   )
 }

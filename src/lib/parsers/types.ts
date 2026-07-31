@@ -481,6 +481,10 @@ export interface ProjectRecord {
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings
+  /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
+   *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
+   *  false imports front matter as translatable cells. */
+  importExcludeFrontMatter?: boolean
 }
 
 /** A single authored guidance entry in the Living Memory page. */

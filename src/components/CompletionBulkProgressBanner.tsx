@@ -8,6 +8,7 @@
 // summary instead of quietly disappearing as if the whole file completed.
 
 import { X, AlertTriangle } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   useCompletionBatchProgress,
@@ -32,14 +33,16 @@ export function CompletionBulkProgressBanner() {
         </span>
         <div className="flex-1" />
         <AppTooltip content="Dismiss">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             onClick={dismissBatchCompletionSummary}
             aria-label="Dismiss"
-            className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            className="ml-1 text-muted-foreground"
           >
-            <X className="h-3.5 w-3.5" />
-          </button>
+            <X />
+          </Button>
         </AppTooltip>
       </div>
     )
@@ -61,14 +64,16 @@ export function CompletionBulkProgressBanner() {
       </span>
       {!cancelled && (
         <AppTooltip content="Stop translating">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             onClick={cancelBatchCompletion}
             aria-label="Stop translating"
-            className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            className="ml-1 text-muted-foreground"
           >
-            <X className="h-3.5 w-3.5" />
-          </button>
+            <X />
+          </Button>
         </AppTooltip>
       )}
       {cancelled && (

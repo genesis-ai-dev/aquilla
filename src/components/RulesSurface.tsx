@@ -7,7 +7,7 @@
  */
 import { useState, useMemo, useEffect } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText } from "lucide-react"
+import { AlertTriangle, AlertCircle, Trash2, Wand2, ChevronDown, ChevronUp, Pencil, ArrowUpCircle, Building2, Lock, Clock, ScrollText, Plus, BookOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/page"
 import { Input } from "@/components/ui/input"
@@ -17,12 +17,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleEditor } from "./RuleEditor"
+import { RuleImportDialog } from "./RuleImportDialog"
+import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { cn } from "@/lib/utils"
-import type { ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
+import type { CompletionSettings, ProjectRecord, RuleAutofix, TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { useRules } from "@/hooks/useRules"
 import type { CellData } from "@/hooks/useCells"
 import type { OrgWideSettings, OrgPatchResult, PromotionRequestResult } from "@/lib/sync/org-settings"
@@ -41,6 +43,7 @@ interface Props {
   setBuiltinOverride: UseRulesReturn["setBuiltinOverride"]
   infractions: Map<string, import("@/lib/parsers/types").RuleInfraction[]>
   cells: CellData[]
+  completionSettings?: CompletionSettings
   orgRules?: TranslationRule[]
   canEditOrgRules?: boolean
   patchOrgSettings?: (partial: OrgWideSettings) => Promise<OrgPatchResult | { kind: "blocked" }>
@@ -81,6 +84,7 @@ export function RulesSurface({
   setBuiltinOverride,
   infractions,
   cells,
+  completionSettings,
   orgRules = [],
   canEditOrgRules = false,
   patchOrgSettings,
@@ -197,10 +201,52 @@ export function RulesSurface({
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-        {editingRuleId === "new" && (
+    <div className="flex h-full flex-col bg-background">
+      {/* In-main toolbar — matches Glossary/Terminology: actions live in the
+          surface, not the workspace header. */}
+      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+        <ScrollText className="h-5 w-5 text-muted-foreground" aria-hidden />
+        <h1 className="flex-1 text-base font-semibold">Rules</h1>
+        <Button variant="outline" size="sm" onClick={() => navigate(`/project/${projectId}/terminology`)}>
+          <BookOpen data-icon="inline-start" />
+          Terminology
+        </Button>
+        <RuleImportDialog
+          completionSettings={completionSettings}
+          onAdd={addRule}
+          projectId={projectId}
+        />
+        <RuleSuggestFromEditsDialog
+          completionSettings={completionSettings}
+          onAdd={addRule}
+          projectId={projectId}
+          cells={cells}
+        />
+        <Button
+          size="sm"
+          onClick={() => setEditingRuleId("new")}
+          disabled={editingRuleId !== null}
+        >
+          <Plus className="size-4" aria-hidden />
+          Add Rule
+        </Button>
+      </header>
+
+      {/* Create project rule — dialog, not inline */}
+      <Dialog
+        open={editingRuleId === "new"}
+        onOpenChange={(open) => { if (!open) setEditingRuleId(null) }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-h-[90vh] max-w-2xl gap-0 overflow-y-auto p-0 sm:max-w-2xl"
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>Create translation rule</DialogTitle>
+            <DialogDescription>Create a project translation rule.</DialogDescription>
+          </DialogHeader>
           <RuleEditor
+            className="rounded-none border-0"
             cells={cells}
             onSave={async (rule) => {
               await addRule(rule)
@@ -208,8 +254,36 @@ export function RulesSurface({
             }}
             onCancel={() => setEditingRuleId(null)}
           />
-        )}
+        </DialogContent>
+      </Dialog>
 
+      {/* Create org rule — dialog, not inline */}
+      <Dialog
+        open={editingOrgRuleId === "new"}
+        onOpenChange={(open) => { if (!open) setEditingOrgRuleId(null) }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-h-[90vh] max-w-2xl gap-0 overflow-y-auto p-0 sm:max-w-2xl"
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>Create org rule</DialogTitle>
+            <DialogDescription>Create an org-scoped translation rule.</DialogDescription>
+          </DialogHeader>
+          <RuleEditor
+            className="rounded-none border-0"
+            cells={cells}
+            onSave={async (rule) => {
+              await addOrgRule(rule)
+              setEditingOrgRuleId(null)
+            }}
+            onCancel={() => setEditingOrgRuleId(null)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
         {usageSummary && (
           <AppTooltip content="LLM usage on this project">
             <p className="text-xs text-muted-foreground">{usageSummary}</p>
@@ -237,7 +311,8 @@ export function RulesSurface({
                     onClick={() => setEditingOrgRuleId("new")}
                     disabled={editingOrgRuleId !== null}
                   >
-                    + Add Org Rule
+                    <Plus className="size-4" aria-hidden />
+                    Add Org Rule
                   </Button>
                 )}
                 {!canEditOrgRules && (
@@ -249,18 +324,6 @@ export function RulesSurface({
               </div>
             </CardHeader>
             <CardContent>
-              {editingOrgRuleId === "new" && canEditOrgRules && (
-                <div className="mb-4">
-                  <RuleEditor
-                    cells={cells}
-                    onSave={async (rule) => {
-                      await addOrgRule(rule)
-                      setEditingOrgRuleId(null)
-                    }}
-                    onCancel={() => setEditingOrgRuleId(null)}
-                  />
-                </div>
-              )}
               {orgRules.length === 0 ? (
                 <EmptyState
                   variant="inline"
@@ -285,15 +348,17 @@ export function RulesSurface({
                         </div>
                         {canEditOrgRules && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setEditingOrgRuleId(editingOrgRuleId === rule.id ? null : rule.id)}
-                              title="Edit org rule"
-                              disabled={editingOrgRuleId !== null && editingOrgRuleId !== rule.id}
-                            >
-                              <Pencil />
-                            </Button>
+                            <AppTooltip content="Edit org rule">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setEditingOrgRuleId(editingOrgRuleId === rule.id ? null : rule.id)}
+                                disabled={editingOrgRuleId !== null && editingOrgRuleId !== rule.id}
+                                aria-label="Edit org rule"
+                              >
+                                <Pencil />
+                              </Button>
+                            </AppTooltip>
                             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                               <Switch
                                 size="sm"
@@ -349,12 +414,16 @@ export function RulesSurface({
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <Button size="sm" onClick={() => handleApproveRequest(req)} title="Promote this rule to org scope">
-                              Approve
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)} title="Dismiss this request">
-                              Dismiss
-                            </Button>
+                            <AppTooltip content="Promote this rule to org scope">
+                              <Button size="sm" onClick={() => handleApproveRequest(req)}>
+                                Approve
+                              </Button>
+                            </AppTooltip>
+                            <AppTooltip content="Dismiss this request">
+                              <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)}>
+                                Dismiss
+                              </Button>
+                            </AppTooltip>
                           </div>
                         </div>
                       </li>
@@ -419,25 +488,27 @@ export function RulesSurface({
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => navigate(`/project/${projectId}?openRule=${rule.id}`)}
-                          title="Opens the editor with this rule's drawer"
-                        >
-                          <Wand2 data-icon="inline-start" />
-                          Try to fix all
-                        </Button>
+                        <AppTooltip content="Opens the editor with this rule's drawer">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
+                          >
+                            <Wand2 data-icon="inline-start" />
+                            Try to fix all
+                          </Button>
+                        </AppTooltip>
                         {canEditOrgRules && patchOrgSettings && (
+                          <AppTooltip content="Copy this rule to the org's rule library">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => setPromoteRule(rule)}
-                            title="Copy this rule to the org's rule library"
                           >
                             <ArrowUpCircle data-icon="inline-start" />
                             Promote to org
                           </Button>
+                          </AppTooltip>
                         )}
                         {!canEditOrgRules && canRequestPromotion && requestPromotion && (
                           (() => {
@@ -451,28 +522,31 @@ export function RulesSurface({
                                 {notice ?? "Requested"}
                               </Badge>
                             ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleRequestPromotion(rule)}
-                                disabled={isRequesting}
-                                title="Ask an org maintainer to promote this rule to org scope"
-                              >
-                                <ArrowUpCircle data-icon="inline-start" />
-                                {isRequesting ? "Requesting…" : "Request promotion"}
-                              </Button>
+                              <AppTooltip content="Ask an org maintainer to promote this rule to org scope">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleRequestPromotion(rule)}
+                                  disabled={isRequesting}
+                                >
+                                  <ArrowUpCircle data-icon="inline-start" />
+                                  {isRequesting ? "Requesting…" : "Request promotion"}
+                                </Button>
+                              </AppTooltip>
                             )
                           })()
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
-                          title="Edit rule"
-                          disabled={editingRuleId !== null && editingRuleId !== rule.id}
-                        >
-                          <Pencil />
-                        </Button>
+                        <AppTooltip content="Edit rule">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
+                            disabled={editingRuleId !== null && editingRuleId !== rule.id}
+                            aria-label="Edit rule"
+                          >
+                            <Pencil />
+                          </Button>
+                        </AppTooltip>
                         <Button variant="ghost" size="sm" onClick={() => toggleExpanded(rule.id)}>
                           {expanded ? <ChevronUp /> : <ChevronDown />}
                         </Button>
@@ -514,6 +588,7 @@ export function RulesSurface({
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     </div>
   )
@@ -528,7 +603,7 @@ function AutofixEditor({ rule, onUpdate }: { rule: TranslationRule; onUpdate: (a
     <>
       <Separator className="my-3" />
       <div className="flex flex-col gap-2">
-        <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Saved autofix (regex)</p>
+        <p className="text-xs text-muted-foreground">Saved autofix (regex)</p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <Input data-autofix-field="pattern" placeholder="Pattern" value={pattern} onChange={(e) => setPattern(e.target.value)} />
           <Input placeholder="Replacement" value={replacement} onChange={(e) => setReplacement(e.target.value)} />

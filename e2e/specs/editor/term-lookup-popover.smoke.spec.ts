@@ -34,9 +34,9 @@ test("term lookup popover appears for terminology-matched source word", async ({
   await openSeededProject(alice, seeded)
 
   // Find the dotted-underline span for "content" in the source column.
-  // TermLookupPopover wraps the word in a span with cursor-pointer + underline.
+  // TermLookupPopover wraps the word in a span with underline decoration.
   const termSpan = alice
-    .locator("span.cursor-pointer.underline")
+    .locator("span.underline")
     .filter({ hasText: /^content$/i })
     .first()
   await expect(termSpan).toBeVisible({ timeout: 10_000 })

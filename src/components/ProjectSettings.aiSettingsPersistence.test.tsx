@@ -19,6 +19,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+
+
+vi.mock("@/components/org/OrgSidebar", () => ({
+  OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
+}))
+vi.mock("@/components/org/OrgBreadcrumb", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  OrgBreadcrumb: ({ section, trail }: any) => (
+    <div data-testid="org-breadcrumb">
+      {section}
+      {(trail ?? []).map((t: { label: string }) => ` › ${t.label}`).join("")}
+    </div>
+  ),
+}))
+
 import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
 
 const PROJECT_ID = "proj-ai-settings"
@@ -147,9 +162,10 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
 // sub-menu pane — deep-link straight there via `?section=`.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=ai`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/ai`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -194,8 +210,8 @@ describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
     fireEvent.click(saveBtn)
 
     // The page must still be showing the settings form (no navigation away) —
-    // the same route continues to render its heading.
-    await waitFor(() => expect(screen.getByText(/project settings/i)).toBeTruthy())
+    // the same route continues to render its section heading.
+    await waitFor(() => expect(screen.getByRole("heading", { name: /ai & completion/i })).toBeTruthy())
 
     const status = await screen.findByRole("status")
     expect(status.textContent?.toLowerCase()).toContain("examples retrieved")

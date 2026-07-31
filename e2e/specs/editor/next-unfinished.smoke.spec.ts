@@ -5,11 +5,11 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * Next-unfinished navigation action.
  *
  * `useNextUnfinished` scans cells for any that are unfinished (no translated
- * text, or fewer than validationCount validators). AQU-331 moved the action
- * from a toolbar button into the workspace header "More" overflow menu as the
- * "Next unfinished" menu item; it is disabled when there is no active file or
- * no unfinished cell. Selecting it scrolls the list to the next
- * unfinished cell after the current position (Cmd+. is the shortcut).
+ * text, or fewer than validationCount validators). The action lives in the
+ * chapter-row File options overflow menu as "Next unfinished"; it is disabled
+ * when there is no active file or no unfinished cell. Selecting it scrolls the
+ * list to the next unfinished cell after the current position (Cmd+. is the
+ * shortcut).
  *
  * This spec verifies:
  *  1. After importing a file (all cells start unfinished), the menu item is
@@ -26,8 +26,8 @@ test("next-unfinished menu item is enabled when unfinished cells exist and jumps
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `NextUnfinished ${Date.now()}` })
   const ws = await openSeededProject(alice, seeded)
 
-  // Open the header ⋯ overflow menu — "Next unfinished" lives there (AQU-331).
-  await ws.openHeaderOverflowMenu()
+  // Open the file options ⋯ overflow menu — "Next unfinished" lives there.
+  await ws.openFileOverflowMenu()
   const jumpItem = alice.getByRole("menuitem", { name: /Next unfinished/i })
   await expect(jumpItem).toBeVisible({ timeout: 5_000 })
 

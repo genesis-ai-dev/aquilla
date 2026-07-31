@@ -28,7 +28,7 @@ test("Escape in file rename input cancels without changing the filename", async 
   await expect(fileRow).toBeVisible({ timeout: 10_000 })
   await fileRow.click({ button: "right" })
 
-  // Click "Rename" (shadcn DropdownMenu — role="menuitem").
+  // Click "Rename" (shadcn ContextMenu — role="menuitem").
   const renameItem = alice.getByRole("menuitem", { name: /^Rename$/i })
   await expect(renameItem).toBeVisible({ timeout: 3_000 })
   await renameItem.click()

@@ -111,7 +111,7 @@ export function RemoveOrgMemberDialog({
                     onCheckedChange={() => toggle(p.id)}
                     disabled={submitting}
                   />
-                  <label htmlFor={`rm-${p.id}`} className="flex-1 cursor-pointer">
+                  <label htmlFor={`rm-${p.id}`} className="flex-1">
                     {p.name}{" "}
                     <span className="text-xs text-muted-foreground">(<RoleLabel name={p.role.name} />)</span>
                   </label>

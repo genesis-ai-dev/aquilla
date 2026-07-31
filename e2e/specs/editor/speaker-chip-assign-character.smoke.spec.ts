@@ -46,7 +46,7 @@ test("clicking a voice chip assigns a line to that voice in audio mode", async (
   // so we don't match the identically-named row in the Voices dock panel.
   const voiceTrigger = alice
     .getByRole("main")
-    .getByTitle("Choose a voice")
+    .getByRole("button", { name: /Voice:.*Choose a voice/i })
     .first()
   await expect(voiceTrigger).toBeVisible({ timeout: 8_000 })
   await expect(voiceTrigger).toHaveAttribute("aria-label", /Voice: Narrator\. Choose a voice/i)

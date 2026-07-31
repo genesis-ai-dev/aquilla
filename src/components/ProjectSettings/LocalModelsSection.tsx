@@ -12,6 +12,7 @@ import { CheckCircle2, AlertCircle, Download, RotateCw, Trash2 } from "lucide-re
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { SettingsGroup } from "@/components/ui/page"
 import {
   clearPrefetchStatus,
   hydratePrefetchStatus,
@@ -58,21 +59,13 @@ export function LocalModelsSection() {
   }, [])
 
   return (
-    <section id="local-models" className="mt-8 space-y-3">
-      <div>
-        <h2 className="text-base font-semibold">Local AI models</h2>
-        <p className="text-xs text-muted-foreground">
-          Whisper transcription and Kokoro / MMS voices run entirely in your
-          browser — audio and text never leave your device. They're stored once
-          and shared across all your projects on this device.
-        </p>
-      </div>
-      <div className="divide-y rounded-lg border bg-card">
+    <div id="local-models">
+      <SettingsGroup label="On-device models">
         {MODELS.map((meta) => (
           <ModelRow key={meta.id} meta={meta} />
         ))}
-      </div>
-    </section>
+      </SettingsGroup>
+    </div>
   )
 }
 
@@ -106,7 +99,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
   }
 
   return (
-    <div className="flex items-start justify-between gap-4 px-4 py-3">
+    <div className="flex items-start justify-between gap-4 px-5 py-4">
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium">{meta.label}</span>
@@ -190,7 +183,7 @@ function DownloadBar({ loaded, total }: { loaded: number; total: number }) {
     <div className="mt-1.5 flex items-center gap-2">
       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-primary transition-[width] duration-150"
+          className="h-full rounded-md bg-primary transition-[width] duration-150"
           style={{ width: `${pct ?? 8}%` }}
         />
       </div>

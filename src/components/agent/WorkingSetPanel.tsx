@@ -13,6 +13,7 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { AlertTriangle, ArrowUpRight, Check, ListChecks, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { pendingRows, proposalRowKey, type WorkingSetRow } from "@/lib/agent/working-set"
 
@@ -193,17 +194,18 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
             {pending.length > 0 && ` · ${pending.length} to review`}
           </span>
           {pending.length > 0 && onAcceptAll && (
-            <Button
-              type="button"
-              size="sm"
-              className="ml-auto h-6 text-[11px]"
-              disabled={busy}
-              onClick={() => void onAcceptAll(valueFor)}
-              title="Accept every pending draft, with your edits (Shift+A)"
-            >
-              <Check data-icon="inline-start" />
-              Accept remaining ({pending.length})
-            </Button>
+            <AppTooltip content="Accept every pending draft, with your edits (Shift+A)">
+              <Button
+                type="button"
+                size="sm"
+                className="ml-auto h-6 text-[11px]"
+                disabled={busy}
+                onClick={() => void onAcceptAll(valueFor)}
+              >
+                <Check data-icon="inline-start" />
+                Accept remaining ({pending.length})
+              </Button>
+            </AppTooltip>
           )}
         </div>
 
@@ -330,20 +332,23 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
       )}
     >
       <div className="flex min-w-0 flex-col items-start gap-1">
-        <span className="max-w-full truncate font-mono text-[10px] text-muted-foreground" title={row.ref}>
-          {row.ref ?? "·"}
-        </span>
+        <AppTooltip content={row.ref}>
+          <span className="max-w-full truncate font-mono text-[10px] text-muted-foreground">
+            {row.ref ?? "·"}
+          </span>
+        </AppTooltip>
         {stateLabel && <span className={cn("text-[10px] font-medium", stateClass)}>{stateLabel}</span>}
         {row.fileId && onJumpToCell && (
-          <button
-            type="button"
-            onClick={() => onJumpToCell(row.fileId!, row.cellId)}
-            className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-            title="Open in editor"
-          >
-            <ArrowUpRight className="h-3 w-3" />
-            open
-          </button>
+          <AppTooltip content="Open in editor">
+            <button
+              type="button"
+              onClick={() => onJumpToCell(row.fileId!, row.cellId)}
+              className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+            >
+              <ArrowUpRight className="h-3 w-3" />
+              open
+            </button>
+          </AppTooltip>
         )}
       </div>
 
@@ -385,15 +390,16 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                 className="w-full resize-none rounded-md border border-sky-400 bg-background px-2 py-1.5 text-xs leading-relaxed shadow-[0_0_0_3px_rgba(56,189,248,0.12)] outline-none"
               />
             ) : (
-              <button
-                type="button"
-                dir="auto"
-                onClick={onStartEdit}
-                title="Edit this draft (or just start typing)"
-                className="whitespace-pre-wrap break-words rounded-sm text-left text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
-              >
-                {editValue}
-              </button>
+              <AppTooltip content="Edit this draft (or just start typing)">
+                <button
+                  type="button"
+                  dir="auto"
+                  onClick={onStartEdit}
+                  className="whitespace-pre-wrap break-words rounded-sm text-left text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
+                >
+                  {editValue}
+                </button>
+              </AppTooltip>
             )}
 
             {lint.map((msg) => (

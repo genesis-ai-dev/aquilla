@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { AlertCircle, Pause, Volume2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -300,14 +301,14 @@ export function CellTtsButton({
             : `Generate & play (${voice.name} — ${engineName})`
 
   const button = (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size={isLoadingModel ? "xs" : "icon-xs"}
       onClick={onClick}
       disabled={disabled || isLoadingModel || isSynthesizing}
       aria-label={tooltip}
       className={cn(
-        "flex h-5 items-center justify-center gap-1 rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
-        isLoadingModel ? "w-auto px-1" : "w-5",
         isError
           ? "text-destructive hover:text-destructive/80"
           : isPlaying
@@ -318,21 +319,19 @@ export function CellTtsButton({
         isSynthesizing && "animate-pulse",
       )}
     >
-      {isError ? <AlertCircle className="h-3 w-3" /> :
+      {isError ? <AlertCircle /> :
        isLoadingModel || isSynthesizing ? <Spinner className="size-3" /> :
-       isPlaying ? <Pause className="h-3 w-3" /> :
-       <Volume2 className="h-3 w-3" />}
+       isPlaying ? <Pause /> :
+       <Volume2 />}
       {isLoadingModel && pct != null && (
         <span className="tabular-nums text-[9px] font-medium leading-none">{pct}%</span>
       )}
-    </button>
+    </Button>
   )
 
   return (
     <AppTooltip content={tooltip}>
-      <span className="inline-flex">
-        {button}
-      </span>
+      {button}
     </AppTooltip>
   )
 }

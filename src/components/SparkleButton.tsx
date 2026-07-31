@@ -17,9 +17,9 @@ export function SparkleButton({ disabled, loading, onComplete, onDragStart, onDr
         "flex h-5 w-5 items-center justify-center rounded transition-colors",
         disabled
           ? onSetupNeeded
-            ? "cursor-pointer text-muted-foreground/30 hover:text-muted-foreground/50"
+            ? "text-muted-foreground/30 hover:text-muted-foreground/50"
             : "cursor-not-allowed text-muted-foreground/30"
-          : "cursor-pointer text-muted-foreground hover:text-primary",
+          : "text-muted-foreground hover:text-primary",
         loading && "animate-pulse text-primary"
       )}
       disabled={nativeDisabled}

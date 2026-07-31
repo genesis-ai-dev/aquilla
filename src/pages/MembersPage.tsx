@@ -7,7 +7,8 @@ import {
   UsersRound,
   X,
 } from "lucide-react"
-import { useSearchParams } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
+import { membersPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -30,6 +31,7 @@ import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
 import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
+import type { MemberGrantResult } from "@/lib/frontier/members"
 import { useActiveOrg } from "@/context/OrgContext"
 
 type MembersTab = "roster" | "matrix"
@@ -139,28 +141,21 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const { activeOrg } = useActiveOrg()
   // AQU-326: the External-collaborators governance view is maintainer+ only.
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
-  const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, remove, listMemberProjects, refresh } =
+  const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
   const { projects: accessibleProjects, refresh: refreshProjects } = useAccessibleProjects()
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
   const [multiInviteOpen, setMultiInviteOpen] = useState(false)
 
   // AQU-538 §3.4: "Roster" (the org-wide member list, default) vs "Matrix"
-  // (MembersMatrixView — members × projects role grid, previously mounted
-  // nowhere). Read/write via the URL so the tab is linkable
-  // (`/members?tab=matrix`) and survives a refresh.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const tab: MembersTab = searchParams.get("tab") === "matrix" ? "matrix" : "roster"
+  // (MembersMatrixView — members × projects role grid). Path-based so the
+  // tab is linkable (`/orgs/:id/members/matrix`) and survives a refresh.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const tab: MembersTab = location.pathname.endsWith("/members/matrix") ? "matrix" : "roster"
   function setTab(next: MembersTab) {
-    setSearchParams(
-      (prev) => {
-        const params = new URLSearchParams(prev)
-        if (next === "matrix") params.set("tab", "matrix")
-        else params.delete("tab")
-        return params
-      },
-      { replace: true },
-    )
+    if (orgId == null) return
+    navigate(membersPath(orgId, next), { replace: true })
   }
 
   const panelMembers: MembersPanelMember[] = members.map((m) => ({
@@ -250,6 +245,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
                   panelMembers={panelMembers}
                   listMemberProjects={listMemberProjects}
                   add={add}
+                  addMany={addMany}
                   remove={remove}
                   callerUserId={callerUserId}
                   callerOrgRoleLevel={activeOrg?.role.level ?? null}
@@ -329,6 +325,8 @@ interface RosterProps {
   panelMembers: MembersPanelMember[]
   listMemberProjects: (userId: number) => Promise<OrgMemberProject[]>
   add: (username: string, role: number) => Promise<unknown>
+  /** AQU-734: batch grant for the multi-select Add flow. */
+  addMany: (members: Array<{ username: string; role: number }>) => Promise<MemberGrantResult[]>
   remove: (userId: number) => Promise<void>
   callerUserId: number | null
   /** AQU-427: the current user's org-level role, forwarded to MemberAccessRow
@@ -341,6 +339,7 @@ function RosterWithProjectChips({
   orgId,
   panelMembers,
   add,
+  addMany,
   callerUserId,
   callerOrgRoleLevel,
   onRequestRemove,
@@ -358,11 +357,13 @@ function RosterWithProjectChips({
           callerUserId={callerUserId}
           callerMaxRole={ROLE.MAINTAINER}
           scopedUserSearch={false}
-          onAdd={async (username, role) => {
-            const result = await add(username, role)
-            return result
-              ? { ok: true }
-              : { ok: false, error: "Could not add user. Username may not exist." }
+          onAdd={async (usernames, role) => {
+            const results = await addMany(usernames.map((username) => ({ username, role })))
+            return results.map((r) => ({
+              username: r.username,
+              ok: r.ok,
+              error: r.error?.message,
+            }))
           }}
           onRemove={(userId) => {
             const target = panelMembers.find((m) => m.userId === userId)
@@ -480,24 +481,25 @@ function PendingInviteRow({
           <span>{futureLabel ?? expiresLabel}</span>
         </div>
       </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-        disabled={busy}
-        title="Revoke invitation"
-        aria-label={`Revoke invitation to ${invite.projectName}`}
-        onClick={async () => {
-          setBusy(true)
-          try {
-            await onRevoke(invite.projectId, invite.token)
-          } finally {
-            setBusy(false)
-          }
-        }}
-      >
-        {busy ? <Spinner className="size-3.5" /> : <X className="h-3.5 w-3.5" />}
-      </Button>
+      <AppTooltip content="Revoke invitation">
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="text-muted-foreground hover:text-destructive"
+          disabled={busy}
+          aria-label={`Revoke invitation to ${invite.projectName}`}
+          onClick={async () => {
+            setBusy(true)
+            try {
+              await onRevoke(invite.projectId, invite.token)
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          {busy ? <Spinner className="size-3.5" /> : <X />}
+        </Button>
+      </AppTooltip>
     </li>
   )
 }

@@ -44,7 +44,7 @@ export function AdminActivityTimeline({
         <li key={a.id} className="relative">
           <span
             aria-hidden
-            className="absolute -left-4 top-1.5 size-[7px] rounded-full bg-primary ring-2 ring-background"
+            className="absolute -left-4 top-1.5 size-[7px] rounded-md bg-primary ring-2 ring-background"
           />
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 space-y-0.5">

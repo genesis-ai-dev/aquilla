@@ -48,7 +48,7 @@ test("assign work form lists project members only and enables Assign", async ({ 
   await addProjectMember(aliceSession.jwt, projectId!, "bob", ROLE.CONTRIBUTOR)
 
   // Import a file so the Book select has options.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
 

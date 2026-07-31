@@ -480,7 +480,44 @@ orgs.delete("/:orgId/groups/:groupId", async (c) => {
   return c.json({ removed: true })
 })
 
-const memberBody = z.object({ username: z.string().min(1) })
+// AQU-736: team membership has no role, so the batch shape is a plain username
+// array (`{ usernames: [...] }`). The legacy single-user body (`{ username }`)
+// keeps working exactly as before.
+const memberSingle = z.object({ username: z.string().min(1) })
+const memberBatch = z.object({ usernames: z.array(z.string().min(1)).min(1).max(100) })
+const memberBody = z.union([memberBatch, memberSingle])
+
+const GROUP_GRANT_ERROR_STATUS: Record<string, 404 | 409> = {
+  user_not_found: 404,
+  not_org_member: 409,
+}
+
+type GroupGrantOutcome =
+  | { ok: true; userId: number; username: string }
+  | { ok: false; username: string; code: string; message: string }
+
+/**
+ * Evaluate + apply a single team-member grant. Per-target so a batch never rolls
+ * the valid grants back on one bad entry; single-user callers see the same
+ * outcomes as before.
+ */
+async function grantGroupMemberOne(
+  env: Env,
+  orgId: number,
+  groupId: number,
+  addedBy: number,
+  username: string,
+): Promise<GroupGrantOutcome> {
+  const target = await lookupUserByUsername(env, username)
+  if (!target) {
+    return { ok: false, username, code: "user_not_found", message: "user not found" }
+  }
+  const result = await addGroupMember(env, orgId, groupId, target.id, addedBy)
+  if (result === "not-org-member") {
+    return { ok: false, username, code: "not_org_member", message: "user is not a member of this org" }
+  }
+  return { ok: true, userId: target.id, username: target.username }
+}
 
 orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), async (c) => {
   const user = c.get("user")
@@ -490,12 +527,36 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
   const callerRole = await getEffectiveOrgRole(c.env, orgId, user)
   if (callerRole == null || callerRole < ROLE.MAINTAINER) return c.json({ error: "org role >= maintainer required" }, 403)
   if (!(await groupExistsInOrg(c.env, orgId, groupId))) return c.json({ error: "group not found" }, 404)
-  const { username } = c.req.valid("json")
-  const target = await lookupUserByUsername(c.env, username)
-  if (!target) return c.json({ error: "user not found" }, 404)
-  const result = await addGroupMember(c.env, orgId, groupId, target.id, user.id)
-  if (result === "not-org-member") return c.json({ error: "user is not a member of this org" }, 409)
-  return c.json({ userId: target.id, username: target.username })
+
+  const body = c.req.valid("json")
+
+  if ("usernames" in body) {
+    const seen = new Set<string>()
+    const names = body.usernames.filter((u) => {
+      const key = u.trim().toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    const results: Array<
+      { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
+    > = []
+    for (const username of names) {
+      const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, username)
+      results.push(
+        outcome.ok
+          ? { username, ok: true }
+          : { username, ok: false, error: { code: outcome.code, message: outcome.message } },
+      )
+    }
+    return c.json({ results })
+  }
+
+  const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, body.username)
+  if (!outcome.ok) {
+    return c.json({ error: outcome.message }, GROUP_GRANT_ERROR_STATUS[outcome.code] ?? 400)
+  }
+  return c.json({ userId: outcome.userId, username: outcome.username })
 })
 
 orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
@@ -512,7 +573,7 @@ orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
 })
 
 // Strict role validation — only the seven canonical levels are accepted.
-const orgMemberBody = z.object({
+const orgMemberSingle = z.object({
   username: z.string().min(1),
   role: z
     .number()
@@ -522,7 +583,60 @@ const orgMemberBody = z.object({
     }),
 })
 
-/** POST /api/v2/orgs/:orgId/members — owner-only add/update. */
+// AQU-736: accept EITHER the legacy single-user body or a batch
+// (`{ members: [{ username, role }, …] }`). The single-user shape is preserved
+// exactly for existing callers; the batch shape powers multi-select add.
+const orgMemberBatch = z.object({
+  members: z.array(orgMemberSingle).min(1).max(100),
+})
+const orgMemberBody = z.union([orgMemberBatch, orgMemberSingle])
+
+const ORG_GRANT_ERROR_STATUS: Record<string, 400 | 404> = {
+  user_not_found: 404,
+  self_grant: 400,
+}
+
+type OrgGrantOutcome =
+  | { ok: true; userId: number; username: string; role: number }
+  | { ok: false; username: string; code: string; message: string }
+
+/**
+ * Evaluate + apply a single org-member grant. Checks are per target so a batch
+ * never rolls the valid grants back on one bad entry. Owner-only is enforced by
+ * the caller as a whole-request gate (matching the pre-batch behavior); there is
+ * no role-cap or target-outranks check on this endpoint, so single-user callers
+ * see exactly the same outcomes as before.
+ */
+async function grantOrgMemberOne(
+  env: Env,
+  orgId: number,
+  callerUserId: number,
+  entry: { username: string; role: number },
+): Promise<OrgGrantOutcome> {
+  const { username, role } = entry
+  const target = await lookupUserByUsername(env, username)
+  if (!target) {
+    return { ok: false, username, code: "user_not_found", message: "user not found" }
+  }
+  if (target.id === callerUserId) {
+    return { ok: false, username, code: "self_grant", message: "cannot grant role to self" }
+  }
+
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(org_id, user_id) DO UPDATE SET
+       role_level = excluded.role_level,
+       granted_by = excluded.granted_by,
+       granted_at = CURRENT_TIMESTAMP`,
+  )
+    .bind(orgId, target.id, role, callerUserId)
+    .run()
+
+  return { ok: true, userId: target.id, username: target.username, role }
+}
+
+/** POST /api/v2/orgs/:orgId/members — owner-only add/update (single or batch). */
 orgs.post(
   "/:orgId/members",
   zValidator("json", orgMemberBody),
@@ -536,28 +650,38 @@ orgs.post(
       return c.json({ error: "only org owners can add members" }, 403)
     }
 
-    const { username, role } = c.req.valid("json")
-    const target = await lookupUserByUsername(c.env, username)
-    if (!target) return c.json({ error: "user not found" }, 404)
-    if (target.id === user.id) {
-      return c.json({ error: "cannot grant role to self" }, 400)
+    const body = c.req.valid("json")
+
+    if ("members" in body) {
+      const seen = new Set<string>()
+      const entries = body.members.filter((m) => {
+        const key = m.username.trim().toLowerCase()
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      const results: Array<
+        { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
+      > = []
+      for (const entry of entries) {
+        const outcome = await grantOrgMemberOne(c.env, orgId, user.id, entry)
+        results.push(
+          outcome.ok
+            ? { username: entry.username, ok: true }
+            : { username: entry.username, ok: false, error: { code: outcome.code, message: outcome.message } },
+        )
+      }
+      return c.json({ results })
     }
 
-    await c.env.AQUILLA_PG.prepare(
-      `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(org_id, user_id) DO UPDATE SET
-         role_level = excluded.role_level,
-         granted_by = excluded.granted_by,
-         granted_at = CURRENT_TIMESTAMP`,
-    )
-      .bind(orgId, target.id, role, user.id)
-      .run()
-
+    const outcome = await grantOrgMemberOne(c.env, orgId, user.id, body)
+    if (!outcome.ok) {
+      return c.json({ error: outcome.message }, ORG_GRANT_ERROR_STATUS[outcome.code] ?? 400)
+    }
     return c.json({
-      userId: target.id,
-      username: target.username,
-      role: { level: role, name: ROLE_NAMES[role] ?? "unknown" },
+      userId: outcome.userId,
+      username: outcome.username,
+      role: { level: outcome.role, name: ROLE_NAMES[outcome.role] ?? "unknown" },
     })
   },
 )

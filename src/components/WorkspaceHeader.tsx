@@ -2,11 +2,14 @@ import type { ReactNode } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { OrgBreadcrumb, type OrgBreadcrumbTrailSegment } from "@/components/org/OrgBreadcrumb"
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu"
+import { WorkspaceHeaderActions } from "./WorkspaceHeaderActions"
 
 interface Props {
   project: ProjectRecord
   children?: ReactNode
   extraMenuItems?: OverflowMenuItem[]
+  /** When set, renders Import in a button group beside the ⋯ overflow menu. */
+  onImport?: () => void
   /**
    * AQU-428: When provided, the project name in the breadcrumb becomes a
    * clickable link to the project overview page (`/projects/:id`), giving
@@ -24,6 +27,7 @@ export function WorkspaceHeader({
   project,
   children,
   extraMenuItems,
+  onImport,
   overviewHref,
   surfaceLabel,
   bookLabel,
@@ -44,7 +48,11 @@ export function WorkspaceHeader({
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {children}
-        {items.length > 0 ? <OverflowMenu items={items} /> : null}
+        {onImport ? (
+          <WorkspaceHeaderActions onImport={onImport} menuItems={items} />
+        ) : items.length > 0 ? (
+          <OverflowMenu items={items} />
+        ) : null}
       </div>
     </header>
   )

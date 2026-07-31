@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Download, CheckSquare, Bot, Upload, Mic, Wand2 } from "lucide-react"
+import { Plus, Sparkles, Download, CheckSquare, Upload, Mic, Wand2 } from "lucide-react"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
@@ -131,11 +131,6 @@ export const workspaceActions: WorkspaceAction[] = [
       return !!p && p.total > 0 && p.validated === p.total
     },
     run: (_c, args) => args.runExport(),
-  },
-  {
-    id: "agent-input", label: "Agent input", icon: Bot, group: "primary",
-    isAvailable: () => true,
-    run: (_c, args) => args.runAgentInput(),
   },
   {
     // AQU-503: the label must carry the word "target" so PMs looking for the

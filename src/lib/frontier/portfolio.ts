@@ -57,6 +57,13 @@ export interface PortfolioProject {
    */
   sourceLanguage?: string | null
   targetLanguage?: string | null
+  /**
+   * AQU-507: the project's designated Project Manager, for the overview
+   * sort/filter-by-PM lens. The portfolio endpoint does not carry it; the org
+   * dashboard merges it in from the accessible-projects feed (the list
+   * endpoint). Absent/null ⇒ unassigned (sorts last under the PM lens).
+   */
+  pm?: { id: number; username: string } | null
 }
 
 /**

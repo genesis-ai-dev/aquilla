@@ -11,8 +11,9 @@ function withQuery(path: string, query: Record<string, QueryValue>): string {
 }
 
 export function workspaceReturnPath(projectId: string, fileId?: string | null): string {
-  const projectPath = `/project/${encodeURIComponent(projectId)}`
-  return fileId ? `${projectPath}/file/${encodeURIComponent(fileId)}` : projectPath
+  const encoded = encodeURIComponent(projectId)
+  const base = `/project/${encoded}/editor`
+  return fileId ? `${base}/file/${encodeURIComponent(fileId)}` : base
 }
 
 

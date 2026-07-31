@@ -19,6 +19,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Languages, Plus } from "lucide-react"
+import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -166,11 +167,11 @@ export function OverviewLaneTable({
     <div className="rounded-xl border bg-card p-5" data-testid="overview-lane-table">
       <div className="mb-3 flex items-center gap-2">
         <Languages className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Languages</h2>
+        <h2 className="text-xs font-semibold text-muted-foreground">Languages</h2>
       </div>
 
       <div
-        className="mb-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+        className="mb-1.5 flex items-center gap-3 text-xs font-medium text-muted-foreground"
         data-testid="overview-lane-header"
       >
         <span className="w-28 shrink-0">Language</span>
@@ -190,8 +191,8 @@ export function OverviewLaneTable({
             ? formatRelativeTime(new Date(lane.lastEditAt).toISOString(), now)
             : null
           const openTo = lane.lane
-            ? `/project/${projectId}?lane=${encodeURIComponent(lane.lane)}`
-            : `/project/${projectId}`
+            ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane.lane)}`
+            : `/project/${projectId}/editor`
           return (
             <li
               key={tagId}
@@ -249,7 +250,7 @@ export function OverviewLaneTable({
       {canAddLanguage && (
         <div className="mt-3 border-t pt-3">
           <Link
-            to={`/project/${projectId}/settings?section=general`}
+            to={projectSettingsPath(projectId, "general")}
             data-testid="overview-lane-add-language"
             className={cn(
               buttonVariants({ size: "sm", variant: "ghost" }),

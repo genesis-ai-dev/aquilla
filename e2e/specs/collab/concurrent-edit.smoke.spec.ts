@@ -38,7 +38,7 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   await addProjectMember(aliceSession.jwt, projectId, "bob", ROLE.CONTRIBUTOR)
 
   // 2. Alice navigates to the project, imports the sample file, opens it.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   // Server-side-created projects have no source/target language, so the import
   // flow opens a blocking "Set translation direction" screen after the preview
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
@@ -60,7 +60,7 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   //    be connected to the ProjectSync DO to receive the broadcast.
   const bobSyncReady = waitForProjectSyncReady(bob, projectId)
   await Promise.all([
-    bob.goto(`/project/${projectId}/file/${fileId}`),
+    bob.goto(`/project/${projectId}/editor/file/${fileId}`),
     bobSyncReady,
   ])
   const bobWs = new Workspace(bob)

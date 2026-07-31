@@ -460,6 +460,71 @@ describe("lane select (AQU-538)", () => {
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
   })
+
+  // ── AQU-728: the default ('') lane must be labeled by its real language ──────
+  // The default lane IS a real language lane (the project's own default target
+  // language). Launched from a Portuguese-default project it previously showed
+  // "Default language" and preselected "default", so Portuguese was neither
+  // listed nor preselected while extra lanes (Swahili) were.
+  it("labels the default ('') lane with defaultLaneLabel instead of the generic 'Default language'", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        targetLanes={["Swahili", "World English"]}
+        defaultLane=""
+        defaultLaneLabel="Portuguese"
+      />,
+    )
+    const laneTrigger = screen.getByRole("combobox", { name: /language lane/i })
+    // Launched from the default lane, the trigger reads as the language name…
+    expect(laneTrigger.textContent).toMatch(/portuguese/i)
+    // …not the generic label, and never "default".
+    expect(laneTrigger.textContent).not.toMatch(/default/i)
+  })
+
+  it("lists every lane including the default language by name (Portuguese present, no 'default' option)", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        targetLanes={["Swahili", "World English"]}
+        defaultLane=""
+        defaultLaneLabel="Portuguese"
+      />,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /language lane/i }))
+    expect(await screen.findByRole("option", { name: /portuguese/i })).toBeTruthy()
+    expect(await screen.findByRole("option", { name: /swahili/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /default language/i })).toBeNull()
+  })
+
+  it("still submits the default lane as targetLang=undefined even when labeled by name", async () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        targetLanes={["Swahili", "World English"]}
+        defaultLane=""
+        defaultLaneLabel="Portuguese"
+      />,
+    )
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    // The label is cosmetic: the default lane still routes to the default (no tag).
+    expect(mockCreate.mock.calls[0][0].targetLang).toBeUndefined()
+  })
+
+  it("falls back to 'Default language' when defaultLaneLabel is unknown/empty", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        targetLanes={["Swahili"]}
+        defaultLane=""
+        defaultLaneLabel=""
+      />,
+    )
+    const laneTrigger = screen.getByRole("combobox", { name: /language lane/i })
+    expect(laneTrigger.textContent).toMatch(/default language/i)
+  })
 })
 
 // ── Error: no member selected ────────────────────────────────────────────────

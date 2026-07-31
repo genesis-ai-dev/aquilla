@@ -38,7 +38,7 @@ test("rule editor live preview shows pass/fail for target-forbids rule", async (
 
   // Open the inline RuleEditor. Default mode is Forbidden + Target, which
   // maps to a target-forbids check.
-  const addBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addBtn).toBeVisible({ timeout: 10_000 })
   await addBtn.click()
 

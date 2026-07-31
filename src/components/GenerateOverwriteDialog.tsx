@@ -69,7 +69,7 @@ export function GenerateOverwriteDialog({
         {/* AQU-591: opting out only skips the confirm for non-validated cells —
             replacing a validated translation always confirms, so no opt-out. */}
         {!isValidated && (
-          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <Checkbox
               checked={dontAskAgain}
               onCheckedChange={(c) => setDontAskAgain(c === true)}

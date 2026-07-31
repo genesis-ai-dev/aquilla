@@ -58,7 +58,7 @@ describe("UsageSection", () => {
     mockGetMyUsage.mockResolvedValue(FULL_USAGE)
     render(<UsageSection />)
 
-    await waitFor(() => expect(screen.getByText("Usage")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("This week")).toBeInTheDocument())
 
     // 125 s = 2 min 5 s
     expect(screen.getByText("2 min 5 s")).toBeInTheDocument()

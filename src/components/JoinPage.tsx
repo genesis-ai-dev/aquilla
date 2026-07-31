@@ -115,7 +115,7 @@ export function JoinPage() {
         project_count: multi.data.accepted.length,
         project_id: multi.data.accepted[0].projectId,
       })
-      navigate(`/project/${multi.data.accepted[0].projectId}`)
+      navigate(`/project/${multi.data.accepted[0].projectId}/editor`)
       return
     }
     const single = await acceptServerInvite(jwt, token)
@@ -125,7 +125,7 @@ export function JoinPage() {
         project_count: 1,
         project_id: single.data.projectId,
       })
-      navigate(`/project/${single.data.projectId}`)
+      navigate(`/project/${single.data.projectId}/editor`)
       return
     }
 

@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Org settings page (/settings).
@@ -11,7 +11,7 @@ import { test, expect } from "../../helpers/multi-user"
  * It does NOT mutate org settings.
  */
 test("org settings page renders Identity section and stats", async ({ alice }) => {
-  await alice.goto("/settings")
+  await alice.goto(orgRoute(alice, "/settings"))
   // Main heading.
   await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible({
     timeout: 10_000,

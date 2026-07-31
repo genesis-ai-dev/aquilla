@@ -46,7 +46,7 @@ test("file hydration shows explicit progress and withholds unresolved zero stati
   })
 
   try {
-    await alice.goto(`/project/${seeded.projectId}/file/${seeded.fileId}`)
+    await alice.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
 
     const loading = alice.getByRole("status", {
       name: "Syncing file from the cloud",

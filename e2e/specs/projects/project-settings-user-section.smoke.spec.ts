@@ -14,7 +14,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("project settings User section username input makes form dirty", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `UserSection ${Date.now()}` })
 
-  await alice.goto(`/project/${seeded.projectId}/settings?section=general`)
+  await alice.goto(`/project/${seeded.projectId}/settings/general`)
   // Scroll to the User section to ensure it's visible.
   const userSection = alice.locator("#section-user")
   await expect(userSection).toBeVisible({ timeout: 10_000 })

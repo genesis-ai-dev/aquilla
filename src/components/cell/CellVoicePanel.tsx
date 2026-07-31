@@ -124,14 +124,14 @@ function WaveScrubber({ fraction, onSeek, seed }: { fraction: number; onSeek: (f
       tabIndex={0}
       onPointerDown={handleDown}
       onPointerMove={handleMove}
-      className="flex h-full cursor-pointer touch-none items-center gap-px"
+      className="flex h-full touch-none items-center gap-px"
     >
       {bars.map((h, i) => {
         const on = (i + 0.5) / bars.length <= active
         return (
           <span
             key={i}
-            className={cn("flex-1 rounded-full transition-colors", on ? "bg-primary" : "bg-muted-foreground/25")}
+            className={cn("flex-1 rounded-md transition-colors", on ? "bg-primary" : "bg-muted-foreground/25")}
             style={{ height: `${h}%` }}
           />
         )
@@ -456,30 +456,31 @@ function VoiceCombobox({
   }, [open])
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            disabled={busy}
-            title="Choose a voice"
-            aria-label={`Voice: ${active.name}. Choose a voice`}
-            className="w-full justify-start gap-1.5"
-          >
-            <span className="relative shrink-0">
-              <VoiceAvatar voice={active} size={18} />
-              {busy && (
-                <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
-                  <Spinner className="h-3 w-3" />
-                </span>
-              )}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
-            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </Button>
-        }
-      />
+      <AppTooltip content="Choose a voice">
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              disabled={busy}
+              aria-label={`Voice: ${active.name}. Choose a voice`}
+              className="w-full justify-start gap-1.5"
+            />
+          }
+        >
+          <span className="relative shrink-0">
+            <VoiceAvatar voice={active} size={18} />
+            {busy && (
+              <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
+                <Spinner className="h-3 w-3" />
+              </span>
+            )}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </PopoverTrigger>
+      </AppTooltip>
       <PopoverContent align="start" side="top" className="w-60 p-2">
         <InputGroup className="mb-1.5">
           <InputGroupAddon>

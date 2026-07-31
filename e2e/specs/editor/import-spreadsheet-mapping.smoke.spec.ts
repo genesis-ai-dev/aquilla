@@ -25,7 +25,7 @@ test("Upload files maps spreadsheet structure before importing", async ({ alice 
   await workspace.openFileBySubstring("scripture-mapping")
   await workspace.waitForEditor()
   await expect(alice.getByRole("button", { name: "Expand" })).toBeVisible()
-  await expect(alice.getByRole("button", { name: "Current chapter: Genesis 1. Choose chapter" })).toBeVisible()
+  await expect(alice.getByRole("combobox", { name: "Current chapter: Genesis 1. Choose chapter" })).toBeVisible()
   await expect(workspace.cellRow(0)).toContainText("Creation")
   await expect(workspace.cellRow(1)).toContainText("In the beginning")
   await expect(workspace.cellRow(1).locator('[data-cell-type="target"]')).toContainText("Au commencement")

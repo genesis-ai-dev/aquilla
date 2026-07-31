@@ -846,7 +846,7 @@ export function ExportDialog({
           onToggle={(e) => setFormatsOpen((e.currentTarget as HTMLDetailsElement).open)}
           className="group"
         >
-          <summary className="cursor-pointer text-xs font-medium text-muted-foreground uppercase tracking-wide select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
+          <summary className="text-xs font-medium text-muted-foreground select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
             <span
               className={
                 "inline-block transition-transform " +
@@ -861,7 +861,7 @@ export function ExportDialog({
           <div className="mt-2.5 flex flex-col gap-4">
         {/* Format selector */}
         <fieldset className="flex flex-col gap-1.5 min-w-0">
-          <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+          <legend className="text-xs font-medium text-muted-foreground mb-1.5">
             Format
           </legend>
           <RadioGroup
@@ -882,7 +882,7 @@ export function ExportDialog({
               <label
                 key={f.id}
                 className={
-                  "flex items-start gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors " +
+                  "flex items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors " +
                   (format === f.id
                     ? "bg-accent/60 ring-1 ring-ring/20"
                     : "hover:bg-accent/40")
@@ -898,7 +898,7 @@ export function ExportDialog({
                     {f.label}
                     <span className="text-xs text-muted-foreground font-normal font-mono">{f.ext}</span>
                     {f.lossy && (
-                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider">
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
                         lossy
                       </span>
                     )}
@@ -912,7 +912,7 @@ export function ExportDialog({
 
         {/* Scope selector */}
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+          <legend className="text-xs font-medium text-muted-foreground mb-1.5">
             Scope
           </legend>
           <SegmentTabs<ExportScope>
@@ -939,7 +939,7 @@ export function ExportDialog({
           {/* SDBH XML skeleton picker — the original MARBLE edition to reinject into. */}
           {format === "sdbh-xml" && (
             <div className="mt-1.5 flex flex-col gap-1">
-              <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer self-start" />}>
+              <Button variant="outline" size="sm" nativeButton={false} render={<label className="self-start" />}>
                 {sdbhSkeleton ? sdbhSkeleton.name : "Choose skeleton (SDBH-<lang>.XML)"}
                 <input
                   type="file"
@@ -967,7 +967,7 @@ export function ExportDialog({
         {/* AQU-439: Voice filter — only shown when cells have cast assignments */}
         {distinctVoices.length > 0 && (
           <fieldset className="flex flex-col gap-1.5">
-            <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+            <legend className="text-xs font-medium text-muted-foreground mb-1.5">
               Voice
             </legend>
             <select
@@ -991,7 +991,7 @@ export function ExportDialog({
 
         {/* AQU-437: Filename control — editable base name + optional suffixes */}
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+          <legend className="text-xs font-medium text-muted-foreground mb-1.5">
             Filename
           </legend>
           <div className="flex flex-col gap-2">
@@ -1010,14 +1010,14 @@ export function ExportDialog({
               </p>
             )}
             <div className="flex items-center gap-4">
-              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 <Checkbox
                   checked={appendTimestamp}
                   onCheckedChange={(c) => setAppendTimestamp(c === true)}
                 />
                 Append timestamp
               </label>
-              <label className="flex items-center gap-1.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors">
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 <Checkbox
                   checked={appendLangTag}
                   onCheckedChange={(c) => setAppendLangTag(c === true)}
@@ -1033,7 +1033,7 @@ export function ExportDialog({
           const preview = previewAudioByCharacter(cells, ttsSettings)
           return (
           <div className="flex flex-col gap-1 text-xs">
-            <p className="font-medium text-muted-foreground uppercase tracking-wide text-[10px]">Preview</p>
+            <p className="font-medium text-muted-foreground text-[10px]">Preview</p>
             {preview.length === 0 ? (
               <p className="text-muted-foreground">No cells with audio found in this file.</p>
             ) : (
@@ -1081,7 +1081,7 @@ export function ExportDialog({
           onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
           className="group"
         >
-          <summary className="cursor-pointer text-xs font-medium text-muted-foreground uppercase tracking-wide select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
+          <summary className="text-xs font-medium text-muted-foreground select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
             <span
               className={
                 "inline-block transition-transform " +
@@ -1104,7 +1104,7 @@ export function ExportDialog({
             >
             <label
               className={
-                "flex items-start gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors " +
+                "flex items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors " +
                 (format === "plain-text-dump"
                   ? "bg-accent/60 ring-1 ring-ring/20"
                   : "hover:bg-accent/40")
@@ -1119,7 +1119,7 @@ export function ExportDialog({
                 <span className="text-sm font-medium leading-tight flex items-baseline gap-1.5 flex-wrap">
                   Plain-text dump
                   <span className="text-xs text-muted-foreground font-normal font-mono">.txt</span>
-                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold uppercase tracking-wider">
+                  <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
                     lossy
                   </span>
                 </span>
@@ -1131,7 +1131,7 @@ export function ExportDialog({
                   untranslated segments. Not suitable for re-import.
                 </span>
                 {format === "plain-text-dump" && (
-                  <label className="flex items-center gap-1.5 mt-1 cursor-pointer">
+                  <label className="flex items-center gap-1.5 mt-1">
                     <Checkbox
                       checked={dumpIncludeRefs}
                       onCheckedChange={(checked) => setDumpIncludeRefs(checked === true)}
@@ -1146,7 +1146,7 @@ export function ExportDialog({
             {/* AQU-441: Metadata spreadsheet — cast, camera angle, cell ref */}
             <label
               className={
-                "flex items-start gap-2.5 rounded-xl px-2.5 py-2 cursor-pointer transition-colors " +
+                "flex items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors " +
                 (format === "metadata-csv"
                   ? "bg-accent/60 ring-1 ring-ring/20"
                   : "hover:bg-accent/40")

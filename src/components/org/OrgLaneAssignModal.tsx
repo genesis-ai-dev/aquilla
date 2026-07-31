@@ -17,6 +17,13 @@ export interface OrgLaneAssignModalProps {
   lane: string
   /** Extra (non-default) lane tags on the project — enables the lane select. */
   targetLanes: string[]
+  /**
+   * AQU-728: display name of the default ('') lane — the project's own default
+   * target language. Threaded to AssignModal so the lane select labels the
+   * default lane by its real language name (e.g. "Portuguese") instead of a
+   * generic "Default language". '' when unknown.
+   */
+  defaultLaneLabel?: string
   /** Files in the project (for the books scope). May be empty when unknown. */
   files: { id: string; name: string }[]
   roleLevel: number
@@ -32,6 +39,7 @@ export function OrgLaneAssignModal({
   projectId,
   lane,
   targetLanes,
+  defaultLaneLabel,
   files,
   roleLevel,
   jwt,
@@ -66,6 +74,7 @@ export function OrgLaneAssignModal({
       projectFiles={projectFiles}
       targetLanes={targetLanes}
       defaultLane={lane}
+      defaultLaneLabel={defaultLaneLabel}
       members={members}
       roleLevel={roleLevel}
       allowSelfAssignment={allowSelfAssignment}

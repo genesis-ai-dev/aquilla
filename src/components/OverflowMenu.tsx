@@ -1,4 +1,4 @@
-import type { ComponentType, Ref } from "react"
+import type { ComponentType, ReactNode, Ref } from "react"
 import type { VariantProps } from "class-variance-authority"
 import { MoreHorizontal } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -17,6 +17,8 @@ export interface OverflowMenuItem {
   type?: "item" | "separator"
   label?: string
   icon?: ComponentType<{ className?: string }>
+  /** Optional trailing badge (e.g. check-file finding count). */
+  badge?: ReactNode
   onClick?: () => void
   disabled?: boolean
   destructive?: boolean
@@ -57,7 +59,8 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
               onClick={item.onClick}
             >
               {item.icon && <item.icon className="h-4 w-4" />}
-              <span>{item.label}</span>
+              <span className="flex-1">{item.label}</span>
+              {item.badge}
             </DropdownMenuItem>
           ),
         )}

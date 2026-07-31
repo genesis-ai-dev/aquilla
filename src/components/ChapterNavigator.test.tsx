@@ -52,20 +52,27 @@ function pickerSearch(vocabulary = "chapter") {
 }
 
 describe("MilestoneNavigator", () => {
-  it("keeps the current chapter and its verse range visible on a fixed-width trigger", () => {
+  it("keeps the current chapter and its verse range visible, fixed-width from xl up", () => {
     render(<MilestoneNavigator items={chapters} activeKey="scripture:MAT:1" onSelect={() => {}} />)
     const trigger = screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })
     expect(trigger).toHaveTextContent("Matthew 1")
     expect(trigger).toHaveTextContent("Verses 1–25")
-    expect(trigger).toHaveClass("w-56")
+    expect(trigger).toHaveClass("min-w-8")
+    expect(trigger).toHaveClass("justify-center")
+    expect(trigger).toHaveClass("px-2.5")
+    expect(trigger).toHaveClass("gap-2")
+    expect(trigger).toHaveClass("shrink")
+    expect(trigger).toHaveClass("xl:w-56")
     expect(trigger).toHaveClass("flex")
     expect(trigger).toHaveClass("items-center")
-    expect(screen.getByText("Matthew 1")).toHaveClass("whitespace-nowrap")
+    expect(screen.getByText("Matthew 1")).toHaveClass("truncate")
     expect(screen.getByText("Verses 1–25")).toHaveClass("truncate")
+    expect(screen.getByText("Verses 1–25")).toHaveClass("hidden")
+    expect(screen.getByText("Verses 1–25")).toHaveClass("xl:inline")
     expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
   })
 
-  it("keeps the trigger at a fixed width and shows the full book name", () => {
+  it("shows the full book name and restores fixed width from xl up", () => {
     const longNameChapters: MilestoneNavigationItem[] = [
       {
         key: "scripture:REV:20",
@@ -80,9 +87,10 @@ describe("MilestoneNavigator", () => {
     ]
     render(<MilestoneNavigator items={longNameChapters} activeKey="scripture:REV:20" onSelect={() => {}} />)
     const trigger = screen.getByRole("combobox", { name: /Current chapter: Revelation 20/ })
-    expect(trigger).toHaveClass("w-56")
+    expect(trigger).toHaveClass("min-w-8")
+    expect(trigger).toHaveClass("xl:w-56")
     expect(trigger).toHaveTextContent("Revelation 20")
-    expect(screen.getByText("Revelation 20")).toHaveClass("whitespace-nowrap")
+    expect(screen.getByText("Revelation 20")).toHaveClass("truncate")
   })
 
   it("moves to the next chapter by stable milestone key", () => {

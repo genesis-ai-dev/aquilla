@@ -38,7 +38,7 @@ export function CheckFileButton({
       {checkRunning
         ? <Spinner data-icon="inline-start" className="size-4" />
         : <ListChecks data-icon="inline-start" />}
-      Check file
+      <span className="hidden md:inline">Check file</span>
       {checkResult && !checkRunning && (
         <span className={checkResult.totalFindingCount > 0
           ? "rounded-md bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"

@@ -5372,7 +5372,7 @@ export function ProjectWorkspace() {
               />
             )}
             {activeFileId && lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (
-              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-4 pr-2 backdrop-blur-xl">
+              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-1.5 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}

@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type RefObject,
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
@@ -58,6 +59,21 @@ interface NavigationRow {
 
 // Estimate only — real height comes from measureElement (no locked style.height).
 const MILESTONE_ROW_HEIGHT_PX = 48
+
+/** Matches EditorTable: picker is absolutely centered from lg up. */
+const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
+
+function useMinWidthLg(): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const mq = window.matchMedia(LG_MIN_WIDTH_QUERY)
+      mq.addEventListener("change", onStoreChange)
+      return () => mq.removeEventListener("change", onStoreChange)
+    },
+    () => window.matchMedia(LG_MIN_WIDTH_QUERY).matches,
+    () => true,
+  )
+}
 
 type MilestoneListVirtualizer = ReturnType<typeof useVirtualizer<HTMLDivElement, Element>>
 
@@ -287,7 +303,10 @@ export function MilestoneNavigator({
 }) {
   const [open, setOpen] = useState(false)
   const [expandedKey, setExpandedKey] = useState(activeKey)
+  const [iconOnlyTrigger, setIconOnlyTrigger] = useState(false)
   const virtualizerRef = useRef<MilestoneListVirtualizer | null>(null)
+  const buttonGroupRef = useRef<HTMLDivElement | null>(null)
+  const pickerCentered = useMinWidthLg()
   const vocabulary = useMemo(() => vocabularyFor(items), [items])
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
@@ -342,6 +361,33 @@ export function MilestoneNavigator({
 
   const activeSummary = activeSubsection ? `(${activeSubsection.label})` : active?.description ?? ""
 
+  // Collapse the middle trigger to a centered chevron when the header slot
+  // is too narrow. Measure the flex slot (available width), not the button
+  // group content width — content-sized observation can't grow back out of
+  // icon-only mode. Hysteresis avoids flicker at the threshold.
+  useEffect(() => {
+    const group = buttonGroupRef.current
+    if (!group || typeof ResizeObserver === "undefined") return
+    const slot = group.closest("[data-chapter-nav-slot]")
+    if (!slot) return
+
+    const COLLAPSE_BELOW_PX = 120
+    const EXPAND_ABOVE_PX = 168
+
+    const update = () => {
+      const width = slot.getBoundingClientRect().width
+      if (width <= 0) return
+      setIconOnlyTrigger((prev) => {
+        if (prev) return width < EXPAND_ABOVE_PX
+        return width <= COLLAPSE_BELOW_PX
+      })
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(slot)
+    return () => ro.disconnect()
+  }, [])
+
   if (!active || items.length === 0) return null
 
   const choose = (key: string, subsectionKey?: string) => {
@@ -356,10 +402,11 @@ export function MilestoneNavigator({
   }
 
   return (
-    <nav aria-label="Milestone navigation" className="flex items-center justify-center">
+    <nav aria-label="Milestone navigation" className="flex w-full min-w-0 max-w-full items-center lg:w-auto">
       <ButtonGroup
+        ref={buttonGroupRef}
         aria-label={`Move between ${vocabulary.plural.toLocaleLowerCase()}`}
-        className="shadow-xs"
+        className="min-w-0 max-w-full shadow-xs"
       >
         <Button
           variant="outline"
@@ -422,20 +469,35 @@ export function MilestoneNavigator({
             render={
               <Button
                 variant="outline"
-                className="flex w-56 items-center gap-2 [&>svg:last-child]:ml-auto [&>svg:last-child]:shrink-0"
+                data-icon-only={iconOnlyTrigger || undefined}
+                // Default: padded label + chevron. data-icon-only: true icon
+                // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
+                // width with start-aligned label regardless of squeeze.
+                className="flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:gap-0 data-[icon-only]:p-0 xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ml-auto [&>svg:last-child]:shrink-0"
                 aria-label={`Current ${vocabulary.singular}: ${active.label}${
                   activeSubsection ? `, cells ${activeSubsection.label}` : ""
                 }. Choose ${vocabulary.singular}`}
               />
             }
           >
-            <span className="whitespace-nowrap text-left font-semibold">{active.label}</span>
-            <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">
+            <span
+              className={
+                iconOnlyTrigger
+                  ? "hidden min-w-0 truncate text-left font-semibold xl:inline"
+                  : "min-w-0 truncate text-left font-semibold"
+              }
+            >
+              {active.label}
+            </span>
+            {/* Below xl: chapter label only — drop the verse/cell summary. */}
+            <span className="hidden min-w-0 truncate text-xs font-normal text-muted-foreground xl:inline">
               {activeSummary}
             </span>
           </ComboboxTrigger>
           <ComboboxContent
-            align="center"
+            // Below lg the picker sits left — align popover to the chapter
+            // trigger. lg+: center under the trigger with the absolute picker.
+            align={pickerCentered ? "center" : "start"}
             // min-w-56 trigger + two size-8 prev/next buttons
             className="w-[calc(14rem+2rem+2rem)] min-w-[calc(14rem+2rem+2rem)] *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
           >
@@ -444,7 +506,9 @@ export function MilestoneNavigator({
               showSearchIcon
               placeholder={`Find a ${vocabulary.singular}…`}
               aria-label={`Find a ${vocabulary.singular}`}
-              className="w-auto rounded-none border-0 shadow-none outline-none ring-0 tabular-nums *:data-[slot=input-group-addon]:pl-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
+              // Input defaults to text-base below md (iOS zoom guard); keep this
+              // popover field at text-sm so it doesn't jump larger on small screens.
+              className="w-auto rounded-none border-0 shadow-none outline-none ring-0 tabular-nums *:data-[slot=input-group-control]:text-sm *:data-[slot=input-group-addon]:pl-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
             />
             <ComboboxSeparator className="mx-0 my-0" />
             <ComboboxEmpty>No {vocabulary.plural.toLocaleLowerCase()} found.</ComboboxEmpty>

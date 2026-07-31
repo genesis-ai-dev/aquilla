@@ -80,11 +80,21 @@ describe("OrgBreadcrumb", () => {
     expect(screen.getByText("All organizations")).toHaveAttribute("aria-current", "page")
   })
 
-  it("keeps the breadcrumb on one line so long labels cannot move the header", () => {
+  it("keeps the breadcrumb on one line and scrolls horizontally instead of clipping", () => {
     const { container } = renderBreadcrumb(
       <OrgBreadcrumb section="A very long project name that still stays on one line" />,
     )
 
-    expect(container.querySelector('[data-slot="breadcrumb-list"]')).toHaveClass("flex-nowrap", "overflow-hidden", "whitespace-nowrap")
+    const list = container.querySelector('[data-slot="breadcrumb-list"]')
+    expect(list).toHaveClass(
+      "flex-nowrap",
+      "overflow-x-auto",
+      "overscroll-x-contain",
+      "whitespace-nowrap",
+      "scrollbar-none",
+    )
+    // Edge fades match TabStrip — present even when unused (opacity toggled).
+    const fades = container.querySelectorAll('[data-slot="breadcrumb"] > span[aria-hidden]')
+    expect(fades).toHaveLength(2)
   })
 })

@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
@@ -10,6 +11,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 
 interface OrgBreadcrumbParent {
   label: string
@@ -41,12 +43,17 @@ interface Crumb {
   isRoot?: boolean
 }
 
+const SCROLL_EDGE_EPS = 1
+
+/** Solid edge fades — same approach as TabStrip against sidebar chrome. */
+const STRIP_EDGE_FADE =
+  "pointer-events-none absolute inset-y-0 z-20 w-8 transition-opacity duration-150"
+
 function CrumbLink({ crumb }: { crumb: Crumb }) {
-  const labelClass = crumb.isRoot
-    ? "block shrink-0 cursor-default whitespace-nowrap rounded-md px-1.5 py-1"
-    : "block max-w-[clamp(7rem,20vw,18rem)] cursor-default truncate rounded-md px-1.5 py-1"
-  // Non-root crumbs truncate at 18rem, so the tooltip is the only way to read a
-  // long org or project name in full. Keep it on every variant.
+  // Keep crumbs at natural width so the trail scrolls instead of truncating
+  // away segments on narrow headers.
+  const labelClass = "block shrink-0 cursor-default whitespace-nowrap rounded-md px-1.5 py-1"
+  // Tooltip still helps when a long label is partially under an edge fade.
   if (crumb.isCurrent) {
     return (
       <AppTooltip content={crumb.label}>
@@ -85,7 +92,7 @@ function CrumbLink({ crumb }: { crumb: Crumb }) {
 
 function CrumbSeparator() {
   return (
-    <BreadcrumbSeparator>
+    <BreadcrumbSeparator className="shrink-0">
       <span className="text-muted-foreground">›</span>
     </BreadcrumbSeparator>
   )
@@ -93,7 +100,7 @@ function CrumbSeparator() {
 
 function renderCrumbItem(crumb: Crumb, key: string) {
   return (
-    <BreadcrumbItem key={key} className={crumb.isRoot ? "shrink-0" : "min-w-0"}>
+    <BreadcrumbItem key={key} className="shrink-0">
       <CrumbLink crumb={crumb} />
     </BreadcrumbItem>
   )
@@ -102,6 +109,9 @@ function renderCrumbItem(crumb: Crumb, key: string) {
 export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }: OrgBreadcrumbProps) {
   const { activeOrgId, isAllOrgs, orgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   const location = useLocation()
+  const scrollRef = useRef<HTMLOListElement | null>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
   const showSection = section !== "Projects" || parent != null
   const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
   const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
@@ -164,9 +174,53 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
     items.push(renderCrumbItem(crumb, `${crumb.label}-${index}`))
   })
 
+  // Stable key so parent re-renders with a fresh `trail` array don't reset scroll.
+  const crumbKey = crumbs.map((crumb) => crumb.label).join("\0")
+
+  const updateScrollEdges = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const { scrollLeft, scrollWidth, clientWidth } = el
+    setCanScrollLeft(scrollLeft > SCROLL_EDGE_EPS)
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - SCROLL_EDGE_EPS)
+  }, [])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    // Prefer the current (trailing) crumb when the trail overflows.
+    el.scrollLeft = el.scrollWidth
+    updateScrollEdges()
+    const ro = new ResizeObserver(updateScrollEdges)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [updateScrollEdges, crumbKey])
+
   return (
-    <Breadcrumb className="min-w-0 overflow-hidden px-3">
-      <BreadcrumbList className="min-w-0 flex-nowrap overflow-hidden whitespace-nowrap">{items}</BreadcrumbList>
+    <Breadcrumb className="relative min-w-0 px-3">
+      <BreadcrumbList
+        ref={scrollRef}
+        onScroll={updateScrollEdges}
+        className="min-w-0 flex-nowrap overflow-x-auto overscroll-x-contain whitespace-nowrap scrollbar-none"
+      >
+        {items}
+      </BreadcrumbList>
+      <span
+        aria-hidden
+        className={cn(
+          STRIP_EDGE_FADE,
+          "left-0 bg-linear-to-r from-sidebar from-30% to-transparent",
+          canScrollLeft ? "opacity-100" : "opacity-0",
+        )}
+      />
+      <span
+        aria-hidden
+        className={cn(
+          STRIP_EDGE_FADE,
+          "right-0 bg-linear-to-l from-sidebar from-30% to-transparent",
+          canScrollRight ? "opacity-100" : "opacity-0",
+        )}
+      />
     </Breadcrumb>
   )
 }

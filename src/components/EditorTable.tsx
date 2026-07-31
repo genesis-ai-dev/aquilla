@@ -1976,10 +1976,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         {(milestoneNavigationItems.length > 0 && activeChapterLabel) || chapterNavTrailing ? (
-          <div className="relative flex items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-4 pr-2 backdrop-blur-xl">
+          // Below lg: in-flow left picker + end toolbar. lg+: absolute center
+          // over the full header (same midpoint as the table beneath).
+          <div className="relative flex items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-1.5 backdrop-blur-xl">
             {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="pointer-events-auto">
+              <div
+                data-chapter-nav-slot=""
+                className="mr-auto flex min-w-0 flex-1 items-center lg:pointer-events-none lg:absolute lg:inset-0 lg:mr-0 lg:flex-none lg:justify-center"
+              >
+                <div className="min-w-0 w-full max-w-full lg:w-auto lg:pointer-events-auto">
                   <MilestoneNavigator
                     items={milestoneNavigationItems}
                     activeKey={activeChapterLabel}

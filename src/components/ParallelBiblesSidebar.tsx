@@ -232,7 +232,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
           onClick={onToggle}
           aria-label="Show parallel bibles"
           className={cn(
-            "flex h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
             className,
           )}
         >
@@ -250,7 +250,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
     : null
 
   return (
-    <div className={cn("flex h-full w-80 shrink-0 flex-col border-l bg-card text-sm", className)}>
+    <div className={cn("hidden h-full w-80 shrink-0 flex-col border-l bg-card text-sm sm:flex", className)}>
       {/* Header — p-2 matches the other side panels' header strip. */}
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">

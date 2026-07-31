@@ -37,11 +37,13 @@ export function EditorModeToggle({ lens, onChange, timeOrdered = false }: Props)
       className="gap-0"
     >
       <TabsList>
-        <TabsTrigger value="text">
-          <Pencil /> Text
+        <TabsTrigger value="text" aria-label="Text">
+          <Pencil />
+          <span className="hidden lg:inline">Text</span>
         </TabsTrigger>
-        <TabsTrigger value="audio">
-          <SecondIcon /> {secondLabel}
+        <TabsTrigger value="audio" aria-label={secondLabel}>
+          <SecondIcon />
+          <span className="hidden lg:inline">{secondLabel}</span>
         </TabsTrigger>
       </TabsList>
     </Tabs>

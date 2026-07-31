@@ -3,6 +3,11 @@
 *July 2026. Companion to `docs/SEO.md` (the build-time prerender mechanics), the ICP doc, and
 the Verbatim Call-Out Kit. This document is the strategy; `docs/SEO.md` is the plumbing.*
 
+> **This is the longer-range plan.** If you're starting SEO work on the site, read
+> `docs/SEO-WORKPLAN.md` first and finish its Phases 0–3 — search console access, the defects on
+> the pages that already exist, and real query data. None of what follows can be steered without
+> those.
+
 ---
 
 ## 0. The verdict, before the plan

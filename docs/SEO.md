@@ -1,5 +1,9 @@
 # SEO — how a client-rendered SPA still gets indexed
 
+> **Picking up SEO work on this site? Start with `docs/SEO-WORKPLAN.md`** — it's the ordered
+> hand-off (what's done, what's broken, what to do first). This file is the build mechanics it
+> refers to. `docs/SEO-STRATEGY.md` is the longer-range plan after that.
+
 The workspace is a client-rendered SPA. That is fine for the app itself, but the
 marketing surface (`/`, `/beta`, the case studies) has to be legible to things
 that never run our JavaScript: search crawlers on a render budget, AI answer

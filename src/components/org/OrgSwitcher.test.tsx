@@ -151,6 +151,82 @@ describe("OrgSwitcher", () => {
     expect(guestSection.querySelector(".lucide-check")).not.toBeNull()
   })
 
+  // AQU-759: with many orgs the switcher shows a search box that filters the
+  // list as you type, and the list stays alphabetical regardless of API order.
+  it("many orgs: shows a search box, filters as you type, keeps the list alphabetical", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Zulu Org", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Alpha Org", role: { level: 700, name: "owner" } },
+      { id: 3, name: "Mike Org", role: { level: 700, name: "owner" } },
+      { id: 4, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      { id: 5, name: "Yankee Org", role: { level: 700, name: "owner" } },
+      { id: 6, name: "Charlie Org", role: { level: 700, name: "owner" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    const trigger = await screen.findByRole("button", { name: /organization switcher/i })
+    await act(async () => { trigger.click() })
+
+    // Long lists surface the search box.
+    const search = await screen.findByLabelText(/search organizations/i)
+
+    // Rendered alphabetically even though the API returned them out of order.
+    const names = screen.getAllByRole("menuitem").map((n) => n.textContent ?? "")
+    const order = ["Alpha Org", "Bravo Org", "Charlie Org", "Mike Org", "Yankee Org", "Zulu Org"].map(
+      (n) => names.findIndex((t) => t.includes(n)),
+    )
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect(order).toEqual([...order].sort((a, b) => a - b))
+
+    // Typing filters the list to matching orgs only.
+    fireEvent.change(search, { target: { value: "brav" } })
+    await waitFor(() => expect(screen.getByText("Bravo Org")).toBeInTheDocument())
+    expect(screen.queryByText("Alpha Org")).not.toBeInTheDocument()
+    expect(screen.queryByText("Zulu Org")).not.toBeInTheDocument()
+
+    // A query that matches nothing shows an empty state.
+    fireEvent.change(search, { target: { value: "zzzzz" } })
+    await waitFor(() => expect(screen.getByText(/no organizations found/i)).toBeInTheDocument())
+  })
+
+  // AQU-759 (regression guard for AQU-473): filtering also narrows guest orgs
+  // while each surviving guest row keeps its "Guest" tag.
+  it("search filters guest orgs and preserves the Guest tag", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Alpha Org", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Bravo Org", role: { level: 700, name: "owner" } },
+      { id: 3, name: "Charlie Org", role: { level: 700, name: "owner" } },
+      { id: 4, name: "Delta Org", role: { level: 700, name: "owner" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "pg", name: "P", orgId: 9, orgName: "Golf Guest", role: { level: 100, name: "viewer", source: "override" } },
+      { id: "ph", name: "P2", orgId: 8, orgName: "Hotel Guest", role: { level: 100, name: "viewer", source: "override" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    const trigger = await screen.findByRole("button", { name: /organization switcher/i })
+    await act(async () => { trigger.click() })
+
+    const search = await screen.findByLabelText(/search organizations/i)
+    fireEvent.change(search, { target: { value: "golf" } })
+
+    await waitFor(() => expect(screen.getByText("Golf Guest")).toBeInTheDocument())
+    expect(screen.getByText("guest")).toBeInTheDocument()
+    expect(screen.queryByText("Hotel Guest")).not.toBeInTheDocument()
+    expect(screen.queryByText("Alpha Org")).not.toBeInTheDocument()
+  })
+
+  // AQU-759: a short list doesn't need the search box.
+  it("few orgs: no search box", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    const trigger = await screen.findByRole("button", { name: /organization switcher/i })
+    await act(async () => { trigger.click() })
+    await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+    expect(screen.queryByLabelText(/search organizations/i)).not.toBeInTheDocument()
+  })
+
   // AQU-624: returning to a member org from a guest's scoped view is symmetric —
   // it navigates to that member org's overview.
   it("guest org → member org: selecting a member org navigates back to its overview", async () => {

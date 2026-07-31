@@ -23,24 +23,24 @@ const title = `${label}\nbuild: ${BRANCH}@${SHA}`
 // of the in-rail tag and covers the account switcher / report button.
 export function hasChromeVersionTag(pathname: string): boolean {
   const segs = pathname.split("/").filter(Boolean)
-  if (segs.length === 0) return true // "/" — org overview
+  if (segs.length === 0) return true // "/" — resumes org overview
 
   const root = segs[0]
 
-  // Org-level AppShell pages (OrgSidebar + footer VersionTag).
+  // Org shell (OrgSidebar + footer VersionTag).
+  if (root === "orgs") return true
+
+  // Remaining AppShell pages that keep the floating badge suppressed.
   if (
     root === "projects" ||
-    root === "teams" ||
-    root === "members" ||
-    root === "assigned" ||
     root === "preferences" ||
-    root === "settings" ||
-    root === "admin"
+    root === "admin" ||
+    root === "shared"
   ) {
     return true
   }
 
-  // Project workspace (LeftDock footer VersionTag) — every /project/* route except
+  // Project workspace (LeftDock footer VersionTag) — every /project/*/editor route except
   // centred shells that don't mount the dock (settings, debug dumps).
   if (root === "project" && segs.length >= 2) {
     if (segs.length >= 3 && segs[2] === "settings") return false
@@ -131,7 +131,7 @@ export function VersionBadge() {
             size="xs"
             onClick={copy}
             className={cn(
-              "bg-card fixed bottom-3 left-3 z-30 h-auto rounded-lg px-3 py-1.5 font-mono text-[11px] leading-none",
+              "bg-card fixed bottom-3 left-3 z-30 h-auto rounded-md px-3 py-1.5 font-mono text-[11px] leading-none",
               copied
                 ? "text-emerald-600 hover:text-emerald-600"
                 : "text-muted-foreground/70 hover:text-muted-foreground",

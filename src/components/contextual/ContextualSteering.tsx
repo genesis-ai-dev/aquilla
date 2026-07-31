@@ -19,6 +19,7 @@ import {
   noteContextualDirectionQueued,
 } from "@/lib/contextual/run-store"
 import { ContextualAuthError, sendContextualSteering } from "@/lib/contextual/transport"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 /** UI cap — well under the server's hard limit on a steering entry. */
 export const MAX_DIRECTION_LENGTH = 2000
@@ -96,14 +97,15 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
         {directions.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {directions.map((direction, i) => (
-              <span
-                key={`${direction}-${i}`}
-                data-testid="contextual-steering-chip"
-                className="max-w-full truncate rounded-lg bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                title={direction}
-              >
-                {direction}
-              </span>
+              // Chips truncate, so the tooltip is how the full direction is read.
+              <AppTooltip key={`${direction}-${i}`} content={direction}>
+                <span
+                  data-testid="contextual-steering-chip"
+                  className="max-w-full truncate rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                >
+                  {direction}
+                </span>
+              </AppTooltip>
             ))}
           </div>
         )}

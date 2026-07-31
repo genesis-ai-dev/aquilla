@@ -63,6 +63,21 @@ vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
 }))
 
+// Settings now renders inside the org appshell; the sidebar and breadcrumb
+// pull OrgProvider context these tests do not stand up.
+vi.mock("@/components/org/OrgSidebar", () => ({
+  OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
+}))
+vi.mock("@/components/org/OrgBreadcrumb", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  OrgBreadcrumb: ({ section, trail }: any) => (
+    <div data-testid="org-breadcrumb">
+      {section}
+      {(trail ?? []).map((t: { label: string }) => ` › ${t.label}`).join("")}
+    </div>
+  ),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "tok", username: "tester", email: "t@example.com" }, loading: false }),
 }))
@@ -83,11 +98,18 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
   DEFAULT_SYSTEM_PROMPT: "Translate accurately.",
 }))
 
-vi.mock("@/lib/completion/completion-service", () => ({
-  fetchModels: vi.fn().mockResolvedValue([]),
-  resolveProvider: vi.fn(() => "frontier"),
-  FRONTIER_CHAT_URL: "https://api.aquilla.app/chat/api/v1/chat/completions",
-}))
+vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
+  // Partial mock: ProjectSettings and other modules in its render tree read
+  // real constants from this module at module-eval time (FRONTIER_CHAT_URL via
+  // lib/ab/feedback.ts, DEFAULT_COMPLETION_MAX_TOKENS for initial state) —
+  // keep every real export and stub only the network-touching functions.
+  const actual = await importOriginal<typeof import("@/lib/completion/completion-service")>()
+  return {
+    ...actual,
+    fetchModels: vi.fn().mockResolvedValue([]),
+    resolveProvider: vi.fn(() => "frontier"),
+  }
+})
 
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),

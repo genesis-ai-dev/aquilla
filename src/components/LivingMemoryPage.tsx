@@ -9,13 +9,13 @@
  * required role, mirroring the AQU-255 pattern in useProjectSettings.
  *
  * Layout: AQU-254 renders this page inside the ProjectWorkspace shell
- * (centerSurface === "memory"), so this component owns only the content
- * area — no full-page header, no back button.
+ * (centerSurface === "memory"). Matches Rules/Glossary: in-main toolbar
+ * + scrollable max-width body — no full-page header, no back button.
  */
 
 import React, { useMemo, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, ExternalLink, Brain } from "lucide-react"
+import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -182,7 +182,7 @@ function ValidatedCellCard({ cell }: { cell: LivingMemoryCell }) {
 
 function FileGroupHeading({ fileName }: { fileName: string }) {
   return (
-    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-6 mb-2 px-0.5 first:mt-0 flex items-center gap-2">
+    <h3 className="text-xs font-semibold text-muted-foreground mt-6 mb-2 px-0.5 first:mt-0 flex items-center gap-2">
       <span className="flex-1 truncate">{fileName}</span>
     </h3>
   )
@@ -222,7 +222,7 @@ function CellList({ cells }: { cells: LivingMemoryCell[] }) {
   )
 }
 
-// ── Entry form (inline add / edit) ─────────────────────────────────────────
+// ── Entry form (used in add dialog + inline edit) ───────────────────────────
 
 interface EntryFormProps {
   initialText?: string
@@ -320,12 +320,12 @@ function AuthoredEntriesSection({
   const filtered = entries.filter((e) => e.kind === kind)
 
   return (
-    <section aria-label={title} className="mb-8">
+    <section aria-label={title}>
       <div className="flex items-center gap-2 mb-1">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex-1">
+        <h2 className="text-xs font-semibold text-muted-foreground flex-1">
           {title}
         </h2>
-        {canEdit && !adding && (
+        {canEdit && (
           <Button
             size="sm"
             variant="ghost"
@@ -342,16 +342,23 @@ function AuthoredEntriesSection({
 
       <p className="text-xs text-muted-foreground mb-3 leading-relaxed">{description}</p>
 
-      {adding && (
-        <div className="mb-3">
+      <Dialog
+        open={adding}
+        onOpenChange={(open: boolean) => { if (!open) setAdding(false) }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add {title.toLowerCase()} entry</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </DialogHeader>
           <EntryForm
             onSave={(text) => { onAdd(text); setAdding(false) }}
             onCancel={() => setAdding(false)}
           />
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
-      {filtered.length === 0 && !adding ? (
+      {filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/60 px-4 py-5 flex flex-col gap-1.5">
           <p className="text-xs text-muted-foreground/60 italic">{placeholder}</p>
           <p className="text-xs text-muted-foreground/50">
@@ -436,8 +443,8 @@ function AuthoredEntriesSection({
 
 // ── Page ──────────────────────────────────────────────────────────────────
 // AQU-254: rendered inside ProjectWorkspace's AppShell (centerSurface===
-// "memory") in a h-full overflow-y-auto wrapper. No full-page header or
-// back-button chrome here — the shell owns that. Content scrolls naturally.
+// "memory"). Layout matches Rules/Glossary: in-main toolbar + scrollable
+// body. No back-button chrome — the shell owns nav.
 
 export function LivingMemoryPage() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -526,108 +533,46 @@ export function LivingMemoryPage() {
   }
 
   return (
-    <div className="flex flex-col">
-      {/* Page header — purpose + liveness (no back button: shell owns nav) */}
-      <div className="px-4 pt-4 pb-3 max-w-2xl mx-auto w-full">
-        <div className="flex items-start gap-3 mb-3">
-          <div className="rounded-xl bg-muted/60 p-2 shrink-0 mt-0.5">
-            <Brain className="h-5 w-5 text-muted-foreground/80" aria-hidden="true" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <h1 className="text-sm font-semibold leading-none">Living Memory</h1>
-              <AppTooltip content={livenessLabel}>
-                <span
-                  aria-label={livenessLabel}
-                  className={[
-                    "h-2 w-2 shrink-0 rounded-full transition-colors",
-                    livenessState === "offline"
-                      ? "bg-red-500"
-                      : livenessState === "updating"
-                        ? "bg-amber-400 animate-pulse"
-                        : "bg-emerald-500",
-                  ].join(" ")}
-                />
-              </AppTooltip>
-              {isLoading ? (
-                <Skeleton className="h-4 w-20 rounded-lg" aria-label="Loading count" />
-              ) : (
-                <Badge variant="secondary" className="text-[10px] tabular-nums">
-                  {cells.length.toLocaleString()} validated
-                </Badge>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Your team's encoded voice and standards — the project context the AI draws on
-              for every new draft. It grows with each validation, correction, and instruction
-              your team adds.
-            </p>
-          </div>
-        </div>
-
-        {/* Cross-link to Terminology */}
-        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted/40 border border-border/50 text-xs text-muted-foreground">
-          <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
-          <span>
-            <strong className="font-medium text-foreground/70">Terminology</strong> captures
-            your project's key terms and preferred renderings.{" "}
-          </span>
-          <button
-            onClick={() => navigate(`/project/${projectId}/terminology`)}
-            className="underline text-foreground/60 hover:text-foreground transition-colors shrink-0"
-            aria-label="Go to Terminology page"
-          >
-            Open Terminology
-          </button>
-        </div>
-      </div>
-
-      {/* Translation Brief section */}
-      <BriefSection
-        brief={brief}
-        canEdit={entriesReady && canEdit}
-        stale={stale}
-        busy={generating}
-        onEdit={() => setBuilderOpen(true)}
-        onGenerate={handleGenerate}
-      />
-
-      {/* Translation Brief builder dialog */}
-      {builderOpen && (
-        <BriefBuilder
-          open={builderOpen}
-          brief={brief ?? emptyBrief(author)}
-          canEdit={entriesReady && canEdit}
-          onClose={() => setBuilderOpen(false)}
-          onSaveDraft={async (draft) => {
-            const prev = brief ?? emptyBrief(author)
-            return saveBrief(prev, draft)
-          }}
-          onGenerateL1={async (draft) => {
-            if (!completionSettings) return
-            const prev = brief ?? emptyBrief(author)
-            const saved = await saveBrief(prev, draft)
-            const l1 = await generateL1Summary(saved, completionSettings, session ?? null)
-            await attachL1(saved, l1, completionSettings.model)
-          }}
-          onHelpDraft={completionSettings
-            ? (fieldId, draft) => draftField(fieldId, draft, completionSettings, session ?? null)
-            : undefined
-          }
-          onExtractDocument={completionSettings
-            ? async (text) => {
-                const chk = checkInputSize(text)
-                if (!chk.ok) throw new Error(chk.message)
-                return extractBriefFromDocument(text, completionSettings, session ?? null)
-              }
-            : undefined
-          }
-        />
-      )}
+    <div className="flex h-full flex-col bg-background">
+      {/* In-main toolbar — matches Rules/Glossary */}
+      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+        <Brain className="h-5 w-5 text-muted-foreground" aria-hidden />
+        <h1 className="text-base font-semibold">Living Memory</h1>
+        <AppTooltip content={livenessLabel}>
+          <span
+            aria-label={livenessLabel}
+            className={[
+              "h-2 w-2 shrink-0 rounded-full transition-colors",
+              livenessState === "offline"
+                ? "bg-red-500"
+                : livenessState === "updating"
+                  ? "bg-amber-400 animate-pulse"
+                  : "bg-emerald-500",
+            ].join(" ")}
+          />
+        </AppTooltip>
+        {isLoading ? (
+          <Skeleton className="h-4 w-20 rounded-md" aria-label="Loading count" />
+        ) : (
+          <Badge variant="secondary" className="text-[10px] tabular-nums">
+            {cells.length.toLocaleString()} validated
+          </Badge>
+        )}
+        <div className="flex-1" />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => navigate(`/project/${projectId}/terminology`)}
+          aria-label="Go to Terminology page"
+        >
+          <BookOpen data-icon="inline-start" />
+          Terminology
+        </Button>
+      </header>
 
       {cellsError && (
         <div
-          className="flex items-start gap-2 border-y border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
+          className="flex shrink-0 items-start gap-2 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-xs text-destructive"
           role="alert"
         >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
@@ -635,58 +580,102 @@ export function LivingMemoryPage() {
         </div>
       )}
 
-      {/* Body — content in a max-width column */}
-      <div className="flex-1 px-4 py-4 max-w-2xl mx-auto w-full">
-
-        {/* Instructions section */}
-        <AuthoredEntriesSection
-          title="Instructions"
-          description="Tell the AI what this project is about — audience, tone, formality, special handling. These appear in every draft prompt."
-          placeholder="No instructions yet."
-          example={`"Translate into formal Swahili for an adult literacy audience. Avoid theological jargon unless the source uses it."`}
-          kind="instruction"
-          entries={entries}
-          canEdit={entriesReady && canEdit}
-          reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
-          onAdd={(text) => handleAdd("instruction", text)}
-          onUpdate={handleUpdate}
-          onDelete={handleDelete}
-        />
-
-        {/* Standards section */}
-        <AuthoredEntriesSection
-          title="Standards"
-          description="Project-wide quality rules the AI checks its drafts against. Capture decisions your team keeps revisiting."
-          placeholder="No standards yet."
-          example={`"Always preserve proper nouns untranslated. Numbers in source must appear as numerals in target."`}
-          kind="standard"
-          entries={entries}
-          canEdit={entriesReady && canEdit}
-          reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
-          onAdd={(text) => handleAdd("standard", text)}
-          onUpdate={handleUpdate}
-          onDelete={handleDelete}
-        />
-
-        {/* Recent Examples */}
-        <section aria-label="Recent Examples" className="mb-8">
-          <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Recent Examples
-            </h2>
-          </div>
-          <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-            Human-validated source&thinsp;&rarr;&thinsp;target pairs the AI uses as in-context
-            examples. These are the translations your team has agreed on.
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Your team&apos;s encoded voice and standards — the project context the AI draws on
+            for every new draft. It grows with each validation, correction, and instruction
+            your team adds.
           </p>
-          {isLoading ? (
-            <LivingMemorySkeleton />
-          ) : isEmpty ? (
-            <RecentExamplesEmpty />
-          ) : (
-            <CellList cells={cells} />
+
+          <BriefSection
+            brief={brief}
+            canEdit={entriesReady && canEdit}
+            stale={stale}
+            busy={generating}
+            onEdit={() => setBuilderOpen(true)}
+            onGenerate={handleGenerate}
+          />
+
+          {builderOpen && (
+            <BriefBuilder
+              open={builderOpen}
+              brief={brief ?? emptyBrief(author)}
+              canEdit={entriesReady && canEdit}
+              onClose={() => setBuilderOpen(false)}
+              onSaveDraft={async (draft) => {
+                const prev = brief ?? emptyBrief(author)
+                return saveBrief(prev, draft)
+              }}
+              onGenerateL1={async (draft) => {
+                if (!completionSettings) return
+                const prev = brief ?? emptyBrief(author)
+                const saved = await saveBrief(prev, draft)
+                const l1 = await generateL1Summary(saved, completionSettings, session ?? null)
+                await attachL1(saved, l1, completionSettings.model)
+              }}
+              onHelpDraft={completionSettings
+                ? (fieldId, draft) => draftField(fieldId, draft, completionSettings, session ?? null)
+                : undefined
+              }
+              onExtractDocument={completionSettings
+                ? async (text) => {
+                    const chk = checkInputSize(text)
+                    if (!chk.ok) throw new Error(chk.message)
+                    return extractBriefFromDocument(text, completionSettings, session ?? null)
+                  }
+                : undefined
+              }
+            />
           )}
-        </section>
+
+          <AuthoredEntriesSection
+            title="Instructions"
+            description="Tell the AI what this project is about — audience, tone, formality, special handling. These appear in every draft prompt."
+            placeholder="No instructions yet."
+            example={`"Translate into formal Swahili for an adult literacy audience. Avoid theological jargon unless the source uses it."`}
+            kind="instruction"
+            entries={entries}
+            canEdit={entriesReady && canEdit}
+            reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
+            onAdd={(text) => handleAdd("instruction", text)}
+            onUpdate={handleUpdate}
+            onDelete={handleDelete}
+          />
+
+          <AuthoredEntriesSection
+            title="Standards"
+            description="Project-wide quality rules the AI checks its drafts against. Capture decisions your team keeps revisiting."
+            placeholder="No standards yet."
+            example={`"Always preserve proper nouns untranslated. Numbers in source must appear as numerals in target."`}
+            kind="standard"
+            entries={entries}
+            canEdit={entriesReady && canEdit}
+            reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
+            onAdd={(text) => handleAdd("standard", text)}
+            onUpdate={handleUpdate}
+            onDelete={handleDelete}
+          />
+
+          <section aria-label="Recent Examples">
+            <div className="flex items-center gap-2 mb-1">
+              <h2 className="text-xs font-semibold text-muted-foreground">
+                Recent Examples
+              </h2>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+              Human-validated source&thinsp;&rarr;&thinsp;target pairs the AI uses as in-context
+              examples. These are the translations your team has agreed on.
+            </p>
+            {isLoading ? (
+              <LivingMemorySkeleton />
+            ) : isEmpty ? (
+              <RecentExamplesEmpty />
+            ) : (
+              <CellList cells={cells} />
+            )}
+          </section>
+        </div>
       </div>
     </div>
   )

@@ -14,6 +14,7 @@
 //   FROM cells t
 //   JOIN cells s
 //     ON s.project_id = COALESCE(:upstream_project_id, t.project_id)
+//    AND s.file_id    = t.file_id
 //    AND s.cell_id    = t.cell_id
 //    AND s.side       = 'source'
 //   WHERE t.project_id      = :project_id
@@ -21,7 +22,10 @@
 //     AND t.side            = 'target'
 //     AND t.source_event_id IS NOT NULL
 //     AND s.event_id        != t.source_event_id
-//     AND s.content_hash    != t.source_content_hash  -- hash-aware (§6)
+//     AND (
+//       pinned.id IS NULL
+//       OR s.value IS DISTINCT FROM pinned.payload.value  -- content-aware (§6)
+//     )
 //
 // The upstream project id is resolved from `projects.source_project_id`
 // — for linked target projects this points at the upstream; for self-
@@ -134,27 +138,37 @@ export async function handleStaleSourceRequest(
   // — a mismatch by construction once mirrored rows carry deterministic
   // mirror event ids distinct from the upstream's.
   //
-  // Hash-aware (§6): the mirror's no-op suppression means an unchanged
-  // upstream edit never advances the local mirrored row's event_id, so the
-  // plain event-id pointer comparison is ALREADY hash-aware by
-  // construction — a content-unchanged upstream commit simply never moves
-  // `s.event_id`, so `s.event_id != t.source_event_id` stays false. This
-  // is also why self-contained/source-only projects (no upstream link)
-  // still need the query: a `target.cell.commit` followed by a same-project
-  // `source.cell.commit` is the same shape, no mirror involved.
+  // Hash-aware (§6): compare the current source text with the source event
+  // named by the target's pin. Re-import can legitimately advance a source
+  // row for metadata, structure, or lossless-formatting changes while leaving
+  // its translatable text untouched. Event-id comparison alone incorrectly
+  // marked those cells stale (notably IDML milestone metadata backfills).
+  //
+  // The projection's content_hash fingerprints plain `value`, so comparing
+  // the pinned event payload's value to the current projected value is the
+  // equivalent content-aware check without adding a duplicated hash column to
+  // every target row. A missing pinned event remains stale defensively.
   const sql = `
     SELECT t.cell_id AS cell_id
     FROM cells t
     JOIN cells s
       ON s.project_id = t.project_id
+     AND s.file_id    = t.file_id
      AND s.cell_id    = t.cell_id
      AND s.side       = 'source'
+    LEFT JOIN events pinned
+      ON pinned.project_id = t.project_id
+     AND pinned.id         = t.source_event_id
     WHERE t.project_id      = ?
       AND t.file_id         = ?
       AND t.side            = 'target'
       AND t.source_event_id IS NOT NULL
       AND s.event_id        != t.source_event_id
       AND s.tombstoned_at IS NULL
+      AND (
+        pinned.id IS NULL
+        OR s.value IS DISTINCT FROM COALESCE((pinned.payload::jsonb)->>'value', '')
+      )
   `
 
   let staleCellIds: string[] = []

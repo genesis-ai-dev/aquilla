@@ -54,13 +54,13 @@ test("Draft-paragraph rail button drafts every cell of a paragraph as one unit (
   // seeded.cellIds is in document order: [p1-cell0, p1-cell1, p2-cell0, p2-cell1].
   const [p1Cell0, p1Cell1, p2Cell0, p2Cell1] = seeded.cellIds
 
-  // The second paragraph's first row carries the boundary indicator: a
-  // pilcrow wrapped in a `title="New paragraph"` div, and the row wrapper
-  // is flagged `data-paragraph-start="true"` (the first paragraph's own
-  // start row is suppressed — it's the file's first row).
+  // The second paragraph's first row carries the boundary indicator — a pilcrow
+  // labelled "New paragraph" by AppTooltip (no native title to key off) — and
+  // the row wrapper is flagged `data-paragraph-start="true"` (the first
+  // paragraph's own start row is suppressed — it's the file's first row).
   const p2StartRow = ws.cellRow(2)
   await expect(p2StartRow).toHaveAttribute("data-paragraph-start", "true")
-  await expect(p2StartRow.locator('[title="New paragraph"]')).toBeVisible()
+  await expect(p2StartRow.getByTestId("paragraph-boundary-indicator")).toBeVisible()
 
   // The first paragraph's start row (index 0, the file's very first row)
   // must NOT show the boundary indicator.

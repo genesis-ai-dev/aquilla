@@ -29,6 +29,7 @@
 import { useState } from "react"
 import { ChevronRight, ChevronDown, ShieldCheck, Sparkles, ArrowUp } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { TermRendering, RenderingStatus } from "@/lib/terminology/types"
 import type {
@@ -68,7 +69,7 @@ function ConfidenceChip({ confidence }: { confidence: EquivalentConfidence }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold",
         confidence === "HIGH" &&
           "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
         confidence === "AMBER" &&
@@ -108,7 +109,7 @@ function PredictedRow({
           type="button"
           className={cn(
             "flex items-center gap-1 text-left",
-            hasExamples ? "cursor-pointer hover:text-foreground" : "cursor-default",
+            hasExamples ? "hover:text-foreground" : "cursor-default",
           )}
           onClick={() => hasExamples && setOpen((v) => !v)}
           aria-expanded={hasExamples ? open : undefined}
@@ -137,16 +138,17 @@ function PredictedRow({
         </span>
 
         {canPromote && onPromote && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 gap-1 px-1.5 text-[10px]"
-            onClick={() => onPromote(prediction.target)}
-            title="Promote to a managed rendering (crosses the deterministic line)"
-          >
-            <ArrowUp className="h-3 w-3" />
-            Promote
-          </Button>
+          <AppTooltip content="Promote to a managed rendering (crosses the deterministic line)">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-1.5 text-[10px]"
+              onClick={() => onPromote(prediction.target)}
+            >
+              <ArrowUp className="h-3 w-3" />
+              Promote
+            </Button>
+          </AppTooltip>
         )}
       </div>
 
@@ -198,7 +200,7 @@ export function EquivalentsPanel({
       <section className="rounded-lg border bg-card p-3">
         <header className="mb-2 flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+          <h3 className="text-xs font-semibold text-foreground">
             Managed
           </h3>
           <span className="text-[10px] text-muted-foreground">(your decisions)</span>
@@ -220,7 +222,7 @@ export function EquivalentsPanel({
       <section className="rounded-lg border border-dashed border-amber-300/60 bg-amber-50/30 p-3 dark:border-amber-800/40 dark:bg-amber-950/10">
         <header className="mb-2 flex items-center gap-1.5">
           <Sparkles className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-foreground">
+          <h3 className="text-xs font-semibold text-foreground">
             AI-assumed
           </h3>
           <span className="text-[10px] text-muted-foreground">(predicted)</span>

@@ -24,7 +24,7 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
     <AppTooltip content={tooltip}>
       <span
         className={cn(
-          "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-border/70 bg-background/80 px-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground",
+          "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground",
           className,
         )}
         aria-label={tooltip}

@@ -80,7 +80,7 @@ export function AssignedToMe() {
                 return (
                   <Link
                     key={a.assignmentId}
-                    to={a.targetLang ? `/project/${a.projectId}?lane=${encodeURIComponent(a.targetLang)}` : `/project/${a.projectId}`}
+                    to={a.targetLang ? `/project/${a.projectId}/editor?lane=${encodeURIComponent(a.targetLang)}` : `/project/${a.projectId}/editor`}
                     className="block p-4 transition-colors hover:bg-muted/50"
                   >
                     <div className="flex items-center gap-2">

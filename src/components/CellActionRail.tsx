@@ -8,6 +8,8 @@
 
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 // Bouncy spring matches the reference popout, slightly tamed for desktop.
 // Original: cubic-bezier(.68,-0.75,.27,1.75)
@@ -42,44 +44,40 @@ export function RailButton({
           ? "bg-emerald-500"
           : null
 
-  const button = (
+  return (
     <div className="relative">
-      <button
-        type="button"
-        title={tooltip}
-        data-tooltip={import.meta.env.MODE === "test" ? tooltip : undefined}
-        onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.() }}
-        onMouseDown={onMouseDown}
-        onMouseEnter={onMouseEnter}
-        disabled={disabled}
-        aria-label={tooltip}
-        className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-lg",
-          "transition-[transform,color,background-color] duration-150 ease-out",
-          "active:scale-[0.88]",
-          "hover:bg-muted/80",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          disabled
-            ? "cursor-not-allowed text-muted-foreground/30"
-            : toneClass ?? "text-muted-foreground/70 hover:text-foreground",
-          pulsing && "animate-pulse",
-        )}
-      >
-        {icon}
-      </button>
+      <AppTooltip content={tooltip}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          data-tooltip={tooltip}
+          onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.() }}
+          onMouseDown={onMouseDown}
+          onMouseEnter={onMouseEnter}
+          disabled={disabled}
+          aria-label={tooltip}
+          className={cn(
+            disabled
+              ? "text-muted-foreground/30"
+              : toneClass ?? "text-muted-foreground/70 hover:text-foreground",
+            pulsing && "animate-pulse",
+          )}
+        >
+          {icon}
+        </Button>
+      </AppTooltip>
       {dotColor && (
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full ring-2 ring-background",
+            "pointer-events-none absolute right-0.5 top-0.5 size-1.5 rounded-full ring-2 ring-background",
             dotColor,
           )}
         />
       )}
     </div>
   )
-
-  return button
 }
 
 interface CellActionRailProps {
@@ -112,15 +110,16 @@ export function CellActionRail({
       data-slot="cell-action-rail"
       data-revealed={revealed ? "true" : "false"}
       className={cn(
-        "flex items-center justify-end gap-0.5 rounded-lg px-1 py-0.5",
-        // Filled pill only when revealed, so the rail reads as a distinct
+        // Match icon-xs Button radius so nested padding reads even.
+        "flex items-center justify-end rounded-[min(var(--radius-md),10px)] p-0.5",
+        // Filled surface only when revealed, so the rail reads as a distinct
         // cluster off the cell surface instead of competing with text.
         revealed && "bg-card",
       )}
       style={{ transition: "background-color 200ms ease-out, box-shadow 200ms ease-out" }}
     >
       <div
-        className="flex items-center gap-0.5"
+        className="flex items-center"
         style={{
           opacity: revealed ? 1 : 0,
           // Scale only — no translate. A translate moves the button's hit-box
@@ -151,7 +150,6 @@ export function CellActionRail({
             <ChevronDown
               className="h-3.5 w-3.5"
               style={{
-                transition: `transform 220ms ${SPRING}`,
                 transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
               }}
             />

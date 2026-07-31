@@ -25,14 +25,17 @@ test("living memory edit entry updates the text in place", async ({ alice }) => 
   const instructionsSection = alice.locator('section[aria-label="Instructions"]')
   await expect(instructionsSection).toBeVisible({ timeout: 10_000 })
 
-  // Add an initial entry.
+  // Add an initial entry via create dialog.
   const addBtn = instructionsSection.getByRole("button", { name: /Add/i })
   await addBtn.click()
-  const textarea = instructionsSection.locator("textarea").first()
+  const addDialog = alice.getByRole("dialog")
+  await expect(addDialog).toBeVisible({ timeout: 3_000 })
+  const textarea = addDialog.locator("textarea").first()
   await expect(textarea).toBeVisible({ timeout: 3_000 })
   const original = `Original text ${Date.now()}`
   await textarea.fill(original)
-  await instructionsSection.getByRole("button", { name: /^Save$/i }).click()
+  await addDialog.getByRole("button", { name: /^Save$/i }).click()
+  await expect(addDialog).not.toBeVisible({ timeout: 5_000 })
   await expect(instructionsSection.getByText(original)).toBeVisible({ timeout: 5_000 })
 
   // Entries render as Cards (divs), not <li> rows. With a single entry in the

@@ -49,13 +49,14 @@ interface IdmlGuardOptions {
 export function idmlEditableSlotPosition(
   doc: ProseMirrorNode,
   requestedSlot?: number,
+  edge: "start" | "end" = "start",
 ): number | null {
   let firstEditable: number | null = null
   let requested: number | null = null
   doc.descendants((node, position) => {
     if (node.type.name !== IDML_SLOT_NODE_NAME) return true
     if (node.attrs.editable !== true) return false
-    const contentPosition = position + 1
+    const contentPosition = position + 1 + (edge === "end" ? node.content.size : 0)
     firstEditable ??= contentPosition
     if (
       requestedSlot !== undefined
@@ -66,6 +67,58 @@ export function idmlEditableSlotPosition(
     return false
   })
   return requested ?? firstEditable
+}
+
+/** Resolve a read-surface text offset to the same position in an editable slot. */
+export function idmlEditableSlotOffsetPosition(
+  doc: ProseMirrorNode,
+  requestedSlot: number,
+  requestedOffset: number,
+): number | null {
+  let requested: number | null = null
+  doc.descendants((node, position) => {
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (
+      node.attrs.editable === true
+      && node.attrs.slot === requestedSlot
+    ) {
+      const offset = Math.min(Math.max(0, requestedOffset), node.content.size)
+      requested = position + 1 + offset
+    }
+    return false
+  })
+  return requested
+}
+
+/** Map the flattened IDML text shown by the read surface back into a slot. */
+export function idmlEditablePlainOffsetPosition(
+  doc: ProseMirrorNode,
+  requestedOffset: number,
+): number | null {
+  let cursor = 0
+  let requested: number | null = null
+  doc.descendants((node, position) => {
+    if (requested !== null) return false
+    if (node.type.name === IDML_SLOT_NODE_NAME) {
+      const end = cursor + node.content.size
+      if (
+        requestedOffset >= cursor
+        && requestedOffset <= end
+        && node.attrs.editable === true
+      ) {
+        requested = position + 1 + (requestedOffset - cursor)
+      }
+      cursor = end
+      return false
+    }
+    if (node.type.name === IDML_TOKEN_NODE_NAME) {
+      const kind = node.attrs.tokenKind as IdmlProtectedTokenKind
+      if (kind === "tab" || kind === "br") cursor += 1
+      return false
+    }
+    return true
+  })
+  return requested
 }
 
 export function isEditableIdmlSelection(selection: {

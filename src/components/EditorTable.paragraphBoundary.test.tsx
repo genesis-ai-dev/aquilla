@@ -154,7 +154,7 @@ describe("EditorTable — paragraph boundary visuals (p1-paragraph-ui-wiring)", 
 
     await screen.findByText("target 0")
 
-    const indicators = screen.getAllByTitle("New paragraph")
+    const indicators = screen.getAllByTestId("paragraph-boundary-indicator")
     expect(indicators).toHaveLength(1)
 
     const row = indicators[0].closest("[data-cell-id]")
@@ -168,7 +168,7 @@ describe("EditorTable — paragraph boundary visuals (p1-paragraph-ui-wiring)", 
 
     await screen.findByText("target 0")
 
-    expect(screen.queryByTitle("New paragraph")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("paragraph-boundary-indicator")).not.toBeInTheDocument()
     const firstRow = screen.getByText("target 0").closest("[data-cell-id]")
     expect(firstRow).not.toHaveAttribute("data-paragraph-start")
   })
@@ -179,7 +179,7 @@ describe("EditorTable — paragraph boundary visuals (p1-paragraph-ui-wiring)", 
 
     await screen.findByText("target 0")
 
-    expect(screen.queryByTitle("New paragraph")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("paragraph-boundary-indicator")).not.toBeInTheDocument()
     for (const id of ["cell-1", "cell-2", "cell-3"]) {
       const row = document.querySelector(`[data-cell-id="${id}"]`)
       expect(row).not.toHaveAttribute("data-paragraph-start")

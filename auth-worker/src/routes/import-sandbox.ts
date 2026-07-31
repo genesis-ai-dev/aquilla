@@ -15,6 +15,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
+import { openRouterExtras } from "../lib/llm-vendor"
 import {
   sandboxDestroy,
   sandboxExec,
@@ -341,8 +342,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
           temperature: 0,
           max_tokens: 10_000,
           stream: false,
-          usage: { include: true },
-          reasoning: { effort: "high" },
+          ...openRouterExtras(c.env.OPENROUTER_BASE_URL, "high"),
           response_format: { type: "json_object" },
         }),
         signal,

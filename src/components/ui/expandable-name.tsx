@@ -48,7 +48,7 @@ export function ExpandableName({ name, className }: { name: string; className?: 
             aria-label={truncated ? `Show full name: ${name}` : undefined}
             className={cn(
               "block w-full min-w-0 max-w-full appearance-none border-0 bg-transparent p-0 text-left",
-              truncated && "cursor-pointer disabled:cursor-default",
+              truncated && "disabled:cursor-default",
             )}
           >
             <span

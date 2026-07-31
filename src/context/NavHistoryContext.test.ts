@@ -27,48 +27,48 @@ describe("initialState", () => {
 describe("syncToLocation", () => {
   it("PUSH appends a new entry and advances the cursor", () => {
     let s = initialState(loc("a", "/projects"))
-    s = syncToLocation(s, loc("b", "/project/x"), "PUSH")
-    expect(titlesAt(s)).toEqual({ titles: ["/projects", "/project/x"], index: 1 })
+    s = syncToLocation(s, loc("b", "/project/x/editor"), "PUSH")
+    expect(titlesAt(s)).toEqual({ titles: ["/projects", "/project/x/editor"], index: 1 })
   })
 
   it("POP back to a known key moves the cursor without mutating the stack", () => {
     let s = initialState(loc("a", "/projects"))
-    s = syncToLocation(s, loc("b", "/project/x"), "PUSH")
+    s = syncToLocation(s, loc("b", "/project/x/editor"), "PUSH")
     // Browser/our-button back: React Router restores key "a".
     s = syncToLocation(s, loc("a", "/projects"), "POP")
-    expect(titlesAt(s)).toEqual({ titles: ["/projects", "/project/x"], index: 0 })
+    expect(titlesAt(s)).toEqual({ titles: ["/projects", "/project/x/editor"], index: 0 })
   })
 
   it("PUSH after going back truncates the forward history (browser semantics)", () => {
     let s = initialState(loc("a", "/projects"))
-    s = syncToLocation(s, loc("b", "/project/x"), "PUSH")
+    s = syncToLocation(s, loc("b", "/project/x/editor"), "PUSH")
     s = syncToLocation(s, loc("c", "/project/x/comments"), "PUSH")
-    s = syncToLocation(s, loc("b", "/project/x"), "POP") // back to index 1
+    s = syncToLocation(s, loc("b", "/project/x/editor"), "POP") // back to index 1
     // New navigation from the middle drops the forward entry "c".
     s = syncToLocation(s, loc("d", "/project/x/settings"), "PUSH")
     expect(titlesAt(s)).toEqual({
-      titles: ["/projects", "/project/x", "/project/x/settings"],
+      titles: ["/projects", "/project/x/editor", "/project/x/settings"],
       index: 2,
     })
   })
 
   it("REPLACE swaps the current entry in place and preserves the surrounding stack", () => {
     let s = initialState(loc("a", "/projects"))
-    s = syncToLocation(s, loc("b", "/project/x"), "PUSH")
+    s = syncToLocation(s, loc("b", "/project/x/editor"), "PUSH")
     s = syncToLocation(s, loc("c", "/project/x/comments"), "PUSH")
-    s = syncToLocation(s, loc("b", "/project/x"), "POP") // back to index 1
+    s = syncToLocation(s, loc("b", "/project/x/editor"), "POP") // back to index 1
     // A redirect (e.g. editor-root bouncing to a remembered file) must NOT
     // truncate the forward entry "c" — this was the QA-found bug.
-    s = syncToLocation(s, loc("redir", "/project/x/file/7"), "REPLACE")
+    s = syncToLocation(s, loc("redir", "/project/x/editor/file/7"), "REPLACE")
     expect(titlesAt(s)).toEqual({
-      titles: ["/projects", "/project/x/file/7", "/project/x/comments"],
+      titles: ["/projects", "/project/x/editor/file/7", "/project/x/comments"],
       index: 1,
     })
   })
 
   it("treats revisiting the same location with a new key as a distinct PUSH", () => {
     let s = initialState(loc("a", "/projects"))
-    s = syncToLocation(s, loc("b", "/project/x"), "PUSH")
+    s = syncToLocation(s, loc("b", "/project/x/editor"), "PUSH")
     s = syncToLocation(s, loc("c", "/projects"), "PUSH") // same path, new key
     expect(s.entries).toHaveLength(3)
     expect(s.index).toBe(2)

@@ -20,7 +20,7 @@ export const DEFAULT_FRONTIER_API = "https://api.frontierrnd.com/api/v1"
 export interface GitLabCredentials {
   /** GitLab personal-access token (use as `Bearer` / `oauth2:<token>`). */
   gitlabToken: string
-  /** GitLab base URL, e.g. https://gitlab.frontierrnd.com (no trailing slash). */
+  /** GitLab base URL, e.g. https://git.genesisrnd.com (no trailing slash). */
   gitlabUrl: string
   /** Frontier API access token (kept for completeness; not needed downstream). */
   accessToken: string

@@ -51,7 +51,7 @@ export function ChatContextPin({
           type="button"
           onClick={() => onToggle(!includeCellContext)}
           className={cn(
-            "flex items-center gap-1.5 rounded-lg transition-colors",
+            "flex items-center gap-1.5 rounded-md transition-colors",
             compact ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-1 text-[11px]",
             includeCellContext && currentCell
               ? "bg-primary/10 text-primary"

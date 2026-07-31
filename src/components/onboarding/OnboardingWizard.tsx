@@ -117,7 +117,7 @@ export function OnboardingWizard() {
   const handleFinish = useCallback(() => {
     localStorage.setItem("codex:onboardingComplete", "true")
     if (createdProject) {
-      navigate(`/project/${createdProject.id}`, {
+      navigate(`/project/${createdProject.id}/editor`, {
         state: { openSetupChecklist: true },
       })
     } else {

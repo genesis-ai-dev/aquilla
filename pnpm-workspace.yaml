@@ -5,7 +5,7 @@ onlyBuiltDependencies:
   - core-js
   - esbuild
   - msw
-#  - onnxruntime-node  # postinstall downloads binaries; blocked by web-session proxy
+  - onnxruntime-node
   - protobufjs
   - sharp
   - workerd

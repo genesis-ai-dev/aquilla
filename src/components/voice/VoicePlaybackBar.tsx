@@ -12,6 +12,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
@@ -38,6 +39,8 @@ interface Props {
    *  set, pressing Play starts from this section instead of the file's start
    *  (AQU-666). */
   startCellId?: string | null
+  /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
+  below?: ReactNode
 }
 
 function fmtTime(s: number): string {
@@ -47,7 +50,9 @@ function fmtTime(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`
 }
 
-export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings, onActiveCell, startCellId }: Props) {
+export function VoicePlaybackBar({
+  cells: rawCells, projectId, session, settings, onActiveCell, startCellId, below,
+}: Props) {
   const queue = useQueueState()
   const { currentTime, duration, rate, volume } = useQueueProgress()
 
@@ -113,7 +118,7 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 
   return (
-    <div className="border-t bg-background">
+    <div className="border-t">
       {/* Full-width progress line doubling as a scrubber. */}
       <BarScrubber
         fraction={progressFraction}
@@ -121,52 +126,58 @@ export function VoicePlaybackBar({ cells: rawCells, projectId, session, settings
         onSeek={(f) => seekQueueToTime(f * duration)}
       />
 
-      <div className="flex items-center gap-3 px-4 py-1.5">
-        {/* Now playing */}
-        <div className="flex min-w-0 flex-[1.2] items-center gap-2">
-          {activeVoice && <VoiceAvatar voice={activeVoice} size={26} />}
-          <div className="min-w-0">
-            <div className="truncate text-xs font-medium leading-tight">
-              {activeCell ? (activeCell.cellLabel || "Line") : "Nothing playing"}
-            </div>
-            <div className="truncate text-[10px] leading-tight text-muted-foreground">
-              {queue.kind === "error"
-                ? queue.message
-                : activeVoice
-                  ? activeVoice.name
-                  : canPlay ? "Press play to listen" : "No voiced lines yet"}
+      {/* Equal flex side columns keep the transport truly centered; stretch +
+          self-center let it sit mid-height when status chips/stats nest below. */}
+      <div className="flex items-stretch gap-3 px-4 py-1.5">
+        {/* Now playing (+ optional status stack) */}
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            {activeVoice && <VoiceAvatar voice={activeVoice} size={26} />}
+            <div className="min-w-0">
+              <div className="truncate text-xs font-medium leading-tight">
+                {activeCell ? (activeCell.cellLabel || "Line") : "Nothing playing"}
+              </div>
+              <div className="truncate text-[10px] leading-tight text-muted-foreground">
+                {queue.kind === "error"
+                  ? queue.message
+                  : activeVoice
+                    ? activeVoice.name
+                    : canPlay ? "Press play to listen" : "No voiced lines yet"}
+              </div>
             </div>
           </div>
+          {below}
         </div>
 
         {/* Transport */}
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5 self-center">
           <SpeedButton rate={rate} onChange={setQueueRate} />
           <IconButton title="Previous line" disabled={!canPlay} onClick={skipBack}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
-          <Button
-            type="button"
-            size="icon"
-            variant="default"
-            onClick={onPlayPause}
-            disabled={!canPlay}
-            title={isPlaying ? "Pause" : "Play all"}
-            aria-label={isPlaying ? "Pause" : "Play all"}
-            className="bg-foreground text-background hover:bg-foreground/90"
-          >
-            {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
-          </Button>
+          <AppTooltip content={isPlaying ? "Pause" : "Play all"}>
+            <Button
+              type="button"
+              size="icon"
+              variant="default"
+              onClick={onPlayPause}
+              disabled={!canPlay}
+              aria-label={isPlaying ? "Pause" : "Play all"}
+              className="bg-foreground text-background hover:bg-foreground/90"
+            >
+              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
+            </Button>
+          </AppTooltip>
           <IconButton title="Next line" disabled={!canPlay} onClick={skipForward}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
-          <span className="ml-1 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          <span className="ml-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
             {fmtTime(currentTime)} / {fmtTime(duration)}
           </span>
         </div>
 
-        {/* Volume */}
-        <div className="flex min-w-0 flex-1 items-center justify-end">
+        {/* Volume — matching flex-1 balances the left column for true center */}
+        <div className="flex min-w-0 flex-1 items-center justify-end self-center">
           <VolumeControl volume={volume} onChange={setQueueVolume} />
         </div>
       </div>
@@ -183,17 +194,18 @@ function IconButton({
   disabled?: boolean
 }) {
   return (
-    <Button
-      type="button"
-      size="icon-sm"
-      variant="ghost"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      {children}
-    </Button>
+    <AppTooltip content={title}>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label={title}
+        onClick={onClick}
+        disabled={disabled}
+      >
+        {children}
+      </Button>
+    </AppTooltip>
   )
 }
 
@@ -222,7 +234,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
       onPointerMove={(e) => { if (!disabled && e.buttons === 1) onSeek(fracFromEvent(e)) }}
       className={cn(
         "group/bar relative h-1 w-full touch-none bg-muted",
-        disabled ? "cursor-default" : "cursor-pointer",
+        disabled ? "cursor-default" : undefined,
       )}
     >
       <div className="absolute inset-y-0 left-0 bg-primary" style={{ width: `${fraction * 100}%` }} />
@@ -234,19 +246,20 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
   const [open, setOpen] = useState(false)
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            title="Playback speed"
-            className="min-w-9 px-1.5 tabular-nums"
-          >
-            {rate}x
-          </Button>
-        }
-      />
+      <AppTooltip content="Playback speed">
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="min-w-9 px-1.5 tabular-nums"
+            >
+              {rate}x
+            </Button>
+          }
+        />
+      </AppTooltip>
       <PopoverContent align="center" side="top" className="w-24 p-1">
         {SPEEDS.map((s) => (
           <button
@@ -270,16 +283,17 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
   const muted = volume === 0
   return (
     <div className="flex items-center gap-2">
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="ghost"
-        title={muted ? "Unmute" : "Mute"}
-        aria-label={muted ? "Unmute" : "Mute"}
-        onClick={() => onChange(muted ? 1 : 0)}
-      >
-        {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-      </Button>
+      <AppTooltip content={muted ? "Unmute" : "Mute"}>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={muted ? "Unmute" : "Mute"}
+          onClick={() => onChange(muted ? 1 : 0)}
+        >
+          {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+        </Button>
+      </AppTooltip>
       <Slider
         min={0}
         max={1}

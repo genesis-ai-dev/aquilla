@@ -27,13 +27,20 @@ import {
   LOGIN_MAX_FAILURES_PER_IDENTIFIER,
   LOGIN_MAX_FAILURES_PER_IP,
   recordAuthEvent,
+  REGISTER_MAX_PER_IP,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
 import {
   LegacyUserMigrationError,
+  migrateLegacyUserCandidate,
   migrateLegacyUserForLogin,
+  verifyLegacyUserForLogin,
   type LegacyMigrationRuntime,
 } from "../services/legacy-user-migration"
+import {
+  hasLegacyIdentityCollision,
+  type FrontierD1Config,
+} from "../services/frontier-d1"
 
 /** Append to activity_logs. Best-effort: a logging failure is swallowed so it
  *  never fails the caller's request; awaited (not fire-and-forget) so the
@@ -73,6 +80,11 @@ const loginSchema = z.object({
   // Can be username or email.
   username: z.string(),
   password: z.string(),
+  // Opt-in web handshake: establish valid D1 credentials before telling the
+  // browser that the continuation will contact GitLab. Other API clients keep
+  // the original one-request login behavior.
+  migration_handshake: z.boolean().optional(),
+  continue_migration: z.boolean().optional(),
 })
 
 const passwordResetRequestSchema = z.object({
@@ -98,28 +110,43 @@ interface ResetTokenRow {
   expires_at: string
 }
 
-function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
+function legacyD1Config(
+  env: AuthHonoEnv["Bindings"],
+): FrontierD1Config | null {
   if (String(env.LEGACY_USER_MIGRATION_ENABLED).toLowerCase() !== "true") {
     return null
   }
   const accountId = env.FRONTIER_D1_ACCOUNT_ID?.trim()
   const databaseId = env.FRONTIER_D1_DATABASE_ID?.trim()
   const apiToken = env.FRONTIER_D1_API_TOKEN?.trim()
-  const gitlabUrl = env.GITLAB_URL?.trim().replace(/\/+$/, "")
-  const gitlabToken = env.GITLAB_ADMIN_TOKEN?.trim()
-  if (!accountId || !databaseId || !apiToken || !gitlabUrl || !gitlabToken) {
+  if (!accountId || !databaseId || !apiToken) {
     throw new LegacyUserMigrationError(
       "dependency",
-      "legacy user migration is enabled but not fully configured",
+      "legacy identity protection is enabled but D1 is not fully configured",
     )
   }
   return {
-    d1: {
-      accountId,
-      databaseId,
-      apiToken,
-      apiBaseUrl: env.FRONTIER_D1_API_BASE_URL?.trim() || undefined,
-    },
+    accountId,
+    databaseId,
+    apiToken,
+    apiBaseUrl: env.FRONTIER_D1_API_BASE_URL?.trim() || undefined,
+  }
+}
+
+function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRuntime | null {
+  const d1 = legacyD1Config(env)
+  if (!d1) return null
+
+  const gitlabUrl = env.GITLAB_URL?.trim().replace(/\/+$/, "")
+  const gitlabToken = env.GITLAB_ADMIN_TOKEN?.trim()
+  if (!gitlabUrl || !gitlabToken) {
+    throw new LegacyUserMigrationError(
+      "dependency",
+      "legacy user migration is enabled but GitLab is not fully configured",
+    )
+  }
+  return {
+    d1,
     gitlab: { gitlabUrl, gitlabToken, accessToken: "" },
   }
 }
@@ -139,6 +166,26 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       )
     }
 
+    // [Pen test] Auth & session mgmt (2026-07-27): unthrottled, so a scripted
+    // caller could flood account creation or use the 409 "User already
+    // exists" response as a fast per-IP enumeration oracle across many
+    // guessed emails/usernames. Recorded regardless of outcome (like
+    // password-reset-request) and checked before the DB uniqueness lookup.
+    const ipIdent = ipIdentifier(clientIp(c))
+    const recentRegistrations = await countRecentEvents(
+      c.env.AQUILLA_PG,
+      "register",
+      ipIdent,
+      { onlyFailures: false },
+    )
+    if (recentRegistrations >= REGISTER_MAX_PER_IP) {
+      return c.json(
+        { detail: "Too many registration attempts. Please try again later.", error: "Too many attempts" },
+        429,
+      )
+    }
+    await recordAuthEvent(c.env.AQUILLA_PG, "register", ipIdent, true)
+
     // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
     // already exists so we never mint case-twin accounts that then collide in
     // lookups/@mentions/audit trails. The row still stores the exact casing the
@@ -154,6 +201,35 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       return c.json(
         { detail: "User already exists", error: "User already exists" },
         409,
+      )
+    }
+
+    // AQU-713: while the one-way identity bridge is enabled, D1 remains the
+    // authority for legacy identity reservations. Reject either a legacy
+    // username or legacy email before hashing or inserting anything into the
+    // Neon users table. The response deliberately matches the Neon duplicate
+    // response so callers cannot distinguish which datastore owns the identity.
+    try {
+      const d1 = legacyD1Config(c.env)
+      if (d1 && await hasLegacyIdentityCollision(d1, username, email)) {
+        return c.json(
+          { detail: "User already exists", error: "User already exists" },
+          409,
+        )
+      }
+    } catch {
+      // Fail closed: creating an identity while the legacy reservation source
+      // is unavailable could permanently shadow a user awaiting JIT migration.
+      // Keep logs free of submitted identifiers, credentials, and raw errors.
+      console.error(
+        "[legacy-user-migration] registration identity check unavailable",
+      )
+      return c.json(
+        {
+          detail: "Registration is temporarily unavailable. Please try again.",
+          error: "Registration temporarily unavailable",
+        },
+        503,
       )
     }
 
@@ -245,7 +321,12 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
 // keep working — matches the legacy frontier-server.
 auth.post("/token", async (c) => {
   const contentType = c.req.header("content-type") || ""
-  let body: { username?: string; password?: string } = {}
+  let body: {
+    username?: string
+    password?: string
+    migration_handshake?: boolean
+    continue_migration?: boolean
+  } = {}
 
   try {
     if (contentType.includes("application/json")) {
@@ -272,7 +353,12 @@ auth.post("/token", async (c) => {
   if (!validated.success) {
     return c.json({ error: "Invalid request body" }, 400)
   }
-  const { username, password } = validated.data
+  const {
+    username,
+    password,
+    migration_handshake: migrationHandshake,
+    continue_migration: continueMigration,
+  } = validated.data
   const identifier = loginIdentifier(username)
   const ipIdent = ipIdentifier(clientIp(c))
 
@@ -316,12 +402,33 @@ auth.post("/token", async (c) => {
       try {
         const runtime = legacyMigrationRuntime(c.env)
         if (runtime) {
-          const migrated = await migrateLegacyUserForLogin(
-            c.env.AQUILLA_PG,
-            username,
-            password,
-            runtime,
-          )
+          const source = migrationHandshake
+            ? await verifyLegacyUserForLogin(username, password, runtime)
+            : null
+          if (source && source.gitlab_user_id == null) {
+            throw new LegacyUserMigrationError(
+              "unresolved-access",
+              "legacy user has no GitLab identity",
+            )
+          }
+          if (source && !continueMigration) {
+            return c.json({ status: "migration_required" }, 202)
+          }
+          const migrated = migrationHandshake
+            ? source
+              ? await migrateLegacyUserCandidate(
+                  c.env.AQUILLA_PG,
+                  source,
+                  runtime,
+                  "jit",
+                )
+              : null
+            : await migrateLegacyUserForLogin(
+                c.env.AQUILLA_PG,
+                username,
+                password,
+                runtime,
+              )
           if (migrated) {
             user = await jwtService.getUserByUsername(migrated.username)
             if (!user) {
@@ -338,6 +445,10 @@ auth.post("/token", async (c) => {
         }
       } catch (error) {
         if (error instanceof LegacyUserMigrationError) {
+          console.error("[legacy-user-migration] login migration failed", {
+            code: error.code,
+            reason: error.message,
+          })
           if (error.code === "conflict") {
             return c.json(
               { error: "Account migration requires support" },

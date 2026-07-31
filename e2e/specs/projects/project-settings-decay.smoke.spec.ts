@@ -16,7 +16,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("project settings decay section expands and changing target marks form dirty", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `DecaySettings ${Date.now()}` })
 
-  await alice.goto(`/project/${seeded.projectId}/settings?section=validation`)
+  await alice.goto(`/project/${seeded.projectId}/settings/validation`)
   const summary = alice.locator("summary").filter({ hasText: /Retrieval support/i })
   await expect(summary).toBeVisible({ timeout: 10_000 })
 

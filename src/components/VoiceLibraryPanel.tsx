@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
@@ -211,11 +212,12 @@ export function VoiceLibraryPanel({
           <Button
             type="button"
             variant="outline"
-            className="w-full justify-center border-dashed"
+            className="w-full"
             disabled={!canEditVoices}
             onClick={() => setEditing({ kind: "create" })}
           >
-            <Plus className="mr-2 h-4 w-4" /> New voice
+            <Plus data-icon="inline-start" />
+            New voice
           </Button>
         </AppTooltip>
       </div>
@@ -273,22 +275,22 @@ function VoiceRow({
     : providerInfo(voice.provider ?? projectProvider).shortTitle
   const [menuOpen, setMenuOpen] = useState(false)
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
-        e.dataTransfer.effectAllowed = "copy"
-      }}
-      onClick={onSelect}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
-      title="Click to select · drag onto a line to assign"
-      className={cn(
-        "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
-        active ? "bg-primary/10" : "hover:bg-accent/50",
-      )}
-    >
+    <AppTooltip content="Click to select · drag onto a line to assign">
+      <div
+        role="button"
+        tabIndex={0}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
+          e.dataTransfer.effectAllowed = "copy"
+        }}
+        onClick={onSelect}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
+        className={cn(
+          "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
+          active ? "bg-primary/10" : "hover:bg-accent/50",
+        )}
+      >
       <VoiceAvatar voice={voice} size={28} />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium leading-tight">{voice.name}</span>
@@ -303,12 +305,14 @@ function VoiceRow({
         </span>
       </span>
       {isDefault && (
-        <span
-          title="Narrator — lines without an explicit speaker use this voice."
-          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
-        >
-          <Star className="h-2.5 w-2.5" /> Narrator
-        </span>
+        <AppTooltip content="Narrator — lines without an explicit speaker use this voice.">
+          <Badge
+            variant="secondary"
+            className="shrink-0 gap-1 text-[9px]"
+          >
+            <Star data-icon="inline-start" /> Narrator
+          </Badge>
+        </AppTooltip>
       )}
       {/* AQU-365: the ⋯ menu is character CRUD (edit/set-narrator/delete) —
           hidden below the maintainer floor. Selecting/dragging a voice to
@@ -316,21 +320,22 @@ function VoiceRow({
           concern this ticket doesn't touch). */}
       {canEdit && (
         <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-          <PopoverTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={(e) => e.stopPropagation()}
-                title="More"
-                aria-label="More voice actions"
-                className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            }
-          />
+          <AppTooltip content="More">
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="More voice actions"
+                  className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
+                >
+                  <MoreHorizontal />
+                </Button>
+              }
+            />
+          </AppTooltip>
           <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
             <MenuItem icon={Pencil} label="Edit" onClick={() => { setMenuOpen(false); onEdit() }} />
             {!isDefault && (
@@ -348,7 +353,8 @@ function VoiceRow({
         </Popover>
       )}
       {active && <Check className="h-4 w-4 shrink-0 text-primary" />}
-    </div>
+      </div>
+    </AppTooltip>
   )
 }
 
@@ -361,17 +367,16 @@ function MenuItem({
   destructive?: boolean
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={destructive ? "destructive" : "ghost"}
+      size="sm"
       onClick={onClick}
-      className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent/50",
-        destructive && "text-destructive hover:bg-destructive/10",
-      )}
+      className="w-full justify-start"
     >
-      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <Icon data-icon="inline-start" />
       {label}
-    </button>
+    </Button>
   )
 }
 

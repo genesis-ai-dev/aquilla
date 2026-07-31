@@ -9,6 +9,7 @@
 import { useState, useEffect, type ReactNode } from "react"
 import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { cn } from "@/lib/utils"
@@ -157,9 +158,9 @@ export function FootnotesTray({
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="rounded-lg bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <Badge variant="secondary" className="text-[10px]">
             {visibleFootnoteCount}
-          </span>
+          </Badge>
           {onClose && (
             <Button
               type="button"
@@ -168,7 +169,7 @@ export function FootnotesTray({
               aria-label="Close footnotes tray"
               onClick={onClose}
             >
-              <X className="h-4 w-4" />
+              <X />
             </Button>
           )}
         </div>
@@ -187,9 +188,9 @@ export function FootnotesTray({
                 className="grid gap-2 border-b border-border/50 px-4 py-2 last:border-b-0 md:grid-cols-[minmax(4rem,0.45fr)_minmax(18rem,0.55fr)]"
               >
                 <div className="flex min-w-0 items-start gap-2 pt-0.5">
-                  <span className="rounded-lg bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  <Badge variant="secondary" className="text-[10px]">
                     {entry.cellLabel}
-                  </span>
+                  </Badge>
                   {entry.cellRef && (
                     <span className="truncate text-[11px] text-muted-foreground">
                       {entry.cellRef}
@@ -230,18 +231,18 @@ function FootnoteSurfaceHeader({
 }) {
   return (
     <div className={cn("flex items-center gap-1.5", className)}>
-      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      <span className="text-xs text-muted-foreground">
         {title}
       </span>
       {typeof count === "number" && count > 0 && (
-        <span className="rounded-lg bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold leading-none text-primary">
+        <Badge className="h-auto border-transparent bg-primary/10 px-1.5 text-[9px] font-bold text-primary">
           {count}
-        </span>
+        </Badge>
       )}
       {isDocx && (
-        <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">
+        <Badge className="h-auto border-transparent bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-600 dark:text-amber-400">
           read-only · DOCX round-trip not yet safe
-        </span>
+        </Badge>
       )}
     </div>
   )
@@ -456,7 +457,7 @@ function FootnoteRow({
             "block w-full rounded text-left text-xs",
             compact ? "px-0.5 py-0 leading-snug" : "px-1 py-0.5",
             editable
-              ? "cursor-pointer text-foreground hover:bg-muted/60"
+              ? "text-foreground hover:bg-muted/60"
               : "cursor-default text-muted-foreground",
             !targetFn.text && editable && "italic text-muted-foreground/60",
           )}
@@ -560,7 +561,7 @@ export function FootnotedTextValue({
     content.push(
       <sup
         key={`fn-${footnote.index}-${index}`}
-        className="mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-lg bg-primary/15 px-0.5 align-super text-[9px] font-bold leading-none text-primary"
+        className="mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-md bg-primary/15 px-0.5 align-super text-[9px] font-bold leading-none text-primary"
       >
         {footnoteDisplayLabel(footnote, index, numberOffset)}
       </sup>,
@@ -601,10 +602,10 @@ function FootnoteMarkerBadge({
   onActivate?: () => void
 }) {
   const className = cn(
-    "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-lg px-1 text-[9px] font-bold",
+    "inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-md px-1 text-[9px] font-bold",
     active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
     onActivate &&
-      "cursor-pointer hover:ring-1 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+      "hover:ring-1 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
   )
   if (onActivate) {
     return (

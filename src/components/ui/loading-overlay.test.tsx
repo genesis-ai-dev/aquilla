@@ -21,7 +21,7 @@ describe("LoadingOverlay", () => {
   it("renders the shared animated spinner (visible motion)", () => {
     const { container } = render(<LoadingOverlay />)
 
-    // Reuses the <Spinner> primitive (lucide Loader2, animate-spin) rather
+    // Reuses the shared <Spinner> primitive (SVG ring + animate-spin) rather
     // than reinventing spinner styling.
     const spinner = container.querySelector("[data-slot='spinner']")
     expect(spinner).not.toBeNull()

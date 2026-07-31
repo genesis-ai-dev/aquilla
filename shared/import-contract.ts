@@ -113,6 +113,35 @@ export const IMPORT_UNIT_KINDS = [
 
 export type ImportUnitKind = (typeof IMPORT_UNIT_KINDS)[number]
 
+export const IMPORT_MILESTONE_KINDS = [
+  "chapter",
+  "chapter-range",
+  "preface",
+  "story",
+  "slide",
+  "section",
+  "time-range",
+  "group",
+  "part",
+] as const
+
+export type ImportMilestoneKind = (typeof IMPORT_MILESTONE_KINDS)[number]
+
+/**
+ * Stable, format-neutral navigation identity attached to every normalized
+ * import unit. Format-specific provenance remains beside this envelope (for
+ * example `metadata.biblica`); editor navigation only consumes this contract.
+ */
+export interface ImportMilestone {
+  /** Stable within one imported file and across deterministic re-imports. */
+  key: string
+  kind: ImportMilestoneKind
+  /** Full user-facing label, e.g. "Genesis 1–2" or "Introduction". */
+  label: string
+  /** Compact picker badge, e.g. "1–2", "P", or "3". */
+  shortLabel: string
+}
+
 export type ImportAddress =
   | {
       scheme: "scripture"

@@ -35,6 +35,7 @@ export function Login() {
   const next = rawNext.startsWith("/") ? rawNext : "/"
 
   const [mode, setMode] = useState<Mode>("login")
+  const [isMigrating, setIsMigrating] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   const form = useForm({
@@ -42,8 +43,11 @@ export function Login() {
     validators: { onSubmit: loginSchema },
     onSubmit: async ({ value }) => {
       clearSubmitError()
+      setIsMigrating(false)
       try {
-        await login(value.username, value.password)
+        await login(value.username, value.password, {
+          onMigrationRequired: () => setIsMigrating(true),
+        })
         navigate(next, { replace: true })
       } catch (err) {
         setSubmitError(err instanceof FrontierAuthError ? err.message : "Login failed")
@@ -124,10 +128,44 @@ export function Login() {
               />
             </FieldGroup>
             {submitError && <FieldError>{submitError}</FieldError>}
-            <Button type="submit" form="login-form" className="w-full">
-              {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-              {form.state.isSubmitting ? "Signing in…" : "Sign in"}
-            </Button>
+            <form.Subscribe
+              selector={(state) => state.isSubmitting}
+              children={(isSubmitting) => (
+                <>
+                  <Button
+                    type="submit"
+                    form="login-form"
+                    className="w-full"
+                    disabled={isSubmitting}
+                    aria-describedby={
+                      isSubmitting && isMigrating
+                        ? "login-account-setup-note"
+                        : undefined
+                    }
+                  >
+                    {isSubmitting && (
+                      <Spinner data-icon="inline-start" aria-hidden="true" />
+                    )}
+                    {isSubmitting
+                      ? isMigrating
+                        ? "Setting up your account and permissions…"
+                        : "Signing in…"
+                      : "Sign in"}
+                  </Button>
+                  {isSubmitting && isMigrating && (
+                    <p
+                      id="login-account-setup-note"
+                      role="status"
+                      aria-live="polite"
+                      className="text-center text-xs text-muted-foreground"
+                    >
+                      First-time sign-in may take a moment while we securely
+                      migrate your account.
+                    </p>
+                  )}
+                </>
+              )}
+            />
           </form>
         )}
 

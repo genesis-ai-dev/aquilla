@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * DevLogoutRoute — /__dev/logout is gated on import.meta.env.DEV.
@@ -24,12 +24,16 @@ test("/__dev/logout is a no-op in built apps: redirects to / with session intact
   await alice.goto("/__dev/logout")
 
   // The !import.meta.env.DEV branch redirects to "/" without logging out.
-  await alice.waitForURL(/\/$/, { timeout: 10_000 })
+  // RootRedirect then resumes last org (`/orgs/$id` or `/orgs/all`).
+  await alice.waitForURL(/\/(?:orgs\/|$)/, { timeout: 10_000 })
 
-  // Alice must still be signed in — the org dashboard renders with her
-  // account button (logout did NOT run).
-  const page = alice
-  await expect(page.getByRole("button", { name: /alice/i }).first()).toBeVisible({ timeout: 5_000 })
+  // Land on alice's org home so the account menu is definitely mounted
+  // (OrgRouteGate not-found has no account switcher).
+  await alice.goto(orgRoute(alice))
+
+  await expect(alice.getByRole("button", { name: /Account menu: alice/i })).toBeVisible({
+    timeout: 10_000,
+  })
   // And we are NOT on the onboarding wizard.
-  await expect(page.getByRole("main", { name: /Account setup/i })).not.toBeVisible()
+  await expect(alice.getByRole("main", { name: /Account setup/i })).not.toBeVisible()
 })

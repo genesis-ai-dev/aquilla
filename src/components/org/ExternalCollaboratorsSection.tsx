@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { ShieldOff } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Section } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -87,14 +88,15 @@ export function ExternalCollaboratorsSection({
         {externals.map((e) => (
           <li key={e.userId} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
             <span className="font-medium">{e.username}</span>
-            <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+            <Badge className="border-transparent bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300">
               external
-            </span>
+            </Badge>
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
               {e.grants.map((g) => (
-                <span
+                <Badge
                   key={`${g.projectId}:${e.userId}`}
-                  className="flex items-center gap-1 rounded-lg border px-2 py-0.5 text-xs"
+                  variant="outline"
+                  className="gap-1 font-normal"
                 >
                   <span className="max-w-40 truncate">{g.projectName}</span>
                   <span className="text-muted-foreground">· <RoleLabel name={g.roleName} /></span>
@@ -123,7 +125,7 @@ export function ExternalCollaboratorsSection({
                       </span>
                     </AppTooltip>
                   )}
-                </span>
+                </Badge>
               ))}
             </div>
           </li>

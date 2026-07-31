@@ -360,13 +360,13 @@ export function AudioRecordingModal({
               </span>
             </div>
             <div className="space-y-0.5">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Source</div>
+              <div className="text-xs text-muted-foreground/60">Source</div>
               <div className="text-xs leading-snug text-muted-foreground">
                 {activeCell.original || <span className="italic text-muted-foreground/60">empty</span>}
               </div>
             </div>
             <div className="space-y-1 pt-2">
-              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">Read aloud</div>
+              <div className="text-xs text-muted-foreground/60">Read aloud</div>
               <div className="text-2xl font-medium leading-relaxed">
                 {activeCell.translated || <span className="italic text-base text-muted-foreground/60">not translated</span>}
               </div>
@@ -394,7 +394,7 @@ export function AudioRecordingModal({
                 aria-label="Close"
                 className="text-muted-foreground/60"
               >
-                <X className="h-4 w-4" />
+                <X />
               </Button>
             </AppTooltip>
           </div>
@@ -511,42 +511,50 @@ export function AudioRecordingModal({
 
         {/* Footer: nav + primary action — fixed, never scrolls */}
         <div className="flex shrink-0 items-center gap-2 border-t bg-muted/30 px-5 py-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!canNav || activeIndex <= 0}
-            onClick={() => gotoIndex(activeIndex - 1)}
-            title="Previous cell (←)"
-          >
-            <ChevronLeft className="mr-1 h-4 w-4" /> Prev
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!canNav || activeIndex >= cells.length - 1}
-            onClick={() => gotoIndex(activeIndex + 1)}
-            title="Next cell (→)"
-          >
-            Next <ChevronRight className="ml-1 h-4 w-4" />
-          </Button>
+          <AppTooltip content="Previous cell (←)">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!canNav || activeIndex <= 0}
+              onClick={() => gotoIndex(activeIndex - 1)}
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" /> Prev
+            </Button>
+          </AppTooltip>
+          <AppTooltip content="Next cell (→)">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!canNav || activeIndex >= cells.length - 1}
+              onClick={() => gotoIndex(activeIndex + 1)}
+            >
+              Next <ChevronRight className="ml-1 h-4 w-4" />
+            </Button>
+          </AppTooltip>
 
           <div className="flex-1" />
 
           {displayPhase === "preview" && (
             <>
-              <Button variant="outline" size="sm" onClick={retake} title="Retake (Esc)">
-                <RefreshCw className="mr-1 h-4 w-4" /> Retake
-              </Button>
-              <Button size="sm" onClick={save} title="Save (Space or Enter)">
-                <Check className="mr-1 h-4 w-4" /> Save
-              </Button>
+              <AppTooltip content="Retake (Esc)">
+                <Button variant="outline" size="sm" onClick={retake}>
+                  <RefreshCw className="mr-1 h-4 w-4" /> Retake
+                </Button>
+              </AppTooltip>
+              <AppTooltip content="Save (Space or Enter)">
+                <Button size="sm" onClick={save}>
+                  <Check className="mr-1 h-4 w-4" /> Save
+                </Button>
+              </AppTooltip>
             </>
           )}
 
           {displayPhase === "recording" && (
-            <Button variant="destructive" size="sm" onClick={stopRecording} title="Stop (Space or Esc)">
-              <Square className="mr-1 h-4 w-4" /> Stop
-            </Button>
+            <AppTooltip content="Stop (Space or Esc)">
+              <Button variant="destructive" size="sm" onClick={stopRecording}>
+                <Square className="mr-1 h-4 w-4" /> Stop
+              </Button>
+            </AppTooltip>
           )}
 
           {(displayPhase === "idle" || displayPhase === "error") && (

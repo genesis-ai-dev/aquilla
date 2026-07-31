@@ -25,6 +25,7 @@
 | Editor      | AI-classify unknown text, review recipe, import source + target lane | `e2e/specs/editor/import-ai-recipe.smoke.spec.ts` | ✅ |
 | Editor      | Upload spreadsheet auto-routes to column mapping; headings stay structural and canonical verse refs survive preview/commit | `e2e/specs/editor/import-spreadsheet-mapping.smoke.spec.ts` | ✅ |
 | Editor      | Scripture verse labels match canonical refs; chapter picker and previous/next navigation | `e2e/specs/editor/chapter-navigation.smoke.spec.ts` | ✅ |
+| Editor      | Every non-empty imported file exposes format-aware, searchable milestone navigation | `e2e/specs/editor/milestone-navigation.smoke.spec.ts` | ✅ |
 | Editor      | Commit survives a stale in-flight refetch (no vanish-until-refresh, AQU-247) | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` | ✅ |
 | Editor      | Cmd+K search                                         | `e2e/specs/editor/search.smoke.spec.ts` (toolbar) + `search-keyboard-shortcut.smoke.spec.ts` (Ctrl+K) | ✅ |
 | Editor      | Virtualization scroll integrity                      | _gap — Plan 2_                                                |        |
@@ -62,7 +63,7 @@
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
 | Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
 | Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
-| Export      | IDML import → protected edit → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
+| Export      | IDML import → story milestone with 50-cell subsection navigation → empty and populated single-activation edits preserve pointer position, spacing, and caret order → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
 | Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
 | Marketing   | Homepage "book a call": Google Calendar booking link + contact form → POST /api/v2/contact/book-call → sent state | `e2e/specs/marketing/book-call.smoke.spec.ts` | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
@@ -70,7 +71,8 @@
 | Editor      | File actions hover menu (rename/delete)               | `e2e/specs/editor/file-actions-button.smoke.spec.ts`          |   ✅   |
 | Editor      | Corpus rename inline edit                             | `e2e/specs/editor/sidebar-corpus-rename.smoke.spec.ts`        |   ✅   |
 | Editor      | Video attachment dialog fill + Save URL               | `e2e/specs/editor/video-attachment-save-url.smoke.spec.ts`    |   ✅   |
-| Editor      | Specialized import routes enable TMX, Macula, and Translation Notes | `e2e/specs/editor/import-specialized-options.smoke.spec.ts` | ✅ |
+| Editor      | Specialized import routes enable TMX, Macula, Translation Notes, and Biblica study notes | `e2e/specs/editor/import-specialized-options.smoke.spec.ts` | ✅ |
+| Editor      | Biblica Study Bible Notes import: IDML package → note cells only, scripture skipped, line-broken lists split per line, optional one-cell-per-sentence split (off by default), notes editable from one activation, and replacement AI drafts reconstruct safe multi-slot anchor damage without a stuck pulse | `e2e/specs/editor/import-biblica-study-notes.smoke.spec.ts` | ✅ |
 | Editor      | Setup checklist coming-soon items visible             | `e2e/specs/editor/setup-checklist-coming-soon-items.smoke.spec.ts` | ✅ |
 | Validation  | Remove validation (unvalidate cell)                   | `e2e/specs/validation/cell-unvalidate.smoke.spec.ts`          |   ✅   |
 | Rules       | Org rule inline edit (pencil button expands editor)   | `e2e/specs/rules/org-rule-edit.smoke.spec.ts`                 |   ✅   |
@@ -121,6 +123,7 @@
 | Auth        | Forgot password flow opens reset form                 | `e2e/specs/orgs/account-add-forgot-password.smoke.spec.ts` + `account-reset-password-form.smoke.spec.ts` | ✅ |
 | Auth        | Dev-only logout route clears session → /onboarding    | `e2e/specs/auth/dev-logout-route.smoke.spec.ts`               |   ✅   |
 | Auth        | D1-only first login atomically imports identity, organization, inherited teams, projects, and exact roles | `e2e/specs/auth/legacy-user-first-login.smoke.spec.ts` | ✅ |
+| Auth        | Server-confirmed first-time migration changes pending sign-in copy | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` | ✅ |
 | Onboarding  | Wizard renders name step and advances                 | `e2e/specs/projects/onboarding-wizard.smoke.spec.ts` + `onboarding-name-step.smoke.spec.ts` + `onboarding-privacy-continue.smoke.spec.ts` + `onboarding-project-step.smoke.spec.ts` | ✅ |
 | Onboarding  | ReadyStep "Start Translating" navigates to project    | `e2e/specs/projects/onboarding-ready-step.smoke.spec.ts`      |   ✅   |
 | Projects    | Archive and restore project                           | `e2e/specs/projects/archive.smoke.spec.ts`                    |   ✅   |
@@ -192,7 +195,7 @@
 | Editor      | Outbox inspector popover shows pending ops            | `e2e/specs/editor/outbox-inspector-popover.smoke.spec.ts`     |   ✅   |
 | Editor      | Selection bar bulk validate + unvalidate              | `e2e/specs/editor/selection-bar.smoke.spec.ts` + `selection-bar-bulk-validate.smoke.spec.ts` + `selection-bar-unvalidate.smoke.spec.ts` + `selection-bar-clear.smoke.spec.ts` | ✅ |
 | Editor      | Formatting italic toggle via toolbar                  | `e2e/specs/editor/formatting-italic-toggle.smoke.spec.ts`     |   ✅   |
-| Editor      | View settings menu toggles line numbers + cell labels | `e2e/specs/editor/view-settings-menu.smoke.spec.ts` + `view-settings-cell-labels-toggle.smoke.spec.ts` + `view-settings-text-direction.smoke.spec.ts` | ✅ |
+| Editor      | Editor settings popover toggles line numbers + cell labels | `e2e/specs/editor/view-settings-menu.smoke.spec.ts` + `view-settings-cell-labels-toggle.smoke.spec.ts` + `view-settings-text-direction.smoke.spec.ts` | ✅ |
 | Editor      | Manual direction mismatch warning can be dismissed without changing the override | `e2e/specs/editor/rtl-hint-dismiss.smoke.spec.ts` | ✅ |
 | Editor      | Video attachment remove clears saved URL              | `e2e/specs/editor/video-attachment-dialog.smoke.spec.ts`      |   ✅   |
 | Editor      | Setup checklist drawer expands items + skip           | `e2e/specs/editor/setup-checklist.smoke.spec.ts` + `setup-checklist-item-expand.smoke.spec.ts` + `setup-checklist-skip.smoke.spec.ts` | ✅ |

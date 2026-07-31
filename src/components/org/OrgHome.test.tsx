@@ -3,10 +3,14 @@ import { act, render, screen, waitFor, fireEvent, within } from "@testing-librar
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgHome, ProjectTable, activityStatus } from "./OrgHome"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
 function projectsRollupStat() {
-  const label = screen.getAllByText("Projects").find((el) => el.classList.contains("text-muted-foreground"))!
+  // The org sidebar renders a "Projects" nav link whose muted/active styling
+  // varies with the route, so match on position instead: the rollup tile is the
+  // only "Projects" label outside the nav.
+  const label = screen.getAllByText("Projects").find((el) => !el.closest("nav"))!
   return label.parentElement!
 }
 
@@ -163,9 +167,9 @@ describe("ProjectTable", () => {
     targetLanguage: "French",
   }
 
-  it("keeps the organization secondary while preserving a compact project identity", () => {
+  it("keeps the organization secondary while preserving a compact project identity", async () => {
     mockProjectNameOverflow(true)
-    render(
+    renderWithTooltips(
       <MemoryRouter>
         <ProjectTable
           projects={[project]}
@@ -227,7 +231,8 @@ describe("ProjectTable", () => {
       "truncate",
     )
     expect(languageChip).toHaveAccessibleName("conversational Spanish: 40% translated")
-    expect(languageChip).toHaveAttribute("title", "conversational Spanish — 40% translated")
+    // The truncated label's full text stays recoverable on hover.
+    await expectTooltip(languageChip, "conversational Spanish — 40% translated")
     expect(screen.getByText("Language")).toBeInTheDocument()
     expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
     expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")

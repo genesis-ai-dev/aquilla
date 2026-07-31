@@ -18,6 +18,7 @@ import { getOrgCredits, type OrgCredits } from "@/lib/sync/credits"
 import { formatCredits, capUsagePct } from "@/lib/credits"
 import { ROLE } from "@/lib/frontier/roles"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export interface CreditsDialProps {
   jwt: string
@@ -35,6 +36,7 @@ function ringClass(pct: number): string {
 
 export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
   const [data, setData] = useState<OrgCredits | null>(null)
+  const [open, setOpen] = useState(false)
 
   const refresh = useCallback(() => {
     if (orgRoleLevel < ROLE.MAINTAINER) return
@@ -60,41 +62,48 @@ export function CreditsDial({ jwt, orgId, orgRoleLevel }: CreditsDialProps) {
   const r = (12 - stroke) / 2
   const C = 2 * Math.PI * r
 
+  const summary = `Agent credits used today: ${formatCredits(day.agentCredits)}`
+
   return (
-    <Popover>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            onClick={refresh}
-            data-testid="credits-dial"
-            title={`Agent credits used today: ${formatCredits(day.agentCredits)}`}
-            aria-label={`Agent credits used today: ${formatCredits(day.agentCredits)}`}
-            className="flex items-center rounded-lg border bg-background p-1 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
-          />
-        }
-      >
-        <svg viewBox="0 0 12 12" className="h-4 w-4 -rotate-90" aria-hidden>
-          <circle
-            cx="6"
-            cy="6"
-            r={r}
-            fill="none"
-            strokeWidth={stroke}
-            className="stroke-muted-foreground/25"
-          />
-          <circle
-            cx="6"
-            cy="6"
-            r={r}
-            fill="none"
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={`${(pct / 100) * C} ${C}`}
-            className={ringClass(pct)}
-          />
-        </svg>
-      </PopoverTrigger>
+    <Popover open={open} onOpenChange={setOpen}>
+      {/* Suppressed while the popover is open: it sits over the same anchor and
+          the popover already spells out the breakdown. AppTooltip must stay
+          mounted (disabled={open}) — unmounting remounts PopoverTrigger and
+          flashes the popover at the top-left until the new anchor measures. */}
+      <AppTooltip content={summary} disabled={open}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              onClick={refresh}
+              data-testid="credits-dial"
+              aria-label={summary}
+              className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground"
+            />
+          }
+        >
+          <svg viewBox="0 0 12 12" className="size-4 -rotate-90" aria-hidden>
+            <circle
+              cx="6"
+              cy="6"
+              r={r}
+              fill="none"
+              strokeWidth={stroke}
+              className="stroke-muted-foreground/25"
+            />
+            <circle
+              cx="6"
+              cy="6"
+              r={r}
+              fill="none"
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={`${(pct / 100) * C} ${C}`}
+              className={ringClass(pct)}
+            />
+          </svg>
+        </PopoverTrigger>
+      </AppTooltip>
       <PopoverContent align="end" className="w-64 p-3 text-xs" data-testid="credits-dial-popover">
         <p className="mb-2 font-medium">Agent credits</p>
         <div className="space-y-1.5">

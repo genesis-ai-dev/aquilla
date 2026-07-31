@@ -8,7 +8,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * swaps only the main content area while the sidebar/header stay mounted.
  * The old standalone RulesPage "Back to Editor" button is gone — the way
  * back to the editor is selecting a file in the always-visible sidebar
- * (navigates to /project/:id/file/:fileId, centerSurface flips to "editor").
+ * (navigates to /project/:id/editor/file/:fileId, centerSurface flips to "editor").
  *
  * This spec: import a file → open the rules surface → verify it rendered
  * (Built-in checks card) → click the file in the sidebar → verify the URL
@@ -36,7 +36,7 @@ test("rules surface returns to editor via sidebar file selection", async ({ alic
     .click()
 
   // URL changes to the editor file route and cells render.
-  await alice.waitForURL(/\/project\/[^/]+\/file\/[^/]+/, { timeout: 10_000 })
+  await alice.waitForURL(/\/project\/[^/]+\/editor\/file\/[^/]+/, { timeout: 10_000 })
   await ws.waitForEditor()
   await expect(alice.getByText("Built-in checks")).not.toBeVisible()
 })

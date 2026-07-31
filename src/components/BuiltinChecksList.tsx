@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import { Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -78,21 +79,24 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
                 </Badge>
               )}
               {showHarmonize && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!canHarmonize}
-                  title={
+                <AppTooltip
+                  content={
                     !canHarmonize
                       ? "You need project lead role to run a harmonization sweep"
                       : `Harmonize all ${count} violation${count === 1 ? "" : "s"} for this check`
                   }
-                  onClick={() => onHarmonize(rule, count)}
-                  data-testid="harmonize-all-btn"
                 >
-                  <Wand2 data-icon="inline-start" />
-                  Harmonize all ({count})
-                </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!canHarmonize}
+                    onClick={() => onHarmonize(rule, count)}
+                    data-testid="harmonize-all-btn"
+                  >
+                    <Wand2 data-icon="inline-start" />
+                    Harmonize all ({count})
+                  </Button>
+                </AppTooltip>
               )}
               <Select
                 items={SEVERITY_OPTIONS}
@@ -103,10 +107,14 @@ export function BuiltinChecksList({ builtinRules, infractions, onSetOverride, on
                   severity: (v ?? rule.severity) as "major" | "minor",
                 })}
               >
-                <SelectTrigger size="sm" className="text-xs" aria-label={`${def.name} severity`}
-                  title={!canManage ? "Only maintainers and owners can change built-in checks" : undefined}>
-                  <SelectValue />
-                </SelectTrigger>
+                <AppTooltip
+                  content={!canManage ? "Only maintainers and owners can change built-in checks" : undefined}
+                  disabled={canManage}
+                >
+                  <SelectTrigger size="sm" className="text-xs" aria-label={`${def.name} severity`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                </AppTooltip>
                 <SelectContent>
                   <SelectGroup>
                     {SEVERITY_OPTIONS.map((o) => (

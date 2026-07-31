@@ -258,7 +258,7 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
   const fileId = c.req.query("fileId")
   if (!fileId) {
     const runs = await listRuns(c.env.AQUILLA_PG, projectId)
-    return c.json({ available: true, runs: runs.map(runSnapshot) })
+    return c.json({ available: true, runs: runs.map((run) => runSnapshot(run)) })
   }
   const targetLang = c.req.query("targetLang") ?? ""
   const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, targetLang)

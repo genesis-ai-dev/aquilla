@@ -34,6 +34,9 @@ export class FrontierAuthError extends Error {
 }
 
 interface LoginArgs { username: string; password: string; }
+export interface LoginOptions {
+  onMigrationRequired?: () => void;
+}
 interface RegisterArgs { username: string; email: string; password: string; }
 
 interface AuthResponse {
@@ -41,12 +44,31 @@ interface AuthResponse {
   token_type: string;
 }
 
-export async function login(args: LoginArgs): Promise<FrontierSession> {
-  const res = await fetch(`${AUTH_BASE}/api/v2/auth/token`, {
+function requestLogin(args: LoginArgs, continueMigration = false): Promise<Response> {
+  return fetch(`${AUTH_BASE}/api/v2/auth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(args),
+    body: JSON.stringify({
+      ...args,
+      migration_handshake: true,
+      ...(continueMigration ? { continue_migration: true } : {}),
+    }),
   });
+}
+
+export async function login(
+  args: LoginArgs,
+  options: LoginOptions = {},
+): Promise<FrontierSession> {
+  let res = await requestLogin(args);
+  if (res.status === 202) {
+    const body = (await res.json()) as { status?: string };
+    if (body.status !== "migration_required") {
+      throw new FrontierAuthError("Login failed (202)", 202);
+    }
+    options.onMigrationRequired?.();
+    res = await requestLogin(args, true);
+  }
   if (res.status === 401) {
     throw new FrontierAuthError("Invalid username or password", 401);
   }

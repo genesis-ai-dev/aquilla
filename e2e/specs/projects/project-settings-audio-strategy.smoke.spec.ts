@@ -12,7 +12,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("project settings audio loading strategy selection marks form dirty", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AudioStrat ${Date.now()}` })
 
-  await alice.goto(`/project/${seeded.projectId}/settings?section=audio-media`)
+  await alice.goto(`/project/${seeded.projectId}/settings/audio-media`)
   // "Audio loading" card title is visible.
   await expect(alice.getByText(/Audio loading/i).first()).toBeVisible({ timeout: 10_000 })
 

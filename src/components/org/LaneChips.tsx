@@ -11,6 +11,7 @@
 import { laneTranslatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { cn } from "@/lib/utils"
 import { laneChipLabel, safePct } from "./project-lanes"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export interface LaneChipsProps {
   projectId: string
@@ -36,19 +37,21 @@ function LaneChip({
 }) {
   const pct = safePct(laneTranslatedPct(lane))
   const label = laneChipLabel(lane.lane, defaultLaneLabel)
+  const tooltip = `${label} — ${pct}% translated`
   return (
-    <span
-      data-testid={`lane-chip-${projectId}-${lane.lane}`}
-      className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded border bg-card px-1.5 py-0.5 text-xs"
-      aria-label={`${label}: ${pct}% translated`}
-      title={`${label} — ${pct}% translated`}
-    >
-      <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-      <span className="h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>
-        <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+    <AppTooltip content={tooltip}>
+      <span
+        data-testid={`lane-chip-${projectId}-${lane.lane}`}
+        className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded border bg-card px-1.5 py-0.5 text-xs"
+        aria-label={`${label}: ${pct}% translated`}
+      >
+        <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+        <span className="h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>
+          <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+        </span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">{pct}%</span>
       </span>
-      <span className="shrink-0 tabular-nums text-muted-foreground">{pct}%</span>
-    </span>
+    </AppTooltip>
   )
 }
 

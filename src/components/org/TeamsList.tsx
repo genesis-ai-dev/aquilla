@@ -6,6 +6,7 @@ import { Plus, Search, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -24,6 +25,7 @@ import { Page, PageHeader, EmptyState } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
+import { orgPath } from "@/lib/navigation/org-paths"
 import {
   Select,
   SelectContent,
@@ -100,7 +102,7 @@ export function TeamsList() {
         )
         setCreating(false)
         createTeamForm.reset()
-        navigate(`/teams/${t.id}`)
+        navigate(orgPath(activeOrgId, `/teams/${t.id}`))
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : "Couldn't create team.")
       }
@@ -327,7 +329,7 @@ export function TeamsList() {
               {filtered.map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => navigate(`/teams/${t.id}`)}
+                  onClick={() => activeOrgId != null && navigate(orgPath(activeOrgId, `/teams/${t.id}`))}
                   className="rounded-2xl border bg-card p-4 text-left transition-colors hover:bg-accent/40"
                 >
                   <span className="block truncate font-medium text-foreground">{t.name}</span>
@@ -336,14 +338,14 @@ export function TeamsList() {
                   </span>
                   <span className="mt-2 flex flex-wrap gap-1">
                     {!t.isInternal && (
-                      <span className="inline-block rounded-lg border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                      <Badge variant="secondary">
                         Public
-                      </span>
+                      </Badge>
                     )}
                     {t.viewerIsMember && (
-                      <span className="inline-block rounded-lg border bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+                      <Badge variant="secondary">
                         Member
-                      </span>
+                      </Badge>
                     )}
                   </span>
                 </button>

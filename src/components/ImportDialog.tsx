@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
-  BookImage, BookA, Search, Cloud,
+  BookImage, BookA, BookOpen, Search, Cloud,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ButtonGroup } from "@/components/ui/button-group"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -29,7 +28,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
@@ -39,6 +38,7 @@ import {
   importHelloao,
   importMacula,
   importTranslationNotes,
+  importBiblicaStudyNotes,
   prepareParatextProject,
   commitParatextProject,
   importParatextAsTarget,
@@ -51,6 +51,7 @@ import {
   type EBibleMatchResult,
   type MaculaProgress,
   type TnProgress,
+  type BiblicaProgress,
   type ParatextImportProgress,
   type SourceCellRef,
   type ImportResult,
@@ -108,7 +109,7 @@ import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs"
 
 interface ImportDialogProps {
   open: boolean
@@ -473,6 +474,7 @@ export function ImportDialog({
                   : screen === "dcs" ? "Door43 (DCS)"
                   : screen === "macula" ? "Macula Hebrew + Greek"
                   : screen === "tn" ? "Translation Notes (TSV)"
+                  : screen === "biblica" ? "Biblica Study Bible Notes"
                   : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
                   : screen === "labels" ? "Cell Labels / Cast"
                   : screen === "paired" ? "Paired Translation Import"
@@ -612,6 +614,19 @@ export function ImportDialog({
           <TnPanel
             projectId={projectId}
             username={username}
+            getToken={getToken}
+            onImported={async (ref) => {
+              await handleChildImported([ref])
+            }}
+          />
+        )}
+
+        {screen === "biblica" && (
+          <BiblicaPanel
+            projectId={projectId}
+            username={username}
+            sourceLanguage={sourceLanguage}
+            targetLanguage={targetLanguage}
             getToken={getToken}
             onImported={async (ref) => {
               await handleChildImported([ref])
@@ -832,6 +847,8 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     description: "Re-upload a template to label existing cells with cast names." },
   { id: "tn", title: "Translation Notes", hint: "TSV", icon: StickyNote, badge: "beta",
     description: "unfoldingWord notes, shown beside the matching verse as you translate." },
+  { id: "biblica", title: "Biblica Study Bible Notes", hint: "IDML", icon: BookOpen, badge: "beta",
+    description: "Study notes from an InDesign study Bible — imports the notes only and leaves the scripture untouched." },
   { id: "obs", title: "Open Bible Stories", hint: "door43", icon: BookImage, badge: "beta",
     description: "Narrative stories with reference images, from unfoldingWord/door43." },
   { id: "dcs", title: "Door43 (DCS)", hint: "upstream", icon: Cloud, badge: "beta",
@@ -878,7 +895,7 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
         "gap-0 px-3",
         disabled
           ? "cursor-not-allowed opacity-55"
-          : "cursor-pointer transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          : "transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
       <div className="flex items-start gap-3">
@@ -905,7 +922,7 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
 function ImportSection({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-2">
-      <h3 className="px-0.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">{label}</h3>
+      <h3 className="px-0.5 text-xs font-medium text-muted-foreground/70">{label}</h3>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{children}</div>
     </div>
   )
@@ -943,7 +960,7 @@ function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
       </ImportSection>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="px-0.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">Specialized</h3>
+          <h3 className="px-0.5 text-xs font-medium text-muted-foreground/70">Specialized</h3>
           <InputGroup className="h-7 w-44">
             <InputGroupAddon>
               <Search className="text-muted-foreground/60" />
@@ -1428,7 +1445,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             Drag & drop files here, or
           </p>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+            <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
               Choose Files
               <input
                 type="file"
@@ -1437,7 +1454,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 onChange={handleFileInput}
               />
             </Button>
-            <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+            <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
               Choose Folder
               {/* Folder picker for an unzipped Paratext project. */}
               <input
@@ -2188,6 +2205,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
   const [books, setBooks] = useState<HelloaoBook[] | null>(null)
   const [booksErr, setBooksErr] = useState<string | null>(null)
   const [checkedBooks, setCheckedBooks] = useState<Set<string>>(new Set())
+  const [bookPreset, setBookPreset] = useState<"all" | "OT" | "NT">("all")
 
   const [progress, setProgress] = useState<EBibleProgress | null>(null)
   const [importing, setImporting] = useState(false)
@@ -2234,11 +2252,13 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     setBooks(null)
     setBooksErr(null)
     setCheckedBooks(new Set())
+    setBookPreset("all")
     fetchHelloaoBooks(t.id)
       .then((list) => {
         setBooks(list)
         // Default: everything selected (whole bible).
         setCheckedBooks(new Set(list.map((b) => b.id)))
+        setBookPreset("all")
       })
       .catch((err) => {
         setBooksErr(err instanceof Error ? err.message : String(err))
@@ -2247,6 +2267,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
 
   function applyPreset(preset: "all" | "OT" | "NT") {
     if (!books) return
+    setBookPreset(preset)
     if (preset === "all") {
       setCheckedBooks(new Set(books.map((b) => b.id)))
     } else {
@@ -2328,17 +2349,18 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         ) : (
           <>
             <div className="flex items-center gap-1.5">
-              <ButtonGroup>
-                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("all")}>
-                  Whole bible
-                </Button>
-                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("OT")}>
-                  Old Testament
-                </Button>
-                <Button size="sm" variant="outline" disabled={importing} onClick={() => applyPreset("NT")}>
-                  New Testament
-                </Button>
-              </ButtonGroup>
+              <SegmentTabs
+                aria-label="Book selection preset"
+                value={bookPreset}
+                onValueChange={(preset) => {
+                  if (!importing) applyPreset(preset)
+                }}
+                options={[
+                  { value: "all", label: "Whole bible", disabled: importing },
+                  { value: "OT", label: "Old Testament", disabled: importing },
+                  { value: "NT", label: "New Testament", disabled: importing },
+                ]}
+              />
               <span className="ml-auto text-xs text-muted-foreground">
                 {checkedBooks.size} of {books.length} books
               </span>
@@ -2348,7 +2370,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
               <ul className="grid grid-cols-2 gap-x-2 p-2 sm:grid-cols-3">
                 {books.map((b) => (
                   <li key={b.id}>
-                    <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-accent">
+                    <label className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-accent">
                       <Checkbox
                         checked={checkedBooks.has(b.id)}
                         disabled={importing}
@@ -3150,7 +3172,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
         file; each sense groups as one paragraph with a cell per definition, gloss list, and comment.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
           {masterFile ? masterFile.name : "Choose master edition (SDBH-en.JSON)"}
           <input
             type="file"
@@ -3163,7 +3185,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
             disabled={importing}
           />
         </Button>
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
           {localizedFile ? localizedFile.name : "Choose localized edition (optional)"}
           <input
             type="file"
@@ -3256,7 +3278,7 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
         morphology (lemma, morph code, Strong's) will be preserved alongside the verse text.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
           {file ? file.name : "Choose Macula TSV file"}
           <input
             type="file"
@@ -3286,6 +3308,150 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
                   style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
                 />
               </div>
+            </>
+          )}
+        </div>
+      )}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="flex justify-end">
+        <Button onClick={handleImport} disabled={!file || importing}>
+          {importing ? "Importing…" : "Import"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Biblica Study Bible Notes (IDML) panel
+// ---------------------------------------------------------------------------
+
+interface BiblicaPanelProps {
+  projectId: string
+  username: string
+  sourceLanguage?: string
+  targetLanguage?: string
+  getToken: (fileId: string) => Promise<string | null>
+  onImported: (ref: FileReference) => void | Promise<void>
+}
+
+function BiblicaPanel({
+  projectId,
+  username,
+  sourceLanguage,
+  targetLanguage,
+  getToken,
+  onImported,
+}: BiblicaPanelProps) {
+  const [importing, setImporting] = useState(false)
+  const [progress, setProgress] = useState<BiblicaProgress | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+  // Off by default: each InDesign line stays one cell unless the translator opts in.
+  const [splitSentences, setSplitSentences] = useState(false)
+
+  async function handleImport() {
+    if (!file || importing) return
+    setImporting(true)
+    setError(null)
+    setProgress({ phase: "parse" })
+    try {
+      const ref = await importBiblicaStudyNotes(
+        file,
+        {
+          projectId,
+          author: username,
+          ...(sourceLanguage ? { sourceLanguage } : {}),
+          ...(targetLanguage ? { targetLanguage } : {}),
+          getToken,
+        },
+        setProgress,
+        { splitSentences },
+      )
+      await onImported(ref)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed")
+    } finally {
+      setImporting(false)
+      setProgress(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 py-2">
+      <p className="text-xs text-muted-foreground">
+        Upload the InDesign (.idml) package for a Biblica study Bible. Only the study
+        notes are imported — the Bible text is skipped, because it comes from the
+        published scripture files rather than being retyped here. Each note keeps its
+        InDesign formatting locked, and the notes carry the book and chapter range they
+        belong to so they stay in step with the passage. Lists that InDesign holds in a
+        single paragraph — cross-references, glossaries, outlines — always arrive as one
+        cell per line. Optionally, longer note blocks can also be split into one cell per
+        sentence; export puts each block back together as InDesign set it.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {file ? file.name : "Choose study Bible IDML file"}
+          <input
+            type="file"
+            className="hidden"
+            accept=".idml"
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null
+              setFile(f)
+              setError(null)
+            }}
+            disabled={importing}
+          />
+        </Button>
+        {file && !importing && (
+          <p className="text-xs text-muted-foreground">
+            {file.name} — {(file.size / 1024 / 1024).toFixed(2)} MB
+          </p>
+        )}
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={splitSentences}
+            disabled={importing}
+            onCheckedChange={(checked) => setSplitSentences(checked === true)}
+            aria-label="Split long notes into one cell per sentence"
+          />
+          <span className="flex flex-col gap-0.5">
+            <span>Split long notes into one cell per sentence</span>
+            <span className="text-xs text-muted-foreground">
+              Leave unchecked to import each note line as one larger cell. Lists still
+              split per line either way.
+            </span>
+          </span>
+        </label>
+      </div>
+      {progress && (
+        <div className="text-xs text-muted-foreground">
+          {progress.phase === "parse" && (
+            <p>
+              Reading the InDesign package…
+              {progress.idml?.total
+                ? ` (${progress.idml.completed} / ${progress.idml.total})`
+                : ""}
+            </p>
+          )}
+          {progress.phase === "save" && progress.cellsTotal && (
+            <>
+              <p>
+                Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} notes
+              </p>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)}%` }}
+                />
+              </div>
+              {progress.verseUnitCount ? (
+                <p className="mt-1.5">
+                  {progress.verseUnitCount.toLocaleString()} scripture paragraphs skipped.
+                </p>
+              ) : null}
             </>
           )}
         </div>
@@ -3353,7 +3519,7 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
         translation cell at the matching verse reference.
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
           {file ? file.name : "Choose Translation Notes TSV"}
           <input
             type="file"

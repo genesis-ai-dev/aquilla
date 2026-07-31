@@ -1,0 +1,6 @@
+# Marks agent-worker as its own pnpm workspace root. Without this, the repo-root
+# pnpm-workspace.yaml captures a `pnpm install` run in this directory: pnpm walks
+# up, installs the ROOT project, and never creates agent-worker/node_modules.
+onlyBuiltDependencies:
+  - esbuild
+  - workerd

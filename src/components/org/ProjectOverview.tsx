@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, SlidersHorizontal } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
@@ -59,6 +59,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
@@ -72,7 +73,11 @@ import {
   type StatKey,
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import {
   Select,
   SelectContent,
@@ -110,7 +115,7 @@ function ProjectOverviewSkeleton() {
       <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
         <div className="flex items-center gap-2">
           <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-md" />
         </div>
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-20" />
@@ -220,7 +225,7 @@ function LanePill({ active, onClick, testId, children }: {
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+        "rounded-md border px-2.5 py-0.5 text-xs font-medium transition-colors",
         active
           ? "border-transparent bg-primary text-primary-foreground"
           : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -385,10 +390,9 @@ function ChapterRow({
       {open && verses != null && (
         <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
           {verses.map((verse, index) => (
+            <AppTooltip key={`${verse.ref}:${index}`} content={verse.ref}>
             <li
-              key={`${verse.ref}:${index}`}
               data-testid="verse-cell"
-              title={verse.ref}
               className={cn(
                 "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
                 verse.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
@@ -398,6 +402,7 @@ function ChapterRow({
             >
               {verse.verseLabel}
             </li>
+            </AppTooltip>
           ))}
         </ul>
       )}
@@ -492,58 +497,6 @@ function FileCanonicalRollup({
         <BookRow key={b.book} book={b} loadVerses={loadVerses} />
       ))}
     </ul>
-  )
-}
-
-// ── Overflow menu (archive / download) ───────────────────────────────────────
-
-function OverflowMenu({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", onClickOutside)
-    return () => document.removeEventListener("mousedown", onClickOutside)
-  }, [open])
-
-  return (
-    <div ref={ref} className="relative">
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="outline"
-        aria-label="More actions"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-md border bg-popover shadow-md py-1">
-          {children}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function OverflowItem({ onClick, disabled, className, children }: {
-  onClick: () => void
-  disabled?: boolean
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent/40 disabled:opacity-50 ${className ?? ""}`}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -993,7 +946,7 @@ export function ProjectOverview() {
                     <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" onClick={() => navigate(`/project/${id}`)}>
+                    <Button size="sm" onClick={() => navigate(`/project/${id}/editor`)}>
                       Open project
                     </Button>
                     {isOwner && isArchived && (
@@ -1003,33 +956,47 @@ export function ProjectOverview() {
                     )}
                     {/* Archive + Download + Lifecycle moved into overflow menu */}
                     {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
-                      <OverflowMenu>
-                        {canManage && (
-                          <OverflowItem
-                            onClick={handleDownloadBundle}
-                            disabled={busy || (project?.files.length ?? 0) === 0}
-                          >
-                            Download deliverable
-                          </OverflowItem>
-                        )}
-                        {canToggleLifecycle && (
-                          <OverflowItem
-                            onClick={handleToggleLifecycle}
-                            disabled={lifecycleBusy}
-                          >
-                            {isFrozen ? "Mark as Active" : "Mark as Inactive"}
-                          </OverflowItem>
-                        )}
-                        {isOwner && (
-                          <OverflowItem
-                            onClick={handleArchive}
-                            disabled={busy}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            Archive
-                          </OverflowItem>
-                        )}
-                      </OverflowMenu>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="outline"
+                              aria-label="More actions"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent align="end" className="min-w-40">
+                          {canManage && (
+                            <DropdownMenuItem
+                              onClick={handleDownloadBundle}
+                              disabled={busy || (project?.files.length ?? 0) === 0}
+                            >
+                              Download deliverable
+                            </DropdownMenuItem>
+                          )}
+                          {canToggleLifecycle && (
+                            <DropdownMenuItem
+                              onClick={handleToggleLifecycle}
+                              disabled={lifecycleBusy}
+                            >
+                              {isFrozen ? "Mark as Active" : "Mark as Inactive"}
+                            </DropdownMenuItem>
+                          )}
+                          {isOwner && (
+                            <DropdownMenuItem
+                              onClick={handleArchive}
+                              disabled={busy}
+                              variant="destructive"
+                            >
+                              Archive
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
                   </div>
                 </div>
@@ -1056,7 +1023,7 @@ export function ProjectOverview() {
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-xl border bg-card p-5" data-testid="progress-card">
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                    <h2 className="text-xs font-semibold text-muted-foreground">Progress</h2>
                     <div className="flex items-center gap-1.5">
                       {/* AQU-593: hide stat widgets you don't find helpful. */}
                       {availableStatKeys.length > 0 && (
@@ -1306,7 +1273,7 @@ export function ProjectOverview() {
                 return (
                   <div className="rounded-xl border bg-card p-5">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      <h2 className="text-xs font-semibold text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
                       </h2>
                       <span className="flex items-center gap-3 text-[10px] text-muted-foreground">
@@ -1371,14 +1338,18 @@ export function ProjectOverview() {
                       after its row moves.
                     */}
                     <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <Input
-                        type="text"
-                        placeholder="Filter files by name…"
-                        aria-label="Filter files by name"
-                        value={fileNameFilter}
-                        onChange={(e) => setFileNameFilter(e.target.value)}
-                        className="max-w-56"
-                      />
+                      <InputGroup className="h-9 max-w-56">
+                        <InputGroupAddon>
+                          <Search />
+                        </InputGroupAddon>
+                        <InputGroupInput
+                          type="text"
+                          placeholder="Filter files by name…"
+                          aria-label="Filter files by name"
+                          value={fileNameFilter}
+                          onChange={(e) => setFileNameFilter(e.target.value)}
+                        />
+                      </InputGroup>
                       <Select
                         items={FILE_SORT_MODES}
                         value={fileSortMode}
@@ -1409,7 +1380,7 @@ export function ProjectOverview() {
                         kept as a redundant, not load-bearing, explainer.
                       */}
                       <div
-                        className="mb-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                        className="mb-1.5 flex items-center gap-3 text-xs font-medium text-muted-foreground"
                         data-testid="file-breakdown-header"
                       >
                         <span className="w-5 shrink-0" />
@@ -1498,7 +1469,7 @@ export function ProjectOverview() {
 
               {/* ── Deadline card ── */}
               <div className="rounded-xl border bg-card p-5">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deadline</h2>
+                <h2 className="mb-2 text-xs font-semibold text-muted-foreground">Deadline</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {audio?.deadlineAt ? (
                     <span className="flex items-center gap-2 font-medium">
@@ -1593,7 +1564,7 @@ export function ProjectOverview() {
               >
                 <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
+                    <h2 className="text-xs font-semibold text-muted-foreground">Team</h2>
                     <SectionVisibilityBadge
                       minRole={orgSettings.memberProgressViewMinRole}
                       canEdit={canEditVisibility}
@@ -1686,7 +1657,7 @@ export function ProjectOverview() {
                     data-testid="overview-members-card"
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
+                      <h2 className="text-xs font-semibold text-muted-foreground">Members</h2>
                       <SectionVisibilityBadge
                         minRole={orgSettings.rosterViewMinRole}
                         canEdit={canEditVisibility}

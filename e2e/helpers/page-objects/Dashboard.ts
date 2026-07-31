@@ -18,9 +18,15 @@ export class Dashboard {
   }
 
   async goto(): Promise<void> {
-    // "/" now renders the org Overview (OrgHome); the projects list + the
-    // "+ New Project" dialog live at /projects (ProjectsList).
-    await this.page.goto("/projects")
+    // Prefer the authed fixture's org id (AuthedPage.orgId) so we never resume
+    // a stale org:active into OrgRouteGate's not-found shell.
+    const orgId = (this.page as Page & { orgId?: number }).orgId
+    const target =
+      typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}` : "/"
+    await this.page.goto(target)
+    await expect(this.page.getByRole("button", { name: /new project/i }).first()).toBeVisible({
+      timeout: 15_000,
+    })
   }
 
   organizationSwitcher(): Locator {
@@ -86,10 +92,13 @@ export class Dashboard {
   /** Click a project card by name and wait for the workspace shell to render.
    * Dismisses the per-project Setup Checklist drawer if it auto-opens. */
   async openProject(name: string): Promise<void> {
-    const workspaceUrl = /\/project\/[^/?#]+(?:[?#].*)?$/
+    // Editor route promotion: workspace is `/project/:id/editor` (optional
+    // `/file/:fileId`) — those are the only two routes. Bare `/project/:id` is
+    // intentionally dead, so this must not stop at the id.
+    const workspaceUrl = /\/project\/[^/?#]+\/editor(?:\/file\/[^/?#]+)?(?:[?#].*)?$/
     // A project card now lands on the project Overview (/projects/:id). Enter
-    // the editor workspace (/project/:id) via its "Open project" action when
-    // present (older UIs went straight to the editor).
+    // the editor workspace via its "Open project" action when present (older
+    // UIs went straight to the editor).
     const openInEditor = this.page.getByRole("button", { name: /^Open project$/i })
     if (!(await openInEditor.isVisible({ timeout: 1_000 }).catch(() => false))) {
       await this.page.getByRole("link", { name, exact: true }).click()

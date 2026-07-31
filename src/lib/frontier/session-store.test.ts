@@ -30,7 +30,7 @@ describe("session-store", () => {
 
 import {
   listSessions, addSession, activateSession, removeSession,
-  loadActiveSession, sessionKey, subscribeSession,
+  loadActiveSession, sessionKey, subscribeSession, patchSessionEmails,
 } from "./session-store"
 
 function mkSession(overrides: Partial<FrontierSession> = {}): FrontierSession {
@@ -224,6 +224,47 @@ describe("cross-tab reconciliation (FRO-367)", () => {
     const second = localStorage.getItem("frontier:session-ping")
     expect(second).not.toBeNull()
     expect(second).not.toBe(first) // forces a `storage` event on every write
+  })
+
+  // Each mutation reads the envelope and writes it back as separate awaits, so
+  // overlapping mutations must not interleave: the slower one would write back
+  // a snapshot taken before the faster one landed and silently undo it. This
+  // is the shape that broke logout in the browser — the email backfill runs
+  // while the account menu is open, so a logout landing mid-backfill was
+  // overwritten and the "logged out" account reappeared as active.
+  it("overlapping mutations do not lose updates", async () => {
+    const users = Array.from({ length: 12 }, (_, i) =>
+      mkSession({ username: `u${i}`, jwt: `j${i}` }),
+    )
+    // Every one of these reads the envelope and writes it back. Unserialized,
+    // they all read the same near-empty snapshot and the last write wins.
+    await Promise.all(users.map(addSession))
+
+    const list = await listSessions()
+    expect(list.map((s) => s.username).sort()).toEqual(users.map((u) => u.username).sort())
+  })
+
+  it("an email backfill overlapping a removal leaves the removal intact", async () => {
+    const alice = mkSession({ username: "alice", jwt: "a" })
+    const bob = mkSession({ username: "bob", jwt: "b", createdAt: "2026-01-02T00:00:00Z" })
+    await addSession(alice)
+    await addSession(bob)
+
+    // Interleave the backfill with other in-flight envelope writes, the way it
+    // overlaps a logout in the browser: the menu is open, /auth/me is still
+    // resolving, and the user clicks Log out.
+    await Promise.all([
+      patchSessionEmails({
+        [sessionKey(alice)]: "alice@example.com",
+        [sessionKey(bob)]: "bob@example.com",
+      }),
+      addSession(mkSession({ username: "carol", jwt: "c" })),
+      removeSession(sessionKey(alice)),
+    ])
+
+    const list = await listSessions()
+    expect(list.map((s) => s.username).sort()).toEqual(["bob", "carol"])
+    expect(await loadActiveSession()).toMatchObject({ username: "bob" })
   })
 
   it("a session-ping storage event fires subscribers; other keys don't", async () => {

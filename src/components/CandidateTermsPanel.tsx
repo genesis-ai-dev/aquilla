@@ -49,7 +49,7 @@ function ScoreCell({
   return (
     <Tooltip>
       <TooltipTrigger render={<div className="flex flex-col items-end tabular-nums" />}>
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="text-[10px] text-muted-foreground">
           {label}
         </span>
         <span className="text-sm font-medium">{value}</span>

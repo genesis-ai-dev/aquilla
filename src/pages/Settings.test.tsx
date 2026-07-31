@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { Settings, OrgSettingsIdentity, OrgSettingsExport, OrgSettingsRoster } from "./Settings"
+import { Settings, OrgSettingsIdentity, OrgSettingsExport, OrgSettingsRoster, OrgSettingsAssignment } from "./Settings"
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,15 +69,16 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
   fireEvent.keyDown(option, { key: "Enter" })
 }
 
-function renderSettings(path = "/settings") {
+function renderSettings(path = "/orgs/1/settings") {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <OrgProvider>
         <Routes>
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/settings/identity" element={<OrgSettingsIdentity />} />
-          <Route path="/settings/export" element={<OrgSettingsExport />} />
-          <Route path="/settings/roster" element={<OrgSettingsRoster />} />
+          <Route path="/orgs/:orgId/settings" element={<Settings />} />
+          <Route path="/orgs/:orgId/settings/identity" element={<OrgSettingsIdentity />} />
+          <Route path="/orgs/:orgId/settings/export" element={<OrgSettingsExport />} />
+          <Route path="/orgs/:orgId/settings/roster" element={<OrgSettingsRoster />} />
+          <Route path="/orgs/:orgId/settings/assignment" element={<OrgSettingsAssignment />} />
         </Routes>
       </OrgProvider>
     </MemoryRouter>,
@@ -86,7 +87,7 @@ function renderSettings(path = "/settings") {
 
 describe("Org Settings", () => {
   it("shows the org name and an owner can rename it", async () => {
-    renderSettings("/settings/identity")
+    renderSettings("/orgs/1/settings/identity")
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole("button", { name: /rename/i }))
     const input = await screen.findByLabelText(/organization name/i)
@@ -97,7 +98,7 @@ describe("Org Settings", () => {
 
   it("hides the rename control for a non-admin", async () => {
     vi.mocked(listMyOrgs).mockResolvedValueOnce([{ id: 1, name: "Come and See", role: { level: 100, name: "viewer" } }])
-    renderSettings("/settings/identity")
+    renderSettings("/orgs/1/settings/identity")
     await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
     expect(screen.queryByRole("button", { name: /rename/i })).not.toBeInTheDocument()
   })
@@ -106,7 +107,7 @@ describe("Org Settings", () => {
 describe("Export policy saved acknowledgment", () => {
   it("shows Saved after a successful export-role change", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })
-    renderSettings("/settings/export")
+    renderSettings("/orgs/1/settings/export")
     // Wait for the export permissions section to appear.
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
@@ -118,7 +119,7 @@ describe("Export policy saved acknowledgment", () => {
 
   it("does not show Saved when the save fails", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
-    renderSettings("/settings/export")
+    renderSettings("/orgs/1/settings/export")
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
     await pickSelectOption(/who can export/i, /contributor \(400\)/i)
@@ -132,14 +133,14 @@ describe("Export policy saved acknowledgment", () => {
 // AQU-485: roster + member-progress visibility settings UI.
 describe("Roster & member-progress visibility settings (AQU-485)", () => {
   it("renders both independent controls, defaulting to Maintainer", async () => {
-    renderSettings("/settings/roster")
+    renderSettings("/orgs/1/settings/roster")
     await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
     expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
   })
 
   it("shows Saved after successfully changing the roster floor, independent of the progress floor", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: { rosterViewMinRole: 400 }, version: 2, updatedAt: null, updatedBy: null } })
-    renderSettings("/settings/roster")
+    renderSettings("/orgs/1/settings/roster")
     await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
 
     await pickSelectOption(/who can view the roster/i, /contributor \(400\)/i)
@@ -151,7 +152,7 @@ describe("Roster & member-progress visibility settings (AQU-485)", () => {
 
   it("surfaces a server error for the member-progress floor without a false Saved", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
-    renderSettings("/settings/roster")
+    renderSettings("/orgs/1/settings/roster")
     await waitFor(() => expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined())
 
     await pickSelectOption(/who can view member progress/i, /owner \(700\)/i)

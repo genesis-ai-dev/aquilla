@@ -1,7 +1,8 @@
 /**
- * RuleEditor — plain-language inline rule editor (AQU-195).
+ * RuleEditor — plain-language rule editor (AQU-195).
  *
- * Used for BOTH create and edit. Renders inline inside RulesSurface (no dialog).
+ * Used for BOTH create and edit. Create opens in a dialog from RulesSurface;
+ * edit remains inline under the rule row.
  * Features:
  *  - Plain-language sentence that updates live as fields change
  *  - Side + Mode pickers → maps to RuleCheck union
@@ -21,6 +22,7 @@ import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/type
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import posthog from "@/lib/posthog"
+import { cn } from "@/lib/utils"
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,9 +114,11 @@ interface RuleEditorProps {
   cells: CellData[]
   onSave: (rule: Omit<TranslationRule, "id" | "createdAt">) => void
   onCancel: () => void
+  /** Optional class override for the outer shell (e.g. dialog embed). */
+  className?: string
 }
 
-export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorProps) {
+export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: RuleEditorProps) {
   // ── Field state ──
   const [name, setName] = useState(initialRule?.name ?? "")
   const [description, setDescription] = useState(initialRule?.description ?? "")
@@ -231,14 +235,14 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
   const sentence = humanSentence(side, mode)
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-4">
+    <div className={cn("rounded-lg border bg-card p-4 space-y-4", className)}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-foreground">
           {initialRule ? "Edit rule" : "New rule"}
         </p>
-        <Button variant="ghost" size="sm" onClick={onCancel} aria-label="Cancel">
-          <X className="h-4 w-4" />
+        <Button variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Cancel">
+          <X />
         </Button>
       </div>
 
@@ -339,7 +343,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
         </div>
 
         <div className="flex items-end">
-          <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+          <label className="flex items-center gap-1.5 text-xs">
             <Switch
               size="sm"
               checked={enabled}
@@ -405,7 +409,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
       {/* Live preview */}
       {pattern && !patternError && !sourcePatternError && (
         <div className="rounded border bg-muted/30 p-3 space-y-2">
-          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+          <p className="text-xs text-muted-foreground">
             Live preview — current file
           </p>
           {preview.count === 0 ? (
@@ -441,7 +445,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel }: RuleEditorP
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+            <p className="text-xs text-muted-foreground">
               Autofix — regex replace
             </p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">

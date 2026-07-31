@@ -30,7 +30,7 @@ interface SettingsNavProps {
  */
 export function SettingsNav({ onSearch, searchQuery }: SettingsNavProps) {
   return (
-    <InputGroup className="h-8">
+    <InputGroup className="h-8 bg-card">
       <InputGroupAddon>
         <Search />
       </InputGroupAddon>

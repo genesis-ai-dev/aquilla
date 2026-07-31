@@ -182,7 +182,6 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         onRowClick={(p) => {
           if (!p.archived) navigate(`/projects/${p.id}`)
         }}
-        rowClassName={(p) => (p.archived ? undefined : "cursor-pointer")}
         initialSorting={[{ id: "status", desc: true }]}
         searchPlaceholder="Search projects…"
         globalFilterFn={(row, _columnId, filterValue) => {

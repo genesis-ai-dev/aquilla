@@ -11,6 +11,10 @@ name: Delta sync (content + audio)
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   FRONTIER_USERNAME, FRONTIER_PASSWORD   GitLab creds (Frontier password grant), OR
 #   FRONTIER_TOKEN, GITLAB_URL             GitLab token escape hatch (skips Frontier login)
+#   FRONTIER_D1_ACCOUNT_ID                 account containing frontier-db-v2
+#   FRONTIER_D1_DATABASE_ID                frontier-db-v2 database UUID
+#   FRONTIER_D1_API_TOKEN                  API token scoped to D1 Read only
+#   NEON_PG_HOST/DB/ROLE/PASSWORD          production Neon direct connection
 #   SYNC_SECRET_KEY                        trusted ingest/upsert auth (prod sync-worker)
 #   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY R2 S3 token (read LFS bucket, write snapshots, state)
 #   DISCORD_WEBHOOK_URL                    channel webhook for the run report
@@ -64,7 +68,29 @@ jobs:
             --endpoint-url "$R2_ENDPOINT" || echo "no prior state — full sweep"
           echo "state entries: $(grep -c contentSha .migrate-state.json 2>/dev/null || echo 0) content, $(grep -c audioFastSha .migrate-state.json 2>/dev/null || echo 0) audio"
 
-      # 1) CONTENT: orgs/teams (created in Neon) + projects + cells. The group
+      # 1) USERS: atomically import every safe D1-only identity together with
+      #    its GitLab-derived org/team/project access. This must finish before
+      #    the full group/content pass so formerly unresolved members resolve.
+      - name: User identity and access delta
+        id: users
+        timeout-minutes: 30
+        env:
+          FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
+          FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}
+          FRONTIER_TOKEN: ${{ secrets.FRONTIER_TOKEN }}
+          GITLAB_URL: ${{ secrets.GITLAB_URL }}
+          FRONTIER_D1_ACCOUNT_ID: ${{ secrets.FRONTIER_D1_ACCOUNT_ID }}
+          FRONTIER_D1_DATABASE_ID: ${{ secrets.FRONTIER_D1_DATABASE_ID }}
+          FRONTIER_D1_API_TOKEN: ${{ secrets.FRONTIER_D1_API_TOKEN }}
+          NEON_PG_HOST: ${{ secrets.NEON_PG_HOST }}
+          NEON_PG_DB: ${{ secrets.NEON_PG_DB }}
+          NEON_PG_ROLE: ${{ secrets.NEON_PG_ROLE }}
+          NEON_PG_PASSWORD: ${{ secrets.NEON_PG_PASSWORD }}
+        run: |
+          set -o pipefail
+          npx tsx scripts/migrate-users.ts --apply 2>&1 | tee users.log
+
+      # 2) CONTENT: orgs/teams (created in Neon) + projects + cells. The group
       #    sync runs inline, so new orgs are fully pulled in. No R2 needed here.
       # Step-level timeouts (not just the job's): a JOB-level timeout kills
       # `if: always()` steps too, so the state-persist step never ran and every
@@ -86,7 +112,7 @@ jobs:
           set -o pipefail
           npx tsx scripts/migrate-all.ts --apply 2>&1 | tee content.log
 
-      # 2) AUDIO: every take, copied R2→R2. Runs even if content failed
+      # 3) AUDIO: every take, copied R2→R2. Runs even if content failed
       #    (independent + idempotent), so one bad pass doesn't block the other.
       - name: Audio delta
         id: audio
@@ -124,7 +150,8 @@ jobs:
         if: always()
         id: report
         run: |
-          c=content.log; a=audio.log
+          u=users.log; c=content.log; a=audio.log
+          [ -f "$u" ] || echo "users.log missing — user pass did not produce output" > "$u"
           [ -f "$c" ] || echo "content.log missing — content pass did not produce output" > "$c"
           [ -f "$a" ] || echo "audio.log missing — audio pass did not produce output" > "$a"
 
@@ -135,6 +162,9 @@ jobs:
           c_groups=$(grep -oE "[0-9]+ orgs / [0-9]+ teams (upserted|planned)" "$c" | tail -1)
           c_skipped=$(grep -c "content unchanged" "$c")
           c_errors=$(grep -cE "✗ " "$c")
+
+          # ── users ──
+          u_summary=$(tail -1 "$u")
 
           # ── audio ──
           a_applied=$(grep -oE "Applied [0-9]+/[0-9]+ projects" "$a" | tail -1); [ -z "$a_applied" ] && a_applied="Applied ?/? (failed early)"
@@ -147,6 +177,9 @@ jobs:
           status="✅ ok"; [ "$errors" -gt 0 ] && status="⚠️ ${errors} errors"
           {
             echo "## Delta sync — ${status}"
+            echo ""
+            echo "### Users (D1 identity + GitLab access)"
+            echo "\`${u_summary}\`"
             echo ""
             echo "### Content (orgs / projects / cells)"
             echo "| metric | value |"

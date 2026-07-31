@@ -60,6 +60,7 @@ const HYPERDRIVE_ENV = { WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE:
 const IDENTITY_PORT = 8787 + K * 100
 const SYNC_WORKER_PORT = 8788 + K * 100
 const VITE_PORT = 5173 + K * 100
+const LEGACY_MIGRATION_MOCK_PORT = 9460 + K * 100
 // Per-shard build output so concurrent `vite build`s don't overwrite one dist.
 // Single-stack keeps the default `dist` so nothing else changes.
 const DIST_DIR = SHARDED ? `dist-e2e-s${K}` : "dist"
@@ -317,6 +318,7 @@ async function main(): Promise<void> {
   await freePort(IDENTITY_PORT)
   await freePort(SYNC_WORKER_PORT)
   await freePort(VITE_PORT)
+  await freePort(LEGACY_MIGRATION_MOCK_PORT)
 
   // Set up the log dir. Worker stdout/stderr is piped here in non-verbose
   // mode so the developer's terminal stays clean. On test failure we tail
@@ -327,6 +329,7 @@ async function main(): Promise<void> {
   logFiles.vite = path.join(LOG_DIR, "vite.log")
   logFiles.migrations = path.join(LOG_DIR, "migrations.log")
   logFiles.build = path.join(LOG_DIR, "build.log")
+  logFiles.legacyMigration = path.join(LOG_DIR, "mock-legacy-migration.log")
   // First-run prerequisites (idempotent): both workers need a .dev.vars.
   ensureDevVars(AUTH_WORKER_DIR, "identity")
   ensureDevVars(SYNC_WORKER_DIR, "sync")
@@ -360,6 +363,23 @@ async function main(): Promise<void> {
   attachOutput(openrouterMock, "mock-openrouter", openLogFile(path.join(LOG_DIR, "mock-openrouter.log")), VERBOSE)
   cleanup.push(() => killChildTree(openrouterMock))
 
+  const legacyMigrationMock = spawn(
+    "npx",
+    ["tsx", "scripts/mock-legacy-migration.ts", String(LEGACY_MIGRATION_MOCK_PORT)],
+    { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } },
+  )
+  attachOutput(
+    legacyMigrationMock,
+    "mock-legacy-migration",
+    openLogFile(logFiles.legacyMigration),
+    VERBOSE,
+  )
+  cleanup.push(() => killChildTree(legacyMigrationMock))
+  await waitForUrl(
+    `http://127.0.0.1:${LEGACY_MIGRATION_MOCK_PORT}/healthz`,
+    30_000,
+  )
+
   const identity: SpawnedWorker = await spawnWranglerDev({
     cwd: AUTH_WORKER_DIR,
     port: IDENTITY_PORT,
@@ -378,6 +398,13 @@ async function main(): Promise<void> {
       "--var", "ADMIN_EMAILS:alice@example.test",
       "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${OPENROUTER_MOCK_PORT}/api/v1`,
       "--var", "OPENROUTER_API_KEY:mock",
+      "--var", "LEGACY_USER_MIGRATION_ENABLED:true",
+      "--var", "FRONTIER_D1_ACCOUNT_ID:e2e",
+      "--var", "FRONTIER_D1_DATABASE_ID:frontier-db-v2",
+      "--var", "FRONTIER_D1_API_TOKEN:e2e-d1-read",
+      "--var", `FRONTIER_D1_API_BASE_URL:http://127.0.0.1:${LEGACY_MIGRATION_MOCK_PORT}/client/v4`,
+      "--var", `GITLAB_URL:http://127.0.0.1:${LEGACY_MIGRATION_MOCK_PORT}`,
+      "--var", "GITLAB_ADMIN_TOKEN:e2e-gitlab-admin",
       "--var", `SYNC_WORKER_URL:http://127.0.0.1:${SYNC_WORKER_PORT}`,
       "--var", "ENVIRONMENT:development",
     ],
@@ -496,6 +523,7 @@ async function main(): Promise<void> {
       ...process.env,
       ...browserEnv,
       E2E_BASE_URL: `http://127.0.0.1:${VITE_PORT}`,
+      E2E_DATABASE_URL: E2E_PG_URL,
     },
   })
   pw.on("error", (error) => {

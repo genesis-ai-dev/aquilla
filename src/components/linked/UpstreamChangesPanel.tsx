@@ -23,7 +23,7 @@
 //      never show it). Confirm the flagged cells render grouped by sync
 //      batch with a readable word-diff.
 //   4. Click "Open" on one row → confirm it navigates to
-//      /project/:B/file/:fileId?cellId=:cellId and the editor scrolls there.
+//      /project/:B/editor/file/:fileId?cellId=:cellId and the editor scrolls there.
 //   5. As a reviewer(300) role, click "Accept as-is" on one cell → confirm
 //      the row disappears from the flagged list on revalidate and the
 //      cell's stale badge clears; re-open the cell's edit history and
@@ -120,7 +120,7 @@ export function UpstreamChangesPanel({
   }
 
   function openToRetranslate(item: ReviewItem) {
-    navigate(`/project/${projectId}/file/${item.fileId}?cellId=${encodeURIComponent(item.cellId)}`)
+    navigate(`/project/${projectId}/editor/file/${item.fileId}?cellId=${encodeURIComponent(item.cellId)}`)
   }
 
   /**

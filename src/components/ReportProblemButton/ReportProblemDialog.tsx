@@ -1,5 +1,6 @@
 /**
  * AQU-307: Dialog for "Report a problem" — free-text + auto-captured context.
+ * Opened from HelpMenu's Report item.
  *
  * Consent-aware:
  * - If analytics are ON  → submits PostHog event (with session replay URL if available).

@@ -141,6 +141,8 @@ export function serializeInner(el: Element): string {
 export interface XliffSegmentMeta {
   version: "1.2" | "2.0"
   unitId: string
+  fileId?: string
+  groupId?: string
   segId?: string
   state?: string
   /** Inner XML of <source> with inline tags (g/x/bpt/ept/ph/pc…) verbatim. */
@@ -162,6 +164,7 @@ function parseXliff12(doc: Document): TranslatableString[] {
   const results: TranslatableString[] = []
 
   const transUnits = allByLocalName(doc.documentElement, "trans-unit")
+  const files = allByLocalName(doc.documentElement, "file")
 
   for (const tu of transUnits) {
     const id = tu.getAttribute("id") || uuid()
@@ -176,16 +179,22 @@ function parseXliff12(doc: Document): TranslatableString[] {
     const noteEl = findByLocalName(tu, "note")
     const context = noteEl ? textContent(noteEl).trim() : id
 
-    // Group context from nearest ancestor <group> id
-    let group = id
+    // Capture both the nearest nested group and containing file so milestone
+    // planning can reproduce the document hierarchy without reparsing XML.
+    let groupId: string | undefined
+    let file: Element | undefined
     let cursor: Element | null = tu.parentElement
     while (cursor) {
-      if (cursor.localName === "group") {
-        group = cursor.getAttribute("id") || group
-        break
-      }
+      if (!groupId && cursor.localName === "group") groupId = cursor.getAttribute("id") || undefined
+      if (cursor.localName === "file") file = cursor
       cursor = cursor.parentElement
     }
+    const fileId = file
+      ? file.getAttribute("id")
+        || file.getAttribute("original")
+        || `File ${files.indexOf(file) + 1}`
+      : undefined
+    const group = groupId ?? id
 
     if (!original) continue  // skip empty source segments
 
@@ -193,6 +202,8 @@ function parseXliff12(doc: Document): TranslatableString[] {
     const meta: XliffSegmentMeta = {
       version: "1.2",
       unitId: id,
+      ...(fileId ? { fileId } : {}),
+      ...(groupId ? { groupId } : {}),
       ...(targetState ? { state: targetState } : {}),
       sourceXml: sourceEl ? serializeInner(sourceEl) : "",
       ...(targetEl ? { targetXml: serializeInner(targetEl) } : {}),
@@ -235,9 +246,23 @@ function parseXliff20(doc: Document): TranslatableString[] {
   const results: TranslatableString[] = []
 
   const units = allByLocalName(doc.documentElement, "unit")
+  const files = allByLocalName(doc.documentElement, "file")
 
   for (const unit of units) {
     const unitId = unit.getAttribute("id") || uuid()
+    let groupId: string | undefined
+    let file: Element | undefined
+    let cursor: Element | null = unit.parentElement
+    while (cursor) {
+      if (!groupId && cursor.localName === "group") groupId = cursor.getAttribute("id") || undefined
+      if (cursor.localName === "file") file = cursor
+      cursor = cursor.parentElement
+    }
+    const fileId = file
+      ? file.getAttribute("id")
+        || file.getAttribute("original")
+        || `File ${files.indexOf(file) + 1}`
+      : undefined
 
     // <notes> → <note> as context (shared across segments)
     const notesEl = findByLocalName(unit, "notes")
@@ -265,6 +290,8 @@ function parseXliff20(doc: Document): TranslatableString[] {
         const meta: XliffSegmentMeta = {
           version: "2.0",
           unitId,
+          ...(fileId ? { fileId } : {}),
+          ...(groupId ? { groupId } : {}),
           segId,
           ...(segState ? { state: segState } : {}),
           sourceXml: srcEl ? serializeInner(srcEl) : "",
@@ -293,6 +320,8 @@ function parseXliff20(doc: Document): TranslatableString[] {
       const meta: XliffSegmentMeta = {
         version: "2.0",
         unitId,
+        ...(fileId ? { fileId } : {}),
+        ...(groupId ? { groupId } : {}),
         sourceXml: serializeInner(directSource),
         ...(directTarget ? { targetXml: serializeInner(directTarget) } : {}),
       }

@@ -36,28 +36,26 @@ testReset.post("/reset", async (c) => {
   }
 
   const db = c.env.AQUILLA_PG
-  const codexDb = c.env.AQUILLA_PG
-
   // Order matters: drop dependent rows before parents. The hand-rolled
   // delete-everything is safer than a real TRUNCATE because some tables
   // may not exist in older migration states and we want this to no-op
   // gracefully there.
   const tables: Array<{ db: AquillaDb; name: string }> = [
+    { db, name: "legacy_identity_links" },
     { db, name: "project_invites" },
+    { db, name: "group_project_grants" },
+    { db, name: "group_members" },
     { db, name: "project_members" },
     { db, name: "org_members" },
+    { db, name: "cells" },
+    { db, name: "files" },
     { db, name: "projects" },
+    { db, name: "groups" },
     { db, name: "organizations" },
     { db, name: "password_reset_tokens" },
     { db, name: "activity_logs" },
     { db, name: "users" },
   ]
-  if (codexDb) {
-    tables.unshift({ db: codexDb, name: "cells" })
-    tables.unshift({ db: codexDb, name: "files" })
-    tables.unshift({ db: codexDb, name: "projects" })
-  }
-
   for (const t of tables) {
     try {
       await t.db.prepare(`DELETE FROM ${t.name}`).run()

@@ -77,6 +77,20 @@ export interface Env {
 
   ENVIRONMENT?: string
 
+  // ── One-way frontier-db-v2 identity bridge (AQU-713) ──────────────────
+  /** Fail-closed rollout flag. Only the exact string "true" enables legacy
+   * lookup for identities absent from Neon. */
+  LEGACY_USER_MIGRATION_ENABLED?: string
+  /** Cloudflare D1 HTTP API coordinates. The token must have D1 Read only. */
+  FRONTIER_D1_ACCOUNT_ID?: string
+  FRONTIER_D1_DATABASE_ID?: string
+  FRONTIER_D1_API_TOKEN?: string
+  /** Dev/e2e only: override Cloudflare's D1 REST API base with a local mock. */
+  FRONTIER_D1_API_BASE_URL?: string
+  /** Trusted GitLab administrator credential used only to reconstruct access. */
+  GITLAB_URL?: string
+  GITLAB_ADMIN_TOKEN?: string
+
   /**
    * Comma-separated allowlist of ACCOUNT EMAILS granted platform-operator
    * (site-wide admin) access — see middleware/platform-admin.ts and
@@ -116,6 +130,12 @@ export interface Env {
   /** Dev/e2e only: override the OpenRouter API base (e.g. the scripted mock
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
+  /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
+   *  Default: anthropic/claude-haiku-4-5. */
+  CONTEXTUAL_FAST_MODEL?: string
+  /** Contextual pipeline deep-tier (verifier) model override. Default: the
+   *  resolved draft (mid) model. */
+  CONTEXTUAL_DEEP_MODEL?: string
   /** Injected by index.ts (never configured): raw Postgres connection string
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string

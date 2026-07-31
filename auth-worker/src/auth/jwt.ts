@@ -83,7 +83,7 @@ export class JWTService {
   async getUserByUsername(username: string): Promise<AuthUser | null> {
     try {
       const result = await this.env.AQUILLA_PG.prepare(
-        "SELECT * FROM users WHERE username = ?",
+        "SELECT * FROM users WHERE LOWER(username) = LOWER(?)",
       )
         .bind(username)
         .first<UserRow>()
@@ -98,7 +98,7 @@ export class JWTService {
   async getUserByEmail(email: string): Promise<AuthUser | null> {
     try {
       const result = await this.env.AQUILLA_PG.prepare(
-        "SELECT * FROM users WHERE email = ?",
+        "SELECT * FROM users WHERE LOWER(email) = LOWER(?)",
       )
         .bind(email)
         .first<UserRow>()

@@ -327,7 +327,7 @@ export function AssignWork({
                   {chapters.map((ch) => (
                     <label
                       key={ch}
-                      className="flex cursor-pointer items-center gap-2 py-1 text-sm"
+                      className="flex items-center gap-2 py-1 text-sm"
                     >
                       <Checkbox
                         checked={selectedChapters.includes(ch)}

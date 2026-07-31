@@ -48,8 +48,8 @@ test("project overview renders name, overview cards, and Open project button", a
   await expect(openBtn.first()).toBeVisible({ timeout: 5_000 })
   await openBtn.first().click()
 
-  // Workspace URL: /project/:id
-  await alice.waitForURL(/\/project\/[^/]+$/, { timeout: 10_000 })
+  // Workspace URL: /project/:id/editor
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 10_000 })
   await expect(alice.locator('[aria-label="Filter files"]')).toBeVisible({ timeout: 5_000 })
 
   const workspaceBreadcrumb = alice.getByRole("navigation", { name: "breadcrumb" })
@@ -59,7 +59,7 @@ test("project overview renders name, overview cards, and Open project button", a
   await expect(workspaceBreadcrumb.getByText("Editor", { exact: true })).toHaveAttribute("aria-current", "page")
 
   await allOrganizations.click()
-  await alice.waitForURL(/\/?\?org=all$/, { timeout: 10_000 })
+  await alice.waitForURL(/\/orgs\/all$/, { timeout: 10_000 })
   await expect(
     alice.getByRole("navigation", { name: "breadcrumb" }).getByText("All organizations", { exact: true }),
   ).toHaveAttribute("aria-current", "page")

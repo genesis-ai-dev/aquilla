@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
+import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   Field,
   FieldDescription,
@@ -208,17 +210,19 @@ export function RuleCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger
-        render={
-          <Button
-            size="sm"
-            disabled={!canManage}
-            title={!canManage ? (deniedReason ?? undefined) : undefined}
-          />
-        }
-      >
-        + Add Rule
-      </DialogTrigger>
+      <AppTooltip content={!canManage ? (deniedReason ?? undefined) : undefined} disabled={canManage || !deniedReason}>
+        <DialogTrigger
+          render={
+            <Button
+              size="sm"
+              disabled={!canManage}
+            />
+          }
+        >
+          <Plus className="size-4" aria-hidden />
+          Add Rule
+        </DialogTrigger>
+      </AppTooltip>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Create Translation Rule</DialogTitle></DialogHeader>
         <form

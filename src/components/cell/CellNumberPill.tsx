@@ -31,7 +31,7 @@ export function CellNumberPill({
     <span
       className={cn(
         "inline-flex items-center gap-1 text-[10px] font-medium leading-none tabular-nums",
-        !plain && "rounded-full border border-border bg-card px-1.5 py-0.5",
+        !plain && "rounded-md border border-border bg-card px-1.5 py-0.5",
         tintClass,
         className,
       )}

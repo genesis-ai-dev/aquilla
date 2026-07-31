@@ -99,7 +99,7 @@ function renderPage(projectId = "proj-1") {
     <MemoryRouter initialEntries={[`/project/${projectId}/members`]}>
       <Routes>
         <Route path="/project/:id/members" element={<ProjectMembersPage />} />
-        <Route path="/project/:id" element={<div>Editor</div>} />
+        <Route path="/project/:id/editor" element={<div>Editor</div>} />
       </Routes>
     </MemoryRouter>,
   )

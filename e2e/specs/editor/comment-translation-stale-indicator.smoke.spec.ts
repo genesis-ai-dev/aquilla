@@ -150,7 +150,7 @@ test("comment on an already-translated cell is NOT stale, but genuine drift is",
   await expect(drawer2).not.toBeVisible({ timeout: 3_000 })
 
   // Step 3: genuinely change the translation → the thread is now stale.
-  await ws.editCell(0, "traduction modifiée")
+  await ws.replaceCell(0, "traduction modifiée")
   await row.hover()
   await expect(openCommentsBtn).toBeVisible({ timeout: 5_000 })
   await openCommentsBtn.click()
@@ -162,7 +162,7 @@ test("comment on an already-translated cell is NOT stale, but genuine drift is",
   // (proves the comparison is against a real snapshot, not a one-way flag).
   await drawer3.getByRole("button").first().click()
   await expect(drawer3).not.toBeVisible({ timeout: 3_000 })
-  await ws.editCell(0, initialTranslation)
+  await ws.replaceCell(0, initialTranslation)
   await row.hover()
   await expect(openCommentsBtn).toBeVisible({ timeout: 5_000 })
   await openCommentsBtn.click()

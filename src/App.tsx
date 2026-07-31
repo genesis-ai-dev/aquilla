@@ -2,11 +2,13 @@ import { Suspense, lazy } from "react"
 import { Navigate, Routes, Route } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
+import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
+import { resumeOrgPath } from "@/lib/navigation/org-paths"
 import { JoinPage } from "@/components/JoinPage"
 import { AccessLinkPage } from "@/components/AccessLinkPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
@@ -26,6 +28,7 @@ import { OutboxProvider } from "@/context/OutboxContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import { Toaster } from "@/components/ui/sonner"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -125,11 +128,13 @@ function SyncFreezeOverlay() {
  * them to the page they just left would read as a broken link. A user who
  * completed onboarding counts as signed in — they may be working on local-only
  * projects without a Frontier account.
+ *
+ * Signed-in visitors resume their last org (`/orgs/$id` or `/orgs/all`).
  */
 function AppEntry() {
   const onboarded = localStorage.getItem("codex:onboardingComplete") === "true"
   if (!hasAuthHintCookie() && !onboarded) return <Navigate to="/login" replace />
-  return <OrgHome />
+  return <Navigate to={resumeOrgPath()} replace />
 }
 
 /** Fallback used while lazy route chunks are loading (e.g. the workspace). */
@@ -166,6 +171,7 @@ export default function App() {
         <GlobalAudioShortcuts />
         <VersionBadge />
         <UpdateBanner />
+        <Toaster />
       </SyncingProvider>
     </TooltipProvider>
   )
@@ -177,12 +183,11 @@ function AppRoutes() {
       <Routes>
         {/* Eager — needed for first paint / sign-in flow */}
         <Route path="/" element={<AppEntry />} />
-        {/* The workspace entry. `/` is marketing at the edge, so this is
-            the URL that opens the app — marketing nav + AppEntryBanner. */}
+        {/* The workspace entry. `/` is marketing at the edge, so this is the
+            URL that opens the app — marketing nav + AppEntryBanner point here. */}
         <Route path="/app" element={<AppEntry />} />
-        <Route path="/projects" element={<Navigate to="/" replace />} />
+        <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
-        <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
         {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
@@ -204,44 +209,47 @@ function AppRoutes() {
         {/* Curated marketing/demo auto-login — see components/MarketingLoginRoute.tsx */}
         <Route path="/__marketing/login" element={<MarketingLoginRoute />} />
 
-        {/* Lazy — org-level pages */}
-        <Route path="/projects/archived" element={<ArchivedProjects />} />
         <Route path="/preferences" element={<Preferences />} />
-        {/* Preferences detail sub-pages — index of nav rows lives at /preferences */}
         <Route path="/preferences/:section" element={<Preferences />} />
 
-        {/* Lazy — heavy workspace tree (pulls in tiptap, editor deps, react-player) */}
-        <Route path="/project/:id" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
+        {/* Org shell — path is authoritative for active org. `/orgs/all` is home-only. */}
+        <Route path="/orgs/all" element={<OrgHome />} />
+        <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
+          <Route index element={<OrgHome />} />
+          <Route path="assigned" element={<AssignedToMe />} />
+          <Route path="archived" element={<ArchivedProjects />} />
+          <Route path="teams" element={<TeamsList />} />
+          <Route path="teams/:groupId" element={<TeamDetail />} />
+          <Route path="members" element={<MembersPage />} />
+          <Route path="members/matrix" element={<MembersPage />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="settings/identity" element={<OrgSettingsIdentity />} />
+          <Route path="settings/export" element={<OrgSettingsExport />} />
+          <Route path="settings/roster" element={<OrgSettingsRoster />} />
+          <Route path="settings/assignment" element={<OrgSettingsAssignment />} />
+          <Route path="settings/providers" element={<OrgSettingsProviders />} />
+          <Route path="settings/monday" element={<OrgSettingsMonday />} />
+        </Route>
+
+        {/* Project routes stay flat (not nested under /orgs).
+            Default work surface is explicit: /project/:id/editor[/file/:fileId].
+            Bare /project/:id and /project/:id/file/:fileId are intentionally dead. */}
+        <Route path="/project/:id/editor" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
-        {/* AQU-194: /rules deep-link renders inside ProjectWorkspace shell — shell stays mounted. */}
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
         <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
-        {/* Agent workbench — full-screen agent surface inside the shell (agent-mode-v2 §4). */}
         <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
-        {/* ISSUE-3 fix: /voice deep-link — workspace detects suffix and activates audio lens. */}
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
-        {/* AQU-254: terminology/comments/memory now render inside the ProjectWorkspace shell
-            (fixed sidebar + top bar + bottom status bar). The shell detects the path suffix
-            and swaps only the main content area, same pattern as /rules. */}
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
         <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
-        {/* AQU-180: per-project members management inside the ProjectWorkspace shell. */}
         <Route path="/project/:id/members" element={<ProjectWorkspace />} />
 
-        {/* Lazy — org admin pages */}
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/settings/identity" element={<OrgSettingsIdentity />} />
-        <Route path="/settings/export" element={<OrgSettingsExport />} />
-        <Route path="/settings/roster" element={<OrgSettingsRoster />} />
-        <Route path="/settings/assignment" element={<OrgSettingsAssignment />} />
-        <Route path="/settings/providers" element={<OrgSettingsProviders />} />
-        <Route path="/settings/monday" element={<OrgSettingsMonday />} />
-        {/* Monday.com OAuth redirect URI (top-level; see MondayOAuthCallback). */}
+        {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
+            path is registered with Monday, so it cannot carry an org segment. */}
         <Route path="/oauth/callback" element={<MondayOAuthCallback />} />
-        <Route path="/members" element={<MembersPage />} />
-        <Route path="/teams" element={<TeamsList />} />
-        <Route path="/teams/:groupId" element={<TeamDetail />} />
+
 
         {/* Lazy — site-wide admin console (platform operators only; gated
             client-side by usePlatformAdmin and server-side by ADMIN_EMAILS) */}

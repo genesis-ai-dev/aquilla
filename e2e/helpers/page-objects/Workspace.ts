@@ -13,7 +13,7 @@ interface FilePayload {
   buffer: Buffer
 }
 
-/** Page object for the project workspace route ("/project/:id"). */
+/** Page object for the project workspace route ("/project/:id/editor"). */
 export class Workspace {
   private readonly page: Page
 
@@ -68,12 +68,48 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
-  /** Shared import prologue: dismiss the setup checklist, open the
-   * ImportDialog's Upload Files panel, and select `filePath`. */
-  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
-    // AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
-    // project, and the modal sheet intercepts workspace clicks. Pre-mark it
-    // as already-shown for this project, then dismiss it if it beat us to it.
+  /**
+   * Import through a specialized importer's own panel (Biblica, Macula,
+   * Translation Notes …). These panels commit from their own Import button
+   * instead of the shared preview/confirm boundary.
+   *
+   * `optionName` matches the landing card, e.g. /Biblica Study Bible Notes/i.
+   */
+  async importViaSpecializedPanel(
+    optionName: RegExp,
+    filePath: string | FilePayload,
+    /**
+     * Optional panel setup after the file is chosen and before Import —
+     * assert or toggle importer options (e.g. Biblica sentence split).
+     */
+    configure?: (dialog: Locator) => Promise<void>,
+  ): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+
+    const dialog = this.page.getByRole("dialog")
+    const option = dialog.getByRole("button", { name: optionName }).first()
+    await expect(option).toBeVisible({ timeout: 8_000 })
+    await option.click()
+
+    // Each specialized panel labels its picker after the format it accepts, so
+    // scope to the panel's own file input rather than any input on the page.
+    const chooseBtn = dialog.getByRole("button", { name: /^Choose .*file$/i }).first()
+    await expect(chooseBtn).toBeVisible({ timeout: 5_000 })
+    await chooseBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    if (configure) await configure(dialog)
+
+    const importBtn = dialog.getByRole("button", { name: /^Import$/i }).last()
+    await expect(importBtn).toBeEnabled({ timeout: 5_000 })
+    await importBtn.click()
+    await this.waitForImportSettled()
+  }
+
+  /** AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
+   * project, and the modal sheet intercepts workspace clicks. Pre-mark it as
+   * already-shown for this project, then dismiss it if it beat us to it. */
+  private async dismissSetupChecklist(): Promise<void> {
     const projectId = this.page.url().match(/\/project\/([^/?#]+)/)?.[1]
     if (projectId) {
       await this.page.evaluate(
@@ -86,6 +122,12 @@ export class Workspace {
       await skipChecklist.click()
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
+  }
+
+  /** Shared import prologue: dismiss the setup checklist, open the
+   * ImportDialog's Upload Files panel, and select `filePath`. */
+  private async chooseImportFiles(filePath: string | FilePayload): Promise<void> {
+    await this.dismissSetupChecklist()
     // Open the ImportDialog — lands on the "landing" screen (card grid).
     // Use the card's accessible button name rather than a case-sensitive text
     // locator; the product label is "Upload files".
@@ -167,37 +209,38 @@ export class Workspace {
     for (let attempt = 0; attempt < 2; attempt++) {
       if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
 
-      // AQU-661: the primary-action dropdown was removed; Import now lives in
-      // the ⋯ overflow menu (button aria-label "More").
+      // Import is a visible header button beside the ⋯ overflow menu.
       const banner = this.page.getByRole("banner")
-      const moreActionsBtn = banner.getByRole("button", { name: /^More$/i })
-      if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await moreActionsBtn.click()
-        const importItem = this.page
-          .getByRole("menuitem", { name: /^Import$/i })
-          .filter({ visible: true })
-          .last()
-        await expect(importItem).toBeVisible({ timeout: 5_000 })
-        try {
-          await importItem.click({ timeout: 2_000 })
-        } catch (error) {
-          // Base UI can open the dialog on pointer-up before Playwright's
-          // actionability loop finishes. The new overlay then covers the menu
-          // item and makes click() reject even though the intended action won.
-          if (!(await uploadCard.isVisible({ timeout: 500 }).catch(() => false))) {
-            throw error
-          }
-          return
-        }
+      const importBtn = banner.getByRole("button", { name: /^Import$/i })
+      if (await importBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await importBtn.click()
       } else {
-        // A fully hydrated project with no files uses the editor empty-state
-        // CTA ("Import a file") instead of the header overflow action.
-        const directImportBtn = this.page
-          .getByRole("button", { name: /^Import(?: a file)?$/i })
-          .filter({ visible: true })
-          .first()
-        await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
-        await directImportBtn.click()
+        const moreActionsBtn = banner.getByRole("button", { name: /^More$/i })
+        if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
+          await moreActionsBtn.click()
+          const importItem = this.page
+            .getByRole("menuitem", { name: /^Import$/i })
+            .filter({ visible: true })
+            .last()
+          await expect(importItem).toBeVisible({ timeout: 5_000 })
+          try {
+            await importItem.click({ timeout: 2_000 })
+          } catch (error) {
+            if (!(await uploadCard.isVisible({ timeout: 500 }).catch(() => false))) {
+              throw error
+            }
+            return
+          }
+        } else {
+          // A fully hydrated project with no files uses the editor empty-state
+          // CTA ("Import a file") instead of the header Import button.
+          const directImportBtn = this.page
+            .getByRole("button", { name: /^Import(?: a file)?$/i })
+            .filter({ visible: true })
+            .first()
+          await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
+          await directImportBtn.click()
+        }
       }
 
       if (await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false)) return
@@ -210,9 +253,7 @@ export class Workspace {
   async openFileBySubstring(nameSubstring: string): Promise<void> {
     await this.page
       .locator("aside")
-      .locator("div")
-      .filter({ hasText: new RegExp(nameSubstring, "i") })
-      .filter({ has: this.page.locator('button[aria-label="File actions"]') })
+      .getByRole("button", { name: new RegExp(nameSubstring, "i") })
       .first()
       .click()
   }
@@ -252,15 +293,39 @@ export class Workspace {
     await row.scrollIntoViewIfNeeded()
 
     const target = this.editableTarget(index)
+    let activatedFromReadView = false
     if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
       const readView = this.targetReadView(index)
       await expect(readView).toBeVisible({ timeout: 10_000 })
       await readView.click()
+      activatedFromReadView = true
     }
 
     await expect(target).toBeVisible({ timeout: 10_000 })
-    await target.click()
+    // A read-view click is the user's one activation. Clicking the newly
+    // mounted editor again normalizes IDML's caret through handleClick and can
+    // hide focus-placement regressions that only occur on first activation.
+    if (!activatedFromReadView) {
+      await target.click()
+    }
+    await expect(target).toBeFocused({ timeout: 10_000 })
     return target
+  }
+
+  private async commitTargetCellEdit(index: number, text: string): Promise<void> {
+    // Blurring commits immediately. Register the response waiter before the
+    // blur so a fast local worker cannot complete the request first.
+    const committed = this.page.waitForResponse((response) => {
+      if (response.request().method() !== "POST" || !response.ok()) return false
+      try {
+        return new URL(response.url()).pathname.endsWith("/events")
+      } catch {
+        return false
+      }
+    }, { timeout: 20_000 })
+    await this.page.locator("aside").click()
+    await committed
+    await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
   }
 
   /** Click into a cell, type text, blur. Persists on blur per editor design.
@@ -277,21 +342,119 @@ export class Workspace {
   async editCell(index: number, text: string): Promise<void> {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
-    // Blurring commits immediately. Wait for the authoritative event flush,
-    // rather than sleeping and assuming IDB + outbox + projection complete at
-    // a particular machine speed. This also guarantees a following validation
-    // has the committed editEventId available.
-    const committed = this.page.waitForResponse((response) => {
-      if (response.request().method() !== "POST" || !response.ok()) return false
-      try {
-        return new URL(response.url()).pathname.endsWith("/events")
-      } catch {
-        return false
+    await this.commitTargetCellEdit(index, text)
+  }
+
+  /**
+   * Reproduce the IDML pointer path from AQU-740: activate a tall empty target
+   * from below its text line, type, click that same blank area again, and keep
+   * typing. Both clicks must resolve to the real single-line caret.
+   */
+  async editIdmlCellFromBlankArea(
+    index: number,
+    firstText: string,
+    secondText: string,
+  ): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const column = this.targetColumn(index)
+    const initialBox = await column.boundingBox()
+    expect(initialBox).not.toBeNull()
+    expect(initialBox!.height).toBeGreaterThan(60)
+
+    const blankPosition = {
+      x: Math.max(4, initialBox!.width / 2),
+      y: initialBox!.height - 4,
+    }
+    await column.click({ position: blankPosition })
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await this.page.keyboard.type(firstText)
+
+    const caretTop = async (): Promise<number> => target.evaluate((surface) => {
+      const selection = surface.ownerDocument.getSelection()
+      if (!selection || selection.rangeCount === 0) throw new Error("IDML caret is missing")
+      const range = selection.getRangeAt(0)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return rect.top
+    })
+    const textLineTop = await caretTop()
+
+    const activeBox = await target.boundingBox()
+    expect(activeBox).not.toBeNull()
+    expect(activeBox!.height).toBeGreaterThan(60)
+    await target.click({
+      position: {
+        x: Math.max(4, activeBox!.width / 2),
+        y: activeBox!.height - 4,
+      },
+    })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    expect(Math.abs((await caretTop()) - textLineTop)).toBeLessThan(5)
+
+    await this.page.keyboard.type(secondText)
+    await this.commitTargetCellEdit(index, `${firstText}${secondText}`)
+  }
+
+  /**
+   * Activate a populated IDML cell at an exact read-view text offset. This exercises
+   * the read-view → ProseMirror remount boundary from a single real pointer
+   * click; a second editor click would hide activation-placement regressions.
+   */
+  async editIdmlCellAtTextOffset(
+    index: number,
+    textOffset: number,
+    insertedText: string,
+    expectedText: string,
+  ): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    const readView = this.targetReadView(index)
+    await expect(readView).toBeVisible({ timeout: 10_000 })
+
+    const point = await readView.evaluate((element, offset) => {
+      const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      let remaining = offset
+      let node: Text | null = null
+      let nodeOffset = 0
+      while (walker.nextNode()) {
+        const candidate = walker.currentNode as Text
+        if (remaining <= candidate.data.length) {
+          node = candidate
+          nodeOffset = remaining
+          break
+        }
+        remaining -= candidate.data.length
       }
-    }, { timeout: 20_000 })
-    await this.page.locator("aside").click() // blur outside editor
-    await committed
-    await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
+      if (!node) throw new Error(`IDML slot has no text position at offset ${offset}`)
+      const range = element.ownerDocument.createRange()
+      range.setStart(node, nodeOffset)
+      range.collapse(true)
+      const rect = range.getClientRects()[0] ?? range.getBoundingClientRect()
+      return { x: rect.left, y: rect.top + Math.max(1, rect.height / 2) }
+    }, textOffset)
+
+    await this.page.mouse.click(point.x, point.y)
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: 10_000 })
+    await expect.poll(() => target.evaluate((surface) => {
+      const editor = (surface as HTMLElement & {
+        editor?: { state: { selection: { $from: { parentOffset: number } } } }
+      }).editor
+      return editor?.state.selection.$from.parentOffset ?? -1
+    })).toBe(textOffset)
+
+    await this.page.keyboard.type(insertedText)
+    await this.commitTargetCellEdit(index, expectedText)
+  }
+
+  /** Replace the complete target value, then wait for its authoritative commit. */
+  async replaceCell(index: number, text: string): Promise<void> {
+    const target = await this.activateTargetCell(index)
+    await target.fill(text)
+    await this.commitTargetCellEdit(index, text)
   }
 
   async readCell(index: number): Promise<string> {
@@ -371,22 +534,29 @@ export class Workspace {
     }
   }
 
-  /** Open the workspace header ⋯ overflow menu (OverflowMenu). */
+  /** Open the workspace header ⋯ overflow menu (project-scoped actions). */
   async openHeaderOverflowMenu(): Promise<void> {
     const moreBtn = this.page.getByRole("button", { name: /^More$/i })
     await expect(moreBtn).toBeVisible({ timeout: 10_000 })
     await moreBtn.click()
   }
 
-  /** AQU-331: view settings live in the header overflow menu. */
-  async openViewSettingsMenu(): Promise<void> {
-    await this.openHeaderOverflowMenu()
-    await this.page.getByRole("menuitem", { name: /View settings/i }).click()
+  /** Open the chapter-row File options ⋯ menu (file-scoped actions). */
+  async openFileOverflowMenu(): Promise<void> {
+    const fileOptionsBtn = this.page.getByRole("button", { name: /^File options$/i })
+    await expect(fileOptionsBtn).toBeVisible({ timeout: 10_000 })
+    await fileOptionsBtn.click()
   }
 
-  /** AQU-661: Export now lives in the header ⋯ overflow menu. */
+  /** Editor settings live in the file options overflow menu. */
+  async openViewSettingsMenu(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Editor settings/i }).click()
+  }
+
+  /** Export lives in the file options overflow menu. */
   async openExportDialog(): Promise<void> {
-    await this.openHeaderOverflowMenu()
+    await this.openFileOverflowMenu()
     await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 
@@ -406,9 +576,9 @@ export class Workspace {
     }
   }
 
-  /** AQU-331: next unfinished lives in the header overflow menu. */
+  /** Next unfinished lives in the file options overflow menu. */
   async jumpNextUnfinished(): Promise<void> {
-    await this.openHeaderOverflowMenu()
+    await this.openFileOverflowMenu()
     await this.page.getByRole("menuitem", { name: /Next unfinished/i }).click()
   }
 

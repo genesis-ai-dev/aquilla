@@ -426,7 +426,7 @@ async function main() {
   // Character labels (cellLabel = speaker) → cast/voices + line assignments.
   await importCast(aquillaProjectId, pairs, token)
 
-  console.log(`\n✓ Done. Open: ${VITE}/project/${aquillaProjectId}`)
+  console.log(`\n✓ Done. Open: ${VITE}/project/${aquillaProjectId}/editor`)
   console.log("  (re-run this command to confirm idempotency — it should add 0 new events)")
 }
 

@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { CheckCircle2, Circle, Users, X } from "lucide-react"
+import { membersPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { useOrgMembers } from "@/hooks/useOrg"
@@ -59,14 +60,16 @@ export function OrgSetupChecklist({
     <section data-testid="org-setup-checklist" className="rounded-lg border bg-card p-4">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-sm font-medium">Get your organization started</h2>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           onClick={dismiss}
           aria-label="Dismiss checklist"
-          className="text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground"
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </Button>
       </div>
       <p className="mb-3 text-xs text-muted-foreground">{doneCount} of 2 complete</p>
       <ul className="space-y-3">
@@ -93,7 +96,7 @@ export function OrgSetupChecklist({
           )}
           <span className="flex-1 text-sm">Invite a teammate to your organization</span>
           {!invitedTeammate && (
-            <Button size="sm" variant="outline" onClick={() => navigate("/members")}>
+            <Button size="sm" variant="outline" onClick={() => navigate(membersPath(orgId))}>
               <Users className="mr-1.5 h-4 w-4" /> Invite
             </Button>
           )}

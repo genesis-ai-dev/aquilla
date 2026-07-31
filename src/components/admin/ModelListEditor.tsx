@@ -2,6 +2,7 @@ import { useState } from "react"
 import { MessageSquare, Bot, Plus, X } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export interface ModelListValue {
@@ -98,14 +99,16 @@ export function ModelListEditor({
                 label="Agent"
                 title="Use as the agent model"
               />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-xs"
                 onClick={() => removeModel(id)}
                 aria-label={`Remove ${id}`}
-                className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                className="text-muted-foreground hover:text-destructive"
               >
-                <X className="size-3.5" />
-              </button>
+                <X />
+              </Button>
             </li>
           ))}
         </ul>
@@ -133,21 +136,22 @@ function RoleToggle({
   title: string
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={`${label}${active ? " (selected)" : ""}`}
-      title={title}
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
-        active
-          ? "border-transparent bg-primary text-primary-foreground"
-          : "border-input text-muted-foreground hover:text-foreground",
-      )}
-    >
-      <Icon className="size-3" />
-      {label}
-    </button>
+    <AppTooltip content={title}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        aria-label={`${label}${active ? " (selected)" : ""}`}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors",
+          active
+            ? "border-transparent bg-primary text-primary-foreground"
+            : "border-input text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <Icon className="size-3" />
+        {label}
+      </button>
+    </AppTooltip>
   )
 }

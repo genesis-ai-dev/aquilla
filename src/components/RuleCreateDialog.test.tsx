@@ -10,12 +10,13 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { RuleCreateDialog } from "./RuleCreateDialog"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 
 vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
 
 describe("RuleCreateDialog permission gate (AQU-480)", () => {
-  it("disables the Add Rule trigger with a reason when canManage is false", () => {
-    render(
+  it("disables the Add Rule trigger with a reason when canManage is false", async () => {
+    renderWithTooltips(
       <RuleCreateDialog
         onAdd={vi.fn()}
         canManage={false}
@@ -24,7 +25,7 @@ describe("RuleCreateDialog permission gate (AQU-480)", () => {
     )
     const trigger = screen.getByRole("button", { name: /Add Rule/i })
     expect(trigger).toBeDisabled()
-    expect(trigger.getAttribute("title")).toMatch(/maintainers/i)
+    await expectTooltip(trigger, /maintainers/i)
   })
 
   it("enables the Add Rule trigger when canManage is true", () => {

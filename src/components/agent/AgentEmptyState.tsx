@@ -79,7 +79,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <p className="text-[11px] font-medium uppercase tracking-wide">Try asking</p>
+          <p className="text-[11px] font-medium">Try asking</p>
           {EXAMPLE_PROMPTS.map((prompt) => (
             <button
               key={prompt}
@@ -93,7 +93,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
         </div>
 
         <div className="flex flex-col gap-1">
-          <p className="text-[11px] font-medium uppercase tracking-wide">Shortcuts</p>
+          <p className="text-[11px] font-medium">Shortcuts</p>
           <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px]">
             {SLASH_COMMANDS.map((cmd) => (
               <div key={cmd.name} className="contents">

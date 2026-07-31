@@ -1,14 +1,12 @@
 import { type Page, request as pwRequest } from "@playwright/test"
-import path from "node:path"
-import fs from "node:fs/promises"
-import { existsSync, mkdirSync } from "node:fs"
-import { fileURLToPath } from "node:url"
 import { seedUser, type SeedUser } from "./seed"
+import {
+  readPersistedSession,
+  type PersistedSession,
+  writePersistedSession,
+} from "./auth-state"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const AUTH_DIR = path.resolve(__dirname, "../.auth")
-
-if (!existsSync(AUTH_DIR)) mkdirSync(AUTH_DIR, { recursive: true })
+export { readPersistedSession, type PersistedSession } from "./auth-state"
 
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
 const AUTH_TRANSPORT_ATTEMPTS = 3
@@ -27,20 +25,11 @@ interface AuthResponse {
   token_type: string
 }
 
-// Mirrors src/lib/frontier/types.ts FrontierSession — the aquilla-identity
-// token response no longer carries gitlab_* fields (frontier-server retired).
-export interface PersistedSession {
-  jwt: string
-  username: string
-  createdAt: string
-}
-
 /** Logs the seed user in via API and writes a JSON sidecar at
- * `e2e/.auth/<username>.json` containing the FrontierSession. Returns
- * the session for immediate use. Always re-mints (no cache) so the
- * stored JWT matches the just-reset DB. */
+ * `e2e/.auth/<identity-origin>/<username>.json` containing the
+ * FrontierSession. Returns the session for immediate use. Always re-mints (no
+ * cache) so the stored JWT matches the just-reset DB. */
 export async function ensureAuthState(username: SeedUser["username"]): Promise<PersistedSession> {
-  const file = path.join(AUTH_DIR, `${username}.json`)
   const u = seedUser(username)
 
   const ctx = await pwRequest.newContext()
@@ -69,16 +58,11 @@ export async function ensureAuthState(username: SeedUser["username"]): Promise<P
       username: u.username,
       createdAt: new Date().toISOString(),
     }
-    await fs.writeFile(file, JSON.stringify(session, null, 2))
+    await writePersistedSession(session)
     return session
   } finally {
     await ctx.dispose()
   }
-}
-
-export async function readPersistedSession(username: SeedUser["username"]): Promise<PersistedSession> {
-  const file = path.join(AUTH_DIR, `${username}.json`)
-  return JSON.parse(await fs.readFile(file, "utf-8")) as PersistedSession
 }
 
 /** Inject the FrontierSession into the page's IndexedDB so the app boots

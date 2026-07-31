@@ -10,6 +10,13 @@ import { BookCallSection } from "./BookCallSection"
 import { useMarketingShell } from "./useMarketingShell"
 import "./homepage.css"
 
+// Help/documentation site (help.aquilla.app). Configurable at build time with
+// the same default HelpMenu uses, so the marketing front door and the in-app
+// help affordance always point at the same docs. (AQU-702)
+const DOCS_URL =
+  (import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
+  "https://help.aquilla.app"
+
 export function Homepage() {
   const brand = useBrand()
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -65,6 +72,7 @@ export function Homepage() {
             <a className="aq-nav-link" href="#languages">Languages</a>
             <a className="aq-nav-link" href="#quality">Quality</a>
             <a className="aq-nav-link" href="#pricing">Pricing</a>
+            <a className="aq-nav-link" href={DOCS_URL}>Docs</a>
             <a className="aq-nav-link" href="#book-call">Book a call</a>
           </div>
           <div className="aq-nav-cta">
@@ -445,7 +453,7 @@ export function Homepage() {
             <h2 className="aq-display">Free to start. Simple when you scale.</h2>
             <p>Aquilla is free for everyone today. No payment is collected on this site yet — usage-based pricing is coming, and we'll tell you before anything changes.</p>
           </div>
-          <div className="aq-price-grid aq-reveal" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+          <div className="aq-price-grid aq-price-grid-3 aq-reveal">
             <div className="aq-price">
               <h4 className="aq-display">Everyone</h4>
               <div className="aq-price-tag">Free, forever</div>
@@ -524,6 +532,11 @@ export function Homepage() {
                 <a href="/onboarding">Sign up free</a>
                 <a href="#book-call">Book a call</a>
                 <a href="#pricing">Enterprise</a>
+              </div>
+              <div className="aq-footer-col">
+                <h5>Resources</h5>
+                <a href={DOCS_URL}>Help &amp; docs</a>
+                <a href="mailto:hello@aquilla.app">Contact us</a>
               </div>
             </div>
           </div>

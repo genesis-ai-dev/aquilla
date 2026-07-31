@@ -129,6 +129,37 @@ describe("external read surface", () => {
       expect(res!.status).toBe(400)
       expect(body.error.code).toBe("validation_failed")
     })
+
+    it("throttles a credential that floods /search", async () => {
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      await testDb.pg.query(
+        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+         SELECT 'external_search', $1, 1 FROM generate_series(1, 300)`,
+        [`credential:${CRED_1}`],
+      )
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/search?q=beginning", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(429)
+      const body = (await res!.json()) as { error: { code: string } }
+      expect(body.error.code).toBe("rate_limited")
+    })
+
+    it("does not throttle a fresh credential", async () => {
+      const other = "00000000-0000-0000-0000-000000000002"
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      await testDb.pg.query(
+        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+         SELECT 'external_search', $1, 1 FROM generate_series(1, 300)`,
+        [`credential:${other}`],
+      )
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/search?q=beginning", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(200)
+    })
   })
 
   describe("cells + files reads", () => {

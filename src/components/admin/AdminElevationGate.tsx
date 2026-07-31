@@ -67,7 +67,7 @@ export function AdminElevationGate({
 
   return (
     <div className="mx-auto mt-10 max-w-md rounded-2xl border bg-card p-6 text-center">
-      <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-full bg-primary/10 text-primary">
+      <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
         <ShieldCheck className="size-6" />
       </div>
       <h2 className="font-heading text-lg font-medium">Admin verification required</h2>

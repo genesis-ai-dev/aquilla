@@ -2152,7 +2152,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 data-testid="edit-target-language"
                 onClick={onEditTargetLanguage}
                 aria-label={project.targetLanguage ? "Change target language" : "Set target language"}
-                className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-[10px] font-normal normal-case tracking-normal text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {project.targetLanguage || "Set target language"}
                 <Languages className="h-2.5 w-2.5" />
@@ -4986,7 +4986,7 @@ function EditorRow({
         ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
       }}
       className={cn(
-        "relative flex h-6 w-6 items-center justify-center rounded-full transition-[transform,color,background-color] duration-150 ease-out",
+        "relative flex h-6 w-6 items-center justify-center rounded-lg transition-[transform,color,background-color] duration-150 ease-out",
         "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
         "hover:bg-muted/80",
         validationColorClass,
@@ -6586,7 +6586,7 @@ function EditorRow({
                     </>
                   ) : (
                     <div className="flex flex-col items-center gap-3 py-4 text-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/40 text-muted-foreground/50">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground/50">
                         <Mic className="h-5 w-5" />
                       </div>
                       <p className="text-xs text-muted-foreground">

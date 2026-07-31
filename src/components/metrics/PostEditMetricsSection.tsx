@@ -138,7 +138,7 @@ function UserTable({ users, activeUser, onSelectUser }: {
                 <TableCell className="text-right">
                   <span className="inline-flex items-center gap-1.5">
                     <span
-                      className={`inline-block size-2 rounded-full ${nedColor(u.avgNed)}`}
+                      className={`inline-block size-2 rounded-lg ${nedColor(u.avgNed)}`}
                     />
                     <span>{pct(u.avgNed)}</span>
                     <span className="text-xs text-muted-foreground">({nedLabel(u.avgNed)})</span>

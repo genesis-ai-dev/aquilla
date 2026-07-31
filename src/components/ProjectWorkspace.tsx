@@ -131,7 +131,6 @@ import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
-import { audioLensLabel, audioLensIcon } from "@/lib/editor/audio-lens-label"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import { SelectionBar } from "./SelectionBar"
@@ -409,6 +408,11 @@ export function ProjectWorkspace() {
   // without this overlay a deleted file lingers until the outbox flushes and
   // a later refetch happens to run.
   const [optimisticDeletes, setOptimisticDeletes] = useState<Set<string>>(new Set())
+  // FRO-272: soft-deleted ("Recently deleted") files — server list + optimistic
+  // overlay so the trash dialog is not empty while file.delete is still flushing.
+  const [deletedFiles, setDeletedFiles] = useState<FileSummary[]>([])
+  const [optimisticTrash, setOptimisticTrash] = useState<FileSummary[]>([])
+  const [trashOpen, setTrashOpen] = useState(false)
   // Session-local dismissal of the rename-suggestion banner. (Persisting this
   // across reloads would need server backing; the in-session state is what the
   // X button and "apply" flows actually need.)
@@ -421,6 +425,8 @@ export function ProjectWorkspace() {
     setOptimisticFiles([])
     setOptimisticRenames(new Map())
     setOptimisticDeletes(new Set())
+    setOptimisticTrash([])
+    setDeletedFiles([])
     setSuggestionsDismissed(false)
     setClientProject(null)
   }, [projectId])
@@ -3640,22 +3646,37 @@ export function ProjectWorkspace() {
   // Latest project for the suggestion-apply undo toast action (avoids stale closure).
   const projectForUndoRef = useRef(project)
   projectForUndoRef.current = project
-  // FRO-272: soft-deleted ("Recently deleted") files fetched from the server.
-  const [deletedFiles, setDeletedFiles] = useState<FileSummary[]>([])
-  const [trashOpen, setTrashOpen] = useState(false)
   // Fetch trash list whenever the section opens or after a delete/restore/purge.
   const refreshDeletedFiles = useCallback(async () => {
     if (!project?.id || !frontierSession?.jwt) return
     try {
+      // Flush first so a just-enqueued file.delete is projected before we read.
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       const files = await fetchDeletedFiles(project.id, frontierSession.jwt)
       setDeletedFiles(files)
+      // Drop optimistic rows the server now knows about.
+      const serverIds = new Set(files.map((f) => f.fileId))
+      setOptimisticTrash((prev) => {
+        if (prev.length === 0) return prev
+        const next = prev.filter((f) => !serverIds.has(f.fileId))
+        return next.length === prev.length ? prev : next
+      })
     } catch {
-      // Non-fatal — trash section shows empty on error.
+      // Non-fatal — trash section shows optimistic entries / empty on error.
     }
-  }, [project?.id, frontierSession?.jwt])
+  }, [project?.id, frontierSession?.jwt, getTokenForProjectFile])
   useEffect(() => {
     if (trashOpen) void refreshDeletedFiles()
   }, [trashOpen, refreshDeletedFiles])
+
+  const trashFiles = useMemo(() => {
+    const byId = new Map<string, FileSummary>()
+    for (const f of deletedFiles) byId.set(f.fileId, f)
+    for (const f of optimisticTrash) {
+      if (!byId.has(f.fileId)) byId.set(f.fileId, f)
+    }
+    return Array.from(byId.values())
+  }, [deletedFiles, optimisticTrash])
 
   const applyRenames = useCallback(async (
     renames: Array<{ fileId: string; name: string }>,
@@ -3707,6 +3728,8 @@ export function ProjectWorkspace() {
   const handleDeleteFile = useCallback(async (fileId: string) => {
     if (!project) return
 
+    const deleted = project.files.find((f) => f.id === fileId)
+
     // Remove the row in the same interaction frame. Enqueuing is normally
     // quick, but IndexedDB can be delayed by another transaction; the visible
     // result of an acknowledged destructive action must not wait on it.
@@ -3715,6 +3738,30 @@ export function ProjectWorkspace() {
       next.add(fileId)
       return next
     })
+    // Surface in Recently deleted immediately — the server list only updates
+    // after the outbox flushes and projects file.delete.
+    if (deleted) {
+      setOptimisticTrash((current) => {
+        if (current.some((f) => f.fileId === fileId)) return current
+        return [
+          ...current,
+          {
+            fileId: deleted.id,
+            projectId: project.id,
+            name: deleted.name,
+            fileType: deleted.type,
+            sourceLanguage: null,
+            targetLanguage: null,
+            cellCount: 0,
+            approvedCount: 0,
+            filledCount: 0,
+            wordCount: 0,
+            lastEditAt: null,
+            deletedAt: Date.now(),
+          },
+        ]
+      })
+    }
 
     try {
       await emitFileDelete({
@@ -3731,6 +3778,7 @@ export function ProjectWorkspace() {
         next.delete(fileId)
         return next
       })
+      setOptimisticTrash((current) => current.filter((f) => f.fileId !== fileId))
       return
     }
 
@@ -3744,8 +3792,8 @@ export function ProjectWorkspace() {
 
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
-    if (trashOpen) void refreshDeletedFiles()
-  }, [project, currentUsername, refresh, activeFileId, setActiveFileId, trashOpen, refreshDeletedFiles])
+    void refreshDeletedFiles()
+  }, [project, currentUsername, refresh, activeFileId, setActiveFileId, refreshDeletedFiles])
 
   // Restore a soft-deleted file: emit file.restore, then refresh listings.
   const handleRestoreFile = useCallback(async (fileId: string) => {
@@ -3768,6 +3816,7 @@ export function ProjectWorkspace() {
       next.delete(fileId)
       return next
     })
+    setOptimisticTrash((current) => current.filter((f) => f.fileId !== fileId))
     refresh()
     void refreshDeletedFiles()
   }, [project, currentUsername, refresh, refreshDeletedFiles])
@@ -3776,6 +3825,8 @@ export function ProjectWorkspace() {
   // Only available from the trash UI (after the file is already soft-deleted).
   const handlePurgeFile = useCallback(async (fileId: string) => {
     if (!project) return
+    setOptimisticTrash((current) => current.filter((f) => f.fileId !== fileId))
+    setDeletedFiles((current) => current.filter((f) => f.fileId !== fileId))
     void deleteFileProjection({
       jwt: frontierSession?.jwt ?? null,
       projectId: project.id,
@@ -3967,39 +4018,21 @@ export function ProjectWorkspace() {
   }, [project?.id, isReadOnly, getActiveCell, activeFileId, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, currentUsername, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, rebuildSearchIndex])
 
   const projectNavItems = useMemo(() => {
-    // AQU-353: mirror the header lens toggle's label/icon exactly (see the
-    // "voice-studio" item below).
-    const audioLensTimeOrdered = activeFile ? fileOrderedBy(activeFile) === "time" : false
     const items = [
       { id: "rules", label: "Rules", icon: Scale,
         onClick: () => navigate(`/project/${projectId}/rules`) },
-      { id: "terminology", label: "Terminology", icon: BookOpen,
-        onClick: () => navigate(`/project/${projectId}/terminology`) },
-      // Pinned: Comments carries a live unread count, so it stays visible;
-      // everything unpinned collapses into the sidebar "More" menu.
+      // Pinned below Comments: Terminology is a frequent destination, so it
+      // stays visible; everything else unpinned collapses into "More".
       { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => navigate(`/project/${projectId}/comments`) },
+      { id: "terminology", label: "Terminology", icon: BookOpen, pinned: true,
+        onClick: () => navigate(`/project/${projectId}/terminology`) },
       { id: "living-memory", label: "Memory", icon: BookMarked,
         onClick: () => navigate(`/project/${projectId}/memory`) },
-      // AQU-353: this sidebar entry toggles the SAME Text/Audio lens as the
-      // header segmented control (EditorModeToggle). It used to be labelled
-      // "Voice" with the Mic2 icon while the header said "Audio", so testers hit
-      // what looked like two different destinations. Both now read the canonical
-      // label/icon from the shared audio-lens helper so they can't drift apart
-      // ("Audio"/Mic2 for cell files, "Media"/AudioWaveform for time-ordered).
-      //
-      // NB: whether a nav *button* toggling a view mode (rather than navigating)
-      // is the right interaction is a separate open question tracked with the
-      // sidebar rework (FRO-308); this change only unifies the naming.
-      { id: "voice-studio", label: audioLensLabel(audioLensTimeOrdered), icon: audioLensIcon(audioLensTimeOrdered),
-        onClick: () => {
-          const next = lens === "audio" ? "text" : "audio"
-          switchLens(next)
-          // The Voices panel now lives in its own dock tab — surface it when
-          // entering the Audio lens; fall back to Files when leaving.
-          setDockTab(next === "audio" ? "voices" : "files")
-        } },
+      // Audio/Media lens lives in the header EditorModeToggle — keep it out of
+      // the sidebar More menu so the overflow list stays structural (share,
+      // settings, trash) rather than view-mode toggles.
       { id: "share", label: "Share", icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", label: "Settings", icon: SettingsIcon,
@@ -4018,7 +4051,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [projectId, activeFileId, activeFile, navigate, openCommentCount, lens, switchLens, setDockTab, currentRoleLevel])
+  }, [projectId, activeFileId, navigate, openCommentCount, currentRoleLevel])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -4916,8 +4949,6 @@ export function ProjectWorkspace() {
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
                   renameSignal={renameSignal}
-                  onOpenGlossary={() => navigate(`/project/${projectId}/terminology`)}
-                  glossaryActive={centerSurface === "terminology"}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
@@ -5894,10 +5925,10 @@ export function ProjectWorkspace() {
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Recently deleted</DialogTitle></DialogHeader>
           <div className="space-y-0.5">
-            {deletedFiles.length === 0 && (
+            {trashFiles.length === 0 && (
               <p className="px-1 py-1 text-sm text-muted-foreground">No recently deleted files.</p>
             )}
-            {deletedFiles.map((f) => (
+            {trashFiles.map((f) => (
               <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
                 <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
                 <AppTooltip content="Cells and audio come back intact">
@@ -6100,7 +6131,7 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
         <div className="bg-card max-w-md rounded-2xl p-8 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
           <Trash2 className="h-6 w-6 text-muted-foreground" />
         </div>
         <h1 className="mb-2 text-lg font-semibold">This project is in Trash</h1>

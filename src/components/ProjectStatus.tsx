@@ -99,7 +99,7 @@ export function LinearStatus({
       className={cn("flex items-center gap-1.5", className)}
       {...(testId ? { "data-testid": testId } : {})}
     >
-      <span className={cn("relative size-4 shrink-0 rounded-full", styles.iconBg)} aria-hidden>
+      <span className={cn("relative size-4 shrink-0 rounded-lg", styles.iconBg)} aria-hidden>
         <Icon
           className={cn(
             "absolute top-1/2 left-1/2 size-3 -translate-x-1/2 -translate-y-1/2",

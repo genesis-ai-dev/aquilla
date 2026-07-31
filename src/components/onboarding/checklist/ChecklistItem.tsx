@@ -78,7 +78,7 @@ function CompletionDot({ complete }: { complete: boolean }) {
   return (
     <div
       className={
-        "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full " +
+        "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-lg " +
         (complete
           ? "bg-emerald-500 text-white"
           : "border-2 border-muted-foreground/25 bg-background")

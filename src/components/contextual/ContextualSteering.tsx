@@ -77,7 +77,7 @@ export function ContextualSteering({ projectId, fileId, runId, directions }: Ste
             {directions.length > 0 && (
               <span
                 data-testid="contextual-steering-count"
-                className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] leading-none tabular-nums text-primary-foreground"
+                className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-lg bg-primary px-0.5 text-[9px] leading-none tabular-nums text-primary-foreground"
               >
                 {directions.length}
               </span>

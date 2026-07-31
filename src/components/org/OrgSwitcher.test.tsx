@@ -54,6 +54,83 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
   })
 
+  it("search filters orgs and keeps Create outside the scroll list", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } },
+      { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+      { id: 3, name: "Zebra Corp", role: { level: 100, name: "viewer" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
+
+    const trigger = screen.getByRole("button", { name: "Organization switcher: All organizations" })
+    await act(async () => {
+      trigger.click()
+    })
+
+    const search = screen.getByRole("textbox", { name: /find an organization/i })
+    expect(search).toBeInTheDocument()
+    fireEvent.change(search, { target: { value: "zebra" } })
+
+    expect(screen.getByText("Zebra Corp")).toBeInTheDocument()
+    expect(screen.queryByText("Come and See")).not.toBeInTheDocument()
+    expect(screen.queryByText("Side Org")).not.toBeInTheDocument()
+    // All-orgs scope is a navigation shortcut, not a searchable org — hide while typing.
+    expect(screen.queryByRole("menuitem", { name: /all organizations/i })).not.toBeInTheDocument()
+    // Create stays pinned below the scrollable org list.
+    expect(screen.getByRole("menuitem", { name: /^create$/i })).toBeInTheDocument()
+
+    // Close keeps the query; reopen clears it so the next session starts fresh.
+    fireEvent.keyDown(search, { key: "Escape" })
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: /find an organization/i })).not.toBeInTheDocument()
+    })
+    await act(async () => {
+      trigger.click()
+    })
+    const reopened = await screen.findByRole("textbox", { name: /find an organization/i })
+    expect(reopened).toHaveValue("")
+    expect(screen.getByText("Come and See")).toBeInTheDocument()
+    expect(screen.getByText("Zebra Corp")).toBeInTheDocument()
+  })
+
+  it("Escape while focusing the search input closes the popover", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+
+    await act(async () => { screen.getByRole("button", { name: /acme/i }).click() })
+    const search = await screen.findByRole("textbox", { name: /find an organization/i })
+    expect(screen.getByRole("menuitem", { name: /^create$/i })).toBeInTheDocument()
+
+    fireEvent.keyDown(search, { key: "Escape" })
+
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: /find an organization/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it("hovering an org row does not steal focus from the search input", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
+
+    await act(async () => {
+      screen.getByRole("button", { name: "Organization switcher: All organizations" }).click()
+    })
+    const search = await screen.findByRole("textbox", { name: /find an organization/i })
+    await waitFor(() => expect(search).toHaveFocus())
+
+    fireEvent.pointerMove(screen.getByRole("menuitem", { name: /side org/i }))
+
+    expect(search).toHaveFocus()
+  })
+
   it("create org: opens dialog, types name, submits, calls createOrg", async () => {
     listMyOrgs
       .mockResolvedValueOnce([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])

@@ -224,6 +224,7 @@
 | Rules       | Rules page add rule dialog opens                      | `e2e/specs/rules/rules-page-add-rule-dialog.smoke.spec.ts`    |   ✅   |
 | Rules       | Rules page back to editor navigation                  | `e2e/specs/rules/rules-page-back-to-editor.smoke.spec.ts`     |   ✅   |
 | Rules       | Rule create dialog test button                        | `e2e/specs/rules/rule-create-dialog-test-button.smoke.spec.ts` |   ✅   |
+| Editor      | Sidebar pins Terminology below Comments; Glossary removed from file-list top | `e2e/specs/editor/sidebar-terminology-nav.smoke.spec.ts` | ✅ |
 | Terminology | Glossary renders and inline append row creates an active term | `e2e/specs/projects/terminology.smoke.spec.ts` + `terminology-add-concept.smoke.spec.ts` | ✅ |
 | Terminology | Edit a glossary source term inline                    | `e2e/specs/projects/terminology-edit-concept.smoke.spec.ts`   | ✅ |
 | Terminology | Glossary lifecycle archives and restores an active term | `e2e/specs/projects/terminology-concept-status-select.smoke.spec.ts` | ✅ |

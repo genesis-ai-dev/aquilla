@@ -154,7 +154,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               size="icon-xs"
               onClick={() => setDismissedMismatchSignature(mismatchSignature)}
               aria-label="Dismiss direction warning"
-              className="size-5 rounded-full text-muted-foreground/70"
+              className="size-5 rounded-lg text-muted-foreground/70"
             >
               <X className="h-3 w-3" />
             </Button>

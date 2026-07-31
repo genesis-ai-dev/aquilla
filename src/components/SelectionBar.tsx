@@ -286,7 +286,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           </span>
         )}
       </span>
-      <div className="mx-1 h-5 w-px rounded-full" />
+      <div className="mx-1 h-5 w-px rounded-lg" />
       {audioMode && (
         <AppTooltip content={
           !onVoiceTogether ? "Voicing isn't available here" :

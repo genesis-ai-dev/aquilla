@@ -118,12 +118,12 @@ function ConceptSelectRow({
         {selected ? (
           <Badge
             variant="default"
-            className="h-5 w-5 rounded-full p-0 flex items-center justify-center text-[10px] tabular-nums"
+            className="h-5 w-5 rounded-lg p-0 flex items-center justify-center text-[10px] tabular-nums"
           >
             {selectionOrder}
           </Badge>
         ) : (
-          <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/30" />
+          <div className="h-5 w-5 rounded-lg border-2 border-muted-foreground/30" />
         )}
       </div>
 

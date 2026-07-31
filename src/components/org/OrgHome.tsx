@@ -50,6 +50,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
@@ -111,7 +112,7 @@ function OrgHomeLoadingTemplate() {
         header={
           <div className="flex items-center justify-between gap-4 px-4">
             <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-7 w-56 rounded-full" />
+            <Skeleton className="h-7 w-56 rounded-lg" />
           </div>
         }
         statusBar={null}
@@ -1027,20 +1028,12 @@ export function OrgHome() {
                           </InputGroup>
                           <div className="flex shrink-0 items-center gap-2" aria-label="Project status filter">
                             <span className="text-xs font-medium text-muted-foreground">Status</span>
-                            <div className="flex items-center gap-1">
-                              {STATUS_FILTERS.map((f) => (
-                                <Button
-                                  key={f.value}
-                                  type="button"
-                                  size="xs"
-                                  variant={statusFilter === f.value ? "default" : "secondary"}
-                                  onClick={() => setStatusFilter(f.value)}
-                                  aria-pressed={statusFilter === f.value}
-                                >
-                                  {f.label}
-                                </Button>
-                              ))}
-                            </div>
+                            <SegmentTabs
+                              aria-label="Project status filter"
+                              value={statusFilter}
+                              onValueChange={setStatusFilter}
+                              options={STATUS_FILTERS}
+                            />
                           </div>
                           <div className="ml-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
                             <span className="text-xs font-medium text-muted-foreground">Sort by</span>
@@ -1140,21 +1133,13 @@ export function OrgHome() {
                       }
                     />
                   ) : (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-wrap items-center gap-1" aria-label="Project status filter">
-                        {STATUS_FILTERS.map((f) => (
-                          <Button
-                            key={f.value}
-                            type="button"
-                            size="xs"
-                            variant={statusFilter === f.value ? "default" : "secondary"}
-                            onClick={() => setStatusFilter(f.value)}
-                            aria-pressed={statusFilter === f.value}
-                          >
-                            {f.label}
-                          </Button>
-                        ))}
-                      </div>
+                      <div className="flex flex-col gap-3">
+                      <SegmentTabs
+                        aria-label="Project status filter"
+                        value={statusFilter}
+                        onValueChange={setStatusFilter}
+                        options={STATUS_FILTERS}
+                      />
 
                       <OrgProjectsDataTable
                         projects={statusFilteredProjects}

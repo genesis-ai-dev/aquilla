@@ -258,9 +258,14 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Kill Safari/macOS rubber-band bounce on the viewport (main window
+       scroll). Inner panes keep using overscroll-contain for their own
+       scroll chaining. */
+    overscroll-behavior: none;
   }
   html {
     @apply font-sans;
+    overscroll-behavior: none;
   }
   html.dark {
     color-scheme: dark;

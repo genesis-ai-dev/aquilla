@@ -1976,15 +1976,21 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           </div>
         )}
         {(milestoneNavigationItems.length > 0 && activeChapterLabel) || chapterNavTrailing ? (
-          // Below lg: in-flow left picker + end toolbar. lg+: absolute center
-          // over the full header (same midpoint as the table beneath).
-          <div className="relative flex items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
+          // Below lg: in-flow left picker + end toolbar. lg+: equal flex
+          // balancers keep the picker centered without absolute overlay — the
+          // old inset-0 layer painted under Text/Audio + ⋯ when space was tight.
+          // min-w-24 floors the picker at prev + chevron + next (three size-8s).
+          // gap-2 matches FileChapterToolbar's tabs ↔ ⋯ spacing.
+          <div className="relative flex items-center gap-2 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
+            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+              <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
+            ) : null}
             {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
               <div
                 data-chapter-nav-slot=""
-                className="mr-auto flex min-w-0 flex-1 items-center lg:pointer-events-none lg:absolute lg:inset-0 lg:mr-0 lg:flex-none lg:justify-center"
+                className="mr-auto flex min-w-24 max-w-full flex-1 items-center lg:mr-0 lg:flex-none lg:shrink"
               >
-                <div className="min-w-0 w-full max-w-full lg:w-auto lg:pointer-events-auto">
+                <div className="min-w-0 w-full max-w-full lg:w-auto">
                   <MilestoneNavigator
                     items={milestoneNavigationItems}
                     activeKey={activeChapterLabel}
@@ -1995,7 +2001,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               </div>
             ) : null}
             {chapterNavTrailing ? (
-              <div className="relative z-10 flex shrink-0 items-center">{chapterNavTrailing}</div>
+              <div
+                className={
+                  milestoneNavigationItems.length > 0 && activeChapterLabel
+                    ? "flex shrink-0 items-center lg:flex-1 lg:justify-end"
+                    : "ml-auto flex shrink-0 items-center"
+                }
+              >
+                {chapterNavTrailing}
+              </div>
+            ) : milestoneNavigationItems.length > 0 && activeChapterLabel ? (
+              <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
             ) : null}
           </div>
         ) : null}

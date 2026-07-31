@@ -62,9 +62,13 @@ describe("MilestoneNavigator", () => {
     expect(trigger).toHaveClass("px-2.5")
     expect(trigger).toHaveClass("gap-2")
     expect(trigger).toHaveClass("shrink")
+    expect(trigger).toHaveClass("data-[icon-only]:shrink-0")
     expect(trigger).toHaveClass("xl:w-56")
     expect(trigger).toHaveClass("flex")
     expect(trigger).toHaveClass("items-center")
+    // Collapsed floor: prev + chevron + next (three size-8 buttons).
+    expect(screen.getByRole("navigation", { name: "Milestone navigation" })).toHaveClass("min-w-24")
+    expect(screen.getByRole("group", { name: "Move between chapters" })).toHaveClass("min-w-24")
     expect(screen.getByText("Matthew 1")).toHaveClass("truncate")
     expect(screen.getByText("Verses 1–25")).toHaveClass("truncate")
     expect(screen.getByText("Verses 1–25")).toHaveClass("hidden")

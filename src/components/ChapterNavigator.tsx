@@ -402,11 +402,13 @@ export function MilestoneNavigator({
   }
 
   return (
-    <nav aria-label="Milestone navigation" className="flex w-full min-w-0 max-w-full items-center lg:w-auto">
+    <nav aria-label="Milestone navigation" className="flex w-full min-w-24 max-w-full items-center lg:w-auto">
       <ButtonGroup
         ref={buttonGroupRef}
         aria-label={`Move between ${vocabulary.plural.toLocaleLowerCase()}`}
-        className="min-w-0 max-w-full shadow-xs"
+        // Floor: prev + middle + next icon buttons (3× size-8). Never shrink
+        // below the collapsed chevron-only trigger state.
+        className="min-w-24 max-w-full shadow-xs"
       >
         <Button
           variant="outline"
@@ -473,7 +475,7 @@ export function MilestoneNavigator({
                 // Default: padded label + chevron. data-icon-only: true icon
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
-                className="flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:gap-0 data-[icon-only]:p-0 xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ml-auto [&>svg:last-child]:shrink-0"
+                className="flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ml-auto [&>svg:last-child]:shrink-0"
                 aria-label={`Current ${vocabulary.singular}: ${active.label}${
                   activeSubsection ? `, cells ${activeSubsection.label}` : ""
                 }. Choose ${vocabulary.singular}`}

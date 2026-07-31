@@ -103,10 +103,14 @@ export function UsernameTypeahead({
   emptySuggestionsHint,
 }: Props) {
   const [open, setOpen] = useState(false)
+  // Anchored below the input by default (`top`), flipped above (`bottom`)
+  // when the viewport can't fit the dropdown underneath — e.g. the add row
+  // at the bottom of the project overview Members card.
   const [dropdownPosition, setDropdownPosition] = useState<{
     left: number
-    top: number
     width: number
+    top?: number
+    bottom?: number
   } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -191,11 +195,21 @@ export function UsernameTypeahead({
     function updateDropdownPosition() {
       const rect = containerRef.current?.getBoundingClientRect()
       if (!rect) return
-      setDropdownPosition({
-        left: rect.left,
-        top: rect.bottom + 4,
-        width: rect.width,
-      })
+      // max-h-44 (176px) + gap: flip above when that can't fit below and
+      // there's more room above. Anchoring with `bottom` lets the list grow
+      // upward as rows load, so no content measurement is needed.
+      const DROPDOWN_MAX_PX = 176 + 8
+      const spaceBelow = window.innerHeight - rect.bottom
+      const openAbove = spaceBelow < DROPDOWN_MAX_PX && rect.top > spaceBelow
+      setDropdownPosition(
+        openAbove
+          ? {
+              left: rect.left,
+              width: rect.width,
+              bottom: window.innerHeight - rect.top + 4,
+            }
+          : { left: rect.left, width: rect.width, top: rect.bottom + 4 },
+      )
     }
 
     updateDropdownPosition()
@@ -321,8 +335,9 @@ export function UsernameTypeahead({
           className="fixed z-[60] max-h-44 overflow-y-auto rounded-md border bg-popover shadow-md"
           style={{
             left: dropdownPosition.left,
-            top: dropdownPosition.top,
             width: dropdownPosition.width,
+            top: dropdownPosition.top,
+            bottom: dropdownPosition.bottom,
           }}
         >
           {needsMorePrefix && visibleRows.length === 0 && (

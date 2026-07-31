@@ -122,3 +122,48 @@ describe("UsernameTypeahead — suggestions + settled-miss staging", () => {
     ).not.toBeInTheDocument()
   })
 })
+
+describe("UsernameTypeahead — dropdown placement", () => {
+  function mockInputRect(rect: { top: number; bottom: number }) {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 40,
+      y: rect.top,
+      left: 40,
+      right: 440,
+      width: 400,
+      height: rect.bottom - rect.top,
+      top: rect.top,
+      bottom: rect.bottom,
+      toJSON: () => ({}),
+    } as DOMRect)
+  }
+
+  function dropdown(): HTMLElement {
+    // The portal container is the fixed-positioned ancestor of a known row.
+    const el = screen.getByRole("checkbox", { name: "dana" }).closest(".fixed")
+    expect(el).not.toBeNull()
+    return el as HTMLElement
+  }
+
+  const SUGGESTIONS = [{ id: 5, username: "dana" }]
+
+  it("opens below the field when there is room underneath", () => {
+    mockInputRect({ top: 100, bottom: 132 })
+    render(<Harness multiSelect suggestions={SUGGESTIONS} />)
+    fireEvent.focus(input())
+
+    expect(dropdown().style.top).toBe("136px")
+    expect(dropdown().style.bottom).toBe("")
+  })
+
+  it("flips above the field when the viewport would cut it off below", () => {
+    // Field hugs the viewport bottom (happy-dom window.innerHeight = 768):
+    // 20px below < the 184px the dropdown may need, plenty of room above.
+    mockInputRect({ top: 716, bottom: 748 })
+    render(<Harness multiSelect suggestions={SUGGESTIONS} />)
+    fireEvent.focus(input())
+
+    expect(dropdown().style.bottom).toBe(`${window.innerHeight - 716 + 4}px`)
+    expect(dropdown().style.top).toBe("")
+  })
+})

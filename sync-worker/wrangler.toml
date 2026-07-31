@@ -9,6 +9,7 @@ workers_dev = true
 # Top-level vars serve LOCAL `wrangler dev` (scripts/dev-stack.ts, e2e-up.ts —
 # both run the default profile). Deployed envs re-declare below (no inherit).
 [vars]
+ENVIRONMENT = "local"
 # Identity worker base URL for the Monday-integration push nudge
 # (src/monday-notify.ts). Local dev stack runs identity on 8788.
 AUTH_WORKER_URL = "http://127.0.0.1:8788"
@@ -18,9 +19,10 @@ AUTH_WORKER_URL = "http://127.0.0.1:8788"
 # =============================================================================
 # Routes live in `[env.production]` and `[env.staging]` below. This file is
 # the source of truth — don't add or remove routes via the Cloudflare
-# dashboard. CI's token lacks zone-route perms so CI runs bare
-# `wrangler deploy` (top-level, code only). Routes are applied by a LOCAL
-# deploy with a zone-perm token:
+# dashboard. CI deploys an explicit named environment so code and bindings
+# always come from the same profile. Wrangler applies routes through the
+# zone-scoped API when the token does not have account-wide zone access.
+# Routes can also be applied by a LOCAL deploy:
 #
 #   pnpm run deploy:aquilla:sync        # = wrangler deploy --env=production
 #   (cd sync-worker && wrangler deploy --env=staging)
@@ -100,9 +102,8 @@ enabled = true
 # the API surface lives on its own subdomain independent of the web app.
 # Pre-migration this was mounted at aquilla.app/api/sync/*; the path-strip
 # in src/index.ts (APEX_PREFIX) handles the new shape transparently.
-# NOTE: CI strips `routes` lines before deploying (its token lacks
-# zone-route perms). Routes are created out-of-band via CF dashboard or
-# local `wrangler deploy --env production`.
+# CI and local deploys both use `wrangler deploy --env production`, keeping
+# the script, bindings, variables, and custom-domain routes in one profile.
 # ---------------------------------------------------------------------------
 [env.production]
 name = "aquilla-sync-worker"
@@ -115,6 +116,7 @@ routes = ["api.aquilla.app/sync/*"]
 enabled = true
 
 [env.production.vars]
+ENVIRONMENT = "production"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
 # Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
@@ -169,6 +171,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.dev.aquilla.app/sync/*"]
 
 [env.development.vars]
+ENVIRONMENT = "development"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.dev.aquilla.app/identity"
 
@@ -228,6 +231,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.staging.aquilla.app/sync/*"]
 
 [env.staging.vars]
+ENVIRONMENT = "staging"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.staging.aquilla.app/identity"
 

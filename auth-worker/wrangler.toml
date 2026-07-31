@@ -18,9 +18,9 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # the Cloudflare dashboard.
 #
 # Why the top-level config has no `routes` block:
-#   CI's API token lacks `Zone.Workers Routes:Edit` on the aquilla.app zone,
-#   so a routed deploy fails with auth error [10000]. CI runs bare
-#   `wrangler deploy` (which uses this top-level config) and only ships CODE.
+#   Production CI uses the explicit `[env.production]` profile below so its
+#   code, bindings, variables, and routes cannot drift across environments.
+#   The top-level block remains useful for local/default Wrangler commands.
 #
 # Routes are applied by a LOCAL deploy with a zone-perm token:
 #   pnpm run deploy:aquilla:auth        # = wrangler deploy --env=production
@@ -33,10 +33,8 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 #   2. Run the deploy command above.
 #   3. Commit the wrangler.toml change.
 #
-# Future state: when CI's token is upgraded with zone-route perms,
-# `.github/workflows/deploy-workers.yml` can switch to
-# `wrangler deploy --env=production`, after which routes ship on every push
-# to main. Until then, route changes are a deliberate local step.
+# CI's token may not have account-wide "All Zones" access; Wrangler falls back
+# to the zone-scoped endpoint and applies the aquilla.app routes individually.
 # =============================================================================
 #
 # Chat: /chat/* on api.aquilla.app is owned by this worker (folded in from
@@ -67,17 +65,15 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
 # R2 bucket for agent-attached artifacts (routes/agent-artifacts.ts). Same
 # bucket sync-worker + agent-worker bind as SNAPSHOTS, so the harness's
-# load_artifact tool reads back what the SPA composer uploads. CI's `wrangler
-# deploy` (no --env) targets this top-level block → the prod bucket.
+# load_artifact tool reads back what the SPA composer uploads. The default
+# profile mirrors the prod bucket for safe manual/default Wrangler commands;
+# CI selects `[env.production]` explicitly.
 [[r2_buckets]]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 
-# CI's `wrangler deploy` (no --env) targets this top-level block for the
-# actually-live aquilla-identity worker (see ROUTE/ENV note above), so the
-# EMAIL binding must be duplicated here too, not just under [env.production] —
-# its absence here was silently making prod behave like the no-EMAIL dev
-# fallback (email sends were no-ops, and admin elevation leaked devCode).
+# Keep the EMAIL binding duplicated here for safe local/default deploys, even
+# though CI targets the explicit production profile below.
 [[send_email]]
 name = "EMAIL"
 
@@ -101,9 +97,8 @@ name = "EMAIL"
 # ONE-TIME SETUP: the sending domain (support.aquilla.app, see EMAIL_FROM) must be
 # onboarded under Compute > Email Service > Email Sending in the dashboard
 # (Frontier R&D account) or sends fail with E_SENDER_NOT_VERIFIED. The
-# binding is deliberately ABSENT from the top-level and e2e profiles so
-# local `wrangler dev` (pinned wrangler 3.x predates Email Service local
-# simulation) keeps email as a no-op — see src/services/email.ts.
+# binding is deliberately absent from the e2e profile, where notifications
+# remain a no-op — see src/services/email.ts.
 
 [observability]
 enabled = true
@@ -174,10 +169,9 @@ MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
 
 # ---------------------------------------------------------------------------
 # Production environment — owns routes on api.aquilla.app for the identity
-# and chat surfaces. Same worker name as top-level (aquilla-identity), so
-# `wrangler deploy` (CI, code-only) and `wrangler deploy --env=production`
-# (local, code + routes) target the same Worker. Bindings + vars are
-# re-declared because env blocks don't inherit them.
+# and chat surfaces. Same worker name as top-level (aquilla-identity), while
+# CI and production scripts both select this profile explicitly. Bindings +
+# vars are re-declared because env blocks don't inherit them.
 # ---------------------------------------------------------------------------
 [env.production]
 name = "aquilla-identity"

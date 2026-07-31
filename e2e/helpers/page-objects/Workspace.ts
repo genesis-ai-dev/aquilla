@@ -68,6 +68,30 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
+  /** Select and commit one translation through the eBible corpus picker. */
+  async importEBibleCorpus(translationTitle: string): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+
+    const dialog = this.page.getByRole("dialog")
+    const ebibleCard = dialog.getByRole("button", { name: /^eBible Corpus/i }).first()
+    await expect(ebibleCard).toBeVisible({ timeout: 5_000 })
+    await ebibleCard.click()
+
+    const search = dialog.getByRole("textbox", { name: "Search eBible translations" })
+    await expect(search).toBeEnabled({ timeout: 10_000 })
+    await search.fill(translationTitle)
+
+    const result = dialog.locator("button").filter({ hasText: translationTitle }).first()
+    await expect(result).toBeVisible({ timeout: 5_000 })
+    await result.click()
+
+    const importButton = dialog.getByRole("button", { name: /^Import$/i }).last()
+    await expect(importButton).toBeEnabled({ timeout: 5_000 })
+    await importButton.click()
+    await this.waitForImportSettled()
+  }
+
   /**
    * Import through a specialized importer's own panel (Biblica, Macula,
    * Translation Notes …). These panels commit from their own Import button
@@ -256,6 +280,13 @@ export class Workspace {
       .getByRole("button", { name: new RegExp(nameSubstring, "i") })
       .first()
       .click()
+  }
+
+  /** Wait for a named file to be present in the authoritative sidebar inventory. */
+  async waitForFileInSidebar(nameSubstring: string): Promise<void> {
+    await expect(
+      this.page.locator("aside").getByText(nameSubstring, { exact: false }).first(),
+    ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   async waitForEditor(expectedCellId?: string): Promise<void> {

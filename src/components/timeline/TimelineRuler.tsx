@@ -19,7 +19,7 @@ export function TimelineRuler({ durationSec, pxPerSec, onScrub }: TimelineRulerP
   return (
     <div
       data-testid="tl-ruler"
-      className="relative h-7 cursor-pointer select-none border-b border-border bg-muted/30"
+      className="relative h-7 select-none border-b border-border bg-muted/30"
       style={{ width: `${width}px` }}
       onClick={(e) => {
         const rect = e.currentTarget.getBoundingClientRect()

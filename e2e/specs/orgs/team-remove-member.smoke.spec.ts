@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
@@ -20,7 +20,7 @@ test("team remove member button removes the member from the team", async ({ alic
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
   // Navigate to teams and create a team.
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   const dash = new Dashboard(alice)
   void dash // suppress unused var
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })

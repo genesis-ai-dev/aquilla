@@ -3,6 +3,7 @@
 // kick off its first model download for this browser.
 
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -65,13 +66,14 @@ export function AiModelConsentDialog() {
           <Button variant="outline" onClick={handleAccept} className="w-full sm:w-auto">
             {justThisLabel}
           </Button>
-          <Button
-            onClick={handleAcceptAll}
-            title="Also pre-download the local AI models so they're ready next time"
-            className="w-full sm:w-auto"
-          >
-            Enable all local models
-          </Button>
+          <AppTooltip content="Also pre-download the local AI models so they're ready next time">
+            <Button
+              onClick={handleAcceptAll}
+              className="w-full sm:w-auto"
+            >
+              Enable all local models
+            </Button>
+          </AppTooltip>
         </DialogFooter>
       </DialogContent>
     </Dialog>

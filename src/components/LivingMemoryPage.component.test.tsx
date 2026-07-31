@@ -125,9 +125,9 @@ describe("LivingMemoryPage — purpose copy", () => {
 
   it("shows the cross-link to Terminology", () => {
     renderPage()
-    // The button's accessible name comes from aria-label
+    // Toolbar button matches Rules/Glossary cross-link pattern
     expect(screen.getByRole("button", { name: /Go to Terminology page/i })).toBeInTheDocument()
-    expect(screen.getByText(/Open Terminology/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Terminology/i })).toBeInTheDocument()
   })
 })
 

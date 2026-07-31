@@ -582,7 +582,7 @@ export function AssignModal({
                         )}
                       </div>
                       {group.files.map((f) => (
-                        <label key={f.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
+                        <label key={f.id} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
                           <Checkbox
                             checked={selectedFileIds.has(f.id)}
                             onCheckedChange={() => toggleFile(f.id)}
@@ -611,7 +611,7 @@ export function AssignModal({
               ) : (
                 <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-md border p-2">
                   {availableChapters.map((ch) => (
-                    <label key={ch} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
+                    <label key={ch} className="flex items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted/50">
                       <Checkbox
                         checked={selectedChapters.has(ch)}
                         onCheckedChange={() => toggleChapter(ch)}

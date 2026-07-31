@@ -23,7 +23,7 @@ test("Violations tab on terminology page shows inbox content", async ({ alice })
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
 
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   const glossary = new Glossary(alice)

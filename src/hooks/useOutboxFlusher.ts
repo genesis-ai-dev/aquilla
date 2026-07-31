@@ -86,6 +86,9 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   /** F5: increments whenever a flush returns stale-source pins.
    *  Caller should surface "Source changed — please re-confirm." */
   staleSourceCount: number
+  /** Clears the transient stale-source notification after the authoritative
+   *  stale-source read confirms that the active file has no stale cells. */
+  clearStaleSource: () => void
   /** Count of records that permanently failed / were quarantined (excluded from
    *  the auto-retry queue). Surfaced separately from `pendingCount` so the
    *  indicator can distinguish "still syncing" from "needs your attention". */
@@ -100,6 +103,9 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   const [staleSiblingCount, setStaleSiblingCount] = useState(0)
   const [staleSiblingEntries, setStaleSiblingEntries] = useState<StaleSiblingEntry[]>([])
   const [staleSourceCount, setStaleSourceCount] = useState(0)
+  const clearStaleSource = useCallback(() => {
+    setStaleSourceCount(0)
+  }, [])
   const clearStaleSiblings = useCallback(() => {
     setStaleSiblingCount(0)
     setStaleSiblingEntries([])
@@ -283,5 +289,6 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     staleSiblingEntries,
     clearStaleSiblings,
     staleSourceCount,
+    clearStaleSource,
   }
 }

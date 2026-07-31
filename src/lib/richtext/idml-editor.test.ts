@@ -8,6 +8,8 @@ import {
   IDML_SLOT_NODE_NAME,
   IDML_TOKEN_NODE_NAME,
   hasIdmlCellMetadata,
+  idmlEditablePlainOffsetPosition,
+  idmlEditableSlotOffsetPosition,
   idmlEditorExtensions,
   prepareIdmlEditorContent,
   resolveIdmlEditorConfiguration,
@@ -146,6 +148,17 @@ describe("IDML editor sanitation and configuration", () => {
 })
 
 describe("IDML ProseMirror transaction guard", () => {
+  it("maps a read-surface slot offset to the matching ProseMirror position", () => {
+    const editor = createEditor()
+    const slotPosition = nodePosition(editor, IDML_SLOT_NODE_NAME)
+    expect(idmlEditableSlotOffsetPosition(editor.state.doc, 0, 5)).toBe(slotPosition + 6)
+    expect(idmlEditableSlotOffsetPosition(editor.state.doc, 0, 5_000)).toBe(
+      slotPosition + 1 + editor.state.doc.nodeAt(slotPosition)!.content.size,
+    )
+    expect(idmlEditableSlotOffsetPosition(editor.state.doc, 1, 0)).toBeNull()
+    expect(idmlEditablePlainOffsetPosition(editor.state.doc, 5)).toBe(slotPosition + 6)
+  })
+
   it("accepts text, bare line breaks, undo, and redo without changing anchors", () => {
     const rejected = vi.fn()
     const editor = createEditor(rejected)

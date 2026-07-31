@@ -37,7 +37,7 @@ test("Delete file confirm dialog requires checkbox before confirming", async ({ 
   await expect(fileActionsBtn).toBeVisible({ timeout: 5_000 })
   await fileActionsBtn.click()
 
-  // Click "Delete" in the context menu (shadcn DropdownMenu — role="menuitem").
+  // Click "Delete" in the context menu (shadcn ContextMenu — role="menuitem").
   const deleteItem = alice.getByRole("menuitem", { name: /^Delete$/i })
   await expect(deleteItem).toBeVisible({ timeout: 5_000 })
   await deleteItem.click()

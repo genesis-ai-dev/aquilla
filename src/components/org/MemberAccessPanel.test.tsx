@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemberAccessRow } from "./MemberAccessPanel"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import { getMemberAccess } from "@/lib/frontier/orgs"
 import { removeProjectMember } from "@/lib/frontier/members"
 
@@ -11,6 +12,7 @@ vi.mock("@/lib/frontier/orgs", () => ({ getMemberAccess: vi.fn() }))
 vi.mock("@/lib/frontier/members", () => ({ removeProjectMember: vi.fn(async () => {}) }))
 
 afterEach(() => vi.clearAllMocks())
+
 
 const ACCESS = {
   orgRole: 100,
@@ -67,7 +69,7 @@ describe("MemberAccessRow", () => {
 
 describe("MemberAccessRow — AQU-427 permission denial on Revoke button", () => {
   function renderRowWithRole(callerOrgRoleLevel: number) {
-    return render(
+    return renderWithTooltips(
       <ul>
         <MemberAccessRow orgId={1} userId={2} username="anna" callerOrgRoleLevel={callerOrgRoleLevel} />
       </ul>,
@@ -95,7 +97,7 @@ describe("MemberAccessRow — AQU-427 permission denial on Revoke button", () =>
 
     const revokeBtn = screen.getByTestId("revoke-direct-grant")
     expect(revokeBtn).toBeDisabled()
-    expect(revokeBtn.getAttribute("title")).toMatch(/maintainer/i)
+    await expectTooltip(revokeBtn, /maintainer/i)
   })
 
   it("revoke button is disabled with a denial tooltip for CONTRIBUTOR (400)", async () => {
@@ -107,7 +109,7 @@ describe("MemberAccessRow — AQU-427 permission denial on Revoke button", () =>
     const revokeBtn = screen.getByTestId("revoke-direct-grant")
     expect(revokeBtn).toBeDisabled()
     // Tooltip must mention the required role so the user understands why
-    expect(revokeBtn.getAttribute("title")).toMatch(/maintainer/i)
+    await expectTooltip(revokeBtn, /maintainer/i)
   })
 
   it("revoke button is disabled with a denial tooltip for VIEWER (100)", async () => {
@@ -118,7 +120,7 @@ describe("MemberAccessRow — AQU-427 permission denial on Revoke button", () =>
 
     const revokeBtn = screen.getByTestId("revoke-direct-grant")
     expect(revokeBtn).toBeDisabled()
-    expect(revokeBtn.getAttribute("title")).toMatch(/maintainer/i)
+    await expectTooltip(revokeBtn, /maintainer/i)
   })
 
   it("revoke button is enabled when callerOrgRoleLevel is not provided (fail-open)", async () => {

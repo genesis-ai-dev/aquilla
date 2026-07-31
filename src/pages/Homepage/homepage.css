@@ -636,8 +636,14 @@
 .aq-quote-cite b { color: var(--aq-dim); font-weight: 560; }
 
 /* ── Pricing ────────────────────────────────────────────────────────────── */
-.aq-price-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-@media (max-width: 760px) { .aq-price-grid { grid-template-columns: 1fr; } }
+.aq-price-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.aq-price-grid-3 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 760px) {
+  .aq-price-grid {
+    display: flex;
+    flex-direction: column;
+  }
+}
 .aq-price {
   position: relative; border-radius: 18px; padding: 28px;
   border: 1px solid var(--aq-line); background: var(--aq-fill);

@@ -323,7 +323,7 @@ describe("resolveProvider", () => {
 describe("complete", () => {
   const fetchMock = vi.fn()
   beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
-  afterEach(() => { vi.unstubAllGlobals() })
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
   function okJson(body: unknown): Response {
     return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } })
@@ -392,8 +392,8 @@ describe("complete", () => {
       window.history.pushState({}, "", "/")
     })
 
-    it("frontier: includes projectId from the current /project/:id route", async () => {
-      window.history.pushState({}, "", "/project/proj-uuid-1/file/file-uuid-2")
+    it("frontier: includes projectId from the current /project/:id/editor route", async () => {
+      window.history.pushState({}, "", "/project/proj-uuid-1/editor/file/file-uuid-2")
       fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
       await complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg })
       const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
@@ -409,7 +409,7 @@ describe("complete", () => {
     })
 
     it("custom: never sends projectId — third-party OpenAI-compatible endpoints may reject unknown fields", async () => {
-      window.history.pushState({}, "", "/project/proj-uuid-1")
+      window.history.pushState({}, "", "/project/proj-uuid-1/editor")
       fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
       await complete({
         settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "gemma" },
@@ -460,6 +460,31 @@ describe("complete", () => {
     await expect(
       complete({ settings: { ...BASE, provider: "custom", endpoint: "" }, session: null, messages: msg }),
     ).rejects.toThrow(/No custom endpoint/)
+  })
+
+  it("terminates a hung completion request with a retryable timeout error", async () => {
+    vi.useFakeTimers()
+    fetchMock.mockImplementationOnce((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        const signal = init.signal
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"))
+        }, { once: true })
+      }),
+    )
+    const pending = complete({
+      settings: { ...BASE, provider: "custom", endpoint: "http://localhost:8000", model: "x" },
+      session: null,
+      messages: msg,
+      timeoutMs: 25,
+    })
+    const rejection = expect(pending).rejects.toThrow(
+      "The AI request timed out. Please try again.",
+    )
+
+    await vi.advanceTimersByTimeAsync(25)
+
+    await rejection
   })
 
   // Helper to build a streaming Response from a sequence of byte chunks.
@@ -1153,9 +1178,9 @@ describe("activeProjectIdFromPath", () => {
   // follow-up) — every completion caller runs on a project route, so the URL
   // defines "the project in scope". A wrong match here silently bills the
   // wrong org (or none), so the route shapes are pinned.
-  it("extracts the id from /project/:id and nested project routes", () => {
-    expect(activeProjectIdFromPath("/project/abc-123")).toBe("abc-123")
-    expect(activeProjectIdFromPath("/project/abc-123/file/f-9")).toBe("abc-123")
+  it("extracts the id from /project/:id/editor and nested project routes", () => {
+    expect(activeProjectIdFromPath("/project/abc-123/editor")).toBe("abc-123")
+    expect(activeProjectIdFromPath("/project/abc-123/editor/file/f-9")).toBe("abc-123")
     expect(activeProjectIdFromPath("/project/abc-123/rules")).toBe("abc-123")
     expect(activeProjectIdFromPath("/projects/abc-123")).toBe("abc-123")
   })

@@ -22,9 +22,7 @@ test("video attachment dialog Save URL validates empty URL on click", async ({ a
   await ws.openFileBySubstring("voices-roundtrip")
   await ws.waitForEditor()
 
-  const moreBtn = alice.getByRole("banner").getByRole("button", { name: /^More$/i })
-  await expect(moreBtn).toBeVisible({ timeout: 10_000 })
-  await moreBtn.click()
+  await ws.openFileOverflowMenu()
 
   const attachVideoItem = alice.getByRole("menuitem", { name: /Attach video/i })
   await expect(attachVideoItem).toBeVisible({ timeout: 3_000 })

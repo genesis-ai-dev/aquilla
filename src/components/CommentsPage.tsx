@@ -13,6 +13,7 @@ import {
   MoreHorizontal, Pencil, Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -527,27 +528,29 @@ function CommentThreadCard({
               {onNavigate && root.scopeKind === "cell" && root.fileId && root.cellId && (() => {
                 const { exists } = resolveFileName(root.fileId, fileMap)
                 return exists ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-xs"
-                    title="Go to cell in editor"
-                    onClick={() => onNavigate(root)}
-                  >
-                    <ArrowUpRight className="mr-0.5 h-3 w-3" />
-                    Open file
-                  </Button>
+                  <AppTooltip content="Go to cell in editor">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => onNavigate(root)}
+                    >
+                      <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                      Open file
+                    </Button>
+                  </AppTooltip>
                 ) : (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
-                    title="File has been deleted"
-                    disabled
-                  >
-                    <ArrowUpRight className="mr-0.5 h-3 w-3" />
-                    Open file
-                  </Button>
+                  <AppTooltip content="File has been deleted">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
+                      disabled
+                    >
+                      <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                      Open file
+                    </Button>
+                  </AppTooltip>
                 )
               })()}
               <Button
@@ -704,7 +707,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           </label>
 
           {/* Show resolved toggle */}
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+          <label className="flex items-center gap-1.5 select-none">
             <Checkbox
               checked={filter.showResolved}
               onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}
@@ -903,7 +906,7 @@ export function CommentsPage() {
     const params = root.cellId
       ? `?cellId=${encodeURIComponent(root.cellId)}`
       : ""
-    navigate(`/project/${projectId}/file/${encodeURIComponent(root.fileId)}${params}`)
+    navigate(`/project/${projectId}/editor/file/${encodeURIComponent(root.fileId)}${params}`)
   }
 
   const activeFilterCount = countActiveFilters(filter)
@@ -911,7 +914,7 @@ export function CommentsPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
       <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}`)}>
+        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}/editor`)}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to project
         </Button>
         <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>

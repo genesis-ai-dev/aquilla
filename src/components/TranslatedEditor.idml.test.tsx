@@ -87,6 +87,169 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(validateIdmlTranslation(SOURCE_HTML, committed.valueHtml, METADATA).valid).toBe(true)
   })
 
+  it("keeps forward caret order after a native collapse-to-end focus (EditorTable path)", async () => {
+    // EditorTable used to focus IDML cells with selectNodeContents + collapse(false).
+    // On empty protected slots that paints the caret on a phantom second line and
+    // desyncs ProseMirror — each keystroke then prepends, producing reverse text.
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-native-end-focus"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      const sel = window.getSelection()
+      if (sel) {
+        const range = document.createRange()
+        range.selectNodeContents(surface)
+        range.collapse(false)
+        sel.removeAllRanges()
+        sel.addRange(range)
+      }
+      for (const character of "abc") {
+        fireEvent.keyDown(surface, { key: character })
+      }
+      fireEvent.blur(surface)
+    })
+
+    expect(editor.getText()).toBe("abc\t")
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("abc")
+    expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({
+      value: "abc\t",
+      valueHtml: expect.stringContaining(">abc</span>"),
+    }))
+  })
+
+  it("appends to a populated slot when read-view activation has no pointer selection", async () => {
+    const onCommit = vi.fn()
+    const targetHtml = SOURCE_HTML.replace(">Source</span>", ">asd</span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-populated-activation"
+        initialPlain={"asd\tSecond"}
+        initialHtml={targetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      for (const character of "123") {
+        fireEvent.keyDown(surface, { key: character })
+      }
+      fireEvent.blur(surface)
+    })
+
+    expect(editor.getText()).toBe("asd123\tSecond")
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("asd123")
+    expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({
+      value: "asd123\tSecond",
+      valueHtml: expect.stringContaining(">asd123</span>"),
+    }))
+  })
+
+  it("restores a populated read-view click before typing and preserves IDML spacing", async () => {
+    const onCommit = vi.fn()
+    const onInitialIdmlSelectionApplied = vi.fn()
+    const targetHtml = SOURCE_HTML.replace(">Source</span>", ">one  two</span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-pointer-activation"
+        initialPlain={"one  two\tSecond"}
+        initialHtml={targetHtml}
+        idmlConfiguration={CONFIGURATION}
+        initialIdmlSelection={{ kind: "plain", offset: 5 }}
+        onInitialIdmlSelectionApplied={onInitialIdmlSelectionApplied}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.keyDown(surface, { key: "X" })
+      fireEvent.blur(surface)
+    })
+
+    expect(editor.getText()).toBe("one  Xtwo\tSecond")
+    expect(surface).toHaveClass("whitespace-pre-wrap")
+    expect(onInitialIdmlSelectionApplied).toHaveBeenCalledTimes(1)
+    expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({
+      value: "one  Xtwo\tSecond",
+      valueHtml: expect.stringContaining(">one  Xtwo</span>"),
+    }))
+  })
+
+  it("keeps same-slot pointer clicks inside ProseMirror's real text positions", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-same-slot-click"
+        initialPlain={"asd\tSecond"}
+        initialHtml={SOURCE_HTML.replace(">Source</span>", ">asd</span>")}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={() => {}}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const firstSlot = surface.querySelector("span[data-idml-slot=\"0\"]")!
+    const slotPosition = positionOf(editor, "idmlSlot")
+    const slot = editor.state.doc.nodeAt(slotPosition)!
+
+    act(() => {
+      editor.commands.setTextSelection(slotPosition + 1 + slot.content.size)
+      const nativeSelection = window.getSelection()
+      const nativeRange = document.createRange()
+      nativeRange.selectNodeContents(surface)
+      nativeRange.collapse(false)
+      nativeSelection?.removeAllRanges()
+      nativeSelection?.addRange(nativeRange)
+    })
+    const preventDefault = vi.fn()
+    const clickEvent = {
+      target: firstSlot,
+      preventDefault,
+    } as unknown as MouseEvent
+    let handled: boolean | void = undefined
+    act(() => {
+      handled = editor.view.someProp("handleClick", (handler) => handler(
+        editor.view,
+        slotPosition + 1 + slot.content.size,
+        clickEvent,
+      ))
+    })
+
+    // Returning false from the old same-slot shortcut delegated to the
+    // browser DOM caret, which can land on an IDML slot's phantom trailing br.
+    expect(handled).toBe(true)
+    expect(preventDefault).toHaveBeenCalled()
+    expect(editor.state.selection.$from.parent.type.name).toBe("idmlSlot")
+    expect(editor.state.selection.$from.parent.attrs.slot).toBe(0)
+    const nativeAnchor = window.getSelection()?.anchorNode
+    expect(
+      nativeAnchor === firstSlot || (nativeAnchor ? firstSlot.contains(nativeAnchor) : false),
+    ).toBe(true)
+  })
+
   it("pastes Unicode and line breaks into an empty slot without importing clipboard markup", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML

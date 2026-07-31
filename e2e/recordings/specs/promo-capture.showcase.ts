@@ -40,7 +40,7 @@ test("Promo capture · curated app stills for the trailer", async ({ page }) => 
   }
   await page.goto("/")
   await injectSession(page, session)
-  await page.goto("/project/demo-john")
+  await page.goto("/project/demo-john/editor")
   await page.waitForLoadState("networkidle")
 
   const ws = new Workspace(page)

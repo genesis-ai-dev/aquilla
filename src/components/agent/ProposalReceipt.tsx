@@ -9,7 +9,8 @@
  */
 
 import { AlertTriangle, ArrowRight, PenLine, Undo2 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { AgentProposal } from "@/lib/agent/protocol"
 
 export interface ReceiptCounts {
@@ -44,19 +45,6 @@ function refSpan(proposal: AgentProposal): string | null {
     : `${refs[0]} – ${refs[refs.length - 1]}`
 }
 
-function Pill({ className, children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground",
-        className,
-      )}
-    >
-      {children}
-    </span>
-  )
-}
-
 export function ProposalReceipt({ proposal, counts, onReview, onUndo }: ProposalReceiptProps) {
   const span = refSpan(proposal)
   const settled = counts.pending === 0
@@ -74,34 +62,40 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
 
       <div className="flex flex-wrap items-center gap-1">
         {counts.accepted > 0 && (
-          <Pill className="border-emerald-800/60 text-emerald-600 dark:text-emerald-500">
+          <Badge variant="outline" className="border-emerald-800/60 text-[10px] text-emerald-600 dark:text-emerald-500">
             {counts.accepted} accepted
-          </Pill>
+          </Badge>
         )}
         {counts.edited > 0 && (
-          <Pill className="border-emerald-800/60 text-emerald-600 dark:text-emerald-500">
+          <Badge variant="outline" className="border-emerald-800/60 text-[10px] text-emerald-600 dark:text-emerald-500">
             {counts.edited} edited & accepted
-          </Pill>
+          </Badge>
         )}
-        {counts.rejected > 0 && <Pill>{counts.rejected} rejected</Pill>}
+        {counts.rejected > 0 && (
+          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+            {counts.rejected} rejected
+          </Badge>
+        )}
         {counts.undone > 0 && (
-          <Pill className="border-amber-700/50 text-amber-600 dark:text-amber-400">
+          <Badge variant="outline" className="border-amber-700/50 text-[10px] text-amber-600 dark:text-amber-400">
             {counts.undone} undone
-          </Pill>
+          </Badge>
         )}
         {counts.pending > 0 && (
-          <Pill className="border-sky-800/60 text-sky-600 dark:text-sky-400">
+          <Badge variant="outline" className="border-sky-800/60 text-[10px] text-sky-600 dark:text-sky-400">
             {counts.pending} to review
-          </Pill>
+          </Badge>
         )}
         {counts.checks > 0 && (
-          <Pill className="border-amber-700/50 text-amber-600 dark:text-amber-400">
-            <AlertTriangle className="h-2.5 w-2.5" />
+          <Badge variant="outline" className="border-amber-700/50 text-[10px] text-amber-600 dark:text-amber-400">
+            <AlertTriangle data-icon="inline-start" />
             {counts.checks} check{counts.checks === 1 ? "" : "s"}
-          </Pill>
+          </Badge>
         )}
         {settled && counts.accepted + counts.edited + counts.rejected + counts.undone > 0 && (
-          <Pill className="border-transparent">done</Pill>
+          <Badge variant="ghost" className="text-[10px] text-muted-foreground">
+            done
+          </Badge>
         )}
       </div>
 
@@ -118,15 +112,16 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
             </button>
           )}
           {undoable && onUndo && (
-            <button
-              type="button"
-              onClick={onUndo}
-              title="Restore each applied cell to its pre-draft text (a new, audited edit — nothing is deleted)"
-              className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
-            >
-              <Undo2 className="h-3 w-3" />
-              Undo applied
-            </button>
+            <AppTooltip content="Restore each applied cell to its pre-draft text (a new, audited edit — nothing is deleted)">
+              <button
+                type="button"
+                onClick={onUndo}
+                className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:underline"
+              >
+                <Undo2 className="h-3 w-3" />
+                Undo applied
+              </button>
+            </AppTooltip>
           )}
         </div>
       )}

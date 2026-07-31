@@ -95,7 +95,8 @@ function CommandList({
     <CommandPrimitive.List
       data-slot="command-list"
       className={cn(
-        "scrollbar-none max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
+        // Native overflow scroll — same chrome as EditorTable (index.css).
+        "max-h-72 scroll-py-1 overflow-x-hidden overflow-y-auto outline-none",
         className
       )}
       {...props}

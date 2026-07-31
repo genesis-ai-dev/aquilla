@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AlertCircle, Users, CheckCircle2 } from "lucide-react"
+import { orgHomePath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -106,7 +107,7 @@ export function JoinOrgPage() {
       posthog.capture(INVITE_REDEEMED, { invite_kind: "org", org_id: result.orgId })
       setOrgName(result.orgName)
       setPhase("done")
-      setTimeout(() => navigate(`/?org=${result.orgId}`), 1200)
+      setTimeout(() => navigate(orgHomePath(result.orgId)), 1200)
     } catch (err) {
       const status = err instanceof UserError ? err.status : undefined
       if (status === 403) {

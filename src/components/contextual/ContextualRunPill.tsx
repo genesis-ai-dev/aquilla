@@ -8,7 +8,8 @@
 // here are plain user words (ui-jargon-guard.test.ts bans spec ids).
 
 import { useEffect } from "react"
-import { AlertTriangle, Eye, Loader2, Pause, Play, X } from "lucide-react"
+import { AlertTriangle, Eye, Pause, Play, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -38,7 +39,7 @@ interface PillProps {
 
 const PILL_BASE =
   "pointer-events-auto absolute bottom-4 right-4 z-30 flex items-center gap-2 " +
-  "rounded-full border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10"
+  "rounded-lg border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10"
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
@@ -103,14 +104,14 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
   } else if (status === "starting") {
     content = (
       <>
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        <Spinner className="size-3.5 text-muted-foreground" />
         <span className="text-muted-foreground">Starting…</span>
       </>
     )
   } else if (status === "pausing") {
     content = (
       <>
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        <Spinner className="size-3.5 text-muted-foreground" />
         <span className="text-muted-foreground">Finishing this passage…</span>
       </>
     )
@@ -218,7 +219,7 @@ export function ContextualRunPill({ projectId, fileId, onSetupNeeded, onSpanClic
             {spanLabel && (
               <button
                 type="button"
-                className="cursor-pointer underline-offset-2 hover:underline"
+                className="underline-offset-2 hover:underline"
                 onClick={() => onSpanClick?.(spanLabel)}
               >
                 {spanLabel}

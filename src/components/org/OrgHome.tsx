@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
+import { membersPath, orgHomePath } from "@/lib/navigation/org-paths"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getPortfolio, getPortfolios, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioProject } from "@/lib/frontier/portfolio"
@@ -49,7 +50,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Page, PageHeader, StatTile, EmptyState } from "@/components/ui/page"
-import { AppTooltip, TooltipDelegationBoundary } from "@/components/ui/tooltip"
+import { SegmentTabs } from "@/components/ui/tabs"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { FolderPlus, Search, X, Building2, Sparkles, CircleCheck, Mic } from "lucide-react"
 
@@ -110,7 +112,7 @@ function OrgHomeLoadingTemplate() {
         header={
           <div className="flex items-center justify-between gap-4 px-4">
             <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-7 w-56 rounded-full" />
+            <Skeleton className="h-7 w-56 rounded-lg" />
           </div>
         }
         statusBar={null}
@@ -386,11 +388,10 @@ export function ProjectTable({
   defaultLaneLabelByProjectId?: Map<string, string>
 }) {
   return (
-    <TooltipDelegationBoundary>
-      <div data-testid="project-table" className="@container/project-table overflow-hidden">
-        <div className="w-full">
+    <div data-testid="project-table" className="@container/project-table overflow-hidden">
+      <div className="w-full">
         <div
-          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm`}
+          className={`sticky top-0 z-20 grid ${PROJECT_TABLE_COLS} items-center gap-x-2 border-b bg-muted/95 py-2 pr-2 pl-4 text-xs font-medium text-muted-foreground backdrop-blur-sm`}
         >
           <span
             className={cn(
@@ -457,7 +458,7 @@ export function ProjectTable({
                           <span
                             tabIndex={0}
                             data-testid="project-table-deadline-trigger"
-                            className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                            className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                           >
                             <ProjectDeadlineStatuses
                               deadline={dstatus}
@@ -540,9 +541,8 @@ export function ProjectTable({
             )
           })}
         </div>
-        </div>
       </div>
-    </TooltipDelegationBoundary>
+    </div>
   )
 }
 
@@ -801,7 +801,7 @@ export function OrgHome() {
 
   function openOrg(orgId: number) {
     setActiveOrg(orgId)
-    navigate({ pathname: "/", search: `?org=${orgId}` })
+    navigate(orgHomePath(orgId))
   }
 
   function selectProjectLens(lens: ProjectLens) {
@@ -1064,20 +1064,12 @@ export function OrgHome() {
                           </InputGroup>
                           <div className="flex shrink-0 items-center gap-2" aria-label="Project status filter">
                             <span className="text-xs font-medium text-muted-foreground">Status</span>
-                            <div className="flex items-center gap-1">
-                              {STATUS_FILTERS.map((f) => (
-                                <Button
-                                  key={f.value}
-                                  type="button"
-                                  size="xs"
-                                  variant={statusFilter === f.value ? "default" : "secondary"}
-                                  onClick={() => setStatusFilter(f.value)}
-                                  aria-pressed={statusFilter === f.value}
-                                >
-                                  {f.label}
-                                </Button>
-                              ))}
-                            </div>
+                            <SegmentTabs
+                              aria-label="Project status filter"
+                              value={statusFilter}
+                              onValueChange={setStatusFilter}
+                              options={STATUS_FILTERS}
+                            />
                           </div>
                           <div className="ml-auto flex shrink-0 items-center gap-2" aria-label="Project sort">
                             <span className="text-xs font-medium text-muted-foreground">Sort by</span>
@@ -1167,28 +1159,23 @@ export function OrgHome() {
                               linkableProjects={accessibleProjects}
                             />
                           )}
-                          <Button variant="outline" onClick={() => navigate("/members")}>
+                          <Button
+                            variant="outline"
+                            onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
+                          >
                             Invite your team
                           </Button>
                         </div>
                       }
                     />
                   ) : (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex flex-wrap items-center gap-1" aria-label="Project status filter">
-                        {STATUS_FILTERS.map((f) => (
-                          <Button
-                            key={f.value}
-                            type="button"
-                            size="xs"
-                            variant={statusFilter === f.value ? "default" : "secondary"}
-                            onClick={() => setStatusFilter(f.value)}
-                            aria-pressed={statusFilter === f.value}
-                          >
-                            {f.label}
-                          </Button>
-                        ))}
-                      </div>
+                      <div className="flex flex-col gap-3">
+                      <SegmentTabs
+                        aria-label="Project status filter"
+                        value={statusFilter}
+                        onValueChange={setStatusFilter}
+                        options={STATUS_FILTERS}
+                      />
 
                       <OrgProjectsDataTable
                         projects={statusFilteredProjects}

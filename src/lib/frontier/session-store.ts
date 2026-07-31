@@ -111,6 +111,31 @@ async function writeEnvelope(env: Envelope): Promise<void> {
   pingOtherTabs()
 }
 
+// Every mutation is a read-modify-write of ONE envelope record, and the read
+// and the write are separate awaits. Two overlapping mutations therefore
+// interleave, and the slower one writes back a snapshot taken before the
+// faster one landed — silently undoing it. The email backfill made this
+// reachable in practice: it runs while the account menu is open, so a logout
+// landing mid-backfill got its removal overwritten and the account came back.
+// Serialize mutations through one chain. Reads stay unserialized.
+let mutationQueue: Promise<unknown> = Promise.resolve()
+
+/**
+ * Runs `mutator` against a freshly-read envelope, with no other mutation
+ * interleaving. Returning `false` skips the write (and its notify).
+ */
+function mutateEnvelope(mutator: (env: Envelope) => boolean | void): Promise<void> {
+  const run = mutationQueue.then(async () => {
+    const env = await readEnvelope()
+    if (mutator(env) === false) return
+    await writeEnvelope(env)
+  })
+  // A rejecting mutation must not poison later ones, but still reject for its
+  // own caller.
+  mutationQueue = run.catch(() => {})
+  return run
+}
+
 export interface SessionSummary {
   key: string
   username: string
@@ -129,30 +154,56 @@ export async function listSessions(): Promise<SessionSummary[]> {
   }))
 }
 
-export async function addSession(s: FrontierSession): Promise<void> {
+/**
+ * Sessions whose email is not yet stored (legacy logins — JWT has no email
+ * claim). Used to backfill via GET /auth/me per account JWT.
+ */
+export async function listSessionsNeedingEmail(): Promise<Array<{ key: string; jwt: string }>> {
   const env = await readEnvelope()
-  const key = sessionKey(s)
-  env.sessions[key] = s
-  if (!env.active) env.active = key
-  await writeEnvelope(env)
+  return Object.entries(env.sessions)
+    .filter(([, s]) => !s.email)
+    .map(([key, s]) => ({ key, jwt: s.jwt }))
+}
+
+/** Batch-write emails onto existing sessions; no-op when nothing changes. */
+export async function patchSessionEmails(updates: Record<string, string>): Promise<void> {
+  if (Object.keys(updates).length === 0) return
+  return mutateEnvelope((env) => {
+    let changed = false
+    for (const [key, email] of Object.entries(updates)) {
+      const existing = env.sessions[key]
+      if (!existing || !email || existing.email === email) continue
+      env.sessions[key] = { ...existing, email }
+      changed = true
+    }
+    return changed
+  })
+}
+
+export async function addSession(s: FrontierSession): Promise<void> {
+  return mutateEnvelope((env) => {
+    const key = sessionKey(s)
+    env.sessions[key] = s
+    if (!env.active) env.active = key
+  })
 }
 
 export async function activateSession(key: string): Promise<void> {
-  const env = await readEnvelope()
-  if (!(key in env.sessions)) throw new Error(`Unknown session key: ${key}`)
-  env.active = key
-  await writeEnvelope(env)
+  return mutateEnvelope((env) => {
+    if (!(key in env.sessions)) throw new Error(`Unknown session key: ${key}`)
+    env.active = key
+  })
 }
 
 export async function removeSession(key: string): Promise<void> {
-  const env = await readEnvelope()
-  if (!(key in env.sessions)) return
-  delete env.sessions[key]
-  if (env.active === key) {
-    const remaining = Object.keys(env.sessions)
-    env.active = remaining.length > 0 ? remaining[0] : null
-  }
-  await writeEnvelope(env)
+  return mutateEnvelope((env) => {
+    if (!(key in env.sessions)) return false
+    delete env.sessions[key]
+    if (env.active === key) {
+      const remaining = Object.keys(env.sessions)
+      env.active = remaining.length > 0 ? remaining[0] : null
+    }
+  })
 }
 
 export async function loadActiveSession(): Promise<FrontierSession | null> {
@@ -163,11 +214,11 @@ export async function loadActiveSession(): Promise<FrontierSession | null> {
 
 // Backward-compat: existing login path uses saveSession. It adds-and-activates.
 export async function saveSession(s: FrontierSession): Promise<void> {
-  const env = await readEnvelope()
-  const key = sessionKey(s)
-  env.sessions[key] = s
-  env.active = key
-  await writeEnvelope(env)
+  return mutateEnvelope((env) => {
+    const key = sessionKey(s)
+    env.sessions[key] = s
+    env.active = key
+  })
 }
 
 export async function loadSession(): Promise<FrontierSession | null> {
@@ -175,10 +226,10 @@ export async function loadSession(): Promise<FrontierSession | null> {
 }
 
 export async function clearSession(): Promise<void> {
-  const env = await readEnvelope()
-  env.active = null
-  env.sessions = {}
-  await writeEnvelope(env)
+  return mutateEnvelope((env) => {
+    env.active = null
+    env.sessions = {}
+  })
 }
 
 export async function _resetDbForTesting(): Promise<void> {

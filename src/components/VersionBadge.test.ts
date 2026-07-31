@@ -5,17 +5,20 @@ describe("hasChromeVersionTag", () => {
   it("suppresses the floating badge on AppShell org routes", () => {
     for (const path of [
       "/",
-      "/members",
-      "/assigned",
+      "/orgs/all",
+      "/orgs/7",
+      "/orgs/7/members",
+      "/orgs/7/assigned",
+      "/orgs/7/settings",
+      "/orgs/7/settings/identity",
+      "/orgs/7/teams",
+      "/orgs/7/teams/10",
+      "/orgs/7/archived",
       "/preferences",
       "/preferences/appearance",
-      "/settings",
-      "/settings/identity",
       "/admin",
-      "/teams",
-      "/teams/10",
+      "/shared",
       "/projects/p1",
-      "/projects/archived",
     ]) {
       expect(hasChromeVersionTag(path), path).toBe(true)
     }
@@ -23,8 +26,8 @@ describe("hasChromeVersionTag", () => {
 
   it("suppresses the floating badge on project workspace routes", () => {
     for (const path of [
-      "/project/p1",
-      "/project/p1/file/f1",
+      "/project/p1/editor",
+      "/project/p1/editor/file/f1",
       "/project/p1/rules",
       "/project/p1/comments",
       "/project/p1/agent",
@@ -40,6 +43,7 @@ describe("hasChromeVersionTag", () => {
       "/onboarding",
       "/join/tok",
       "/project/p1/settings",
+      "/project/p1/settings/ai",
       "/project/p1/debug",
       "/privacy-policy",
     ]) {

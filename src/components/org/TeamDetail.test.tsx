@@ -54,9 +54,9 @@ function renderDetail() {
   // which clears the React Query cache on account switch (AQU-212).
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter initialEntries={["/teams/10"]}>
+      <MemoryRouter initialEntries={["/orgs/1/teams/10"]}>
         <OrgProvider>
-          <Routes><Route path="/teams/:groupId" element={<TeamDetail />} /></Routes>
+          <Routes><Route path="/orgs/:orgId/teams/:groupId" element={<TeamDetail />} /></Routes>
         </OrgProvider>
       </MemoryRouter>
     </QueryClientProvider>,

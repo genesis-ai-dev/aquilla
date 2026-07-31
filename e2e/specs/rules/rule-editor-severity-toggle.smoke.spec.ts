@@ -21,7 +21,7 @@ test("rule editor severity toggle switches between Minor and Major", async ({ al
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `SeverityRule ${Date.now()}` })
   await alice.goto(`/project/${seeded.projectId}/rules`)
   // "+ Add Rule" opens the inline RuleEditor (no dialog).
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
   await expect(alice.locator("#re-name")).toBeVisible({ timeout: 5_000 })

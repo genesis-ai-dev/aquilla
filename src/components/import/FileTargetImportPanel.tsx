@@ -224,7 +224,7 @@ export function FileTargetImportPanel({
           }}
         >
           <p className="text-sm text-muted-foreground">Drop a file here, or</p>
-          <label className="cursor-pointer">
+          <label>
             <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
               Choose file
             </span>
@@ -326,7 +326,7 @@ export function FileTargetImportPanel({
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border">
           <div className="divide-y">
             {matched.map((m) => (
-              <label key={m.cellId} className="flex cursor-pointer items-start gap-2 px-3 py-2 hover:bg-muted/30">
+              <label key={m.cellId} className="flex items-start gap-2 px-3 py-2 hover:bg-muted/30">
                 <input
                   type="checkbox"
                   className="mt-0.5 rounded"

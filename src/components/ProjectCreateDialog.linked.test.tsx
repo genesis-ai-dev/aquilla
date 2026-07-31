@@ -91,7 +91,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
   it("shows the upstream picker + clone/live + consumes choice only for the linked-target shape", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     expect(screen.queryAllByText(/Upstream project/i)).toHaveLength(0)
 
     // Open the advanced disclosure and pick "linked-target".
@@ -105,7 +105,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
   it("creates the project then links it to the chosen upstream with mode/consumes", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
     fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "French Episode 1" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
@@ -151,7 +151,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     })
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
     fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "French Episode 1" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
@@ -178,7 +178,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
   it("shows validation when upstream project is missing for linked-target", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "X" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
     fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })

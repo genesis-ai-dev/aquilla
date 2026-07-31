@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react"
 import { Monitor, Moon, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export type ThemeMode = "light" | "dark" | "system"
 export type ResolvedTheme = "light" | "dark"
@@ -83,16 +84,17 @@ export function ThemeToggle({ className }: { className?: string }) {
         : "Theme: dark. Click for system."
   const Icon = mode === "system" ? Monitor : mode === "dark" ? Moon : Sun
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      aria-label={label}
-      title={label}
-      onClick={() => setMode(next)}
-      className={className}
-    >
-      <Icon />
-    </Button>
+    <AppTooltip content={label}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={label}
+        onClick={() => setMode(next)}
+        className={className}
+      >
+        <Icon />
+      </Button>
+    </AppTooltip>
   )
 }

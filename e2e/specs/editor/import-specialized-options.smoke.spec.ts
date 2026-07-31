@@ -4,11 +4,11 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * ImportDialog specialized formats remain discoverable and actionable.
  *
- * TMX now enters the unified Upload Files pipeline; Macula and Translation
- * Notes retain their purpose-built panels. This guards the landing-page
- * routing contract rather than stale rollout badges.
+ * TMX now enters the unified Upload Files pipeline; Macula, Translation Notes,
+ * and Biblica study notes retain their purpose-built panels. This guards the
+ * landing-page routing contract rather than stale rollout badges.
  */
-test("import dialog enables TMX, Macula, and Translation Notes routes", async ({ alice }) => {
+test("import dialog enables TMX, Macula, Translation Notes, and Biblica routes", async ({ alice }) => {
   const dash = new Dashboard(alice)
   await dash.goto()
   const name = `ImportSoon ${Date.now()}`
@@ -16,8 +16,8 @@ test("import dialog enables TMX, Macula, and Translation Notes routes", async ({
   await dash.openProject(name)
 
   // Open the import dialog — lands on the type-selector screen.
-  const importBtn = alice.getByRole("button", {
-    name: /^Import(?: a file)?$/i,
+  const importBtn = alice.getByRole("banner").getByRole("button", {
+    name: /^Import$/i,
   })
   await expect(importBtn).toBeVisible({ timeout: 10_000 })
   await importBtn.click()
@@ -38,6 +38,21 @@ test("import dialog enables TMX, Macula, and Translation Notes routes", async ({
   const notesBtn = dialog.getByRole("button", { name: /Translation Notes TSV/i })
   await expect(notesBtn).toBeVisible({ timeout: 3_000 })
   await expect(notesBtn).toBeEnabled()
+
+  // Biblica study notes import from InDesign through their own panel.
+  const biblicaBtn = dialog.getByRole("button", { name: /Biblica Study Bible Notes IDML/i })
+  await expect(biblicaBtn).toBeVisible({ timeout: 3_000 })
+  await expect(biblicaBtn).toBeEnabled()
+
+  // Its panel states the contract that distinguishes it from a plain IDML
+  // import: notes come in, scripture does not.
+  await biblicaBtn.click()
+  await expect(dialog.getByRole("heading", { name: /Biblica Study Bible Notes/i })).toBeVisible()
+  await expect(dialog.getByText(/Only the study\s+notes are imported/i)).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /Choose study Bible IDML file/i })).toBeVisible()
+
+  await dialog.getByRole("button", { name: /Back to import types/i }).click()
+  await expect(tmBtn).toBeVisible({ timeout: 5_000 })
 
   // TMX routes to the unified upload surface, whose accepted-format summary
   // explicitly includes TMX before the user chooses a file.

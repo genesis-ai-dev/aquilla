@@ -20,7 +20,7 @@ export function BriefSection(props: BriefSectionProps) {
   const status = briefStatus(brief)
 
   return (
-    <section className="px-4 py-3 max-w-2xl mx-auto w-full">
+    <section aria-label="Translation brief">
       <div className="flex items-center gap-2 mb-2">
         <h2 className="text-sm font-semibold">Translation brief</h2>
         <Badge variant="secondary" className="text-[10px] capitalize">{status}</Badge>

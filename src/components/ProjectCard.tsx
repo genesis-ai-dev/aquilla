@@ -100,7 +100,7 @@ export function ProjectCard({
   const clickable = !isTrashed && !pending
   return (
     <Card
-      className={`relative ${isTrashed ? "opacity-70" : pending ? "cursor-wait" : "cursor-pointer hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
+      className={`relative ${isTrashed ? "opacity-70" : pending ? "cursor-wait" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
       onClick={clickable ? onClick : undefined}
       aria-busy={pending || undefined}
       data-testid={isInactive && !isTrashed ? "inactive-project-card" : undefined}

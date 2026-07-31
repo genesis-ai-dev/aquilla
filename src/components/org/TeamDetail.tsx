@@ -22,6 +22,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { humanRoleName } from "@/lib/frontier/roles"
+import { orgPath } from "@/lib/navigation/org-paths"
 import {
   getTeam,
   addTeamMembers,
@@ -206,7 +207,7 @@ export function TeamDetail() {
     setDeleting(true)
     try {
       await deleteTeam(jwt, activeOrgId, groupIdNum)
-      navigate("/teams")
+      navigate(orgPath(activeOrgId, "/teams"))
     } finally {
       setDeleting(false)
     }
@@ -292,7 +293,7 @@ export function TeamDetail() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb parent={{ label: "Teams", to: "/teams" }} section={team?.name ?? "Team"} />}
+      header={<OrgBreadcrumb parent={{ label: "Teams", to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? "Team"} />}
       statusBar={null}
       main={
         <Page size="wide">
@@ -435,7 +436,7 @@ export function TeamDetail() {
                       {/* "?" tooltip summarising all access levels — hover or focus to read */}
                       <AppTooltip content={Object.values(ROLE_DESCRIPTIONS).join("\n")} className="max-w-xs">
                         <span
-                          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border text-[10px] leading-none text-muted-foreground"
+                          className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-lg border text-[10px] leading-none text-muted-foreground"
                           aria-label="Access level definitions"
                           tabIndex={0}
                         >
@@ -564,7 +565,7 @@ export function TeamDetail() {
                                   aria-label={`Org-level role: ${roleLabel(m.roleLevel)}`}
                                 >
                                   {roleLabel(m.roleLevel)}
-                                  <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
+                                  <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-lg border text-[10px] leading-none text-muted-foreground" aria-hidden="true">?</span>
                                 </span>
                               </AppTooltip>
                             )}

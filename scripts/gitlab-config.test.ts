@@ -7,6 +7,26 @@ const LIVE_GITLAB_ORIGIN = "https://git.genesisrnd.com"
 const RETIRED_GITLAB_ORIGIN = "https://gitlab.frontierrnd.com"
 
 describe("GitLab migration configuration", () => {
+  it("enables legacy-user migration in both production configuration blocks", () => {
+    const config = readFileSync(
+      path.join(REPO_ROOT, "auth-worker", "wrangler.toml"),
+      "utf8",
+    )
+    const productionMarker = "[env.production.vars]"
+    const productionStart = config.indexOf(productionMarker)
+    const productionEnd = config.indexOf(
+      "\n[",
+      productionStart + productionMarker.length,
+    )
+    const topLevel = config.slice(0, productionStart)
+    const production = config.slice(productionStart, productionEnd)
+
+    expect(productionStart).toBeGreaterThan(-1)
+    expect(productionEnd).toBeGreaterThan(productionStart)
+    expect(topLevel).toContain('LEGACY_USER_MIGRATION_ENABLED = "true"')
+    expect(production).toContain('LEGACY_USER_MIGRATION_ENABLED = "true"')
+  })
+
   it("points every auth-worker environment at the live GitLab origin", () => {
     const config = readFileSync(
       path.join(REPO_ROOT, "auth-worker", "wrangler.toml"),

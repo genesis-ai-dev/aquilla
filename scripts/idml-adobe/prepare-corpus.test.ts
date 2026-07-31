@@ -78,7 +78,11 @@ describe("Adobe corpus preparation", () => {
         id: "feature-rich",
         exportReport: expect.objectContaining({
           unsupportedLiteral: 0,
-          preservedUnsupported: 3,
+          // Two of these five are the embedded processing instructions the
+          // engine started preserving in AQU-551. Preserving them raises this
+          // count; what the Adobe gate cares about is that none of them
+          // degraded into an unsupportedLiteral text skip.
+          preservedUnsupported: 5,
         }),
       }),
       expect.objectContaining({

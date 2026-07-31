@@ -9,11 +9,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const VTT_FIXTURE = path.resolve(__dirname, "../../fixtures/voices-roundtrip.vtt")
 
 /**
- * VideoAttachmentDialog — "Attach video" option in the workspace overflow menu.
+ * VideoAttachmentDialog — "Attach video" option in the file options overflow menu.
  *
- * The WorkspaceHeader has an OverflowMenu (aria-label="More") that contains
- * "Attach video" when a subtitle file (VTT/SRT) is open.
- * Clicking it opens VideoAttachmentDialog with DialogTitle "Attach Video".
+ * The chapter-row File options menu contains "Attach video" when a subtitle
+ * file (VTT/SRT) is open. Clicking it opens VideoAttachmentDialog with
+ * DialogTitle "Attach Video".
  *
  * This spec imports a VTT, opens the overflow menu, and verifies the dialog.
  */
@@ -29,10 +29,10 @@ test("attach video dialog opens from overflow menu for VTT file", async ({ alice
   await ws.openFileBySubstring("voices-roundtrip")
   await ws.waitForEditor()
 
-  // The WorkspaceHeader OverflowMenu button.
-  const moreBtn = alice.getByRole("button", { name: /^More$/i })
-  await expect(moreBtn).toBeVisible({ timeout: 10_000 })
-  await moreBtn.click()
+  // The chapter-row File options overflow menu button.
+  const fileOptionsBtn = alice.getByRole("button", { name: /^File options$/i })
+  await expect(fileOptionsBtn).toBeVisible({ timeout: 10_000 })
+  await fileOptionsBtn.click()
 
   // "Attach video" item is visible in the dropdown (only for subtitle files).
   // No .or() text fallback: when the menu is open BOTH branches match (the

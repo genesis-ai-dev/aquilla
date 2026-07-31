@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { MembersPage } from "./MembersPage"
@@ -91,9 +91,12 @@ describe("MembersPage active-org", () => {
     // which clears the React Query cache on account switch (AQU-212).
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/orgs/42/members"]}>
           <OrgProvider>
-            <MembersPage />
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+              <Route path="/orgs/:orgId/members/matrix" element={<MembersPage />} />
+            </Routes>
           </OrgProvider>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -130,9 +133,12 @@ describe("MembersPage — AQU-485 roster visibility", () => {
 
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={["/orgs/42/members"]}>
           <OrgProvider>
-            <MembersPage />
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+              <Route path="/orgs/:orgId/members/matrix" element={<MembersPage />} />
+            </Routes>
           </OrgProvider>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -158,9 +164,12 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
   it("renders the Roster tab by default", async () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/members"]}>
+        <MemoryRouter initialEntries={["/orgs/42/members"]}>
           <OrgProvider>
-            <MembersPage />
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+              <Route path="/orgs/:orgId/members/matrix" element={<MembersPage />} />
+            </Routes>
           </OrgProvider>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -174,9 +183,12 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
   it("switches to the Matrix tab (MembersMatrixView) on click", async () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/members"]}>
+        <MemoryRouter initialEntries={["/orgs/42/members"]}>
           <OrgProvider>
-            <MembersPage />
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+              <Route path="/orgs/:orgId/members/matrix" element={<MembersPage />} />
+            </Routes>
           </OrgProvider>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -195,9 +207,12 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
   it("deep-links directly to the Matrix tab via ?tab=matrix", async () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/members?tab=matrix"]}>
+        <MemoryRouter initialEntries={["/orgs/42/members/matrix"]}>
           <OrgProvider>
-            <MembersPage />
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+              <Route path="/orgs/:orgId/members/matrix" element={<MembersPage />} />
+            </Routes>
           </OrgProvider>
         </MemoryRouter>
       </QueryClientProvider>,

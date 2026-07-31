@@ -25,13 +25,13 @@ import type { ChecklistState } from "@/hooks/useSetupChecklist"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 
-// RoleGatedStep's AppTooltip renders the full Base UI tooltip on hover/focus
-// (see tooltip.tsx's TooltipDelegationBoundary comment) — its async open
-// isn't reliably driveable in happy-dom. Only RoleGatedStep consumes this
-// module in the drawer's tree, so mocking it here still exercises every real
-// child step (AiInstructionsStep, InviteStep, VoiceStep, …) end-to-end; it
-// only replaces the tooltip's open/close mechanics with an always-rendered
-// content node so the role-naming string can be asserted directly.
+// RoleGatedStep's AppTooltip renders the full Base UI tooltip on hover/focus —
+// its async open isn't reliably driveable in happy-dom. Only RoleGatedStep
+// consumes this module in the drawer's tree, so mocking it here still
+// exercises every real child step (AiInstructionsStep, InviteStep, VoiceStep,
+// …) end-to-end; it only replaces the tooltip's open/close mechanics with an
+// always-rendered content node so the role-naming string can be asserted
+// directly.
 vi.mock("@/components/ui/tooltip", () => ({
   AppTooltip: ({ children, content }: { children: React.ReactNode; content: React.ReactNode }) => (
     <>

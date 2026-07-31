@@ -5,7 +5,7 @@
  * never a silent no-op. This module provides:
  *
  *   - `denialMessage(minRole, currentRole?)` — human-readable "why" string.
- *   - `actionGateProps(canPerform, reason)` — disabled+title props for <button>.
+ *   - `actionGateProps(canPerform, reason)` — disabled+tooltip props for <button>.
  *
  * Keep this module framework-free (no React) so it can be tested purely and
  * imported from hooks, util files, and components alike.
@@ -38,7 +38,7 @@ export function denialMessage(minRoleLevel: number, currentLevel: number | null 
 
 /**
  * Props to apply to a <button> (or any element) to communicate a permission
- * denial. Returns `{ disabled: true, title: <reason> }` so the user sees a
+ * denial. Returns `{ disabled: true, tooltip: <reason> }` so the user sees a
  * tooltip on hover and the button is non-interactive.
  *
  * Usage:
@@ -46,15 +46,15 @@ export function denialMessage(minRoleLevel: number, currentLevel: number | null 
  *
  * @param allowed   Whether the action is permitted.
  * @param minRole   Human-readable minimum role name (e.g. "contributor").
- * @returns         `{}` when allowed; `{ disabled: true, title: <reason> }` otherwise.
+ * @returns         `{}` when allowed; `{ disabled: true, tooltip: <reason> }` otherwise.
  */
 export function actionGateProps(
   allowed: boolean,
   minRoleName: string,
-): { disabled?: true; title?: string } {
+): { disabled?: true; tooltip?: string } {
   if (allowed) return {}
   return {
     disabled: true,
-    title: `Requires at least ${minRoleName} access`,
+    tooltip: `Requires at least ${minRoleName} access`,
   }
 }

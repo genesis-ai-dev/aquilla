@@ -452,7 +452,7 @@ export function Homepage() {
             <h2 className="aq-display">Free to start. Simple when you scale.</h2>
             <p>Aquilla is free for everyone today. No payment is collected on this site yet — usage-based pricing is coming, and we'll tell you before anything changes.</p>
           </div>
-          <div className="aq-price-grid aq-reveal" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+          <div className="aq-price-grid aq-price-grid-3 aq-reveal">
             <div className="aq-price">
               <h4 className="aq-display">Everyone</h4>
               <div className="aq-price-tag">Free, forever</div>

@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -21,7 +21,7 @@ test("share panel invite mode toggles between @user and email", async ({ alice }
   await seedProjectWithFile(await jwtFor("alice"), { name: `InviteMode ${Date.now()}` })
 
   // The mode toggle lives in the Members page "Add to projects" dialog.
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   const addToProjectsBtn = alice.getByRole("button", { name: /Add to projects/i })
   await expect(addToProjectsBtn).toBeVisible({ timeout: 10_000 })
   await expect(addToProjectsBtn).toBeEnabled({ timeout: 10_000 })

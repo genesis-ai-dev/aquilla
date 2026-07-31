@@ -574,7 +574,7 @@ describe("ProjectOverview archive/restore", () => {
     const moreBtn = await screen.findByRole("button", { name: "More actions" })
     fireEvent.click(moreBtn)
 
-    const btn = await screen.findByRole("button", { name: "Archive" })
+    const btn = await screen.findByRole("menuitem", { name: "Archive" })
     fireEvent.click(btn)
 
     await waitFor(() => expect(archiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
@@ -607,6 +607,8 @@ describe("ProjectOverview archive/restore", () => {
       status: "ready",
       refresh,
     })
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
     downloadProjectBundle.mockResolvedValue(undefined)
     renderOverview()
 
@@ -614,7 +616,7 @@ describe("ProjectOverview archive/restore", () => {
     const moreBtn = await screen.findByRole("button", { name: "More actions" })
     fireEvent.click(moreBtn)
 
-    const btn = await screen.findByRole("button", { name: "Download deliverable" })
+    const btn = await screen.findByRole("menuitem", { name: "Download deliverable" })
     fireEvent.click(btn)
     await waitFor(() =>
       expect(downloadProjectBundle).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", fileId: "f1" })),
@@ -627,11 +629,13 @@ describe("ProjectOverview archive/restore", () => {
       status: "ready",
       refresh,
     })
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
     renderOverview()
 
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Download deliverable" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Download deliverable" })).not.toBeInTheDocument()
   })
 })
 
@@ -790,7 +794,7 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
 
   // AQU-416: the overview rendering (no redirect) is necessary but not
   // sufficient — a guest must be able to actually ENTER the workspace from
-  // here. "Open project" navigates unconditionally to `/project/:id`; this
+  // here. "Open project" navigates unconditionally to `/project/:id/editor`; this
   // locks in that the button still fires for a project whose org the caller
   // does not belong to (the exact "Shared with you" scenario), so a future
   // regression that guards this button on org membership fails loudly here
@@ -812,7 +816,7 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     // in a transition so the button can spin); it still navigates to the
     // workspace, forwarding an optional NavigateOptions arg.
     expect(
-      navigate.mock.calls.some((call: unknown[]) => call[0] === "/project/p1"),
+      navigate.mock.calls.some((call: unknown[]) => call[0] === "/project/p1/editor"),
     ).toBe(true)
   })
 })
@@ -1519,9 +1523,9 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
-    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1?lane=es")
+    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
     // The default lane opens the workspace with no lane param (today's behavior).
-    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1")
+    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
   })
 
   it("Assign… on a lane row mounts AssignModal pinned to that lane", async () => {
@@ -1559,7 +1563,7 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
 
     await screen.findByTestId("overview-lane-table")
     expect(screen.getByTestId("overview-lane-add-language").getAttribute("href"))
-      .toBe("/project/p1/settings?section=general")
+      .toBe("/project/p1/settings/general")
   })
 
   it("re-reads the per-file drill-down with the selected lane param", async () => {

@@ -21,11 +21,15 @@ export class Glossary {
   }
 
   async addTerm(sourceTerm: string, rendering: string): Promise<Locator> {
-    await this.page.getByPlaceholder("New source term…").fill(sourceTerm)
-    if (rendering) await this.page.getByPlaceholder("rendering", { exact: true }).fill(rendering)
-    const saved = this.waitForSettingsPatch()
     await this.page.getByRole("button", { name: "Add term" }).click()
+    const dialog = this.page.getByRole("dialog")
+    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    await dialog.getByPlaceholder("New source term…").fill(sourceTerm)
+    if (rendering) await dialog.getByPlaceholder("rendering", { exact: true }).fill(rendering)
+    const saved = this.waitForSettingsPatch()
+    await dialog.getByRole("button", { name: "Add term" }).click()
     await this.expectSettingsPatchOk(saved)
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 })
     const row = this.row(sourceTerm)
     await expect(row).toBeVisible({ timeout: 8_000 })
     return row

@@ -53,7 +53,8 @@ export function Dashboard() {
   const navigate = useNavigate()
   // AQU-737: opening a project card is a lazy-route + cloud-download hop; drive
   // the clicked card's spinner/disabled state off the real transition pending.
-  const { open: openWorkspace, isOpening } = useOpenWorkspace()
+  // `openingOverlay` blocks the rest of the dashboard while the open is in flight.
+  const { open: openWorkspace, isOpening, overlay: openingOverlay } = useOpenWorkspace()
   const brand = useBrand()
 
   useEffect(() => {
@@ -242,6 +243,7 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
+      {openingOverlay}
       <header className="border-b">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-2">

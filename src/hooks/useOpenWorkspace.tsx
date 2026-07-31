@@ -1,6 +1,8 @@
 import { useCallback, useState, useTransition } from "react"
 import { useNavigate, type NavigateOptions } from "react-router-dom"
 
+import { BlockingLoadingOverlay } from "@/components/ui/loading-overlay"
+
 /**
  * Navigate into a lazy route while surfacing the load as an observable pending
  * state on the control that triggered it (AQU-737).
@@ -18,6 +20,11 @@ import { useNavigate, type NavigateOptions } from "react-router-dom"
  * `pendingTo` records the destination currently in flight so a grid of controls
  * (e.g. project cards) can spin only the one that was clicked; `isOpening(to)`
  * tests a specific target.
+ *
+ * `overlay` is a viewport-wide input blocker to render alongside the surface's
+ * normal content: while the open is pending it covers the whole display area
+ * so no *other* control can be clicked mid-transition, and it disappears the
+ * moment the transition commits or aborts.
  */
 export function useOpenWorkspace() {
   const navigate = useNavigate()
@@ -39,5 +46,12 @@ export function useOpenWorkspace() {
     [isPending, pendingTo],
   )
 
-  return { isPending, pendingTo, open, isOpening }
+  const overlay = isPending ? (
+    <BlockingLoadingOverlay
+      label="Opening project"
+      data-testid="workspace-opening-overlay"
+    />
+  ) : null
+
+  return { isPending, pendingTo, open, isOpening, overlay }
 }

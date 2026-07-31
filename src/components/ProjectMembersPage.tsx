@@ -73,13 +73,15 @@ export function ProjectMembersPage() {
   const { id: projectId } = useParams<{ id: string }>()
   // AQU-737: the workspace route is lazy; surface the load on Back to project so
   // it spins + disables instead of sitting idle and re-clickable.
-  const { open: openWorkspace, isPending: backPending } = useOpenWorkspace()
+  // `openingOverlay` blocks the rest of the page while the open is in flight.
+  const { open: openWorkspace, isPending: backPending, overlay: openingOverlay } = useOpenWorkspace()
   const [tab, setTab] = useState<ActiveTab>("members")
 
   if (!projectId) return null
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
+      {openingOverlay}
       {/* Back header */}
       <div className="flex items-center gap-3 border-b bg-background px-6 py-3">
         <Button

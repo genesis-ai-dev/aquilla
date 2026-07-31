@@ -510,7 +510,8 @@ export function ProjectOverview() {
   const navigate = useNavigate()
   // AQU-737: the workspace is a lazy route; surface the load on the Open project
   // button so it spins + disables instead of sitting idle and re-clickable.
-  const { open: openWorkspace, isPending: openPending } = useOpenWorkspace()
+  // `openingOverlay` blocks the rest of the page while the open is in flight.
+  const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
   const { project, status, refresh, pm } = useProject(id)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -938,6 +939,7 @@ export function ProjectOverview() {
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
+          {openingOverlay}
           {isFrozen && status === "ready" && project && (
             <InactiveProjectBanner
               projectName={project.name}

@@ -1,5 +1,4 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
-import { pickSelectOption } from "../../helpers/base-ui"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
@@ -11,8 +10,9 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * "Remove <username>" button (aria-label="Remove <username>").
  * Clicking it calls removeTeamMember and the row disappears.
  *
- * This spec: seeds bob in alice's org → creates a team → adds bob →
- * clicks "Remove bob" → verifies bob no longer appears in the members list.
+ * This spec: seeds bob in alice's org → creates a team → adds bob via the
+ * AQU-735 multi-select dialog → clicks "Remove bob" → verifies bob no longer
+ * appears in the members list.
  */
 test("team remove member button removes the member from the team", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
@@ -39,21 +39,22 @@ test("team remove member button removes the member from the team", async ({ alic
   // span, which is aria-disabled, so clicking it hangs until the test times out.)
   await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
 
-  // Add bob to the team.
+  // Add bob to the team via multi-select (AQU-735).
   const addMemberBtn = alice.getByRole("button", { name: /Add member/i })
   await expect(addMemberBtn).toBeVisible({ timeout: 5_000 })
   await addMemberBtn.click()
 
-  const memberSelect = alice.getByRole("combobox", { name: "Member to add" })
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const memberSelect = dialog.getByRole("combobox", { name: "Members to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
-  await pickSelectOption(alice, memberSelect, "bob")
-  const confirmAdd = alice.getByRole("button", { name: /^Add$/i })
+  await memberSelect.click()
+  await alice.getByRole("checkbox", { name: "bob" }).check()
+  const confirmAdd = dialog.getByRole("button", { name: /^Add$/i })
   await expect(confirmAdd).toBeEnabled({ timeout: 3_000 })
   await confirmAdd.click()
 
-  // Wait for bob's member row. Don't use a bare getByText("bob") — the
-  // (still-mounted) "Member to add" select trigger also shows "bob", tripping
-  // strict mode. The member row uniquely carries the "Remove bob" action.
+  // Wait for bob's member row. The member row uniquely carries "Remove bob".
   const removeBtn = alice.getByRole("button", { name: /Remove bob/i })
   await expect(removeBtn).toBeVisible({ timeout: 8_000 })
 

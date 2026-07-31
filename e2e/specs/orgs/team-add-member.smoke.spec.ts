@@ -1,17 +1,15 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
-import { pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
 
 /**
- * TeamDetail — add a member to a team.
+ * TeamDetail — add a member to a team (AQU-735 multi-select).
  *
- * TeamDetail.tsx: "Add member" button (isAdmin) reveals a <select> of
- * available org members + "Add" and "Cancel" buttons. Clicking Add calls
- * handleAddMember().
+ * TeamDetail opens an "Add members" dialog with a combobox whose checkbox rows
+ * stage people as chips; one Add grants the whole batch.
  *
  * This spec: seed bob in the org → create a team → navigate to team detail →
- * click "Add member" → select bob → click Add → bob appears in the members list.
+ * click "Add member" → check bob → click Add → bob appears in the members list.
  */
 test("team add member workflow shows new member in members list", async ({ alice }) => {
   // Seed bob in alice's org.
@@ -33,16 +31,22 @@ test("team add member workflow shows new member in members list", async ({ alice
   await expect(addMemberBtn).toBeVisible({ timeout: 5_000 })
   await addMemberBtn.click()
 
-  // Select appears with org members — select bob.
-  const memberSelect = alice.getByRole("combobox", { name: "Member to add" })
-  await expect(memberSelect).toBeVisible({ timeout: 3_000 })
-  await pickSelectOption(alice, memberSelect, "bob")
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
 
-  // Click Add.
-  const addBtn = alice.getByRole("button", { name: /^Add$/i })
-  await expect(addBtn).toBeVisible()
+  // Open the multi-select combobox and check bob.
+  const memberSelect = dialog.getByRole("combobox", { name: "Members to add" })
+  await expect(memberSelect).toBeVisible({ timeout: 3_000 })
+  await memberSelect.click()
+  const bobCheckbox = alice.getByRole("checkbox", { name: "bob" })
+  await expect(bobCheckbox).toBeVisible({ timeout: 3_000 })
+  await bobCheckbox.check()
+
+  // Click Add — enabled once someone is staged.
+  const addBtn = dialog.getByRole("button", { name: /^Add$/i })
+  await expect(addBtn).toBeEnabled({ timeout: 3_000 })
   await addBtn.click()
 
-  // Bob appears in the Members list.
-  await expect(alice.getByText("bob").first()).toBeVisible({ timeout: 5_000 })
+  // Bob appears in the Members list (Remove bob is unique to the member row).
+  await expect(alice.getByRole("button", { name: /Remove bob/i })).toBeVisible({ timeout: 5_000 })
 })

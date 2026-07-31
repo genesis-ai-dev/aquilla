@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getOrCreateMyOrg, fetchOrgRoster, addOrgMember, removeOrgMember,
+  getOrCreateMyOrg, fetchOrgRoster, addOrgMember, addOrgMembers, removeOrgMember,
   listOrgMemberProjects, type MyOrg, type OrgMember, type OrgMemberProject,
 } from "@/lib/frontier/orgs";
+import type { MemberGrantResult } from "@/lib/frontier/members";
 import { useFrontierSession } from "./useFrontierSession";
 
 /**
@@ -96,6 +97,14 @@ export interface UseOrgMembers {
   rosterHidden: boolean;
   refresh: () => Promise<void>;
   add: (username: string, role: number) => Promise<OrgMember | null>;
+  /**
+   * AQU-734: grant `role` to several people in ONE batch request (non-atomic).
+   * Returns the per-person `results` so the caller can name who failed; the
+   * roster refreshes once after so everyone who landed shows up.
+   */
+  addMany: (
+    members: Array<{ username: string; role: number }>,
+  ) => Promise<MemberGrantResult[]>;
   remove: (userId: number) => Promise<void>;
   /** For the remove-confirmation flow: list a member's direct project memberships. */
   listMemberProjects: (userId: number) => Promise<OrgMemberProject[]>;
@@ -159,6 +168,15 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
     }
   }, [jwt, orgId, refresh]);
 
+  const addMany = useCallback(async (
+    toAdd: Array<{ username: string; role: number }>,
+  ) => {
+    if (!jwt || orgId == null || toAdd.length === 0) return [];
+    const results = await addOrgMembers(jwt, orgId, toAdd);
+    await refresh();
+    return results;
+  }, [jwt, orgId, refresh]);
+
   const remove = useCallback(async (userId: number) => {
     if (!jwt || orgId == null) return;
     await removeOrgMember(jwt, orgId, userId);
@@ -170,5 +188,5 @@ export function useOrgMembers(orgId: number | null): UseOrgMembers {
     return listOrgMemberProjects(jwt, orgId, userId);
   }, [jwt, orgId]);
 
-  return { members, isLoading, error, rosterHidden, refresh, add, remove, listMemberProjects };
+  return { members, isLoading, error, rosterHidden, refresh, add, addMany, remove, listMemberProjects };
 }

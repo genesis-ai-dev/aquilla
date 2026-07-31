@@ -6,6 +6,7 @@ import {
   isTranslatable,
   isEndMarker,
   isNestedMarker,
+  isBookTitleOrIntroMarker,
 } from "./usfm-markers"
 
 describe("normalizeMarker", () => {
@@ -104,6 +105,37 @@ describe("isTranslatable", () => {
     for (const m of ["\\fr", "\\xo", "\\c", "\\id", "\\ide", "\\fv", "\\p", "\\b"]) {
       expect(isTranslatable(m)).toBe(false)
     }
+  })
+})
+
+describe("isBookTitleOrIntroMarker (AQU-634 front-matter classifier)", () => {
+  it("true for book name / running header / TOC (identification)", () => {
+    for (const m of ["\\h", "\\h1", "\\toc1", "\\toc2", "\\toc3", "\\toca1"]) {
+      expect(isBookTitleOrIntroMarker(m)).toBe(true)
+    }
+  })
+  it("true for the main title (title category)", () => {
+    for (const m of ["\\mt", "\\mt1", "\\mt2", "\\mte", "\\mte1"]) {
+      expect(isBookTitleOrIntroMarker(m)).toBe(true)
+    }
+  })
+  it("true for the whole introduction block (introduction category)", () => {
+    for (const m of ["\\imt", "\\imt1", "\\is", "\\is1", "\\ip", "\\ipi", "\\ipq", "\\io", "\\io1", "\\io2", "\\iot", "\\im", "\\iq1"]) {
+      expect(isBookTitleOrIntroMarker(m)).toBe(true)
+    }
+  })
+  it("false for in-body section headings (they always import)", () => {
+    for (const m of ["\\s", "\\s1", "\\s2", "\\ms", "\\ms1", "\\sr", "\\mr", "\\r"]) {
+      expect(isBookTitleOrIntroMarker(m)).toBe(false)
+    }
+  })
+  it("false for Psalm descriptive titles \\d and verse/chapter/paragraph markers", () => {
+    for (const m of ["\\d", "\\v", "\\c", "\\p", "\\q1", "\\nd", "\\ft"]) {
+      expect(isBookTitleOrIntroMarker(m)).toBe(false)
+    }
+  })
+  it("false for an unknown marker (conservative: keep, don't drop)", () => {
+    expect(isBookTitleOrIntroMarker("\\zznotreal")).toBe(false)
   })
 })
 

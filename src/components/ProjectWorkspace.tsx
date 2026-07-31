@@ -5727,6 +5727,7 @@ export function ProjectWorkspace() {
           projectFiles={projectFiles}
           targetLanes={project.targetLanes}
           defaultLane={activeLane}
+          defaultLaneLabel={activeTargetLanguage ?? ""}
           members={projectMembers}
           roleLevel={currentRoleLevel}
           allowSelfAssignment={allowSelfAssignment}
@@ -5796,6 +5797,7 @@ export function ProjectWorkspace() {
           existingFiles={project.files}
           projectFiles={labelPickerFiles}
           activeFileId={activeFileId}
+          excludeFrontMatter={project.importExcludeFrontMatter}
           onLabelsImported={(r) => {
             if (r.applied === 0) {
               toast.warning(
@@ -5831,6 +5833,7 @@ export function ProjectWorkspace() {
             cells={fileTargetCells}
             getToken={getTokenForFile}
             applyOptimisticTargetEdits={applyOptimisticTargetEdits}
+            excludeFrontMatter={project.importExcludeFrontMatter}
             onImported={() => { /* reconciliation handled by drain-complete effect (next task) */ }}
           />
         </Suspense>

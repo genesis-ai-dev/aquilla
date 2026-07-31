@@ -4,23 +4,13 @@ import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, createOrg, ROLE } from "../../helpers/frontier-api"
 
 /**
- * UsernameTypeahead — "Verified Aquilla user" badge.
+ * Share panel Members tab — multi-select typeahead stages a verified user (AQU-734).
  *
- * UsernameTypeahead.tsx renders a "verified" badge (title="Verified Aquilla
- * user", green background) when value.mode === "username" && value.resolved.
- *
- * The typeahead resolves a username when the user picks a suggestion from the
- * dropdown (handlePick sets value.resolved) — typing alone doesn't set the
- * badge. The user search is scoped to org/project-overlap users (AQU-321).
- * Bob is seeded into a separate alice-owned org so he is searchable but is not
- * already an effective member of the project under test.
- *
- * This spec:
- *   1. Adds bob to a separate alice-owned org (so scoped search can find him)
- *   2. Creates a project (alice owns it) and opens its workspace
- *   3. Opens the Share panel → Members tab → types "bob" → picks the
- *      "bob" suggestion
- *   4. Verifies the "Verified Aquilla user" badge appears
+ * UsernameTypeahead in multiSelect mode renders suggestion rows as checkboxes.
+ * Checking a resolved Aquilla user stages them as a removable chip (the
+ * single-select "Verified Aquilla user" badge journey was replaced by this).
+ * Bob is seeded into a separate alice-owned org so scoped search can find him
+ * without making him an existing member of the project under test (AQU-321).
  */
 test("share panel username typeahead shows Verified Aquilla user badge", async ({ alice }) => {
   const aliceSession = await ensureAuthState("alice")
@@ -57,18 +47,15 @@ test("share panel username typeahead shows Verified Aquilla user badge", async (
     .or(dialog.locator('input[placeholder="Aquilla username"]'))
   await expect(usernameInput).toBeVisible({ timeout: 8_000 })
 
-  // Type "bob" — the typeahead suggests him; the verified badge only
-  // appears once a suggestion is PICKED (value.resolved is set by
-  // handlePick, not by typing alone).
+  // Type "bob" — multi-select suggestions are checkbox rows; checking stages a chip.
   await usernameInput.fill("bob")
-  const suggestion = alice.getByRole("button", { name: "bob", exact: true })
+  const suggestion = alice.getByRole("checkbox", { name: "bob" })
   await expect(suggestion).toBeVisible({ timeout: 8_000 })
   await suggestion.click()
 
-  // The "Verified Aquilla user" badge appears next to the input.
-  const verifiedBadge = dialog.getByText(/verified/i)
-  await expect(verifiedBadge).toBeVisible({ timeout: 8_000 })
-  await expect(verifiedBadge).toContainText(/verified/i)
+  // Staged chip for the verified Aquilla user appears (removable).
+  await expect(dialog.getByRole("button", { name: "Remove bob" })).toBeVisible({ timeout: 8_000 })
+  await expect(dialog.getByText("bob").first()).toBeVisible()
 
   // Dismiss.
   await alice.keyboard.press("Escape")

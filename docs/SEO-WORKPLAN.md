@@ -45,6 +45,12 @@ Read `docs/SEO.md` for the mechanics. Summary of what shipped:
   one `<h1>`, missing canonical, missing JSON-LD, or a broken asset reference. You cannot
   accidentally regress the prerendering.
 - **Marketing fonts moved into `<head>`** so pages paint in their real typeface immediately.
+- **`run_worker_first = ["/"]`** in `wrangler.toml` so the bare domain serves the marketing
+  homepage instead of the empty app shell — see §1.2, and verify it after the next deploy.
+- **The app shell is `noindex`.** `index.html` carries `<meta name="robots" content="noindex,
+  follow">`; every marketing page has its own prerendered entry, so this covers the app surface
+  without a robots.txt denylist. If you add a marketing page, give it its own entry — a SPA
+  route would inherit the noindex.
 
 **Important:** it is *prerender-and-replace*, not hydration. React clears `#root` and re-renders
 over the static copy. If you add anything to a marketing page, it must render without a DOM —
@@ -102,7 +108,57 @@ Files: `homepage.html`. Note the title/description there use `%BRAND_*%` placeho
 by `scripts/vite-html-branding.ts` — the homepage needs its own literal strings, the way
 `beta.html` and the case studies already do.
 
-### 1.2 Pricing has no URL
+### 1.2 The root URL served an empty shell — fixed here, verify after deploy
+
+**This was the single worst SEO defect on the site and it hid behind a passing test.**
+
+`https://aquilla.app/` was returning the empty SPA shell (`<div id="root"></div>`) to everyone —
+byte-identical to a nonexistent path. Not the marketing homepage. Verified against production:
+
+```
+/                              200  8501b   <- empty SPA shell
+/this-page-does-not-exist-9f3a 200  8501b   <- byte-identical
+/homepage                      200  7544b   <- the actual marketing page
+```
+
+Sending the `aq_hint=1` cookie changed nothing, and the response carried
+`cache-control: public, max-age=0, must-revalidate` rather than the `private, no-store` the
+Worker sets — so the Worker's root branch was never executing. The cause: **Cloudflare's asset
+router runs before the Worker and serves any path it can resolve to an asset.** `/` resolves to
+`index.html` there, so the Worker never got the request. Paths the router *can't* resolve
+(`/case-studies/come-and-see` → `case-study.html`, `/join/:token`) did reach the Worker and
+worked fine, which is why this went unnoticed.
+
+`worker/index.test.ts` asserts *"GET / with no cookie serves homepage.html"* and has been
+passing throughout — it calls the Worker's `fetch` directly, so it never sees the asset router.
+
+**Fixed on this branch** by adding `run_worker_first = ["/"]` to all four assets blocks in
+`wrangler.toml`, plus a config-contract test in `worker/index.test.ts` (verified: it fails when
+the setting is removed). **After the next deploy, confirm it:**
+
+```bash
+curl -s https://aquilla.app/ | grep -o '<title>[^<]*</title>'
+curl -sI https://aquilla.app/ | grep -i cache-control    # expect: private, no-store
+```
+
+If `/` still serves the shell, the fallback is to canonicalise the homepage to `/homepage`
+instead — but do not leave the canonical pointing at `/` while `/` serves an empty page.
+
+### 1.3 Every unknown URL returns HTTP 200 (soft 404)
+
+`not_found_handling = "single-page-application"` means **any** path returns 200 with the SPA
+shell. `/this-page-does-not-exist-9f3a` → `200`. The `NotFound` React component renders a
+"Page not found" message client-side, but the HTTP status is still 200.
+
+Google calls this a soft 404 and reports it in Search Console. The practical harm: the URL space
+is infinite and every bogus URL looks valid to a crawler, so crawl budget gets spent on nothing.
+
+**Not fixed here — it needs a decision.** The Worker would have to know which SPA routes are
+real in order to 404 the rest, which means an allowlist of route prefixes that has to stay in
+sync with `src/App.tsx`. Get it wrong and you 404 a real page. See §"App and marketing share one
+namespace" below, because this is the same question in a different costume.
+
+### 1.4 Pricing has no URL
 
 The homepage carries seven topics on one URL:
 
@@ -118,7 +174,7 @@ the other credible candidate.
 How to add a page: `docs/SEO.md` §"Adding a marketing page" has the four-step checklist. There's
 a parity test that fails if you do only some of the steps.
 
-### 1.3 Internal links point at the non-canonical URL
+### 1.5 Internal links point at the non-canonical URL
 
 The homepage is served at both `/` and `/homepage`. Canonical is `/`. But both case studies link
 back to **`/homepage`** — so the two strongest internal links on the site point at the alias
@@ -127,13 +183,13 @@ instead of the canonical URL.
 Fix: change `href="/homepage"` to `href="/"` in `src/pages/CaseStudy/ComeAndSee.tsx` and
 `src/pages/CaseStudy/Biblica.tsx`.
 
-### 1.4 The case studies are orphans
+### 1.6 The case studies are orphans
 
 The homepage links to both case studies (good). Neither case study links to the other, or to
 `/beta`. Add cross-links — a short "more stories" block at the foot of each case study. Cheap,
 and it's the standard fix for pages that never get crawled deeply.
 
-### 1.5 `/privacy-policy` is still client-rendered
+### 1.7 `/privacy-policy` is still client-rendered
 
 It's a SPA route (`src/pages/PrivacyPolicy.tsx`), so it ships as an empty shell. It's a real page
 people look for. Either promote it to a prerendered marketing entry, or accept it and move on —
@@ -279,7 +335,7 @@ With Phases 0–3 done you'll have queries, clusters, and a value sentence per p
 
 Suggested order, easiest and safest first:
 
-1. **`/pricing`** — split from the homepage anchor (1.2 above).
+1. **`/pricing`** — split from the homepage anchor (1.4 above).
 2. **Format/interop pages** — "USFM to InDesign: what survives," "Getting your Paratext project
    out of Paratext," "USX vs USFM." We have ~20 real parsers in `src/lib/parsers/` with test
    fixtures, so these can be *accurate* in a way competitors' pages aren't. This is the highest
@@ -289,6 +345,67 @@ Suggested order, easiest and safest first:
 
 `docs/SEO-STRATEGY.md` covers what comes after this (a content graph, a much larger page
 programme, and AI-answer-engine visibility). Don't start it until Phase 4 is underway.
+
+---
+
+## App and marketing share one namespace — do we move the app under `/a`?
+
+**Short answer: no, not now.** The SEO benefit is ~95% achievable for one line, and the prefix
+carries costs that have nothing to do with search.
+
+### The situation
+
+`worker/index.ts` maps a handful of marketing routes (`/`, `/homepage`, `/beta`,
+`/case-studies/*`, `/bible-translation`) and hands **everything else** to the SPA. So the app
+owns the entire remaining URL space by default, and each new marketing URL has to be carved out
+of it. Two real consequences: robots.txt is an enumerated *denylist* of app paths that someone
+must remember to extend, and every unknown path returns 200 (§1.3).
+
+### Why the prefix isn't the answer
+
+Moving the app to `/a/*` breaks every existing app URL, and some of those URLs live outside our
+control:
+
+- **`/join/:token`, `/join-org/:token`, `/link/:token`, `/approve/:changesetId`** are shared
+  externally — they sit in people's email and chat history. They'd need permanent redirects
+  forever, so the "clean split" is never actually clean.
+- **`/oauth/callback`** is registered with Monday.com as an OAuth redirect URI. Changing it means
+  editing an external app registration and coordinating the cutover.
+- Every `navigate()` call, `<Link>`, e2e page object, deep link in a notification email, the
+  Tauri shell, and every bookmark a customer has.
+
+And after all that, **the search benefit over the one-line fix below is close to zero.**
+
+### What we did instead
+
+- **`<meta name="robots" content="noindex, follow">` on `index.html`** (this branch). Because
+  every marketing page has its own prerendered HTML entry, `index.html` is *only* served for
+  app routes and invite links. One rule now covers every app route, including ones nobody has
+  written yet — which is the actual thing the prefix was going to buy. Social meta still works;
+  noindex doesn't affect link unfurling.
+- **`run_worker_first = ["/"]`** (§1.2), so the root URL serves the marketing homepage rather
+  than the app shell.
+
+Note the interaction: robots.txt `Disallow` and `noindex` don't stack. A path that's disallowed
+is never fetched, so its `noindex` is never seen. That's fine — either one keeps a page out of
+the index. Keep the `Disallow` entries for genuinely private routes (`/join/`, `/approve/`,
+`/link/`) and let `noindex` cover the general app surface.
+
+### What's still open: proper 404s
+
+The remaining piece of the namespace problem is §1.3 — unknown paths return 200. The fix is an
+allowlist of real route prefixes in `worker/index.ts`, 404ing anything else. Maybe 30 lines plus
+tests, and the Worker already has its own suite.
+
+The risk is that the allowlist drifts from `src/App.tsx` and starts 404ing real pages, which is
+a user-visible break rather than an SEO regression. Worth doing, worth doing carefully, and it
+should be its own PR with the route list derived from `App.tsx` rather than hand-copied.
+
+### When to revisit the prefix
+
+If the marketing surface grows past ~50 URLs, or if you want to move marketing to a separate
+origin or CMS. If you do it then: use `/app/*`, keep every externally-shared token route at the
+root permanently, and ship 301s for the rest.
 
 ---
 

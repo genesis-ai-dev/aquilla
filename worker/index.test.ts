@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { describe, it, expect } from "vitest"
 import { injectInviteMeta } from "./index"
 
@@ -177,5 +179,41 @@ describe("worker/index — routing", () => {
   it("GET /__dev/login passes through to ASSETS unchanged", async () => {
     const res = await fetchWorker("/__dev/login")
     expect(await res.text()).toBe("served:/__dev/login")
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deployment-config contract.
+//
+// The routing tests above call the Worker's `fetch` directly. In production the
+// Cloudflare asset router runs BEFORE the Worker and serves any path it can
+// resolve to an asset — and `/` resolves to index.html. So "GET / with no
+// cookie serves homepage.html" passed here for months while aquilla.app/`
+// served the empty SPA shell to every signed-out visitor and crawler.
+//
+// `run_worker_first` is what makes the tests above describe reality. It is
+// deployment config, not code, so it needs its own assertion — this is the
+// level the regression escaped at.
+describe("wrangler.toml — asset router must not preempt the Worker at /", () => {
+  const toml = readFileSync(resolve(__dirname, "../wrangler.toml"), "utf8")
+  const assetBlocks = toml.split(/^\[.*assets\]$/m).slice(1)
+
+  it("declares an assets block per environment", () => {
+    // top-level + production + development + staging
+    expect(assetBlocks).toHaveLength(4)
+  })
+
+  it("runs the Worker first for / in every environment", () => {
+    for (const block of assetBlocks) {
+      const decl = /run_worker_first\s*=\s*\[([^\]]*)\]/.exec(block)
+      expect(decl, `an assets block is missing run_worker_first:\n${block.trim().slice(0, 200)}`).toBeTruthy()
+      expect(decl![1]).toContain('"/"')
+    }
+  })
+
+  it("keeps SPA fallback on, so app routes still resolve to index.html", () => {
+    for (const block of assetBlocks) {
+      expect(block).toContain('not_found_handling = "single-page-application"')
+    }
   })
 })

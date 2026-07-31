@@ -60,6 +60,13 @@ enabled = true
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
+# to index.html there, so the Worker's aq_hint branch never executed and the
+# bare domain served the empty SPA shell to signed-out visitors and crawlers
+# alike (verified in production: `/` was byte-identical to a nonexistent path).
+# Listing `/` here runs the Worker first for the root only; every other path
+# keeps the cheaper asset-first behaviour.
+run_worker_first = ["/"]
 
 # ---------------------------------------------------------------------------
 # Production environment — attaches aquilla.app/* to this Worker. web.aquilla.app is retired.
@@ -78,6 +85,13 @@ routes = ["aquilla.app/*"]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
+# to index.html there, so the Worker's aq_hint branch never executed and the
+# bare domain served the empty SPA shell to signed-out visitors and crawlers
+# alike (verified in production: `/` was byte-identical to a nonexistent path).
+# Listing `/` here runs the Worker first for the root only; every other path
+# keeps the cheaper asset-first behaviour.
+run_worker_first = ["/"]
 
 # ---------------------------------------------------------------------------
 # Development staging — served from dev branch, deploys to dev.aquilla.app
@@ -94,6 +108,13 @@ routes = ["dev.aquilla.app/*"]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
+# to index.html there, so the Worker's aq_hint branch never executed and the
+# bare domain served the empty SPA shell to signed-out visitors and crawlers
+# alike (verified in production: `/` was byte-identical to a nonexistent path).
+# Listing `/` here runs the Worker first for the root only; every other path
+# keeps the cheaper asset-first behaviour.
+run_worker_first = ["/"]
 
 # ---------------------------------------------------------------------------
 # Pre-production staging — served from staging branch, deploys to staging.aquilla.app
@@ -110,3 +131,10 @@ routes = ["staging.aquilla.app/*"]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
+# to index.html there, so the Worker's aq_hint branch never executed and the
+# bare domain served the empty SPA shell to signed-out visitors and crawlers
+# alike (verified in production: `/` was byte-identical to a nonexistent path).
+# Listing `/` here runs the Worker first for the root only; every other path
+# keeps the cheaper asset-first behaviour.
+run_worker_first = ["/"]

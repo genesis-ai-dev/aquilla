@@ -68,13 +68,17 @@ vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(async () => []),
   putMemberScopes: vi.fn(async () => []),
 }))
+const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
+// OrgSidebar (rendered by ProjectOverview's AppShell) calls
+// useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
+// you" nav section (AQU-474), and OrgProvider fetches the same directory
+// (the org overview's PM column joins from it, AQU-507). Default to empty so
+// it never interferes with pre-existing tests.
+const fetchAccessibleProjects = vi.fn(async (_jwt: string): Promise<unknown[]> => [])
 vi.mock("@/lib/sync/cloud-projects", () => ({
   setProjectDeadline: vi.fn(),
-  // OrgSidebar (rendered by ProjectOverview's AppShell) calls
-  // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
-  // you" nav section (AQU-474). Default to empty so it never interferes with
-  // pre-existing tests; individual AQU-474 tests override via mockResolvedValue.
-  fetchAccessibleProjects: vi.fn(async () => []),
+  setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
+  fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
 }))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({
@@ -636,6 +640,39 @@ describe("ProjectOverview archive/restore", () => {
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
     expect(screen.queryByRole("menuitem", { name: "Download deliverable" })).not.toBeInTheDocument()
+  })
+})
+
+// ── Project manager (AQU-507) ──────────────────────────────────────────────
+
+describe("ProjectOverview PM assignment", () => {
+  // WHY: the org overview's PM column joins from the app-wide accessible-
+  // projects directory (OrgContext, fetched once per session). A PM change
+  // that only refreshes this page's own project row leaves that directory
+  // stale, so the org overview kept showing the old PM until a hard reload.
+  it("saving a PM change revalidates the accessible-projects directory", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+      pm: { id: 7, username: "wendi" },
+    })
+    renderOverview()
+
+    expect(await screen.findByTestId("overview-pm-name")).toHaveTextContent("wendi")
+    // Let the provider's mount-time directory fetch resolve first: OrgContext
+    // dedupes refreshes into an in-flight request for the same JWT, so a
+    // still-pending initial fetch would absorb the post-save revalidation.
+    await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalled())
+    const callsBeforeSave = fetchAccessibleProjects.mock.calls.length
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }))
+
+    await waitFor(() => expect(setProjectPm).toHaveBeenCalledWith("jwt", "p1", null))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(fetchAccessibleProjects.mock.calls.length).toBeGreaterThan(callsBeforeSave),
+    )
   })
 })
 

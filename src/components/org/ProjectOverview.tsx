@@ -520,7 +520,7 @@ export function ProjectOverview() {
   // roster read.
   const canManagePm = (project?.syncRole?.level ?? 0) >= 600
   const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
-  const { activeOrgId } = useActiveOrg()
+  const { activeOrgId, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
   // the page a shared-projects row links to. Recording it here clears the
@@ -832,6 +832,11 @@ export function ProjectOverview() {
     try {
       await setProjectPm(jwt, id, pmUserId)
       await refresh()
+      // AQU-507: the org overview's PM column joins from the app-wide
+      // accessible-projects directory (OrgContext, fetched once per session) —
+      // revalidate it so the new PM shows there without a hard reload. Not
+      // awaited: the PM card above reads useProject, not the directory.
+      void refreshAccessibleProjects()
       setPmDialogOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

@@ -348,10 +348,16 @@ programme, and AI-answer-engine visibility). Don't start it until Phase 4 is und
 
 ---
 
-## App and marketing share one namespace — do we move the app under `/a`?
+## App and marketing share one namespace
 
-**Short answer: no, not now.** The SEO benefit is ~95% achievable for one line, and the prefix
-carries costs that have nothing to do with search.
+> **There is now a full design note on this: `docs/specs/2026-07-31-marketing-app-namespace-design.md`.**
+> Its recommendation is to move the app to **`app.aquilla.app`**, make the apex 100% marketing,
+> and delete the cookie-based root switch. Read it before doing anything in this section — what
+> follows is the interim position that holds until that lands.
+
+**Short answer for right now: don't move the app under a path prefix like `/a`.** The SEO benefit
+is ~95% achievable for one line, and a path prefix carries the same migration cost as the
+subdomain with none of its operational upside.
 
 ### The situation
 
@@ -401,11 +407,16 @@ The risk is that the allowlist drifts from `src/App.tsx` and starts 404ing real 
 a user-visible break rather than an SEO regression. Worth doing, worth doing carefully, and it
 should be its own PR with the route list derived from `App.tsx` rather than hand-copied.
 
-### When to revisit the prefix
+### Where this is heading
 
-If the marketing surface grows past ~50 URLs, or if you want to move marketing to a separate
-origin or CMS. If you do it then: use `/app/*`, keep every externally-shared token route at the
-root permanently, and ship 301s for the rest.
+A path prefix is the wrong shape — if we're paying to move every app URL, the subdomain buys
+strictly more: an apex that can be edge-cached, real 404s, a `robots.txt` per host that is
+written once and never edited, and marketing that can move to a CMS later without touching the
+app. See the design note linked at the top of this section for the migration plan and its costs
+(shared invite links, the Monday OAuth callback, cookie scope, two-origin E2E).
+
+Nothing in Phases 0–3 conflicts with that move — metadata, internal links, and query research
+all survive it intact — so don't block on the decision.
 
 ---
 

@@ -71,7 +71,9 @@ import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
-import { humanRoleName } from "@/lib/frontier/roles"
+import { humanRoleName, ROLE } from "@/lib/frontier/roles"
+import { renameProject } from "@/lib/sync/cloud-projects"
+import { UserError } from "@/lib/errors/user-error"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
 import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSection"
 
@@ -277,6 +279,18 @@ export function ProjectSettings() {
   // (roleLevel is null) but have no shared-settings permission model.
   const roleBlocked = isCloudProject && reasonCannotEdit === "role"
 
+  // AQU-765: renaming a synced project now persists to the server rename
+  // endpoint (maintainer+). Local (unsynced) projects keep their name editable
+  // — their IDB record is the source of truth. For a cloud project below the
+  // maintainer floor the field is disabled with an explanatory tooltip (the
+  // AQU-427 convention), not left editable to write a silent local-only no-op.
+  const projectRoleLevel = project?.syncRole?.level ?? null
+  const canRenameProject =
+    !isCloudProject || (projectRoleLevel != null && projectRoleLevel >= ROLE.MAINTAINER)
+  const renameDisabledTooltip = canRenameProject
+    ? null
+    : "Maintainer or higher can rename this project."
+
   // Baseline is the last-saved snapshot of every field on the page. The diff
   // between baseline and the form state determines `isDirty` and which writes
   // we actually have to fire on Save.
@@ -286,6 +300,8 @@ export function ProjectSettings() {
   // baseline; never overwritten by background project re-renders (that's what
   // caused the "typed letter flashes then disappears" bug under auto-save).
   const [name, setName] = useState("")
+  // AQU-765: inline validation for an empty/whitespace-only rename.
+  const [nameError, setNameError] = useState<string | null>(null)
   const [sourceLanguage, setSourceLanguage] = useState("")
   const [targetLanguage, setTargetLanguage] = useState("")
   const [username, setUsername] = useState("")
@@ -574,6 +590,7 @@ export function ProjectSettings() {
     setSaveError(null)
     setPermissionBlocked(false)
     setSavedMessage(null)
+    setNameError(null)
     // AQU-408: track which fields actually changed so the success message can
     // reflect the real delta saved, instead of a generic "Saved" that implies
     // everything on the page was written.
@@ -596,7 +613,38 @@ export function ProjectSettings() {
       if (validationBatchSize !== baseline.validationBatchSize) { completionUpdates.validationBatchSize = validationBatchSize; changedFieldLabels.push("batch validation size") }
 
       const localUpdates: Partial<ProjectRecord> = {}
-      if (name !== baseline.name) { localUpdates.name = name; changedFieldLabels.push("project name") }
+      // AQU-765: rename. Trim first so a whitespace-only entry is rejected
+      // (visible validation) rather than persisted. For a synced project the
+      // server's `projects.name` is the source of truth every surface reads
+      // (org list, breadcrumbs, portfolio, search), so push the rename there
+      // before mirroring it into the local IDB record below. Local projects
+      // skip the server call — their IDB record IS the source of truth.
+      const trimmedName = name.trim()
+      if (trimmedName !== baseline.name) {
+        if (!trimmedName) {
+          setNameError("Enter a project name.")
+          return false
+        }
+        if (isCloudProject) {
+          const jwt = getJwt()
+          if (!jwt) {
+            setSaveError("You're signed out. Sign in again to rename this project.")
+            return false
+          }
+          try {
+            await renameProject(jwt, id, trimmedName)
+          } catch (err) {
+            if (err instanceof UserError && err.status === 403) {
+              setPermissionBlocked(true)
+            } else {
+              setSaveError(err instanceof Error ? err.message : "Renaming the project failed.")
+            }
+            return false
+          }
+        }
+        localUpdates.name = trimmedName
+        changedFieldLabels.push("project name")
+      }
       if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push("username") }
       if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
       if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push("audio media strategy") }
@@ -679,8 +727,11 @@ export function ProjectSettings() {
       // that hasn't necessarily flushed yet, so the read would return stale
       // values and `applyBaseline` would wipe what the user just saved. We
       // wrote the values; we know what they are.
+      // AQU-765: re-baseline (and reflect in the input) with the trimmed name
+      // we actually persisted, so the canonical value doesn't read back dirty.
+      if (trimmedName !== name) setName(trimmedName)
       const newBaseline: Baseline = {
-        name,
+        name: trimmedName,
         sourceLanguage,
         targetLanguage,
         username,
@@ -746,7 +797,7 @@ export function ProjectSettings() {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells,
+    precedingTargetCells, getJwt, isCloudProject,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1078,29 +1129,37 @@ export function ProjectSettings() {
             <CardContent className="space-y-4">
               <div>
                 <FieldLabel htmlFor="pname">Project Name</FieldLabel>
-                {/* AQU-480: a synced project's name comes from the server and has
-                    no rename endpoint (see auth-worker projects route — INSERT
-                    only). Editing this field only wrote local IDB, which reverts
-                    on the next server sync — a silent no-op for every role, and
-                    un-gated for contributors. Gate it read-only with an honest
-                    reason on cloud projects; local projects keep it editable
-                    (their IDB record IS the source of truth). */}
+                {/* AQU-765: a synced project's name lives in the server
+                    `projects.name` row (the source of truth for the org list,
+                    breadcrumbs, portfolio, and search). Renaming now PATCHes
+                    that row on save (maintainer+); local projects keep editing
+                    their IDB record directly. Below the maintainer floor the
+                    field is disabled with an honest reason (AQU-427), not left
+                    editable to write a silent local-only no-op. */}
                 <DisabledFieldTooltip
-                  disabled={isCloudProject}
-                  tooltip={isCloudProject ? "Renaming a synced project isn't supported yet." : null}
+                  disabled={!canRenameProject}
+                  tooltip={renameDisabledTooltip}
                 >
                   <Input
                     id="pname"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    disabled={isCloudProject}
+                    onChange={(e) => {
+                      setName(e.target.value)
+                      if (nameError) setNameError(null)
+                    }}
+                    disabled={!canRenameProject || saving}
+                    aria-invalid={nameError ? true : undefined}
                   />
                 </DisabledFieldTooltip>
-                {isCloudProject && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Renaming a synced project isn't supported yet.
+                {nameError ? (
+                  <p role="alert" className="mt-1 text-xs text-destructive">
+                    {nameError}
                   </p>
-                )}
+                ) : !canRenameProject ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {renameDisabledTooltip}
+                  </p>
+                ) : null}
               </div>
               {sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0 && (
                 <p className="text-xs text-muted-foreground">

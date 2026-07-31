@@ -524,6 +524,58 @@ projects.get("/:projectId", authMiddleware, async (c) => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
+// PATCH /api/v2/projects/:projectId — rename a project (maintainer+)
+//
+// AQU-765: projects had no rename endpoint — the name was fixed at creation
+// (INSERT-only). `projects.name` is the single source of truth every surface
+// reads (the org project list, breadcrumbs, portfolio rollups, and search), so
+// one row UPDATE reflects everywhere on reload; there is no separate projection
+// to notify. Gated at maintainer+ (a contributor's rename is a 403, mirroring
+// the deadline/lifecycle mutations), matching the org-rename floor.
+// ──────────────────────────────────────────────────────────────────────────
+
+// `.trim()` runs before the length checks, so a whitespace-only name collapses
+// to "" and fails min(1) with a 400 — the empty-name rejection the client also
+// guards against.
+const renameProjectSchema = z.object({
+  name: z.string().trim().min(1).max(256),
+})
+
+projects.patch(
+  "/:projectId",
+  authMiddleware,
+  zValidator("json", renameProjectSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+
+    const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
+    if (!role) return c.json({ error: "not found or no access" }, 403)
+    if (role.level < ROLE.MAINTAINER) {
+      return c.json({ error: "maintainer or higher required to rename a project" }, 403)
+    }
+
+    const { name } = c.req.valid("json")
+    try {
+      const result = await c.env.AQUILLA_PG.prepare(
+        "UPDATE projects SET name = ? WHERE id = ?",
+      )
+        .bind(name, projectId)
+        .run()
+      if ((result.meta?.changes ?? 0) === 0) {
+        return c.json({ error: "not found" }, 404)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error("project rename failed:", err)
+      return c.json({ error: `rename failed: ${message}` }, 500)
+    }
+
+    return c.json({ id: projectId, name })
+  },
+)
+
+// ──────────────────────────────────────────────────────────────────────────
 // POST /api/v2/projects/:projectId/archive — owner-only
 // ──────────────────────────────────────────────────────────────────────────
 

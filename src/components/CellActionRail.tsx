@@ -46,36 +46,30 @@ export function RailButton({
 
   return (
     <div className="relative">
-      <button
-        type="button"
-        // AQU-755: register as a delegated tooltip trigger so the shared
-        // DelegatedTooltipLayer (mounted by the editor grid's
-        // TooltipDelegationBoundary) shows a styled tooltip on hover AND on
-        // keyboard focus. Native `title` alone never surfaces on focus and was
-        // the reason these rail buttons read as unexplained. `data-tooltip` is
-        // set unconditionally now (it doubles as the e2e/test hook); no `title`,
-        // so the delegated tooltip is the single source and never double-renders.
-        data-slot="tooltip-trigger"
-        data-tooltip={tooltip}
-        onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.() }}
-        onMouseDown={onMouseDown}
-        onMouseEnter={onMouseEnter}
-        disabled={disabled}
-        aria-label={tooltip}
-        className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-full",
-          "transition-[transform,color,background-color] duration-150 ease-out",
-          "active:scale-[0.88]",
-          "hover:bg-muted/80",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
-          disabled
-            ? "cursor-not-allowed text-muted-foreground/30"
-            : toneClass ?? "text-muted-foreground/70 hover:text-foreground",
-          pulsing && "animate-pulse",
-        )}
-      >
-        {icon}
-      </button>
+      {/* AQU-755: AppTooltip (not native `title`) so the tooltip surfaces on
+          keyboard focus as well as hover. `data-tooltip` stays as the e2e/test
+          hook; AppTooltip strips `title` so nothing double-renders. */}
+      <AppTooltip content={tooltip}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          data-tooltip={tooltip}
+          onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.() }}
+          onMouseDown={onMouseDown}
+          onMouseEnter={onMouseEnter}
+          disabled={disabled}
+          aria-label={tooltip}
+          className={cn(
+            disabled
+              ? "text-muted-foreground/30"
+              : toneClass ?? "text-muted-foreground/70 hover:text-foreground",
+            pulsing && "animate-pulse",
+          )}
+        >
+          {icon}
+        </Button>
+      </AppTooltip>
       {dotColor && (
         <span
           aria-hidden

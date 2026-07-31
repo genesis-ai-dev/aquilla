@@ -271,7 +271,7 @@ export function AppShell({
       </div>
       {aboveCard ? (
         <div className="mx-2 mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="shrink-0 pb-1">{aboveCard}</div>
+          <div className="min-w-0 shrink-0 pb-1">{aboveCard}</div>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background">
             {cardBody}
           </div>

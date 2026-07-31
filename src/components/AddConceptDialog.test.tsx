@@ -125,4 +125,43 @@ describe("AddConceptDialog", () => {
     })
     expect(onConfirm).not.toHaveBeenCalled()
   })
+
+  // ── AQU-754: failed saves surface, dialog stays open (no silent no-op) ───────
+
+  it("surfaces the error and keeps the input mounted when onConfirm rejects", async () => {
+    // Mirrors the editor path: onConfirm persists via patchSettings and throws
+    // when the write is rejected (e.g. below Maintainer). The dialog must show
+    // why and stay open, not close as if the concept was saved.
+    const onConfirm = vi.fn().mockRejectedValue(
+      new Error("You need the Maintainer role or higher to change the term base."),
+    )
+    const onCancel = vi.fn()
+    renderDialog({ sourceTerm: "grace", onConfirm, onCancel })
+
+    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/maintainer role or higher/i)
+    })
+    // Dialog is still interactive (input present) and did not auto-cancel.
+    expect(screen.getByLabelText(/source term for new concept/i)).toBeInTheDocument()
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it("clears a prior error when the user re-submits successfully", async () => {
+    const onConfirm = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("You're offline — reconnect to save term base changes."))
+      .mockResolvedValueOnce(undefined)
+    renderDialog({ sourceTerm: "peace", onConfirm })
+
+    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    })
+    expect(onConfirm).toHaveBeenCalledTimes(2)
+  })
 })

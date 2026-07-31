@@ -6,7 +6,7 @@
  * it before the draft concept is created.
  */
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import {
@@ -41,11 +41,21 @@ export function AddConceptDialog({
   onConfirm,
   onCancel,
 }: AddConceptDialogProps) {
+  // AQU-754: onConfirm persists the concept and throws when the save is
+  // rejected (below Maintainer, offline, conflict, 5xx). Surface that reason and
+  // keep the dialog open instead of dismissing it as if the concept was saved.
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
   const form = useForm({
     defaultValues: { term: sourceTerm },
     validators: { onSubmit: formSchema },
     onSubmit: async ({ value }) => {
-      await onConfirm(value.term.trim())
+      setSubmitError(null)
+      try {
+        await onConfirm(value.term.trim())
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : "Couldn't add the concept — try again.")
+      }
     },
   })
 
@@ -53,6 +63,7 @@ export function AddConceptDialog({
     if (!open) return
     form.reset()
     form.setFieldValue("term", sourceTerm)
+    setSubmitError(null)
   }, [open, sourceTerm, form])
 
   return (
@@ -107,6 +118,12 @@ export function AddConceptDialog({
             />
           </FieldGroup>
         </form>
+
+        {submitError && (
+          <p role="alert" className="px-1 text-sm text-destructive">
+            {submitError}
+          </p>
+        )}
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel}>

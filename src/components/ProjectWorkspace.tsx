@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
+import { describePatchFailure } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
@@ -2448,7 +2449,14 @@ export function ProjectWorkspace() {
       createdBy: currentUsername,
     }
     const updated = addConcept(project, draft)
-    await patchSettings({ terminology: updated.terminology ?? [] })
+    // AQU-754: patchSettings never rejects — it resolves a PatchOutcome. The
+    // prior code ignored it, so an "add concept" from the editor silently
+    // no-op'd whenever the write was rejected (below Maintainer, offline,
+    // version conflict, or a 5xx) — the same silent-failure the Terminology
+    // page hit in AQU-749. Surface it so AddConceptDialog keeps the dialog open
+    // and shows why, instead of closing as if the concept was saved.
+    const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
+    if (failure) throw new Error(failure)
   }, [project, currentUsername, patchSettings])
 
   /** Called when a user manually saves an edited BT from the BT tab. */

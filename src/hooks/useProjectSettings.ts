@@ -26,6 +26,28 @@ export type PatchOutcome =
   | { kind: "blocked"; reason: "offline" | "role" }
   | { kind: "error"; message: string }
 
+/**
+ * Map a non-`ok` {@link PatchOutcome} to a user-facing message, or `null` when
+ * the write succeeded. `patch` never rejects — it resolves an outcome — so any
+ * caller that ignores the result silently swallows role/offline/conflict/server
+ * failures (the AQU-749 class of silent no-op). Callers that write on a user's
+ * behalf should surface `describePatchFailure(outcome)` instead of dropping it.
+ */
+export function describePatchFailure(outcome: PatchOutcome): string | null {
+  switch (outcome.kind) {
+    case "ok":
+      return null
+    case "blocked":
+      return outcome.reason === "offline"
+        ? "You're offline — reconnect to save term base changes."
+        : "You need the Maintainer role or higher to change the term base."
+    case "conflict":
+      return "The term base was changed elsewhere. Re-open the concept and try again."
+    case "error":
+      return `Saving the term base failed: ${outcome.message}`
+  }
+}
+
 export interface UseProjectSettings {
   /** Merged view: server values overlay local IDB values for keys the
    *  server has set. Always defined (may be empty). */

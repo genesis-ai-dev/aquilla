@@ -26,10 +26,11 @@ test("join page with invalid token shows error state and Back to projects", asyn
     alice.getByRole("button", { name: /Back to projects/i })
   ).toBeVisible({ timeout: 10_000 })
 
-  // "Back to projects" navigates home. "/" renders the org Overview
-  // (RootRedirect → OrgHome) — it no longer redirects to /projects.
+  // "Back to projects" navigates home, then RootRedirect settles on the
+  // current organization overview. Assert the stable destination rather than
+  // racing the transient "/" route between those two navigation steps.
   await alice.getByRole("button", { name: /Back to projects/i }).click()
-  await alice.waitForURL((url) => url.pathname === "/", { timeout: 5_000 })
+  await expect(alice).toHaveURL(/\/orgs\/[^/?]+$/, { timeout: 10_000 })
 })
 
 /**

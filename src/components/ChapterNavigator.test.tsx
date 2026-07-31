@@ -115,6 +115,32 @@ describe("MilestoneNavigator", () => {
     expect(onSelect).toHaveBeenCalledWith("scripture:MAT:2")
   })
 
+  it("anchors the left-aligned picker to the full prev/trigger/next group", () => {
+    const matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      onchange: null,
+    }))
+    const original = window.matchMedia
+    window.matchMedia = matchMedia as typeof window.matchMedia
+
+    try {
+      render(<MilestoneNavigator items={chapters} activeKey="scripture:MAT:1" onSelect={() => {}} />)
+      openPicker(/Current chapter: Matthew 1/)
+      // ComboboxContent sets data-chips when a custom `anchor` is provided —
+      // below lg we pass the button group so the popover meets the prev arrow.
+      expect(document.querySelector("[data-slot=combobox-content]")).toHaveAttribute("data-chips", "true")
+      expect(matchMedia).toHaveBeenCalledWith("(min-width: 1024px)")
+    } finally {
+      window.matchMedia = original
+    }
+  })
+
   it("marks the active milestone row as checked", () => {
     render(<MilestoneNavigator items={chapters} activeKey="scripture:MAT:2" onSelect={() => {}} />)
     openPicker(/Current chapter: Matthew 2/)

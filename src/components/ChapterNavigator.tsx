@@ -497,9 +497,11 @@ export function MilestoneNavigator({
             </span>
           </ComboboxTrigger>
           <ComboboxContent
-            // Below lg the picker sits left — align popover to the chapter
-            // trigger. lg+: center under the trigger with the absolute picker.
+            // Below lg the picker sits left — anchor to the full prev/trigger/
+            // next group so the popover's left edge meets the prev arrow.
+            // lg+: center under the trigger with the absolute picker.
             align={pickerCentered ? "center" : "start"}
+            anchor={pickerCentered ? undefined : buttonGroupRef}
             // min-w-56 trigger + two size-8 prev/next buttons
             className="w-[calc(14rem+2rem+2rem)] min-w-[calc(14rem+2rem+2rem)] *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
           >

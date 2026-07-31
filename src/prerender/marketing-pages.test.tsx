@@ -33,12 +33,26 @@ describe.each(MARKETING_PAGE_IDS)("%s renders without a browser", (id) => {
   })
 })
 
-describe("signed-out fallback", () => {
-  it("renders the homepage's signed-out call to action", () => {
-    // hasAuthHintCookie() has no cookie to read at build time; the prerendered
-    // page must therefore be the signed-out variant, never a stale "open app"
-    // link pointing signed-out visitors into the workspace.
-    const html = renderToStaticMarkup(marketingPageElement("homepage"))
-    expect(html).toContain('href="/login"')
+describe("the prerendered page is identity-independent", () => {
+  // The Worker serves one copy of this page to every visitor and lets the edge
+  // cache it, so the prerendered markup must not encode who is asking.
+  // AppEntryBanner does that in the browser after mount instead.
+  const html = renderToStaticMarkup(marketingPageElement("homepage"))
+
+  it("points 'open app' at the workspace entry, not at / or /login", () => {
+    expect(html).toContain('href="/app"')
+    // `/` is this very page — linking there would bounce the user in a circle.
+    expect(html).not.toMatch(/href="\/"[^>]*>[^<]*open app/i)
+  })
+
+  it("carries no signed-in banner", () => {
+    expect(html).not.toContain("aq-appentry")
+    expect(html).not.toMatch(/welcome back/i)
+  })
+
+  it("reads no browser identity state while rendering", () => {
+    // There is no document, cookie, or IndexedDB in Node. A page that needed
+    // any of them to render would throw here rather than at deploy time.
+    expect(html.length).toBeGreaterThan(5000)
   })
 })

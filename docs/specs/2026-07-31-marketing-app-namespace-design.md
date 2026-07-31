@@ -4,9 +4,17 @@
 comparison pages, content angles. How do we make this scalable and simple for a team that
 doesn't want to track a million things?"*
 
-**Recommendation: move the app to `app.aquilla.app`, make the apex 100% marketing, and delete
-the cookie-based root switch.** Reasoning below, including the part where the premise we were
-working from turns out not to match what Linear and Cursor actually do.
+> **Status, 2026-07-31: the low-churn half of this is implemented.** `/` now serves the marketing
+> homepage to every visitor with no cookie branch, identity moved to the browser
+> (`AppEntryBanner`), and `/app` is the workspace entry. That captured the cacheability win, the
+> "static marketing is the default" behaviour, and the deletion of the switch — **without moving a
+> single app URL.** The subdomain below remains the eventual destination, not an urgent one; §4
+> is now optional future work rather than a plan of record.
+
+**Recommendation: serve one marketing page at `/` to everyone and resolve identity client-side
+(done), then move the app to `app.aquilla.app` when the marketing surface justifies it.**
+Reasoning below, including the part where the premise we were working from turns out not to match
+what Linear and Cursor actually do.
 
 ---
 
@@ -75,7 +83,7 @@ works fine on a shared domain *if* the split is structural rather than enumerate
 
 ## 3. The two structural options
 
-### Option A — subdomain: `app.aquilla.app` (recommended)
+### Option A — subdomain: `app.aquilla.app` (the eventual destination)
 
 The **host** answers the question. Nothing to list, ever.
 
@@ -111,6 +119,9 @@ cleanly. If we're paying the migration cost, pay it once for the subdomain.
 
 ## 4. Migration — what it actually costs
 
+*Not scheduled. Retained because the costs don't change, and knowing them is what made the
+low-churn path obviously correct to do first.*
+
 Mechanical, and mostly derivable from `src/App.tsx` rather than hand-written.
 
 1. **Stand up `app.aquilla.app`** serving the same Worker + SPA assets. Both hosts live at once.
@@ -134,6 +145,26 @@ Mechanical, and mostly derivable from `src/App.tsx` rather than hand-written.
 Deliberately *not* part of this: auto-redirecting signed-in visitors from the apex to the app.
 Linear and Cursor don't, it's what broke, and it's what makes the root uncacheable. Marketing
 shows an "Open app" link; that's it.
+
+## 4a. What actually shipped instead
+
+The user's framing — *"minimise churn, just do what Cursor does: show everyone the homepage,
+check login afterwards, and steer signed-in users with an obvious UX"* — gets most of the value
+for none of the migration cost:
+
+- **`worker/index.ts`**: `/` serves `homepage.html` unconditionally. No cookie branch. Response is
+  identical for every visitor, so it carries `public, max-age=0, s-maxage=600,
+  stale-while-revalidate=86400` instead of `private, no-store`.
+- **`AppEntryBanner`**: reads the session from IndexedDB after mount and offers a signed-in
+  visitor their workspace. Additive, so no flicker; renders `null` without a DOM, so the
+  prerendered page stays identical for everyone; keys on session *presence*, not validity,
+  because a stale token is better handled by `/app` than by hiding the door.
+- **`/app`**: the workspace entry (`AppEntry`, mounted at `/app` and `/`), sending signed-out
+  visitors to `/login`. Marketing's "Open app" link is now unconditional — no identity read in a
+  cached page.
+
+What this does **not** solve, and what still argues for the subdomain eventually: URL collisions
+as the marketing surface grows, and soft-404s (§1.3 of the workplan).
 
 ## 5. The test: what does the team track afterwards?
 

@@ -45,19 +45,35 @@ async function fetchWorker(path: string, cookie?: string) {
 }
 
 describe("worker/index — routing", () => {
-  it("GET / with no cookie serves homepage.html", async () => {
+  // `/` is the marketing homepage for everyone. It used to branch on the
+  // aq_hint cookie; that never actually ran in production (the asset router
+  // preempted the Worker) and it made the most-requested URL on the site
+  // uncacheable. Identity is resolved in the browser now — AppEntryBanner.
+  it("GET / serves homepage.html with no cookie", async () => {
     const res = await fetchWorker("/")
     expect(await res.text()).toBe("served:/homepage.html")
   })
 
-  it("GET / with aq_hint=1 cookie serves index.html", async () => {
+  it("GET / serves homepage.html even with aq_hint=1 — no identity branch", async () => {
     const res = await fetchWorker("/", "aq_hint=1")
-    expect(await res.text()).toBe("served:/index.html")
+    expect(await res.text()).toBe("served:/homepage.html")
   })
 
-  it("GET / with unrelated cookie still serves homepage.html", async () => {
-    const res = await fetchWorker("/", "session=abc123")
-    expect(await res.text()).toBe("served:/homepage.html")
+  it("GET / is byte-identical regardless of cookies, so it can be shared-cached", async () => {
+    const anon = await (await fetchWorker("/")).text()
+    const signedIn = await (await fetchWorker("/", "aq_hint=1")).text()
+    const other = await (await fetchWorker("/", "someone=else")).text()
+    expect(signedIn).toBe(anon)
+    expect(other).toBe(anon)
+  })
+
+  it("GET / is edge-cacheable and does not vary on Cookie", async () => {
+    const res = await fetchWorker("/", "aq_hint=1")
+    const cc = res.headers.get("Cache-Control") ?? ""
+    expect(cc).toContain("public")
+    expect(cc).toMatch(/s-maxage=\d+/)
+    expect(cc).not.toContain("no-store")
+    expect(res.headers.get("Vary") ?? "").not.toMatch(/cookie/i)
   })
 
   it("GET /homepage always serves homepage.html (no cookie)", async () => {

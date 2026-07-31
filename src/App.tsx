@@ -112,31 +112,23 @@ function SyncFreezeOverlay() {
 }
 
 /**
- * Root-path guard: visitors without the aq_hint=1 cookie are sent to
- * /homepage (the marketing page). Returning/authenticated users who have
- * the cookie proceed to OrgHome as before.
+ * Workspace entry point, mounted at both `/app` and `/`.
  *
- * This is a client-side defence-in-depth layer. The aquilla-web Worker
- * already does the same check at the edge (worker/index.ts) — this guard
- * only fires if the SPA is somehow reached without the Worker (e.g. local
- * dev without `wrangler dev`, or a Worker not yet deployed).
+ * `/` is served as the marketing homepage to every visitor now — the Worker
+ * doesn't branch on a cookie any more (see worker/index.ts), which is what lets
+ * that page be edge-cached. So a fresh load never reaches this component at `/`;
+ * only in-app navigation does. `/app` is the URL that opens the workspace, and
+ * it's where the marketing nav and AppEntryBanner point.
  *
- * Loop-safety: /homepage is served as homepage.html (a separate entry point
- * that never mounts this component), so this redirect can never loop back.
+ * Signed-out visitors go to /login rather than back to the marketing page:
+ * anyone arriving here clicked something that said "open the app", and bouncing
+ * them to the page they just left would read as a broken link. A user who
+ * completed onboarding counts as signed in — they may be working on local-only
+ * projects without a Frontier account.
  */
-function RootRedirect() {
-  // A user who has completed onboarding is a real user of the app (they may be
-  // working with local-only projects without a Frontier account), so don't
-  // bounce them to the marketing homepage — only un-onboarded, signed-out
-  // visitors get sent there.
+function AppEntry() {
   const onboarded = localStorage.getItem("codex:onboardingComplete") === "true"
-  if (!hasAuthHintCookie() && !onboarded) {
-    // Hard redirect so the Worker (or server) can serve homepage.html.
-    // A client-side <Navigate> would stay inside the SPA bundle and find
-    // no React Router match for /homepage.
-    window.location.replace("/homepage")
-    return null
-  }
+  if (!hasAuthHintCookie() && !onboarded) return <Navigate to="/login" replace />
   return <OrgHome />
 }
 
@@ -184,7 +176,10 @@ function AppRoutes() {
     <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
         {/* Eager — needed for first paint / sign-in flow */}
-        <Route path="/" element={<RootRedirect />} />
+        <Route path="/" element={<AppEntry />} />
+        {/* The workspace entry. `/` is marketing at the edge, so this is
+            the URL that opens the app — marketing nav + AppEntryBanner. */}
+        <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to="/" replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
         <Route path="/assigned" element={<AssignedToMe />} />

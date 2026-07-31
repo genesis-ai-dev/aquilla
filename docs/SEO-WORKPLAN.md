@@ -121,28 +121,49 @@ byte-identical to a nonexistent path. Not the marketing homepage. Verified again
 /homepage                      200  7544b   <- the actual marketing page
 ```
 
-Sending the `aq_hint=1` cookie changed nothing, and the response carried
-`cache-control: public, max-age=0, must-revalidate` rather than the `private, no-store` the
-Worker sets — so the Worker's root branch was never executing. The cause: **Cloudflare's asset
-router runs before the Worker and serves any path it can resolve to an asset.** `/` resolves to
-`index.html` there, so the Worker never got the request. Paths the router *can't* resolve
-(`/case-studies/come-and-see` → `case-study.html`, `/join/:token`) did reach the Worker and
-worked fine, which is why this went unnoticed.
+Two causes stacked. **Cloudflare's asset router runs before the Worker** and resolves `/` to
+`index.html`, so the Worker's root branch never executed. And that branch was switching on the
+`aq_hint` cookie, which meant the response could never be cached even once it did run.
 
-`worker/index.test.ts` asserts *"GET / with no cookie serves homepage.html"* and has been
-passing throughout — it calls the Worker's `fetch` directly, so it never sees the asset router.
+`worker/index.test.ts` asserted *"GET / with no cookie serves homepage.html"* and passed
+throughout — it calls the Worker's `fetch` directly, so it never saw the asset router.
 
-**Fixed on this branch** by adding `run_worker_first = ["/"]` to all four assets blocks in
-`wrangler.toml`, plus a config-contract test in `worker/index.test.ts` (verified: it fails when
-the setting is removed). **After the next deploy, confirm it:**
+**Both are fixed on this branch:**
+
+- `run_worker_first = ["/"]` in `wrangler.toml` (all four assets blocks), so the Worker actually
+  handles the root. Config-contract test in `worker/index.test.ts`, verified to fail without it.
+- **`/` now serves the marketing homepage to everyone**, with no cookie branch at all. Identity
+  moved to the browser — `AppEntryBanner` reads the session after mount and offers signed-in
+  visitors a way into the workspace. See §1.2a.
+
+Verified by running the real Worker against the real build: `/` returns 8,221 readable chars,
+byte-identical with and without `aq_hint=1`, `Cache-Control: public, max-age=0, s-maxage=600,
+stale-while-revalidate=86400`, no `Vary: Cookie`.
+
+**After the next deploy, confirm it:**
 
 ```bash
 curl -s https://aquilla.app/ | grep -o '<title>[^<]*</title>'
-curl -sI https://aquilla.app/ | grep -i cache-control    # expect: private, no-store
+curl -sI https://aquilla.app/ | grep -i cache-control   # expect: public … s-maxage=600
+# and the point of the whole exercise — real content with no JS:
+curl -s https://aquilla.app/ | sed 's/<[^>]*>/ /g' | tr -s ' ' | head -20
 ```
 
-If `/` still serves the shell, the fallback is to canonicalise the homepage to `/homepage`
-instead — but do not leave the canonical pointing at `/` while `/` serves an empty page.
+### 1.2a The app entry is now `/app`
+
+Because `/` is marketing for every visitor, it can no longer double as the app home. `/app` is
+the workspace entry (`AppEntry` in `src/App.tsx`, mounted at both `/app` and `/`), and it sends
+signed-out visitors to `/login` rather than bouncing them back to the page they just left.
+
+Two rules follow, and they matter if you touch the marketing pages:
+
+- **Marketing pages must not read identity while rendering.** They are prerendered at build time
+  and edge-cached, so their markup has to be the same for everyone. The nav's "Open app" link is
+  unconditionally `/app`; it used to branch on the `aq_hint` cookie.
+- **Steer signed-in visitors with additive UI, never by mutating existing UI.** `AppEntryBanner`
+  appears alongside the hero rather than rewriting the call to action, so there's no flicker when
+  the session check resolves. `src/prerender/marketing-pages.test.tsx` fails if identity-dependent
+  markup leaks into the prerendered page.
 
 ### 1.3 Every unknown URL returns HTTP 200 (soft 404)
 

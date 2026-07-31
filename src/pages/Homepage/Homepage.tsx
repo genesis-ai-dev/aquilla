@@ -1,11 +1,11 @@
 import { Component, type ReactNode, useEffect, useRef, useState } from "react"
 import { useBrand } from "@/branding/use-brand"
-import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { HealthRing } from "@/components/HealthRing"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { MultimodalWorkspace } from "./MultimodalWorkspace"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitz"
 import { BetaBar } from "./BetaBar"
+import { AppEntryBanner } from "./AppEntryBanner"
 import { BookCallSection } from "./BookCallSection"
 import { useMarketingShell } from "./useMarketingShell"
 import "./homepage.css"
@@ -33,12 +33,12 @@ export function Homepage() {
 
   const Mark = brand.logo.Mark
 
-  // Signed-in visitors (aq_hint=1 cookie — same bit the Worker reads at the
-  // edge) go straight into the app at `/`; returning (unsigned-in) users go to
-  // /login; brand-new visitors use the "Sign up free" button → /onboarding.
-  // AQU-282: "Open app" is the sign-in entry for returning users — it must
-  // NOT send them through the signup wizard.
-  const appHref = hasAuthHintCookie() ? "/" : "/login"
+  // `/` is the marketing homepage for everyone now, so "open app" can't point
+  // there — /app is the workspace entry, and it sends signed-out visitors to
+  // /login itself. No cookie read here: the marketing pages are prerendered and
+  // edge-cached, so their markup must not depend on who is asking. Signed-in
+  // visitors get steered by AppEntryBanner after mount instead.
+  const appHref = "/app"
 
   return (
     <div className="aq-root" ref={rootRef} data-theme={theme}>
@@ -49,6 +49,7 @@ export function Homepage() {
       </div>
 
       {/* ── Beta strip (above the sticky nav; scrolls away) ──────────────── */}
+      <AppEntryBanner />
       <BetaBar />
 
       {/* ── Nav ───────────────────────────────────────────────────────── */}

@@ -1595,7 +1595,7 @@ export function ProjectOverview() {
 
               {/* ── Project manager card (AQU-507) ── */}
               <div className="rounded-xl border bg-card p-5">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Project manager</h2>
+                <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">Project manager</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {pm ? (
                     <span className="font-medium" data-testid="overview-pm-name">{pm.username}</span>
@@ -1645,7 +1645,19 @@ export function ProjectOverview() {
                   <FieldGroup>
                     <Field>
                       <FieldLabel htmlFor="project-pm">Project manager</FieldLabel>
-                      <Select value={pmSelection} onValueChange={(v) => setPmSelection(v ?? "")}>
+                      {/* `items` maps values → labels so the trigger shows the
+                          member's username, not the raw stringified userId. */}
+                      <Select
+                        value={pmSelection}
+                        onValueChange={(v) => setPmSelection(v ?? "")}
+                        items={[
+                          { value: "", label: "Unassigned" },
+                          ...pmCandidates.map((m) => ({
+                            value: String(m.userId),
+                            label: m.username,
+                          })),
+                        ]}
+                      >
                         <SelectTrigger id="project-pm" aria-label="Project manager">
                           <SelectValue placeholder="Select a member" />
                         </SelectTrigger>

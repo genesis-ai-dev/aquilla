@@ -37,7 +37,9 @@
 # for the full convention doc.
 # =============================================================================
 
-name = "aquilla-web"
+# The unnamed profile is local-only. Live deploys must select a named profile;
+# a bare `wrangler deploy` therefore cannot overwrite the production Worker.
+name = "aquilla-web-local"
 main = "worker/index.ts"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 compatibility_date = "2025-05-01"
@@ -72,6 +74,9 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 workers_dev = true
 routes = ["aquilla.app/*"]
 
+[env.production.build]
+command = "bash scripts/verify-deploy-branch.sh main"
+
 [env.production.assets]
 directory = "./dist"
 binding = "ASSETS"
@@ -104,7 +109,22 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 workers_dev = true
 routes = ["staging.aquilla.app/*"]
 
+[env.staging.build]
+command = "bash scripts/verify-deploy-branch.sh staging"
+
 [env.staging.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# Pull-request previews are isolated from every live Worker and route. They use
+# development API hosts but publish only a workers.dev preview alias.
+[env.preview]
+name = "aquilla-web-preview"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+
+[env.preview.assets]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"

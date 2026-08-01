@@ -1,4 +1,6 @@
-name = "aquilla-identity"
+# The unnamed profile is local-only. Live deploys must select a named profile;
+# a bare `wrangler deploy` therefore cannot overwrite the production Worker.
+name = "aquilla-identity-local"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -154,8 +156,8 @@ GITLAB_URL = "https://git.genesisrnd.com"
 # don't matter. Separate axis from the org role ladder; see platform-admin.ts.
 # ADMIN_REQUIRE_ELEVATION="true" adds the emailed 6-digit step-up code (→ 6h
 # session); bypassed under WRANGLER_LOCAL=1 (local dev-stack / e2e) so the local
-# console stays open. NOTE: deployed via `wrangler deploy` (CI main) which reads
-# THIS top-level block, so it must carry both to harden prod.
+# console stays open. The named production profile re-declares both values below;
+# the unnamed profile is local-only and is never a production deploy source.
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (non-secret ids; empty defaults — set real values per
@@ -168,9 +170,8 @@ MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
 
 # ---------------------------------------------------------------------------
 # Production environment — owns routes on api.aquilla.app for the identity
-# and chat surfaces. Same worker name as top-level (aquilla-identity), so
-# `wrangler deploy` (CI, code-only) and `wrangler deploy --env=production`
-# (local, code + routes) target the same Worker. Bindings + vars are
+# and chat surfaces. Only `wrangler deploy --env=production` targets this Worker;
+# the unnamed profile has a distinct local-only name. Bindings + vars are
 # re-declared because env blocks don't inherit them.
 # ---------------------------------------------------------------------------
 [env.production]
@@ -180,6 +181,9 @@ routes = [
   "api.aquilla.app/identity/*",
   "api.aquilla.app/chat/*",
 ]
+
+[env.production.build]
+command = "bash ../scripts/verify-deploy-branch.sh main"
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.production.placement]
@@ -327,6 +331,9 @@ routes = [
   "api.staging.aquilla.app/identity/*",
   "api.staging.aquilla.app/chat/*",
 ]
+
+[env.staging.build]
+command = "bash ../scripts/verify-deploy-branch.sh staging"
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.staging.placement]

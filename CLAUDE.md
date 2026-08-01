@@ -102,11 +102,12 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
 In-flight (uncommitted on dev): Monday.com nudge — `sync-worker/src/monday-notify.ts` fires
 best-effort throttled pushes from the DO broadcast to auth-worker `/api/v2/monday/internal/push`.
 
-Frontend wires hosts at build time: `VITE_AUTH_BASE`, `VITE_CHAT_BASE`,
-`VITE_SYNC_WORKER_HOST`. Browser-facing workers mount under `aquilla.app/api/*` via Workers
-Routes (Safari drops `*.workers.dev` — see SYNC.md). CI's CF token cannot mutate zone routes:
-keep `routes` out of the CI-deployed `wrangler.toml` top level; routes are claimed out-of-band
-by a local `wrangler deploy`.
+Frontend hosts are wired at build time through `VITE_AUTH_BASE`, `VITE_CHAT_BASE`,
+and `VITE_SYNC_WORKER_HOST`. Browser-facing API Workers mount at `/identity/*`,
+`/chat/*`, and `/sync/*` on the environment's `api.*.aquilla.app` host. Routes and
+bindings live in explicit named Wrangler profiles and are deployed by the guarded
+repository commands; unnamed profiles use local-only Worker names. See
+`docs/DEPLOYMENT-ENVIRONMENTS.md` for the executable production/staging/dev contract.
 
 ## Architecture (AD-2 / AD-3 / AD-9)
 

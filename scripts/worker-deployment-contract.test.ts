@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import path from "node:path"
+import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
@@ -17,14 +19,77 @@ function tomlBlock(config: string, marker: string): string {
 }
 
 describe("worker deployment environment contract", () => {
-  it("always passes an explicit named environment to GitHub worker deploys", () => {
+  it("resolves GitHub deploys once and never falls through to an environment", () => {
     const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
-    const deploymentExpression =
-      "github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development'"
+    const deployCommand = "command: deploy --env=${{ needs.target.outputs.wrangler_environment }}"
 
-    expect(workflow.match(new RegExp(deploymentExpression.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")))
+    expect(workflow.match(new RegExp(deployCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")))
       .toHaveLength(2)
-    expect(workflow).not.toContain("refs/heads/main' && ' '")
+    expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
+    expect(workflow.match(/name: \$\{\{ needs\.target\.outputs\.github_environment \}\}/g))
+      .toHaveLength(2)
+    expect(workflow).not.toContain("|| '--env=development'")
+  })
+
+  it.each([
+    ["push", "main", "production", "production", "api.aquilla.app"],
+    ["push", "staging", "staging", "staging", "api.staging.aquilla.app"],
+    ["workflow_dispatch", "dev", "development", "development", "api.dev.aquilla.app"],
+    ["pull_request", "123/merge", "preview", "development", "api.dev.aquilla.app"],
+  ])(
+    "resolves %s on %s without an implicit fallback",
+    (eventName, refName, wranglerEnvironment, liveEnvironment, apiHost) => {
+      const result = spawnSync(
+        "bash",
+        [path.join(REPO_ROOT, "scripts", "resolve-deployment-target.sh"), eventName, refName],
+        { encoding: "utf8", env: {} },
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stdout).toContain(`wrangler_environment=${wranglerEnvironment}`)
+      expect(result.stdout).toContain(`live_environment=${liveEnvironment}`)
+      expect(result.stdout).toContain(`api_host=${apiHost}`)
+    },
+  )
+
+  it.each(["feature/example", "development", "", "release"])(
+    "rejects unauthorized live deployment ref %j",
+    (refName) => {
+      const result = spawnSync(
+        "bash",
+        [path.join(REPO_ROOT, "scripts", "resolve-deployment-target.sh"), "workflow_dispatch", refName],
+        { encoding: "utf8", env: {} },
+      )
+
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain("ABORT:")
+    },
+  )
+
+  it("enforces the expected branch inside named production profiles", () => {
+    const tempRepo = mkdtempSync(path.join(tmpdir(), "aquilla-deploy-guard-"))
+    const guard = path.join(REPO_ROOT, "scripts", "verify-deploy-branch.sh")
+
+    try {
+      expect(spawnSync("git", ["init", "-b", "main"], { cwd: tempRepo }).status).toBe(0)
+
+      const allowed = spawnSync("bash", [guard, "main"], {
+        cwd: tempRepo,
+        encoding: "utf8",
+        env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: "main" },
+      })
+      expect(allowed.status).toBe(0)
+
+      const rejected = spawnSync("bash", [guard, "staging"], {
+        cwd: tempRepo,
+        encoding: "utf8",
+        env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: "main" },
+      })
+      expect(rejected.status).not.toBe(0)
+      expect(rejected.stderr).toContain("requires branch 'staging'")
+    } finally {
+      rmSync(tempRepo, { recursive: true, force: true })
+    }
   })
 
   it("keeps account_id above the first TOML table", () => {
@@ -34,6 +99,39 @@ describe("worker deployment environment contract", () => {
 
     expect(topLevel).toContain('account_id = "6a80496d1e59948a9cbaa3c643ba81d7"')
     expect(localVars).not.toContain("account_id")
+  })
+
+  it.each([
+    ["wrangler.toml", "aquilla-web-local", "aquilla-web", "bash scripts/verify-deploy-branch.sh main"],
+    ["sync-worker/wrangler.toml", "aquilla-sync-worker-local", "aquilla-sync-worker", "bash ../scripts/verify-deploy-branch.sh main"],
+    ["auth-worker/wrangler.toml", "aquilla-identity-local", "aquilla-identity", "bash ../scripts/verify-deploy-branch.sh main"],
+    ["agent-worker/wrangler.toml", "aquilla-agent-sandbox-local", "aquilla-agent-sandbox", "bash ../scripts/verify-deploy-branch.sh main"],
+    ["resource-worker/wrangler.toml", "aquilla-resources-local", "aquilla-resources", "bash ../scripts/verify-deploy-branch.sh main"],
+  ])(
+    "keeps the unnamed profile in %s away from production",
+    (file, localName, productionName, guardCommand) => {
+      const config = readRepoFile(...file.split("/"))
+      const topLevel = config.slice(0, config.indexOf("\n["))
+      const production = tomlBlock(config, "[env.production]")
+      const productionBuild = tomlBlock(config, "[env.production.build]")
+
+      expect(topLevel).toContain(`name = "${localName}"`)
+      expect(topLevel).not.toContain(`name = "${productionName}"`)
+      expect(production).toContain(`name = "${productionName}"`)
+      expect(productionBuild).toContain(`command = "${guardCommand}"`)
+    },
+  )
+
+  it.each([
+    ["wrangler.toml", "bash scripts/verify-deploy-branch.sh staging"],
+    ["sync-worker/wrangler.toml", "bash ../scripts/verify-deploy-branch.sh staging"],
+    ["auth-worker/wrangler.toml", "bash ../scripts/verify-deploy-branch.sh staging"],
+    ["agent-worker/wrangler.toml", "bash ../scripts/verify-deploy-branch.sh staging"],
+  ])("enforces staging branch ownership in %s", (file, guardCommand) => {
+    const config = readRepoFile(...file.split("/"))
+    const stagingBuild = tomlBlock(config, "[env.staging.build]")
+
+    expect(stagingBuild).toContain(`command = "${guardCommand}"`)
   })
 
   it.each([
@@ -149,6 +247,20 @@ describe("worker deployment environment contract", () => {
 
     expect(workerPackage.scripts?.["deploy:workers-build"])
       .toBe("node scripts/cloudflare-build-deploy.mjs")
+    expect(workerPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:sync")
+
+    const authPackage = JSON.parse(readRepoFile("auth-worker", "package.json")) as {
+      scripts?: Record<string, string>
+    }
+    expect(authPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:auth")
+
+    const agentPackage = JSON.parse(readRepoFile("agent-worker", "package.json")) as {
+      scripts?: Record<string, string>
+    }
+    expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh main")
+    expect(agentPackage.scripts?.deploy).toContain("--env=production")
+    expect(agentPackage.scripts?.["deploy:staging"]).toContain("--env=staging")
+    expect(agentPackage.scripts?.["deploy:development"]).toContain("--env=development")
   })
 
   it("keeps the documented environment matrix synchronized with the executable contract", () => {
@@ -166,6 +278,8 @@ describe("worker deployment environment contract", () => {
     expect(matrix).toContain("`staging` -> `--env=staging`")
     expect(matrix).toContain("`dev` -> `--env=development`")
     expect(matrix).toContain("`pnpm run deploy:workers-build`")
+    expect(matrix).toContain("All unnamed Wrangler profiles are local-only")
+    expect(matrix).toContain("deployment-branch policy")
 
     expect(readRepoFile("README.md")).toContain("docs/DEPLOYMENT-ENVIRONMENTS.md")
     expect(readRepoFile("docs", "STAGING.md")).toContain("DEPLOYMENT-ENVIRONMENTS.md")
@@ -200,16 +314,19 @@ describe("worker deployment environment contract", () => {
 
   it("keeps SPA CI builds and deploys on the same explicit environment", () => {
     const workflow = readRepoFile(".github", "workflows", "deploy.yml")
+    const deployJobStart = workflow.indexOf("  deploy:")
     const deployJobHeader = workflow.slice(
-      workflow.indexOf("  deploy:"),
-      workflow.indexOf("    steps:"),
+      deployJobStart,
+      workflow.indexOf("    steps:", deployJobStart),
     )
 
-    expect(workflow).toContain("bash scripts/verify-dist-host.sh \"$host\"")
-    expect(workflow).toContain("node scripts/verify-live-environment.mjs \"$target\" --surface=spa")
-    expect(workflow).toContain(
-      "github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development'",
-    )
+    expect(workflow).toContain("bash scripts/verify-dist-host.sh \"${{ needs.target.outputs.api_host }}\"")
+    expect(workflow).toContain("node scripts/verify-live-environment.mjs \"${{ needs.target.outputs.live_environment }}\" --surface=spa")
+    expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
+    expect(workflow).toContain("command: deploy --env=${{ needs.target.outputs.wrangler_environment }}")
+    expect(workflow).toContain("command: versions upload --env=preview")
+    expect(workflow).toContain("name: ${{ needs.target.outputs.github_environment }}")
+    expect(workflow).not.toContain("|| '--env=development'")
     expect(deployJobHeader).toContain("env:")
     expect(deployJobHeader).toContain("VITE_SYNC_WORKER_HOST:")
     expect(deployJobHeader).toContain("VITE_AUTH_BASE:")

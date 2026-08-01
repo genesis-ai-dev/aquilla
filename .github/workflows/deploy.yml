@@ -37,9 +37,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      wrangler_environment: ${{ steps.resolve.outputs.wrangler_environment }}
+      live_environment: ${{ steps.resolve.outputs.live_environment }}
+      github_environment: ${{ steps.resolve.outputs.github_environment }}
+      api_host: ${{ steps.resolve.outputs.api_host }}
+      sync_worker_host: ${{ steps.resolve.outputs.sync_worker_host }}
+      auth_base: ${{ steps.resolve.outputs.auth_base }}
+      chat_base: ${{ steps.resolve.outputs.chat_base }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve authorized deployment target
+        run: bash scripts/resolve-deployment-target.sh
+
   deploy:
+    needs: target
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
     permissions:
       contents: read
       deployments: write
@@ -49,9 +68,9 @@ jobs:
     # before the following verification step and previously blocked every
     # otherwise-valid SPA deployment.
     env:
-      VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'api.aquilla.app/sync' || github.ref == 'refs/heads/staging' && 'api.staging.aquilla.app/sync' || 'api.dev.aquilla.app/sync' }}
-      VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/identity' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/identity' || 'https://api.dev.aquilla.app/identity' }}
-      VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/chat' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/chat' || 'https://api.dev.aquilla.app/chat' }}
+      VITE_SYNC_WORKER_HOST: ${{ needs.target.outputs.sync_worker_host }}
+      VITE_AUTH_BASE: ${{ needs.target.outputs.auth_base }}
+      VITE_CHAT_BASE: ${{ needs.target.outputs.chat_base }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -114,13 +133,7 @@ jobs:
 
       - name: Verify built API environment
         if: steps.decide.outputs.deploy == 'true'
-        run: |
-          case "${GITHUB_REF_NAME}" in
-            main) host=api.aquilla.app ;;
-            staging) host=api.staging.aquilla.app ;;
-            *) host=api.dev.aquilla.app ;;
-          esac
-          bash scripts/verify-dist-host.sh "$host"
+        run: bash scripts/verify-dist-host.sh "${{ needs.target.outputs.api_host }}"
 
       # Workers' static-assets parser rejects the SPA `/*  /index.html  200`
       # rule in _redirects (error 100324 — "infinite loop"). SPA fallback is
@@ -145,17 +158,11 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: deploy ${{ github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+          command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
 
       - name: Verify deployed SPA environment
         if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
-        run: |
-          case "${GITHUB_REF_NAME}" in
-            main) target=production ;;
-            staging) target=staging ;;
-            *) target=development ;;
-          esac
-          node scripts/verify-live-environment.mjs "$target" --surface=spa
+        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=spa
 
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview
@@ -164,7 +171,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: versions upload --preview-alias "pr-${{ github.event.number }}" --message "PR ${{ github.event.number }} @ ${{ github.event.pull_request.head.sha }}"
+          command: versions upload --env=preview --preview-alias "pr-${{ github.event.number }}" --message "PR ${{ github.event.number }} @ ${{ github.event.pull_request.head.sha }}"
 
       - name: Comment preview URL on PR
         if: github.event_name == 'pull_request' && steps.decide.outputs.deploy == 'true'
@@ -174,7 +181,7 @@ jobs:
           message: |
             **aquilla-web Worker preview**
 
-            - Preview alias: `pr-${{ github.event.number }}-aquilla-web.<workers-subdomain>.workers.dev`
+            - Preview alias: `pr-${{ github.event.number }}-aquilla-web-preview.<workers-subdomain>.workers.dev`
               (see the "Upload aquilla-web preview" step output for the full URL — first PR after this CI change will reveal the subdomain; pin it here afterwards)
             - Commit: `${{ github.event.pull_request.head.sha }}`
 

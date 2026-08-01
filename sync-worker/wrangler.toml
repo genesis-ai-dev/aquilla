@@ -1,4 +1,6 @@
-name = "aquilla-sync-worker"
+# The unnamed profile is local-only. Live deploys must select a named profile;
+# a bare `wrangler deploy` therefore cannot overwrite the production Worker.
+name = "aquilla-sync-worker-local"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -109,6 +111,9 @@ enabled = true
 name = "aquilla-sync-worker"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.aquilla.app/sync/*"]
+
+[env.production.build]
+command = "bash ../scripts/verify-deploy-branch.sh main"
 
 # Observability is NOT inherited from the top-level block by named envs —
 # without this, production has Workers Logs disabled and 4xx/5xx are invisible.
@@ -229,6 +234,9 @@ name = "EMAIL"
 name = "aquilla-sync-worker-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.staging.aquilla.app/sync/*"]
+
+[env.staging.build]
+command = "bash ../scripts/verify-deploy-branch.sh staging"
 
 [env.staging.vars]
 ENVIRONMENT = "staging"

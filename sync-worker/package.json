@@ -6,7 +6,7 @@
   "scripts": {
     "deploy:workers-build": "node scripts/cloudflare-build-deploy.mjs",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "pnpm --dir .. run deploy:aquilla:sync",
     "type-check": "tsc --noEmit",
     "test": "vitest run"
   },

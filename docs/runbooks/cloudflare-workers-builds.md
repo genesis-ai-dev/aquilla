@@ -30,9 +30,20 @@ If `WORKERS_CI=1` or `WORKERS_CI_BRANCH` is absent, the command fails without in
 Feature builds may create preview versions, but they cannot promote a version or
 change a live route.
 
+The unnamed Wrangler profile targets `aquilla-sync-worker-local`, never
+`aquilla-sync-worker`. The named production and staging profiles run the repository
+branch guard as a Wrangler build hook, so an accidental direct deployment is
+rejected before upload unless the checkout is on the authorized branch. The build
+hook is defense in depth; Cloudflare Builds must still use the repository-owned
+command above.
+
 Actual staging and development promotion remains owned by
 `.github/workflows/deploy-workers.yml`, whose branch mapping always passes an
 explicit named environment.
+
+GitHub production deploy jobs also enter the repository's `production`
+Environment. GitHub's deployment-branch policy restricts that Environment to
+`main`, independently of the workflow mapping.
 
 ## Production verification
 

@@ -101,7 +101,9 @@ Scripts follow the pattern `pnpm run deploy:<brand>:<target>`:
 Production, staging, and development mappings are defined in
 [docs/DEPLOYMENT-ENVIRONMENTS.md](docs/DEPLOYMENT-ENVIRONMENTS.md). Live Aquilla
 deploys always pass an explicit named Wrangler environment; do not use a bare
-`wrangler deploy`.
+`wrangler deploy`. Unnamed Wrangler profiles are local-only, production jobs are
+restricted to `main` by the GitHub `production` Environment, and the named
+production profile runs a branch guard before upload.
 
 ## Multi-brand build system
 

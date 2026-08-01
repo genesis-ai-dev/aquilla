@@ -111,12 +111,21 @@ describe("worker deployment environment contract", () => {
 
   it("keeps SPA CI builds and deploys on the same explicit environment", () => {
     const workflow = readRepoFile(".github", "workflows", "deploy.yml")
+    const deployJobHeader = workflow.slice(
+      workflow.indexOf("  deploy:"),
+      workflow.indexOf("    steps:"),
+    )
 
     expect(workflow).toContain("bash scripts/verify-dist-host.sh \"$host\"")
     expect(workflow).toContain("node scripts/verify-live-environment.mjs \"$target\" --surface=spa")
     expect(workflow).toContain(
       "github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development'",
     )
+    expect(deployJobHeader).toContain("env:")
+    expect(deployJobHeader).toContain("VITE_SYNC_WORKER_HOST:")
+    expect(deployJobHeader).toContain("VITE_AUTH_BASE:")
+    expect(deployJobHeader).toContain("VITE_CHAT_BASE:")
+    expect(workflow.match(/VITE_AUTH_BASE:/g)).toHaveLength(1)
     expect(workflow).not.toContain("refs/heads/main' && ' '")
   })
 })

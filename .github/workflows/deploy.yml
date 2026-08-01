@@ -44,6 +44,14 @@ jobs:
       contents: read
       deployments: write
       pull-requests: write
+    # Keep the API target in job scope so the build and the artifact guard
+    # consume the exact same values. Step-scoped VITE_* variables disappear
+    # before the following verification step and previously blocked every
+    # otherwise-valid SPA deployment.
+    env:
+      VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'api.aquilla.app/sync' || github.ref == 'refs/heads/staging' && 'api.staging.aquilla.app/sync' || 'api.dev.aquilla.app/sync' }}
+      VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/identity' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/identity' || 'https://api.dev.aquilla.app/identity' }}
+      VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/chat' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/chat' || 'https://api.dev.aquilla.app/chat' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -103,16 +111,6 @@ jobs:
       # use VITE_FRONTIER_BASE if we ever needed it.
       - run: pnpm run build
         if: steps.decide.outputs.deploy == 'true'
-        env:
-          # API lives on its own subdomain (api.aquilla.app) — separate from
-          # the SPA (aquilla.app — the canonical app domain, no web. prefix).
-          # Auth is bearer-token-only so cross-subdomain CORS is permitted
-          # (see CORS_HEADERS in auth-worker/src/index.ts). Safari drops
-          # *.workers.dev WebSockets, which is why sync stays on a real zone
-          # via Workers Routes; the worker strips its /sync prefix internally.
-          VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'api.aquilla.app/sync' || github.ref == 'refs/heads/staging' && 'api.staging.aquilla.app/sync' || 'api.dev.aquilla.app/sync' }}
-          VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/identity' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/identity' || 'https://api.dev.aquilla.app/identity' }}
-          VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/chat' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/chat' || 'https://api.dev.aquilla.app/chat' }}
 
       - name: Verify built API environment
         if: steps.decide.outputs.deploy == 'true'

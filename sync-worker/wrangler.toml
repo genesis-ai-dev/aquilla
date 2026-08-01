@@ -85,8 +85,8 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 # id = "<prod-namespace-id>"
 
 # Auth:
-#   SYNC_SECRET_KEY (shared with frontier-server for JWT signing — distinct
-#   from Frontier's main SECRET_KEY) and ALLOW_UNAUTHENTICATED live in
+#   SYNC_SECRET_KEY (shared with auth-worker for sync-token verification and
+#   distinct from the identity access-token SECRET_KEY) and ALLOW_UNAUTHENTICATED live in
 #   .dev.vars for local dev (see .dev.vars.example) and are provisioned via
 #   `wrangler secret put` in production. Deploying with neither set means
 #   strict auth (reject all WS connections without a valid sync-token JWT)
@@ -102,9 +102,8 @@ enabled = true
 # the API surface lives on its own subdomain independent of the web app.
 # Pre-migration this was mounted at aquilla.app/api/sync/*; the path-strip
 # in src/index.ts (APEX_PREFIX) handles the new shape transparently.
-# NOTE: CI strips `routes` lines before deploying (its token lacks
-# zone-route perms). Routes are created out-of-band via CF dashboard or
-# local `wrangler deploy --env production`.
+# GitHub Actions and local scripts deploy this route through the explicit
+# production profile. A route-permission failure must remain a failed deploy.
 # ---------------------------------------------------------------------------
 [env.production]
 name = "aquilla-sync-worker"

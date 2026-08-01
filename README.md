@@ -20,7 +20,9 @@ consultants — USFM/Paratext import-export fidelity is a hard requirement.
 
 Architecture: event-sourced CQRS. Client → IndexedDB outbox → `POST /events` →
 sync-worker projects into `cells`/`files` tables → ProjectSync DO broadcasts to
-WebSocket clients. See [AGENTS.md](AGENTS.md) for details.
+WebSocket clients. Start with the [documentation index](docs/README.md),
+[system specification](docs/SPEC.md), and
+[deployment environment matrix](docs/DEPLOYMENT-ENVIRONMENTS.md).
 
 ## Fresh-clone setup
 
@@ -90,9 +92,16 @@ Scripts follow the pattern `pnpm run deploy:<brand>:<target>`:
 | `pnpm run deploy:aquilla:sync` | sync-worker only |
 | `pnpm run deploy:aquilla:staging` | Full staging deploy (staging.aquilla.app) |
 | `pnpm run verify:live:staging` | Verify staging DNS, TLS, API routes, and SPA targets |
+| `pnpm run deploy:aquilla:dev` | Full development deploy (dev.aquilla.app) |
+| `pnpm run verify:live:development` | Verify development DNS, TLS, API routes, and SPA targets |
 | `pnpm run deploy:codex` | Codex brand to Cloudflare Pages |
 | `pnpm run deploy:honeycomb` | Honeycomb brand |
 | `pnpm run deploy:context` | Context brand |
+
+Production, staging, and development mappings are defined in
+[docs/DEPLOYMENT-ENVIRONMENTS.md](docs/DEPLOYMENT-ENVIRONMENTS.md). Live Aquilla
+deploys always pass an explicit named Wrangler environment; do not use a bare
+`wrangler deploy`.
 
 ## Multi-brand build system
 

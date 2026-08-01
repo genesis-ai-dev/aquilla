@@ -1,5 +1,8 @@
 # Cloudflare Workers Builds
 
+This runbook implements the Cloudflare Builds section of the canonical
+[deployment environment matrix](../DEPLOYMENT-ENVIRONMENTS.md).
+
 The production sync Worker (`aquilla-sync-worker`) is connected to Cloudflare
 Workers Builds. Environment selection belongs to this repository; the dashboard
 must not contain its own branch-selection shell expression.

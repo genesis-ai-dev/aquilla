@@ -1,0 +1,39 @@
+# Aquilla documentation
+
+Use this index to distinguish current operational documentation from historical
+design and audit material.
+
+## Current operational truth
+
+- [Deployment environments](DEPLOYMENT-ENVIRONMENTS.md) — canonical branch,
+  Wrangler profile, hostname, Worker, Neon branch, R2 bucket, and deploy-command
+  mapping.
+- [System specification](SPEC.md) — current product and system boundaries.
+- [Sync architecture](SYNC.md) — current event, projection, realtime, and blob
+  ownership.
+- [Staging](STAGING.md) — staging provisioning, refresh, deploy, and verification.
+- [Cloudflare Workers Builds](runbooks/cloudflare-workers-builds.md) — safe
+  repository-owned branch selection for the Cloudflare Git integration.
+- [E2E](../e2e/README.md) — local integration and smoke-test environment.
+- [RLS rollout](RLS-ROLLOUT.md) — Postgres row-level-security operations.
+
+Runtime configuration in `wrangler.toml`, `auth-worker/wrangler.toml`,
+`sync-worker/wrangler.toml`, the deploy workflows, and `package.json` is enforced
+against the deployment matrix by `scripts/worker-deployment-contract.test.ts`.
+Change the configuration, matrix, and test together.
+
+## Product behavior specification
+
+The sibling `aquilla-specs` repository is the source of truth for intended product
+behavior. Its implementation documents describe the deployed topology and
+environment contract. This repository remains the source of truth for exact live
+resource identifiers and executable deploy commands.
+
+## Historical and reference material
+
+Dated audits, incident notes, rollout logs, and material under `docs/design/`,
+`docs/superpowers/`, `docs/swarm/`, and `docs/v3-audit/` preserve decisions and
+provenance. They are not live deployment instructions unless a current document
+above links to them for a specific procedure. In particular, references to D1 as
+the live event store, `frontier-server`, or a VS Code extension describe retired
+architectures.

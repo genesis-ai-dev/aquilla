@@ -1,7 +1,7 @@
 name: Deploy Workers
 
 # Branch → environment mapping:
-#   push to main    → wrangler deploy              → prod workers
+#   push to main    → wrangler deploy --env=production → prod workers
 #   push to staging → wrangler deploy --env=staging → staging workers (staging.aquilla.app)
 #   push to dev     → wrangler deploy --env=development → dev workers (dev.aquilla.app)
 #

@@ -1,5 +1,9 @@
 # Staging environment
 
+This procedure implements the staging row of the canonical
+[deployment environment matrix](DEPLOYMENT-ENVIRONMENTS.md). If this document and
+the matrix disagree, stop the deploy and update the contract and its test together.
+
 Staging mirrors production on isolated infrastructure so fixes can be validated
 before QA. It is the `Ready for Review` -> `Ready for QA` target in the
 `/issue` workflow.

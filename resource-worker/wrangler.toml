@@ -27,7 +27,7 @@ workers_dev = true
 routes = ["resources.aquilla.app/*"]
 
 # ---------------------------------------------------------------------------
-# Development staging — resources.dev.aquilla.app
+# Development — resources.dev.aquilla.app (not staging)
 # ---------------------------------------------------------------------------
 [env.development]
 name = "aquilla-resources-development"

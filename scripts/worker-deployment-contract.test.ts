@@ -49,6 +49,43 @@ describe("worker deployment environment contract", () => {
   })
 
   it.each([
+    [
+      "production",
+      "aquilla-sync-worker",
+      "api.aquilla.app/sync/*",
+      "aquilla-snapshots",
+      "69bcc10e67464f2eaf4fe91a9141e7cd",
+    ],
+    [
+      "staging",
+      "aquilla-sync-worker-staging",
+      "api.staging.aquilla.app/sync/*",
+      "aquilla-snapshots-staging",
+      "822231ade4da4db5b1955702e13d1ac3",
+    ],
+    [
+      "development",
+      "aquilla-sync-worker-dev",
+      "api.dev.aquilla.app/sync/*",
+      "aquilla-snapshots-dev",
+      "53581197ff7a4202a5ed0ef08537d4a6",
+    ],
+  ])(
+    "keeps %s sync routing and storage isolated",
+    (profile, workerName, route, bucket, hyperdriveId) => {
+      const config = readRepoFile("sync-worker", "wrangler.toml")
+      const environment = tomlBlock(config, `[env.${profile}]`)
+      const snapshots = tomlBlock(config, `[[env.${profile}.r2_buckets]]`)
+      const hyperdrive = tomlBlock(config, `[[env.${profile}.hyperdrive]]`)
+
+      expect(environment).toContain(`name = "${workerName}"`)
+      expect(environment).toContain(`routes = ["${route}"]`)
+      expect(snapshots).toContain(`bucket_name = "${bucket}"`)
+      expect(hyperdrive).toContain(`id = "${hyperdriveId}"`)
+    },
+  )
+
+  it.each([
     ["production", "aquilla-web", "aquilla.app/*"],
     ["staging", "aquilla-web-staging", "staging.aquilla.app/*"],
     ["development", "aquilla-web-development", "dev.aquilla.app/*"],
@@ -61,21 +98,49 @@ describe("worker deployment environment contract", () => {
   })
 
   it.each([
-    ["production", "aquilla-identity", "api.aquilla.app", "https://aquilla.app"],
-    ["staging", "aquilla-staging-identity", "api.staging.aquilla.app", "https://staging.aquilla.app"],
-    ["development", "aquilla-dev-identity", "api.dev.aquilla.app", "https://dev.aquilla.app"],
-  ])("keeps %s identity and chat routing isolated", (profile, workerName, apiHost, baseUrl) => {
-    const config = readRepoFile("auth-worker", "wrangler.toml")
-    const environment = tomlBlock(config, `[env.${profile}]`)
-    const vars = tomlBlock(config, `[env.${profile}.vars]`)
+    [
+      "production",
+      "aquilla-identity",
+      "api.aquilla.app",
+      "https://aquilla.app",
+      "aquilla-snapshots",
+      "69bcc10e67464f2eaf4fe91a9141e7cd",
+    ],
+    [
+      "staging",
+      "aquilla-staging-identity",
+      "api.staging.aquilla.app",
+      "https://staging.aquilla.app",
+      "aquilla-snapshots-staging",
+      "822231ade4da4db5b1955702e13d1ac3",
+    ],
+    [
+      "development",
+      "aquilla-dev-identity",
+      "api.dev.aquilla.app",
+      "https://dev.aquilla.app",
+      "aquilla-snapshots-dev",
+      "53581197ff7a4202a5ed0ef08537d4a6",
+    ],
+  ])(
+    "keeps %s identity and chat routing isolated",
+    (profile, workerName, apiHost, baseUrl, bucket, hyperdriveId) => {
+      const config = readRepoFile("auth-worker", "wrangler.toml")
+      const environment = tomlBlock(config, `[env.${profile}]`)
+      const vars = tomlBlock(config, `[env.${profile}.vars]`)
+      const snapshots = tomlBlock(config, `[[env.${profile}.r2_buckets]]`)
+      const hyperdrive = tomlBlock(config, `[[env.${profile}.hyperdrive]]`)
 
-    expect(environment).toContain(`name = "${workerName}"`)
-    expect(environment).toContain(`"${apiHost}/identity/*"`)
-    expect(environment).toContain(`"${apiHost}/chat/*"`)
-    expect(vars).toContain(`BASE_URL = "${baseUrl}"`)
-    expect(vars).toContain(`SYNC_WORKER_URL = "https://${apiHost}/sync"`)
-    expect(vars).toContain(`ENVIRONMENT = "${profile}"`)
-  })
+      expect(environment).toContain(`name = "${workerName}"`)
+      expect(environment).toContain(`"${apiHost}/identity/*"`)
+      expect(environment).toContain(`"${apiHost}/chat/*"`)
+      expect(vars).toContain(`BASE_URL = "${baseUrl}"`)
+      expect(vars).toContain(`SYNC_WORKER_URL = "https://${apiHost}/sync"`)
+      expect(vars).toContain(`ENVIRONMENT = "${profile}"`)
+      expect(snapshots).toContain(`bucket_name = "${bucket}"`)
+      expect(hyperdrive).toContain(`id = "${hyperdriveId}"`)
+    },
+  )
 
   it("exposes the repository-owned Workers Builds command", () => {
     const workerPackage = JSON.parse(readRepoFile("sync-worker", "package.json")) as {
@@ -84,6 +149,30 @@ describe("worker deployment environment contract", () => {
 
     expect(workerPackage.scripts?.["deploy:workers-build"])
       .toBe("node scripts/cloudflare-build-deploy.mjs")
+  })
+
+  it("keeps the documented environment matrix synchronized with the executable contract", () => {
+    const matrix = readRepoFile("docs", "DEPLOYMENT-ENVIRONMENTS.md")
+
+    for (const row of [
+      "| Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
+      "| Staging | `staging` | `staging` | `https://staging.aquilla.app` | `api.staging.aquilla.app` | `aquilla-web-staging` | `aquilla-staging-identity` | `aquilla-sync-worker-staging` | `staging` | `aquilla-snapshots-staging` |",
+      "| Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |",
+    ]) {
+      expect(matrix).toContain(row)
+    }
+
+    expect(matrix).toContain("`main` -> `--env=production`")
+    expect(matrix).toContain("`staging` -> `--env=staging`")
+    expect(matrix).toContain("`dev` -> `--env=development`")
+    expect(matrix).toContain("`pnpm run deploy:workers-build`")
+
+    expect(readRepoFile("README.md")).toContain("docs/DEPLOYMENT-ENVIRONMENTS.md")
+    expect(readRepoFile("docs", "STAGING.md")).toContain("DEPLOYMENT-ENVIRONMENTS.md")
+    expect(readRepoFile("docs", "runbooks", "cloudflare-workers-builds.md"))
+      .toContain("../DEPLOYMENT-ENVIRONMENTS.md")
+    expect(readRepoFile("resource-worker", "README.md"))
+      .toContain("This Worker has no staging profile or staging hostname")
   })
 
   it("uses explicit environments and live checks in every local deploy command", () => {

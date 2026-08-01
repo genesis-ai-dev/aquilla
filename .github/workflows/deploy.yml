@@ -37,13 +37,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      wrangler_environment: ${{ steps.resolve.outputs.wrangler_environment }}
+      live_environment: ${{ steps.resolve.outputs.live_environment }}
+      github_environment: ${{ steps.resolve.outputs.github_environment }}
+      api_host: ${{ steps.resolve.outputs.api_host }}
+      sync_worker_host: ${{ steps.resolve.outputs.sync_worker_host }}
+      auth_base: ${{ steps.resolve.outputs.auth_base }}
+      chat_base: ${{ steps.resolve.outputs.chat_base }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve authorized deployment target
+        run: bash scripts/resolve-deployment-target.sh
+
   deploy:
+    needs: target
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
     permissions:
       contents: read
       deployments: write
       pull-requests: write
+    # Keep the API target in job scope so the build and the artifact guard
+    # consume the exact same values. Step-scoped VITE_* variables disappear
+    # before the following verification step and previously blocked every
+    # otherwise-valid SPA deployment.
+    env:
+      VITE_SYNC_WORKER_HOST: ${{ needs.target.outputs.sync_worker_host }}
+      VITE_AUTH_BASE: ${{ needs.target.outputs.auth_base }}
+      VITE_CHAT_BASE: ${{ needs.target.outputs.chat_base }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -103,16 +130,10 @@ jobs:
       # use VITE_FRONTIER_BASE if we ever needed it.
       - run: pnpm run build
         if: steps.decide.outputs.deploy == 'true'
-        env:
-          # API lives on its own subdomain (api.aquilla.app) — separate from
-          # the SPA (aquilla.app — the canonical app domain, no web. prefix).
-          # Auth is bearer-token-only so cross-subdomain CORS is permitted
-          # (see CORS_HEADERS in auth-worker/src/index.ts). Safari drops
-          # *.workers.dev WebSockets, which is why sync stays on a real zone
-          # via Workers Routes; the worker strips its /sync prefix internally.
-          VITE_SYNC_WORKER_HOST: ${{ github.ref == 'refs/heads/main' && 'api.aquilla.app/sync' || github.ref == 'refs/heads/staging' && 'api.staging.aquilla.app/sync' || 'api.dev.aquilla.app/sync' }}
-          VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/identity' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/identity' || 'https://api.dev.aquilla.app/identity' }}
-          VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/chat' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/chat' || 'https://api.dev.aquilla.app/chat' }}
+
+      - name: Verify built API environment
+        if: steps.decide.outputs.deploy == 'true'
+        run: bash scripts/verify-dist-host.sh "${{ needs.target.outputs.api_host }}"
 
       # Workers' static-assets parser rejects the SPA `/*  /index.html  200`
       # rule in _redirects (error 100324 — "infinite loop"). SPA fallback is
@@ -123,16 +144,10 @@ jobs:
         if: steps.decide.outputs.deploy == 'true'
         run: rm -f dist/_redirects
 
-      # Pushes to main/staging/dev publish the live Worker for THAT branch's
-      # env. The env mapping must match the VITE_* build vars above — a bare
-      # `deploy` here targets the top-level wrangler.toml worker (aquilla-web,
-      # PRODUCTION), which shipped dev-API-pointing bundles to aquilla.app on
-      # every dev push (2026-07-01/02 outages: api.dev.aquilla.app is
-      # NXDOMAIN, so prod looked API-dead until a manual prod redeploy).
-      # NOTE: --env=staging/--env=development declare `routes`, and CI's token
-      # lacks Zone.Workers Routes edit — the code uploads, then the route-sync
-      # step fails (code 10000, same as deploy-workers.yml). Red but harmless;
-      # fix is upgrading the token (see wrangler.toml route convention doc).
+      # Pushes to main/staging/dev publish the live Worker for that branch's
+      # explicit named environment. The env mapping must match the VITE_* build
+      # vars above; never use a bare deploy because it can inherit the wrong
+      # top-level worker name, routes, or bindings.
       # PRs upload a preview version aliased as `pr-<N>`, reachable at
       # https://pr-<N>-aquilla-web.<workers-subdomain>.workers.dev without
       # touching the production version.
@@ -143,7 +158,11 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+          command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
+
+      - name: Verify deployed SPA environment
+        if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
+        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=spa
 
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview
@@ -152,7 +171,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: versions upload --preview-alias "pr-${{ github.event.number }}" --message "PR ${{ github.event.number }} @ ${{ github.event.pull_request.head.sha }}"
+          command: versions upload --env=preview --preview-alias "pr-${{ github.event.number }}" --message "PR ${{ github.event.number }} @ ${{ github.event.pull_request.head.sha }}"
 
       - name: Comment preview URL on PR
         if: github.event_name == 'pull_request' && steps.decide.outputs.deploy == 'true'
@@ -162,7 +181,7 @@ jobs:
           message: |
             **aquilla-web Worker preview**
 
-            - Preview alias: `pr-${{ github.event.number }}-aquilla-web.<workers-subdomain>.workers.dev`
+            - Preview alias: `pr-${{ github.event.number }}-aquilla-web-preview.<workers-subdomain>.workers.dev`
               (see the "Upload aquilla-web preview" step output for the full URL — first PR after this CI change will reveal the subdomain; pin it here afterwards)
             - Commit: `${{ github.event.pull_request.head.sha }}`
 

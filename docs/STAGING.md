@@ -1,5 +1,9 @@
 # Staging environment
 
+This procedure implements the staging row of the canonical
+[deployment environment matrix](DEPLOYMENT-ENVIRONMENTS.md). If this document and
+the matrix disagree, stop the deploy and update the contract and its test together.
+
 Staging mirrors production on isolated infrastructure so fixes can be validated
 before QA. It is the `Ready for Review` -> `Ready for QA` target in the
 `/issue` workflow.
@@ -31,7 +35,16 @@ pnpm run deploy:aquilla:staging:auth
 
 The staging SPA is built with `VITE_AUTH_BASE`, `VITE_SYNC_WORKER_HOST`, and
 `VITE_CHAT_BASE` pointed at `api.staging.aquilla.app`. Worker deploys run a
-target-aware Neon schema guard before publishing.
+target-aware Neon schema guard before publishing. Every deploy command then
+runs the public live-environment verifier; a DNS, TLS, route-owner, auth-guard,
+or SPA bundle mismatch leaves the deploy red instead of silently crossing an
+environment boundary.
+
+`api.staging.aquilla.app` must remain a **Custom Domain** on
+`aquilla-staging-identity`, in addition to the three path routes. Cloudflare
+manages the proxied DNS record and deep-subdomain TLS certificate for that
+Custom Domain. The more-specific `/identity/*`, `/chat/*`, and `/sync/*` routes
+continue to select their configured Workers.
 
 ## Neon refresh model
 
@@ -68,8 +81,17 @@ After a reset or branch replacement:
 
 ```bash
 pnpm neon:status:staging
-curl https://api.staging.aquilla.app/identity/api/v2/health
+pnpm verify:live:staging
 ```
+
+The verifier requires all of the following:
+
+- `api.staging.aquilla.app` resolves and passes TLS hostname validation.
+- Identity health returns the `aquilla-identity` liveness contract.
+- Chat and sync return their exact unauthenticated `401` guard contracts,
+  proving those paths are owned by the intended Workers.
+- The deployed SPA bundle contains all three staging API targets and no
+  development API target.
 
 Then load https://staging.aquilla.app, sign in with a real account, open a
 project, and confirm writes land in the Neon `staging` branch and

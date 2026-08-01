@@ -8,6 +8,7 @@ describe("deriveCellAreaState", () => {
     cellCount: 1,
     syncStatus: "live" as "live" | "connecting" | "offline" | "idle" | "disabled",
     cellsLoading: false,
+    cellsError: false,
   }
 
   it("returns no-file when nothing is selected", () => {
@@ -36,6 +37,18 @@ describe("deriveCellAreaState", () => {
     expect(
       deriveCellAreaState({ ...open, cellCount: 0, syncStatus: "live", cellsLoading: false }).kind
     ).toBe("ready-empty")
+  })
+
+  it("returns load-error instead of ready-empty when the cells read failed", () => {
+    expect(
+      deriveCellAreaState({ ...open, cellCount: 0, cellsError: true }).kind
+    ).toBe("load-error")
+  })
+
+  it("keeps cached cells ready when a soft refresh fails", () => {
+    expect(
+      deriveCellAreaState({ ...open, cellCount: 1, cellsError: true }).kind
+    ).toBe("ready")
   })
 
   it("returns ready-empty for offline / idle / disabled when cells are empty (no cloud to wait on)", () => {

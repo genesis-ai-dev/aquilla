@@ -114,6 +114,16 @@ jobs:
           VITE_AUTH_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/identity' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/identity' || 'https://api.dev.aquilla.app/identity' }}
           VITE_CHAT_BASE: ${{ github.ref == 'refs/heads/main' && 'https://api.aquilla.app/chat' || github.ref == 'refs/heads/staging' && 'https://api.staging.aquilla.app/chat' || 'https://api.dev.aquilla.app/chat' }}
 
+      - name: Verify built API environment
+        if: steps.decide.outputs.deploy == 'true'
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            main) host=api.aquilla.app ;;
+            staging) host=api.staging.aquilla.app ;;
+            *) host=api.dev.aquilla.app ;;
+          esac
+          bash scripts/verify-dist-host.sh "$host"
+
       # Workers' static-assets parser rejects the SPA `/*  /index.html  200`
       # rule in _redirects (error 100324 — "infinite loop"). SPA fallback is
       # handled by `not_found_handling = "single-page-application"` in
@@ -123,16 +133,10 @@ jobs:
         if: steps.decide.outputs.deploy == 'true'
         run: rm -f dist/_redirects
 
-      # Pushes to main/staging/dev publish the live Worker for THAT branch's
-      # env. The env mapping must match the VITE_* build vars above — a bare
-      # `deploy` here targets the top-level wrangler.toml worker (aquilla-web,
-      # PRODUCTION), which shipped dev-API-pointing bundles to aquilla.app on
-      # every dev push (2026-07-01/02 outages: api.dev.aquilla.app is
-      # NXDOMAIN, so prod looked API-dead until a manual prod redeploy).
-      # NOTE: --env=staging/--env=development declare `routes`, and CI's token
-      # lacks Zone.Workers Routes edit — the code uploads, then the route-sync
-      # step fails (code 10000, same as deploy-workers.yml). Red but harmless;
-      # fix is upgrading the token (see wrangler.toml route convention doc).
+      # Pushes to main/staging/dev publish the live Worker for that branch's
+      # explicit named environment. The env mapping must match the VITE_* build
+      # vars above; never use a bare deploy because it can inherit the wrong
+      # top-level worker name, routes, or bindings.
       # PRs upload a preview version aliased as `pr-<N>`, reachable at
       # https://pr-<N>-aquilla-web.<workers-subdomain>.workers.dev without
       # touching the production version.
@@ -143,7 +147,17 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+          command: deploy ${{ github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+
+      - name: Verify deployed SPA environment
+        if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            main) target=production ;;
+            staging) target=staging ;;
+            *) target=development ;;
+          esac
+          node scripts/verify-live-environment.mjs "$target" --surface=spa
 
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview

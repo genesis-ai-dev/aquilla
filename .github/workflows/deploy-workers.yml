@@ -148,7 +148,16 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: sync-worker
-          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+          command: deploy ${{ github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+
+      - name: Verify sync-worker route and environment
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            main) target=production ;;
+            staging) target=staging ;;
+            *) target=development ;;
+          esac
+          node scripts/verify-live-environment.mjs "$target" --surface=sync
 
   auth-worker:
     needs: [detect, schema-guard]
@@ -194,4 +203,13 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: auth-worker
-          command: deploy ${{ github.ref == 'refs/heads/main' && ' ' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+          command: deploy ${{ github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+
+      - name: Verify identity and chat routes
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            main) target=production ;;
+            staging) target=staging ;;
+            *) target=development ;;
+          esac
+          node scripts/verify-live-environment.mjs "$target" --surface=auth

@@ -6,9 +6,14 @@ compatibility_flags = ["nodejs_compat"]
 # routed deploy would otherwise disable it.
 workers_dev = true
 
+# Same CF account as every Aquilla worker. This must remain a top-level key:
+# placing it after `[vars]` silently turns it into a worker environment variable.
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
 # Top-level vars serve LOCAL `wrangler dev` (scripts/dev-stack.ts, e2e-up.ts —
 # both run the default profile). Deployed envs re-declare below (no inherit).
 [vars]
+ENVIRONMENT = "local"
 # Identity worker base URL for the Monday-integration push nudge
 # (src/monday-notify.ts). Local dev stack runs identity on 8788.
 AUTH_WORKER_URL = "http://127.0.0.1:8788"
@@ -18,9 +23,10 @@ AUTH_WORKER_URL = "http://127.0.0.1:8788"
 # =============================================================================
 # Routes live in `[env.production]` and `[env.staging]` below. This file is
 # the source of truth — don't add or remove routes via the Cloudflare
-# dashboard. CI's token lacks zone-route perms so CI runs bare
-# `wrangler deploy` (top-level, code only). Routes are applied by a LOCAL
-# deploy with a zone-perm token:
+# dashboard. GitHub Actions always passes an explicit named environment.
+# Cloudflare Workers Builds calls `pnpm run deploy:workers-build`, which
+# promotes `main` with production bindings and uploads preview-only versions
+# for every other branch. Routes can also be applied by a LOCAL deploy:
 #
 #   pnpm run deploy:aquilla:sync        # = wrangler deploy --env=production
 #   (cd sync-worker && wrangler deploy --env=staging)
@@ -29,10 +35,6 @@ AUTH_WORKER_URL = "http://127.0.0.1:8788"
 # deploy command, commit the wrangler.toml change. See
 # auth-worker/wrangler.toml for the full convention doc.
 # =============================================================================
-
-# Same CF account as frontier-server and aquilla-db. Pinned so `wrangler deploy`
-# doesn't prompt interactively and lands on the wrong account by accident.
-account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
 # Per-project DO (Phase 2c). Holds focus locks + presence + an event-fanout
 # relay. Transient state only; no D1/R2 writes from inside the DO itself.
@@ -115,6 +117,7 @@ routes = ["api.aquilla.app/sync/*"]
 enabled = true
 
 [env.production.vars]
+ENVIRONMENT = "production"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
 # Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
@@ -169,6 +172,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.dev.aquilla.app/sync/*"]
 
 [env.development.vars]
+ENVIRONMENT = "development"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.dev.aquilla.app/identity"
 
@@ -228,6 +232,7 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 routes = ["api.staging.aquilla.app/sync/*"]
 
 [env.staging.vars]
+ENVIRONMENT = "staging"
 # Identity worker base for the Monday-integration push nudge (monday-notify.ts).
 AUTH_WORKER_URL = "https://api.staging.aquilla.app/identity"
 

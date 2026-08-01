@@ -189,10 +189,9 @@ makes the work impossible to review or revert cleanly.
 > flags issues whose code shipped but whose status lagged, `Deployed`/`Done` issues with no
 > traceable merge, and commits that landed without a ticket. Read-only; never moves the board.
 
-> **Staging** lives at `https://dev.aquilla.app` (API `api.dev.aquilla.app`), backed by the
+> **Staging** lives at `https://staging.aquilla.app` (API `api.staging.aquilla.app`), backed by the
 > Neon `staging` branch via Hyperdrive. Deploy with `pnpm run deploy:aquilla:staging`. Setup
-> + one-time provisioning are in [`docs/STAGING.md`](docs/STAGING.md) (tracked by AQU-146 —
-> not fully provisioned until the staging Hyperdrive id is filled in).
+> + provisioning and verification are in [`docs/STAGING.md`](docs/STAGING.md).
 
 ## Useful slash commands
 

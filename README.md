@@ -88,7 +88,8 @@ Scripts follow the pattern `pnpm run deploy:<brand>:<target>`:
 | `pnpm run deploy:aquilla:spa` | SPA only |
 | `pnpm run deploy:aquilla:auth` | auth-worker only |
 | `pnpm run deploy:aquilla:sync` | sync-worker only |
-| `pnpm run deploy:aquilla:staging` | Full staging deploy (dev.aquilla.app) |
+| `pnpm run deploy:aquilla:staging` | Full staging deploy (staging.aquilla.app) |
+| `pnpm run verify:live:staging` | Verify staging DNS, TLS, API routes, and SPA targets |
 | `pnpm run deploy:codex` | Codex brand to Cloudflare Pages |
 | `pnpm run deploy:honeycomb` | Honeycomb brand |
 | `pnpm run deploy:context` | Context brand |

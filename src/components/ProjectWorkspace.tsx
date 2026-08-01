@@ -1020,10 +1020,12 @@ export function ProjectWorkspace() {
   const {
     store: cellStore,
     revalidate: revalidateCells,
+    retry: retryCells,
     revalidateCell,
     applyOptimisticTargetEdit,
     applyOptimisticTargetEdits,
     isLoading: cellsLoading,
+    isError: cellsError,
   } = useActiveCellStore({
     projectId: project?.id ?? null,
     fileId: activeFileId,
@@ -3426,8 +3428,9 @@ export function ProjectWorkspace() {
       cellCount: cellSummaries.length,
       syncStatus: fileSyncStatus,
       cellsLoading,
+      cellsError,
     }),
-    [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading]
+    [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError]
   )
 
   async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
@@ -5491,6 +5494,7 @@ export function ProjectWorkspace() {
             hasFiles={projectFiles.length > 0}
             filesLoaded={status === "ready"}
             onImportClick={openImportFlow}
+            onRetryClick={retryCells}
           />
         )}
         aside={

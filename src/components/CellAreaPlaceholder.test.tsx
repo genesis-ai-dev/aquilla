@@ -1,5 +1,6 @@
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
+import { vi } from "vitest"
 
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 
@@ -22,5 +23,23 @@ describe("CellAreaPlaceholder", () => {
     expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
     expect(status.querySelectorAll("[data-slot='skeleton']")).toHaveLength(32)
     expect(screen.queryByText(/0 cells/i)).not.toBeInTheDocument()
+  })
+
+  it("shows a recoverable load error instead of claiming the file is empty", () => {
+    const retry = vi.fn()
+    render(
+      <CellAreaPlaceholder
+        state={{ kind: "load-error" }}
+        fileName="sample.md"
+        hasFiles
+        filesLoaded
+        onRetryClick={retry}
+      />,
+    )
+
+    expect(screen.getByText("Couldn't load sample.md")).toBeInTheDocument()
+    expect(screen.queryByText(/sample\.md is empty/i)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading file" }))
+    expect(retry).toHaveBeenCalledOnce()
   })
 })

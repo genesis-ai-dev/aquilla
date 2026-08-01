@@ -128,4 +128,13 @@ describe("worker deployment environment contract", () => {
     expect(workflow.match(/VITE_AUTH_BASE:/g)).toHaveLength(1)
     expect(workflow).not.toContain("refs/heads/main' && ' '")
   })
+
+  it("installs Chromium before running IDML browser conformance in Web CI", () => {
+    const workflow = readRepoFile(".github", "workflows", "web-ci.yml")
+    const installBrowser = workflow.indexOf("pnpm exec playwright install --with-deps chromium")
+    const runIdmlTests = workflow.indexOf("pnpm test:idml")
+
+    expect(installBrowser).toBeGreaterThan(-1)
+    expect(runIdmlTests).toBeGreaterThan(installBrowser)
+  })
 })

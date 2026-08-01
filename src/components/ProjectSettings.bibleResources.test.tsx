@@ -82,14 +82,14 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
   DEFAULT_SYSTEM_PROMPT: "Translate accurately.",
 }))
 
-vi.mock("@/lib/completion/completion-service", () => ({
-  fetchModels: vi.fn().mockResolvedValue([]),
-  resolveProvider: vi.fn(() => "frontier"),
-  // AQU-478: ProjectSettings now transitively imports events-emit.ts (via
-  // UpstreamChangesPanel) → src/lib/ab/feedback.ts, which reads this export
-  // at module-eval time.
-  FRONTIER_CHAT_URL: "https://api.aquilla.app/chat/api/v1/chat/completions",
-}))
+vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/completion/completion-service")>()
+  return {
+    ...actual,
+    fetchModels: vi.fn().mockResolvedValue([]),
+    resolveProvider: vi.fn(() => "frontier"),
+  }
+})
 
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),

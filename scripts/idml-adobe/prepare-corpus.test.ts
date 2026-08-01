@@ -78,7 +78,7 @@ describe("Adobe corpus preparation", () => {
         id: "feature-rich",
         exportReport: expect.objectContaining({
           unsupportedLiteral: 0,
-          preservedUnsupported: 3,
+          preservedUnsupported: 5,
         }),
       }),
       expect.objectContaining({

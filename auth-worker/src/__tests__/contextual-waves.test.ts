@@ -476,3 +476,34 @@ describe("getProjectAutopilotSummary", () => {
     expect(summary.proposedDrafts).toBe(0)
   })
 })
+
+describe("wave fault containment", () => {
+  it("charges an unexpected lane failure to one span and still advances the cursor", async () => {
+    await seedFourSpans()
+    const run = await startRun()
+
+    // A progress reporter that throws on the second lane's open. Before the
+    // per-lane catch this rejected Promise.all: the wave's other spans lost
+    // their work, the cursor never advanced, and the run replayed the same
+    // failing wave forever.
+    let starts = 0
+    const notify = async (frame: ContextualProgressFrame) => {
+      if (frame.type === "contextual.span.start" && ++starts === 2) {
+        throw new Error("progress channel exploded")
+      }
+    }
+
+    const result = await runOneTick({ db, runId: run.id, llm: llm(), concurrency: 2, notify })
+
+    const after = await getRun(db, run.id)
+    expect(after?.spanCursor?.nextIndex).toBe(2) // advanced past the whole wave
+    expect(after?.doneSpans).toBe(1)
+    expect(after?.failedSpans).toBe(1)
+    expect(after?.lastError).toContain("progress channel exploded")
+    expect(result.continueRun).toBe(true)
+
+    // The healthy lane's work survived.
+    const drafts = await listDrafts(db, PROJECT, FILE, "proposed")
+    expect(drafts).toHaveLength(1)
+  })
+})

@@ -719,9 +719,20 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   // work in flight for a dead driver.
   await touchRun(db, runId)
 
+  // One lane's unexpected throw must cost exactly one span. Without this
+  // catch a single rejection takes down `Promise.all`, so the wave's other
+  // spans lose their work AND the cursor never advances — the run would
+  // replay the same failing wave forever instead of recording the failure and
+  // moving on. `processSpan` already handles pipeline errors; this covers the
+  // paths outside it (a throwing progress reporter, a dropped connection).
   const outcomes = await Promise.all(
     wave.map((storedSeed) =>
-      processSpan(deps, run, shared, storedSeed, steering.directions, notify),
+      processSpan(deps, run, shared, storedSeed, steering.directions, notify).catch(
+        (err: unknown): SpanOutcome => ({
+          outcome: "failed",
+          lastError: (err instanceof Error ? err.message : String(err)).slice(0, 2000),
+        }),
+      ),
     ),
   )
 

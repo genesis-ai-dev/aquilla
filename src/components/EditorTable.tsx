@@ -5739,10 +5739,11 @@ function EditorRow({
               )}
               {/* Pending autopilot draft — verified text a contextual run
                   staged for this cell. Only rendered while the target is
-                  still empty: a suggestion must never cover work that exists.
+                  still empty AND the cell is not being edited: a suggestion
+                  must never cover work that exists, nor sit under a caret.
                   Accepting routes through handleEditorCommit, so it lands as
                   an ordinary human edit with every normal guard applied. */}
-              {!hasTranslatedText && !showCompletionOverlay && (
+              {!hasTranslatedText && !showCompletionOverlay && !isEditorActive && (
                 <ContextualDraftCard
                   cellId={cell.id}
                   projectId={project.id}

@@ -72,8 +72,16 @@ export function ContextualDraftCard({
     <div
       data-testid="contextual-draft-card"
       data-cell-id={cellId}
+      // In normal flow, not absolute: the target cell is only min-h-[40px] when
+      // empty, and an overlay would clip the text plus its actions. Letting the
+      // cell grow around the card is what makes a long verse readable.
+      //
+      // Clicks stop here. The cell wrapper opens the editor on click, and
+      // "accept" that also drops a caret into the cell it just filled is a
+      // fight between two intents.
+      onClick={(event) => event.stopPropagation()}
       className={cn(
-        "group/draft absolute inset-0 flex flex-col gap-1 rounded-md px-2 py-1",
+        "group/draft mt-1 flex flex-col gap-1 rounded-md px-2 py-1",
         "border border-dashed border-primary/40 bg-primary/[0.04]",
         // Newly arrived drafts fade in so a wave landing reads as motion
         // rather than as text that was always there.
@@ -87,7 +95,7 @@ export function ContextualDraftCard({
       >
         {draft.text}
       </p>
-      <div className="mt-auto flex items-center gap-1">
+      <div className="flex items-center gap-1">
         <AppTooltip content={draft.spanLabel ? `Drafted from ${draft.spanLabel}` : "Drafted for you"}>
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Sparkles className="h-3 w-3" aria-hidden />

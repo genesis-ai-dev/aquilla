@@ -161,3 +161,87 @@ describe("ProjectAutopilotPanel", () => {
     expect(await screen.findByText(/agent credit cap reached/i)).toBeTruthy()
   })
 })
+
+describe("context readiness", () => {
+  function withReadiness(patch: Partial<NonNullable<ContextualOverview["readiness"]>> = {}) {
+    return overview({
+      files: [fileRow()],
+      readiness: {
+        blockingGaps: 2,
+        ready: false,
+        items: [
+          {
+            id: "terminology",
+            label: "Key terms",
+            level: "missing",
+            detail: "No key terms have an approved rendering yet.",
+            href: "settings/terminology",
+          },
+          {
+            id: "brief",
+            label: "Translation brief",
+            level: "missing",
+            detail: "No brief. Autopilot has to guess your audience.",
+            href: "settings/brief",
+          },
+          {
+            id: "languages",
+            label: "Languages",
+            level: "ready",
+            detail: "Translating English → Spanish.",
+          },
+        ],
+        ...patch,
+      },
+    })
+  }
+
+  it("opens itself when something important is missing", async () => {
+    // A gap nobody sees is a gap nobody fixes, and the run still reports
+    // "staged" either way.
+    fetchMock.mockResolvedValue(withReadiness())
+    renderPanel()
+    await screen.findByTestId("autopilot-readiness")
+    expect(screen.getByText("Key terms")).toBeTruthy()
+    expect(screen.getByText(/No key terms have an approved rendering/)).toBeTruthy()
+  })
+
+  it("counts the gaps in the header", async () => {
+    fetchMock.mockResolvedValue(withReadiness())
+    renderPanel()
+    const section = await screen.findByTestId("autopilot-readiness")
+    expect(section.textContent).toContain("2 gaps")
+  })
+
+  it("stays collapsed when the project is fully set up", async () => {
+    fetchMock.mockResolvedValue(
+      withReadiness({
+        blockingGaps: 0,
+        ready: true,
+        items: [{ id: "languages", label: "Languages", level: "ready", detail: "English → Spanish." }],
+      }),
+    )
+    renderPanel()
+    const section = await screen.findByTestId("autopilot-readiness")
+    expect(section.querySelector('[aria-expanded="false"]')).toBeTruthy()
+    expect(screen.queryByText("English → Spanish.")).toBeNull()
+  })
+
+  it("links each unmet item to the place that fixes it", async () => {
+    fetchMock.mockResolvedValue(withReadiness())
+    renderPanel()
+    await screen.findByTestId("autopilot-readiness")
+    const links = screen.getAllByRole("link", { name: /set up/i })
+    expect(links.map((l) => l.getAttribute("href"))).toEqual([
+      "/project/p1/settings/terminology",
+      "/project/p1/settings/brief",
+    ])
+  })
+
+  it("renders nothing extra when the server sends no readiness", async () => {
+    fetchMock.mockResolvedValue(overview({ files: [fileRow()] }))
+    renderPanel()
+    await screen.findByTestId("project-autopilot-panel")
+    expect(screen.queryByTestId("autopilot-readiness")).toBeNull()
+  })
+})

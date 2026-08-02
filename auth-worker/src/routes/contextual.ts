@@ -47,6 +47,8 @@ import {
   getProjectAutopilotSummary,
   type ContextualRun,
 } from "../../../db/shared/contextual-runs"
+import { loadProjectContext } from "../lib/contextual/project-context"
+import { computeContextReadiness, type ContextReadiness } from "../lib/contextual/readiness"
 import {
   runOneTick,
   makeLlmCall,
@@ -365,7 +367,37 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
   if (!gate.ok) return gate.res
   const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
-  return c.json({ available: true, ...summary })
+
+  // What autopilot actually KNOWS about this project. A run with no brief, no
+  // key terms and no validated examples still produces confident output — the
+  // most expensive kind, because nothing looks wrong until a consultant reads
+  // it, and the progress numbers say "staged" either way. Reporting the gaps
+  // is the only way a PM finds out before spending the run.
+  let readiness: ContextReadiness | null = null
+  try {
+    const context = await loadProjectContext(c.env.AQUILLA_PG, projectId)
+    const counts = await c.env.AQUILLA_PG
+      .prepare(
+        `SELECT COUNT(*) FILTER (WHERE t.validated = 1 AND COALESCE(t.value,'') <> '') AS validated,
+                COUNT(*) FILTER (WHERE COALESCE(t.value,'') = '') AS untranslated
+           FROM cells s
+           LEFT JOIN cells t
+             ON t.project_id = s.project_id AND t.file_id = s.file_id
+            AND t.cell_id = s.cell_id AND t.side = 'target'
+          WHERE s.project_id = ? AND s.side = 'source'`,
+      )
+      .bind(projectId)
+      .first<{ validated: number; untranslated: number }>()
+    readiness = computeContextReadiness({
+      context,
+      validatedExamples: Number(counts?.validated ?? 0),
+      untranslatedCells: Number(counts?.untranslated ?? 0),
+    })
+  } catch {
+    // Readiness is advisory — never fail the rollup over it.
+  }
+
+  return c.json({ available: true, ...summary, ...(readiness ? { readiness } : {}) })
 })
 
 /** Snapshot shape the pill hydrates from (mirrors run-store's expectations). */

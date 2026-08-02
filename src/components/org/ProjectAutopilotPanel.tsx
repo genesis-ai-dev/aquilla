@@ -17,7 +17,7 @@
 // battery bug.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, Loader2, Play, Sparkles } from "lucide-react"
+import { AlertTriangle, ChevronRight, Loader2, Play, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -248,6 +248,14 @@ export function ProjectAutopilotPanel({
         </p>
       )}
 
+      {/* What autopilot knows. A run with no brief, no key terms and no
+          validated examples still produces confident, fluent, generic output —
+          and the progress numbers above say "staged" either way. This is the
+          only place that difference is visible before the run is spent. */}
+      {overview.readiness && (
+        <ContextReadinessList projectId={projectId} readiness={overview.readiness} />
+      )}
+
       {hasHistory && (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[34rem] text-left text-xs">
@@ -278,6 +286,84 @@ export function ProjectAutopilotPanel({
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {error}
         </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The context checklist, rendered as a checklist and not a score.
+ *
+ * Deliberately not a gate and not a percentage: nobody is blocked from
+ * pressing play, and "72% ready" would invite optimising the number instead of
+ * answering the questions. Each row names one thing a professional translator
+ * would have on the desk, says whether this project has it, and links to it.
+ */
+function ContextReadinessList({
+  projectId,
+  readiness,
+}: {
+  projectId: string
+  readiness: NonNullable<ContextualOverview["readiness"]>
+}) {
+  const [open, setOpen] = useState(readiness.blockingGaps > 0)
+
+  return (
+    <div className="mt-4 border-t border-border/60 pt-3" data-testid="autopilot-readiness">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 text-left text-xs font-medium hover:text-foreground"
+      >
+        <ChevronRight
+          className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-90")}
+          aria-hidden
+        />
+        What autopilot knows about this project
+        {readiness.blockingGaps > 0 ? (
+          <span className="ml-auto flex items-center gap-1 text-amber-600 dark:text-amber-500">
+            <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+            {readiness.blockingGaps} {readiness.blockingGaps === 1 ? "gap" : "gaps"}
+          </span>
+        ) : (
+          <span className="ml-auto text-muted-foreground">Set up</span>
+        )}
+      </button>
+
+      {open && (
+        <ul className="mt-2 space-y-2">
+          {readiness.items.map((item) => (
+            <li key={item.id} className="flex gap-2 text-xs">
+              <span
+                aria-hidden
+                className={cn(
+                  "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
+                  item.level === "ready" && "bg-emerald-500",
+                  item.level === "partial" && "bg-amber-500",
+                  item.level === "missing" && "bg-destructive",
+                )}
+              />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-medium">{item.label}</span>
+                  <span className="sr-only">
+                    {item.level === "ready" ? "set up" : item.level === "partial" ? "partly set up" : "missing"}
+                  </span>
+                  {item.href && item.level !== "ready" && (
+                    <a
+                      className="text-primary underline-offset-2 hover:underline"
+                      href={`/project/${projectId}/${item.href}`}
+                    >
+                      Set up
+                    </a>
+                  )}
+                </div>
+                <p className="text-muted-foreground">{item.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )

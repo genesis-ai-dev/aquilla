@@ -38,7 +38,8 @@ import {
   getSceneBrief,
 } from "../../../../db/shared/scene-briefs"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
-import { loadLintRules, type LintRule } from "../agent/lint"
+import { type LintRule } from "../agent/lint"
+import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterUsage } from "../llm-vendor"
 import { deriveSpanSeeds } from "./segment"
 import { lintSpanDraft } from "./lint-node"
@@ -285,32 +286,12 @@ function spanLabel(seed: StoredSpanSeed, pairs: CellPair[]): string {
 }
 
 // ── Context assembly ────────────────────────────────────────────────────────
-
-interface ProjectContext {
-  sourceLanguage?: string
-  targetLanguage?: string
-  projectBriefL1?: string
-}
-
-async function loadProjectContext(db: AquillaDb, projectId: string): Promise<ProjectContext> {
-  try {
-    const row = await db
-      .prepare(
-        `SELECT source_language, target_language,
-                settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
-           FROM project_settings WHERE project_id = ?`,
-      )
-      .bind(projectId)
-      .first<{ source_language: string | null; target_language: string | null; brief_summary: string | null }>()
-    return {
-      sourceLanguage: row?.source_language ?? undefined,
-      targetLanguage: row?.target_language ?? undefined,
-      projectBriefL1: row?.brief_summary ?? undefined,
-    }
-  } catch {
-    return {}
-  }
-}
+//
+// Project context now comes from lib/contextual/project-context.ts, which
+// reads the whole settings blob rather than just the brief's L1 summary. That
+// is where the project's TERMINOLOGY lives — key-term decisions that used to
+// be compiled to rules client-side only, so no server-side draft or lint ever
+// saw them.
 
 /** Approved briefs adjacent to the seed, sided by document position. */
 async function loadNeighborBriefs(
@@ -493,6 +474,10 @@ async function processSpan(
       layerAbove: shared.layerAbove,
       examples: validatedExamples(shared.pairs),
       ...(shared.ctx.projectBriefL1 ? { projectBriefL1: shared.ctx.projectBriefL1 } : {}),
+      // The brief's own answers carry when nobody generated an L1 summary, and
+      // the concepts get scoped to this span's source text inside runSpan.
+      briefParameters: shared.ctx.briefParameters,
+      ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
       ...(steeringDirections.length > 0 ? { steeringDirections } : {}),
       rules: shared.rules,
       ...(shared.ctx.sourceLanguage ? { sourceLanguage: shared.ctx.sourceLanguage } : {}),
@@ -538,7 +523,7 @@ async function processSpan(
         })
         return proposed.brief.id
       },
-      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft),
+      lint: async (draft) => lintSpanDraft(shared.rules, shared.pairs, draft, shared.ctx.concepts),
       stage: async (draft) => {
         // Anti-clobber, checked as late as possible: a human may have typed
         // into one of these cells while the span was running. `pairs` is a
@@ -690,12 +675,7 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
     ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
     : []
-  let rules: LintRule[] = []
-  try {
-    rules = await loadLintRules(db, run.projectId)
-  } catch {
-    /* lint is best-effort — never blocks the span */
-  }
+  const rules: LintRule[] = ctx.authoredRules
   const shared: RunContext = {
     ctx,
     rules,

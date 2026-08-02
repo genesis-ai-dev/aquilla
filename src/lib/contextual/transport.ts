@@ -225,6 +225,25 @@ export interface ContextualOverviewFile {
   lastError: string | null
 }
 
+export type ReadinessLevel = "ready" | "partial" | "missing"
+
+export interface ReadinessItem {
+  id: string
+  label: string
+  level: ReadinessLevel
+  detail: string
+  /** Project-relative path to go fix it. */
+  href?: string
+}
+
+/** What autopilot knows about this project — the context an expert translator
+ *  would have on the desk before drafting a line. */
+export interface ContextReadiness {
+  items: ReadinessItem[]
+  blockingGaps: number
+  ready: boolean
+}
+
 export interface ContextualOverview {
   available: boolean
   files: ContextualOverviewFile[]
@@ -235,6 +254,7 @@ export interface ContextualOverview {
   unitsSpent: number
   proposedDrafts: number
   appliedDrafts: number
+  readiness?: ContextReadiness
 }
 
 const EMPTY_OVERVIEW: ContextualOverview = {

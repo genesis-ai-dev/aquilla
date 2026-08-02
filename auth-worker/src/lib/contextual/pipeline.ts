@@ -15,6 +15,11 @@ import { statusOf, type CellPair } from "../agent/tools/select-cells"
 import { construeScene, type ClosureContext, type ClosureResult } from "./closure"
 import { performSpan, type ExamplePair, type PerformSpanResult } from "./draft"
 import { classifyRisk } from "./router"
+import {
+  termGuidanceForSpan,
+  type Concept,
+  type TranslationBriefParameters,
+} from "./project-context"
 import { summarizeConstrual, renderConstrualL2 } from "./summarize"
 import { tallyVotes } from "./quorum"
 import { verifySpan } from "./verify"
@@ -53,6 +58,10 @@ export interface RunSpanDeps {
   layerAbove: ClosureContext["layerAbove"]
   examples: ExamplePair[]
   projectBriefL1?: string
+  /** The brief's structured answers, used when there is no L1 summary. */
+  briefParameters?: TranslationBriefParameters
+  /** Active key-term concepts for the project (scoped to the span in here). */
+  concepts?: Concept[]
   steeringDirections?: string[]
   rules?: LintRule[]
   sourceLanguage?: string
@@ -230,6 +239,13 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   let carriedConstraints: { cellId: string; constraints: string[] }[] = []
   let stagePromptVersion = ""
 
+  // Key terms are scoped to the SPAN, not the project: a 900-entry termbase in
+  // the prompt buries the eight entries that matter for this passage. Computed
+  // once from the span's source text, before the redraft loop.
+  const spanTerms = deps.concepts
+    ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source))
+    : []
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     phase("drafting")
     const drafted: PerformSpanResult = await performSpan({
@@ -239,6 +255,8 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
       precedingValidated: precedingValidated(deps.seed, deps.pairs),
       ...(deps.steeringDirections ? { steeringDirections: deps.steeringDirections } : {}),
       ...(deps.projectBriefL1 ? { projectBriefL1: deps.projectBriefL1 } : {}),
+      ...(deps.briefParameters ? { briefParameters: deps.briefParameters } : {}),
+      ...(spanTerms.length > 0 ? { terms: spanTerms } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),
       ...(carriedConstraints.length > 0 ? { constraints: carriedConstraints } : {}),
       ...(deps.sourceLanguage ? { sourceLanguage: deps.sourceLanguage } : {}),

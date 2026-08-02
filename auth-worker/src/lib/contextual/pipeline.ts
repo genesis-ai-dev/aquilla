@@ -29,6 +29,7 @@ import {
   type Scope,
   type SkippedCell,
   type SpanDraft,
+  type SpanPhase,
   type SpanReport,
   type SpanSeed,
   type StagedOutcome,
@@ -66,6 +67,9 @@ export interface RunSpanDeps {
   lint: (draft: SpanDraft) => Promise<LintFlag[]>
   /** Stage accepted commits through the emit-stage perimeter. */
   stage: (draft: SpanDraft) => Promise<StagedOutcome>
+  /** Live progress only (fire-and-forget). Never awaited, never a control
+   *  signal — a throwing reporter must not fail the span. */
+  onPhase?: (phase: SpanPhase) => void
 }
 
 function spanPairs(seed: SpanSeed, pairs: CellPair[]): CellPair[] {
@@ -91,7 +95,19 @@ interface VerifyPhaseResult {
   barrierMet: boolean
 }
 
-/** Run the verifier set with the barrier's retry-once-on-failure policy. */
+/**
+ * Run the verifier set with the barrier's retry-once-on-failure policy.
+ *
+ * The stances are `independent: true` in the graph spec — they share no state
+ * and never read each other's votes — so they dispatch CONCURRENTLY. On a
+ * three-stance panel that turns three serial deep/mid round-trips into one,
+ * which is the single largest latency term in a high-risk span.
+ *
+ * Budget stays exact under concurrency without extra machinery: `chargeBudget`
+ * is synchronous (no await between reading and writing the counters), so on
+ * JS's single thread each charge is atomic and the cap cannot be overshot.
+ * Charges land in dispatch order, exactly as they did serially.
+ */
 async function runVerifiers(
   verifiers: VerifierKey[],
   deps: RunSpanDeps,
@@ -100,14 +116,19 @@ async function runVerifiers(
   pairs: CellPair[],
   budget: RunBudget,
 ): Promise<VerifyPhaseResult> {
+  const settled = await Promise.all(
+    verifiers.map(async (key) => {
+      const args = { sceneBrief: brief, draft, pairs, llm: deps.llm, budget }
+      let result = await verifySpan(key, args)
+      // Barrier on_partial: retry, retries: 1.
+      if (!result.ok) result = await verifySpan(key, args)
+      return { key, result }
+    }),
+  )
+
   const votes: Vote[] = []
   const failed: { verifier: VerifierKey; error: string }[] = []
-  for (const key of verifiers) {
-    let result = await verifySpan(key, { sceneBrief: brief, draft, pairs, llm: deps.llm, budget })
-    if (!result.ok) {
-      // Barrier on_partial: retry, retries: 1.
-      result = await verifySpan(key, { sceneBrief: brief, draft, pairs, llm: deps.llm, budget })
-    }
+  for (const { key, result } of settled) {
     if (result.ok) votes.push(result.vote)
     else failed.push({ verifier: key, error: result.error })
   }
@@ -121,6 +142,14 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   const skipped: SkippedCell[] = []
   const notes: string[] = []
   const incompleteReasons: string[] = []
+  /** Progress is decoration: a broken reporter must never fail a span. */
+  const phase = (p: SpanPhase): void => {
+    try {
+      deps.onPhase?.(p)
+    } catch {
+      /* ignore */
+    }
+  }
 
   const report = (cellsStaged: string[], ambiguities: number): SpanReport => ({
     spanId: deps.seed.id,
@@ -143,6 +172,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   }
 
   // ── scene_closure loop (construe ⇄ expand_window, register at exit) ──
+  phase("reading")
   const context: ClosureContext = {
     orderedPairs: deps.pairs,
     neighborBriefs: deps.neighborBriefs,
@@ -201,6 +231,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   let stagePromptVersion = ""
 
   for (let attempt = 1; attempt <= 2; attempt++) {
+    phase("drafting")
     const drafted: PerformSpanResult = await performSpan({
       sceneBrief: brief,
       pairs: attemptPairs,
@@ -226,6 +257,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     }
     if (drafted.draft.cells.length === 0) break
 
+    phase("checking")
     const flags = await deps.lint(drafted.draft)
     const risk = classifyRisk(drafted.draft, flags, brief.ambiguityRegister, exampleCoverage, {
       rounds: closure.rounds,
@@ -270,6 +302,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   // ── stage → report ──
   let stagedCellIds: string[] = []
   if (accepted.length > 0) {
+    phase("staging")
     const staged = await deps.stage({
       spanId: deps.seed.id,
       sceneBriefId,

@@ -92,6 +92,7 @@ import agentArtifactsRoutes from "./routes/agent-artifacts"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
 import { flushDirtyLinks } from "./lib/monday/push"
+import { sweepStrandedContextualRuns } from "./routes/contextual"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -367,6 +368,15 @@ const scheduled = async (
   try {
     const flushed = await flushDirtyLinks(runEnv, 20)
     if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
+    // Contextual autopilot: restart runs whose driver died and wake runs that
+    // parked with spans still queued, so long files finish unattended. Failing
+    // here must never take the Monday flush down with it.
+    try {
+      const swept = await sweepStrandedContextualRuns(runEnv)
+      if (swept > 0) console.log(`[contextual cron] resumed ${swept} stranded run(s)`)
+    } catch (err) {
+      console.error("[contextual cron] sweep failed:", err)
+    }
   } finally {
     if (shim) ctx.waitUntil(shim.close())
   }

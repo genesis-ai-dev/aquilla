@@ -35,12 +35,16 @@ import {
   requestPause,
   resumeRun,
   terminateRun,
+  parkRun,
   failRun,
   appendSteering,
   readUnconsumedSteering,
   listDrafts,
   countDrafts,
   reviewDraft,
+  claimStrandedRuns,
+  listAutopilotCandidateFiles,
+  getProjectAutopilotSummary,
   type ContextualRun,
 } from "../../../db/shared/contextual-runs"
 import {
@@ -54,9 +58,19 @@ import {
 
 const contextual = new Hono<AuthHonoEnv>()
 
-/** Safety cap on server-side self-continuation — a run longer than this parks
- *  where it stands and resumes on the next resume/steering kick. */
-const MAX_TICKS_PER_LOOP = 50
+/** Safety cap on server-side self-continuation. A run longer than this PARKS
+ *  where it stands — it must never simply fall out of the loop still marked
+ *  'running', because `resumeRun` refuses a running run and nothing could then
+ *  restart it. Parked-with-spans-left is a state the sweeper knows how to
+ *  wake, so long files finish unattended. */
+const MAX_WAVES_PER_LOOP = 50
+
+/** Total spans one project-wide start may drive at once, across every file.
+ *  Per-file wave width is divided down to respect it — the ceiling that
+ *  matters is the model provider's rate limit, not any one file's size. */
+const MAX_PROJECT_CONCURRENCY = 12
+/** Files a single project-wide start will fan out to. */
+const MAX_PROJECT_FILES = 24
 
 type ErrorCode =
   | "not_found"
@@ -99,9 +113,14 @@ async function requireRole(
  *  no executionCtx to flush). Production code never reads this. */
 export const _test: { lastLoop: Promise<void> | null } = { lastLoop: null }
 
-/** Run ticks until the run stops continuing or the safety cap. Owns its own
+/** Run waves until the run stops continuing or the safety cap. Owns its own
  *  PG connection (env.AQUILLA_PG dies with the Response); never throws. */
-async function selfTickLoop(env: Env, projectId: string, runId: string): Promise<void> {
+async function selfTickLoop(
+  env: Env,
+  projectId: string,
+  runId: string,
+  concurrency?: number,
+): Promise<void> {
   const shim = env.PG_CONNECTION_STRING ? makePostgres(env.PG_CONNECTION_STRING) : null
   const db: AquillaDb = (shim as unknown as AquillaDb) ?? env.AQUILLA_PG
   const notify = async (frame: ContextualProgressFrame) =>
@@ -113,10 +132,20 @@ async function selfTickLoop(env: Env, projectId: string, runId: string): Promise
       apiKey: env.OPENROUTER_API_KEY ?? "",
       models: resolveContextualModels(env, settings),
     })
-    for (let tick = 0; tick < MAX_TICKS_PER_LOOP; tick++) {
-      const result = await runOneTick({ db, runId, llm, notify })
+    for (let wave = 0; wave < MAX_WAVES_PER_LOOP; wave++) {
+      const result = await runOneTick({
+        db,
+        runId,
+        llm,
+        notify,
+        ...(concurrency ? { concurrency } : {}),
+      })
       if (!result.continueRun) return
     }
+    // Cap reached with spans still queued. Park (never leave it 'running' with
+    // no driver) so resume, steering, or the sweeper can pick it back up.
+    const parked = await parkRun(db, runId)
+    if (parked.status === "ok") await notify(runStateFrame(parked.run))
   } catch (err) {
     // Last-resort settlement — the run must never wedge in 'running'.
     const message = err instanceof Error ? err.message : String(err)
@@ -140,8 +169,13 @@ async function selfTickLoop(env: Env, projectId: string, runId: string): Promise
 
 /** Kick the loop in the background. Hono throws on `c.executionCtx` when there
  *  is none (vitest) — fall back to a floating promise, tracked in _test. */
-function kickLoop(c: Context<AuthHonoEnv>, projectId: string, runId: string): void {
-  const loop = selfTickLoop(c.env, projectId, runId)
+function kickLoop(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  runId: string,
+  concurrency?: number,
+): void {
+  const loop = selfTickLoop(c.env, projectId, runId, concurrency)
   _test.lastLoop = loop
   try {
     c.executionCtx.waitUntil(loop)
@@ -150,11 +184,44 @@ function kickLoop(c: Context<AuthHonoEnv>, projectId: string, runId: string): vo
   }
 }
 
+/**
+ * Restart runs whose driver died, and wake runs that parked with spans left.
+ *
+ * Called from the auth-worker cron (every 5 minutes). Without it, a run whose
+ * Worker request ended mid-flight stays 'running' with nothing driving it —
+ * unresumable, because `resumeRun` only accepts paused|parked — and the pill
+ * spins until a human terminates it. Best-effort by contract: a sweep that
+ * throws must never fail the cron's other work.
+ */
+export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise<number> {
+  const db = env.AQUILLA_PG
+  if (!db) return 0
+  let adopted: Awaited<ReturnType<typeof claimStrandedRuns>> = []
+  try {
+    adopted = await claimStrandedRuns(db, limit)
+  } catch (err) {
+    console.warn("[contextual] stranded-run sweep query failed:", err)
+    return 0
+  }
+  for (const run of adopted) {
+    const loop = selfTickLoop(env, run.projectId, run.id)
+    _test.lastLoop = loop
+    void loop.catch(() => {})
+  }
+  return adopted.length
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 const startSchema = z.object({
-  fileId: z.string().min(1),
+  // Optional only for a project-wide start, which derives its own file list.
+  fileId: z.string().min(1).optional(),
   targetLang: z.string().max(64).optional(),
+  /** Cell the user was looking at — the first wave starts there. */
+  anchorCellId: z.string().max(256).optional(),
+  /** "file" (default) drafts one file; "project" fans out across every
+   *  discourse file with work left. */
+  scope: z.enum(["file", "project"]).optional(),
 })
 
 // POST /:projectId/contextual/runs — start a run (CONTRIBUTOR: this is
@@ -202,12 +269,62 @@ contextual.post(
       return c.json(err, status)
     }
 
+    const roleSnapshot = { userId: user.id, username: user.username, level: gate.level }
+    const lane = body.targetLang ?? ""
+
+    // ── Project-wide start: one graph per file, all of them at once ──
+    if (body.scope === "project") {
+      const candidates = (
+        await listAutopilotCandidateFiles(c.env.AQUILLA_PG, projectId)
+      ).slice(0, MAX_PROJECT_FILES)
+      if (candidates.length === 0) {
+        const { body: err, status } = errorJson(
+          "validation_failed",
+          "no files in this project have untranslated text to draft",
+          400,
+        )
+        return c.json(err, status)
+      }
+      // Divide the global ceiling across files so a 24-file fan-out doesn't
+      // multiply into 144 concurrent model calls.
+      const perFile = Math.max(1, Math.floor(MAX_PROJECT_CONCURRENCY / candidates.length))
+      const scopeGroup = crypto.randomUUID()
+      const started: { runId: string; fileId: string }[] = []
+      const skipped: { fileId: string; reason: string }[] = []
+      for (const file of candidates) {
+        const made = await createRun(c.env.AQUILLA_PG, {
+          projectId,
+          fileId: file.fileId,
+          targetLang: lane,
+          initiatedBy: user.username,
+          roleSnapshot,
+          scopeGroup,
+          ...(body.anchorCellId ? { anchorCellId: body.anchorCellId } : {}),
+        })
+        if (made.status === "active_exists") {
+          // Already running is not a failure — it is the same work in flight.
+          skipped.push({ fileId: file.fileId, reason: "already running" })
+          continue
+        }
+        await notifySyncWorkerOfContextualActivity(c.env, projectId, runStateFrame(made.run))
+        kickLoop(c, projectId, made.run.id, perFile)
+        started.push({ runId: made.run.id, fileId: file.fileId })
+      }
+      return c.json({ scope: "project", scopeGroup, started, skipped }, 201)
+    }
+
+    // ── Single-file start ──
+    if (!body.fileId) {
+      const { body: err, status } = errorJson("validation_failed", "fileId is required", 400)
+      return c.json(err, status)
+    }
     const created = await createRun(c.env.AQUILLA_PG, {
       projectId,
       fileId: body.fileId,
-      targetLang: body.targetLang ?? "",
+      targetLang: lane,
       initiatedBy: user.username,
-      roleSnapshot: { userId: user.id, username: user.username, level: gate.level },
+      roleSnapshot,
+      ...(body.anchorCellId ? { anchorCellId: body.anchorCellId } : {}),
     })
     if (created.status === "active_exists") {
       const { body: err, status } = errorJson(
@@ -224,6 +341,16 @@ contextual.post(
     return c.json({ runId: created.run.id, run: created.run }, 201)
   },
 )
+
+// GET /:projectId/contextual/overview — project-wide autopilot rollup for the
+// PM surface (VIEWER: read-only observability, not a control).
+contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+  const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
+  return c.json({ available: true, ...summary })
+})
 
 /** Snapshot shape the pill hydrates from (mirrors run-store's expectations). */
 function runSnapshot(run: ContextualRun, activeDirections: string[] = []) {

@@ -127,12 +127,13 @@ export const realContextualTransport: ContextualTransport = {
     return { available: true, run: run ?? null }
   },
 
-  async start(projectId: string, fileId: string): Promise<{ runId: string }> {
+  async start(projectId: string, fileId: string, anchorCellId?: string): Promise<{ runId: string }> {
     const jwt = await requireJwt()
     const res = await fetchWithTimeout(runsBase(projectId), {
       method: "POST",
       headers: authHeaders(jwt),
-      body: JSON.stringify({ fileId }),
+      // The anchor rotates the first wave to start where the user is looking.
+      body: JSON.stringify({ fileId, ...(anchorCellId ? { anchorCellId } : {}) }),
     })
     if (!res.ok) return throwFromResponse(res, "start contextual run failed")
     const { runId } = (await res.json()) as { runId: string }
@@ -143,6 +144,146 @@ export const realContextualTransport: ContextualTransport = {
   pause: (runId) => postRunCommand(runId, "pause"),
   resume: (runId) => postRunCommand(runId, "resume"),
   terminate: (runId) => postRunCommand(runId, "terminate"),
+}
+
+// ── Drafts: the run's actual output ─────────────────────────────────────────
+
+export interface ContextualDraftRecord {
+  draftId: string
+  cellId: string
+  text: string
+  spanLabel?: string
+}
+
+interface DraftListRow {
+  id: string
+  cellId: string
+  text: string
+  provenance?: { spanId?: string } | null
+}
+
+/**
+ * Pending drafts for a file. The WebSocket burst is the fast path; this is the
+ * authoritative one, used on file open, on reconnect, and whenever a frame
+ * reports it was truncated. Returns [] rather than throwing when the backend
+ * isn't deployed — a missing review surface must not break opening a file.
+ */
+export async function fetchContextualDrafts(
+  projectId: string,
+  fileId: string,
+): Promise<ContextualDraftRecord[]> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/drafts` +
+      `?fileId=${encodeURIComponent(fileId)}&status=proposed`,
+    { headers: authHeaders(jwt) },
+  )
+  if (res.status === 404 || res.status === 501) return []
+  if (!res.ok) return throwFromResponse(res, "fetch contextual drafts failed")
+  const { drafts } = (await res.json()) as { drafts?: DraftListRow[] }
+  return (drafts ?? []).map((d) => ({
+    draftId: d.id,
+    cellId: d.cellId,
+    text: d.text,
+    ...(d.provenance?.spanId ? { spanLabel: d.provenance.spanId } : {}),
+  }))
+}
+
+/**
+ * Report a decision on a draft. This is a REPORT, not a gate: the caller has
+ * already applied the text through its own outbox (or dismissed it), exactly
+ * as a human edit would. Failure is logged, never surfaced as a blocked
+ * action — the user's edit already landed.
+ */
+export async function reviewContextualDraft(
+  projectId: string,
+  draftId: string,
+  action: "applied" | "rejected",
+): Promise<void> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/drafts/` +
+      `${encodeURIComponent(draftId)}/review`,
+    { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ action }) },
+  )
+  if (!res.ok) return throwFromResponse(res, "review contextual draft failed")
+}
+
+// ── Project-wide autopilot (PM surface) ─────────────────────────────────────
+
+export interface ContextualOverviewFile {
+  fileId: string
+  runId: string
+  status: string
+  doneSpans: number
+  totalSpans: number
+  failedSpans: number
+  unitsSpent: number
+  proposedDrafts: number
+  appliedDrafts: number
+  updatedAt: string
+  lastError: string | null
+}
+
+export interface ContextualOverview {
+  available: boolean
+  files: ContextualOverviewFile[]
+  activeRuns: number
+  doneSpans: number
+  totalSpans: number
+  failedSpans: number
+  unitsSpent: number
+  proposedDrafts: number
+  appliedDrafts: number
+}
+
+const EMPTY_OVERVIEW: ContextualOverview = {
+  available: false,
+  files: [],
+  activeRuns: 0,
+  doneSpans: 0,
+  totalSpans: 0,
+  failedSpans: 0,
+  unitsSpent: 0,
+  proposedDrafts: 0,
+  appliedDrafts: 0,
+}
+
+/** Project-wide autopilot rollup. Reports `available: false` rather than
+ *  throwing when the backend isn't deployed, so the overview renders without it. */
+export async function fetchContextualOverview(projectId: string): Promise<ContextualOverview> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/overview`,
+    { headers: authHeaders(jwt) },
+  )
+  if (res.status === 404 || res.status === 501) return EMPTY_OVERVIEW
+  if (!res.ok) return throwFromResponse(res, "fetch autopilot overview failed")
+  const body = (await res.json()) as Partial<ContextualOverview>
+  return { ...EMPTY_OVERVIEW, ...body, available: true }
+}
+
+export interface ProjectRunStartResult {
+  scopeGroup: string
+  started: { runId: string; fileId: string }[]
+  skipped: { fileId: string; reason: string }[]
+}
+
+/** Start autopilot on EVERY discourse file in the project that still has work.
+ *  The server picks the files and divides the concurrency ceiling across them. */
+export async function startProjectContextualRun(
+  projectId: string,
+): Promise<ProjectRunStartResult> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(runsBase(projectId), {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify({ scope: "project" }),
+  })
+  if (!res.ok) return throwFromResponse(res, "start project autopilot failed")
+  const body = (await res.json()) as ProjectRunStartResult
+  for (const run of body.started ?? []) runProjects.set(run.runId, projectId)
+  return { scopeGroup: body.scopeGroup, started: body.started ?? [], skipped: body.skipped ?? [] }
 }
 
 /**

@@ -55,6 +55,7 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
 import { CellTranscriptPreview } from "./CellTranscriptPreview"
+import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
 import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
@@ -5735,6 +5736,20 @@ function EditorRow({
                     </div>
                   )}
                 </div>
+              )}
+              {/* Pending autopilot draft — verified text a contextual run
+                  staged for this cell. Only rendered while the target is
+                  still empty: a suggestion must never cover work that exists.
+                  Accepting routes through handleEditorCommit, so it lands as
+                  an ordinary human edit with every normal guard applied. */}
+              {!hasTranslatedText && !showCompletionOverlay && (
+                <ContextualDraftCard
+                  cellId={cell.id}
+                  projectId={project.id}
+                  editable={editable}
+                  dir={targetCellDirection}
+                  onAccept={(text) => handleEditorCommit({ value: text, valueHtml: text })}
+                />
               )}
             </div>
             </div>

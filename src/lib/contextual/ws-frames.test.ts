@@ -25,8 +25,12 @@ function dispatch(raw: object): void {
   const parsed = parseProjectWsMessage(JSON.stringify(raw))
   if (!parsed) throw new Error("frame did not parse — wire contract broken")
   if (parsed.t !== "contextual.activity") throw new Error(`unexpected frame type ${parsed.t}`)
-  // ProjectWorkspace's onMessage branch: project match, then straight to the store.
+  // ProjectWorkspace's onMessage branch: project match, split draft bursts off
+  // to the drafts store, then straight to the run store.
   expect(parsed.project).toBe(PROJECT)
+  if (parsed.frame.type === "contextual.drafts") {
+    throw new Error("draft bursts are covered by drafts-store.test.ts, not here")
+  }
   applyRemoteFrame(parsed.frame)
 }
 

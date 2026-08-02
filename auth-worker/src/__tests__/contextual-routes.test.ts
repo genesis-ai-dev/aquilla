@@ -11,7 +11,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import app from "../index"
-import { _test } from "../routes/contextual"
+import { _test, sweepStrandedContextualRuns } from "../routes/contextual"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { getRun, listDrafts } from "../../../db/shared/contextual-runs"
 import { scriptMockResponse } from "../../../scripts/mock-openrouter"
@@ -430,5 +430,41 @@ describe("live draft streaming", () => {
     expect(firstStart).toBeGreaterThanOrEqual(0)
     expect(firstStart).toBeLessThan(firstScene)
     expect(types).toContain("contextual.phase")
+  })
+})
+
+describe("sweepStrandedContextualRuns", () => {
+  it("adopts a run whose driver died and drives it to completion", async () => {
+    const { contrib } = await seedWorld()
+    // Start a run, then leave it mid-flight: 'running' with a quiet heartbeat
+    // and spans still on the cursor is exactly what a dead Worker request
+    // leaves behind, and `resumeRun` refuses that state.
+    const runId = await startRun(contrib)
+    await env.AQUILLA_PG.prepare(
+      `UPDATE contextual_runs
+          SET status = 'running', span_cursor = jsonb_set(span_cursor, '{nextIndex}', '0'),
+              updated_at = now() - interval '1 hour'
+        WHERE id = ?`,
+    )
+      .bind(runId)
+      .run()
+
+    const sweep = await sweepStrandedContextualRuns(testEnv as unknown as Parameters<typeof sweepStrandedContextualRuns>[0])
+    expect(sweep.adopted).toBeGreaterThanOrEqual(1)
+    // `done` is the caller's contract: the cron must not close the shared
+    // Postgres connection until every adopted loop has finished with it.
+    await sweep.done
+    _test.lastLoop = null
+
+    const after = await getRun(env.AQUILLA_PG, runId)
+    expect(after?.status).toBe("parked")
+  })
+
+  it("adopts nothing when every run has a live heartbeat", async () => {
+    const { contrib } = await seedWorld()
+    await startRun(contrib)
+    const sweep = await sweepStrandedContextualRuns(testEnv as unknown as Parameters<typeof sweepStrandedContextualRuns>[0])
+    await sweep.done
+    expect(sweep.adopted).toBe(0)
   })
 })

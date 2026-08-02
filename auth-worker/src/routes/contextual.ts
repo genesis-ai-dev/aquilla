@@ -193,22 +193,38 @@ function kickLoop(
  * spins until a human terminates it. Best-effort by contract: a sweep that
  * throws must never fail the cron's other work.
  */
-export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise<number> {
+export interface SweepResult {
+  /** Runs this sweep adopted. */
+  adopted: number
+  /**
+   * Settles when every adopted run's loop finishes.
+   *
+   * The caller MUST keep its Postgres connection alive until this resolves.
+   * `selfTickLoop` only opens its own connection when `PG_CONNECTION_STRING`
+   * is configured; otherwise it borrows `env.AQUILLA_PG`, and the cron closes
+   * that in its `finally`. Without this handle the sweep would adopt runs and
+   * then yank the connection out from under them — worse than not sweeping,
+   * because the adoption already refreshed their heartbeats.
+   */
+  done: Promise<void>
+}
+
+export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise<SweepResult> {
   const db = env.AQUILLA_PG
-  if (!db) return 0
+  if (!db) return { adopted: 0, done: Promise.resolve() }
   let adopted: Awaited<ReturnType<typeof claimStrandedRuns>> = []
   try {
     adopted = await claimStrandedRuns(db, limit)
   } catch (err) {
     console.warn("[contextual] stranded-run sweep query failed:", err)
-    return 0
+    return { adopted: 0, done: Promise.resolve() }
   }
-  for (const run of adopted) {
-    const loop = selfTickLoop(env, run.projectId, run.id)
-    _test.lastLoop = loop
-    void loop.catch(() => {})
+  const loops = adopted.map((run) => selfTickLoop(env, run.projectId, run.id))
+  if (loops.length > 0) _test.lastLoop = Promise.all(loops).then(() => {})
+  return {
+    adopted: adopted.length,
+    done: Promise.allSettled(loops).then(() => {}),
   }
-  return adopted.length
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────

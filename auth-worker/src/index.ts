@@ -365,6 +365,10 @@ const scheduled = async (
     shim = makePostgres(env.HYPERDRIVE.connectionString)
     runEnv = { ...env, AQUILLA_PG: shim as unknown as AquillaDb, HYPERDRIVE: undefined }
   }
+  // Adopted contextual runs keep driving after this handler returns, on the
+  // SAME connection (selfTickLoop only opens its own when PG_CONNECTION_STRING
+  // is configured). The close below must wait for them.
+  let sweepDone: Promise<void> = Promise.resolve()
   try {
     const flushed = await flushDirtyLinks(runEnv, 20)
     if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
@@ -372,13 +376,17 @@ const scheduled = async (
     // parked with spans still queued, so long files finish unattended. Failing
     // here must never take the Monday flush down with it.
     try {
-      const swept = await sweepStrandedContextualRuns(runEnv)
-      if (swept > 0) console.log(`[contextual cron] resumed ${swept} stranded run(s)`)
+      const sweep = await sweepStrandedContextualRuns(runEnv)
+      sweepDone = sweep.done
+      if (sweep.adopted > 0) {
+        console.log(`[contextual cron] resumed ${sweep.adopted} stranded run(s)`)
+        ctx.waitUntil(sweep.done)
+      }
     } catch (err) {
       console.error("[contextual cron] sweep failed:", err)
     }
   } finally {
-    if (shim) ctx.waitUntil(shim.close())
+    if (shim) ctx.waitUntil(sweepDone.then(() => shim!.close()))
   }
 }
 

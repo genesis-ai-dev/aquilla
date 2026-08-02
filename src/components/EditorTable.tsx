@@ -192,6 +192,16 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 const EMPTY_CONCEPTS: Concept[] = []
 
+interface EditorActivationOptions {
+  /**
+   * AQU-618: async flows may restore the editor that launched them only when
+   * the user has not activated another cell in the meantime.
+   */
+  ifActivationVersion?: number
+}
+
+type ActivateEditor = (cellId: string, options?: EditorActivationOptions) => void
+
 function clampIndex(index: number, length: number): number {
   if (length <= 0) return 0
   return Math.max(0, Math.min(length - 1, index))
@@ -789,6 +799,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     setChapterNavigationSelection(null)
   }, [])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
+  // AQU-618: state alone cannot distinguish a late async focus restoration
+  // from a newer user click because the completion and click may settle in
+  // the same React batch. Keep a synchronous identity + version alongside it.
+  const activeEditorCellIdRef = useRef<string | null>(null)
+  const editorActivationVersionRef = useRef(0)
   // AQU-669: the single, exclusive cell whose action rail is focus-pinned. At
   // most one cell is ever the "focused cell", so the rail pin is derived from
   // `focusedRailCellId === cell.id` rather than each row's own local
@@ -885,6 +900,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   useEffect(() => {
     if (!activeEditorCellId) return
     if (displayCellIds.includes(activeEditorCellId)) return
+    if (activeEditorCellIdRef.current === activeEditorCellId) {
+      activeEditorCellIdRef.current = null
+    }
     setActiveEditorCellId(null)
   }, [activeEditorCellId, displayCellIds])
 
@@ -896,12 +914,38 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     setFocusedRailCellId(null)
   }, [focusedRailCellId, displayCellIds])
 
-  const handleActivateEditor = useCallback((cellId: string) => {
+  const handleActivateEditor = useCallback<ActivateEditor>((cellId, options) => {
+    if (
+      options?.ifActivationVersion !== undefined
+      && options.ifActivationVersion !== editorActivationVersionRef.current
+    ) {
+      return
+    }
+    if (options?.ifActivationVersion !== undefined) {
+      const focusedRow = document.activeElement instanceof Element
+        ? document.activeElement.closest<HTMLElement>("[data-cell-id]")
+        : null
+      if (focusedRow?.dataset.cellId && focusedRow.dataset.cellId !== cellId) {
+        return
+      }
+    }
+    if (activeEditorCellIdRef.current !== cellId) {
+      editorActivationVersionRef.current += 1
+    }
+    activeEditorCellIdRef.current = cellId
     setActiveEditorCellId(cellId)
     lastActiveEditorCellIdRef.current = cellId
   }, [])
 
+  const getEditorActivationVersion = useCallback(
+    () => editorActivationVersionRef.current,
+    [],
+  )
+
   const handleDeactivateEditor = useCallback((cellId: string) => {
+    if (activeEditorCellIdRef.current === cellId) {
+      activeEditorCellIdRef.current = null
+    }
     setActiveEditorCellId((current) => current === cellId ? null : current)
   }, [])
 
@@ -998,8 +1042,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
     clearChapterNavigationSelection()
-    setActiveEditorCellId(targetId)
-    lastActiveEditorCellIdRef.current = targetId
+    handleActivateEditor(targetId)
     void listRef.current?.scrollToIndex({
       index,
       viewPosition: 0.5,
@@ -1038,7 +1081,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     }
     focusWhenMounted()
-  }, [clearChapterNavigationSelection, getListQueryRoot])
+  }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor])
 
   // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
   // both defer to the next frame (the list may still be scrolling, so the DOM
@@ -1784,6 +1827,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onRowFocusPin={handleRowFocusPin}
           onRowFocusRelease={handleRowFocusRelease}
           onActivateEditor={handleActivateEditor}
+          getEditorActivationVersion={getEditorActivationVersion}
           onDeactivateEditor={handleDeactivateEditor}
           isStaleSource={staleCellIds?.has(cell.id) ?? false}
           isUpstreamStaleSource={upstreamStaleCellIds?.has(cell.id) ?? false}
@@ -1910,6 +1954,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     handleDragEnter,
     handleDragStart,
     handleActivateEditor,
+    getEditorActivationVersion,
     handleDeactivateEditor,
     handleEscapeToGrid,
     handleGridRowKeyNav,
@@ -2272,7 +2317,8 @@ interface MemoizedRowProps {
   onRowFocusPin: (cellId: string) => void
   /** AQU-669: called when focus leaves this row — clears the owner if still ours. */
   onRowFocusRelease: (cellId: string) => void
-  onActivateEditor: (cellId: string) => void
+  onActivateEditor: ActivateEditor
+  getEditorActivationVersion: () => number
   onDeactivateEditor: (cellId: string) => void
   username: string
   /** AQU-538: active target lane, carried into target-side emits. */
@@ -2425,6 +2471,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onRowFocusPin,
     onRowFocusRelease,
     onActivateEditor,
+    getEditorActivationVersion,
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
@@ -2538,6 +2585,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onRowFocusPin={onRowFocusPin}
         onRowFocusRelease={onRowFocusRelease}
         onActivateEditor={onActivateEditor}
+        getEditorActivationVersion={getEditorActivationVersion}
         onDeactivateEditor={onDeactivateEditor}
         username={username}
         activeLane={activeLane}
@@ -2637,7 +2685,8 @@ interface EditorRowProps {
   /** AQU-669: report focus entering / leaving this row to the exclusive owner. */
   onRowFocusPin: (cellId: string) => void
   onRowFocusRelease: (cellId: string) => void
-  onActivateEditor: (cellId: string) => void
+  onActivateEditor: ActivateEditor
+  getEditorActivationVersion: () => number
   onDeactivateEditor: (cellId: string) => void
   username: string
   /** AQU-538: active target lane. Passed into `target.cell.commit` and
@@ -3573,7 +3622,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 }
 
 function EditorRow({
-  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onActivateEditor, onDeactivateEditor,
+  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, health,
@@ -4047,11 +4096,13 @@ function EditorRow({
   // `onCompleteSingle` and leave focus on the dialog / rail button with no
   // saved signal, so testers re-applied the change unsure it had persisted.
   // We await the commit (completeSingle auto-commits and flushes the outbox),
-  // then re-focus the cell editor (the new text is now visible there) and show
-  // a brief "Saved" confirmation.
+  // then re-focus the cell editor only if the translator has not activated or
+  // focused another cell meanwhile. The saved signal is independent of focus:
+  // the originating row still confirms that its write landed.
   const completeSingleAndReturn = useCallback(async () => {
+    const activationVersion = getEditorActivationVersion()
     const saved = await onCompleteSingle(cell)
-    onActivateEditor(cell.id)
+    onActivateEditor(cell.id, { ifActivationVersion: activationVersion })
     // AQU-670: only confirm "Saved" when the draft actually committed. On a
     // failed enqueue completeSingle resolves `false` and records the error
     // (shown inline via the `error` line); showing "Saved" as well would give
@@ -4063,7 +4114,7 @@ function EditorRow({
       setShowSaved(false)
       savedTimerRef.current = null
     }, 2400)
-  }, [onCompleteSingle, cell, onActivateEditor])
+  }, [onCompleteSingle, cell, onActivateEditor, getEditorActivationVersion])
 
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)

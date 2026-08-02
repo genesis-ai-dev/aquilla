@@ -273,3 +273,162 @@ describe("draft listing + review handshake", () => {
     expect((await req("GET", "/drafts", viewer)).status).toBe(400)
   })
 })
+
+// ── Project-wide fan-out + the PM overview ─────────────────────────────────
+
+/** A second discourse file so a project-wide start has more than one target. */
+async function seedSecondFile(): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO files (id, project_id, name, kind, event_id, cell_count) VALUES (?, ?, ?, ?, ?, 0)`,
+  )
+    .bind("file-luk", PROJECT, "LUK.usfm", "usfm", "ev-file-luk")
+    .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO files (id, project_id, name, kind, event_id, cell_count) VALUES (?, ?, ?, ?, ?, 0)`,
+  )
+    .bind(FILE, PROJECT, "MRK.usfm", "usfm", "ev-file-mrk")
+    .run()
+  // A key/value catalog, which has no discourse to construe.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO files (id, project_id, name, kind, event_id, cell_count) VALUES (?, ?, ?, ?, ?, 0)`,
+  )
+    .bind("file-ui", PROJECT, "ui.json", "json", "ev-file-ui")
+    .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+     VALUES (?, 'file-luk', 'l1', 'source', 'A careful account', 'LUK 1:1', 'ev-l1', 0)`,
+  )
+    .bind(PROJECT)
+    .run()
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+     VALUES (?, 'file-ui', 'u1', 'source', 'Save', NULL, 'ev-u1', 0)`,
+  )
+    .bind(PROJECT)
+    .run()
+}
+
+describe("POST /contextual/runs {scope:'project'}", () => {
+  it("viewer → 403; contributor fans out across discourse files and skips catalogs", async () => {
+    const { contrib, viewer } = await seedWorld()
+    await seedSecondFile()
+
+    expect((await req("POST", "/runs", viewer, { scope: "project" })).status).toBe(403)
+
+    const started = await req("POST", "/runs", contrib, { scope: "project" })
+    expect(started.status).toBe(201)
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
+
+    const body = (await started.json()) as {
+      scopeGroup: string
+      started: { runId: string; fileId: string }[]
+      skipped: { fileId: string }[]
+    }
+    expect(body.scopeGroup).toBeTruthy()
+    const fileIds = body.started.map((s) => s.fileId).sort()
+    expect(fileIds).toEqual(["file-luk", FILE].sort())
+    // The JSON catalog is not a discourse file — nothing to construe there.
+    expect(fileIds).not.toContain("file-ui")
+  })
+
+  it("reports files already running as skipped rather than failing the start", async () => {
+    const { contrib } = await seedWorld()
+    await seedSecondFile()
+    await startRun(contrib) // MRK is now active
+
+    const started = await req("POST", "/runs", contrib, { scope: "project" })
+    expect(started.status).toBe(201)
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
+
+    const body = (await started.json()) as {
+      started: { fileId: string }[]
+      skipped: { fileId: string; reason: string }[]
+    }
+    expect(body.skipped.map((s) => s.fileId)).toContain(FILE)
+    expect(body.started.map((s) => s.fileId)).toContain("file-luk")
+  })
+
+  it("400s when no file in the project has work left", async () => {
+    const { contrib } = await seedWorld()
+    // Translate everything the seeded world has.
+    for (const cellId of ["c1", "c2"]) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, source_event_id, last_edit_at, validated)
+         VALUES (?, ?, ?, 'target', 'ya hecho', 'MRK 1:1', ?, ?, 0, 0)`,
+      )
+        .bind(PROJECT, FILE, cellId, `ev-t-${cellId}`, `ev-${cellId}`)
+        .run()
+    }
+    const started = await req("POST", "/runs", contrib, { scope: "project" })
+    expect(started.status).toBe(400)
+  })
+
+  it("400s a single-file start with no fileId", async () => {
+    const { contrib } = await seedWorld()
+    expect((await req("POST", "/runs", contrib, {})).status).toBe(400)
+  })
+})
+
+describe("GET /contextual/overview", () => {
+  it("viewer can read the project rollup: per-file runs plus the review backlog", async () => {
+    const { contrib, viewer } = await seedWorld()
+    await startRun(contrib)
+
+    const res = await req("GET", "/overview", viewer)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      available: boolean
+      files: { fileId: string; proposedDrafts: number; totalSpans: number }[]
+      proposedDrafts: number
+      totalSpans: number
+    }
+    expect(body.available).toBe(true)
+    const row = body.files.find((f) => f.fileId === FILE)
+    expect(row).toBeTruthy()
+    expect(row?.proposedDrafts).toBe(2)
+    expect(body.proposedDrafts).toBe(2)
+    expect(body.totalSpans).toBeGreaterThan(0)
+  })
+
+  it("reports an empty rollup for a project autopilot has never touched", async () => {
+    const { viewer } = await seedWorld()
+    const res = await req("GET", "/overview", viewer)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { files: unknown[]; activeRuns: number; proposedDrafts: number }
+    expect(body.files).toEqual([])
+    expect(body.activeRuns).toBe(0)
+    expect(body.proposedDrafts).toBe(0)
+  })
+})
+
+describe("live draft streaming", () => {
+  it("fans a contextual.drafts frame with the verified text out to the project DO", async () => {
+    const { contrib } = await seedWorld()
+    await startRun(contrib)
+
+    const draftFrames = syncFrames.filter((f) => f.frame.type === "contextual.drafts")
+    expect(draftFrames.length).toBeGreaterThan(0)
+    const payload = draftFrames[0].frame as unknown as {
+      fileId: string
+      drafts: { draftId: string; cellId: string; text: string }[]
+    }
+    expect(payload.fileId).toBe(FILE)
+    expect(payload.drafts.map((d) => d.cellId).sort()).toEqual(["c1", "c2"])
+    expect(payload.drafts[0].text).toMatch(/^MOCK /)
+    expect(payload.drafts[0].draftId).toBeTruthy()
+  })
+
+  it("opens a lane before the first model output so the UI never shows dead air", async () => {
+    const { contrib } = await seedWorld()
+    await startRun(contrib)
+
+    const types = syncFrames.map((f) => f.frame.type)
+    const firstStart = types.indexOf("contextual.span.start")
+    const firstScene = types.indexOf("contextual.scene")
+    expect(firstStart).toBeGreaterThanOrEqual(0)
+    expect(firstStart).toBeLessThan(firstScene)
+    expect(types).toContain("contextual.phase")
+  })
+})

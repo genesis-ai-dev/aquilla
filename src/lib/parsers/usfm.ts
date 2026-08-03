@@ -8,18 +8,28 @@ export interface UsfmBookResult {
   strings: TranslatableString[]
 }
 
-export function extractUsfmStrings(content: string): UsfmBookResult[] {
+export interface ExtractUsfmOptions {
+  /** When true, book-name/title/TOC + intro-block front matter is excluded from
+   *  the emitted cells (per-project opt-out, AQU-634). In-body section headings
+   *  (\s, \ms, \r) and Psalm titles (\d) are unaffected. Default: false. */
+  excludeFrontMatter?: boolean
+}
+
+export function extractUsfmStrings(
+  content: string,
+  opts?: ExtractUsfmOptions,
+): UsfmBookResult[] {
   const hasId = /\\id\s/.test(content)
 
   if (!hasId) {
-    return [parseBookSection(content, "unknown")]
+    return [parseBookSection(content, "unknown", opts)]
   }
 
   const sections = content.split(/(?=\\id\s)/).filter((s) => s.trim().length > 0)
   return sections.map((section) => {
     const idMatch = section.match(/\\id\s+(\S+)/)
     const bookId = idMatch ? idMatch[1] : "unknown"
-    return parseBookSection(section, bookId)
+    return parseBookSection(section, bookId, opts)
   })
 }
 
@@ -113,7 +123,12 @@ function normalizeAlignedUsfm(section: string): string {
     .join("\n")
 }
 
-function parseBookSection(section: string, bookId: string): UsfmBookResult {
+function parseBookSection(
+  section: string,
+  bookId: string,
+  opts?: ExtractUsfmOptions,
+): UsfmBookResult {
+  const excludeFrontMatter = opts?.excludeFrontMatter ?? false
   const lines = normalizeAlignedUsfm(unwrapSelah(stripNotes(section))).split("\n")
   const strings: TranslatableString[] = []
   let chapter = 0
@@ -203,12 +218,14 @@ function parseBookSection(section: string, bookId: string): UsfmBookResult {
 
     const paratextMatch = trimmed.match(/^\\(mt|ms|r)(\d?)\s+(.*)/)
     if (paratextMatch) {
-      // AQU-585: the main title (\mt) is the book name — front matter, not a
-      // translatable source cell. Major-section (\ms) and parallel-reference
-      // (\r) headings are in-body content and stay.
-      if (!isBookTitleOrIntroMarker(paratextMatch[1] + paratextMatch[2])) {
-        addString(paratextMatch[3], bookId, "paratext", `${bookId} intro`)
+      // Opt-out (AQU-634): drop book title (\mt) front matter when requested;
+      // \ms and \r are in-body section headings and always import.
+      if (excludeFrontMatter && isBookTitleOrIntroMarker(paratextMatch[1] + paratextMatch[2])) {
+        verseOpen = false
+        continue
       }
+      addString(paratextMatch[3], bookId, "paratext", `${bookId} intro`)
+      verseOpen = false
       continue
     }
 

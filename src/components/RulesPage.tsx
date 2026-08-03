@@ -188,7 +188,7 @@ export function RulesPage() {
         />
       )}
       <header className="flex items-center gap-4 border-b px-4 py-2">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${id}`)}>
+        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${id}/editor`)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> Back to Editor
         </Button>
         <h2 className="font-semibold">Translation Rules</h2>
@@ -264,10 +264,12 @@ export function RulesPage() {
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
-                        <Button size="sm" variant="outline" onClick={() => navigate(`/project/${id}?openRule=${rule.id}`)} title="Opens the editor with this rule's drawer">
-                          <Wand2 className="mr-1 h-3.5 w-3.5" />
-                          Try to fix all
-                        </Button>
+                        <AppTooltip content="Opens the editor with this rule's drawer">
+                          <Button size="sm" variant="outline" onClick={() => navigate(`/project/${id}/editor?openRule=${rule.id}`)}>
+                            <Wand2 className="mr-1 h-3.5 w-3.5" />
+                            Try to fix all
+                          </Button>
+                        </AppTooltip>
                         <Button variant="ghost" size="sm" onClick={() => toggleExpanded(rule.id)}>
                           {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                         </Button>
@@ -277,12 +279,13 @@ export function RulesPage() {
                             onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })} />
                           <span className="text-muted-foreground">Enabled</span>
                         </label>
-                        <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`}
-                          disabled={!canManageRules}
-                          title={manageRulesDeniedReason ?? undefined}
-                          onClick={() => setPendingDeleteRuleId(rule.id)}>
-                          <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        </Button>
+                        <AppTooltip content={manageRulesDeniedReason ?? undefined} disabled={canManageRules || !manageRulesDeniedReason}>
+                          <Button variant="ghost" size="sm" aria-label={`Delete rule ${rule.name}`}
+                            disabled={!canManageRules}
+                            onClick={() => setPendingDeleteRuleId(rule.id)}>
+                            <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          </Button>
+                        </AppTooltip>
                       </div>
 
                       {expanded && (
@@ -323,7 +326,7 @@ function AutofixEditor({ rule, onUpdate, disabled = false }: { rule: Translation
 
   return (
     <div className="mt-3 space-y-2 border-t pt-3">
-      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Saved autofix (regex)</p>
+      <p className="text-xs text-muted-foreground">Saved autofix (regex)</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Input data-autofix-field="pattern" placeholder="Pattern" value={pattern} onChange={(e) => setPattern(e.target.value)} disabled={disabled} />
         <Input placeholder="Replacement" value={replacement} onChange={(e) => setReplacement(e.target.value)} disabled={disabled} />

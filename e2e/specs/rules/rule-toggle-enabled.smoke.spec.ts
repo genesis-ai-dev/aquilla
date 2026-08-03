@@ -17,12 +17,12 @@ test("custom rule enable/disable toggle updates aria-label", async ({ alice }) =
   await dash.createProject({ name: projectName })
   await dash.openProject(projectName)
 
-  const projectId = alice.url().match(/\/project\/([^/]+)$/)?.[1]
+  const projectId = alice.url().match(/\/project\/([^/]+)/)?.[1]
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/rules`)
   // Create a custom rule.
-  const addBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addBtn).toBeVisible({ timeout: 10_000 })
   await addBtn.click()
 

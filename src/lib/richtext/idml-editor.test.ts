@@ -15,6 +15,7 @@ import {
   idmlEditorExtensions,
   prepareIdmlEditorContent,
   resolveIdmlEditorConfiguration,
+  sanitizeIdmlSlotInsertion,
   serializeIdmlEditorDocument,
   validateIdmlEditorCommit,
   type IdmlEditorConfiguration,
@@ -381,5 +382,47 @@ describe("IDML trailing break caret box", () => {
     editor.view.dispatch(editor.state.tr.insert(slotEnd, editor.state.schema.nodes.hardBreak.create()))
     expect(editor.view.dom.querySelector("span[data-idml-slot=\"0\"] br")).toBeTruthy()
     expect(editor.view.dom.querySelector(".idml-trailing-break")).toBeNull()
+  })
+})
+
+describe("sanitizeIdmlSlotInsertion (AQU-758)", () => {
+  it("collapses doubled spaces and drops leading/trailing spaces on paste into an empty slot", () => {
+    expect(sanitizeIdmlSlotInsertion("  hello   world  ", "", "", "paste")).toBe("hello world")
+  })
+
+  it("keeps a single word separator when pasting against existing slot text", () => {
+    // Caret sits after "Source" (before = "e"), so a leading space is a real
+    // word gap and survives; a doubled interior space is still collapsed.
+    expect(sanitizeIdmlSlotInsertion(" Pasted  text", "e", "", "paste")).toBe(" Pasted text")
+  })
+
+  it("drops a leading space that would double against a preceding space", () => {
+    expect(sanitizeIdmlSlotInsertion(" more", " ", "", "paste")).toBe("more")
+  })
+
+  it("preserves line breaks but strips spaces that would abut them", () => {
+    expect(sanitizeIdmlSlotInsertion("a \n b", "", "", "paste")).toBe("a\nb")
+  })
+
+  it("leaves non-breaking spaces and other Unicode whitespace untouched", () => {
+    expect(sanitizeIdmlSlotInsertion("keep nbsp", "x", "y", "paste")).toBe("keep nbsp")
+  })
+
+  it("blocks a leading space typed into an empty slot", () => {
+    expect(sanitizeIdmlSlotInsertion(" ", "", "", "type")).toBe("")
+  })
+
+  it("blocks a second consecutive space typed after an existing space", () => {
+    expect(sanitizeIdmlSlotInsertion(" ", " ", "", "type")).toBe("")
+  })
+
+  it("allows a lone trailing space while typing so the next word can follow", () => {
+    // before = "d" (end of a word), slot end after — a paste would strip this,
+    // but live typing must keep it so "word " can become "word next".
+    expect(sanitizeIdmlSlotInsertion(" ", "d", "", "type")).toBe(" ")
+  })
+
+  it("allows an ordinary single space typed between two words", () => {
+    expect(sanitizeIdmlSlotInsertion(" ", "d", "n", "type")).toBe(" ")
   })
 })

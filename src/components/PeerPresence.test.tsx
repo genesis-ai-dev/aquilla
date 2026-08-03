@@ -19,9 +19,7 @@ describe("PeerPresence", () => {
     render(<PeerPresence peers={[alice]} onJumpToPeer={onJumpToPeer} />)
 
     fireEvent.click(screen.getByRole("button", { name: /alice/i }))
-    const list = screen.getByText("Online (1)").closest("div")?.parentElement
-    expect(list).not.toBeNull()
-    const popover = list as HTMLElement
+    const popover = screen.getByLabelText("1 online")
 
     fireEvent.click(within(popover).getByRole("button", { name: /alice editing/i }))
 
@@ -38,8 +36,7 @@ describe("PeerPresence", () => {
     fireEvent.click(screen.getByRole("button", { name: /alice/i }))
 
     const shell = screen.getByTestId("clipped-shell")
-    const popover = screen.getByText("Online (1)").closest<HTMLElement>('[data-slot="popover-content"]')
-    expect(popover).not.toBeNull()
+    const popover = screen.getByLabelText("1 online")
     expect(shell).not.toContainElement(popover)
     expect(document.body).toContainElement(popover)
   })

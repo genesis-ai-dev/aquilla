@@ -20,6 +20,7 @@ import {
 } from "@/lib/parsers/helloao"
 import { cn } from "@/lib/utils"
 import { BookMarked, Plus, Search, X } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   InputGroup,
@@ -231,12 +232,12 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
           onClick={onToggle}
           aria-label="Show parallel bibles"
           className={cn(
-            "flex h-full w-7 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
             className,
           )}
         >
           <BookMarked className="h-4 w-4" />
-          <span className="text-[10px] font-medium uppercase tracking-wider [writing-mode:vertical-rl]">
+          <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
             Bibles
           </span>
         </button>
@@ -249,9 +250,9 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
     : null
 
   return (
-    <div className={cn("flex h-full w-80 shrink-0 flex-col border-l bg-background text-sm", className)}>
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-2">
+    <div className={cn("hidden h-full w-80 shrink-0 flex-col border-l bg-card text-sm sm:flex", className)}>
+      {/* Header — p-2 matches the other side panels' header strip. */}
+      <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">
           <BookMarked className="h-4 w-4 text-muted-foreground" />
           <span>Parallel Bibles</span>
@@ -261,14 +262,16 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
             </span>
           )}
         </div>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           aria-label="Hide parallel bibles"
           onClick={onToggle}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+          className="text-muted-foreground"
         >
-          <X className="h-4 w-4" />
-        </button>
+          <X />
+        </Button>
       </div>
 
       {/* Body */}
@@ -291,17 +294,19 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
               return (
                 <div key={versionId} className="group px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                    <span className="text-xs font-medium text-muted-foreground/70">
                       {meta ? (meta.shortName || meta.id) : versionId}
                     </span>
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       aria-label={`Remove ${versionId}`}
                       onClick={() => unpinVersion(versionId)}
-                      className="rounded p-0.5 text-muted-foreground/0 transition-colors hover:text-foreground group-hover:text-muted-foreground"
+                      className="text-muted-foreground/0 transition-colors hover:text-foreground group-hover:text-muted-foreground"
                     >
-                      <X className="h-3 w-3" />
-                    </button>
+                      <X />
+                    </Button>
                   </div>
                   {data?.error ? (
                     <p className="mt-1 text-xs text-destructive">{data.error}</p>

@@ -5,6 +5,8 @@ import { getMyOrg } from "./frontier-api"
 
 export interface AuthedPage extends Page {
   username: "alice" | "bob" | "carol"
+  /** Personal org id from GET /orgs/me — used to build `/orgs/$id/...` URLs. */
+  orgId: number
 }
 
 interface Fixtures {
@@ -13,12 +15,19 @@ interface Fixtures {
   carol: AuthedPage
 }
 
+/** Build an org-scoped path for an authed e2e user. */
+export function orgRoute(page: Pick<AuthedPage, "orgId">, rest = ""): string {
+  const suffix = !rest ? "" : rest.startsWith("/") ? rest : `/${rest}`
+  return `/orgs/${page.orgId}${suffix}`
+}
+
 async function makeAuthedPage(
   browser: Browser,
   username: "alice" | "bob" | "carol",
   baseURL?: string,
 ): Promise<AuthedPage> {
   const session = await ensureAuthState(username)
+  const ownOrg = await getMyOrg(session.jwt)
   const ctx = await browser.newContext()
   // alice is a platform admin in the e2e stack (PLATFORM_ADMINS:alice in
   // scripts/e2e-up.ts), so GET /api/v2/orgs returns *every* org in the tenancy
@@ -32,11 +41,12 @@ async function makeAuthedPage(
   // behavior (and orgs/members.smoke depends on it). The guard keeps this a
   // one-time default that in-test org switches can still override.
   if (username === "alice") {
-    const ownOrg = await getMyOrg(session.jwt)
     await ctx.addInitScript((orgId) => {
-      if (localStorage.getItem("org:active") == null) {
-        localStorage.setItem("org:active", String(orgId))
-      }
+      // Always pin alice to her personal org — path-scoped `/orgs/:id` resume
+      // via localStorage must not retain a stale id from a prior document in
+      // this context (or "all"), or RootRedirect / Dashboard.goto land on
+      // OrgRouteGate's not-found shell (no "+ New Project", no account menu).
+      localStorage.setItem("org:active", String(orgId))
     }, ownOrg.id)
   }
   // RootRedirect (AQU-172) hard-replaces "/" with /homepage when the aq_hint
@@ -63,7 +73,7 @@ async function makeAuthedPage(
   const page = await ctx.newPage()
   await page.goto("/")
   await injectSession(page, session)
-  return Object.assign(page, { username }) as AuthedPage
+  return Object.assign(page, { username, orgId: ownOrg.id }) as AuthedPage
 }
 
 /** Per-test backend reset + lazy pre-authenticated Pages.

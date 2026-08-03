@@ -20,7 +20,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("project settings AI context controls mark form dirty", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `CtxControls ${Date.now()}` })
 
-  await alice.goto(`/project/${seeded.projectId}/settings?section=ai`)
+  await alice.goto(`/project/${seeded.projectId}/settings/ai`)
   // #context-size select defaults to "Medium" — change to "Large".
   const contextSizeSelect = alice.locator("#context-size")
   await expect(contextSizeSelect).toBeVisible({ timeout: 10_000 })

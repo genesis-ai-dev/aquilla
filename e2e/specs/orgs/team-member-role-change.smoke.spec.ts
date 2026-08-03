@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
 import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
@@ -12,7 +12,7 @@ import { addOrgMember, getMyOrg, ROLE } from "../../helpers/frontier-api"
  * contributor(400), project_lead(500), maintainer(600), owner(700).
  *
  * This spec: seed bob in alice's org → create a team → add bob as a team
- * member → navigate to team detail → change "Role for bob" to "maintainer"
+ * member (AQU-735 multi-select) → change "Role for bob" to "maintainer"
  * → verify the select trigger shows "maintainer".
  */
 test("team member role select changes member role", async ({ alice }) => {
@@ -22,7 +22,7 @@ test("team member role select changes member role", async ({ alice }) => {
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.CONTRIBUTOR)
 
   // Create a team.
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })
   await expect(createBtn).toBeVisible({ timeout: 10_000 })
   await createBtn.click()
@@ -36,21 +36,24 @@ test("team member role select changes member role", async ({ alice }) => {
   await alice.waitForURL(/\/teams\/\d+/, { timeout: 10_000 })
   await expect(alice.getByRole("heading", { name: teamName })).toBeVisible({ timeout: 5_000 })
 
-  // Add bob as a member via the "Member to add" select.
+  // Add bob via the multi-select "Members to add" combobox (AQU-735).
   const addMemberBtn = alice.getByRole("button", { name: /Add member/i })
   await expect(addMemberBtn).toBeVisible({ timeout: 10_000 })
   await addMemberBtn.click()
 
-  const memberSelect = alice.getByRole("combobox", { name: "Member to add" })
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const memberSelect = dialog.getByRole("combobox", { name: "Members to add" })
   await expect(memberSelect).toBeVisible({ timeout: 3_000 })
-  await pickSelectOption(alice, memberSelect, "bob")
+  await memberSelect.click()
+  await alice.getByRole("checkbox", { name: "bob" }).check()
 
-  const addBtn = alice.getByRole("button", { name: /^Add$/i })
-  await expect(addBtn).toBeVisible({ timeout: 3_000 })
+  const addBtn = dialog.getByRole("button", { name: /^Add$/i })
+  await expect(addBtn).toBeEnabled({ timeout: 3_000 })
   await addBtn.click()
 
   // Bob now appears in the member list.
-  await expect(alice.getByText("bob").first()).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByRole("button", { name: /Remove bob/i })).toBeVisible({ timeout: 10_000 })
 
   // The "Role for bob" select is visible (alice is owner).
   const roleSelect = alice.getByRole("combobox", { name: "Role for bob" })

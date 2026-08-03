@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -27,17 +27,18 @@ test("archive a project and restore it", async ({ alice }) => {
   await expect(moreBtn).toBeVisible({ timeout: 5_000 })
   await moreBtn.click()
 
-  const archiveItem = alice.getByRole("button", { name: "Archive" })
+  const archiveItem = alice.getByRole("menuitem", { name: "Archive" })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
 
-  // handleArchive() calls navigate("/projects") on success — wait for that redirect.
-  await alice.waitForURL(/\/projects$/, { timeout: 10_000 })
+  // handleArchive() navigates to "/projects", which is a replace-redirect to the
+  // org home. Wait for the settled URL, not the transient one.
+  await alice.waitForURL(new RegExp(`/orgs/${alice.orgId}$`), { timeout: 10_000 })
   // 2. The project should NOT appear in the active projects list.
   await expect(alice.getByText(name).first()).not.toBeVisible({ timeout: 5_000 })
 
   // 3. Navigate to /projects/archived and confirm it's listed there.
-  await alice.goto("/projects/archived")
+  await alice.goto(orgRoute(alice, "/archived"))
   await expect(alice.getByText(name).first()).toBeVisible({ timeout: 5_000 })
 
   // 4. Click Restore — ArchivedProjects calls load() after success, which removes

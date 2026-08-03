@@ -30,7 +30,7 @@ export interface DcsSyncBadgeProps {
 }
 
 /** Full-pin tooltip: what's synced, from where, at which release, and where
- *  to manage it. Kept as a plain string so the delegated-tooltip layer works. */
+ *  to manage it. */
 function pinTooltip(cursor: DcsCursor): string {
   const imported = new Date(cursor.importedAt)
   const importedLabel = Number.isNaN(imported.getTime())
@@ -50,7 +50,6 @@ export function DcsSyncBadge({ cursor, onClick }: DcsSyncBadgeProps) {
       <Badge
         variant="outline"
         data-testid="dcs-sync-badge"
-        className={onClick ? "cursor-pointer" : undefined}
         render={
           onClick
             ? <button type="button" onClick={onClick} aria-label="Door43 source link — open Project Settings" />

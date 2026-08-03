@@ -77,7 +77,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await expect(ws.cellRow(1)).toContainText("the LORD")
   await expect(alice.locator('[data-paragraph-start="true"]')).toHaveCount(0)
 
-  const navigator = alice.getByRole("button", {
+  const navigator = alice.getByRole("combobox", {
     name: /Current story: Story 1, cells 1–2/,
   })
   await expect(navigator).toContainText("(1–2)")
@@ -86,16 +86,18 @@ test("IDML import, protected edit, and strict artifact export preserve original 
     .toBeVisible()
   await alice.keyboard.press("Escape")
 
-  await ws.editIdmlCellFromBlankArea(0, "Chapitre", "  Un")
+  // AQU-758 sanitizes whitespace at entry: the deliberately doubled space
+  // typed before "Un" collapses to a single space in the committed cell.
+  await ws.editIdmlCellFromBlankArea(0, "Chapitre", "  Un", "Chapitre Un")
   // The first click on a populated cell happens on the cheap read surface.
-  // Preserve its exact slot offset across the ProseMirror remount, including
-  // both spaces before "Un", then insert at that clicked position.
-  await ws.editIdmlCellAtTextOffset(0, 10, "X", "Chapitre  XUn")
+  // Preserve its exact slot offset across the ProseMirror remount (offset 9
+  // is the boundary before "U"), then insert at that clicked position.
+  await ws.editIdmlCellAtTextOffset(0, 9, "X", "Chapitre XUn")
   // Re-enter the populated IDML target through its read view. The activation
   // fallback must append at the real ProseMirror slot end, not jump to the
   // beginning as the browser-recorded AQU-740 regression did.
   await ws.editCell(0, " — suite")
-  await expect(ws.cellRow(0)).toContainText("Chapitre  XUn — suite")
+  await expect(ws.cellRow(0)).toContainText("Chapitre XUn — suite")
   await expect(
     alice.getByText(/This edit would remove protected InDesign formatting/i),
   ).toHaveCount(0)
@@ -118,7 +120,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await alice.reload()
   await ws.openFileBySubstring("protected-roundtrip")
   await ws.waitForEditor()
-  await expect(ws.cellRow(0)).toContainText("Chapitre  XUn — suite")
+  await expect(ws.cellRow(0)).toContainText("Chapitre XUn — suite")
   await expect(alice.getByTestId("stale-source-indicator")).toHaveCount(0)
   await expect(
     alice.getByText(/Source text changed since your last edit/i),
@@ -136,7 +138,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await ws.importFile(collidingFixture)
   await ws.openFileBySubstring("protected-roundtrip")
   await ws.waitForEditor()
-  await expect(ws.cellRow(0)).toContainText("Chapitre  XUn — suite")
+  await expect(ws.cellRow(0)).toContainText("Chapitre XUn — suite")
   await expect(alice.getByTestId("stale-source-indicator")).toHaveCount(0)
 
   await ws.openExportDialog()
@@ -157,7 +159,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   const story = await output.file(STORY_PATH)!.async("string")
 
   expect(story).toContain(
-    'AppliedCharacterStyle="CharacterStyle/Plain"><Content>Chapitre  XUn — suite</Content>',
+    'AppliedCharacterStyle="CharacterStyle/Plain"><Content>Chapitre XUn — suite</Content>',
   )
   expect(story).toContain(
     'AppliedCharacterStyle="CharacterStyle/Plain"><Content>the </Content>',

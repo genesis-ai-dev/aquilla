@@ -1,6 +1,6 @@
 // AQU-538 §3.2 — "+ Language" quick action on an OrgHome project row.
 //
-// "Add languages from the org dashboard" without opening /project/:id settings.
+// "Add languages from the org dashboard" without opening /project/:id/editor settings.
 // Same validation as ProjectSettings' LanguagesSection (trim / <=64 / case-
 // insensitive dedupe against the default target language + existing lanes),
 // then PATCHes that project's `settings.targetLanes`.

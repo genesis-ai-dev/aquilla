@@ -1,5 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Glossary } from "../../helpers/page-objects/Glossary"
+import { addProjectMember, ROLE } from "../../helpers/frontier-api"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -77,4 +78,44 @@ test("selecting source text reveals Add to termbase button and creates draft con
   }).toPass({ timeout: 20_000 })
   await expect(pending.getByRole("button", { name: "Accept term" })).toBeVisible()
   await expect(pending.getByRole("button", { name: "Dismiss term" })).toBeVisible()
+})
+
+/**
+ * AQU-754 follow-up: below the termbase write floor (Maintainer 600), the
+ * AddConceptDialog opens BLOCKED — role message shown, source-term input and
+ * Create draft disabled — instead of accepting input for a save that the
+ * server is guaranteed to reject (which previously left the button stuck on
+ * "Saving…"). Cancel stays active so the user can dismiss the dialog.
+ */
+test("below-Maintainer user sees a blocked Add-to-termbase dialog they can cancel", async ({ alice, bob }) => {
+  void alice // fixture must be created first so alice's org/session exists
+  const aliceJwt = await jwtFor("alice")
+  const seeded = await seedProjectWithFile(aliceJwt, { name: `TermbaseBlocked ${Date.now()}` })
+  await addProjectMember(aliceJwt, seeded.projectId, "bob", ROLE.CONTRIBUTOR)
+
+  await openSeededProject(bob, seeded)
+
+  const sourceArea = bob.locator('[aria-label="Source text"], .source-text, [data-cell-type="source"]').first()
+  const addBtn = bob.getByRole("button", { name: /Add to term ?base/i })
+  await expect(sourceArea).toBeVisible({ timeout: 10_000 })
+  await sourceArea.click({ clickCount: 3 })
+  await expect(addBtn).toBeVisible({ timeout: 5_000 })
+  await addBtn.click()
+
+  // Dialog opens in the blocked state. The role resolves server-side, so wait
+  // on the message (state), not elapsed time.
+  const dialog = bob.getByRole("dialog", { name: /Add to term base/i })
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await expect(dialog.getByRole("alert")).toContainText(
+    "You need the Maintainer role or higher to change the term base.",
+    { timeout: 10_000 },
+  )
+  await expect(dialog.getByRole("textbox", { name: /Source term for new concept/i })).toBeDisabled()
+  await expect(dialog.getByRole("button", { name: /Create draft concept/i })).toBeDisabled()
+
+  // Cancel stays active and closes the dialog.
+  const cancelBtn = dialog.getByRole("button", { name: "Cancel" })
+  await expect(cancelBtn).toBeEnabled()
+  await cancelBtn.click()
+  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 })

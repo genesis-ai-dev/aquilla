@@ -77,14 +77,21 @@ test("expanding a file row reveals section rows in the sidebar", async ({ alice 
   const validatedBar = gen1.locator("span.bg-emerald-500")
   await gen1.click()
   await ws.waitForEditor()
-  // AQU-585 filters book-name/title front matter from editor cells, so the
-  // first row in the selected chapter is GEN 1:1.
-  await ws.editCell(0, "Bonjour")
+  // AQU-634 imports book-name/title front matter by default, so cell index 0
+  // may be a book-level paratext row. Edit the first verse of the selected
+  // chapter (GEN 1:1) so the GEN 1 progress bar updates.
+  const verseCell = alice.locator('[data-cell-id]').filter({ hasText: /In the beginning/i }).first()
+  await expect(verseCell).toBeVisible({ timeout: 10_000 })
+  const verseIndex = await alice.locator("[data-cell-id]").evaluateAll((nodes, text) => {
+    return nodes.findIndex((n) => (n.textContent ?? "").includes(text))
+  }, "In the beginning")
+  expect(verseIndex).toBeGreaterThanOrEqual(0)
+  await ws.editCell(verseIndex, "Bonjour")
   await expect.poll(async () => Number.parseFloat((await translatedBar.getAttribute("style"))?.match(/[\d.]+/)?.[0] ?? "0"), {
     timeout: 10_000,
   }).toBeGreaterThan(0)
 
-  await ws.validateCell(0)
+  await ws.validateCell(verseIndex)
   await expect.poll(async () => Number.parseFloat((await validatedBar.getAttribute("style"))?.match(/[\d.]+/)?.[0] ?? "0"), {
     timeout: 10_000,
   }).toBeGreaterThan(0)

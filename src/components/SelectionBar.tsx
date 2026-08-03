@@ -12,12 +12,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Languages, Sparkles, Wand2, X } from "lucide-react"
+import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
 import { type CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
@@ -83,7 +85,6 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
   const selected = useSelectedIds()
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const [running, setRunning] = useState<Running>({ kind: "idle" })
-  const [toastMsg, setToastMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (selected.size === 0) return
@@ -101,11 +102,6 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [selected.size])
-
-  const showToast = useCallback((msg: string) => {
-    setToastMsg(msg)
-    setTimeout(() => setToastMsg(null), 3000)
-  }, [])
 
   const selectedCells = useMemo(() => {
     return readAtVersion(cellStoreVersion, () => cellStore.getCellsByIds(selected).slice(0, MAX_SELECTED))
@@ -223,7 +219,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
       const msg = alreadyValidated > 0
         ? `Validated ${validated} cell${validated === 1 ? "" : "s"} (${alreadyValidated} already validated)`
         : `Validated ${validated} cell${validated === 1 ? "" : "s"}`
-      showToast(msg)
+      toast.success(msg)
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
       if (validated > 0) onValidationCommitted?.()
@@ -253,7 +249,7 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
         })
         removed++
       }
-      showToast(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
+      toast.success(`Removed validations from ${removed} cell${removed === 1 ? "" : "s"}`)
       // AQU-616: flush now rather than waiting for the periodic flusher.
       if (removed > 0) onValidationCommitted?.()
     } finally {
@@ -274,20 +270,10 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
   if (selectedCells.length === 0) return null
 
   return (
-    <>
-    {toastMsg && (
-      <div
-        role="status"
-        aria-live="polite"
-        className="pointer-events-none fixed bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-lg border bg-card px-4 py-2 text-xs font-medium ring-1 ring-foreground/10"
-      >
-        {toastMsg}
-      </div>
-    )}
     <div
       className={cn(
         "pointer-events-auto fixed left-1/2 z-30 flex -translate-x-1/2 items-center gap-2",
-        "bottom-4 rounded-full border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10",
+        "bottom-4 rounded-md border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10",
       )}
       role="toolbar"
       aria-label="Selection actions"
@@ -300,138 +286,143 @@ export function SelectionBar({ project, cellStore, username, activeLane, myScope
           </span>
         )}
       </span>
-      <div className="mx-1 h-5 w-px rounded-full" />
+      <div className="mx-1 h-5 w-px rounded-lg" />
       {audioMode && (
+        <AppTooltip content={
+          !onVoiceTogether ? "Voicing isn't available here" :
+          voiceableCount < 2 ? "Select at least two translated lines" :
+          `Voice ${voiceableCount} lines as one clip`
+        }>
+          <Button
+            type="button"
+            size="sm"
+            variant="default"
+            onClick={onVoice}
+            disabled={isBusy || voiceableCount < 2 || !onVoiceTogether}
+          >
+            {running.kind === "voice" ? (
+              <Spinner className="mr-1 size-3.5" />
+            ) : (
+              <Sparkles className="mr-1 h-3.5 w-3.5" />
+            )}
+            Voice together
+            {voiceableCount > 1 && (
+              <span className="ml-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
+                {Math.min(voiceableCount, 12)}
+              </span>
+            )}
+          </Button>
+        </AppTooltip>
+      )}
+      {!audioMode && (
+        <>
+      <AppTooltip content={
+        !completeBatch ? "Translation isn't configured for this project" :
+        missingCount === 0 ? "All selected cells already have translations" :
+        `Translate ${missingCount} missing`
+      }>
         <Button
           type="button"
           size="sm"
           variant="default"
-          onClick={onVoice}
-          disabled={isBusy || voiceableCount < 2 || !onVoiceTogether}
-          title={
-            !onVoiceTogether ? "Voicing isn't available here" :
-            voiceableCount < 2 ? "Select at least two translated lines" :
-            `Voice ${voiceableCount} lines as one clip`
-          }
+          onClick={onTranslate}
+          disabled={isBusy || missingCount === 0 || !completeBatch}
         >
-          {running.kind === "voice" ? (
+          {running.kind === "translate" ? (
             <Spinner className="mr-1 size-3.5" />
           ) : (
-            <Sparkles className="mr-1 h-3.5 w-3.5" />
+            <Languages className="mr-1 h-3.5 w-3.5" />
           )}
-          Voice together
-          {voiceableCount > 1 && (
-            <span className="ml-1 rounded-full bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
-              {Math.min(voiceableCount, 12)}
+          Translate
+          {missingCount > 0 && allHaveTranslation === false && (
+            <span className="ml-1 rounded-md bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
+              {missingCount}
             </span>
           )}
         </Button>
-      )}
-      {!audioMode && (
-        <>
-      <Button
-        type="button"
-        size="sm"
-        variant="default"
-        onClick={onTranslate}
-        disabled={isBusy || missingCount === 0 || !completeBatch}
-        title={
-          !completeBatch ? "Translation isn't configured for this project" :
-          missingCount === 0 ? "All selected cells already have translations" :
-          `Translate ${missingCount} missing`
-        }
-      >
-        {running.kind === "translate" ? (
-          <Spinner className="mr-1 size-3.5" />
-        ) : (
-          <Languages className="mr-1 h-3.5 w-3.5" />
-        )}
-        Translate
-        {missingCount > 0 && allHaveTranslation === false && (
-          <span className="ml-1 rounded-full bg-primary-foreground/20 px-1.5 py-0.5 tabular-nums text-primary-foreground">
-            {missingCount}
-          </span>
-        )}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={onValidate}
-        disabled={isBusy || validatableCount === 0}
-        title={
-          validateDisabledReason
-            ? validateDisabledReason
-            : `Validate ${validatableCount} cell${validatableCount === 1 ? "" : "s"}`
-        }
-      >
-        {running.kind === "validate" ? (
-          <Spinner className="mr-1 size-3.5" />
-        ) : null}
-        Validate
-        {validatableCount > 0 && (
-          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
-            {validatableCount}
-          </span>
-        )}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={onUnvalidate}
-        disabled={isBusy || unvalidatableCount === 0}
-        title={
-          unvalidatableCount === 0
-            ? "No cells have your validation"
-            : `Remove your validation from ${unvalidatableCount} cell${unvalidatableCount === 1 ? "" : "s"}`
-        }
-      >
-        Remove my validations
-        {unvalidatableCount > 0 && (
-          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
-            {unvalidatableCount}
-          </span>
-        )}
-      </Button>
-      {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
-          translation (v1 minimum per spec). Disabled when canHarmonize=false
-          (role too low) or onHarmonize callback not provided. */}
-      {onHarmonize != null && harmonizableCount > 0 && (
+      </AppTooltip>
+      <AppTooltip content={
+        validateDisabledReason
+          ? validateDisabledReason
+          : `Validate ${validatableCount} cell${validatableCount === 1 ? "" : "s"}`
+      }>
         <Button
           type="button"
           size="sm"
           variant="outline"
-          onClick={() => onHarmonize(selectedCells.filter((c) => c.translated.trim()))}
-          disabled={isBusy || !canHarmonize}
-          title={
-            !canHarmonize
-              ? "You need project lead role to run a harmonization sweep"
-              : `Open harmonize sweep for ${harmonizableCount} selected cell${harmonizableCount === 1 ? "" : "s"}`
-          }
-          data-testid="selection-harmonize-btn"
+          onClick={onValidate}
+          disabled={isBusy || validatableCount === 0}
         >
-          <Wand2 className="mr-1 h-3.5 w-3.5" />
-          Harmonize…
-          <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
-            {harmonizableCount}
-          </span>
+          {running.kind === "validate" ? (
+            <Spinner className="mr-1 size-3.5" />
+          ) : null}
+          Validate
+          {validatableCount > 0 && (
+            <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+              {validatableCount}
+            </span>
+          )}
         </Button>
+      </AppTooltip>
+      <AppTooltip content={
+        unvalidatableCount === 0
+          ? "No cells have your validation"
+          : `Remove your validation from ${unvalidatableCount} cell${unvalidatableCount === 1 ? "" : "s"}`
+      }>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onUnvalidate}
+          disabled={isBusy || unvalidatableCount === 0}
+        >
+          Remove my validations
+          {unvalidatableCount > 0 && (
+            <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+              {unvalidatableCount}
+            </span>
+          )}
+        </Button>
+      </AppTooltip>
+      {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
+          translation (v1 minimum per spec). Disabled when canHarmonize=false
+          (role too low) or onHarmonize callback not provided. */}
+      {onHarmonize != null && harmonizableCount > 0 && (
+        <AppTooltip content={
+          !canHarmonize
+            ? "You need project lead role to run a harmonization sweep"
+            : `Open harmonize sweep for ${harmonizableCount} selected cell${harmonizableCount === 1 ? "" : "s"}`
+        }>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => onHarmonize(selectedCells.filter((c) => c.translated.trim()))}
+            disabled={isBusy || !canHarmonize}
+            data-testid="selection-harmonize-btn"
+          >
+            <Wand2 className="mr-1 h-3.5 w-3.5" />
+            Harmonize…
+            <span className="ml-1 rounded-md bg-muted px-1.5 py-0.5 tabular-nums text-muted-foreground">
+              {harmonizableCount}
+            </span>
+          </Button>
+        </AppTooltip>
       )}
         </>
       )}
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="ghost"
-        onClick={() => clearSelection()}
-        disabled={isBusy}
-        aria-label="Clear selection"
-        title="Clear selection (Esc)"
-      >
-        <X className="h-3.5 w-3.5" />
-      </Button>
+      <AppTooltip content="Clear selection (Esc)">
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => clearSelection()}
+          disabled={isBusy}
+          aria-label="Clear selection"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </AppTooltip>
     </div>
-    </>
   )
 }

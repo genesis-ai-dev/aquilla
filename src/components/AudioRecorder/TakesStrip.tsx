@@ -160,7 +160,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
 
   return (
     <div className="border-t px-5 py-3">
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+      <div className="mb-2 text-xs text-muted-foreground/60">
         Takes ({takes.length})
       </div>
       <div className="flex flex-wrap gap-1.5">
@@ -182,7 +182,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
             <div
               key={att.audioId}
               className={cn(
-                "flex items-center gap-1 rounded-full border py-0.5 pl-1 pr-1.5 text-xs transition-colors",
+                "flex items-center gap-1 rounded-md border py-0.5 pl-1 pr-1.5 text-xs transition-colors",
                 isCircled
                   ? "border-emerald-500/60 bg-emerald-500/10"
                   : isCleaned
@@ -197,7 +197,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                   size="icon-xs"
                   onClick={() => void play(att)}
                   aria-label={isPlaying ? "Stop" : "Play take"}
-                  className="rounded-full hover:bg-background"
+                  className="rounded-md hover:bg-background"
                 >
                   {isLoading ? <Spinner className="size-3.5" />
                     : isPlaying ? <Pause className="h-3.5 w-3.5" />
@@ -220,7 +220,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                     onClick={() => void denoise(att)}
                     disabled={!session?.jwt || denoisingId !== null}
                     aria-label="Remove noise (adds a cleaned take)"
-                    className="rounded-full text-muted-foreground/60 hover:bg-background"
+                    className="rounded-md text-muted-foreground/60 hover:bg-background"
                   >
                     {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
                   </Button>
@@ -235,7 +235,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                     onClick={() => void circle(revertTo)}
                     disabled={isSelectInFlight}
                     aria-label="Revert to the original recording"
-                    className="rounded-full text-muted-foreground/60 hover:bg-background"
+                    className="rounded-md text-muted-foreground/60 hover:bg-background"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
@@ -250,7 +250,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                   disabled={isSelectInFlight || isCircled}
                   aria-label={isCircled ? "Active take" : "Use this take"}
                   className={cn(
-                    "rounded-full hover:bg-background",
+                    "rounded-md hover:bg-background",
                     isCircled ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground/60",
                   )}
                 >
@@ -265,7 +265,7 @@ export function TakesStrip({ projectId, fileId, cellId, takes, selectedAudioId, 
                   onClick={() => void remove(att.audioId)}
                   disabled={isBusy}
                   aria-label="Delete take"
-                  className="rounded-full text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
+                  className="rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>

@@ -1,6 +1,7 @@
 import { GitBranch, MoreVertical, PauseCircle, Trash2, Undo2 } from "lucide-react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -31,6 +32,11 @@ function hasServerSideExistence(project: ProjectRecord): boolean {
 interface ProjectCardProps {
   project: ProjectRecord
   onClick: () => void
+  /** Opening this project's workspace is in flight (AQU-737). Shows a spinner
+   * overlay and blocks re-activation until the workspace route takes over, so
+   * the clicked card can't be fired again during the lazy-chunk / cloud-download
+   * window. */
+  pending?: boolean
   /** Show the overflow menu with "Move to Trash". Hidden when the user
    * doesn't own the project. */
   canTrash?: boolean
@@ -48,6 +54,7 @@ interface ProjectCardProps {
 export function ProjectCard({
   project,
   onClick,
+  pending = false,
   canTrash,
   onTrash,
   variant = "active",
@@ -88,12 +95,24 @@ export function ProjectCard({
     myMember?.role.name ??
     (project.syncRole ? roleName(project.syncRole.level) : null)
 
+  // While a card's workspace is opening it must not fire again — the click is
+  // swallowed and the cursor reflects the wait (AQU-737).
+  const clickable = !isTrashed && !pending
   return (
     <Card
-      className={`${isTrashed ? "opacity-70" : "cursor-pointer hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
-      onClick={isTrashed ? undefined : onClick}
+      className={`relative ${isTrashed ? "opacity-70" : pending ? "cursor-wait" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
+      onClick={clickable ? onClick : undefined}
+      aria-busy={pending || undefined}
       data-testid={isInactive && !isTrashed ? "inactive-project-card" : undefined}
     >
+      {pending && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center rounded-[inherit] bg-background/60"
+          data-testid="project-card-opening"
+        >
+          <Spinner className="size-5 text-muted-foreground" />
+        </div>
+      )}
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           {/* min-w-0 lets the title shrink below its content width inside the

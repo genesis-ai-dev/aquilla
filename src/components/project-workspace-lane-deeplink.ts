@@ -1,7 +1,7 @@
 // AQU-538: deep-link lane resolution for ProjectWorkspace.
 //
 // The PM surfaces link into the editor "at the lane they were looking at" via
-// `/project/:id?lane=<tag>`. ProjectWorkspace reads the param once on mount and
+// `/project/:id/editor?lane=<tag>`. ProjectWorkspace reads the param once on mount and
 // sets `activeLane`. This pure helper isolates the (testable) resolution rule
 // from the heavyweight component so it can be unit-tested without a harness.
 

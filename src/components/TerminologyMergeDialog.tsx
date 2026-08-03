@@ -118,12 +118,12 @@ function ConceptSelectRow({
         {selected ? (
           <Badge
             variant="default"
-            className="h-5 w-5 rounded-full p-0 flex items-center justify-center text-[10px] tabular-nums"
+            className="h-5 w-5 rounded-lg p-0 flex items-center justify-center text-[10px] tabular-nums"
           >
             {selectionOrder}
           </Badge>
         ) : (
-          <div className="h-5 w-5 rounded-full border-2 border-muted-foreground/30" />
+          <div className="h-5 w-5 rounded-lg border-2 border-muted-foreground/30" />
         )}
       </div>
 
@@ -277,14 +277,14 @@ export function TerminologyMergeDialog({
                 className="rounded-md border bg-muted/30 p-4 space-y-3"
               >
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                  <p className="text-xs text-muted-foreground mb-1">
                     Survivor (keeps id)
                   </p>
                   <p className="text-sm font-semibold">{survivor.sourceTerm}</p>
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                  <p className="text-xs text-muted-foreground mb-1">
                     Merged renderings
                   </p>
                   <div className="flex flex-wrap gap-1">
@@ -302,7 +302,7 @@ export function TerminologyMergeDialog({
 
                 {preview.notes && (
                   <div>
-                    <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                    <p className="text-xs text-muted-foreground mb-1">
                       Combined notes
                     </p>
                     <p className="text-xs text-muted-foreground">{preview.notes}</p>
@@ -310,7 +310,7 @@ export function TerminologyMergeDialog({
                 )}
 
                 <div>
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+                  <p className="text-xs text-muted-foreground mb-1">
                     Concepts to remove
                   </p>
                   <div className="flex flex-wrap gap-1">

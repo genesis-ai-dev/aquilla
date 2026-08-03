@@ -64,7 +64,7 @@ describe("extractUsfmStrings", () => {
     expect(strings[0].type).toBe("paratext")
   })
 
-  it("filters the book name (\\mt) out of source cells (AQU-585)", () => {
+  it("parses paratext markers", () => {
     const usfm = `\\id GEN
 \\mt Genesis
 \\c 1
@@ -72,9 +72,30 @@ describe("extractUsfmStrings", () => {
 
     const result = extractUsfmStrings(usfm)
     const strings = result[0].strings
-    // The \mt book title is front matter, not a translatable cell.
-    expect(strings.map((s) => s.original)).toEqual(["In the beginning."])
-    expect(strings.some((s) => s.type === "paratext")).toBe(false)
+    expect(strings[0].original).toBe("Genesis")
+    expect(strings[0].type).toBe("paratext")
+  })
+
+  it("AQU-634: excludeFrontMatter drops the \\mt title but keeps \\ms/\\s + verses", () => {
+    const usfm = `\\id GEN
+\\mt Genesis
+\\ms A major section
+\\c 1
+\\s The Creation
+\\v 1 In the beginning.`
+
+    const withFront = extractUsfmStrings(usfm)[0].strings.map((s) => s.original)
+    expect(withFront).toContain("Genesis")
+
+    const withoutFront = extractUsfmStrings(usfm, { excludeFrontMatter: true })[0].strings.map(
+      (s) => s.original,
+    )
+    // \mt book title is front matter → dropped…
+    expect(withoutFront).not.toContain("Genesis")
+    // …but \ms/\s section headings and the verse remain.
+    expect(withoutFront).toEqual(
+      expect.arrayContaining(["A major section", "The Creation", "In the beginning."]),
+    )
   })
 
   it("treats file without \\id as single document", () => {
@@ -125,11 +146,11 @@ describe("extractUsfmStrings — section labels", () => {
     expect(heading?.section).toBe("GEN 3")
   })
 
-  it("does not emit a cell for book-level front matter (\\mt1) — AQU-585", () => {
+  it("emits a paratext cell for book-level \\mt1 by default (AQU-634)", () => {
     const usfm = "\\id GEN\n\\mt1 Genesis\n\\c 1\n\\v 1 hi\n"
     const [book] = extractUsfmStrings(usfm)
-    expect(book.strings.find(s => s.type === "paratext")).toBeUndefined()
-    expect(book.strings.map(s => s.original)).toEqual(["hi"])
+    expect(book.strings.find(s => s.type === "paratext")?.original).toBe("Genesis")
+    expect(book.strings.map(s => s.original)).toEqual(["Genesis", "hi"])
   })
 })
 
@@ -155,10 +176,8 @@ describe("extractUsfmStrings — aligned USFM3 (unfoldingWord)", () => {
 
   it("leaves no alignment markup or attribute residue in any cell", () => {
     const [book] = extractUsfmStrings(ultTitRaw)
-    // Verse cells only — the \mt1/\h/\toc book-name front matter is filtered
-    // out on import (AQU-585), leaving the three excerpted Titus verses.
-    expect(book.strings.length).toBeGreaterThanOrEqual(3)
-    expect(book.strings.every((s) => s.type === "verse")).toBe(true)
+    // Verses + the \mt1 book title (AQU-634 default imports front matter).
+    expect(book.strings.length).toBeGreaterThanOrEqual(4)
     for (const s of book.strings) {
       expect(s.original).not.toMatch(/\\zaln|\\w|x-occurrence|x-strong|\|/)
       expect(s.original).not.toMatch(/\s[,.;:!?]/)
@@ -208,9 +227,10 @@ describe("extractUsfmStrings — aligned USFM3 (unfoldingWord)", () => {
 the heavens , and the earth.
 \\v 2 The earth was without form.`
     const [book] = extractUsfmStrings(plain)
-    // \mt Genesis (book name) is filtered out per AQU-585; the section heading
-    // and verse bodies are preserved byte-for-byte.
+    // \mt Genesis imports by default (AQU-634); section heading + verse bodies
+    // are preserved byte-for-byte.
     expect(book.strings.map((s) => s.original)).toEqual([
+      "Genesis",
       "The Creation",
       "In the beginning God created the heavens , and the earth.",
       "The earth was without form.",

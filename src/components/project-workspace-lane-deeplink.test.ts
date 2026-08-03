@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { resolveDeepLinkLane } from './project-workspace-lane-deeplink'
 
-// AQU-538: `/project/:id?lane=<tag>` deep-link resolution.
+// AQU-538: `/project/:id/editor?lane=<tag>` deep-link resolution.
 describe('resolveDeepLinkLane', () => {
   const available = ['', 'es', 'fr']
 

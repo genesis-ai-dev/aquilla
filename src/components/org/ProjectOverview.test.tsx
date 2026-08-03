@@ -68,13 +68,17 @@ vi.mock("@/lib/sync/member-scopes", () => ({
   fetchMemberScopes: vi.fn(async () => []),
   putMemberScopes: vi.fn(async () => []),
 }))
+const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
+// OrgSidebar (rendered by ProjectOverview's AppShell) calls
+// useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
+// you" nav section (AQU-474), and OrgProvider fetches the same directory
+// (the org overview's PM column joins from it, AQU-507). Default to empty so
+// it never interferes with pre-existing tests.
+const fetchAccessibleProjects = vi.fn(async (_jwt: string): Promise<unknown[]> => [])
 vi.mock("@/lib/sync/cloud-projects", () => ({
   setProjectDeadline: vi.fn(),
-  // OrgSidebar (rendered by ProjectOverview's AppShell) calls
-  // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
-  // you" nav section (AQU-474). Default to empty so it never interferes with
-  // pre-existing tests; individual AQU-474 tests override via mockResolvedValue.
-  fetchAccessibleProjects: vi.fn(async () => []),
+  setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
+  fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
 }))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({
@@ -574,7 +578,7 @@ describe("ProjectOverview archive/restore", () => {
     const moreBtn = await screen.findByRole("button", { name: "More actions" })
     fireEvent.click(moreBtn)
 
-    const btn = await screen.findByRole("button", { name: "Archive" })
+    const btn = await screen.findByRole("menuitem", { name: "Archive" })
     fireEvent.click(btn)
 
     await waitFor(() => expect(archiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
@@ -607,6 +611,8 @@ describe("ProjectOverview archive/restore", () => {
       status: "ready",
       refresh,
     })
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
     downloadProjectBundle.mockResolvedValue(undefined)
     renderOverview()
 
@@ -614,7 +620,7 @@ describe("ProjectOverview archive/restore", () => {
     const moreBtn = await screen.findByRole("button", { name: "More actions" })
     fireEvent.click(moreBtn)
 
-    const btn = await screen.findByRole("button", { name: "Download deliverable" })
+    const btn = await screen.findByRole("menuitem", { name: "Download deliverable" })
     fireEvent.click(btn)
     await waitFor(() =>
       expect(downloadProjectBundle).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", fileId: "f1" })),
@@ -627,11 +633,46 @@ describe("ProjectOverview archive/restore", () => {
       status: "ready",
       refresh,
     })
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
     renderOverview()
 
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Download deliverable" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Download deliverable" })).not.toBeInTheDocument()
+  })
+})
+
+// ── Project manager (AQU-507) ──────────────────────────────────────────────
+
+describe("ProjectOverview PM assignment", () => {
+  // WHY: the org overview's PM column joins from the app-wide accessible-
+  // projects directory (OrgContext, fetched once per session). A PM change
+  // that only refreshes this page's own project row leaves that directory
+  // stale, so the org overview kept showing the old PM until a hard reload.
+  it("saving a PM change revalidates the accessible-projects directory", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+      pm: { id: 7, username: "wendi" },
+    })
+    renderOverview()
+
+    expect(await screen.findByTestId("overview-pm-name")).toHaveTextContent("wendi")
+    // Let the provider's mount-time directory fetch resolve first: OrgContext
+    // dedupes refreshes into an in-flight request for the same JWT, so a
+    // still-pending initial fetch would absorb the post-save revalidation.
+    await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalled())
+    const callsBeforeSave = fetchAccessibleProjects.mock.calls.length
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }))
+
+    await waitFor(() => expect(setProjectPm).toHaveBeenCalledWith("jwt", "p1", null))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(fetchAccessibleProjects.mock.calls.length).toBeGreaterThan(callsBeforeSave),
+    )
   })
 })
 
@@ -790,7 +831,7 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
 
   // AQU-416: the overview rendering (no redirect) is necessary but not
   // sufficient — a guest must be able to actually ENTER the workspace from
-  // here. "Open project" navigates unconditionally to `/project/:id`; this
+  // here. "Open project" navigates unconditionally to `/project/:id/editor`; this
   // locks in that the button still fires for a project whose org the caller
   // does not belong to (the exact "Shared with you" scenario), so a future
   // regression that guards this button on org membership fails loudly here
@@ -808,7 +849,12 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     const openButton = await screen.findByRole("button", { name: "Open project" })
     fireEvent.click(openButton)
 
-    expect(navigate).toHaveBeenCalledWith("/project/p1")
+    // AQU-737: Open project now routes through useOpenWorkspace (navigate wrapped
+    // in a transition so the button can spin); it still navigates to the
+    // workspace, forwarding an optional NavigateOptions arg.
+    expect(
+      navigate.mock.calls.some((call: unknown[]) => call[0] === "/project/p1/editor"),
+    ).toBe(true)
   })
 })
 
@@ -1514,9 +1560,9 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
-    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1?lane=es")
+    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
     // The default lane opens the workspace with no lane param (today's behavior).
-    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1")
+    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
   })
 
   it("Assign… on a lane row mounts AssignModal pinned to that lane", async () => {
@@ -1554,7 +1600,7 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
 
     await screen.findByTestId("overview-lane-table")
     expect(screen.getByTestId("overview-lane-add-language").getAttribute("href"))
-      .toBe("/project/p1/settings?section=general")
+      .toBe("/project/p1/settings/general")
   })
 
   it("re-reads the per-file drill-down with the selected lane param", async () => {

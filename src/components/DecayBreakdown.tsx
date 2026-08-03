@@ -52,7 +52,7 @@ export function DecayBreakdown({
       <PopoverTrigger nativeButton={false} openOnHover delay={300} closeDelay={120} render={<span className="inline-flex">{children}</span>} />
       <PopoverContent side="top" align="start" className="w-72 rounded-2xl border-0 bg-card p-3">
         <div className="mb-2 flex items-baseline justify-between">
-          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="text-xs font-medium text-muted-foreground">
             {scopeLabel}
           </span>
           <span className="text-sm font-semibold tabular-nums">{health}%</span>
@@ -70,7 +70,7 @@ export function DecayBreakdown({
 
         {drags.length > 0 ? (
           <>
-            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="mb-1 text-xs text-muted-foreground">
               Biggest drags
             </p>
             <ul className="space-y-0.5">

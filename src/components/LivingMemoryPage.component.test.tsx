@@ -112,7 +112,7 @@ describe("LivingMemoryPage — purpose copy", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({ ...mockProjectSettingsReturn })
@@ -125,9 +125,9 @@ describe("LivingMemoryPage — purpose copy", () => {
 
   it("shows the cross-link to Terminology", () => {
     renderPage()
-    // The button's accessible name comes from aria-label
+    // Toolbar button matches Rules/Glossary cross-link pattern
     expect(screen.getByRole("button", { name: /Go to Terminology page/i })).toBeInTheDocument()
-    expect(screen.getByText(/Open Terminology/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Terminology/i })).toBeInTheDocument()
   })
 })
 
@@ -141,7 +141,7 @@ describe("LivingMemoryPage — empty states", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -185,7 +185,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -211,7 +211,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -233,7 +233,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -260,7 +260,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({
@@ -282,7 +282,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatch,
     })
     vi.mocked(useProjectSettings).mockReturnValue({

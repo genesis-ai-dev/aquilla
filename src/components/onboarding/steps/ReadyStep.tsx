@@ -11,7 +11,7 @@ export function ReadyStep({
 }) {
   return (
     <div className="space-y-6 text-center">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-green-600">
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-lg bg-green-100 text-green-600">
         <Check className="h-8 w-8" />
       </div>
       <div className="space-y-2">

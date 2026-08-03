@@ -69,6 +69,7 @@ export { ProjectSync } from "./project-do"
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
+import { deploymentEnvironmentError } from "./environment-guard"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -97,6 +98,10 @@ declare global {
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
+      /** Deployment profile used to reject cross-environment custom-domain traffic. */
+      ENVIRONMENT?: string
+      /** Base URL of the identity worker in the same deployment environment. */
+      AUTH_WORKER_URL?: string
       /**
        * Dev escape hatch. "true" disables JWT verification for ProjectSync
        * WS connections. Set to "false" (or omit) in production.
@@ -197,6 +202,24 @@ const worker = {
     // Must run before CORS / route matching — those test bare paths.
     request = stripApexPrefix(request)
 
+    // OPTIONS must still complete so browsers can receive the guarded error
+    // response for the real request instead of hiding it behind a CORS error.
+    const preflight = handleCorsPreflight(request)
+    if (preflight) return preflight
+
+    const environmentError = deploymentEnvironmentError(request.url, env)
+    if (environmentError) {
+      console.error("Refusing request with cross-environment worker bindings", {
+        environmentError,
+      })
+      return withCors(
+        new Response("Worker deployment configuration does not match this API environment", {
+          status: 503,
+        }),
+        request,
+      )
+    }
+
     // Postgres (Neon) is the only datastore. Serve AQUILLA_PG via the
     // D1-compatible Postgres shim (per-request connection, closed after the
     // response). HYPERDRIVE is required — without it we fail fast instead of
@@ -211,9 +234,6 @@ const worker = {
     const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
     env = { ...env, AQUILLA_PG: pgShim as unknown as AquillaDb }
     try {
-    const preflight = handleCorsPreflight(request)
-    if (preflight) return preflight
-
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
     // AQU-346: eject a removed member's live WS sessions + denylist their

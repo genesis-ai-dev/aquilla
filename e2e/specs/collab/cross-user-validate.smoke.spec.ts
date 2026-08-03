@@ -33,7 +33,7 @@ test("bob can validate alice's edit in a shared project", async ({ alice, bob })
   })
 
   // Alice imports the file and edits cell 0.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   // Server-side-created projects have no source/target language, so the import
   // flow opens a blocking "Set translation direction" screen after the preview
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
@@ -53,7 +53,7 @@ test("bob can validate alice's edit in a shared project", async ({ alice, bob })
 
   // Bob opens the exact same file and waits for alice's projected edit. This
   // is the synchronization boundary the test cares about—not elapsed time.
-  await bob.goto(`/project/${projectId}/file/${fileId}`)
+  await bob.goto(`/project/${projectId}/editor/file/${fileId}`)
   const bobWs = new Workspace(bob)
   await bobWs.waitForEditor()
   await expect(bobWs.cellRow(0)).toContainText(translation, { timeout: 20_000 })

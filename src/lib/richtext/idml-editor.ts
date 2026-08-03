@@ -797,3 +797,49 @@ export function idmlEditorExtensions(options: IdmlGuardOptions) {
 export function idmlDiagnosticMessage(diagnostic: IdmlDiagnostic | undefined): string {
   return diagnosticMessage(diagnostic)
 }
+
+/**
+ * AQU-758: strip whitespace that would enter an IDML slot as *spurious* — the
+ * leading, trailing, and doubled spaces InDesign renders as unintended breaks
+ * and the "Extra whitespace in translation" health check (`double-space`)
+ * otherwise flags only after the fact. Prevent them at entry instead of
+ * accepting-then-flagging.
+ *
+ * `\n` is preserved (it becomes an InDesign `<Br/>`); a run of spaces/tabs is
+ * collapsed to a single space, and any space that would abut a line break, a
+ * slot boundary, or an existing space is dropped. Only literal ASCII spaces and
+ * tabs are touched, so meaningful non-breaking spaces and other Unicode
+ * whitespace pass through unchanged.
+ *
+ * `before`/`after` are the slot characters flanking the insertion point (empty
+ * at a slot edge or against a protected token / line break). `mode` separates a
+ * paste — where a space landing at the slot end is trailing whitespace and is
+ * removed — from live typing, where a lone trailing space begins the next word
+ * and must survive so the user can keep typing.
+ */
+export function sanitizeIdmlSlotInsertion(
+  text: string,
+  before: string,
+  after: string,
+  mode: "paste" | "type" = "paste",
+): string {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n")
+  const lastIndex = lines.length - 1
+  return lines
+    .map((line, index) => {
+      let next = line.replace(/[ \t]+/g, " ")
+      // Trim a leading space when it would abut the slot start, a preceding
+      // line break (any line after the first), or an existing space.
+      if (index > 0 || before === "" || before.endsWith(" ")) {
+        next = next.replace(/^ +/, "")
+      }
+      // Trim a trailing space when it would abut a following line break (any
+      // line but the last) or an existing space. On paste, a space landing at
+      // the slot end is trailing whitespace too; while typing it is left alone.
+      if (index < lastIndex || after.startsWith(" ") || (mode === "paste" && after === "")) {
+        next = next.replace(/ +$/, "")
+      }
+      return next
+    })
+    .join("\n")
+}

@@ -16,7 +16,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("project settings AI instructions textarea makes form dirty", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AIInstr ${Date.now()}` })
 
-  await alice.goto(`/project/${seeded.projectId}/settings?section=ai`)
+  await alice.goto(`/project/${seeded.projectId}/settings/ai`)
   // The system prompt textarea.
   const textarea = alice.locator("#sp")
   await expect(textarea).toBeVisible({ timeout: 10_000 })

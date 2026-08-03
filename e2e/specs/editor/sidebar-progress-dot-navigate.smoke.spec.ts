@@ -14,7 +14,7 @@ const SAMPLE_USFM = path.resolve(__dirname, "../../fixtures/sample.usfm")
  * (src/components/sidebar/FileSectionGrid.tsx): one clickable row per
  * section, each a <button> whose accessible name is the section label and
  * whose title is "<label> — N% translated, M% validated". Clicking a row
- * calls onSectionClick → onSelectFile (opens the file at /project/:id/file/
+ * calls onSectionClick → onSelectFile (opens the file at /project/:id/editor/file/
  * :fileId) + requestScrollToSection.
  *
  * Sections exist only for scripture file types (fileTypeHasSections is

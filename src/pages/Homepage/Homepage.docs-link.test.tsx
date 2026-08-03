@@ -29,9 +29,13 @@ vi.mock("./LanguageBlitz", () => ({ LanguageBlitz: () => null, LanguageMarquee: 
 vi.mock("@/components/HealthRing", () => ({ HealthRing: () => null }))
 vi.mock("./homepage.css", () => ({}))
 
-const mockHasAuthHintCookie = vi.fn()
 vi.mock("@/lib/frontier/session-store", () => ({
-  hasAuthHintCookie: () => mockHasAuthHintCookie(),
+  // The homepage itself no longer reads identity while rendering — it's
+  // prerendered and edge-cached, so its markup can't depend on the visitor.
+  // AppEntryBanner resolves the session after mount instead, which is why this
+  // mock has to provide loadActiveSession. Returning null keeps the banner off
+  // so these assertions see the signed-out page.
+  loadActiveSession: () => Promise.resolve(null),
 }))
 
 function renderHomepage() {
@@ -46,7 +50,6 @@ const DOCS_URL = "https://help.aquilla.app"
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockHasAuthHintCookie.mockReturnValue(false)
 })
 
 describe("Homepage — help documentation link (AQU-702)", () => {

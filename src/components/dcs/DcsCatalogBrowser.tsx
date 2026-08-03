@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Search, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import {
@@ -175,7 +176,8 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
             <SelectTrigger className="h-8 text-sm" aria-label="Subject">
               <SelectValue placeholder="Any subject" />
             </SelectTrigger>
-            <SelectContent>
+            {/* Grow past the narrow filter trigger so long subjects aren't clipped. */}
+            <SelectContent className="w-max min-w-(--anchor-width)" alignItemWithTrigger={false}>
               <SelectItem value={ANY}>Any subject</SelectItem>
               {SUBJECT_OPTIONS.map((s) => (
                 <SelectItem key={s} value={s}>{s}</SelectItem>
@@ -230,16 +232,16 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
               // resources are shown but not pickable, so the user never hits
               // importDcsResource's "no route" throw AFTER committing.
               const supported = isSupportedCatalogEntry(entry)
+              const unsupportedReason = "Aquilla can't import this resource type yet (tracked in AQU-615)"
               return (
-                <li
+                <AppTooltip
                   key={`${entry.fullName}@${entry.ref}`}
-                  // Title lives on the <li> — disabled buttons swallow pointer
-                  // events in some browsers, so a button-level tooltip may never show.
-                  title={
-                    supported
-                      ? undefined
-                      : "Aquilla can't import this resource type yet (tracked in AQU-615)"
-                  }
+                  content={supported ? undefined : unsupportedReason}
+                  disabled={supported}
+                >
+                <li
+                  // Tooltip on wrapper — disabled buttons swallow pointer events in some browsers.
+                  className="list-none"
                 >
                   <button
                     type="button"
@@ -271,6 +273,7 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
                     </div>
                   </button>
                 </li>
+                </AppTooltip>
               )
             })}
           </ul>

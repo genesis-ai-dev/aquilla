@@ -186,7 +186,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
             onClick={onClose}
             aria-label="Close"
           >
-            <X className="h-4 w-4" />
+            <X />
           </Button>
         </div>
         <p className="mb-4 text-xs text-muted-foreground">

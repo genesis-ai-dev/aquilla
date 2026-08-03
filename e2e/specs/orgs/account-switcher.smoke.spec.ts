@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState, injectSessions } from "../../helpers/auth"
 
 /**
@@ -10,11 +10,11 @@ import { ensureAuthState, injectSessions } from "../../helpers/auth"
  *   - "Preferences" link
  *   - "Add another account…" button
  *
- * This spec navigates to /projects and verifies the account switcher
+ * This spec navigates to the org home and verifies the account switcher
  * renders and the dropdown opens.
  */
 test("account switcher dropdown opens with session info", async ({ alice }) => {
-  await alice.goto("/projects")
+  await alice.goto(orgRoute(alice))
   // The AccountSwitcher renders as a button showing the username.
   // Alice is seeded as "alice".
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
@@ -44,13 +44,23 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
     ensureAuthState("bob"),
   ])
 
-  await alice.goto("/projects")
+  await alice.goto(orgRoute(alice))
   await injectSessions(alice, [aliceSession, bobSession], "alice")
 
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
   await expect(accountBtn).toBeVisible({ timeout: 10_000 })
   await accountBtn.click()
+  await expect(alice.getByText("bob", { exact: true })).toBeVisible({ timeout: 3_000 })
   await alice.getByRole("menuitem", { name: /^Log out$/i }).click()
+
+  // handleLogout is async: wait until alice is gone and bob is active. Still on
+  // alice's org URL, OrgRouteGate shows not-found (no account switcher) — that
+  // flip is the signal the IDB promote finished before we navigate away.
+  await expect(alice.getByRole("heading", { name: /Organization not found/i })).toBeVisible({
+    timeout: 10_000,
+  })
+
+  await alice.goto("/orgs/all")
 
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
     timeout: 10_000,

@@ -14,11 +14,14 @@
  */
 
 import { useMemo, useRef, useState } from "react"
-import { BookOpen, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
+import { BookOpen, ChevronLeft, ChevronRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { PassageRow } from "@/lib/agent/protocol"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 const ROW_CAP = 12
 
@@ -147,27 +150,31 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
         </span>
         {navigable && (
           <span className="flex items-center">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => void navigate(-1)}
               disabled={loading}
               aria-label="Previous chapter"
-              className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+              className="text-muted-foreground"
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <button
+              <ChevronLeft />
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => void navigate(1)}
               disabled={loading}
               aria-label="Next chapter"
-              className="rounded p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-40"
+              className="text-muted-foreground"
             >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
+              <ChevronRight />
+            </Button>
           </span>
         )}
-        {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-label="Loading chapter" />}
+        {loading && <Spinner className="size-3 text-muted-foreground" aria-label="Loading chapter" />}
       </div>
 
       {navError && <p className="px-2 py-1 text-[10px] text-destructive">{navError}</p>}
@@ -175,9 +182,11 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
       <div className="divide-y">
         {visible.map((row) => (
           <div key={row.cellId} className="grid grid-cols-[minmax(52px,7rem)_1fr] gap-x-3 px-2 py-1 text-[11px]">
-            <span className="truncate font-mono text-[10px] text-muted-foreground" title={row.ref}>
-              {row.ref ?? "·"}
-            </span>
+            <AppTooltip content={row.ref}>
+              <span className="truncate font-mono text-[10px] text-muted-foreground">
+                {row.ref ?? "·"}
+              </span>
+            </AppTooltip>
             <span className="min-w-0">
               {side !== "target" && (
                 <span dir="auto" className="block whitespace-pre-wrap break-words text-muted-foreground">

@@ -294,6 +294,75 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
   })
 
+  it("strips spurious leading/trailing/doubled spaces from a paste (AQU-758)", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-paste-whitespace"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    act(() => {
+      fireEvent.focus(surface)
+      fireEvent.paste(surface, {
+        clipboardData: {
+          types: ["text/plain"],
+          files: [],
+          items: [],
+          getData: (type: string) => (type === "text/plain" ? "  spaced   words  " : ""),
+        },
+      })
+      fireEvent.blur(surface)
+    })
+
+    const slotElement = surface.querySelector("span[data-idml-slot=\"0\"]")
+    expect(slotElement?.textContent).toBe("spaced words")
+    const committed = onCommit.mock.calls[0]?.[0] as { valueHtml: string } | undefined
+    expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
+  })
+
+  it("blocks a leading space and a doubled space at entry while typing (AQU-758)", async () => {
+    const onCommit = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-type-whitespace"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={onCommit}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    act(() => {
+      fireEvent.focus(surface)
+      // A leading space into an empty slot is dropped; then a word, a real
+      // separator space (kept), and a second space (dropped as a double).
+      for (const key of [" ", "a", " ", " ", "b"]) {
+        fireEvent.keyDown(surface, { key })
+      }
+      fireEvent.blur(surface)
+    })
+
+    const slotElement = surface.querySelector("span[data-idml-slot=\"0\"]")
+    expect(slotElement?.textContent).toBe("a b")
+    const committed = onCommit.mock.calls.at(-1)?.[0] as { valueHtml: string } | undefined
+    expect(validateIdmlTranslation(SOURCE_HTML, committed!.valueHtml, METADATA).valid).toBe(true)
+  })
+
   it("replaces in-progress IME composition text instead of duplicating it", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML

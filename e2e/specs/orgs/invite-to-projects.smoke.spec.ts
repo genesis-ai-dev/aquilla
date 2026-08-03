@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -17,7 +17,7 @@ test("invite to projects dialog opens from members page", async ({ alice }) => {
   // so create one first.
   await seedProjectWithFile(await jwtFor("alice"), { name: `InviteOpenProj ${Date.now()}` })
 
-  await alice.goto("/members")
+  await alice.goto(orgRoute(alice, "/members"))
   // "Add to projects" button — only visible to org owners/admins.
   const inviteBtn = alice.getByRole("button", { name: /Add to projects/i })
   await expect(inviteBtn).toBeEnabled({ timeout: 10_000 })

@@ -39,7 +39,7 @@ test("alice imports a file; bob (added via API) sees it in his workspace", async
   // 2. Alice navigates to the project workspace directly and imports the file.
   //    useProject reads from the server (thin client), so direct navigation
   //    works even though the project was registered server-side, not via the UI.
-  await alice.goto(`/project/${projectId}`)
+  await alice.goto(`/project/${projectId}/editor`)
   // Server-side-created projects have no source/target language, so the import
   // flow opens a blocking "Set translation direction" screen after the preview
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
@@ -70,7 +70,7 @@ test("alice imports a file; bob (added via API) sees it in his workspace", async
   }).toBe(true)
 
   // 4. UI: bob navigates to the project; sidebar should list the file.
-  await bob.goto(`/project/${projectId}`)
+  await bob.goto(`/project/${projectId}/editor`)
   await expect(
     bob.locator("aside").locator("div").filter({ hasText: /sample/i }).first(),
   ).toBeVisible({ timeout: 15_000 })

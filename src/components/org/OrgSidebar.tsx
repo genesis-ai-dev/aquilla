@@ -5,12 +5,13 @@ import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { Badge } from "@/components/ui/badge"
+import { orgHomePath, orgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
 
 const link = ({ isActive }: { isActive: boolean }) =>
-  `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium" : "hover:bg-accent/60"}`
+  `block rounded-md px-2 py-1.5 text-sm ${isActive ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
 
 export function OrgSidebar() {
   const { orgs, activeOrg, activeOrgId, isAllOrgs, accessibleProjects } = useActiveOrg()
@@ -42,6 +43,12 @@ export function OrgSidebar() {
       isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id)),
     )
 
+  const homeTo = isAllOrgs
+    ? orgHomePath(ALL_ORGS_PARAM)
+    : activeOrgId != null
+      ? orgHomePath(activeOrgId)
+      : orgHomePath(ALL_ORGS_PARAM)
+
   return (
     <div className="flex h-full min-w-0 flex-col gap-1 overflow-hidden p-2">
       <div data-tour="org-switcher">
@@ -50,22 +57,22 @@ export function OrgSidebar() {
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
         {/* FRO-243: data-tour anchors for product tour steps */}
         <NavLink
-          to={{ pathname: "/", search: isAllOrgs ? "?org=all" : activeOrgId != null ? `?org=${activeOrgId}` : "" }}
+          to={homeTo}
           end
           className={link}
           data-tour="nav-overview"
         >
           Projects
         </NavLink>
-        {!isAllOrgs && <>
-          <NavLink to="/teams" className={link}>Teams</NavLink>
-          <NavLink to="/assigned" className={link} data-tour="nav-assigned">Assigned to me</NavLink>
+        {!isAllOrgs && activeOrgId != null && <>
+          <NavLink to={orgPath(activeOrgId, "/teams")} className={link}>Teams</NavLink>
+          <NavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">Assigned to me</NavLink>
         </>}
-        {isAdmin && <>
+        {isAdmin && activeOrgId != null && <>
           <div className="my-1 border-t" />
-          <NavLink to="/members" className={link}>Members</NavLink>
-          <NavLink to="/projects/archived" className={link}>Archived</NavLink>
-          <NavLink to="/settings" className={link} data-tour="nav-settings">Settings</NavLink>
+          <NavLink to={orgPath(activeOrgId, "/members")} className={link}>Members</NavLink>
+          <NavLink to={orgPath(activeOrgId, "/archived")} className={link}>Archived</NavLink>
+          <NavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">Settings</NavLink>
         </>}
         {isPlatformAdmin && <>
           <div className="my-1 border-t" />

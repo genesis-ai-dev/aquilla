@@ -1184,6 +1184,9 @@ export interface UseActiveCellStoreOptions {
 export interface UseActiveCellStoreResult {
   store: CellStore
   revalidate: () => void
+  /** Explicit recovery after a failed hard load. Unlike a soft revalidate,
+   * this restores the loading state while no authoritative rows are present. */
+  retry: () => void
   revalidateCell: (cellId: string) => void
   applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
   /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
@@ -1459,6 +1462,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     void doFetch(true)
   }, [doFetch])
 
+  const retry = useCallback(() => {
+    void doFetch(false)
+  }, [doFetch])
+
   const refreshCellsCacheFromStore = useCallback((maxServerSeq?: number) => {
     const pid = projectRef.current
     const fid = fileRef.current
@@ -1564,7 +1571,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, isLoading, isError }
+  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, isLoading, isError }
 }
 
 /**

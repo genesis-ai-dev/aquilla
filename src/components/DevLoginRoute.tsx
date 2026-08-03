@@ -34,7 +34,7 @@ export function DevLoginRoute() {
           return
         }
         // Seeded project id is hardcoded in auth-worker/src/routes/dev-seed.ts.
-        navigate("/project/dev-project", { replace: true })
+        navigate("/project/dev-project/editor", { replace: true })
       } catch (e) {
         if (cancelled) return
         setError(e instanceof Error ? e.message : String(e))

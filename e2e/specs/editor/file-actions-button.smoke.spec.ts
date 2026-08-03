@@ -5,8 +5,8 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * FileRow — "File actions" button opens the file context menu.
  *
  * FileRow.tsx has a MoreHorizontal (⋯) button with aria-label="File actions"
- * that appears on hover inside the sidebar file list. Clicking it calls
- * onOpenMenu(x, y) which opens the FileActionMenu popup.
+ * that appears on hover inside the sidebar file list. Clicking it dispatches
+ * a contextmenu event so the shadcn ContextMenu opens at the pointer.
  *
  * The context menu contains items like "Rename", "Move", "Delete".
  *

@@ -3,6 +3,7 @@ import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { Copy, Plus, UserPlus, Check, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
@@ -204,20 +205,22 @@ export function InviteStep({ projectId, onSharesChanged }: InviteStepProps) {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-1">
               <Input value={issuedUrl} readOnly className="h-7 text-[11px] font-mono" />
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => copyUrl(issuedUrl)}
-                className="h-7 w-7 p-0"
-                title={copied ? "Copied!" : "Copy"}
-              >
+              <AppTooltip content={copied ? "Copied!" : "Copy"}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => copyUrl(issuedUrl)}
+                  className="h-7 w-7 p-0"
+                  aria-label={copied ? "Copied" : "Copy invite link"}
+                >
                 {copied ? (
                   <Check className="h-3 w-3 text-emerald-600" />
                 ) : (
                   <Copy className="h-3 w-3" />
                 )}
               </Button>
+              </AppTooltip>
             </div>
             <Button
               type="button"

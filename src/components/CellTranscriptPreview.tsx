@@ -7,6 +7,7 @@
 import { forwardRef, useMemo } from "react"
 import { AudioLines, AlertTriangle, RefreshCw, CornerDownLeft, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { WordTiming } from "@/lib/codex-editor/types"
 
@@ -91,7 +92,7 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
       )}
     >
       {/* Soft tone bar instead of a hard bordered box. */}
-      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px] rounded-full", accent)} />
+      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px] rounded-md", accent)} />
 
       <div className="flex items-center gap-1.5">
         <Icon className={cn("h-3.5 w-3.5 shrink-0", iconTone)} />
@@ -117,37 +118,40 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
       {editable && state !== "match" && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {state === "stale" && onRetranscribe && (
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={onRetranscribe}
-              title="Listen to the recording again and refresh the transcript"
-            >
-              <RefreshCw /> Transcribe again
-            </Button>
+            <AppTooltip content="Listen to the recording again and refresh the transcript">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={onRetranscribe}
+              >
+                <RefreshCw /> Transcribe again
+              </Button>
+            </AppTooltip>
           )}
           {state === "differs" && onUseAsCellText && (
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => onUseAsCellText(transcript)}
-              title={cellHasText
-                ? "Replace your text with what the recording says"
-                : "Fill in your text from the recording"}
-            >
-              <CornerDownLeft /> {cellHasText ? "Use what was heard" : "Use as the text"}
-            </Button>
+            <AppTooltip content={cellHasText
+              ? "Replace your text with what the recording says"
+              : "Fill in your text from the recording"}>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => onUseAsCellText(transcript)}
+              >
+                <CornerDownLeft /> {cellHasText ? "Use what was heard" : "Use as the text"}
+              </Button>
+            </AppTooltip>
           )}
           {state === "differs" && onRetranscribe && (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={onRetranscribe}
-              title="Listen to the recording again and refresh the transcript"
-              className="text-muted-foreground"
-            >
-              <RefreshCw /> Transcribe again
-            </Button>
+            <AppTooltip content="Listen to the recording again and refresh the transcript">
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={onRetranscribe}
+                className="text-muted-foreground"
+              >
+                <RefreshCw /> Transcribe again
+              </Button>
+            </AppTooltip>
           )}
         </div>
       )}

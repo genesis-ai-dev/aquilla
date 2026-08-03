@@ -110,7 +110,7 @@ export function SectionVisibilityBadge({
       variant="outline"
       className={cn(
         "gap-1 font-normal text-muted-foreground",
-        interactive && "cursor-pointer hover:bg-muted",
+        interactive && "hover:bg-muted",
         className,
       )}
     >
@@ -143,7 +143,7 @@ export function SectionVisibilityBadge({
           <button
             type="button"
             data-testid="section-visibility-badge"
-            className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             aria-label={`${label}. Change section visibility`}
           >
             {badgeContent}

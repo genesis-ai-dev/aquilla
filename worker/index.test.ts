@@ -179,3 +179,31 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("served:/__dev/login")
   })
 })
+
+describe("worker/index — non-canonical host noindex (SEO)", () => {
+  async function fetchHost(host: string, path = "/") {
+    const { default: worker } = await import("./index")
+    return worker.fetch(new Request(`https://${host}${path}`), makeEnv())
+  }
+
+  it("dev.aquilla.app responses carry X-Robots-Tag: noindex", async () => {
+    const res = await fetchHost("dev.aquilla.app")
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex")
+    expect(await res.text()).toBe("served:/homepage.html")
+  })
+
+  it("workers.dev preview responses carry X-Robots-Tag: noindex", async () => {
+    const res = await fetchHost("aquilla-web.example.workers.dev", "/bible-translation")
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex")
+  })
+
+  it("production aquilla.app responses have no X-Robots-Tag", async () => {
+    const res = await fetchHost("aquilla.app", "/bible-translation")
+    expect(res.headers.get("X-Robots-Tag")).toBeNull()
+  })
+
+  it("localhost dev responses are left untouched", async () => {
+    const res = await fetchHost("localhost:8788".split(":")[0])
+    expect(res.headers.get("X-Robots-Tag")).toBeNull()
+  })
+})

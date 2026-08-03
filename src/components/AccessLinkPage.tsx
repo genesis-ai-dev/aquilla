@@ -45,7 +45,7 @@ export function AccessLinkPage() {
         // Private-mode / storage-blocked: navigation below still works; the
         // RootRedirect guard only matters at "/", not the project route.
       }
-      navigate(`/project/${projectId}`, { replace: true })
+      navigate(`/project/${projectId}/editor`, { replace: true })
     } catch (err) {
       // Show the generic dead-link message regardless of the specific failure
       // (no PIN/token oracle). Only a genuine network error gets its own text.

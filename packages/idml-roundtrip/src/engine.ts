@@ -2399,7 +2399,7 @@ function isRuntimeLocator(value: unknown): value is IdmlLocator {
     locator.kind !== "idml"
     || typeof locator.memberPath !== "string"
     || locator.memberPath.length === 0
-    || /[\u0000-\u001f]/.test(locator.memberPath)
+    || /[\u0000-\u001f]/.test(locator.memberPath) // eslint-disable-line no-control-regex -- Archive member paths must reject C0 controls.
     || locator.memberPath.startsWith("/")
     || /^[A-Za-z]:/.test(locator.memberPath)
     || locator.memberPath.includes("\\")

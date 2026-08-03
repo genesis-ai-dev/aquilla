@@ -483,6 +483,8 @@ type PrepareImportContext = Pick<
   "projectId" | "identityToken" | "sourceLanguage" | "targetLanguage" | "signal"
 > & {
   onIdmlProgress?: (progress: IdmlProgress) => void
+  /** AQU-634: USFM front-matter opt-out forwarded into parseFile. */
+  excludeFrontMatter?: boolean
 }
 
 function preparedParsedFile(
@@ -705,7 +707,9 @@ export async function prepareImportFile(
           analysisError = error
         }
       }
-      const prepared = preparedParsedFile(file, fileType, await parseFile(file, fileType))
+      const prepared = preparedParsedFile(file, fileType, await parseFile(file, fileType, {
+        excludeFrontMatter: ctx.excludeFrontMatter,
+      }))
       if (analysisError) {
         prepared.results = prepared.results.map((result) => ({
           ...result,
@@ -734,7 +738,9 @@ export async function prepareImportFile(
     inspected = await readUnknownTextFile(file, ctx.signal)
     const sniffedType = sniffKnownTextFile(inspected.text)
     if (sniffedType) {
-      return preparedParsedFile(file, sniffedType, await parseFile(file, sniffedType))
+      return preparedParsedFile(file, sniffedType, await parseFile(file, sniffedType, {
+        excludeFrontMatter: ctx.excludeFrontMatter,
+      }))
     }
     if (!ctx.identityToken) {
       throw new Error(`Unsupported file type: ${file.name}. Sign in to use AI-assisted format detection.`)
@@ -1816,7 +1822,10 @@ export interface ParatextPlan {
  * parsing), so the dialog can show a preview of every book's cells before the
  * user confirms the import.
  */
-export async function prepareParatextProject(entries: ProjectEntryCollection): Promise<ParatextPlan> {
+export async function prepareParatextProject(
+  entries: ProjectEntryCollection,
+  opts?: { excludeFrontMatter?: boolean },
+): Promise<ParatextPlan> {
   const project = await assembleParatextProject(entries)
   if (!project) {
     throw new Error(
@@ -1824,7 +1833,9 @@ export async function prepareParatextProject(entries: ProjectEntryCollection): P
     )
   }
   const books: ParatextBookPlan[] = project.books.map((book) => {
-    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource)
+    const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource, {
+      excludeFrontMatter: opts?.excludeFrontMatter,
+    })
     return { book, strings, duplicateRefs, cellCount: strings.length }
   })
   // Materialize and validate the complete package during preview. Commit then
@@ -2244,6 +2255,10 @@ function withExactSourceArtifact(
 export interface ParseFileOptions {
   signal?: AbortSignal
   onIdmlProgress?: (progress: IdmlProgress) => void
+  /** USFM only: per-project opt-out that excludes book-name/title/TOC +
+   *  intro-block front matter from the imported cells (AQU-634). Default:
+   *  false (import front matter). */
+  excludeFrontMatter?: boolean
 }
 
 export async function parseFile(
@@ -2285,7 +2300,12 @@ export async function parseFile(
       // worker via parse-text-formats.ts.
       const isUsx = looksLikeUsx(raw)
       const text = isUsx ? usxToUsfm(raw) : raw
-      const results = await parseTextFormatOffMainThread({ fileType: "usfm", text, name: file.name })
+      const results = await parseTextFormatOffMainThread({
+        fileType: "usfm",
+        text,
+        name: file.name,
+        excludeFrontMatter: options?.excludeFrontMatter,
+      })
       if (results.length > 1) {
         return results.map((result, index) => ({
           ...result,

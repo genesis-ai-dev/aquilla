@@ -26,7 +26,7 @@ test("project settings validation section: changing options makes form dirty", a
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings?section=validation`)
+  await alice.goto(`/project/${projectId}/settings/validation`)
   // The Allow self-validation switch is visible.
   const selfValidationSwitch = alice.locator("#allow-self-validation")
   await expect(selfValidationSwitch).toBeVisible({ timeout: 10_000 })

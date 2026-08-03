@@ -148,9 +148,15 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     ],
   })
 
-  it("expands into one sub-row per lane with correct translated/validated pcts", () => {
-    renderTable([p], { defaultLabels: { p1: "en-target" } })
-    fireEvent.click(screen.getByTestId("project-lanes-expand-p1"))
+  it("expands via language overflow into one sub-row per lane with correct translated/validated pcts", () => {
+    const lanes = [
+      { lane: "", totalCells: 100, filledCells: 68, validatedCells: 40, lastEditAt: now },
+      { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
+      { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
+      { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
+    ]
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })], { defaultLabels: { p1: "en-target" } })
+    fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
 
     const defaultRow = screen.getByTestId("project-lane-row-p1-")
     expect(defaultRow).toHaveTextContent("en-target")
@@ -163,26 +169,52 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
   })
 
   it("Open links carry ?lane= for named lanes and no lane query for the default lane", () => {
-    renderTable([p], { defaultLabels: { p1: "en-target" } })
-    fireEvent.click(screen.getByTestId("project-lanes-expand-p1"))
+    const lanes = [
+      { lane: "", totalCells: 100, filledCells: 68, validatedCells: 40, lastEditAt: now },
+      { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
+      { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
+      { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
+    ]
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })], { defaultLabels: { p1: "en-target" } })
+    fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
 
     const defaultOpen = within(screen.getByTestId("project-lane-row-p1-")).getByRole("link", {
       name: /open/i,
     })
-    expect(defaultOpen.getAttribute("href")).toBe("/project/p1")
+    expect(defaultOpen.getAttribute("href")).toBe("/project/p1/editor")
 
     const esOpen = within(screen.getByTestId("project-lane-row-p1-es")).getByRole("link", {
       name: /open/i,
     })
-    expect(esOpen.getAttribute("href")).toBe("/project/p1?lane=es")
+    expect(esOpen.getAttribute("href")).toBe("/project/p1/editor?lane=es")
   })
 
   it("Assign… on a lane sub-row opens the lane-scoped assign modal", () => {
-    renderTable([p])
-    fireEvent.click(screen.getByTestId("project-lanes-expand-p1"))
+    const lanes = [
+      { lane: "", totalCells: 100, filledCells: 68, validatedCells: 40, lastEditAt: now },
+      { lane: "es", totalCells: 100, filledCells: 22, validatedCells: 8, lastEditAt: now },
+      { lane: "fr", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
+      { lane: "de", totalCells: 100, filledCells: 10, validatedCells: 0, lastEditAt: now },
+    ]
+    renderTable([baseProject({ id: "p1", name: "Gospels", lanes })])
+    fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
     const esRow = screen.getByTestId("project-lane-row-p1-es")
     fireEvent.click(within(esRow).getByRole("button", { name: /assign/i }))
     expect(screen.getByTestId("assign-open-p1-es")).toBeInTheDocument()
+  })
+
+  it("row … menu offers Assign work and Add member", () => {
+    renderTable([p])
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    expect(screen.getByRole("menuitem", { name: /assign work/i })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /add member/i })).toBeInTheDocument()
+  })
+
+  it("Assign work from the … menu opens the assign modal for the default lane", () => {
+    renderTable([p])
+    fireEvent.click(screen.getByTestId("project-row-actions-p1"))
+    fireEvent.click(screen.getByRole("menuitem", { name: /assign work/i }))
+    expect(screen.getByTestId("assign-open-p1-")).toBeInTheDocument()
   })
 })
 

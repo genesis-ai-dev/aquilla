@@ -30,49 +30,26 @@ describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
     expect(results[0].strings.some((s) => s.original.includes("In the beginning"))).toBe(true)
   })
 
-  // AQU-585: book names (running header / TOC / main title) and the whole
-  // introduction block are front matter, not translatable source cells.
-  it("filters book-name and book-introduction cells out of USFM import (AQU-585)", () => {
-    const usfm = [
-      "\\id MAT",
-      "\\h Matthew",              // running header (book name)
-      "\\toc1 The Gospel of Matthew", // table-of-contents long name
-      "\\toc2 Matthew",           // table-of-contents short name
-      "\\mt1 The Gospel",         // main title (book name)
-      "\\imt Introduction",       // intro main title
-      "\\is Background",          // intro section heading
-      "\\ip This book was written by Matthew.", // intro paragraph
-      "\\io1 The genealogy",      // intro outline
-      "\\c 1",
-      "\\ms The Genealogy Section", // in-body major-section heading — KEPT
-      "\\s1 The Genealogy",       // in-body section heading — KEPT
-      "\\p",
-      "\\v 1 The book of the genealogy of Jesus Christ.",
-      "\\v 2 Abraham fathered Isaac.",
-    ].join("\n")
+  it("AQU-634: imports USFM front matter by default, excludes it when opted out", () => {
+    const usfm =
+      "\\id GEN\n\\h Genesis\n\\mt1 Genesis\n\\ip An introduction.\n" +
+      "\\c 1\n\\s The Creation\n\\v 1 In the beginning.\n"
 
-    const [result] = parseTextFormat({ fileType: "usfm", text: usfm, name: "MAT.usfm" })
-    const originals = result.strings.map((s) => s.original)
+    const withFront = parseTextFormat({ fileType: "usfm", text: usfm, name: "gen.usfm" })
+    const defaultTexts = withFront[0].strings.map((s) => s.original)
+    expect(defaultTexts).toEqual(expect.arrayContaining(["Genesis", "An introduction.", "The Creation", "In the beginning."]))
 
-    // Verses and in-body section headings survive…
-    expect(originals).toEqual([
-      "The Genealogy Section",
-      "The Genealogy",
-      "The book of the genealogy of Jesus Christ.",
-      "Abraham fathered Isaac.",
-    ])
-    // …and none of the book-name / introduction front matter leaks through.
-    for (const frontMatter of [
-      "Matthew",
-      "The Gospel of Matthew",
-      "The Gospel",
-      "Introduction",
-      "Background",
-      "This book was written by Matthew.",
-      "The genealogy",
-    ]) {
-      expect(originals).not.toContain(frontMatter)
-    }
+    const withoutFront = parseTextFormat({
+      fileType: "usfm",
+      text: usfm,
+      name: "gen.usfm",
+      excludeFrontMatter: true,
+    })
+    const optedTexts = withoutFront[0].strings.map((s) => s.original)
+    // Book name/title/intro dropped; section heading + verse still present.
+    expect(optedTexts).not.toContain("An introduction.")
+    expect(optedTexts.filter((t) => t === "Genesis")).toHaveLength(0)
+    expect(optedTexts).toEqual(expect.arrayContaining(["The Creation", "In the beginning."]))
   })
 
   it("declares exactly the DOM-free file types it can handle", () => {

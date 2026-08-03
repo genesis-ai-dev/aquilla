@@ -27,7 +27,7 @@ import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "l
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
@@ -249,6 +249,13 @@ interface TranslatedEditorProps {
    */
   aiDrafted?: boolean
   onCommit: (snapshot: TranslatedEditorCommit) => void
+  /**
+   * AQU-746: keystrokes a fast typist enters after clicking a cell but before
+   * this editor has mounted + focused are buffered by the parent row (they have
+   * no editor to land in yet). On focus, once the caret is placed, this editor
+   * drains the buffer into the document so the first character(s) are never lost.
+   */
+  pendingInputRef?: MutableRefObject<string>
   onFocus?: () => void
   onBlur?: () => void
   onSelectionChange?: (selection: TargetPresenceSelection | null) => void
@@ -340,6 +347,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onIdmlValidationError,
   aiDrafted = false,
   onCommit,
+  pendingInputRef,
   onFocus,
   onBlur,
   onSelectionChange,
@@ -1030,6 +1038,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         if (position !== null) editor.commands.setTextSelection(position)
       }
       onFocus?.()
+      // AQU-746: drain any keystrokes the parent row buffered while this editor
+      // was mounting/focusing (a fast typist after a click). The caret is now
+      // placed — IDML at its protected slot position above, plain at end via the
+      // insert path — so replaying preserves order and lands where a normal edit
+      // would. Route through the same insertion logic as live typing.
+      const buffered = pendingInputRef?.current
+      if (buffered) {
+        pendingInputRef.current = ""
+        if (idmlContext) {
+          replaceIdmlSelectionWithPlainText(editor.view, buffered)
+        } else {
+          // Insert as a literal text node (not HTML) so characters like "<" or
+          // "&" are preserved verbatim rather than parsed as markup. Buffered
+          // content is printable single keys only — never a newline.
+          editor.chain().focus("end").insertContent({ type: "text", text: buffered }).run()
+        }
+      }
       publishSelection(editor)
     },
     onBlur({ editor }) {
@@ -1380,7 +1405,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           <button
             type="button"
             onClick={onDiscardLocal}
-            className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
+            className="rounded-md bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
           >
             Discard and reload
           </button>
@@ -1426,7 +1451,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleBold().run()}
               aria-label="Bold"
-              className={cn("rounded-full", editor.isActive("bold") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("bold") && "bg-accent")}
             >
               <Bold className="h-3 w-3" />
             </Button>
@@ -1438,7 +1463,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleItalic().run()}
               aria-label="Italic"
-              className={cn("rounded-full", editor.isActive("italic") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("italic") && "bg-accent")}
             >
               <Italic className="h-3 w-3" />
             </Button>
@@ -1450,7 +1475,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleUnderline().run()}
               aria-label="Underline"
-              className={cn("rounded-full", editor.isActive("underline") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("underline") && "bg-accent")}
             >
               <UnderlineIcon className="h-3 w-3" />
             </Button>
@@ -1462,7 +1487,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleStrike().run()}
               aria-label="Strikethrough"
-              className={cn("rounded-full", editor.isActive("strike") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("strike") && "bg-accent")}
             >
               <Strikethrough className="h-3 w-3" />
             </Button>
@@ -1474,7 +1499,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleCode().run()}
               aria-label="Inline code"
-              className={cn("rounded-full", editor.isActive("code") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("code") && "bg-accent")}
             >
               <Code className="h-3 w-3" />
             </Button>

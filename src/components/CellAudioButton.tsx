@@ -4,6 +4,7 @@
 // AQU-238: aria-label mirrors title so screen-readers and test selectors work.
 
 import { AlertCircle, CloudDownload, CloudOff, FileQuestion, Pause, Play, Trash2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
@@ -34,14 +35,16 @@ export function CellAudioButton({ controller, hidden }: Props) {
           : "Play audio"
 
   const button = (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-xs"
       onClick={onClick}
       onPointerEnter={state === "cloud" ? () => { void play() } : undefined}
       disabled={state === "loading"}
       aria-label={tooltip}
       className={cn(
-        "flex h-5 w-5 items-center justify-center rounded-full transition-[transform,color] duration-150 ease-out active:scale-[0.92] hover:bg-muted/60",
+        "rounded-full",
         state === "error"
           ? "text-destructive hover:text-destructive/80"
           : state === "cloud"
@@ -53,19 +56,17 @@ export function CellAudioButton({ controller, hidden }: Props) {
     >
       {state === "loading" && <Spinner className="size-3" />}
       {state === "error" && errorIcon(error?.kind)}
-      {state === "cloud" && <CloudDownload className="h-3 w-3" />}
+      {state === "cloud" && <CloudDownload />}
       {state !== "loading" && state !== "error" && state !== "cloud" && (isPlaying
-        ? <Pause className="h-3 w-3" />
-        : <Play className="h-3 w-3" />
+        ? <Pause />
+        : <Play />
       )}
-    </button>
+    </Button>
   )
 
   return (
     <AppTooltip content={tooltip}>
-      <span className="inline-flex">
-        {button}
-      </span>
+      {button}
     </AppTooltip>
   )
 }
@@ -74,16 +75,16 @@ function errorIcon(kind: string | undefined) {
   switch (kind) {
     case "pointer-missing":
     case "pointer-invalid":
-      return <FileQuestion className="h-3 w-3" />
+      return <FileQuestion />
     case "no-session":
     case "no-git-origin":
     case "batch-failed":
-      return <CloudOff className="h-3 w-3" />
+      return <CloudOff />
     case "audio-deleted":
       // F10: permanent deletion — show a trash icon instead of a generic error
-      return <Trash2 className="h-3 w-3" />
+      return <Trash2 />
     default:
-      return <AlertCircle className="h-3 w-3" />
+      return <AlertCircle />
   }
 }
 

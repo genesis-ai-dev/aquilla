@@ -1,8 +1,9 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
+import { hydrateSessionEmails } from "@/lib/frontier/auth"
 import { clearSession, removeSession, sessionKey } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
 import { outboxPendingCount } from "@/lib/sync/outbox"
@@ -108,6 +109,13 @@ export function AccountSwitcher({
   const returnTo = location.pathname !== "/" ? location.pathname + location.search : undefined
 
   const isHeader = variant === "header"
+
+  // JWTs don't carry email — backfill from /auth/me for every logged-in
+  // account when the menu opens so each row can show its address.
+  useEffect(() => {
+    if (!open) return
+    void hydrateSessionEmails().catch(() => {})
+  }, [open])
 
   async function handleLogout(scope: LogoutScope) {
     setOpen(false)
@@ -222,7 +230,7 @@ export function AccountSwitcher({
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          className="w-60 rounded-lg"
+          className="w-72 rounded-lg"
           side="bottom"
           align={isHeader ? "end" : "start"}
           sideOffset={4}
@@ -293,11 +301,13 @@ function AccountMenuEntry({
       }}
     >
       <InitialsAvatar name={summary.username} size="xs" shape="square" menuSafe />
-      <div className="flex min-w-0 flex-col">
-        <span className="truncate">{summary.username}</span>
-        {summary.email && (
-          <span className="truncate text-xs text-muted-foreground">{summary.email}</span>
-        )}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate font-medium">{summary.username}</span>
+          {summary.email && (
+            <span className="min-w-0 truncate text-xs text-muted-foreground">{summary.email}</span>
+          )}
+        </div>
         {ENV_HINT && (
           <span className="truncate text-xs text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
         )}

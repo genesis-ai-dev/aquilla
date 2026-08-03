@@ -42,9 +42,13 @@ OASIS/W3C schema URLs).
 2. **Claim the route + DNS record** with a local zone-perm token:
    `cd resource-worker && wrangler deploy --env=production` (CI's token can't
    sync zone routes — same convention as the other Workers).
-3. **Build the SPA with** `VITE_RESOURCES_BASE=https://resources.aquilla.app`
-   (and `resources.dev.aquilla.app` for staging) so the client rewrites its
-   fetches.
+3. **Build the production SPA with**
+   `VITE_RESOURCES_BASE=https://resources.aquilla.app`, or the development SPA
+   with `VITE_RESOURCES_BASE=https://resources.dev.aquilla.app`, so the client
+   rewrites its fetches. This Worker has no staging profile or staging hostname.
+   Do not point staging at the development proxy; provision an isolated
+   `[env.staging]` route and add it to the deployment contract before enabling
+   the proxy in a staging build.
 4. **Verify** with the browser network tab open on a DCS-linked project +
    resource lookup: no client requests to non-`aquilla.app` hosts for content;
    DCS import/live-refresh still works; caching headers pass through.

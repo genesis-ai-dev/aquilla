@@ -18,19 +18,19 @@ test("structured non-Scripture imports expose searchable milestone navigation", 
   await workspace.importFile(STRUCTURED_MARKDOWN)
   await workspace.waitForEditor()
 
-  const currentSection = alice.getByRole("button", {
+  const currentSection = alice.getByRole("combobox", {
     name: /Current section: Introduction/,
   })
   await expect(currentSection).toBeVisible()
   await expect(currentSection).toContainText("Introduction")
 
   await alice.getByRole("button", { name: "Next section" }).click()
-  await expect(alice.getByRole("button", {
+  await expect(alice.getByRole("combobox", {
     name: /Current section: Details/,
   })).toBeVisible()
   await expect(alice.getByText("The detailed workflow begins here.")).toBeVisible()
 
-  await alice.getByRole("button", { name: /Current section: Details/ }).click()
+  await alice.getByRole("combobox", { name: /Current section: Details/ }).click()
   const search = alice.getByRole("combobox", { name: "Find a section" })
   await search.fill("summary")
   await expect(alice.getByRole("option", { name: /Summary/ })).toBeVisible()
@@ -38,7 +38,7 @@ test("structured non-Scripture imports expose searchable milestone navigation", 
   await alice.getByRole("option", { name: /Summary/ }).click()
 
   await expect(alice.getByText("The final section reviews the result.")).toBeVisible()
-  await expect(alice.getByRole("button", {
+  await expect(alice.getByRole("combobox", {
     name: /Current section: Summary/,
   })).toBeVisible()
 })

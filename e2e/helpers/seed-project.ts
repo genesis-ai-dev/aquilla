@@ -146,7 +146,7 @@ export async function openSeededProject(page: Page, seeded: SeededProject): Prom
     return url.pathname === sourceCellsPath && url.searchParams.get("side") === "source"
   }, { timeout: 30_000 })
 
-  await page.goto(`/project/${seeded.projectId}/file/${seeded.fileId}`)
+  await page.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
   const sourceResponse = await sourceCellsLoaded
   if (!sourceResponse.ok()) {
     throw new Error(

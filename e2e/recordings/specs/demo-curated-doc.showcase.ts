@@ -43,7 +43,7 @@ test("Demo · Documentation walkthrough — read a real project, step by step", 
 
   let verified = false
   try {
-    await page.goto("/project/demo-john")
+    await page.goto("/project/demo-john/editor")
     await page.waitForLoadState("networkidle")
     await show.chapter("Open a project", "John — Plainspoken Draft · a curated demo project.")
     await show.caption("Every project opens to real content — source and target, side by side.")

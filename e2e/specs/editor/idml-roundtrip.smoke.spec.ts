@@ -77,7 +77,7 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   await expect(ws.cellRow(1)).toContainText("the LORD")
   await expect(alice.locator('[data-paragraph-start="true"]')).toHaveCount(0)
 
-  const navigator = alice.getByRole("button", {
+  const navigator = alice.getByRole("combobox", {
     name: /Current story: Story 1, cells 1–2/,
   })
   await expect(navigator).toContainText("(1–2)")

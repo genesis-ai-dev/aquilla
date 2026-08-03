@@ -319,4 +319,26 @@ export function isTranslatable(raw: string): boolean {
   return classifyMarker(raw)?.translatable ?? false
 }
 
+/** The "front matter" marker categories: book-name/running-header/TOC
+ *  (identification), the main title (title), and the whole introduction block
+ *  (introduction). These are exactly the markers a project can opt to EXCLUDE
+ *  from import (AQU-634 / reversed-AQU-585). In-body section headings
+ *  (\s, \ms, \sr, \mr, \r → "heading") and Psalm descriptive titles (\d →
+ *  "heading") are deliberately NOT here, so they always import in both modes. */
+const FRONT_MATTER_CATEGORIES: ReadonlySet<MarkerCategory> = new Set<MarkerCategory>([
+  "identification",
+  "title",
+  "introduction",
+])
+
+/** True when `raw` is a book-name/title/TOC or introduction-block marker — the
+ *  front matter that the per-project "exclude front matter" opt-out drops on
+ *  import. Section headings and Psalm titles return false (they are content a
+ *  translator localizes regardless of the opt-out). Unknown markers return
+ *  false (conservative: keep, don't silently drop). */
+export function isBookTitleOrIntroMarker(raw: string): boolean {
+  const spec = classifyMarker(raw)
+  return spec ? FRONT_MATTER_CATEGORIES.has(spec.category) : false
+}
+
 export const KNOWN_MARKER_BASES: ReadonlySet<string> = new Set(Object.keys(MARKERS))

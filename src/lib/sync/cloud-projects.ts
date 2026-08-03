@@ -56,6 +56,15 @@ export interface CloudProjectSummary {
    * to "everything is new".
    */
   grantedAt?: string | null
+  /**
+   * AQU-507: the project's designated Project Manager (attribution, distinct
+   * from the member roster / permission ladder). Returned by both the list and
+   * single-project endpoints. Optional **and** nullable, following the
+   * `grantedAt` precedent: an older worker that omits the field degrades to
+   * "unassigned" — never to a crash or a wrong grouping — and `null` is an
+   * explicit "no PM assigned".
+   */
+  pm?: { id: number; username: string } | null
   /** AQU-476/478: link mode/consumes/gate/cursor. Only the single-project
    *  endpoint returns these (the list endpoint returns sourceProjectId only —
    *  the picker/settings-detail views are what need the full state). */
@@ -230,6 +239,28 @@ export async function renameProject(
   })
   if (!res.ok) throw new UserError(res.status, "", "project")
   return (await res.json()) as { id: string; name: string }
+}
+
+/**
+ * AQU-507: PATCH /api/v2/projects/:id/pm — assign (userId) or clear (null) the
+ * project's designated Project Manager. Maintainer+ only (server-enforced);
+ * the server also rejects a target who is not a member of the project. Returns
+ * the resolved PM (or null). Throws on failure.
+ */
+export async function setProjectPm(
+  jwt: string,
+  projectId: string,
+  pmUserId: number | null,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ id: number; username: string } | null> {
+  const res = await fetch(`${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/pm`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ pmUserId }),
+  })
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  const body = (await res.json()) as { pm?: { id: number; username: string } | null }
+  return body.pm ?? null
 }
 
 /**

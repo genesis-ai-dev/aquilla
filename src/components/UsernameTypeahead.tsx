@@ -11,6 +11,22 @@ import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 
+/**
+ * AQU-734: multi-select wiring. When passed, each search result renders as a
+ * checkbox row reflecting `stagedUsernames` (lowercased) instead of a
+ * single-pick row, toggling keeps the dropdown open (staging accumulates
+ * across searches), and Enter stages the free-typed value. The parent owns the
+ * staged set + chips; this component only surfaces the search + toggle affordances.
+ */
+export interface MultiSelectConfig {
+  /** Lowercased usernames currently staged, used to render the checked state. */
+  stagedUsernames: ReadonlySet<string>
+  /** Toggle a searched user in/out of the staged set. */
+  onToggleResult: (u: UserSearchResult) => void
+  /** Stage whatever is currently typed (Enter key). Parent clears `raw`. */
+  onStageTyped: () => void
+}
+
 export type RecipientMode = "username" | "email"
 
 export interface RecipientValue {
@@ -38,6 +54,18 @@ interface Props {
   excludedUserIds?: readonly number[]
   /** Scope search to related users. Disable for org membership, where any Aquilla user can be added. */
   scopedSearch?: boolean
+  /** AQU-734: enable checkbox multi-select. Absent = legacy single-pick. */
+  multiSelect?: MultiSelectConfig
+  /**
+   * Eligible people offered as rows before any search fires — e.g. org
+   * colleagues without a direct grant (the AQU-672 Team-detail pattern).
+   * When provided (even empty), the dropdown opens on focus with these rows;
+   * typing narrows them by substring, and 2+ characters merges in server
+   * search results. Absent = dropdown only opens once something is typed.
+   */
+  suggestions?: readonly UserSearchResult[]
+  /** Shown when `suggestions` is provided but empty and nothing is typed. */
+  emptySuggestionsHint?: string
 }
 
 /**
@@ -70,12 +98,19 @@ export function UsernameTypeahead({
   placeholder,
   excludedUserIds = [],
   scopedSearch = true,
+  multiSelect,
+  suggestions,
+  emptySuggestionsHint,
 }: Props) {
   const [open, setOpen] = useState(false)
+  // Anchored below the input by default (`top`), flipped above (`bottom`)
+  // when the viewport can't fit the dropdown underneath — e.g. the add row
+  // at the bottom of the project overview Members card.
   const [dropdownPosition, setDropdownPosition] = useState<{
     left: number
-    top: number
     width: number
+    top?: number
+    bottom?: number
   } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -89,19 +124,36 @@ export function UsernameTypeahead({
   const searchMatchesInput = query.trim() === trimmedRaw
   const needsMorePrefix = trimmedRaw.length > 0 && trimmedRaw.length < 2
   const excludedUserIdSet = new Set(excludedUserIds)
+  const byName = (a: UserSearchResult, b: UserSearchResult) =>
+    a.username.localeCompare(b.username, undefined, { sensitivity: "base" })
   const visibleResults = searchMatchesInput
-    ? results
-        .filter((u) => !excludedUserIdSet.has(u.id))
-        .sort((a, b) =>
-          a.username.localeCompare(b.username, undefined, { sensitivity: "base" })
-        )
+    ? results.filter((u) => !excludedUserIdSet.has(u.id)).sort(byName)
     : []
+  // Eligible-colleague rows: the full pool with nothing typed, substring-
+  // narrowed as the user types (mirrors the AQU-672 combobox). Server search
+  // results merge in from 2 characters, deduped by id.
+  const matchingSuggestions = (suggestions ?? [])
+    .filter((u) => !excludedUserIdSet.has(u.id))
+    .filter(
+      (u) =>
+        trimmedRaw.length === 0 ||
+        u.username.toLowerCase().includes(trimmedRaw.toLowerCase())
+    )
+    .sort(byName)
+  const suggestedIds = new Set(matchingSuggestions.map((u) => u.id))
+  const visibleRows =
+    trimmedRaw.length >= 2
+      ? [
+          ...matchingSuggestions,
+          ...visibleResults.filter((u) => !suggestedIds.has(u.id)),
+        ].sort(byName)
+      : matchingSuggestions
   const allMatchesAlreadyAdded =
     !needsMorePrefix &&
     searchMatchesInput &&
     !isLoading &&
     results.length > 0 &&
-    visibleResults.length === 0
+    visibleRows.length === 0
   const searchPendingForInput =
     !needsMorePrefix && trimmedRaw.length >= 2 && (!searchMatchesInput || isLoading)
   const canShowSettledEmptyState =
@@ -109,9 +161,17 @@ export function UsernameTypeahead({
     searchMatchesInput &&
     !isLoading &&
     results.length === 0 &&
+    visibleRows.length === 0 &&
     trimmedRaw.length >= 2
+  const showEmptySuggestionsHint =
+    suggestions != null &&
+    trimmedRaw.length === 0 &&
+    matchingSuggestions.length === 0 &&
+    emptySuggestionsHint != null
   const showSuggestions =
-    value.mode === "username" && open && trimmedRaw.length > 0
+    value.mode === "username" &&
+    open &&
+    (trimmedRaw.length > 0 || suggestions != null)
 
   // Close the dropdown on outside click — typeahead UX expects this.
   useEffect(() => {
@@ -135,11 +195,21 @@ export function UsernameTypeahead({
     function updateDropdownPosition() {
       const rect = containerRef.current?.getBoundingClientRect()
       if (!rect) return
-      setDropdownPosition({
-        left: rect.left,
-        top: rect.bottom + 4,
-        width: rect.width,
-      })
+      // max-h-44 (176px) + gap: flip above when that can't fit below and
+      // there's more room above. Anchoring with `bottom` lets the list grow
+      // upward as rows load, so no content measurement is needed.
+      const DROPDOWN_MAX_PX = 176 + 8
+      const spaceBelow = window.innerHeight - rect.bottom
+      const openAbove = spaceBelow < DROPDOWN_MAX_PX && rect.top > spaceBelow
+      setDropdownPosition(
+        openAbove
+          ? {
+              left: rect.left,
+              width: rect.width,
+              bottom: window.innerHeight - rect.top + 4,
+            }
+          : { left: rect.left, width: rect.width, top: rect.bottom + 4 },
+      )
     }
 
     updateDropdownPosition()
@@ -224,6 +294,20 @@ export function UsernameTypeahead({
             disabled={disabled}
             value={value.raw}
             onChange={(e) => handleChange(e.target.value)}
+            onKeyDown={(e) => {
+              // AQU-734: in multi-select mode Enter stages the typed value as a
+              // chip rather than submitting a single add. Only fire when there's
+              // something to stage so an empty Enter is a no-op.
+              if (
+                multiSelect &&
+                e.key === "Enter" &&
+                value.mode === "username" &&
+                value.raw.trim().length > 0
+              ) {
+                e.preventDefault()
+                multiSelect.onStageTyped()
+              }
+            }}
             onFocus={() => value.mode === "username" && setOpen(true)}
             placeholder={
               placeholder?.[value.mode] ??
@@ -251,17 +335,24 @@ export function UsernameTypeahead({
           className="fixed z-[60] max-h-44 overflow-y-auto rounded-md border bg-popover shadow-md"
           style={{
             left: dropdownPosition.left,
-            top: dropdownPosition.top,
             width: dropdownPosition.width,
+            top: dropdownPosition.top,
+            bottom: dropdownPosition.bottom,
           }}
         >
-          {needsMorePrefix && (
+          {needsMorePrefix && visibleRows.length === 0 && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
               Type at least 2 characters to search.
             </p>
           )}
 
-          {searchPendingForInput && visibleResults.length === 0 && (
+          {showEmptySuggestionsHint && (
+            <p className="px-3 py-2 text-[11px] text-muted-foreground">
+              {emptySuggestionsHint}
+            </p>
+          )}
+
+          {searchPendingForInput && visibleRows.length === 0 && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
               <Spinner className="size-3" /> Searching…
             </p>
@@ -281,8 +372,22 @@ export function UsernameTypeahead({
           {canShowSettledEmptyState && lastFetchOk && (
             <div className="px-3 py-2">
               <p className="text-[11px] text-muted-foreground">
-                No Aquilla user named "{trimmedRaw}".
+                {multiSelect && scopedSearch
+                  ? // Scoped search only sees org/project-overlap users
+                    // (AQU-321), so a miss is NOT proof the account doesn't
+                    // exist — don't claim it is.
+                    `No match among people who share an org or project with you.`
+                  : `No Aquilla user named "${trimmedRaw}".`}
               </p>
+              {multiSelect && (
+                <button
+                  type="button"
+                  onClick={() => multiSelect.onStageTyped()}
+                  className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                >
+                  Add "{trimmedRaw}" by exact username
+                </button>
+              )}
               {showModeToggle && (
                 <button
                   type="button"
@@ -297,14 +402,59 @@ export function UsernameTypeahead({
           )}
 
           {canShowSettledEmptyState && !lastFetchOk && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground">
-              Couldn't search right now — we'll verify the username when you submit.
-            </p>
+            <div className="px-3 py-2">
+              <p className="text-[11px] text-muted-foreground">
+                Couldn't search right now — we'll verify the username when you submit.
+              </p>
+              {multiSelect && (
+                <button
+                  type="button"
+                  onClick={() => multiSelect.onStageTyped()}
+                  className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                >
+                  Add "{trimmedRaw}" by exact username
+                </button>
+              )}
+            </div>
           )}
 
-          {visibleResults.length > 0 && (
+          {visibleRows.length > 0 && (
             <ul className="py-0.5">
-              {visibleResults.map((u) => {
+              {visibleRows.map((u) => {
+                if (multiSelect) {
+                  // AQU-734: checkbox row. The whole row is one control acting as
+                  // a checkbox (role+aria-checked) so its accessible name is the
+                  // username and there's no nested-interactive nesting. Toggling
+                  // keeps the dropdown open so several people accumulate.
+                  const checked = multiSelect.stagedUsernames.has(
+                    u.username.toLowerCase(),
+                  )
+                  return (
+                    <li key={u.id}>
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={checked}
+                        onClick={() => multiSelect.onToggleResult(u)}
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted ${
+                          checked ? "bg-muted/60" : ""
+                        }`}
+                      >
+                        <span
+                          aria-hidden
+                          className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border ${
+                            checked
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-input"
+                          }`}
+                        >
+                          {checked && <Check className="h-3 w-3" />}
+                        </span>
+                        <span className="truncate">{u.username}</span>
+                      </button>
+                    </li>
+                  )
+                }
                 const isSelected =
                   value.resolved?.id === u.id && value.resolved?.username === u.username
                 return (

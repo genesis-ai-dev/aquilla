@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ChevronDown, ChevronRight, CircleCheck, FolderOpen, Mic, Sparkles } from "lucide-react"
+import { CircleCheck, FolderOpen, Mic, MoreHorizontal, Sparkles, UserPlus } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import {
   attentionRank,
@@ -24,6 +24,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
 import { AddLanguagePopover } from "./AddLanguagePopover"
@@ -43,7 +50,7 @@ function activityLabel(project: PortfolioProject, now: number): string | null {
   return null
 }
 
-type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name"
+type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
 
 function lensToSorting(lens: ProjectLens) {
   switch (lens) {
@@ -57,6 +64,10 @@ function lensToSorting(lens: ProjectLens) {
       return [{ id: "translated", desc: true }] as const
     case "name":
       return [{ id: "name", desc: false }] as const
+    case "pm":
+      // AQU-507: ascending by PM username; the column's sortingFn keeps
+      // unassigned rows last regardless of direction.
+      return [{ id: "pm", desc: false }] as const
   }
 }
 
@@ -139,31 +150,10 @@ export function OrgProjectsDataTable({
     return projects
   }, [projects, initialLens, tableNow])
 
+  const canAssign = Boolean(jwt && author != null)
+
   const columns = useMemo<ColumnDef<OrgProjectRow>[]>(
     () => [
-      {
-        id: "expand",
-        enableSorting: false,
-        header: () => <span className="sr-only">Expand languages</span>,
-        cell: ({ row }) => {
-          const isOpen = expanded.has(row.original.id)
-          return (
-            <button
-              type="button"
-              data-testid={`project-lanes-expand-${row.original.id}`}
-              aria-label={isOpen ? "Collapse languages" : "Expand languages"}
-              aria-expanded={isOpen}
-              className="flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleExpand(row.original.id)
-              }}
-            >
-              {isOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-            </button>
-          )
-        },
-      },
       {
         accessorKey: "name",
         header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
@@ -298,6 +288,29 @@ export function OrgProjectsDataTable({
         ),
       },
       {
+        // AQU-507: designated Project Manager. Sortable; unassigned rows sort
+        // last (see sortingFn) so scanning "by PM" surfaces owned projects first.
+        id: "pm",
+        accessorFn: (p) => p.pm?.username ?? "",
+        header: ({ column }) => <DataTableColumnHeader column={column} title="PM" />,
+        sortingFn: (a, b) => {
+          const av = a.original.pm?.username ?? null
+          const bv = b.original.pm?.username ?? null
+          if (av && bv) return av.localeCompare(bv)
+          if (av) return -1
+          if (bv) return 1
+          return 0
+        },
+        cell: ({ row }) => {
+          const username = row.original.pm?.username
+          return username ? (
+            <div className="truncate text-left text-xs text-muted-foreground">{username}</div>
+          ) : (
+            <div className="truncate text-left text-xs text-muted-foreground/60">Unassigned</div>
+          )
+        },
+      },
+      {
         id: "edited",
         accessorFn: (p) => p.lastEditAt ?? null,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
@@ -334,22 +347,68 @@ export function OrgProjectsDataTable({
           )
         },
       },
+      {
+        id: "actions",
+        enableSorting: false,
+        header: () => <span className="sr-only">Project actions</span>,
+        cell: ({ row }) => {
+          const p = row.original
+          return (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                data-testid={`project-row-actions-${p.id}`}
+                render={
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`More actions for ${p.name}`}
+                    className="text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent
+                align="end"
+                className="min-w-40"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {canAssign && (
+                  <DropdownMenuItem
+                    onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
+                  >
+                    <UserPlus className="size-4" />
+                    Assign work
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={() => navigate(`/project/${p.id}/members`)}
+                >
+                  Add member
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        },
+      },
     ],
     [
       roleByProjectId,
       showOrg,
       tableNow,
-      expanded,
       toggleExpand,
       canAddLanguage,
       defaultLaneLabelByProjectId,
       jwt,
       onLaneAdded,
+      canAssign,
+      navigate,
     ],
   )
 
   const colSpan = columns.length
-  const canAssign = Boolean(jwt && author != null)
 
   const assignProject = assignTarget
     ? projects.find((p) => p.id === assignTarget.projectId) ?? null
@@ -379,7 +438,6 @@ export function OrgProjectsDataTable({
         data={tableData}
         getRowId={(p) => p.id}
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
-        rowClassName="cursor-pointer"
         initialSorting={
           initialLens === "attention" ? [] : [...lensToSorting(initialLens)]
         }
@@ -388,7 +446,9 @@ export function OrgProjectsDataTable({
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
           const p = row.original
-          return `${p.name} ${p.orgName ?? ""}`.toLowerCase().includes(q)
+          // AQU-507: match PM username too, so the search box satisfies the
+          // "filter by PM" half of the AC without a separate filter control.
+          return `${p.name} ${p.orgName ?? ""} ${p.pm?.username ?? ""}`.toLowerCase().includes(q)
         }}
         toolbar={(table) => (
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
@@ -423,6 +483,7 @@ export function OrgProjectsDataTable({
           targetLanes={displayLanes(assignProject)
             .map((l) => l.lane)
             .filter((l) => l !== "")}
+          defaultLaneLabel={defaultLaneLabelByProjectId?.get(assignTarget.projectId) ?? ""}
           files={filesByProjectId?.get(assignTarget.projectId) ?? []}
           roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? ROLE.PROJECT_LEAD}
           jwt={jwt}

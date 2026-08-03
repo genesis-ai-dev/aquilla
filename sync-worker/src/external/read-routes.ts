@@ -56,6 +56,7 @@ import { AUTH_HINT } from "./discovery-route"
 import { listProjectsForCredential } from "./projects-list"
 import { validateApiCredential, type ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
+import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { paginate, parsePageParams } from "./pagination"
 
 export interface ExternalReadsEnv {
@@ -227,6 +228,14 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
 // GET /api/v1/external/projects/:projectId/search
 // ---------------------------------------------------------------------------
 
+// Search is the cheapest external call to spam (no write, no changeset) and
+// the most abuse-prone (FTS over the whole project on every request), so it's
+// the first external route throttled. Scoped per credential, not per IP — PAT
+// callers are already authenticated and IP-scoping a bot-run agent buys
+// nothing. Wide enough that a legitimate agent looping searches every few
+// seconds never trips it; tight enough to blunt a leaked-PAT query flood.
+const SEARCH_MAX_PER_CREDENTIAL = 300
+
 async function handleExternalSearch(
   request: Request,
   env: ExternalReadsEnv,
@@ -234,6 +243,15 @@ async function handleExternalSearch(
 ): Promise<Response> {
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
+
+  if (env.AQUILLA_PG) {
+    const identifier = `credential:${authed.ctx.credential.credentialId}`
+    const recent = await countRecentRateLimitEvents(env.AQUILLA_PG, "external_search", identifier)
+    if (recent >= SEARCH_MAX_PER_CREDENTIAL) {
+      return externalError("rate_limited", "search rate limit exceeded, slow down", 429)
+    }
+    await recordRateLimitEvent(env.AQUILLA_PG, "external_search", identifier)
+  }
 
   const url = new URL(request.url)
   const q = url.searchParams.get("q")
@@ -281,10 +299,11 @@ async function handleExternalSearch(
     return Response.json(paginate(results, offset, limit))
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    console.error("external search failed:", err)
     if (/syntax error|fts5/i.test(message)) {
-      return externalError("validation_failed", `invalid search query: ${message}`, 400)
+      return externalError("validation_failed", "invalid search query", 400)
     }
-    return externalError("validation_failed", `search failed: ${message}`, 400)
+    return externalError("validation_failed", "search failed", 400)
   }
 }
 

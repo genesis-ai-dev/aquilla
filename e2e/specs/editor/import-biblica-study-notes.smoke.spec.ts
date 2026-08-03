@@ -133,19 +133,19 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
 
   // Notes retain Biblica's richer Preface/chapter grouping in the universal
   // navigator while verse paragraphs remain protected source structure.
-  await expect(alice.getByRole("button", {
+  await expect(alice.getByRole("combobox", {
     name: /Current chapter: Preface/,
   })).toBeVisible()
-  await alice.getByRole("button", { name: /Current chapter: Preface/ }).click()
+  await alice.getByRole("combobox", { name: /Current chapter: Preface/ }).click()
   await expect(alice.getByRole("option", { name: /^Cells 1–1 / }))
     .toHaveAttribute("data-milestone-subsection")
   await alice.keyboard.press("Escape")
   await alice.getByRole("button", { name: "Next chapter" }).click()
-  await expect(alice.getByRole("button", {
+  await expect(alice.getByRole("combobox", {
     name: /Current chapter: Genesis Preface/,
   })).toBeVisible()
   await alice.getByRole("button", { name: "Next chapter" }).click()
-  await expect(alice.getByRole("button", {
+  await expect(alice.getByRole("combobox", {
     name: /Current chapter: Genesis 1/,
   })).toBeVisible()
   await expect(ws.cellRow(2)).toBeVisible()

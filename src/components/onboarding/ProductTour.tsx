@@ -349,14 +349,16 @@ function TooltipCard({ step, stepIndex, totalSteps, pos, onNext, onPrev, onSkip 
       {/* Header */}
       <div className="flex items-start justify-between gap-2 p-4 pb-2">
         <p className="text-sm font-semibold leading-tight">{step.title}</p>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-xs"
           aria-label="Skip tour"
           onClick={onSkip}
-          className="shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="shrink-0 text-muted-foreground"
         >
-          <X className="h-3.5 w-3.5" />
-        </button>
+          <X />
+        </Button>
       </div>
 
       {/* Body */}

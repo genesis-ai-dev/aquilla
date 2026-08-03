@@ -34,13 +34,16 @@ export function SuggestionBanner({ suggestions, onApply, onDismiss }: Props) {
               <Button size="sm" onClick={() => onApply(suggestions)}>Apply all</Button>
             </div>
           </div>
-          <button
-            className="p-0.5 rounded hover:bg-amber-100 dark:hover:bg-amber-900/40"
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="text-amber-800 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/40"
             onClick={onDismiss}
             aria-label="Dismiss"
           >
-            <X className="h-3.5 w-3.5" />
-          </button>
+            <X />
+          </Button>
         </div>
       </div>
       <RenameSuggestionsDialog

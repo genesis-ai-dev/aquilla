@@ -1,2 +1,23 @@
+# aquilla.app — marketing pages are crawlable; app-only routes stay out of the index.
 User-agent: *
-Disallow: /bible-translation
+Disallow: /project/
+Disallow: /projects
+Disallow: /assigned
+Disallow: /shared
+Disallow: /join/
+Disallow: /join-org/
+Disallow: /link/
+Disallow: /approve/
+Disallow: /login
+Disallow: /onboarding
+Disallow: /reset-password
+Disallow: /verify-email
+Disallow: /settings
+Disallow: /preferences
+Disallow: /members
+Disallow: /teams
+Disallow: /oauth/
+Disallow: /__dev/
+Disallow: /__marketing/
+
+Sitemap: https://aquilla.app/sitemap.xml

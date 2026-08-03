@@ -40,8 +40,8 @@ test("terminology violation shows the inline blot (no advisory band), explained 
   await glossary.addTerm("sample", "verboten")
   await glossary.setRenderingStatus("sample", "forbidden")
 
-  // Import sample.md and open the editor.
-  await alice.goto(`/project/${projectId}`)
+  // Import sample.md and open the editor (bare /project/:id is intentionally dead).
+  await alice.goto(`/project/${projectId}/editor`)
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
   await ws.openFileBySubstring("sample")

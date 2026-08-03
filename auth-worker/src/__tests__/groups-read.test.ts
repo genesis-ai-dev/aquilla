@@ -81,6 +81,46 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     expect(body.description).toBe("West Africa translation team")
   })
 
+  // AQU-748: a contributor must not see the member list of a team they don't
+  // belong to. Seed a second team (id 11) that anna (viewer, role 100) is NOT in.
+  async function seedSecondTeam() {
+    await seedUser(3, "kofi")
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 3, 400, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO groups (id, org_id, name, created_by) VALUES (11, 1, 'East Africa', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO group_members (group_id, user_id) VALUES (11, 1), (11, 3)").run()
+  }
+
+  it("AQU-748: hides a team's members from an org member who is not on that team", async () => {
+    await seedGroups()
+    await seedSecondTeam()
+    // anna (role 100, member of team 10 only) tries to read team 11's detail.
+    const res = await app.request("/api/v2/orgs/1/groups/11", { headers: authHeader(await jwtFor("anna")) }, env)
+    expect(res.status).toBe(404)
+  })
+
+  it("AQU-748: a member still sees their own team's members (no regression)", async () => {
+    await seedGroups()
+    await seedSecondTeam()
+    // anna is a member of team 10 — must still see its members.
+    const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("anna")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { members: Array<{ username: string }> }
+    expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "wendi"])
+  })
+
+  it("AQU-748: maintainers+ see any team's members even when not a member", async () => {
+    await seedGroups()
+    await seedSecondTeam()
+    // wendi is an org owner (role 700) but NOT a member of team 11 in this setup?
+    // wendi IS in team 11 (seedSecondTeam adds user 1). Remove her to prove the
+    // admin bypass, not membership, grants access.
+    await env.AQUILLA_PG.prepare("DELETE FROM group_members WHERE group_id = 11 AND user_id = 1").run()
+    const res = await app.request("/api/v2/orgs/1/groups/11", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { members: Array<{ username: string }> }
+    expect(body.members.map((m) => m.username)).toEqual(["kofi"])
+  })
+
   it("excludes cross-org project grants from group detail", async () => {
     await seedGroups()
     await seedUser(8, "other")

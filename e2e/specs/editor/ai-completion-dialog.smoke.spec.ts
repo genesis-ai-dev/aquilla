@@ -4,9 +4,8 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * Run AI completions dialog — ConfirmActionDialog.
  *
- * AQU-661: the workspace actions live in the header ⋯ overflow menu. After
- * importing a file with untranslated cells, the menu lists "Run AI completions"
- * (isAvailable when a file is open and the role permits target commits).
+ * With a file open, "Run AI completions" lives in the chapter-row File
+ * options ⋯ menu (isAvailable when the role permits target commits).
  *
  * Selecting it triggers requiresConfirmation → opens ConfirmActionDialog:
  *   - DialogTitle "Run completions"
@@ -20,12 +19,9 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  */
 test("AI completions dialog opens with acknowledgement checkbox", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Completions ${Date.now()}` })
-  await openSeededProject(alice, seeded)
+  const ws = await openSeededProject(alice, seeded)
 
-  // AQU-661: open the header ⋯ overflow menu, then pick "Run AI completions".
-  const moreBtn = alice.getByRole("banner").getByRole("button", { name: /^More$/i })
-  await expect(moreBtn).toBeVisible({ timeout: 10_000 })
-  await moreBtn.click()
+  await ws.openFileOverflowMenu()
   await alice.getByRole("menuitem", { name: /Run AI completions/i }).click()
 
   // ConfirmActionDialog opens as a <Dialog> with aria role "dialog".

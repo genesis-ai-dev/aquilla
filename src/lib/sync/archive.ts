@@ -61,6 +61,9 @@ export interface ProjectStateResponse {
   /** AQU-476/478: max upstream server_seq this project has mirrored so far. */
   sourceLinkCursor?: number | null
   role: { level: number; name: string; source: string }
+  /** AQU-507: designated Project Manager (null = unassigned; absent = older
+   *  server). Distinct from the member roster / permission ladder. */
+  pm?: { id: number; username: string } | null
   /** Populated by the codex-db.files join. Optional only because old
    *  deployments may not have shipped the join yet — current servers
    *  always return at least []. */

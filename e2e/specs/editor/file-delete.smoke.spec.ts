@@ -23,7 +23,7 @@ test("file delete dialog opens with acknowledgement checkbox", async ({ alice })
   await expect(fileRow).toBeVisible({ timeout: 10_000 })
   await fileRow.click({ button: "right" })
 
-  // Click "Delete" in the context menu (shadcn DropdownMenu — role="menuitem").
+  // Click "Delete" in the context menu (shadcn ContextMenu — role="menuitem").
   const deleteBtn = alice.getByRole("menuitem", { name: /^Delete$/i })
   await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
   await deleteBtn.click()

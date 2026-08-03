@@ -90,6 +90,31 @@ interface OrgSettingsResponse {
   updatedBy: number | null
 }
 
+/**
+ * Settings keys that hold secret values (third-party provider API keys).
+ * These must never reach a client whose org role is below the write gate —
+ * GET is otherwise open to any org member (viewer included), so without this
+ * redaction a viewer could read the org's live Gemini/TTS vendor key straight
+ * out of the settings response and use or exfiltrate it.
+ */
+const SECRET_BLOB_KEYS = new Set(["orgProviderKeys"])
+const REDACTED_MARKER = "••••••••"
+
+function redactSecrets(settings: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...settings }
+  for (const key of SECRET_BLOB_KEYS) {
+    const value = result[key]
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const redacted: Record<string, unknown> = {}
+      for (const subKey of Object.keys(value as Record<string, unknown>)) {
+        redacted[subKey] = REDACTED_MARKER
+      }
+      result[key] = redacted
+    }
+  }
+  return result
+}
+
 function rowToResponse(row: OrgSettingsRow): OrgSettingsResponse {
   let settings: Record<string, unknown> = {}
   try {
@@ -145,6 +170,9 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   if (role == null) return c.json({ error: "no access to org" }, 403)
 
   const response = await loadSettings(c.env, orgId)
+  if (role < SETTINGS_WRITE_MIN_ROLE) {
+    return c.json({ ...response, settings: redactSecrets(response.settings) })
+  }
   return c.json(response)
 })
 
@@ -263,9 +291,8 @@ orgSettings.on(
         if (fresh.version !== newVersion) {
           return c.json({ error: "version mismatch", current: fresh }, 409)
         }
-        const message = err instanceof Error ? err.message : String(err)
         console.error("org_settings insert failed:", err)
-        return c.json({ error: `write failed: ${message}` }, 500)
+        return c.json({ error: "write failed" }, 500)
       }
     } else {
       const result = await c.env.AQUILLA_PG.prepare(

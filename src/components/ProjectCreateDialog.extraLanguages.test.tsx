@@ -72,7 +72,7 @@ const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
 
 function openDialogWithBasics(opts?: { name?: string; source?: string; target?: string }) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
-  fireEvent.click(screen.getByText("+ New Project"))
+  fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
   fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
     target: { value: opts?.name ?? "Multilingual Episode 1" },
@@ -251,7 +251,7 @@ describe("ProjectCreateDialog — self-contained extra target languages (AQU-538
 
   it("does not offer the extra-language UI on the source-only shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Source-only/i))
 
@@ -261,7 +261,7 @@ describe("ProjectCreateDialog — self-contained extra target languages (AQU-538
 
   it("does not offer the extra-language UI on the linked-target shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 

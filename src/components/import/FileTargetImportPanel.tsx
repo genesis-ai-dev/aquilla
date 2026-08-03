@@ -51,6 +51,10 @@ export interface FileTargetImportPanelProps {
   /** Optimistically patch many cells at once so the editor reflects the
    *  imported translations before the outbox finishes flushing. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string }[]) => void
+  /** AQU-634: per-project USFM front-matter opt-out. When on, the incoming USFM
+   *  target rows exclude book-name/title/TOC + intro-block cells, staying
+   *  aligned with source cells imported under the same setting. */
+  excludeFrontMatter?: boolean
 }
 
 type PanelStep = "file" | "sheet" | "mapping" | "review"
@@ -69,6 +73,7 @@ export function FileTargetImportPanel({
   onCancel,
   onError,
   applyOptimisticTargetEdits,
+  excludeFrontMatter,
 }: FileTargetImportPanelProps) {
   const [step, setStep] = useState<PanelStep>("file")
   const [error, setError] = useState<string | null>(null)
@@ -96,7 +101,9 @@ export function FileTargetImportPanel({
     try {
       assertSourceUploadByteLength(file.size)
       if (USFM_EXTENSIONS.has(ext)) {
-        const rows = usfmToTargetRows(decodeImportText(await file.arrayBuffer(), file.name))
+        const rows = usfmToTargetRows(decodeImportText(await file.arrayBuffer(), file.name), {
+          excludeFrontMatter,
+        })
         if (rows.length === 0) {
           setError("No verses found in this USFM file.")
           return
@@ -131,7 +138,7 @@ export function FileTargetImportPanel({
       setError(message)
       onError?.(message, "parse")
     }
-  }, [cells, showReview, onError])
+  }, [cells, showReview, onError, excludeFrontMatter])
 
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
@@ -217,7 +224,7 @@ export function FileTargetImportPanel({
           }}
         >
           <p className="text-sm text-muted-foreground">Drop a file here, or</p>
-          <label className="cursor-pointer">
+          <label>
             <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
               Choose file
             </span>
@@ -319,7 +326,7 @@ export function FileTargetImportPanel({
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border">
           <div className="divide-y">
             {matched.map((m) => (
-              <label key={m.cellId} className="flex cursor-pointer items-start gap-2 px-3 py-2 hover:bg-muted/30">
+              <label key={m.cellId} className="flex items-start gap-2 px-3 py-2 hover:bg-muted/30">
                 <input
                   type="checkbox"
                   className="mt-0.5 rounded"

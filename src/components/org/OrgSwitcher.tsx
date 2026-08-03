@@ -1,11 +1,22 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Building2, Check, ChevronDown, Plus, Search } from "lucide-react"
+import { Building2, Check, ChevronDown, Plus, SearchIcon, X } from "lucide-react"
 import { useActiveOrg, type GuestOrg } from "@/context/OrgContext"
 import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { RoleLabel } from "@/components/RoleLabel"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
+import {
+  ALL_ORGS_PARAM,
+  orgHomePath,
+  swapOrgInPath,
+} from "@/lib/navigation/org-paths"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,13 +25,28 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
 
 const ORG_MENU_ITEM_CLASS =
-  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5"
+  // hover: only — Base UI highlight-on-hover would steal focus from the search input.
+  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5 hover:bg-accent"
 
-// AQU-759: below this many switchable orgs (members + guests) a search box is
-// clutter; at or above it the list is long enough that type-to-filter helps.
-const ORG_SEARCH_MIN = 6
+/** Muted meta (role / "All projects") — `!` beats menu `focus:**:text-accent-foreground`. */
+const ORG_MENU_META_CLASS = "text-xs text-muted-foreground!"
+
+/** ~10 org rows (py-1.5 + text-sm ≈ 2rem each). */
+const ORG_LIST_MAX_HEIGHT_CLASS = "max-h-80"
+
+function orgMatchesSearch(name: string, query: string): boolean {
+  const normalized = query.trim().toLocaleLowerCase()
+  if (!normalized) return true
+  return name.toLocaleLowerCase().includes(normalized)
+}
 
 function byName(a: { name: string | null }, b: { name: string | null }) {
   return (a.name ?? "").localeCompare(b.name ?? "")
@@ -45,7 +71,7 @@ function OrgMark({
         menuSafeColor="var(--muted-foreground)"
         fallbackClassName="bg-muted"
       >
-        <Plus className="size-3" />
+        <Plus className="size-3 text-muted-foreground!" aria-hidden />
       </InitialsAvatar>
     )
   }
@@ -56,10 +82,12 @@ function OrgMark({
         size="xs"
         shape="square"
         menuSafe
-        menuSafeColor="var(--primary-foreground)"
+        menuSafeColor="#000"
         fallbackClassName="bg-primary"
       >
-        <Building2 className="size-3" />
+        {/* color on the SVG itself — menu `focus:**:text-accent-foreground` paints
+            descendants light on press; parent color alone cannot beat that. */}
+        <Building2 className="size-3 text-black!" color="#000" aria-hidden />
       </InitialsAvatar>
     )
   }
@@ -74,26 +102,20 @@ export function OrgSwitcher() {
   const navigate = useNavigate()
 
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [query, setQuery] = useState("")
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   // AQU-759: keep both member and guest lists alphabetical regardless of the
   // order the backend returned them in (Joel: "Keep it alphabetical").
   const sortedOrgs = useMemo(() => [...orgs].sort(byName), [orgs])
   const sortedGuestOrgs = useMemo(() => [...guestOrgs].sort(byName), [guestOrgs])
 
-  // AQU-759: a search box for long org lists. Filter member + guest orgs by a
-  // case-insensitive substring of their display name; "All organizations" is
-  // itself matchable so it disappears once the query no longer matches it.
-  const q = query.trim().toLowerCase()
-  const nameMatches = (name: string) => q === "" || name.toLowerCase().includes(q)
-  const visibleOrgs = sortedOrgs.filter((o) => nameMatches(o.name ?? "Workspace"))
-  const visibleGuestOrgs = sortedGuestOrgs.filter((g) => nameMatches(g.name ?? `Org #${g.id}`))
-  const showSearch = orgs.length + guestOrgs.length >= ORG_SEARCH_MIN
-
-  // AQU-473: a project-only invitee has zero member orgs but may still have
-  // guest orgs to switch into — don't hide the whole switcher for them.
-  if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
+  useEffect(() => {
+    if (!open) return
+    // Keep typing in the filter; menu open otherwise focuses the first item.
+    queueMicrotask(() => searchInputRef.current?.focus())
+  }, [open])
 
   // AQU-624: a guest org isn't a membership, so it can't become the `activeOrg`
   // without misrepresenting the caller's role (AQU-473). Instead we treat the
@@ -112,20 +134,37 @@ export function OrgSwitcher() {
   const guestSelected = selectedGuest != null
 
   const showAllOrgs = orgs.length > 1
-  // AQU-759: the "All organizations" row is filtered by the search too.
-  const showAllOrgsRow = showAllOrgs && nameMatches("All organizations")
-  const noMatches =
-    !showAllOrgsRow && visibleOrgs.length === 0 && visibleGuestOrgs.length === 0
   const title = guestSelected
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
     : isAllOrgs
       ? "All organizations"
       : activeOrg?.name ?? "Workspace"
 
+  const filteredOrgs = useMemo(
+    () => sortedOrgs.filter((o) => orgMatchesSearch(o.name ?? "Workspace", search)),
+    [sortedOrgs, search],
+  )
+  const filteredGuestOrgs = useMemo(
+    () => sortedGuestOrgs.filter((g) => orgMatchesSearch(g.name ?? `Org #${g.id}`, search)),
+    [sortedGuestOrgs, search],
+  )
+  const showAllOrgsRow = showAllOrgs && search.trim() === ""
+  const listEmpty =
+    !showAllOrgsRow && filteredOrgs.length === 0 && filteredGuestOrgs.length === 0
+
+  // AQU-473: a project-only invitee has zero member orgs but may still have
+  // guest orgs to switch into — don't hide the whole switcher for them.
+  if (!activeOrg && !isAllOrgs && guestOrgs.length === 0) return null
+
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen)
+    if (nextOpen) setSearch("")
+  }
+
   function handleAllOrgs() {
     setAllOrgs()
     setOpen(false)
-    navigate({ pathname: "/", search: "?org=all" })
+    navigate(swapOrgInPath(location.pathname, ALL_ORGS_PARAM))
   }
 
   function handleActiveOrg(orgId: number) {
@@ -133,9 +172,10 @@ export function OrgSwitcher() {
     setOpen(false)
     // `|| guestSelected`: returning to a member org from a guest's scoped
     // shared view (`/shared?org=<id>`) must navigate to that org's overview,
-    // symmetric with picking a guest org (AQU-624).
+    // symmetric with picking a guest org (AQU-624). swapOrgInPath falls back
+    // to the org home when the current path isn't org-scoped (e.g. /shared).
     if (isOrgScopedRoute(location.pathname) || location.pathname === "/" || guestSelected) {
-      navigate({ pathname: "/", search: `?org=${orgId}` })
+      navigate(swapOrgInPath(location.pathname, orgId))
     }
   }
 
@@ -152,7 +192,9 @@ export function OrgSwitcher() {
     await refresh()
     setActiveOrg(orgId)
     if (isOrgScopedRoute(location.pathname) || location.pathname === "/") {
-      navigate({ pathname: "/", search: `?org=${orgId}` })
+      navigate(swapOrgInPath(location.pathname, orgId))
+    } else {
+      navigate(orgHomePath(orgId))
     }
   }
 
@@ -161,16 +203,9 @@ export function OrgSwitcher() {
     setCreateDialogOpen(true)
   }
 
-  // AQU-759: clear the filter whenever the menu closes so it reopens showing
-  // the full list rather than a stale query.
-  function handleOpenChange(next: boolean) {
-    setOpen(next)
-    if (!next) setQuery("")
-  }
-
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+      <DropdownMenu open={open} onOpenChange={handleOpenChange} highlightItemOnHover={false}>
         <DropdownMenuTrigger
           render={
             <button
@@ -181,99 +216,148 @@ export function OrgSwitcher() {
           }
         >
           <OrgMark name={title} allOrgs={!guestSelected && isAllOrgs} />
-          <span className="truncate font-medium">{title}</span>
+          <span className="truncate">{title}</span>
           <ChevronDown className="ml-auto size-4 opacity-50" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-72 rounded-lg" align="start" side="bottom" sideOffset={4}>
-          {showSearch && (
-            <div className="px-1 pt-1 pb-0.5">
-              <div className="flex items-center gap-2 rounded-md border px-2 py-1.5">
-                <Search className="size-4 shrink-0 text-muted-foreground" />
-                <input
-                  type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  // Keep printable keystrokes in the field: base-ui's menu
-                  // typeahead would otherwise swallow them to move the highlight.
-                  onKeyDown={(e) => {
-                    if (e.key !== "Escape" && e.key !== "ArrowDown" && e.key !== "ArrowUp") {
-                      e.stopPropagation()
-                    }
+        <DropdownMenuContent
+          className="w-72 overflow-hidden rounded-lg p-0 flex flex-col"
+          align="start"
+          side="bottom"
+          sideOffset={4}
+        >
+          {/* Icon column matches list rows: p-1 + px-2 inset, then 1.25rem avatar slot. */}
+          <InputGroup className="h-10 w-auto rounded-none border-0 bg-transparent shadow-none outline-none dark:bg-transparent ring-0 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!">
+            <InputGroupAddon
+              align="inline-start"
+              className="ml-3 w-5 justify-center p-0!"
+            >
+              <SearchIcon className="size-4 text-muted-foreground" />
+            </InputGroupAddon>
+            <InputGroupInput
+              ref={searchInputRef}
+              placeholder="Find an organization…"
+              aria-label="Find an organization"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  handleOpenChange(false)
+                  return
+                }
+                e.stopPropagation()
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+            {search ? (
+              <InputGroupAddon
+                align="inline-end"
+                // Match Create row inset (list `p-1` + item `px-2`); kill addon’s
+                // default `has-[>button]:mr-[-0.3rem]` that pulls the X flush.
+                className="p-0! pr-2! has-[>button]:mr-0!"
+              >
+                <InputGroupButton
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Clear search"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSearch("")
+                    searchInputRef.current?.focus()
                   }}
-                  aria-label="Search organizations"
-                  placeholder="Search organizations…"
-                  autoFocus
-                  className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                />
-              </div>
-            </div>
-          )}
-          {/* AQU-141: cap the list height so long org lists stay scrollable while
-              the search box and Create action remain pinned in view. */}
-          <div className="max-h-72 overflow-x-hidden overflow-y-auto">
-            <DropdownMenuGroup>
-              {showAllOrgsRow && (
-                <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={handleAllOrgs}>
-                  <OrgMark name="All organizations" allOrgs />
-                  <span className="truncate">All organizations</span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">All projects</span>
-                    {!guestSelected && isAllOrgs && <Check className="size-4 opacity-60" />}
-                  </span>
-                </DropdownMenuItem>
-              )}
-              {visibleOrgs.map((o) => {
-                const name = o.name ?? "Workspace"
-                const selected = !guestSelected && activeOrgId === o.id
-                return (
-                  <DropdownMenuItem
-                    key={o.id}
-                    className={ORG_MENU_ITEM_CLASS}
-                    onClick={() => handleActiveOrg(o.id)}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <X />
+                </InputGroupButton>
+              </InputGroupAddon>
+            ) : null}
+          </InputGroup>
+          <DropdownMenuSeparator className="mx-0 my-0" />
+          <div
+            role="presentation"
+            className={`${ORG_LIST_MAX_HEIGHT_CLASS} overflow-y-auto overscroll-contain p-1 scrollbar-thin flex-1 flex flex-col`}
+          >
+            {listEmpty ? (
+              <Empty className="min-h-32 border-0 p-4 gap-2">
+                <EmptyHeader>
+                  <EmptyMedia
+                    variant="icon"
+                    className="mb-0 border border-border bg-transparent text-muted-foreground"
                   >
-                    <OrgMark name={name} />
-                    <span className="truncate">{name}</span>
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      <RoleLabel name={o.role.name} className="text-xs text-muted-foreground" />
-                      {selected && <Check className="size-4 opacity-60" />}
-                    </span>
-                  </DropdownMenuItem>
-                )
-              })}
-            </DropdownMenuGroup>
-            {visibleGuestOrgs.length > 0 && (
+                    <SearchIcon />
+                  </EmptyMedia>
+                  <EmptyTitle className="text-muted-foreground font-normal">
+                    No organizations found.
+                  </EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            ) : (
               <>
-                <DropdownMenuSeparator className="mx-0 my-1" />
-                <DropdownMenuGroup data-testid="guest-orgs">
-                  {visibleGuestOrgs.map((g) => (
+                <DropdownMenuGroup>
+                  {showAllOrgsRow && (
                     <DropdownMenuItem
-                      key={g.id}
-                      className={ORG_MENU_ITEM_CLASS}
-                      onClick={() => handleGuestOrg(g)}
+                      className={`${ORG_MENU_ITEM_CLASS} focus:[&_[data-slot=avatar]_svg]:text-black! data-highlighted:[&_[data-slot=avatar]_svg]:text-black!`}
+                      onClick={handleAllOrgs}
                     >
-                      <OrgMark name={g.name ?? `Org #${g.id}`} />
-                      <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
+                      <OrgMark name="All organizations" allOrgs />
+                      <span className="truncate">All organizations</span>
                       <span className="flex shrink-0 items-center gap-1.5">
-                        <RoleLabel name="guest" className="text-xs text-muted-foreground" />
-                        {selectedGuestOrgId === g.id && <Check className="size-4 opacity-60" />}
+                        <span className={ORG_MENU_META_CLASS}>All projects</span>
+                        {!guestSelected && isAllOrgs && <Check className="size-4 opacity-60" />}
                       </span>
                     </DropdownMenuItem>
-                  ))}
+                  )}
+                  {filteredOrgs.map((o) => {
+                    const name = o.name ?? "Workspace"
+                    const selected = !guestSelected && activeOrgId === o.id
+                    return (
+                      <DropdownMenuItem
+                        key={o.id}
+                        className={ORG_MENU_ITEM_CLASS}
+                        onClick={() => handleActiveOrg(o.id)}
+                      >
+                        <OrgMark name={name} />
+                        <span className="truncate">{name}</span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <RoleLabel name={o.role.name} className={ORG_MENU_META_CLASS} />
+                          {selected && <Check className="size-4 opacity-60" />}
+                        </span>
+                      </DropdownMenuItem>
+                    )
+                  })}
                 </DropdownMenuGroup>
+                {filteredGuestOrgs.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator className="mx-0 my-1" />
+                    <DropdownMenuGroup data-testid="guest-orgs">
+                      {filteredGuestOrgs.map((g) => (
+                        <DropdownMenuItem
+                          key={g.id}
+                          className={ORG_MENU_ITEM_CLASS}
+                          onClick={() => handleGuestOrg(g)}
+                        >
+                          <OrgMark name={g.name ?? `Org #${g.id}`} />
+                          <span className="truncate">{g.name ?? `Org #${g.id}`}</span>
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            <RoleLabel name="guest" className={ORG_MENU_META_CLASS} />
+                            {selectedGuestOrgId === g.id && <Check className="size-4 opacity-60" />}
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </>
+                )}
               </>
             )}
-            {noMatches && (
-              <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                No organizations found
-              </div>
-            )}
           </div>
-          <DropdownMenuSeparator className="mx-0 my-1" />
-          <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={openCreateDialog}>
-            <OrgMark name="Create" create />
-            <span className="truncate text-muted-foreground">Create</span>
-            <span aria-hidden />
-          </DropdownMenuItem>
+          <DropdownMenuSeparator className="mx-0 my-0" />
+          <div role="presentation" className="p-1">
+            <DropdownMenuItem className={ORG_MENU_ITEM_CLASS} onClick={openCreateDialog}>
+              <OrgMark name="Create" create />
+              <span className="truncate text-muted-foreground!">Create</span>
+              <span aria-hidden />
+            </DropdownMenuItem>
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
 

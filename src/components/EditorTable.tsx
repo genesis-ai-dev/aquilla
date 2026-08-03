@@ -674,6 +674,9 @@ interface EditorTableProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  /** Non-null when the user cannot write to the termbase (below Maintainer) —
+   *  AddConceptDialog opens blocked with this reason instead of accepting input. */
+  addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -748,7 +751,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
@@ -1892,6 +1895,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onOpenAudioSetup={onOpenAudioSetup}
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
+          addConceptBlockedReason={addConceptBlockedReason}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -2408,6 +2412,7 @@ interface MemoizedRowProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -2480,7 +2485,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -2639,6 +2644,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
         onAddConceptFromSelection={onAddConceptFromSelection}
+        addConceptBlockedReason={addConceptBlockedReason}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -2796,6 +2802,7 @@ interface EditorRowProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -3638,7 +3645,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -5368,33 +5375,28 @@ function EditorRow({
             controls (character picker, generate, play, make-a-character). In
             Text mode it shows the source text as usual. */}
         {audioLens ? (
-          (() => {
-            const vid = assignedCastVoiceId(audioLens.settings, cell.id) ?? audioLens.defaultVoiceId
-            const resolvedVoice =
-              audioLens.voices.find((v) => v.id === vid) ?? audioLens.voices[0]
-            if (!resolvedVoice) return <div />
-            return (
-              <div
-                className={cn("flex flex-col transition-opacity", isSynthBusy && "opacity-70")}
-                dir="ltr"
-              >
-                <CellVoicePanel
-                  cell={cell}
-                  project={audioLens.project}
-                  projectId={audioLens.projectId}
-                  settings={audioLens.settings}
-                  voices={audioLens.voices}
-                  resolvedVoice={resolvedVoice}
-                  session={audioLens.session}
-                  username={audioLens.username}
-                  onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
-                  onAfterGenerate={audioLens.onAfterGenerate}
-                  onPlay={() => audioLens.onPlayCell(cell.id, cell)}
-                  onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
-                />
-              </div>
-            )
-          })()
+          // AQU-768: the panel resolves this line's active voice from `settings`
+          // itself — don't pre-resolve it here (a stale-prone JSX IIFE deep in
+          // this huge row let the React Compiler serve a stale voice, so a
+          // freshly-picked voice didn't stick in the trigger).
+          <div
+            className={cn("flex flex-col transition-opacity", isSynthBusy && "opacity-70")}
+            dir="ltr"
+          >
+            <CellVoicePanel
+              cell={cell}
+              project={audioLens.project}
+              projectId={audioLens.projectId}
+              settings={audioLens.settings}
+              voices={audioLens.voices}
+              session={audioLens.session}
+              username={audioLens.username}
+              onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
+              onAfterGenerate={audioLens.onAfterGenerate}
+              onPlay={() => audioLens.onPlayCell(cell.id, cell)}
+              onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
+            />
+          </div>
         ) : (
           <div
             data-showcase="editor.source"
@@ -6855,6 +6857,7 @@ function EditorRow({
         <AddConceptDialog
           open={showAddConceptDialog}
           sourceTerm={sourceSelection ?? ""}
+          blockedReason={addConceptBlockedReason}
           onConfirm={handleAddConceptConfirm}
           onCancel={handleAddConceptCancel}
         />

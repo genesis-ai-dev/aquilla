@@ -35,6 +35,7 @@ import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
+  IDML_SLOT_NODE_NAME,
   idmlEditableSlotPosition,
   idmlEditableSlotOffsetPosition,
   idmlEditablePlainOffsetPosition,
@@ -42,6 +43,7 @@ import {
   idmlEditorExtensions,
   isEditableIdmlSelection,
   prepareIdmlEditorContent,
+  sanitizeIdmlSlotInsertion,
   serializeIdmlEditorDocument,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
@@ -153,10 +155,33 @@ interface IdmlInsertedRange {
   to: number
 }
 
+/**
+ * AQU-758: the slot character immediately before/after an insertion point,
+ * used to decide whether an inserted space would create spurious whitespace.
+ * Returns "" at a slot edge or against a protected token / line break — anything
+ * that is not literal slot text reads as a boundary.
+ */
+function idmlSlotBoundaryChar(
+  doc: ProseMirrorNode,
+  pos: number,
+  side: "before" | "after",
+): string {
+  const resolved = doc.resolve(pos)
+  if (resolved.parent.type.name !== IDML_SLOT_NODE_NAME) return ""
+  const offset = resolved.parentOffset
+  if (side === "before") {
+    if (offset <= 0) return ""
+    return resolved.parent.textBetween(offset - 1, offset)
+  }
+  if (offset >= resolved.parent.content.size) return ""
+  return resolved.parent.textBetween(offset, offset + 1)
+}
+
 function replaceIdmlSelectionWithPlainText(
   view: EditorView,
   text: string,
   requestedRange?: IdmlInsertedRange,
+  mode: "paste" | "type" = "type",
 ): IdmlInsertedRange | null {
   const selection = view.state.selection
   const fallbackPosition = idmlEditableSlotPosition(view.state.doc)
@@ -166,7 +191,9 @@ function replaceIdmlSelectionWithPlainText(
     ?? (isEditableIdmlSelection(selection) ? selection.to : fallbackPosition)
   if (from === null || to === null) return null
 
-  const normalized = text.replace(/\r\n?/g, "\n")
+  const before = idmlSlotBoundaryChar(view.state.doc, from, "before")
+  const after = idmlSlotBoundaryChar(view.state.doc, to, "after")
+  const normalized = sanitizeIdmlSlotInsertion(text, before, after, mode).replace(/\r\n?/g, "\n")
   const lines = normalized.split("\n")
   const nodes = lines.flatMap((line, index) => [
     ...(line.length > 0 ? [view.state.schema.text(line)] : []),
@@ -633,7 +660,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         const plainText = event.clipboardData?.getData("text/plain")
           ?? slice.content.textBetween(0, slice.content.size, "\n")
         event.preventDefault()
-        replaceIdmlSelectionWithPlainText(view, plainText)
+        // AQU-758: paste mode strips leading/trailing/doubled spaces so a paste
+        // never injects the spurious whitespace the health check later flags.
+        replaceIdmlSelectionWithPlainText(view, plainText, undefined, "paste")
         return true
       },
       handleDoubleClick(view, pos, event) {

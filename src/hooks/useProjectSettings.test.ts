@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
-import { useProjectSettings, type PatchOutcome } from "./useProjectSettings"
+import { useProjectSettings, describePatchFailure, type PatchOutcome } from "./useProjectSettings"
 import * as restClient from "@/lib/sync/project-settings"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -549,5 +549,34 @@ describe("useProjectSettings — fail-closed GET (DCS lockdown)", () => {
     // Old behavior wrote null over the snapshot; the fixed hook keeps it.
     expect(result.current.version).toBe(9)
     expect(result.current.settings.sourceLanguage).toBe("de")
+  })
+})
+
+// AQU-754: callers that write on a user's behalf (e.g. adding a concept from
+// the editor) must surface a non-ok PatchOutcome instead of dropping it — the
+// silent no-op class AQU-749 fixed on the Terminology page.
+describe("describePatchFailure", () => {
+  it("returns null for an ok outcome", () => {
+    expect(describePatchFailure({ kind: "ok" })).toBeNull()
+  })
+
+  it("explains a role block", () => {
+    const msg = describePatchFailure({ kind: "blocked", reason: "role" })
+    expect(msg).toMatch(/maintainer role or higher/i)
+  })
+
+  it("explains an offline block", () => {
+    const msg = describePatchFailure({ kind: "blocked", reason: "offline" })
+    expect(msg).toMatch(/offline/i)
+  })
+
+  it("explains a version conflict", () => {
+    const conflict = { kind: "conflict", latest: {} } as unknown as PatchOutcome
+    expect(describePatchFailure(conflict)).toMatch(/changed elsewhere/i)
+  })
+
+  it("includes the server message on error", () => {
+    const msg = describePatchFailure({ kind: "error", message: "boom" })
+    expect(msg).toMatch(/boom/)
   })
 })

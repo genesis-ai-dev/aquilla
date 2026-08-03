@@ -165,6 +165,13 @@ export async function listSessionsNeedingEmail(): Promise<Array<{ key: string; j
     .map(([key, s]) => ({ key, jwt: s.jwt }))
 }
 
+/** Every session's JWT, for a "sign out all accounts" fan-out that needs to
+ *  revoke each token server-side before the local envelope is cleared. */
+export async function listAllSessionJwts(): Promise<string[]> {
+  const env = await readEnvelope()
+  return Object.values(env.sessions).map((s) => s.jwt)
+}
+
 /** Batch-write emails onto existing sessions; no-op when nothing changes. */
 export async function patchSessionEmails(updates: Record<string, string>): Promise<void> {
   if (Object.keys(updates).length === 0) return

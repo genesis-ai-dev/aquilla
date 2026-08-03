@@ -305,6 +305,19 @@ CREATE TABLE auth_rate_limit_events (
 );
 CREATE INDEX idx_auth_rate_limit_lookup ON auth_rate_limit_events(kind, identifier, created_at);
 
+-- [Pen test] Auth & session mgmt (2026-08-03): denylist backing server-side
+-- logout (POST /api/v2/auth/logout, utils/token-revocation.ts). Keyed by the
+-- JWT `jti` claim (added to every newly minted access token). expires_at
+-- mirrors the token's own `exp` so rows can be pruned once the token would
+-- have expired naturally anyway.
+CREATE TABLE revoked_tokens (
+    jti        TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    revoked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
+
 CREATE TABLE admin_elevations (
     user_id        BIGINT PRIMARY KEY,
     elevated_until TIMESTAMPTZ NOT NULL,

@@ -232,6 +232,10 @@ export interface Env {
 
 export type Variables = {
   user: AuthUser
+  /** The verified JWT payload for the current request, set by authMiddleware
+   *  so routes (e.g. POST /auth/logout) can read `jti`/`exp` without
+   *  re-verifying the token. */
+  tokenPayload: JWTPayload
 }
 
 /**
@@ -280,6 +284,10 @@ export interface JWTPayload {
   sub: string
   exp: number
   iat: number
+  /** Unique token id, checked against revoked_tokens on logout (migration
+   *  0073). Optional — tokens minted before this field existed have none
+   *  and simply aren't individually revocable. */
+  jti?: string
   [k: string]: unknown
 }
 

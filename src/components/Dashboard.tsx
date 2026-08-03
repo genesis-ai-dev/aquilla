@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, Navigate } from "react-router-dom"
+import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import {
   ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users, FolderOpen, Filter,
 } from "lucide-react"
@@ -50,6 +51,10 @@ export function Dashboard() {
   const { session } = useFrontierSession()
   const { activeOrgId } = useActiveOrg()
   const navigate = useNavigate()
+  // AQU-737: opening a project card is a lazy-route + cloud-download hop; drive
+  // the clicked card's spinner/disabled state off the real transition pending.
+  // `openingOverlay` blocks the rest of the dashboard while the open is in flight.
+  const { open: openWorkspace, isOpening, overlay: openingOverlay } = useOpenWorkspace()
   const brand = useBrand()
 
   useEffect(() => {
@@ -238,6 +243,7 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
+      {openingOverlay}
       <header className="border-b">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-2">
@@ -332,7 +338,8 @@ export function Dashboard() {
                 <ProjectCard
                   key={p.id}
                   project={p}
-                  onClick={() => navigate(`/project/${p.id}/editor`)}
+                  onClick={() => openWorkspace(`/project/${p.id}/editor`)}
+                  pending={isOpening(`/project/${p.id}/editor`)}
                   canTrash={canTrash(p)}
                   onTrash={() => setPendingTrashId(p.id)}
                   canToggleLifecycle={canToggleLifecycle(p)}
@@ -376,7 +383,8 @@ export function Dashboard() {
                 <ProjectCard
                   key={cp.id}
                   project={minimalProjectRecord(cp)}
-                  onClick={() => navigate(`/project/${cp.id}/editor`)}
+                  onClick={() => openWorkspace(`/project/${cp.id}/editor`)}
+                  pending={isOpening(`/project/${cp.id}/editor`)}
                 />
               ))}
             </div>

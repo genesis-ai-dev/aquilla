@@ -93,6 +93,16 @@ describe("injectHeadMeta", () => {
     expect(out).toContain('<link rel="canonical" href="https://aquilla.app/" />')
   })
 
+  it("replaces a hand-written canonical instead of adding a second one", () => {
+    const withStatic = builtHtml().replace(
+      "</head>",
+      '  <link rel="canonical" href="https://aquilla.app/somewhere-else" />\n  </head>',
+    )
+    const out = injectHeadMeta(withStatic, caseStudy, brand, ORIGIN)
+    expect(out.match(/rel="canonical"/g)).toHaveLength(1)
+    expect(out).toContain('<link rel="canonical" href="https://aquilla.app/case-studies/come-and-see" />')
+  })
+
   it("points og:url at the page instead of the site root", () => {
     const out = injectHeadMeta(builtHtml(), caseStudy, brand, ORIGIN)
     expect(out).toContain('<meta property="og:url" content="https://aquilla.app/case-studies/come-and-see" />')
@@ -179,8 +189,8 @@ describe("sitemap.xml", () => {
     }
   })
 
-  it("omits the unlisted BT landing page", () => {
-    expect(xml).not.toContain("/bible-translation")
+  it("lists the BT landing page (indexed since the 2026-07-31 SEO pass)", () => {
+    expect(xml).toContain(`<loc>${ORIGIN}/bible-translation</loc>`)
   })
 
   it("omits alias paths so they don't compete with the canonical URL", () => {
@@ -204,13 +214,15 @@ describe("robots.txt", () => {
     for (const path of DISALLOWED_APP_PATHS) expect(txt).toContain(`Disallow: ${path}`)
   })
 
-  it("keeps the unlisted BT landing page out of search", () => {
-    expect(txt).toContain("Disallow: /bible-translation")
-  })
-
   it("leaves the indexable marketing pages crawlable", () => {
     expect(txt).not.toContain("Disallow: /beta")
     expect(txt).not.toContain("Disallow: /case-studies")
+    expect(txt).not.toContain("Disallow: /bible-translation")
+  })
+
+  it("keeps signed-in app entry points out of the crawl budget", () => {
+    expect(txt).toContain("Disallow: /login")
+    expect(txt).toContain("Disallow: /oauth/")
   })
 })
 

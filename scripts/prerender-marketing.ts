@@ -96,12 +96,13 @@ export const MARKETING_PAGES: MarketingPage[] = [
     sources: ["case-study-biblica.html", "src/pages/CaseStudy/Biblica.tsx"],
   },
   {
-    // Unlisted BT landing: noindex + robots Disallow, direct-link only.
-    // See docs/superpowers/specs/2026-07-07-generic-homepage-bt-unlisted-design.md
+    // Indexed as of the 2026-07-31 SEO pass (dev), which superseded the
+    // unlisted design in 2026-07-07-generic-homepage-bt-unlisted-design.md:
+    // the noindex meta came out of its <head> and it joined the sitemap.
     entry: "bible-translation",
     path: "/bible-translation",
-    indexable: false,
-    priority: 0,
+    indexable: true,
+    priority: 0.9,
     kind: "site",
     sources: ["bible-translation.html", "src/pages/Homepage/BibleTranslationLanding.tsx"],
   },
@@ -120,7 +121,9 @@ export const DISALLOWED_APP_PATHS = [
   "/join-org/",
   "/join/",
   "/link/",
+  "/login",
   "/members",
+  "/oauth/",
   "/onboarding",
   "/preferences",
   "/project/",
@@ -249,7 +252,13 @@ export function injectHeadMeta(html: string, page: MarketingPage, brand: BrandDa
   const meta = readPageMeta(html)
   const jsonLd = escapeJsonLd(buildJsonLd(page, meta, brand, origin))
 
-  const out = html.replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${url}$2`)
+  const out = html
+    .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${url}$2`)
+    // The source pages ship a hand-written canonical (added in dev's SEO
+    // pass). The manifest-derived one below replaces it, so the built page
+    // carries exactly one and a non-aquilla brand/origin can't inherit a
+    // hardcoded aquilla.app URL.
+    .replace(/[ \t]*<link rel="canonical"[^>]*\/?>\n?/g, "")
 
   const lines = [
     `<link rel="canonical" href="${url}" />`,

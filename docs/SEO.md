@@ -89,12 +89,13 @@ disagree.
 several are private — plus any manifest page marked non-indexable, and points at
 `/sitemap.xml`.
 
-The homepage is served at both `/` (signed-out visitors, via the `aq_hint`
-cookie) and `/homepage`; `/` is canonical, and `/homepage` is not in the sitemap.
+The homepage is served at both `/` (for everyone — the root no longer branches
+on the `aq_hint` cookie) and `/homepage`; `/` is canonical, and `/homepage` is
+not in the sitemap.
 
-`/bible-translation` stays deliberately unlisted: `noindex` in its `<head>`,
-`Disallow` in robots.txt, absent from the sitemap. It is still prerendered, so a
-direct link unfurls and reads correctly.
+`/bible-translation` is indexed as of the 2026-07-31 SEO pass on dev, which
+superseded the earlier unlisted design: no `noindex`, present in the sitemap,
+crawlable in robots.txt.
 
 ## Not covered here
 

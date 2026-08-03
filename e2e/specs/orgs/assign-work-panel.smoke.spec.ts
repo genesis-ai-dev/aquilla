@@ -22,10 +22,9 @@ test("assign-work panel opens and shows Assignee and Book selects", async ({ ali
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AssignProj ${Date.now()}` })
 
   await alice.goto(`/projects/${seeded.projectId}`)
-  // The "Assign…" button should be visible for the project owner.
-  const assignBtn = alice.getByRole("button", { name: /^Assign…$/i })
-    .or(alice.getByRole("button", { name: /^Assign$/i }))
-    .first()
+  // Prefer the AssignWork control ("Assign…") — do NOT match the Project
+  // manager card's plain "Assign" button (AQU-507), which opens a different dialog.
+  const assignBtn = alice.getByRole("button", { name: "Assign…" })
   await expect(assignBtn).toBeVisible({ timeout: 10_000 })
   await assignBtn.click()
 

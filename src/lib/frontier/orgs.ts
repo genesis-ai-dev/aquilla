@@ -1,5 +1,6 @@
 import { FRONTIER_BASE } from "./auth";
 import { UserError } from "@/lib/errors/user-error";
+import type { MemberGrantResult } from "./members";
 
 /**
  * Default timeout for org/members fetches. Errors out as
@@ -301,6 +302,25 @@ export async function addOrgMember(
     throw new UserError(res.status, text, "org");
   }
   return (await res.json()) as OrgMember;
+}
+
+/**
+ * Grant several people the same-or-per-person role on an org in ONE request
+ * (AQU-736). Non-atomic — returns the per-person `results` in request order.
+ */
+export async function addOrgMembers(
+  jwt: string, orgId: number, members: Array<{ username: string; role: number }>
+): Promise<MemberGrantResult[]> {
+  const res = await fetch(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members`, {
+    method: "POST",
+    headers: authHeaders(jwt),
+    body: JSON.stringify({ members }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new UserError(res.status, text, "org");
+  }
+  return ((await res.json()) as { results: MemberGrantResult[] }).results;
 }
 
 export async function removeOrgMember(

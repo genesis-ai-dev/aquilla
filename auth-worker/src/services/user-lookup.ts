@@ -18,16 +18,11 @@ export interface LookedUpUser {
  *      space, e.g. pasted from elsewhere, used to cause a false "not found"
  *      against case- and whitespace-sensitive Postgres).
  *   2. If no exact row, fall back to `WHERE LOWER(username) = LOWER(?)`.
- *      The `users.username` column has only a case-sensitive uniqueness
- *      constraint, so two rows can differ only in case (e.g. "Bob" and
- *      "bob" both existing). If exactly one row matches case-insensitively,
- *      return it. If more than one matches, the query is genuinely
- *      ambiguous — we do NOT guess (e.g. via `ORDER BY id LIMIT 1`), since
- *      this lookup feeds member/permission-grant flows and picking the
- *      wrong account would be a silent wrong-grant. Ambiguous case
- *      collisions return null, same as a true miss; callers translate that
- *      into a 404 at the HTTP layer, and the caller can disambiguate by
- *      typing the exact case.
+ *      Migration 0070 enforces UNIQUE(LOWER(username)), so a case-insensitive
+ *      match identifies at most one account. The two-row ceiling remains as
+ *      defense in depth: if an invalid legacy fixture or partially migrated
+ *      database ever violates that invariant, lookup fails closed instead of
+ *      granting access to an arbitrary account.
  */
 export async function lookupUserByUsername(
   env: Env,

@@ -24,6 +24,10 @@ import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectOrgId } from "@/hooks/useProjectOrgId"
+import { useActiveOrgOptional } from "@/context/OrgContext"
+import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
+import { partitionMembers } from "@/lib/frontier/members"
 import {
   MembersPanel,
   type MembersPanelMember,
@@ -113,7 +117,45 @@ function MembersTab({ projectId }: { projectId: string }) {
   const callerUsername = session?.username ?? null
   const jwt = session?.jwt ?? null
 
-  const { members, isLoading, error, add, remove } = useProjectMembers(projectId)
+  const { members, isLoading, error, add, addMany, remove } = useProjectMembers(projectId)
+
+  // AQU-672 parity for the Share modal: offer org colleagues as checkbox rows
+  // before any search fires. Eligibility mirrors the members page — org
+  // members minus those who already hold a project-level grant
+  // (direct/team/creator); org-access-only members stay eligible so they can
+  // be given an explicit project role. The roster comes from the PROJECT's
+  // own org (the active-org picker may be on "All organizations"), falling
+  // back to the optional org context. Best-effort — the typeahead degrades
+  // to search + free text without it.
+  const projectOrgId = useProjectOrgId(projectId)
+  const activeOrgId = useActiveOrgOptional()?.activeOrgId ?? null
+  const rosterOrgId = projectOrgId ?? activeOrgId
+  const [orgMembers, setOrgMembers] = useState<OrgMember[] | null>(null)
+  useEffect(() => {
+    if (!jwt || rosterOrgId == null) {
+      setOrgMembers(null)
+      return
+    }
+    let alive = true
+    listOrgMembers(jwt, rosterOrgId)
+      .then((ms) => { if (alive) setOrgMembers(ms) })
+      .catch(() => { /* suggestions are best-effort; search still works */ })
+    return () => { alive = false }
+  }, [jwt, rosterOrgId])
+
+  const projectGrantUserIds = useMemo(
+    () => new Set(partitionMembers(members).projectMembers.map((m) => m.userId)),
+    [members],
+  )
+  const suggestions = useMemo(
+    () =>
+      orgMembers == null
+        ? undefined
+        : orgMembers
+            .filter((m) => !projectGrantUserIds.has(m.userId))
+            .map((m) => ({ id: m.userId, username: m.username })),
+    [orgMembers, projectGrantUserIds],
+  )
 
   // AQU-285 (F-A4): derive callerMaxRole from the caller's own effective role
   // in the members list so the role picker never offers what the server 403s.
@@ -223,13 +265,19 @@ function MembersTab({ projectId }: { projectId: string }) {
           newMemberDefaultRole={ROLE.CONTRIBUTOR}
           callerUserId={callerUserId}
           callerMaxRole={callerMaxRole}
-          onAdd={async (username, role) => {
-            const result = await add(username, role)
-            return result ? { ok: true } : { ok: false, error: "No user with that username" }
+          onAdd={async (usernames, role) => {
+            const results = await addMany(usernames.map((username) => ({ username, role })))
+            return results.map((r) => ({
+              username: r.username,
+              ok: r.ok,
+              error: r.error?.message,
+            }))
           }}
           onRemove={remove}
           onChangeRole={async (username, role) => { await add(username, role) }}
           scopeConfig={scopeConfig}
+          suggestions={suggestions}
+          emptySuggestionsHint="All org members already have access to this project."
         />
       )}
     </div>

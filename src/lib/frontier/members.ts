@@ -190,6 +190,45 @@ export async function addProjectMember(
   return (await res.json()) as ProjectMember;
 }
 
+/**
+ * One entry in a batch membership-grant response (AQU-736). The endpoints are
+ * deliberately non-atomic: each person is evaluated independently, so a batch
+ * reports per-person success/failure rather than all-or-nothing. `error.code`
+ * is stable + machine-readable (e.g. `user_not_found`, `self_grant`,
+ * `role_above_caller`, `target_outranks_caller`, `not_org_member`).
+ */
+export interface MemberGrantResult {
+  username: string;
+  ok: boolean;
+  error?: { code: string; message: string };
+}
+
+/**
+ * Grant several people the same-or-per-person role on a project in ONE request.
+ * Returns the per-person `results` in request order so the caller can show who
+ * succeeded and name anyone who failed. Only a malformed batch (empty, non-array,
+ * or over the 100-person cap) or a whole-request auth failure throws.
+ */
+export async function addProjectMembers(
+  jwt: string,
+  projectId: string,
+  members: Array<{ username: string; role: number }>
+): Promise<MemberGrantResult[]> {
+  const res = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
+    {
+      method: "POST",
+      headers: authHeaders(jwt),
+      body: JSON.stringify({ members }),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new UserError(res.status, text, "project");
+  }
+  return ((await res.json()) as { results: MemberGrantResult[] }).results;
+}
+
 export async function removeProjectMember(
   jwt: string,
   projectId: string,

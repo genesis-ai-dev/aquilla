@@ -14,17 +14,53 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..620;1,9..144,300..560&amp;display=swap" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Coptic&amp;family=Noto+Serif+Ethiopic:wght@400..600&amp;family=Noto+Serif+Tibetan:wght@400..600&amp;display=swap" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="%BRAND_DESCRIPTION%" />
-    <title>%BRAND_TITLE%</title>
+    <meta
+      name="description"
+      content="Aquilla is free AI Bible translation software — a workspace for Bible & ministry teams where text, audio, and video translation live under one roof, with real-time checks and a memory that learns."
+    />
+    <link rel="canonical" href="https://aquilla.app/" />
+    <title>Aquilla — AI Bible Translation Software</title>
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="%BRAND_OG_URL%" />
-    <meta property="og:title" content="%BRAND_TITLE%" />
-    <meta property="og:description" content="%BRAND_DESCRIPTION%" />
+    <meta property="og:url" content="https://aquilla.app/" />
+    <meta property="og:title" content="Aquilla — AI Bible Translation Software" />
+    <meta
+      property="og:description"
+      content="Free AI Bible translation software — text, audio, and video translation under one roof, with real-time checks and a memory that learns. Translators, lifted."
+    />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="%BRAND_TITLE%" />
-    <meta name="twitter:description" content="%BRAND_DESCRIPTION%" />
+    <meta name="twitter:title" content="Aquilla — AI Bible Translation Software" />
+    <meta
+      name="twitter:description"
+      content="Free AI Bible translation software — text, audio, and video translation under one roof, with real-time checks and a memory that learns. Translators, lifted."
+    />
     %BRAND_SOCIAL_IMAGE_TAGS%
     %BRAND_THEME_STYLE%
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://aquilla.app/#org",
+            "name": "Aquilla",
+            "url": "https://aquilla.app/",
+            "logo": "https://aquilla.app/aquilla-logo.png",
+            "email": "hello@aquilla.app"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "name": "Aquilla",
+            "url": "https://aquilla.app/",
+            "applicationCategory": "BusinessApplication",
+            "applicationSubCategory": "AI Bible translation software",
+            "operatingSystem": "Web",
+            "publisher": { "@id": "https://aquilla.app/#org" },
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "description": "Free AI Bible translation software: one workspace where text, audio, and video translation live under one roof, with real-time guidance and a translation memory that learns."
+          }
+        ]
+      }
+    </script>
     <script>
       // Paint the ink/paper background immediately so there's no flash before
       // the React homepage mounts. Each visit follows the OS unless the visitor
@@ -79,6 +115,13 @@
           <a class="p" href="/onboarding">Create account</a>
           <a class="s" href="/onboarding">Sign in</a>
         </div>
+        <nav aria-label="More from Aquilla" style="font-size: 15px">
+          <a href="/bible-translation" style="color: #7db1ff; padding: 0 8px">Bible translation</a>
+          <a href="/case-studies/biblica" style="color: #7db1ff; padding: 0 8px">Biblica case study</a>
+          <a href="/case-studies/come-and-see" style="color: #7db1ff; padding: 0 8px">Come and See case study</a>
+          <a href="/beta" style="color: #7db1ff; padding: 0 8px">Public beta</a>
+          <a href="https://help.aquilla.app" style="color: #7db1ff; padding: 0 8px">Help &amp; docs</a>
+        </nav>
       </main>
     </div>
     <script type="module" src="/src/homepage-main.tsx"></script>

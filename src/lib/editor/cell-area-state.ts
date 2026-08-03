@@ -21,6 +21,9 @@ export interface CellAreaStateInput {
    *  socket goes `live` long before `fetchAllFileCells` finishes paginating.
    *  Without this we'd flash `ready-empty` for the whole load. */
   cellsLoading: boolean
+  /** The authoritative cells read finished unsuccessfully. This is distinct
+   * from a successful empty projection and must never render empty-file copy. */
+  cellsError: boolean
 }
 
 export type CellAreaState =
@@ -29,6 +32,8 @@ export type CellAreaState =
    *  cells may arrive any moment — render a skeleton rather than an empty
    *  state. */
   | { kind: "syncing-empty" }
+  /** The file may contain cells, but its projection could not be loaded. */
+  | { kind: "load-error" }
   /** Sync is settled, cells fetch is done, genuinely no cells. */
   | { kind: "ready-empty" }
   | { kind: "ready" }
@@ -36,9 +41,11 @@ export type CellAreaState =
 export function deriveCellAreaState(input: CellAreaStateInput): CellAreaState {
   if (!input.activeFileId) return { kind: "no-file" }
   if (input.cellCount === 0) {
-    if (input.cellsLoading || input.syncStatus === "connecting") {
+    if (input.cellsLoading) {
       return { kind: "syncing-empty" }
     }
+    if (input.cellsError) return { kind: "load-error" }
+    if (input.syncStatus === "connecting") return { kind: "syncing-empty" }
     return { kind: "ready-empty" }
   }
   return { kind: "ready" }

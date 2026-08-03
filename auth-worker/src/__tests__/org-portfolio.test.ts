@@ -212,9 +212,12 @@ describe("POST /api/v2/orgs/portfolio", () => {
     }))
     const fakeEnv = { AQUILLA_PG: { prepare } } as unknown as Env
 
-    await getOrgPortfolios(fakeEnv, [2, 1, 2])
+    await getOrgPortfolios(fakeEnv, [2, 1, 2], { userId: 99, isAdmin: false })
 
-    expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1]])
+    // AQU-745: the aggregate carries the org binds (both IN clauses) plus the
+    // per-caller visibility binds appended by PORTFOLIO_VISIBILITY_PREDICATE:
+    // <isAdmin 0/1>, then userId ×4.
+    expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, 0, 99, 99, 99, 99]])
     const settingsQuery = preparedQueries.find((query) => query.includes("FROM project_settings ps"))
     expect(settingsQuery).toContain("ps.validation_count")
     expect(settingsQuery).toContain("ps.target_lanes")
@@ -251,5 +254,105 @@ describe("POST /api/v2/orgs/portfolio", () => {
       { orgId: 2, projects: [expect.objectContaining({ id: "pb", name: "Luke" })] },
       { orgId: 1, projects: [expect.objectContaining({ id: "pa", name: "John" })] },
     ])
+  })
+})
+
+// AQU-745: the org dashboard portfolio must not leak the name of every project
+// to a regular member. Visibility mirrors GET /api/v2/projects — a
+// sub-maintainer sees only projects reached via creator / direct / group; the
+// org path (blanket visibility) fires only at Maintainer+ (600).
+describe("AQU-745 — portfolio project-name visibility floor", () => {
+  // org 1: owner=1, maintainer=3 (600), contributor=2 (400).
+  // projects pa/pb/pc all org-owned by user 1; contributor has a direct grant
+  // to pc only (and no path to pa/pb).
+  async function seedOrg() {
+    await seedUser(1, "owner")
+    await seedUser(2, "contributor")
+    await seedUser(3, "maintainer")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 400, 1), (1, 3, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Algerian', 1, 1), ('pb', 'Bambara', 1, 1), ('pc', 'Cebuano', 1, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pc', 2, 400, 1)",
+    ).run()
+  }
+
+  async function portfolioNames(username: string): Promise<string[]> {
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor(username)) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; name: string }> }
+    return body.projects.map((p) => p.name).sort()
+  }
+
+  it("a Contributor sees ONLY projects they're assigned to (not every org project)", async () => {
+    await seedOrg()
+    expect(await portfolioNames("contributor")).toEqual(["Cebuano"])
+  })
+
+  it("a Maintainer still sees every project in the org (AQU-435 oversight)", async () => {
+    await seedOrg()
+    expect(await portfolioNames("maintainer")).toEqual(["Algerian", "Bambara", "Cebuano"])
+  })
+
+  it("the Owner still sees every project in the org", async () => {
+    await seedOrg()
+    expect(await portfolioNames("owner")).toEqual(["Algerian", "Bambara", "Cebuano"])
+  })
+
+  it("a Contributor with NO project path sees an empty portfolio (no name leak)", async () => {
+    await seedUser(1, "owner2")
+    await seedUser(2, "lonely")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 400, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Algerian', 1, 1), ('pb', 'Bambara', 1, 1)",
+    ).run()
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("lonely")) }, env)
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { projects: unknown[] }).projects).toHaveLength(0)
+  })
+
+  it("the batched POST /orgs/portfolio applies the same per-caller visibility floor", async () => {
+    await seedOrg()
+    const res = await app.request(
+      "/api/v2/orgs/portfolio",
+      {
+        method: "POST",
+        headers: { ...authHeader(await jwtFor("contributor")), "Content-Type": "application/json" },
+        body: JSON.stringify({ orgIds: [1] }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { portfolios: Array<{ orgId: number; projects: Array<{ name: string }> }> }
+    expect(body.portfolios[0].projects.map((p) => p.name)).toEqual(["Cebuano"])
+  })
+
+  it("a group (team) grant reveals exactly the granted project in the portfolio", async () => {
+    await seedUser(1, "owner3")
+    await seedUser(2, "teamie")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (1, 2, 400, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Algerian', 1, 1), ('pb', 'Bambara', 1, 1)",
+    ).run()
+    const grp = await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (org_id, name, created_by) VALUES (1, 'Team A', 1) RETURNING id",
+    ).first<{ id: number }>()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO group_members (group_id, user_id, added_by) VALUES (?, 2, 1)",
+    ).bind(grp!.id).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (?, 'pb', 400, 1)",
+    ).bind(grp!.id).run()
+    expect(await portfolioNames("teamie")).toEqual(["Bambara"])
   })
 })

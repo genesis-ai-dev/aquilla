@@ -9,7 +9,10 @@ import {
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { RoleLabel } from "@/components/RoleLabel";
 import { roleDisplayText } from "@/lib/frontier/roles";
-import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
+import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
+import type { UserSearchResult } from "@/hooks/useUserSearch";
+
+export type { MemberAddOutcome } from "@/components/MemberMultiAddRow";
 
 /** AQU-553: a single lane/file scope on a member. */
 export interface MemberScopeValue {
@@ -69,7 +72,13 @@ interface MembersPanelProps {
    * grant (see AD-12 max-wins resolver in project-permissions.ts).
    */
   newMemberDefaultRole: number;
-  onAdd: (username: string, role: number) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * AQU-734: grant the chosen role to a batch of people in ONE call. Returns a
+   * per-person outcome in any order; the panel drops the people who succeeded
+   * and keeps the ones who failed staged, naming them. Implementations send a
+   * single batch request (never a client-side fan-out).
+   */
+  onAdd: (usernames: string[], role: number) => Promise<MemberAddOutcome[]>;
   onRemove: (userId: number) => Promise<void>;
   onChangeRole?: (username: string, role: number) => Promise<void>;
   /** Caller's own user id, used to block self-edit affordances. Pass null when
@@ -84,6 +93,13 @@ interface MembersPanelProps {
    * lane/file scopes editor for scopable members (roleLevel < 500).
    */
   scopeConfig?: MembersPanelScopeConfig;
+  /**
+   * Eligible-colleague rows offered by the add typeahead before any search —
+   * e.g. org members without a direct grant. See UsernameTypeahead.
+   */
+  suggestions?: readonly UserSearchResult[];
+  /** Shown when `suggestions` is provided but empty and nothing is typed. */
+  emptySuggestionsHint?: string;
 }
 
 export function MembersPanel({
@@ -97,41 +113,24 @@ export function MembersPanel({
   callerMaxRole,
   scopedUserSearch = true,
   scopeConfig,
+  suggestions,
+  emptySuggestionsHint,
 }: MembersPanelProps) {
   // AQU-553: the scopes editor is shown only when project context is supplied
   // AND the caller is a lead+ (500). Leads themselves are never scopable, so
   // per-row the editor is further gated on the member being below 500.
   const canManageScopes =
     scopeConfig != null && callerMaxRole >= SCOPE_MANAGE_MIN_ROLE;
-  // Typeahead-mode-only here. Email-mode is for project-link invites
-  // (handled in MultiProjectInviteDialog / SharePanel), not direct
-  // org-membership grants — `addOrgMember` requires a real Frontier
-  // user id, which we don't have for an unsigned-up email yet.
-  const [recipient, setRecipient] = useState<RecipientValue>({
-    mode: "username",
-    raw: "",
-  });
-  const [role, setRole] = useState(newMemberDefaultRole);
-  const [adding, setAdding] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
-
-  async function handleAdd() {
-    const trimmed = recipient.raw.trim();
-    if (!trimmed) return;
-    setAdding(true);
-    setAddError(null);
-    const result = await onAdd(trimmed, role);
-    setAdding(false);
-    if (!result.ok) {
-      setAddError(result.error ?? "Could not add user");
-      return;
-    }
-    setRecipient({ mode: "username", raw: "" });
-    setRole(newMemberDefaultRole);
-  }
 
   const grantableRoles = roleOptions.filter((r) => r.level <= callerMaxRole);
-  const existingUserIds = members.map((m) => m.userId);
+  // People in `suggestions` stay searchable/checkable even when they appear in
+  // the roster — an org-access-only member is still grantable an explicit
+  // direct role (AQU-672 eligibility). Everyone else already listed is hidden
+  // from the typeahead as "already a member."
+  const suggestionIds = new Set((suggestions ?? []).map((u) => u.id));
+  const existingUserIds = members
+    .map((m) => m.userId)
+    .filter((id) => !suggestionIds.has(id));
 
   return (
     <div className="flex flex-col gap-4">
@@ -216,48 +215,15 @@ export function MembersPanel({
         })}
       </ul>
 
-      <div className="space-y-2">
-        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_max-content_max-content] sm:items-start">
-          <div className="min-w-0">
-            <UsernameTypeahead
-              value={recipient}
-              onChange={setRecipient}
-              disabled={adding}
-              showModeToggle={false}
-              placeholder={{ username: "Aquilla username" }}
-              excludedUserIds={existingUserIds}
-              scopedSearch={scopedUserSearch}
-            />
-          </div>
-          <Select
-            items={grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
-            value={String(role)}
-            onValueChange={(v) => setRole(parseInt(v ?? "", 10))}
-            disabled={adding}
-          >
-            <SelectTrigger aria-label="Role">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {grantableRoles.map((r) => (
-                  <SelectItem key={r.level} value={String(r.level)}>
-                    <RoleLabel name={r.name} />
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Button
-            className="sm:whitespace-nowrap"
-            onClick={handleAdd}
-            disabled={adding || !recipient.raw.trim()}
-          >
-            Add
-          </Button>
-        </div>
-        {addError && <p className="text-xs text-destructive">{addError}</p>}
-      </div>
+      <MemberMultiAddRow
+        roleOptions={grantableRoles}
+        defaultRole={newMemberDefaultRole}
+        onAdd={onAdd}
+        excludedUserIds={existingUserIds}
+        scopedUserSearch={scopedUserSearch}
+        suggestions={suggestions}
+        emptySuggestionsHint={emptySuggestionsHint}
+      />
     </div>
   );
 }

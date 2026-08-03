@@ -1,8 +1,19 @@
 import type { ReactNode } from "react"
+import { createPortal } from "react-dom"
 
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+
+/** The shared spinner pill shown centered on every loading overlay. */
+function LoadingStatusPill({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
+      <Spinner aria-hidden="true" className="size-5" />
+      <span>{label}…</span>
+    </div>
+  )
+}
 
 type LoadingTemplateProps = Omit<React.ComponentProps<"div">, "children"> & {
   label?: string
@@ -44,12 +55,43 @@ function LoadingTemplate({
         {children}
       </div>
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/20">
-        <div className="flex items-center gap-3 rounded-lg border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
-          <Spinner aria-hidden="true" className="size-5" />
-          <span>{label}…</span>
-        </div>
+        <LoadingStatusPill label={label} />
       </div>
     </div>
+  )
+}
+
+/**
+ * Viewport-blocking overlay for in-flight route transitions (AQU-737).
+ *
+ * Unlike LoadingTemplate — whose scrim is pointer-transparent because the
+ * template beneath it is already inert — this overlay portals to <body> and
+ * swallows pointer input for the whole display area, so no other control can
+ * be activated while the destination chunk/data loads. Render it only while
+ * the transition is actually pending; it carries no timer of its own.
+ */
+function BlockingLoadingOverlay({
+  label = "Loading",
+  className,
+  ...props
+}: Omit<React.ComponentProps<"div">, "children"> & {
+  label?: string
+}) {
+  return createPortal(
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label={label}
+      aria-live="polite"
+      className={cn(
+        "fixed inset-0 z-50 flex cursor-wait items-center justify-center bg-background/20",
+        className,
+      )}
+      {...props}
+    >
+      <LoadingStatusPill label={label} />
+    </div>,
+    document.body,
   )
 }
 
@@ -164,4 +206,4 @@ function NeutralLoadingTemplate() {
   )
 }
 
-export { LoadingOverlay, LoadingPanel, LoadingTemplate }
+export { BlockingLoadingOverlay, LoadingOverlay, LoadingPanel, LoadingTemplate }

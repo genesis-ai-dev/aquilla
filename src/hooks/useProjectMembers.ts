@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  fetchProjectRoster, addProjectMember, removeProjectMember,
+  fetchProjectRoster, addProjectMember, addProjectMembers, removeProjectMember,
   lookupUser,
-  type ProjectMember,
+  type ProjectMember, type MemberGrantResult,
 } from "@/lib/frontier/members";
 import { useFrontierSession } from "./useFrontierSession";
 import { toUserFacingError } from "@/lib/errors/user-error";
@@ -21,6 +21,14 @@ export interface UseProjectMembers {
   refresh: () => Promise<void>;
   /** Returns null if username not found, otherwise the new/upserted member. */
   add: (username: string, role: number) => Promise<ProjectMember | null>;
+  /**
+   * AQU-734: grant `role` to several people in ONE batch request (non-atomic).
+   * Returns the per-person `results` so the caller can name who failed. The
+   * roster is refreshed once after the call so everyone who landed shows up.
+   */
+  addMany: (
+    members: Array<{ username: string; role: number }>,
+  ) => Promise<MemberGrantResult[]>;
   remove: (userId: number) => Promise<void>;
   /** Same as add — server upserts. Convenience for renaming the call site. */
   changeRole: (username: string, role: number) => Promise<ProjectMember | null>;
@@ -82,11 +90,20 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
     return next;
   }, [jwt, projectId, refresh]);
 
+  const addMany = useCallback(async (
+    toAdd: Array<{ username: string; role: number }>,
+  ) => {
+    if (!jwt || !projectId || toAdd.length === 0) return [];
+    const results = await addProjectMembers(jwt, projectId, toAdd);
+    await refresh();
+    return results;
+  }, [jwt, projectId, refresh]);
+
   const remove = useCallback(async (userId: number) => {
     if (!jwt || !projectId) return;
     await removeProjectMember(jwt, projectId, userId);
     await refresh();
   }, [jwt, projectId, refresh]);
 
-  return { members, isLoading, error, rosterHidden, refresh, add, remove, changeRole: add };
+  return { members, isLoading, error, rosterHidden, refresh, add, addMany, remove, changeRole: add };
 }

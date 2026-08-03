@@ -5,14 +5,17 @@ import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
+import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
-import { setProjectDeadline } from "@/lib/sync/cloud-projects"
+import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
@@ -505,10 +508,19 @@ function FileCanonicalRollup({
 export function ProjectOverview() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { project, status, refresh } = useProject(id)
+  // AQU-737: the workspace is a lazy route; surface the load on the Open project
+  // button so it spins + disables instead of sitting idle and re-clickable.
+  // `openingOverlay` blocks the rest of the page while the open is in flight.
+  const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
+  const { project, status, refresh, pm } = useProject(id)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const { activeOrgId } = useActiveOrg()
+  // AQU-507: candidate PMs = the project's effective members. Only fetched for
+  // maintainer+ (the only role that can assign a PM); viewers never trigger the
+  // roster read.
+  const canManagePm = (project?.syncRole?.level ?? 0) >= 600
+  const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
+  const { activeOrgId, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
   // the page a shared-projects row links to. Recording it here clears the
@@ -526,6 +538,10 @@ export function ProjectOverview() {
   const [files, setFiles] = useState<FileSummary[]>([])
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
+  // AQU-507: PM assignment dialog. `pmSelection` holds the picker value (a
+  // stringified userId, or "" for unassigned) while the dialog is open.
+  const [pmDialogOpen, setPmDialogOpen] = useState(false)
+  const [pmSelection, setPmSelection] = useState<string>("")
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
@@ -809,6 +825,26 @@ export function ProjectOverview() {
     }
   }
 
+  async function savePm(pmUserId: number | null) {
+    if (!jwt) return
+    setBusy(true)
+    setError(null)
+    try {
+      await setProjectPm(jwt, id, pmUserId)
+      await refresh()
+      // AQU-507: the org overview's PM column joins from the app-wide
+      // accessible-projects directory (OrgContext, fetched once per session) —
+      // revalidate it so the new PM shows there without a hard reload. Not
+      // awaited: the PM card above reads useProject, not the directory.
+      void refreshAccessibleProjects()
+      setPmDialogOpen(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleDownloadBundle() {
     if (!jwt || !project) return
     const fileId = project.files[0]?.id
@@ -908,6 +944,7 @@ export function ProjectOverview() {
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
+          {openingOverlay}
           {isFrozen && status === "ready" && project && (
             <InactiveProjectBanner
               projectName={project.name}
@@ -946,8 +983,20 @@ export function ProjectOverview() {
                     <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" onClick={() => navigate(`/project/${id}/editor`)}>
-                      Open project
+                    <Button
+                      size="sm"
+                      onClick={() => openWorkspace(`/project/${id}/editor`)}
+                      disabled={openPending}
+                      aria-busy={openPending || undefined}
+                    >
+                      {openPending ? (
+                        <>
+                          <Spinner className="size-4" />
+                          Opening…
+                        </>
+                      ) : (
+                        "Open project"
+                      )}
                     </Button>
                     {isOwner && isArchived && (
                       <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
@@ -1544,6 +1593,107 @@ export function ProjectOverview() {
                       type="button"
                       disabled={busy || !deadlineDate}
                       onClick={() => saveDeadline(deadlineDate ? dateToDeadlineString(deadlineDate) : null)}
+                    >
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* ── Project manager card (AQU-507) ── */}
+              <div className="rounded-xl border bg-card p-5">
+                <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">Project manager</h2>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  {pm ? (
+                    <span className="font-medium" data-testid="overview-pm-name">{pm.username}</span>
+                  ) : (
+                    <span className="text-muted-foreground" data-testid="overview-pm-name">Unassigned</span>
+                  )}
+                  {canManage && (
+                    <ButtonGroup>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        data-testid="overview-pm-edit"
+                        onClick={() => {
+                          setPmSelection(pm ? String(pm.id) : "")
+                          setPmDialogOpen(true)
+                        }}
+                      >
+                        {pm ? "Change" : "Assign"}
+                      </Button>
+                      {pm && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => savePm(null)}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </ButtonGroup>
+                  )}
+                </div>
+              </div>
+
+              <Dialog open={pmDialogOpen} onOpenChange={setPmDialogOpen}>
+                <DialogContent className="sm:max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>{pm ? "Change project manager" : "Assign project manager"}</DialogTitle>
+                    <DialogDescription>
+                      The project manager is responsible for this project. They must be a member
+                      of the project.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="project-pm">Project manager</FieldLabel>
+                      {/* `items` maps values → labels so the trigger shows the
+                          member's username, not the raw stringified userId. */}
+                      <Select
+                        value={pmSelection}
+                        onValueChange={(v) => setPmSelection(v ?? "")}
+                        items={[
+                          { value: "", label: "Unassigned" },
+                          ...pmCandidates.map((m) => ({
+                            value: String(m.userId),
+                            label: m.username,
+                          })),
+                        ]}
+                      >
+                        <SelectTrigger id="project-pm" aria-label="Project manager">
+                          <SelectValue placeholder="Select a member" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="">Unassigned</SelectItem>
+                            {pmCandidates.map((m) => (
+                              <SelectItem key={m.userId} value={String(m.userId)}>
+                                {m.username}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </FieldGroup>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => setPmDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => savePm(pmSelection === "" ? null : Number(pmSelection))}
                     >
                       Save
                     </Button>

@@ -125,4 +125,93 @@ describe("AddConceptDialog", () => {
     })
     expect(onConfirm).not.toHaveBeenCalled()
   })
+
+  // ── AQU-754: failed saves surface, dialog stays open (no silent no-op) ───────
+
+  it("surfaces the error and keeps the input mounted when onConfirm rejects", async () => {
+    // Mirrors the editor path: onConfirm persists via patchSettings and throws
+    // when the write is rejected (e.g. below Maintainer). The dialog must show
+    // why and stay open, not close as if the concept was saved.
+    const onConfirm = vi.fn().mockRejectedValue(
+      new Error("You need the Maintainer role or higher to change the term base."),
+    )
+    const onCancel = vi.fn()
+    renderDialog({ sourceTerm: "grace", onConfirm, onCancel })
+
+    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/maintainer role or higher/i)
+    })
+    // Dialog is still interactive (input present) and did not auto-cancel.
+    expect(screen.getByLabelText(/source term for new concept/i)).toBeInTheDocument()
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
+  it("re-enables the Create draft button after a rejected save (no stuck Saving…)", async () => {
+    // Regression: the button label read form.state.isSubmitting directly in
+    // render, which is not reactive — after a rejected save it stayed stuck on
+    // "Saving…" forever. It must return to an enabled "Create draft".
+    const onConfirm = vi.fn().mockRejectedValue(new Error("nope"))
+    renderDialog({ sourceTerm: "grace", onConfirm })
+
+    const submitBtn = screen.getByRole("button", { name: /create draft concept/i })
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
+    await waitFor(() => {
+      expect(submitBtn).toHaveTextContent("Create draft")
+      expect(submitBtn).toBeEnabled()
+    })
+  })
+
+  // ── Blocked below the termbase write floor ─────────────────────────────────
+
+  it("disables the input and Create draft and shows the reason when blockedReason is set", async () => {
+    const onConfirm = vi.fn()
+    renderDialog({
+      onConfirm,
+      blockedReason: "You need the Maintainer role or higher to change the term base.",
+    })
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/maintainer role or higher/i)
+    expect(screen.getByLabelText(/source term for new concept/i)).toBeDisabled()
+    expect(screen.getByRole("button", { name: /create draft concept/i })).toBeDisabled()
+
+    // Even a programmatic form submit must not reach onConfirm. Flush the
+    // async handleSubmit before asserting the negative.
+    fireEvent.submit(document.getElementById("add-concept-form")!)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
+
+  it("keeps Cancel active while blocked so the user can close the dialog", () => {
+    const onCancel = vi.fn()
+    renderDialog({
+      onCancel,
+      blockedReason: "You need the Maintainer role or higher to change the term base.",
+    })
+
+    const cancelBtn = screen.getByRole("button", { name: /cancel/i })
+    expect(cancelBtn).toBeEnabled()
+    fireEvent.click(cancelBtn)
+    expect(onCancel).toHaveBeenCalledOnce()
+  })
+
+  it("clears a prior error when the user re-submits successfully", async () => {
+    const onConfirm = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("You're offline — reconnect to save term base changes."))
+      .mockResolvedValueOnce(undefined)
+    renderDialog({ sourceTerm: "peace", onConfirm })
+
+    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    })
+    expect(onConfirm).toHaveBeenCalledTimes(2)
+  })
 })

@@ -31,6 +31,11 @@ const formSchema = z.object({
 interface AddConceptDialogProps {
   open: boolean
   sourceTerm: string
+  /** Non-null when the current user cannot write to the term base (below the
+   *  Maintainer floor). The dialog opens blocked: input and Create draft are
+   *  disabled and this reason is shown, but Cancel stays active so the user
+   *  can dismiss it — instead of letting them type a draft doomed to reject. */
+  blockedReason?: string | null
   onConfirm: (term: string) => void | Promise<void>
   onCancel: () => void
 }
@@ -38,6 +43,7 @@ interface AddConceptDialogProps {
 export function AddConceptDialog({
   open,
   sourceTerm,
+  blockedReason,
   onConfirm,
   onCancel,
 }: AddConceptDialogProps) {
@@ -45,11 +51,13 @@ export function AddConceptDialog({
   // rejected (below Maintainer, offline, conflict, 5xx). Surface that reason and
   // keep the dialog open instead of dismissing it as if the concept was saved.
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const blocked = !!blockedReason
 
   const form = useForm({
     defaultValues: { term: sourceTerm },
     validators: { onSubmit: formSchema },
     onSubmit: async ({ value }) => {
+      if (blocked) return
       setSubmitError(null)
       try {
         await onConfirm(value.term.trim())
@@ -109,7 +117,8 @@ export function AddConceptDialog({
                       placeholder="Source term…"
                       aria-label="Source term for new concept"
                       aria-invalid={invalid}
-                      autoFocus
+                      disabled={blocked}
+                      autoFocus={!blocked}
                     />
                     {invalid && <FieldError errors={field.state.meta.errors} />}
                   </Field>
@@ -119,9 +128,9 @@ export function AddConceptDialog({
           </FieldGroup>
         </form>
 
-        {submitError && (
+        {(blockedReason ?? submitError) && (
           <p role="alert" className="px-1 text-sm text-destructive">
-            {submitError}
+            {blockedReason ?? submitError}
           </p>
         )}
 
@@ -129,14 +138,23 @@ export function AddConceptDialog({
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            form="add-concept-form"
-            aria-label="Create draft concept"
-          >
-            {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-            {form.state.isSubmitting ? "Saving…" : "Create draft"}
-          </Button>
+          {/* Subscribe rather than reading form.state.isSubmitting in render:
+              that read is not reactive, so after a rejected save the button
+              stayed stuck on "Saving…" (same trap as ProjectCreateDialog). */}
+          <form.Subscribe
+            selector={(state) => state.isSubmitting}
+            children={(isSubmitting) => (
+              <Button
+                type="submit"
+                form="add-concept-form"
+                aria-label="Create draft concept"
+                disabled={blocked || isSubmitting}
+              >
+                {isSubmitting && <Spinner data-icon="inline-start" />}
+                {isSubmitting ? "Saving…" : "Create draft"}
+              </Button>
+            )}
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -42,9 +42,9 @@ vi.mock("@/components/HealthRing", () => ({
 // CSS import — no-op in tests.
 vi.mock("./homepage.css", () => ({}))
 
-const mockHasAuthHintCookie = vi.fn()
 vi.mock("@/lib/frontier/session-store", () => ({
-  hasAuthHintCookie: () => mockHasAuthHintCookie(),
+  // AppEntryBanner reads the session; these specs only care about the nav link.
+  loadActiveSession: () => Promise.resolve(null),
 }))
 
 // ---------------------------------------------------------------------------
@@ -67,26 +67,27 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Homepage — Open app link target (AQU-282)", () => {
-  it("points to /login when the user is not signed in", () => {
-    mockHasAuthHintCookie.mockReturnValue(false)
+describe("Homepage — Open app link target", () => {
+  // `/` is the marketing homepage for every visitor now, so "open app" must not
+  // point there — /app is the workspace entry and it redirects signed-out
+  // visitors to /login itself. The link is identity-independent on purpose:
+  // these pages are prerendered and edge-cached, so their markup cannot depend
+  // on who is asking. Signed-in visitors are steered by AppEntryBanner instead.
+  it("points at /app regardless of session state", () => {
     renderHomepage()
 
     const links = screen.getAllByRole("link", { name: /open app/i })
     expect(links.length).toBeGreaterThan(0)
     links.forEach((link) => {
-      expect(link).toHaveAttribute("href", "/login")
+      expect(link).toHaveAttribute("href", "/app")
     })
   })
 
-  it("points to / when the auth-hint cookie is set (signed-in user)", () => {
-    mockHasAuthHintCookie.mockReturnValue(true)
+  it("never links back to /, which would bounce the user to marketing again", () => {
     renderHomepage()
 
-    const links = screen.getAllByRole("link", { name: /open app/i })
-    expect(links.length).toBeGreaterThan(0)
-    links.forEach((link) => {
-      expect(link).toHaveAttribute("href", "/")
+    screen.getAllByRole("link", { name: /open app/i }).forEach((link) => {
+      expect(link).not.toHaveAttribute("href", "/")
     })
   })
 })

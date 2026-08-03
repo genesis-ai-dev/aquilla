@@ -3756,6 +3756,13 @@ function EditorRow({
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
   const pendingIdmlPointerSelectionRef = useRef<IdmlPointerSelection | null>(null)
+  // AQU-746: activation is async (read view → TipTap mount → rAF focus), so a
+  // printable keydown typed in that window has no focused editor to land in and
+  // is silently dropped. Buffer those keys on the (synchronously refocused) row
+  // wrapper and replay them once the editor reports focus, so a fast typist
+  // never loses the first character(s). See requestTargetEdit / handleGridRowKeyDown.
+  const awaitingEditorFocusRef = useRef(false)
+  const pendingActivationInputRef = useRef<string>("")
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -4436,6 +4443,14 @@ function EditorRow({
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
     if (!editable || isLoading || lockHolderLabel) return
     pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
+    // AQU-746: open the keystroke-buffer window and move focus to the persistent
+    // row wrapper *synchronously*, before React swaps the read view out. Without
+    // this the read view unmounts, focus falls to <body>, and any keydown before
+    // the editor focuses is lost. On the row wrapper those keydowns are catchable
+    // (handleGridRowKeyDown) and get replayed on editor focus.
+    awaitingEditorFocusRef.current = true
+    pendingActivationInputRef.current = ""
+    rowRef.current?.focus({ preventScroll: true })
     onActivateEditor(cell.id)
   }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
 
@@ -4445,12 +4460,19 @@ function EditorRow({
 
   const handleEditorFocus = useCallback(() => {
     editorFocusedRef.current = true
+    // AQU-746: the editor now owns the caret — stop buffering; TranslatedEditor
+    // replays whatever was captured during activation (see its onFocus).
+    awaitingEditorFocusRef.current = false
     onActivateEditor(cell.id)
     onClaimCell?.(cell.id)
     onAckRemoteChange?.(cell.id)
   }, [cell.id, onActivateEditor, onClaimCell, onAckRemoteChange])
 
   const handleEditorBlurOuter = useCallback(() => {
+    // AQU-746: activation was abandoned without the editor ever focusing — drop
+    // any buffered keys so they can't leak into a later, unrelated activation.
+    awaitingEditorFocusRef.current = false
+    pendingActivationInputRef.current = ""
     if (editorFocusedRef.current) {
       editorFocusedRef.current = false
       onReleaseCell?.(cell.id)
@@ -5152,6 +5174,23 @@ function EditorRow({
     // Only act when the grid row wrapper itself is focused, not a child element
     // (child interactive elements handle their own keyboard events).
     if (e.target !== e.currentTarget) return
+    // AQU-746: while the editor is mounting/focusing after an activation, capture
+    // printable keystrokes here (the row wrapper holds focus in that window) and
+    // buffer them for replay. Without this the character is dropped: it fires
+    // before any editor exists to receive it. Only single printable keys — no
+    // modifier chords, no navigation/IME keys — are text; everything else falls
+    // through to the normal grid-navigation handling below.
+    if (
+      awaitingEditorFocusRef.current
+      && e.key.length === 1
+      && !e.metaKey
+      && !e.ctrlKey
+      && !e.altKey
+    ) {
+      e.preventDefault()
+      pendingActivationInputRef.current += e.key
+      return
+    }
     if (e.key === "ArrowDown" || e.key === "j") {
       e.preventDefault()
       onGridRowKeyNav("next")
@@ -5573,6 +5612,7 @@ function EditorRow({
                     // local human draft — then `visibleTranslated` IS cell.translated.
                     aiDrafted={!localTargetDraft && cell.aiDrafted}
                     onCommit={handleEditorCommit}
+                    pendingInputRef={pendingActivationInputRef}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
                     onSelectionChange={handleTargetPresenceSelection}

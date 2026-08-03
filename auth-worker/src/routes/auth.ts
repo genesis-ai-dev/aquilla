@@ -743,11 +743,18 @@ auth.post(
       const throttled = recentRequests >= RESET_REQUEST_MAX_PER_IDENTIFIER
       await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_request", identifier, true)
 
+      // AQU-751: match the user case-insensitively, exactly as login
+      // (jwt.getUserByEmail) and registration (the dedup check) already do —
+      // all three canonicalize email with LOWER(). A plain `email = ?` here
+      // silently missed any account whose stored casing differed from what the
+      // requester typed (common for Codex-migrated accounts, whose casing came
+      // from the migration source), returning the generic 200 without ever
+      // minting a token or sending the reset email.
       const user = await c.env.AQUILLA_PG.prepare(
-        "SELECT id, username FROM users WHERE email = ?",
+        "SELECT id, username, email FROM users WHERE LOWER(email) = LOWER(?)",
       )
         .bind(email)
-        .first<{ id: number; username: string }>()
+        .first<{ id: number; username: string; email: string }>()
       if (!user || throttled) {
         // Don't disclose whether the email is registered, and don't disclose
         // that the request was throttled either — same message either way.
@@ -775,7 +782,9 @@ auth.post(
       // usable via the emailed link regardless of whether the SEND itself
       // succeeds, so a delivery failure shouldn't change the response.
       try {
-        await sendPasswordResetEmail(c.env, email, resetUrl)
+        // Send to the address of record (user.email), not the requester-typed
+        // casing, so the mail always targets the account's canonical email.
+        await sendPasswordResetEmail(c.env, user.email, resetUrl)
       } catch (err) {
         console.warn("[password-reset] email send failed (non-fatal):", err)
       }

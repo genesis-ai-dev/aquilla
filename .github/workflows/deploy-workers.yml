@@ -17,6 +17,11 @@ on:
     paths:
       - 'sync-worker/**'
       - 'auth-worker/**'
+      - 'config/cloudflare-deployments.json'
+      - 'scripts/cloudflare-build-deploy.*'
+      - 'scripts/cloudflare-deployment-manifest.*'
+      - 'scripts/cloudflare-version-deploy.*'
+      - 'scripts/verify-worker-deployment.*'
   workflow_dispatch:
     inputs:
       worker:
@@ -29,6 +34,10 @@ on:
 # to write back to the repo.
 permissions:
   contents: read
+
+concurrency:
+  group: deploy-workers-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   target:
@@ -71,8 +80,9 @@ jobs:
             base="${{ github.sha }}~1"
           fi
           changed=$(git diff --name-only "$base" "${{ github.sha }}" || git show --name-only --format= "${{ github.sha }}")
-          echo "$changed" | grep -q '^sync-worker/' && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
-          echo "$changed" | grep -q '^auth-worker/' && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
+          common='^(config/cloudflare-deployments\.json|scripts/(cloudflare-(build-deploy|deployment-manifest|version-deploy)|verify-worker-deployment)\.)'
+          echo "$changed" | grep -Eq "^sync-worker/|$common" && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
+          echo "$changed" | grep -Eq "^auth-worker/|$common" && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
 
   # Worker deploys are blocked until the target Neon schema is current — the
   # recurring 500 class (AQU-135/150/158, projects.is_active/source_link_*) was
@@ -159,12 +169,11 @@ jobs:
         working-directory: sync-worker
 
       - name: Deploy sync-worker
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          workingDirectory: sync-worker
-          command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
+        working-directory: sync-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node ../scripts/cloudflare-version-deploy.mjs sync "${{ needs.target.outputs.wrangler_environment }}"
 
       - name: Verify sync-worker route and environment
         run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=sync
@@ -210,12 +219,11 @@ jobs:
       # ledger). The schema-guard job above fails this deploy if the target
       # schema is behind db/postgres/migrations/.
       - name: Deploy auth-worker
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          workingDirectory: auth-worker
-          command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
+        working-directory: auth-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node ../scripts/cloudflare-version-deploy.mjs identity "${{ needs.target.outputs.wrangler_environment }}"
 
       - name: Verify identity and chat routes
         run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=auth

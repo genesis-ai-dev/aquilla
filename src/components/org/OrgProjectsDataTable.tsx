@@ -451,11 +451,11 @@ export function OrgProjectsDataTable({
           return `${p.name} ${p.orgName ?? ""} ${p.pm?.username ?? ""}`.toLowerCase().includes(q)
         }}
         toolbar={(table) => (
-          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+          <Badge variant="secondary" className="ml-auto tabular-nums">
             {table.getFilteredRowModel().rows.length === tableData.length
               ? `${tableData.length}`
               : `${table.getFilteredRowModel().rows.length} of ${tableData.length}`}
-          </span>
+          </Badge>
         )}
         renderSubRow={(p) =>
           expanded.has(p.id) ? (

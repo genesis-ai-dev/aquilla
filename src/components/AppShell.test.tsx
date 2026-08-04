@@ -111,7 +111,7 @@ describe("AppShell main-content error containment", () => {
     expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
   })
 
-  it("wraps a right aside in a resizable panel with a drag handle", () => {
+  it("lays out aside children without a shared width shell", () => {
     const { container, rerender } = render(
       <MemoryRouter>
         <AppShell
@@ -120,14 +120,12 @@ describe("AppShell main-content error containment", () => {
           sidebar={<div>sidebar</div>}
           main={<div>main</div>}
           aside={<div data-testid="right-aside">comments</div>}
-          asideStorageKey="test-project"
         />
       </MemoryRouter>,
     )
 
     expect(screen.getByTestId("right-aside")).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="app-shell-aside"]')).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="resizable-handle"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="app-shell-aside"]')).not.toBeInTheDocument()
 
     rerender(
       <MemoryRouter>
@@ -142,6 +140,6 @@ describe("AppShell main-content error containment", () => {
     )
 
     expect(screen.getByTestId("aside-edge")).toBeInTheDocument()
-    expect(container.querySelector('[data-slot="app-shell-aside"]')).not.toBeInTheDocument()
+    expect(screen.queryByTestId("right-aside")).not.toBeInTheDocument()
   })
 })

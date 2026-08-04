@@ -8,6 +8,7 @@ import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 
 interface HistoryDrawerProps {
   cell: CellData
@@ -176,7 +177,8 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-card">
+    <RightSidebarPanel storageKey="history" defaultWidth={384} resizeLabel="Resize history panel">
+    <div className="flex h-full w-full flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
@@ -254,6 +256,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
         )}
       </div>
     </div>
+    </RightSidebarPanel>
   )
 }
 

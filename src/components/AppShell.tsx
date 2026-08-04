@@ -34,10 +34,6 @@ const DOCK_DEFAULT_WIDTH = 256
 /** Collapsed rail (40) + aside `pl-2` inset (8) when railCollapsed. */
 const DOCK_COLLAPSED_WIDTH = 48
 
-const ASIDE_MIN_WIDTH = 240
-const ASIDE_MAX_WIDTH = 640
-const ASIDE_DEFAULT_WIDTH = 360
-
 const VIDEO_STORAGE_KEY = "codex:video-height"
 const VIDEO_DEFAULT_HEIGHT = 320
 const VIDEO_MIN_HEIGHT = 120
@@ -60,29 +56,6 @@ function writeStoredDockWidth(storageKey: string | undefined, width: number) {
   if (!storageKey) return
   try {
     localStorage.setItem(`left-dock-width:${storageKey}`, String(Math.round(width)))
-  } catch {
-    // ignore
-  }
-}
-
-function readStoredAsideWidth(storageKey: string | undefined): number {
-  if (!storageKey) return ASIDE_DEFAULT_WIDTH
-  try {
-    const saved = localStorage.getItem(`right-aside-width:${storageKey}`)
-    if (saved) {
-      const n = parseInt(saved, 10)
-      if (n >= ASIDE_MIN_WIDTH && n <= ASIDE_MAX_WIDTH) return n
-    }
-  } catch {
-    // ignore
-  }
-  return ASIDE_DEFAULT_WIDTH
-}
-
-function writeStoredAsideWidth(storageKey: string | undefined, width: number) {
-  if (!storageKey) return
-  try {
-    localStorage.setItem(`right-aside-width:${storageKey}`, String(Math.round(width)))
   } catch {
     // ignore
   }
@@ -132,16 +105,12 @@ interface Props {
   resizableTop?: ReactNode
   main: ReactNode
   /**
-   * Right-side editor drawers/sidebars. When set, width is owned by a
-   * horizontal ResizablePanelGroup (same pattern as the left dock).
+   * Right-side editor drawers/sidebars. Each panel owns its own width via
+   * `RightSidebarPanel` — AppShell only lays them out in a row.
    */
   aside?: ReactNode
-  /** Persist right-aside width per project (`right-aside-width:${key}`). */
-  asideStorageKey?: string
   /**
    * Non-resizable right-edge chrome (e.g. collapsed Parallel Bibles tab).
-   * Sits outside the aside Resizable panel so a thin rail isn't stretched
-   * to the stored aside width.
    */
   asideEdge?: ReactNode
   /** Brand logo mark rendered at the top of the dock rail — passed here so
@@ -169,13 +138,11 @@ export function AppShell({
   resizableTop,
   main,
   aside,
-  asideStorageKey,
   asideEdge,
   railCollapsed,
 }: Props) {
   const dockContent = leftDock ?? sidebar
   const useDockResize = Boolean(leftDock)
-  const useAsideResize = Boolean(aside)
   // Route-keyed so a crash in one page's content doesn't stick around after
   // the user navigates elsewhere — a key change unmounts + remounts the
   // boundary, clearing its error state. Chrome (sidebar, header, status bar)
@@ -196,9 +163,7 @@ export function AppShell({
   ) : null)
 
   const dockPanelRef = usePanelRef()
-  const asidePanelRef = usePanelRef()
   const [dockWidth] = useState(() => readStoredDockWidth(dockStorageKey))
-  const [asideWidth] = useState(() => readStoredAsideWidth(asideStorageKey))
   const [videoHeight] = useState(() => readStoredVideoHeight())
 
   // Keep the resizable dock panel in sync with tab collapse/expand.
@@ -212,14 +177,6 @@ export function AppShell({
       panel.resize(readStoredDockWidth(dockStorageKey))
     }
   }, [railCollapsed, useDockResize, dockStorageKey, dockPanelRef])
-
-  // Re-apply stored aside width when a right panel opens (group remounts).
-  useEffect(() => {
-    if (!useAsideResize) return
-    const panel = asidePanelRef.current
-    if (!panel) return
-    panel.resize(readStoredAsideWidth(asideStorageKey))
-  }, [useAsideResize, asideStorageKey, asidePanelRef])
 
   // Status / playback sit at the bottom of the MAIN column (not under `aside`)
   // so the transport/volume share the editor's right edge when drawers/sidebars
@@ -237,36 +194,8 @@ export function AppShell({
 
   const mainStack = (
     <main className="flex min-h-0 flex-1 overflow-hidden">
-      {useAsideResize ? (
-        <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
-          <ResizablePanel id="shell-main-column" minSize="40%">
-            {mainColumn}
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel
-            id="shell-aside"
-            panelRef={asidePanelRef}
-            defaultSize={asideWidth}
-            minSize={ASIDE_MIN_WIDTH}
-            maxSize={ASIDE_MAX_WIDTH}
-            groupResizeBehavior="preserve-pixel-size"
-            onResize={(size) => {
-              if (size.inPixels >= ASIDE_MIN_WIDTH) {
-                writeStoredAsideWidth(asideStorageKey, size.inPixels)
-              }
-            }}
-          >
-            <div
-              data-slot="app-shell-aside"
-              className="flex h-full min-h-0 min-w-0 overflow-hidden"
-            >
-              {aside}
-            </div>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      ) : (
-        mainColumn
-      )}
+      {mainColumn}
+      {aside}
       {asideEdge}
     </main>
   )

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { TranslationRule, RuleInfraction, ProjectRecord } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 
 interface RuleDrawerProps {
   rule: TranslationRule | null
@@ -41,7 +42,8 @@ export function RuleDrawer({
   }
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-card">
+    <RightSidebarPanel storageKey="rule" defaultWidth={320} resizeLabel="Resize rule panel">
+    <div className="flex h-full w-full flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-2">
           <SeverityIcon className={`h-4 w-4 ${severityColor}`} />
@@ -131,5 +133,6 @@ export function RuleDrawer({
       </div>
 
     </div>
+    </RightSidebarPanel>
   )
 }

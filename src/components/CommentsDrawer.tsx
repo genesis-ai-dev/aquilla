@@ -10,6 +10,7 @@ import { canPerform } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE } from "@/lib/frontier/roles"
 import { CommentThread } from "./CommentThread"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 
 interface CommentsDrawerProps {
   project: ProjectRecord
@@ -89,7 +90,8 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   }
 
   return (
-    <div className="bg-card relative z-10 flex h-full min-w-0 flex-1 flex-col border-l" data-testid="comments-drawer">
+    <RightSidebarPanel storageKey="comments" defaultWidth={384} resizeLabel="Resize comments panel">
+    <div className="bg-card relative z-10 flex h-full w-full flex-col border-l" data-testid="comments-drawer">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           Comments {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
@@ -153,5 +155,6 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
         </div>
       )}
     </div>
+    </RightSidebarPanel>
   )
 }

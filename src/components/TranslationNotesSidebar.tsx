@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
 import { BookOpen, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { RightSidebarPanel } from "./RightSidebarPanel"
 
 // Sentinel fileId for project-scoped token mints (no specific file).
 // Must match the "__project__" sentinel used by useComments,
@@ -179,9 +180,10 @@ export function TranslationNotesSidebar({
   }
 
   return (
+    <RightSidebarPanel storageKey="translation-notes" defaultWidth={288} resizeLabel="Resize translation notes panel">
     <div
       className={cn(
-        "flex h-full min-w-0 flex-1 flex-col border-l bg-card text-sm",
+        "flex h-full w-full flex-col border-l bg-card text-sm",
         className,
       )}
     >
@@ -242,6 +244,7 @@ export function TranslationNotesSidebar({
         )}
       </div>
     </div>
+    </RightSidebarPanel>
   )
 }
 

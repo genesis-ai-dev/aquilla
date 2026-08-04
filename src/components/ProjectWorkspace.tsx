@@ -4884,7 +4884,6 @@ export function ProjectWorkspace() {
       <AppShell
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
-        asideStorageKey={projectId}
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">

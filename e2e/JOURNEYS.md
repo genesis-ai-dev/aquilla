@@ -262,7 +262,7 @@
 | Projects    | Project settings audio media strategy buttons         | `e2e/specs/projects/project-settings-audio-strategy.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings decay section expands                | `e2e/specs/projects/project-settings-decay.smoke.spec.ts`     |   ✅   |
 | Projects    | Project settings more save options → Close without saving | `e2e/specs/projects/project-settings-more-save-options.smoke.spec.ts` |   ✅   |
-| Projects    | Project settings named validators multi-select combobox | `e2e/specs/projects/project-settings-named-validators.smoke.spec.ts` |   ✅   |
+| Projects    | Project settings named validators avatar-stack combobox | `e2e/specs/projects/project-settings-named-validators.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings search filter (across sub-menus, AQU-501) | `e2e/specs/projects/project-settings-nav-search.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings termbase publish toggle              | `e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Project settings validation section                   | `e2e/specs/projects/project-settings-validation.smoke.spec.ts` + `project-settings-validation-count.smoke.spec.ts` | ✅ |

@@ -4,16 +4,17 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
 /**
  * ValidationSettingsSection — "Named validators" multi-select combobox.
  *
- * ValidationSettingsSection.tsx renders a Combobox (multiple + chips) for
- * project-member usernames:
- *   - input id="validation-named-users"
- *   - options drawn from the project members roster
+ * ValidationSettingsSection.tsx renders a popup Combobox for project-member
+ * usernames:
+ *   - trigger id="validation-named-users" (avatar stack + comma-separated names)
+ *   - options with checkbox + avatar + username
+ *   - autoHighlight + Shift+Enter toggles without closing
  *
  * Selecting a member marks the form dirty, which reveals the "Save changes"
  * button in the parent ProjectSettings form.
  *
  * This spec: navigate to project settings → open the named validators
- * combobox → pick alice (project creator) → verify Save changes appears.
+ * combobox → Shift+Enter to pick alice (auto-highlighted) → verify Save.
  */
 test("project settings named validators combobox makes form dirty", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -26,21 +27,19 @@ test("project settings named validators combobox makes form dirty", async ({ ali
   expect(projectId).toBeTruthy()
 
   await alice.goto(`/project/${projectId}/settings/validation`)
-  const namedUsersInput = alice.locator("#validation-named-users")
-  await expect(namedUsersInput).toBeVisible({ timeout: 10_000 })
+  const trigger = alice.locator("#validation-named-users")
+  await expect(trigger).toBeVisible({ timeout: 10_000 })
 
-  // Wait for the members roster to populate the combobox options.
-  await namedUsersInput.click()
-  const aliceOption = alice.getByRole("option", { name: "alice" })
-  await expect(aliceOption).toBeVisible({ timeout: 10_000 })
-  await aliceOption.click()
+  await trigger.click()
+  const search = alice.getByRole("combobox", { name: /Search members/i })
+  await expect(search).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByRole("option", { name: "alice" })).toBeVisible({ timeout: 10_000 })
+  await search.press("Shift+Enter")
 
-  // Chip for the selected member should appear (controlled from form state).
-  await expect(alice.locator('[data-slot="combobox-chip"]', { hasText: "alice" })).toBeVisible({
-    timeout: 5_000,
-  })
+  // Trigger shows the selected username (avatar-stack + label); popup stays open.
+  await expect(trigger).toContainText("alice", { timeout: 5_000 })
+  await expect(search).toBeVisible({ timeout: 5_000 })
 
-  // Close the popup so header actions aren't obscured, then assert dirty.
   await alice.keyboard.press("Escape")
   const saveBtn = alice.getByRole("button", { name: /Save changes/i })
   await expect(saveBtn).toBeVisible({ timeout: 10_000 })

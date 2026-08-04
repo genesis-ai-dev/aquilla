@@ -322,7 +322,7 @@ export function TakesStrip({
 
   return (
     <div className="border-t px-5 py-3">
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60">
+      <div className="mb-2 text-xs text-muted-foreground/60">
         Takes ({takes.length})
       </div>
       {/* Round 8: rows, not chips — one take per line, name first. */}
@@ -364,7 +364,7 @@ export function TakesStrip({
                   size="icon-xs"
                   onClick={() => void play(att)}
                   aria-label={isPlaying ? "Stop" : "Play take"}
-                  className="rounded-full hover:bg-background"
+                  className="rounded-md hover:bg-background"
                 >
                   {isLoading ? <Spinner className="size-3.5" />
                     : isPlaying ? <Pause className="h-3.5 w-3.5" />
@@ -428,7 +428,7 @@ export function TakesStrip({
                           setRenamingId(att.audioId)
                         }}
                         aria-label="Rename take"
-                        className="rounded-full text-muted-foreground/40 hover:bg-background hover:text-foreground"
+                        className="rounded-md text-muted-foreground/40 hover:bg-background hover:text-foreground"
                       >
                         <Pencil className="h-3 w-3" />
                       </Button>
@@ -445,7 +445,7 @@ export function TakesStrip({
                     onClick={() => void denoise(att)}
                     disabled={!session?.jwt || denoisingId !== null}
                     aria-label="Remove noise (adds a cleaned take)"
-                    className="rounded-full text-muted-foreground/60 hover:bg-background"
+                    className="rounded-md text-muted-foreground/60 hover:bg-background"
                   >
                     {isDenoising ? <Spinner className="size-3.5" /> : <Bird className="h-3.5 w-3.5" />}
                   </Button>
@@ -460,7 +460,7 @@ export function TakesStrip({
                     onClick={() => void circle(revertTo)}
                     disabled={isSelectInFlight}
                     aria-label="Revert to the original recording"
-                    className="rounded-full text-muted-foreground/60 hover:bg-background"
+                    className="rounded-md text-muted-foreground/60 hover:bg-background"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </Button>
@@ -475,7 +475,7 @@ export function TakesStrip({
                   disabled={isSelectInFlight || isCircled}
                   aria-label={isCircled ? "Active take" : "Use this take"}
                   className={cn(
-                    "rounded-full hover:bg-background",
+                    "rounded-md hover:bg-background",
                     isCircled
                       ? isGenerated
                         ? "text-violet-600 dark:text-violet-400"
@@ -494,7 +494,7 @@ export function TakesStrip({
                   onClick={() => void remove(att.audioId)}
                   disabled={isBusy}
                   aria-label="Delete take"
-                  className="rounded-full text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
+                  className="rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>

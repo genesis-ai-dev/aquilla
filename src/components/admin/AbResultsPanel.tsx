@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { DataTable } from "@/components/ui/data-table"
 import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Spinner } from "@/components/ui/spinner"
 import { getAbResults, type AbResultRow } from "@/lib/frontier/admin"
 import { cn } from "@/lib/utils"
 
@@ -96,7 +97,7 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
               <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
                 <div
                   className={cn(
-                    "h-full rounded-full",
+                    "h-full rounded-md",
                     acceptPct >= 70 ? "bg-emerald-500" : acceptPct >= 40 ? "bg-primary" : "bg-amber-500",
                   )}
                   style={{ width: `${acceptPct}%` }}
@@ -199,7 +200,7 @@ export function AbResultsPanel({ jwt }: { jwt: string }) {
           onClick={() => void refresh()}
           aria-label="Refresh results"
         >
-          <RefreshCw className={cn(loading && "animate-spin")} />
+          {loading ? <Spinner className="size-3.5" /> : <RefreshCw className="size-3.5" />}
         </Button>
       </div>
 

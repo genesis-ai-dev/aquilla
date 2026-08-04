@@ -401,7 +401,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
 
         {rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-3 py-10 text-center">
-            <span className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
               <Check className="size-4" aria-hidden />
             </span>
             <p className="text-sm font-medium">You&rsquo;re all caught up</p>
@@ -428,7 +428,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                         className={cn(
                           "group/row flex w-full items-start gap-2 px-3 py-2.5 text-left transition-colors",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                          hasMore && "hover:bg-muted/60 cursor-pointer",
+                          hasMore && "hover:bg-muted/60",
                           !hasMore && "cursor-default",
                         )}
                       >

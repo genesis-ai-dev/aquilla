@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "bash ../scripts/verify-deploy-branch.sh main && wrangler deploy --env=production",
+    "deploy:staging": "bash ../scripts/verify-deploy-branch.sh staging && wrangler deploy --env=staging",
+    "deploy:development": "wrangler deploy --env=development",
     "type-check": "tsc --noEmit",
     "test": "vitest run"
   },

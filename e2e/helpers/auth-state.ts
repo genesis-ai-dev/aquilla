@@ -48,9 +48,29 @@ export async function writePersistedSession(
   )
   try {
     await fs.writeFile(temporary, JSON.stringify(session, null, 2), { mode: 0o600 })
-    await fs.rename(temporary, file)
+    await publishAtomically(temporary, file)
   } finally {
     await fs.rm(temporary, { force: true })
+  }
+}
+
+/**
+ * Windows refuses a replacing rename with EPERM/EACCES while any handle is still
+ * open on the destination, which two stacks publishing at once routinely hit.
+ * Retrying keeps publication atomic — the rename either replaces the file whole
+ * or has not happened — where giving up would lose a session.
+ */
+async function publishAtomically(temporary: string, file: string): Promise<void> {
+  const RETRYABLE = new Set(["EPERM", "EACCES", "EBUSY"])
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.rename(temporary, file)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (attempt >= 50 || code === undefined || !RETRYABLE.has(code)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
   }
 }
 

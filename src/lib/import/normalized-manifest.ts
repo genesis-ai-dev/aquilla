@@ -3,16 +3,20 @@ import {
   NORMALIZED_IMPORT_VERSION,
   type DeclarativeImportRecipe,
   type ImportAddress,
+  type ImportMilestone,
   type ImportSourceLocator,
   type ImportUnitKind,
   type NormalizedImportSummary,
   type RoundTripFidelity,
 } from "../../../shared/import-contract"
+import { planImportMilestones } from "./milestones"
 
 export {
   NORMALIZED_IMPORT_VERSION,
   type DeclarativeImportRecipe,
   type ImportAddress,
+  type ImportMilestone,
+  type ImportMilestoneKind,
   type ImportSourceLocator,
   type ImportUnitKind,
   type NormalizedImportSummary,
@@ -23,6 +27,7 @@ export interface NormalizedImportUnit {
   unitKey: string
   kind: ImportUnitKind
   displayLabel: string | null
+  milestone: ImportMilestone
   canonicalRef?: string
   address: ImportAddress
   sourceLocator: ImportSourceLocator
@@ -75,6 +80,7 @@ export interface AquillaImportMetadata {
   unitKey: string
   kind: ImportUnitKind
   displayLabel: string | null
+  milestone: ImportMilestone
   address: ImportAddress
   sourceLocator: ImportSourceLocator
   physicalOrder: number
@@ -371,7 +377,10 @@ export function normalizeTranslatableStrings(
   const warnings: ImportWarning[] = []
   let contentOrder = 0
 
-  const units = strings.map((value, physicalOrder): NormalizedImportUnit => {
+  const unitsWithoutMilestones = strings.map((
+    value,
+    physicalOrder,
+  ): Omit<NormalizedImportUnit, "milestone"> => {
     const kind = unitKind(value)
     if (kind !== "heading" && kind !== "paratext") contentOrder += 1
     const ref = canonicalRef(value, kind)
@@ -450,6 +459,16 @@ export function normalizeTranslatableStrings(
     }
   })
 
+  const milestones = planImportMilestones(unitsWithoutMilestones, strings, {
+    fileName: options.fileName,
+    fileType: options.fileType,
+    profileId: options.profileId ?? `builtin:${options.fileType}`,
+  })
+  const units: NormalizedImportUnit[] = unitsWithoutMilestones.map((unit, index) => ({
+    ...unit,
+    milestone: milestones[index]!,
+  }))
+
   return {
     manifestVersion: NORMALIZED_IMPORT_VERSION,
     fileName: options.fileName,
@@ -475,6 +494,7 @@ export function aquillaImportMetadata(
     unitKey: unit.unitKey,
     kind: unit.kind,
     displayLabel: unit.displayLabel,
+    milestone: unit.milestone,
     address: unit.address,
     sourceLocator: unit.sourceLocator,
     physicalOrder: unit.physicalOrder,

@@ -32,7 +32,7 @@ FRONTIER_D1_DATABASE_ID=""
 FRONTIER_D1_API_TOKEN=""
 # Local test override only. Leave unset when talking to Cloudflare.
 # FRONTIER_D1_API_BASE_URL="http://127.0.0.1:9460/client/v4"
-GITLAB_URL="https://gitlab.frontierrnd.com"
+GITLAB_URL="https://git.genesisrnd.com"
 GITLAB_ADMIN_TOKEN=""
 
 # Email goes through the Cloudflare Email Service `send_email` binding, which

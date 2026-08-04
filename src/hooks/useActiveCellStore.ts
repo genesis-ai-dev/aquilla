@@ -10,6 +10,8 @@ import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/ex
 import { sortByLens } from "@/lib/timeline/derive"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
+import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
+import type { ImportMilestoneKind } from "../../shared/import-contract"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
@@ -89,13 +91,31 @@ export interface CellCommitHandle {
 }
 
 export interface CellNavigationEntry {
+  key: string
+  label: string
+  shortLabel: string
+  kind: ImportMilestoneKind
+  firstCellId: string
+  firstIndex: number
+  cellIds: readonly string[]
+  translated: number
+  validated: number
+  total: number
+  subsections: readonly CellNavigationSubsection[]
+}
+
+export interface CellNavigationSubsection {
+  key: string
   label: string
   firstCellId: string
   firstIndex: number
+  cellIds: readonly string[]
   translated: number
   validated: number
   total: number
 }
+
+export const MILESTONE_SUBSECTION_SIZE = 50
 
 export interface CellFootnoteDetails {
   sourceFootnotes: ExtractedFootnote[]
@@ -367,7 +387,10 @@ export class CellStore {
   }
 
   findIndexBySection(label: string): number {
-    const entry = this.navIndex.find((item) => item.label === label)
+    const normalizedKey = legacySectionKey(label)
+    const entry = this.navIndex.find((item) => (
+      item.key === label || item.label === label || item.key === normalizedKey
+    ))
     return entry?.firstIndex ?? -1
   }
 
@@ -376,8 +399,11 @@ export class CellStore {
     return this.sectionLabelById.get(cellId) ?? ""
   }
 
-  getNavigationIndex(): readonly CellNavigationEntry[] {
-    return this.navIndex.length === 0 ? EMPTY_NAVIGATION : this.navIndex
+  getNavigationIndex(displayCellIds?: readonly string[]): readonly CellNavigationEntry[] {
+    const navigation = displayCellIds
+      ? this.buildNavigationIndex(displayCellIds).entries
+      : this.navIndex
+    return navigation.length === 0 ? EMPTY_NAVIGATION : navigation
   }
 
   getFileProgressSnapshot(): FileProgressResponse | null {
@@ -1005,8 +1031,7 @@ export class CellStore {
   private rebuildDerivedIndexes(): void {
     this.derivedVersion++
     this.derivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
-    const nav = new Map<string, CellNavigationEntry>()
-    const sectionById = new Map<string, string>()
+    const navigation = this.buildNavigationIndex(this.order)
     const footnoteOffsets = new Map<string, { source: number; target: number }>()
     const countsByScope = new Map<string, { source: number; target: number }>()
     const progressThreshold = Math.min(15, Math.max(1, this.ctx.requiredValidations))
@@ -1033,18 +1058,7 @@ export class CellStore {
       const source = this.sourceById.get(id)
       const target = this.targetById.get(id)
       const canonical = target?.canonicalRef ?? source?.canonicalRef ?? null
-      const section = canonical ? sectionLabelFromCanonical(canonical) : ""
-      if (section) {
-        sectionById.set(id, section)
-        let entry = nav.get(section)
-        if (!entry) {
-          entry = { label: section, firstCellId: id, firstIndex: index, translated: 0, validated: 0, total: 0 }
-          nav.set(section, entry)
-        }
-        entry.total++
-        if ((target?.value ?? "").trim()) entry.translated++
-        if (target?.validated) entry.validated++
-      }
+      const section = navigation.milestoneByCellId.get(id)?.key ?? ""
 
       if (source) {
         const audit = this.ctx.auditStats.get(id)
@@ -1078,7 +1092,7 @@ export class CellStore {
       counts.target += countNumericFootnotes(target?.value ?? "")
       countsByScope.set(scopeKey, counts)
     }
-    this.navIndex = Array.from(nav.values())
+    this.navIndex = navigation.entries
     this.fileProgressSnapshot = this.ctx.fileId && this.sourceOrder.length > 0
       ? {
           fileId: this.ctx.fileId,
@@ -1089,8 +1103,80 @@ export class CellStore {
           source: 'projection',
         }
       : null
-    this.sectionLabelById = sectionById
+    this.sectionLabelById = new Map(
+      [...navigation.milestoneByCellId].map(([cellId, milestone]) => [cellId, milestone.key]),
+    )
     this.footnoteOffsets = footnoteOffsets
+  }
+
+  private buildNavigationIndex(ids: readonly string[]): {
+    entries: CellNavigationEntry[]
+    milestoneByCellId: ReadonlyMap<string, {
+      key: string
+      kind: ImportMilestoneKind
+      label: string
+      shortLabel: string
+    }>
+  } {
+    const derived = deriveMilestoneNavigation(ids.map((id) => {
+      const source = this.sourceById.get(id)
+      const target = this.targetById.get(id)
+      return {
+        id,
+        original: source?.value ?? target?.value ?? "",
+        type: source?.type ?? target?.type ?? null,
+        canonicalRef: target?.canonicalRef ?? source?.canonicalRef ?? null,
+        ...(typeof source?.startMs === "number"
+          ? { startMs: source.startMs }
+          : typeof target?.startMs === "number"
+            ? { startMs: target.startMs }
+            : {}),
+        metadata: source?.metadata ?? target?.metadata ?? null,
+      }
+    }))
+    const displayIndexByCellId = new Map(ids.map((id, index) => [id, index]))
+    const progressFor = (cellIds: readonly string[]) => {
+      let translated = 0
+      let validated = 0
+      for (const cellId of cellIds) {
+        const target = this.targetById.get(cellId)
+        const targetValue = this.optimisticEdits.get(cellId)?.value
+          ?? this.pendingOverlay.get(cellId)?.value
+          ?? target?.value
+          ?? ""
+        if (targetValue.trim()) translated += 1
+        if (target?.validated) validated += 1
+      }
+      return { translated, validated, total: cellIds.length }
+    }
+    const entries = derived.orderedMilestones.map((group): CellNavigationEntry => {
+      const progress = progressFor(group.cellIds)
+      const subsections: CellNavigationSubsection[] = []
+      for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
+        const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
+        const firstCellId = cellIds[0]!
+        subsections.push({
+          key: `${group.milestone.key}:range:${firstCellId}`,
+          label: `${offset + 1}–${offset + cellIds.length}`,
+          firstCellId,
+          firstIndex: displayIndexByCellId.get(firstCellId) ?? group.firstIndex,
+          cellIds,
+          ...progressFor(cellIds),
+        })
+      }
+      return {
+        key: group.milestone.key,
+        label: group.milestone.label,
+        shortLabel: group.milestone.shortLabel,
+        kind: group.milestone.kind,
+        firstCellId: group.firstCellId,
+        firstIndex: group.firstIndex,
+        cellIds: group.cellIds,
+        ...progress,
+        subsections,
+      }
+    })
+    return { entries, milestoneByCellId: derived.milestoneByCellId }
   }
 
   private bumpCells(ids: Iterable<string>): void {
@@ -1142,6 +1228,9 @@ export interface UseActiveCellStoreOptions {
 export interface UseActiveCellStoreResult {
   store: CellStore
   revalidate: () => void
+  /** Explicit recovery after a failed hard load. Unlike a soft revalidate,
+   * this restores the loading state while no authoritative rows are present. */
+  retry: () => void
   revalidateCell: (cellId: string) => void
   applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
   /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
@@ -1422,6 +1511,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     void doFetch(true)
   }, [doFetch])
 
+  const retry = useCallback(() => {
+    void doFetch(false)
+  }, [doFetch])
+
   const refreshCellsCacheFromStore = useCallback((maxServerSeq?: number) => {
     const pid = projectRef.current
     const fid = fileRef.current
@@ -1534,7 +1627,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
   }, [store])
 
-  return { store, revalidate, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, isLoading, isError }
+  return { store, revalidate, retry, revalidateCell, applyOptimisticTargetEdit, applyOptimisticTargetEdits, applyOptimisticCellTiming, isLoading, isError }
 }
 
 /**
@@ -1666,6 +1759,15 @@ function symmetricChangedKeys<T>(
 function sectionLabelFromCanonical(ref: string): string {
   const colonIdx = ref.indexOf(":")
   return (colonIdx >= 0 ? ref.slice(0, colonIdx) : ref).trim()
+}
+
+function legacySectionKey(label: string): string {
+  const match = label.trim().match(/^([1-3]?[A-Z]{2,3})\s+(\d+)$/i)
+  if (!match) return label
+  const book = match[1].toUpperCase()
+  return book === "OBS"
+    ? `story:OBS:${Number(match[2])}`
+    : `scripture:${book}:${Number(match[2])}`
 }
 
 function footnoteScopeKey(fileId: string, canonical: string | null, section: string): string {

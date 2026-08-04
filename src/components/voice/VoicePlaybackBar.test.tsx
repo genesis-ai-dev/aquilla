@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 
 // No session → useFileAudioAttachments bails before any network read and
 // returns an empty map, so the player hydrates purely from the `cells` prop.
@@ -40,8 +41,8 @@ function cell(over: Partial<CellData> = {}): CellData {
 }
 
 describe("VoicePlaybackBar", () => {
-  it("renders the transport and disables play-all with no audio", () => {
-    render(
+  it("renders the transport and disables play-all with no audio", async () => {
+    renderWithTooltips(
       <VoicePlaybackBar cells={[cell()]} projectId="dev-project" session={null} settings={undefined} />,
     )
     const play = screen.getByLabelText("Play all") as HTMLButtonElement
@@ -49,8 +50,8 @@ describe("VoicePlaybackBar", () => {
     expect(play.disabled).toBe(true)
     expect(screen.getByLabelText("Previous line")).toBeTruthy()
     expect(screen.getByLabelText("Next line")).toBeTruthy()
-    expect(screen.getByTitle("Playback speed")).toBeTruthy()
-    expect(screen.getByText("1x")).toBeTruthy()
+    // The speed control reads "1x"; its purpose is carried by the tooltip.
+    await expectTooltip(screen.getByText("1x"), "Playback speed")
     expect(screen.getByText("0:00 / 0:00")).toBeTruthy()
     expect(screen.getByText("No voiced lines yet")).toBeTruthy()
   })
@@ -66,6 +67,20 @@ describe("VoicePlaybackBar", () => {
     const play = screen.getByLabelText("Play all") as HTMLButtonElement
     expect(play.disabled).toBe(false)
     expect(screen.getByText("Press play to listen")).toBeTruthy()
+  })
+
+  it("renders nested below content under now-playing", () => {
+    render(
+      <VoicePlaybackBar
+        cells={[cell()]}
+        projectId="dev-project"
+        session={null}
+        settings={undefined}
+        below={<span>Synced</span>}
+      />,
+    )
+    expect(screen.getByText("Synced")).toBeTruthy()
+    expect(screen.getByText("Nothing playing")).toBeTruthy()
   })
 
   describe("start section (AQU-666)", () => {

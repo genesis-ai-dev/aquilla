@@ -30,7 +30,7 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
 
   // Navigate to project settings.
   // AQU-501: Project name lives in the "General" sub-menu pane.
-  await alice.goto(`/project/${seeded.projectId}/settings?section=general`)
+  await alice.goto(`/project/${seeded.projectId}/settings/general`)
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
   await sourceLanguage.fill("English (US)")
@@ -62,14 +62,14 @@ test("project settings discard dialog: Keep editing stays on settings page", asy
   await expect(dialog).not.toBeVisible({ timeout: 3_000 })
   // AQU-501: the pane is now expressed via `?section=`, so match the path
   // rather than anchoring on end-of-string.
-  await expect(alice).toHaveURL(/\/settings(\?|$)/, { timeout: 3_000 })
+  await expect(alice).toHaveURL(/\/settings(?:\/|\?|$)/, { timeout: 3_000 })
 })
 
 test("project settings discard dialog: Discard navigates away from settings", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `DiscardNav ${Date.now()}` })
 
   // AQU-501: Project name lives in the "General" sub-menu pane.
-  await alice.goto(`/project/${seeded.projectId}/settings?section=general`)
+  await alice.goto(`/project/${seeded.projectId}/settings/general`)
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
   await sourceLanguage.fill("English (Canada)")

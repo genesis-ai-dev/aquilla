@@ -236,7 +236,7 @@ export function TimelineCard({
         {isDialogue && cell.cameraState && (
           <span
             className={cn(
-              "rounded-full px-1.5 py-px text-[8.5px] font-semibold uppercase tracking-wide",
+              "rounded-md px-1.5 py-px text-[8.5px] font-semibold",
               cell.cameraState === "on"
                 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
                 : "bg-muted text-muted-foreground",

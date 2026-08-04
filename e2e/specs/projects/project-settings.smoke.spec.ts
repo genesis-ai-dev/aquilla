@@ -18,7 +18,7 @@ test("project settings keeps synced name read-only and saves source language", a
   expect(projectId).toBeTruthy()
 
   // Navigate directly to the settings page.
-  await alice.goto(`/project/${projectId}/settings?section=general`)
+  await alice.goto(`/project/${projectId}/settings/general`)
   const nameInput = alice.locator("#pname")
   await expect(nameInput).toBeVisible({ timeout: 10_000 })
   await expect(nameInput).toHaveValue(originalName, { timeout: 5_000 })
@@ -42,7 +42,7 @@ test("project settings keeps synced name read-only and saves source language", a
   await saveBtn.click()
   // AQU-501: the General pane is expressed via `?section=general`, so match
   // the path prefix rather than anchoring on end-of-string.
-  await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(\\?|$)`), { timeout: 10_000 })
+  await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(?:/|\\?|$)`), { timeout: 10_000 })
   await expect(nameInput).toHaveValue(originalName, { timeout: 5_000 })
   await expect(sourceLanguage).toHaveValue("English (US)", { timeout: 5_000 })
   await expect(alice.getByText(/Saved: source language/i)).toBeVisible({ timeout: 10_000 })

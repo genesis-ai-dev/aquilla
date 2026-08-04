@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
-import { ProjectMembersPage, MemberAddCombobox } from "./ProjectMembersPage"
+import { ProjectMembersPage } from "./ProjectMembersPage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import type { OrgMember } from "@/lib/frontier/orgs"
 
@@ -47,6 +47,12 @@ const mockMembers = [
 
 const mockRefresh = vi.fn().mockResolvedValue(undefined)
 const mockAdd = vi.fn().mockResolvedValue(mockMembers[0])
+const mockAddMany = vi.fn(
+  async (
+    toAdd: Array<{ username: string; role: number }>,
+  ): Promise<Array<{ username: string; ok: boolean; error?: { code: string; message: string } }>> =>
+    toAdd.map(({ username }) => ({ username, ok: true })),
+)
 const mockRemove = vi.fn().mockResolvedValue(undefined)
 
 const mockUseProjectMembers = vi.fn(() => ({
@@ -56,6 +62,7 @@ const mockUseProjectMembers = vi.fn(() => ({
   rosterHidden: false,
   refresh: mockRefresh,
   add: mockAdd,
+  addMany: mockAddMany,
   remove: mockRemove,
   changeRole: mockAdd,
 }))
@@ -63,6 +70,54 @@ const mockUseProjectMembers = vi.fn(() => ({
 vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: () => mockUseProjectMembers(),
 }))
+
+// AQU-734 parity: the add row's typeahead calls the user-search hook; keep it
+// deterministic and offline (no fetch) — suggestion rows come from the mocked
+// org roster below, so an empty search result set is the interesting case.
+vi.mock("@/hooks/useUserSearch", () => ({
+  useUserSearch: (query: string) => ({
+    query,
+    results: [],
+    isLoading: false,
+    needsMorePrefix: query.trim().length < 2,
+    lastFetchOk: true,
+  }),
+}))
+
+// Org context + roster driving the eligible-colleague suggestions. Hoisted so
+// the mock factories (which run before module bodies) can reference it; each
+// suite resets the values it cares about.
+const orgMocks = vi.hoisted(() => ({
+  activeOrgId: null as number | null,
+  roster: [] as Array<{ userId: number; username: string; role: { level: number; name: string } }>,
+}))
+
+vi.mock("@/context/OrgContext", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/context/OrgContext")>()
+  return {
+    ...original,
+    useActiveOrgOptional: () =>
+      orgMocks.activeOrgId == null ? null : { activeOrgId: orgMocks.activeOrgId },
+  }
+})
+
+vi.mock("@/lib/frontier/orgs", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/frontier/orgs")>()
+  return {
+    ...original,
+    listOrgMembers: vi.fn(async () => orgMocks.roster),
+  }
+})
+
+// useProjectOrgId resolves the project's own org; keep it offline here and
+// let the suites drive suggestions through the active-org fallback.
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
+  return {
+    ...original,
+    resolveCloudProjectResult: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+  }
+})
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
@@ -99,7 +154,7 @@ function renderPage(projectId = "proj-1") {
     <MemoryRouter initialEntries={[`/project/${projectId}/members`]}>
       <Routes>
         <Route path="/project/:id/members" element={<ProjectMembersPage />} />
-        <Route path="/project/:id" element={<div>Editor</div>} />
+        <Route path="/project/:id/editor" element={<div>Editor</div>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -120,6 +175,7 @@ describe("ProjectMembersPage", () => {
       rosterHidden: false,
       refresh: mockRefresh,
       add: mockAdd,
+      addMany: mockAddMany,
       remove: mockRemove,
       changeRole: mockAdd,
     })
@@ -298,7 +354,7 @@ describe("ProjectMembersPage", () => {
     })
   })
 
-  it("adds a member via the add-member form", async () => {
+  it("adds a single typed member via one batch call (AQU-734 parity)", async () => {
     renderPage()
 
     const input = screen.getByPlaceholderText("Aquilla username")
@@ -307,7 +363,8 @@ describe("ProjectMembersPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add" }))
 
     await waitFor(() => {
-      expect(mockAdd).toHaveBeenCalledWith("dave", 400)
+      expect(mockAddMany).toHaveBeenCalledTimes(1)
+      expect(mockAddMany).toHaveBeenCalledWith([{ username: "dave", role: 400 }])
     })
   })
 })
@@ -429,6 +486,7 @@ describe("ProjectMembersPage — AQU-454 roster sectioning", () => {
       rosterHidden: false,
       refresh: mockRefresh,
       add: mockAdd,
+      addMany: mockAddMany,
       remove: mockRemove,
       changeRole: mockAdd,
     })
@@ -455,6 +513,7 @@ describe("ProjectMembersPage — AQU-485 roster visibility", () => {
       rosterHidden: true,
       refresh: mockRefresh,
       add: mockAdd,
+      addMany: mockAddMany,
       remove: mockRemove,
       changeRole: mockAdd,
     })
@@ -475,88 +534,145 @@ describe("ProjectMembersPage — AQU-485 roster visibility", () => {
 
 // AQU-672: the add-member field is a combobox that suggests org members (minus
 // those already directly granted) yet stays free-text for exact usernames.
-describe("MemberAddCombobox — AQU-672 org-member suggestions", () => {
+describe("MembersTab multi-select add — AQU-672 suggestions + AQU-734 batch", () => {
   const om = (userId: number, username: string): OrgMember =>
     ({ userId, username, role: { level: 400, name: "contributor" } }) as OrgMember
 
-  function renderCombobox(
-    props: Partial<Parameters<typeof MemberAddCombobox>[0]> = {},
-  ) {
-    const onChange = vi.fn()
-    const onSubmit = vi.fn()
-    const utils = render(
-      <MemberAddCombobox
-        members={props.members ?? [om(1, "dana"), om(2, "dave"), om(3, "eve")]}
-        value={props.value ?? ""}
-        onChange={props.onChange ?? onChange}
-        onSubmit={props.onSubmit ?? onSubmit}
-        orgLoaded={props.orgLoaded ?? true}
-        disabled={props.disabled}
-      />,
-    )
-    return { ...utils, onChange: props.onChange ?? onChange, onSubmit: props.onSubmit ?? onSubmit }
+  beforeEach(() => {
+    vi.clearAllMocks()
+    orgMocks.activeOrgId = 7
+    // alice(1) holds a direct grant (ineligible); bob(2) is org-access-only
+    // and stays eligible for an explicit direct role; dana/dave are new.
+    orgMocks.roster = [om(1, "alice"), om(2, "bob"), om(5, "dana"), om(6, "dave")]
+  })
+
+  function focusAddInput() {
+    const input = screen.getByPlaceholderText("Aquilla username")
+    fireEvent.focus(input)
+    return input
   }
 
-  it("opens on focus and lists the eligible org members", () => {
-    renderCombobox()
-    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
-    const list = screen.getByRole("listbox", { name: "Org members" })
-    expect(within(list).getByRole("option", { name: /dana/ })).toBeInTheDocument()
-    expect(within(list).getByRole("option", { name: /dave/ })).toBeInTheDocument()
-    expect(within(list).getByRole("option", { name: /eve/ })).toBeInTheDocument()
+  it("opens on focus and lists eligible org colleagues as checkbox rows", async () => {
+    renderPage()
+    focusAddInput()
+
+    // Eligible = org roster minus direct grants: bob (org-access), dana, dave.
+    expect(await screen.findByRole("checkbox", { name: "bob" })).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "dana" })).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "dave" })).toBeInTheDocument()
+    // alice already holds a direct grant — not offered.
+    expect(screen.queryByRole("checkbox", { name: "alice" })).not.toBeInTheDocument()
   })
 
-  it("narrows the list by case-insensitive substring as you type", () => {
-    // Parent owns `value`; simulate its update by re-rendering with the typed value.
-    const { rerender } = renderCombobox({ value: "" })
-    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
-    rerender(
-      <MemberAddCombobox
-        members={[om(1, "dana"), om(2, "dave"), om(3, "eve")]}
-        value="DA"
-        onChange={vi.fn()}
-        onSubmit={vi.fn()}
-        orgLoaded
-      />,
+  it("checking people stages removable chips that survive a new search term", async () => {
+    renderPage()
+    const input = focusAddInput()
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "dana" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "dave" }))
+
+    const chips = screen.getByRole("list", { name: "People to add" })
+    expect(within(chips).getByText("dana")).toBeInTheDocument()
+    expect(within(chips).getByText("dave")).toBeInTheDocument()
+
+    // Typing a fresh query must not drop the staged chips.
+    fireEvent.change(input, { target: { value: "zz" } })
+    expect(within(chips).getByText("dana")).toBeInTheDocument()
+    expect(within(chips).getByText("dave")).toBeInTheDocument()
+
+    // Chips are individually removable.
+    fireEvent.click(screen.getByRole("button", { name: "Remove dave" }))
+    expect(within(chips).queryByText("dave")).not.toBeInTheDocument()
+  })
+
+  it("narrows suggestions by substring and keeps checked state", async () => {
+    renderPage()
+    const input = focusAddInput()
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "dana" }))
+    fireEvent.change(input, { target: { value: "da" } })
+
+    // "da" matches dana + dave only; dana keeps her checked state.
+    expect(await screen.findByRole("checkbox", { name: "dana" })).toHaveAttribute(
+      "aria-checked",
+      "true",
     )
-    const list = screen.getByRole("listbox", { name: "Org members" })
-    expect(within(list).getByRole("option", { name: /dana/ })).toBeInTheDocument()
-    expect(within(list).getByRole("option", { name: /dave/ })).toBeInTheDocument()
-    expect(within(list).queryByRole("option", { name: /eve/ })).not.toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: "dave" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    )
+    expect(screen.queryByRole("checkbox", { name: "bob" })).not.toBeInTheDocument()
   })
 
-  it("picking a suggestion fills the field via onChange", () => {
-    const { onChange } = renderCombobox()
-    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
-    fireEvent.click(screen.getByRole("option", { name: /dave/ }))
-    expect(onChange).toHaveBeenCalledWith("dave")
-  })
+  it("grants the staged batch in ONE call; a partial failure names only the loser and keeps them staged", async () => {
+    mockAddMany.mockResolvedValueOnce([
+      { username: "dana", ok: true },
+      { username: "dave", ok: true },
+      { username: "bogus", ok: false, error: { code: "not_found", message: "No user found" } },
+    ])
+    renderPage()
+    const input = focusAddInput()
 
-  it("shows an explicit empty state when every org member already has a grant", () => {
-    renderCombobox({ members: [], orgLoaded: true })
-    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
-    expect(
-      screen.getByText(/all org members are already on this project/i),
-    ).toBeInTheDocument()
-  })
-
-  it("keeps free text: an unknown username is still submittable (onSubmit on Enter)", () => {
-    const { onSubmit } = renderCombobox({ value: "outsider" })
-    const input = screen.getByRole("combobox", { name: "Member to add" })
-    fireEvent.focus(input)
-    // No org member matches — the field stays usable and Enter submits.
-    expect(
-      screen.getByText(/press add to grant by exact username/i),
-    ).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole("checkbox", { name: "dana" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "dave" }))
+    // Free-typed name staged as a chip with Enter (AQU-734).
+    fireEvent.change(input, { target: { value: "bogus" } })
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(onSubmit).toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }))
+
+    await waitFor(() => {
+      expect(mockAddMany).toHaveBeenCalledTimes(1)
+      expect(mockAddMany).toHaveBeenCalledWith([
+        { username: "dana", role: 400 },
+        { username: "dave", role: 400 },
+        { username: "bogus", role: 400 },
+      ])
+    })
+
+    // The two successes drop; the failure is named and stays staged for a retry.
+    expect(
+      await screen.findByText(/couldn't add 1 person: bogus \(No user found\)/i),
+    ).toBeInTheDocument()
+    const chips = screen.getByRole("list", { name: "People to add" })
+    expect(within(chips).getByText("bogus")).toBeInTheDocument()
+    expect(within(chips).queryByText("dana")).not.toBeInTheDocument()
+    expect(within(chips).queryByText("dave")).not.toBeInTheDocument()
   })
 
-  it("with no org roster (personal project) stays a plain free-text field", () => {
-    renderCombobox({ members: [], orgLoaded: false })
-    fireEvent.focus(screen.getByRole("combobox", { name: "Member to add" }))
-    // No dropdown/listbox opens — just the input.
-    expect(screen.queryByRole("listbox", { name: "Org members" })).not.toBeInTheDocument()
+  it("disables Add until someone is staged or typed", async () => {
+    renderPage()
+    const input = focusAddInput()
+    const addButton = screen.getByRole("button", { name: "Add" })
+    expect(addButton).toBeDisabled()
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "dana" }))
+    expect(addButton).toBeEnabled()
+
+    // Clearing the last chip disables Add again.
+    fireEvent.click(screen.getByRole("button", { name: "Remove dana" }))
+    expect(addButton).toBeDisabled()
+
+    fireEvent.change(input, { target: { value: "someone" } })
+    expect(addButton).toBeEnabled()
+  })
+
+  it("shows an explicit empty state when every org member already has a grant", async () => {
+    orgMocks.roster = [om(1, "alice"), om(3, "carol"), om(4, "erin")]
+    renderPage()
+    focusAddInput()
+
+    expect(
+      await screen.findByText(/all org members are already on this project/i),
+    ).toBeInTheDocument()
+  })
+
+  it("with no org context (personal project) no suggestion dropdown opens on focus", () => {
+    orgMocks.activeOrgId = null
+    renderPage()
+    focusAddInput()
+
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
     expect(
       screen.queryByText(/all org members are already on this project/i),
     ).not.toBeInTheDocument()

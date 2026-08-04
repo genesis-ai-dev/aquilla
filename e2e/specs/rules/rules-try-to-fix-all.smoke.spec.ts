@@ -6,7 +6,7 @@ import { Dashboard } from "../../helpers/page-objects/Dashboard"
  *
  * RulesSurface.tsx renders a "Try to fix all" button per rule (title="Opens
  * the editor with this rule's drawer"). Clicking it calls:
- *   navigate(`/project/${projectId}?openRule=${rule.id}`)
+ *   navigate(`/project/${projectId}/editor?openRule=${rule.id}`)
  *
  * ProjectWorkspace picks up the `?openRule=` search param and sets the rule
  * drawer open for that rule.
@@ -28,7 +28,7 @@ test("'Try to fix all' button navigates to editor with ?openRule= param", async 
   expect(projectId).toBeTruthy()
   await alice.goto(`/project/${projectId}/rules`)
   // Create a rule via the inline RuleEditor ("+ Add Rule" in the header).
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i }).first()
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i }).first()
   await expect(addRuleBtn).toBeVisible({ timeout: 8_000 })
   await addRuleBtn.click()
 
@@ -49,6 +49,6 @@ test("'Try to fix all' button navigates to editor with ?openRule= param", async 
   await tryFixBtn.click()
 
   // URL should contain openRule= param and be on the project editor.
-  await alice.waitForURL(/\/project\/[^/]+\?.*openRule=/, { timeout: 5_000 })
+  await alice.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?\?.*openRule=/, { timeout: 5_000 })
   expect(alice.url()).toContain("openRule=")
 })

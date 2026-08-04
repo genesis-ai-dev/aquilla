@@ -60,7 +60,13 @@ function emptyProtectedTarget(unit: IdmlTranslationUnit): {
   }
 }
 
-function toTranslatableString(unit: IdmlTranslationUnit): TranslatableString {
+/**
+ * Map one engine unit to one Aquilla cell. Semantic IDML adapters (e.g. the
+ * Biblica study-notes importer) reuse this so every IDML cell carries the same
+ * protected anchors, locator, and v2 metadata regardless of which units the
+ * adapter chose to import.
+ */
+export function idmlUnitToTranslatableString(unit: IdmlTranslationUnit): TranslatableString {
   const target = emptyProtectedTarget(unit)
   return {
     id: unit.id,
@@ -85,7 +91,8 @@ function toTranslatableString(unit: IdmlTranslationUnit): TranslatableString {
  *
  * One engine unit becomes one Aquilla cell. The generic text splitter is
  * deliberately absent: IDML units may only be partitioned between known slots
- * by the shared engine, which records `part` and exact `slotIndexes`.
+ * by the shared engine, which records `part` and exact `slotIndexes` (see
+ * `partitionIdmlUnitAtLineBreaks`, which the Biblica adapter opts into).
  */
 export async function extractIdmlStrings(
   buffer: ArrayBuffer,
@@ -94,5 +101,5 @@ export async function extractIdmlStrings(
   options?: IdmlImportParseOptions,
 ): Promise<TranslatableString[]> {
   const result = await parse(buffer, profile, options)
-  return result.units.map(toTranslatableString)
+  return result.units.map(idmlUnitToTranslatableString)
 }

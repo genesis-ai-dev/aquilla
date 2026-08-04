@@ -23,7 +23,7 @@ test("rule row chevron expands and collapses autofix editor", async ({ alice }) 
 
   await alice.goto(`/project/${projectId}/rules`)
   // Create a rule first.
-  const addRuleBtn = alice.getByRole("button", { name: /\+ Add Rule/i })
+  const addRuleBtn = alice.getByRole("button", { name: /Add Rule/i })
   await expect(addRuleBtn).toBeVisible({ timeout: 10_000 })
   await addRuleBtn.click()
 

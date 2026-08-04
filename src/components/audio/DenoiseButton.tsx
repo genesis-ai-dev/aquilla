@@ -12,6 +12,7 @@ import { Bird, Check, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { AppTooltip } from "@/components/ui/tooltip"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { isDenoisedAudioId } from "@/lib/audio/upload"
 import { isDenoiseSupported } from "@/lib/audio/denoise"
@@ -114,26 +115,28 @@ export function DenoiseButton(props: Props) {
   if (isDenoised) {
     return (
       <div className="flex flex-wrap items-center gap-1.5">
-        <Badge
-          variant="outline"
-          title="Background noise removed from this take"
-          className="border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-        >
-          <Check className="h-3 w-3" />
-          Noise removed
-        </Badge>
-        {referenceAudioId && (
-          <Button
-            type="button"
-            size="xs"
+        <AppTooltip content="Background noise removed from this take">
+          <Badge
             variant="outline"
-            onClick={() => void handleRevert()}
-            disabled={!editable || reverting || !session?.jwt}
-            title="Switch back to the original recording"
+            className="border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
           >
-            {reverting ? <Spinner className="size-3" /> : <RotateCcw className="h-3 w-3" />}
-            Revert
-          </Button>
+            <Check className="h-3 w-3" />
+            Noise removed
+          </Badge>
+        </AppTooltip>
+        {referenceAudioId && (
+          <AppTooltip content="Switch back to the original recording">
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              onClick={() => void handleRevert()}
+              disabled={!editable || reverting || !session?.jwt}
+            >
+              {reverting ? <Spinner className="size-3" /> : <RotateCcw className="h-3 w-3" />}
+              Revert
+            </Button>
+          </AppTooltip>
         )}
         {error && <span className="text-[11px] text-destructive">{error}</span>}
       </div>
@@ -142,21 +145,22 @@ export function DenoiseButton(props: Props) {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <Button
-        type="button"
-        size="xs"
-        variant="outline"
-        onClick={() => void handleDenoise()}
-        disabled={!canRun || processing}
-        title={
-          !supported
-            ? "Noise removal isn't supported in this browser"
-            : "Remove background noise (on-device) — adds a cleaned take"
-        }
-      >
-        <Bird className={processing ? "h-3 w-3 animate-pulse" : "h-3 w-3"} />
-        {processing ? "Removing noise…" : error ? "Retry noise removal" : "Remove noise"}
-      </Button>
+      <AppTooltip content={
+        !supported
+          ? "Noise removal isn't supported in this browser"
+          : "Remove background noise (on-device) — adds a cleaned take"
+      }>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          onClick={() => void handleDenoise()}
+          disabled={!canRun || processing}
+        >
+          <Bird className={processing ? "h-3 w-3 animate-pulse" : "h-3 w-3"} />
+          {processing ? "Removing noise…" : error ? "Retry noise removal" : "Remove noise"}
+        </Button>
+      </AppTooltip>
       {error && <span className="text-[11px] text-destructive">{error}</span>}
     </div>
   )

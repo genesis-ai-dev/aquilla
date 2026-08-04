@@ -153,6 +153,50 @@ describe('sendNotificationEmail', () => {
     expect(email.send.mock.calls[0][0].from).toBe('noreply@support.aquilla.app')
   })
 
+  // AQU pen-test finding (2026-07-29): authorDisplayName/projectName/excerpt
+  // are attacker-controlled (registration puts no charset limit on username;
+  // a comment body is free text) and used to be interpolated into the email
+  // HTML unescaped — a crafted username or comment could inject markup
+  // (phishing links, spoofed styling, tracking pixels) into a notification
+  // sent to a different user's inbox.
+  it('HTML-escapes attacker-controlled fields before building the email', async () => {
+    const email = makeEmailBinding()
+    await sendNotificationEmail(
+      { EMAIL: email, EMAIL_FROM: 'test@example.com' },
+      'recipient@example.com',
+      {
+        authorDisplayName: '<img src=x onerror=alert(1)>',
+        kind: 'mention',
+        projectName: '<script>alert(2)</script>',
+        excerpt: 'check this <b>bold</b> & "quoted"',
+        commentsUrl: 'https://aquilla.app/project/p1/comments',
+      },
+    )
+    const msg = email.send.mock.calls[0][0]
+    expect(msg.html).not.toContain('<img')
+    expect(msg.html).not.toContain('<script>')
+    expect(msg.html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    expect(msg.html).toContain('&lt;script&gt;')
+    expect(msg.html).toContain('&amp;')
+  })
+
+  it("strips CR/LF from subject so a crafted display name can't inject headers", async () => {
+    const email = makeEmailBinding()
+    await sendNotificationEmail(
+      { EMAIL: email },
+      'recipient@example.com',
+      {
+        authorDisplayName: 'Alice\r\nBcc: attacker@evil.example',
+        kind: 'mention',
+        projectName: 'TestProject',
+        excerpt: 'hi',
+        commentsUrl: 'https://aquilla.app/project/p1/comments',
+      },
+    )
+    const msg = email.send.mock.calls[0][0]
+    expect(msg.subject).not.toMatch(/[\r\n]/)
+  })
+
   it('throws when the provider send() rejects', async () => {
     const email = makeEmailBinding(async () => {
       throw new Error('E_SENDER_NOT_VERIFIED')

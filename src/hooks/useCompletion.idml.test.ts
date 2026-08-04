@@ -4,11 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   parseIdml,
   renderIdmlUnitHtml,
+  validateIdmlTranslation,
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { useCompletion } from "./useCompletion"
 
@@ -44,7 +45,7 @@ const SETTINGS: CompletionSettings = {
   provider: "custom",
   endpoint: "http://localhost:9999",
   model: "test-model",
-  maxTokens: 512,
+  maxTokens: DEFAULT_COMPLETION_MAX_TOKENS,
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
 }
@@ -90,7 +91,9 @@ describe("useCompletion IDML protected-output boundary", () => {
     )
     const request = JSON.parse(bodies[0]!) as {
       messages: Array<{ role: string; content: string }>
+      max_tokens: number
     }
+    expect(request.max_tokens).toBe(DEFAULT_COMPLETION_MAX_TOKENS)
     expect(request.messages[0]?.content).toContain("IDML protected-anchor output contract")
     expect(request.messages.at(-1)?.content).toContain(unit.sourceHtml)
   })
@@ -110,6 +113,80 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(saved).toBe(false)
     expect(commit).not.toHaveBeenCalled()
     expect(result.current.errors.get(cell.id)).toMatch(/protected IDML anchor/i)
+  })
+
+  it("repairs a plain one-slot model response before crossing the commit boundary", async () => {
+    const unit = await parsedUnit({ singleSlot: true })
+    const cell = completionCell(unit)
+    mockCompletion("Texte traduit", [])
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(cell, commit)
+
+    let saved = false
+    await act(async () => {
+      saved = await result.current.completeSingle(cell as never)
+    })
+
+    expect(saved).toBe(true)
+    expect(commit).toHaveBeenCalledTimes(1)
+    const committedHtml = commit.mock.calls[0]?.[1] as string
+    expect(committedHtml).toContain("Texte traduit")
+    expect(validateIdmlTranslation(
+      unit.sourceHtml,
+      committedHtml,
+      unit.metadata,
+    ).valid).toBe(true)
+    expect(result.current.completing.get(cell.id)).toBeUndefined()
+    expect(result.current.errors.get(cell.id)).toBeUndefined()
+  })
+
+  it("repairs a replace draft whose editable slot attribute changed before committing", async () => {
+    const unit = await parsedUnit()
+    const cell = completionCell(unit)
+    const existingHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Ancien" : "texte",
+      })),
+    })
+    cell.translated = "Ancien\ntexte"
+    cell.translatedHtml = existingHtml
+    const generated = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Nouveau" : "texte",
+      })),
+    })
+    const damaged = generated.replace(
+      'data-idml-protected="slot"',
+      'data-idml-protected="slot" contenteditable="false"',
+    )
+    expect(damaged).not.toBe(generated)
+    mockCompletion(damaged, [])
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(cell, commit)
+
+    let saved = false
+    await act(async () => {
+      saved = await result.current.completeSingle(cell as never, undefined, {
+        regenerate: true,
+      })
+    })
+
+    expect(saved).toBe(true)
+    expect(commit).toHaveBeenCalledTimes(1)
+    const committedHtml = commit.mock.calls[0]?.[1] as string
+    expect(committedHtml).toContain("Nouveau")
+    expect(committedHtml).not.toContain('contenteditable="false"')
+    expect(validateIdmlTranslation(
+      unit.sourceHtml,
+      committedHtml,
+      unit.metadata,
+    ).valid).toBe(true)
+    expect(result.current.completing.get(cell.id)).toBeUndefined()
+    expect(result.current.errors.get(cell.id)).toBeUndefined()
   })
 })
 
@@ -156,7 +233,7 @@ function completionCell(unit: IdmlTranslationUnit) {
   }
 }
 
-async function parsedUnit(): Promise<IdmlTranslationUnit> {
+async function parsedUnit(options: { singleSlot?: boolean } = {}): Promise<IdmlTranslationUnit> {
   const mime = "application/vnd.adobe.indesign-idml-package"
   const namespace = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
   const storyPath = "Stories/Story_u100.xml"
@@ -173,7 +250,9 @@ async function parsedUnit(): Promise<IdmlTranslationUnit> {
       `<?xml version="1.0"?><idPkg:Story ${namespace}><Story Self="u100">`,
       '<ParagraphStyleRange Self="mixed" AppliedParagraphStyle="ParagraphStyle/Body">',
       '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello</Content></CharacterStyleRange>',
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>WORLD</Content></CharacterStyleRange>',
+      ...(!options.singleSlot
+        ? ['<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>WORLD</Content></CharacterStyleRange>']
+        : ["<Br/>"]),
       "</ParagraphStyleRange></Story></idPkg:Story>",
     ].join(""),
     { compression: "DEFLATE", createFolders: false },

@@ -118,6 +118,7 @@ function validSha256(value: unknown): string | undefined {
 }
 
 function validMemberPath(value: unknown): string | undefined {
+  // eslint-disable-next-line no-control-regex -- Archive member paths must reject C0 controls.
   if (typeof value !== "string" || !/^[^\\\u0000-\u001f]+$/.test(value)) return undefined
   if (
     value.startsWith("/")

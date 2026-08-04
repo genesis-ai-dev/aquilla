@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff, LoaderCircle } from "lucide-react"
+import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
@@ -175,13 +176,13 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   }
 
   return (
-    <div className="flex h-full w-96 flex-col border-l bg-background">
-      <div className="flex items-center justify-between border-b px-3 py-2">
+    <div className="flex h-full w-96 flex-col border-l bg-card">
+      <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
         </h3>
-        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close history">
-          <X className="h-4 w-4" />
+        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close history">
+          <X />
         </Button>
       </div>
 
@@ -222,7 +223,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                 </button>
               </p>
             )}
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            <p className="text-[10px] text-muted-foreground">
               {groups.length} significant {groups.length === 1 ? "revision" : "revisions"}
               {hiddenCount > 0 && (
                 <span className="ml-1 normal-case text-muted-foreground/70">
@@ -322,7 +323,7 @@ function GroupItem({
         )}
         {terminal.syncState === "pending" && (
           <span className="flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
-            <LoaderCircle className="h-3 w-3 animate-spin" />
+            <Spinner className="size-3" />
             syncing
           </span>
         )}

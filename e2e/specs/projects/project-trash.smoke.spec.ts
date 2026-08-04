@@ -33,12 +33,13 @@ test("Archive removes project from active projects list", async ({ alice }) => {
 
   // Open the header overflow menu and click "Archive".
   await alice.getByRole("button", { name: /More actions/i }).click()
-  const archiveItem = alice.getByRole("button", { name: /^Archive$/ })
+  const archiveItem = alice.getByRole("menuitem", { name: /^Archive$/ })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
 
-  // Archiving navigates back to the projects list.
-  await alice.waitForURL(/\/projects$/, { timeout: 10_000 })
+  // Archiving navigates to "/projects", which is a replace-redirect to the org
+  // home. Wait for the settled URL, not the transient one.
+  await alice.waitForURL(new RegExp(`/orgs/${alice.orgId}$`), { timeout: 10_000 })
 
   // The archived project is gone from the active list; the other remains.
   await expect(alice.getByText(keepName)).toBeVisible({ timeout: 10_000 })

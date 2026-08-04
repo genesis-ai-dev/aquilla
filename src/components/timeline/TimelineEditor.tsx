@@ -31,6 +31,7 @@ import type { Concept } from "@/lib/terminology/types"
 import type { AudioTimingMode, ProjectRecord, RuleInfraction } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 export type { TimelineDetailActions } from "./TimelineCellDetail"
 
@@ -622,50 +623,52 @@ export function TimelineEditor({
         <div className="ml-auto flex items-center gap-1.5">
           {/* SUB-53: nothing to snap to when positions are computed. */}
           {!audioFirst && (
-          <button
-            type="button"
-            aria-label="Snap to neighboring edges"
-            aria-pressed={snapOn}
-            title={snapOn ? "Snapping on — edges magnet to neighbors" : "Snapping off"}
-            data-testid="tl-snap-toggle"
-            onClick={() => {
-              const next = !snapOn
-              setSnapOn(next)
-              saveSnapEnabled(next)
-            }}
-            className={cn(
-              "inline-flex items-center rounded-md border border-border px-1.5 py-1",
-              snapOn ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
-            )}
-          >
-            <Magnet className="h-3.5 w-3.5" />
-          </button>
+          <AppTooltip content={snapOn ? "Snapping on — edges magnet to neighbors" : "Snapping off"}>
+            <button
+              type="button"
+              aria-label="Snap to neighboring edges"
+              aria-pressed={snapOn}
+              data-testid="tl-snap-toggle"
+              onClick={() => {
+                const next = !snapOn
+                setSnapOn(next)
+                saveSnapEnabled(next)
+              }}
+              className={cn(
+                "inline-flex items-center rounded-md border border-border px-1.5 py-1",
+                snapOn ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
+              )}
+            >
+              <Magnet className="h-3.5 w-3.5" />
+            </button>
+          </AppTooltip>
           )}
-          <button
-            type="button"
-            aria-label="Follow playhead"
-            aria-pressed={follow}
-            title="Follow playhead"
-            onClick={() => {
-              const next = !follow
-              setFollow(next)
-              if (next) {
-                const el = scrollRef.current
-                if (el) {
-                  const target = computeFollowScroll(
-                    secToPx(clock.currentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
-                  )
-                  if (target != null) scrollTrackTo(target)
+          <AppTooltip content="Follow playhead">
+            <button
+              type="button"
+              aria-label="Follow playhead"
+              aria-pressed={follow}
+              onClick={() => {
+                const next = !follow
+                setFollow(next)
+                if (next) {
+                  const el = scrollRef.current
+                  if (el) {
+                    const target = computeFollowScroll(
+                      secToPx(clock.currentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
+                    )
+                    if (target != null) scrollTrackTo(target)
+                  }
                 }
-              }
-            }}
-            className={cn(
-              "inline-flex items-center rounded-md border border-border px-1.5 py-1",
-              follow ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
-            )}
-          >
-            <LocateFixed className="h-3.5 w-3.5" />
-          </button>
+              }}
+              className={cn(
+                "inline-flex items-center rounded-md border border-border px-1.5 py-1",
+                follow ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
+              )}
+            >
+              <LocateFixed className="h-3.5 w-3.5" />
+            </button>
+          </AppTooltip>
           {onLinkVideo && (
             <button
               type="button"

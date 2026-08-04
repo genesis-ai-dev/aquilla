@@ -243,9 +243,20 @@ describe("EditorTable — selection targeting (AQU-348)", () => {
     expect(new Set(getSelectedIds())).toEqual(new Set(["1", "3"]))
   })
 
-  it("reserves source-column space for the divider control", () => {
+  it("keeps the select control out of the source column, in its own leading track", () => {
     renderTable([makeCell("1")])
 
-    expect(screen.getByLabelText("Source text")).toHaveClass("pr-4")
+    const sourceColumn = screen.getByLabelText("Source text")
+    const control = selectCheckbox("1")
+
+    // The control used to straddle the source/target divider and protrude into
+    // the source column, which is what the old `pr-4` reservation was for. It
+    // now owns the row's first grid track, ahead of the number gutter, so it
+    // cannot overlap source text (or the line number) at any width.
+    expect(sourceColumn.contains(control)).toBe(false)
+    expect(control).not.toHaveClass("absolute")
+
+    // The remaining right padding clears the floating source-edit pencil.
+    expect(sourceColumn).toHaveClass("pr-7")
   })
 })

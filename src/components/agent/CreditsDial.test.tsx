@@ -10,6 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import { CreditsDial } from "./CreditsDial"
 import type { OrgCredits } from "@/lib/sync/credits"
 import { ROLE } from "@/lib/frontier/roles"
@@ -49,7 +50,7 @@ describe("CreditsDial — visibility gates", () => {
 
   it("self-hides when the server returns 403 → null (flag gate)", async () => {
     mockGetOrgCredits.mockResolvedValue(null)
-    const { container } = render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    const { container } = renderWithTooltips(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
     await waitFor(() => expect(mockGetOrgCredits).toHaveBeenCalled())
     expect(container.innerHTML).toBe("")
   })
@@ -58,16 +59,17 @@ describe("CreditsDial — visibility gates", () => {
 describe("CreditsDial — maintainer view", () => {
   it("shows only the ring by default; today's spend is on the hover tooltip, not inline (AQU-671)", async () => {
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
-    render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    renderWithTooltips(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
     const dial = await screen.findByTestId("credits-dial")
     // No always-on inline number beside the ring — the icon stands alone.
     expect(dial.textContent).not.toContain("150 cr")
     expect(dial.querySelector("svg")).not.toBeNull()
-    // Today's agent-credit spend is surfaced on hover via the title/aria-label.
-    expect(dial).toHaveAttribute("title", "Agent credits used today: 150 cr")
+    // Today's agent-credit spend is surfaced on hover. AppTooltip replaced the
+    // native title, so assert the tooltip that opens rather than an attribute.
     expect(dial).toHaveAttribute("aria-label", "Agent credits used today: 150 cr")
+    await expectTooltip(dial, "Agent credits used today: 150 cr")
     // Still credits-only: no raw $.
-    expect(dial.getAttribute("title")).not.toContain("$")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("$")
   })
 
   it("never surfaces 'NaN cr' when today's agent credits are non-numeric (AQU-671)", async () => {
@@ -75,24 +77,27 @@ describe("CreditsDial — maintainer view", () => {
       ...SAMPLE_DATA,
       day: { ...SAMPLE_DATA.day, agentCredits: NaN },
     })
-    render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    renderWithTooltips(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
     const dial = await screen.findByTestId("credits-dial")
-    expect(dial.getAttribute("title")).not.toContain("NaN")
-    expect(dial.getAttribute("title")).toBe("Agent credits used today: 0 cr")
+    expect(dial).toHaveAttribute("aria-label", "Agent credits used today: 0 cr")
+    await expectTooltip(dial, "Agent credits used today: 0 cr")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("NaN")
     // The ring dasharray must stay finite even with a NaN spend.
     const ring = dial.querySelectorAll("circle")[1]
     expect(ring.getAttribute("stroke-dasharray") ?? "").not.toContain("NaN")
   })
 
-  it("draws the ring as a chip-backed 16px gauge, still with no inline number", async () => {
+  it("draws a bare 16px ring (no bordered chip), still with no inline number", async () => {
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
-    render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    renderWithTooltips(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
     const dial = await screen.findByTestId("credits-dial")
-    expect(dial.querySelector("svg")?.getAttribute("class")).toContain("h-4")
-    expect(dial.className).toContain("rounded-full")
-    // The heavier treatment is styling only — the ring still stands alone (AQU-671).
+    expect(dial.querySelector("svg")?.getAttribute("class")).toContain("size-4")
+    // Ring only — no outer bordered/bg chip around the SVG gauge.
+    expect(dial.className).not.toContain("border")
+    expect(dial.className).not.toContain("rounded-full")
+    expect(dial.className).not.toContain("shadow-sm")
     expect(dial.textContent).not.toContain("150 cr")
-    expect(dial).toHaveAttribute("title", "Agent credits used today: 150 cr")
+    expect(dial).toHaveAttribute("aria-label", "Agent credits used today: 150 cr")
     // The thicker arc must stay inside the 12x12 box: r + stroke/2 <= 6.
     const ring = dial.querySelectorAll("circle")[1]
     const r = Number(ring.getAttribute("r"))
@@ -100,9 +105,20 @@ describe("CreditsDial — maintainer view", () => {
     expect(r + stroke / 2).toBeLessThanOrEqual(6)
   })
 
+  it("keeps the popover trigger mounted when opening (no AppTooltip remount flash)", async () => {
+    mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
+    renderWithTooltips(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    const dial = await screen.findByTestId("credits-dial")
+    fireEvent.click(dial)
+    await screen.findByTestId("credits-dial-popover")
+    // Same trigger node must still be in the document — remounting it is what
+    // flashed the popover at (0,0) before the new anchor measured.
+    expect(screen.getByTestId("credits-dial")).toBe(dial)
+  })
+
   it("opens a popover with agent + all-rail day/week detail on click", async () => {
     mockGetOrgCredits.mockResolvedValue(SAMPLE_DATA)
-    render(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
+    renderWithTooltips(<CreditsDial jwt="jwt" orgId={1} orgRoleLevel={ROLE.MAINTAINER} />)
     fireEvent.click(await screen.findByTestId("credits-dial"))
 
     const popover = await screen.findByTestId("credits-dial-popover")

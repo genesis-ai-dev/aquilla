@@ -24,8 +24,17 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   await flagSwitch.click()
   await expect(flagSwitch).toBeChecked()
 
+  // The pill is visible while its server capability snapshot is still
+  // hydrating. Wait for that authoritative response before pressing Play so
+  // the test does not race the intentional "backend unavailable" setup path.
+  const contextualSnapshotLoaded = alice.waitForResponse((r) =>
+    r.request().method() === "GET" &&
+    r.url().includes("/contextual/runs?") &&
+    r.status() === 200,
+  )
   const ws = await openSeededProject(alice, seeded)
   await ws.waitForEditor()
+  await contextualSnapshotLoaded
 
   // Idle pill: play affordance visible inside the editor viewport.
   const pill = alice.getByTestId("contextual-run-pill")

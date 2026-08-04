@@ -30,9 +30,14 @@ function useAccountsState(enabled = true) {
   // both clears are idempotent.
   const prevKeyRef = useRef<string | null | undefined>(undefined)
 
+  // `loading` means "the first read hasn't landed yet", NOT "a refresh is in
+  // flight". Re-entering it on every notification blanked whole pages behind
+  // their loading gate mid-interaction: an email backfill (or any session
+  // write) would unmount the open account menu along with the rest of the
+  // page, destroying its local `open` state. Revalidations are silent; state
+  // swaps atomically when the read resolves.
   const refresh = useCallback(async () => {
     if (!enabled) return
-    setLoading(true)
     const [a, s] = await Promise.all([loadActiveSession(), listSessions()])
     const key = a ? sessionKey(a) : null
     if (prevKeyRef.current !== undefined && prevKeyRef.current !== key) {

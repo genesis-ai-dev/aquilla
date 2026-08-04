@@ -1,4 +1,6 @@
-name = "aquilla-identity"
+# The unnamed profile is local-only. Live deploys must select a named profile;
+# a bare `wrangler deploy` therefore cannot overwrite the production Worker.
+name = "aquilla-identity-local"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
@@ -17,12 +19,12 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 # file IS the source of truth for routes — do NOT add or remove routes via
 # the Cloudflare dashboard.
 #
-# Why the top-level config has no `routes` block:
-#   CI's API token lacks `Zone.Workers Routes:Edit` on the aquilla.app zone,
-#   so a routed deploy fails with auth error [10000]. CI runs bare
-#   `wrangler deploy` (which uses this top-level config) and only ships CODE.
+# GitHub Actions and local deploy scripts always pass an explicit named
+# environment. The deploy token must have permission to synchronize the routes
+# declared by that environment. A route-permission failure is a failed deploy,
+# never a reason to retry with the default profile.
 #
-# Routes are applied by a LOCAL deploy with a zone-perm token:
+# Examples:
 #   pnpm run deploy:aquilla:auth        # = wrangler deploy --env=production
 #   (cd auth-worker && wrangler deploy --env=staging)
 # These commands sync the worker's routes to match the env block — they
@@ -33,16 +35,12 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 #   2. Run the deploy command above.
 #   3. Commit the wrangler.toml change.
 #
-# Future state: when CI's token is upgraded with zone-route perms,
-# `.github/workflows/deploy-workers.yml` can switch to
-# `wrangler deploy --env=production`, after which routes ship on every push
-# to main. Until then, route changes are a deliberate local step.
 # =============================================================================
 #
 # Chat: /chat/* on api.aquilla.app is owned by this worker (folded in from
 # the former aquilla-chat-worker on 2026-05-26 — same JWT secret, one
 # worker). OPENROUTER_API_KEY must be set on aquilla-identity (and
-# aquilla-dev-identity for staging) via `wrangler secret put`. The legacy
+# aquilla-dev-identity for development) via `wrangler secret put`. The legacy
 # `aquilla.app/api/chat/*` route still lives on codex-chat-worker; once
 # this worker's `api.aquilla.app/chat/*` is verified the legacy route can
 # be detached.
@@ -67,23 +65,21 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 
 # R2 bucket for agent-attached artifacts (routes/agent-artifacts.ts). Same
 # bucket sync-worker + agent-worker bind as SNAPSHOTS, so the harness's
-# load_artifact tool reads back what the SPA composer uploads. CI's `wrangler
-# deploy` (no --env) targets this top-level block → the prod bucket.
+# load_artifact tool reads back what the SPA composer uploads. Named deployed
+# environments re-declare this binding below; the top-level binding supports
+# the default/local profile only.
 [[r2_buckets]]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 
-# CI's `wrangler deploy` (no --env) targets this top-level block for the
-# actually-live aquilla-identity worker (see ROUTE/ENV note above), so the
-# EMAIL binding must be duplicated here too, not just under [env.production] —
-# its absence here was silently making prod behave like the no-EMAIL dev
-# fallback (email sends were no-ops, and admin elevation leaked devCode).
+# Keep the top-level email binding for default-profile compatibility. Every live
+# named environment also declares its own binding because Wrangler environments
+# do not inherit top-level bindings.
 [[send_email]]
 name = "EMAIL"
 
 # Secrets (provisioned via `wrangler secret put`, never committed):
-#   SECRET_KEY      — frontier JWT signing key. MUST match prod
-#                     frontier-server so access tokens are interchangeable.
+#   SECRET_KEY      — identity access-token signing key.
 #   SYNC_SECRET_KEY — signs /sync-token JWTs. MUST match aquilla-sync-worker.
 #   OPENROUTER_API_KEY — Bearer key forwarded by /api/v1/chat/completions
 #                        to OpenRouter (folded in from aquilla-chat-worker).
@@ -145,11 +141,11 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
-# AQU-713 rollout gate. Keep false until the production dry-run succeeds and
-# all three migration secrets above have been provisioned.
-LEGACY_USER_MIGRATION_ENABLED = "false"
+# AQU-713 legacy identity bridge. Production enables JIT migration by default;
+# all three migration secrets above must be provisioned before deployment.
+LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
+GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — sandbox worker (aquilla-agent-sandbox) base URL for the agent's
 # code-exec tools. Left UNSET at top level until the sandbox worker is deployed:
 # the harness degrades to a clear "sandbox unavailable" tool error when absent,
@@ -160,9 +156,9 @@ GITLAB_URL = "https://gitlab.frontierrnd.com"
 # don't matter. Separate axis from the org role ladder; see platform-admin.ts.
 # ADMIN_REQUIRE_ELEVATION="true" adds the emailed 6-digit step-up code (→ 6h
 # session); bypassed under WRANGLER_LOCAL=1 (local dev-stack / e2e) so the local
-# console stays open. NOTE: deployed via `wrangler deploy` (CI main) which reads
-# THIS top-level block, so it must carry both to harden prod.
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
+# console stays open. The named production profile re-declares both values below;
+# the unnamed profile is local-only and is never a production deploy source.
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (non-secret ids; empty defaults — set real values per
 # deploy). Secrets MONDAY_CLIENT_SECRET + MONDAY_SIGNING_SECRET go through
@@ -174,9 +170,8 @@ MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
 
 # ---------------------------------------------------------------------------
 # Production environment — owns routes on api.aquilla.app for the identity
-# and chat surfaces. Same worker name as top-level (aquilla-identity), so
-# `wrangler deploy` (CI, code-only) and `wrangler deploy --env=production`
-# (local, code + routes) target the same Worker. Bindings + vars are
+# and chat surfaces. Only `wrangler deploy --env=production` targets this Worker;
+# the unnamed profile has a distinct local-only name. Bindings + vars are
 # re-declared because env blocks don't inherit them.
 # ---------------------------------------------------------------------------
 [env.production]
@@ -186,6 +181,9 @@ routes = [
   "api.aquilla.app/identity/*",
   "api.aquilla.app/chat/*",
 ]
+
+[env.production.build]
+command = "bash ../scripts/verify-deploy-branch.sh main"
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.production.placement]
@@ -230,10 +228,10 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
-LEGACY_USER_MIGRATION_ENABLED = "false"
+LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
+GITLAB_URL = "https://git.genesisrnd.com"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
 # Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
@@ -304,15 +302,15 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
-LEGACY_USER_MIGRATION_ENABLED = "false"
+LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
+GITLAB_URL = "https://git.genesisrnd.com"
 # AQU-AGENT §6 — intentionally unset until the development sandbox has a
 # stable deployed URL. `127.0.0.1` here would mean the deployed auth Worker's
 # own runtime, not a developer laptop. Local dev-stack injects either its
 # optional :8790 container or an explicitly configured remote endpoint.
 # AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-dev-url>"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = ""
@@ -333,6 +331,9 @@ routes = [
   "api.staging.aquilla.app/identity/*",
   "api.staging.aquilla.app/chat/*",
 ]
+
+[env.staging.build]
+command = "bash ../scripts/verify-deploy-branch.sh staging"
 
 # See top-level [placement] — keep env blocks in sync (they don't inherit it).
 [env.staging.placement]
@@ -384,8 +385,8 @@ DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
 LEGACY_USER_MIGRATION_ENABLED = "false"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
-GITLAB_URL = "https://gitlab.frontierrnd.com"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com"
+GITLAB_URL = "https://git.genesisrnd.com"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = ""

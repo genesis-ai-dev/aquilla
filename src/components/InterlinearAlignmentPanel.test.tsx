@@ -21,11 +21,9 @@ import {
   type AlignmentSeed,
 } from "@/lib/completion/interlinear"
 
-// AppTooltip only exposes the delegated `data-tooltip` attribute inside a
-// TooltipDelegationBoundary; elsewhere it renders the real Base UI tooltip,
-// which mounts on hover/focus and isn't reliably driveable in happy-dom.
-// Render its content unconditionally so this test asserts the panel's own
-// copy, not Base UI's async open/close timing.
+// AppTooltip mounts the real Base UI tooltip on hover/focus, which isn't
+// reliably driveable in happy-dom. Render its content unconditionally so this
+// test asserts the panel's own copy, not Base UI's async open/close timing.
 vi.mock("@/components/ui/tooltip", () => ({
   AppTooltip: ({ children, content }: { children: React.ReactNode; content: React.ReactNode }) => (
     <>

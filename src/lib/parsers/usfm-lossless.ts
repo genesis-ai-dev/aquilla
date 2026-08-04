@@ -19,6 +19,10 @@
 // inside the verse text. Translators see them in the cell. Round-trip is
 // preserved either way.
 
+import { isBookTitleOrIntroMarker } from "./usfm-markers"
+
+export { isBookTitleOrIntroMarker }
+
 const BOM = "﻿"
 
 // Paragraph is a GROUPING over cells, never a re-segmentation of them. The verse-cell
@@ -110,24 +114,6 @@ const PARATEXT_KINDS: Record<string, "heading" | "paratext"> = {
   "ip": "paratext", "ipi": "paratext", "ipq": "paratext",
   "io1": "paratext", "io2": "paratext", "io3": "paratext",
   "iot": "heading",
-}
-
-/** True for book-name and book-introduction front-matter markers, whose content
- *  is NOT wanted as a translatable source cell (AQU-585). Two families:
- *
- *  - **Book name / title:** running header (`\h`, `\h1`-`\h3`), table of contents
- *    names (`\toc1`-`\toc3`, `\toca1`-`\toca3`), and the printed main title
- *    (`\mt`, `\mt1`-`\mt4`, `\mte`, `\mte1`-`\mte2`).
- *  - **Introduction:** every USFM introduction marker begins with `i` — intro
- *    titles/sections/paragraphs/outlines (`\imt*`, `\is*`, `\ip*`, `\im*`,
- *    `\iq*`, `\io*`, `\iot`, `\ior`, `\iex`, `\ib`, `\ie`, `\ili*`).
- *
- *  In-body section headings (`\s*`, `\ms*`, `\sr`, `\mr`, `\r`) and Psalm
- *  descriptive titles (`\d`) are deliberately NOT matched — they are content the
- *  reviewer still translates. Filtering happens only at the import→cell boundary;
- *  the lossless parser keeps these spans so export round-trips byte-for-byte. */
-export function isBookTitleOrIntroMarker(marker: string): boolean {
-  return /^(?:h\d*|toca?\d|mte?\d*|i[a-z]*\d*)$/.test(marker)
 }
 
 export interface UsfmVerse {
@@ -237,7 +223,19 @@ function findLineMarkers(raw: string): LineMarker[] {
   return out
 }
 
-export function parseUsfmLossless(raw: string): UsfmDocument {
+export interface ParseUsfmOptions {
+  /** When true, book-name/running-header/TOC, main title, and the whole
+   *  introduction block (the `isBookTitleOrIntroMarker` set) are NOT emitted as
+   *  `headings` cells — the per-project "exclude front matter" opt-out
+   *  (AQU-634). In-body section headings and Psalm titles are unaffected. The
+   *  raw bytes and every verse span are identical either way, so export
+   *  round-trip stays byte-for-byte lossless. Default: false (import front
+   *  matter). */
+  excludeFrontMatter?: boolean
+}
+
+export function parseUsfmLossless(raw: string, opts?: ParseUsfmOptions): UsfmDocument {
+  const excludeFrontMatter = opts?.excludeFrontMatter ?? false
   const markers = findLineMarkers(raw)
 
   let bookId = ""
@@ -338,6 +336,10 @@ export function parseUsfmLossless(raw: string): UsfmDocument {
     }
 
     if (m.name in PARATEXT_KINDS && m.rest.length > 0) {
+      // Per-project opt-out: drop book-name/title/TOC + the intro block, but
+      // keep in-body section headings (\s, \ms, \sr, \mr, \r) and Psalm titles
+      // (\d). Verse spans and raw bytes are untouched, so export stays lossless.
+      if (excludeFrontMatter && isBookTitleOrIntroMarker(m.name)) continue
       // Heading text = the rest of the line (single-line paratext is the
       // common case). For round-trip we only need the byte span, so any
       // wrapping like multi-line intros is fine as long as the next

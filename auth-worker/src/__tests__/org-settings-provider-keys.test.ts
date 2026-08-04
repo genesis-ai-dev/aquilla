@@ -103,6 +103,32 @@ describe("org-settings orgProviderKeys (AQU-433)", () => {
     expect(clearBody.settings.orgProviderKeys).toBeUndefined()
   })
 
+  it("GET redacts orgProviderKeys for a contributor (below MAINTAINER)", async () => {
+    await seedOrg()
+    await patch("anna", { orgProviderKeys: { "gemini-tts": "AIza-secret-key" } })
+    const res = await get("tom")
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { settings: Record<string, unknown> }
+    const keys = body.settings.orgProviderKeys as Record<string, unknown>
+    expect(keys["gemini-tts"]).not.toBe("AIza-secret-key")
+    expect(typeof keys["gemini-tts"]).toBe("string")
+  })
+
+  it("GET returns the real orgProviderKeys value for a maintainer/owner", async () => {
+    await seedOrg()
+    await patch("anna", { orgProviderKeys: { "gemini-tts": "AIza-secret-key" } })
+    const maintainerRes = await get("anna")
+    const maintainerBody = (await maintainerRes.json()) as { settings: Record<string, unknown> }
+    expect((maintainerBody.settings.orgProviderKeys as Record<string, unknown>)["gemini-tts"]).toBe(
+      "AIza-secret-key",
+    )
+    const ownerRes = await get("wendi")
+    const ownerBody = (await ownerRes.json()) as { settings: Record<string, unknown> }
+    expect((ownerBody.settings.orgProviderKeys as Record<string, unknown>)["gemini-tts"]).toBe(
+      "AIza-secret-key",
+    )
+  })
+
   it("orgProviderKeys write does not disturb exportMinRole", async () => {
     await seedOrg()
     // Owner sets exportMinRole first.

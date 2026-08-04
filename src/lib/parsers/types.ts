@@ -1,4 +1,4 @@
-import type { ImportSourceLocator } from "../../../shared/import-contract"
+import type { ImportMilestone, ImportSourceLocator } from "../../../shared/import-contract"
 
 export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
@@ -28,6 +28,9 @@ export interface TranslatableString {
   group: string
   /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). */
   section?: string
+  /** Explicit semantic milestone supplied by a specialized parser. The shared
+   * planner validates/fills this into every normalized import unit. */
+  milestone?: ImportMilestone
   /**
    * Semantic tags external to cell identity. For scripture, the verse ref(s) this cell represents,
    * e.g. ["LUK 1:1"] or ["LUK 1:1", "LUK 1:2"] for a verse range. Mirrors the codex-editor
@@ -502,6 +505,10 @@ export interface ProjectRecord {
   /** AI-draft context budget. Synced via ProjectWideSettings; absent →
    *  DEFAULT_DRAFT_CONTEXT applies. See D10 in paragraph-drafting spec. */
   draftContext?: import("@/lib/completion/draft-context").DraftContextSettings
+  /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
+   *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
+   *  false imports front matter as translatable cells. */
+  importExcludeFrontMatter?: boolean
 }
 
 /** A single authored guidance entry in the Living Memory page. */

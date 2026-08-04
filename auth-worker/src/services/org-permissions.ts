@@ -975,8 +975,34 @@ function readTargetLanes(raw: unknown): string[] {
   return value.filter((lane): lane is string => typeof lane === "string" && lane !== "")
 }
 
+/**
+ * AQU-745: per-project visibility predicate for the portfolio rollups. Mirrors
+ * the GET /api/v2/projects access predicate (projects.ts) so the org dashboard
+ * cannot leak project names the caller can't already open. A regular member
+ * sees only projects reached via creator / direct membership / group grant; the
+ * org path (blanket visibility) fires only at Maintainer+ (ORG_WIDE_ACCESS_FLOOR),
+ * and platform admins bypass entirely. Emits `<isAdmin>, <userId>×4` binds in
+ * this exact order — append them to the query in the same order.
+ */
+const PORTFOLIO_VISIBILITY_PREDICATE = `(
+          ?::int = 1
+          OR p.created_by = ?
+          OR EXISTS (SELECT 1 FROM project_members pm
+                      WHERE pm.project_id = p.id AND pm.user_id = ?)
+          OR EXISTS (SELECT 1 FROM group_project_grants gpg
+                       JOIN group_members gm ON gm.group_id = gpg.group_id
+                      WHERE gpg.project_id = p.id AND gm.user_id = ?)
+          OR EXISTS (SELECT 1 FROM org_members om
+                      WHERE om.org_id = p.org_id AND om.user_id = ?
+                        AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
+        )`
+
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
-export async function getOrgPortfolio(env: Env, orgId: number): Promise<PortfolioRow[]> {
+export async function getOrgPortfolio(
+  env: Env,
+  orgId: number,
+  viewer: { userId: number; isAdmin: boolean },
+): Promise<PortfolioRow[]> {
   // Perf (dashboard 15s timeout fix):
   //  - The AQU-523 language pair reads the STORED generated columns on
   //    project_settings (migration 0054) — never (settings::jsonb)->>'…'
@@ -1015,15 +1041,23 @@ export async function getOrgPortfolio(env: Env, orgId: number): Promise<Portfoli
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN au ON au.project_id = p.id
       WHERE p.org_id = ? AND p.archived_at IS NULL
+        AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
-  ).bind(orgId, orgId).all<PortfolioDbRow>()
+  ).bind(
+    orgId, orgId,
+    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+  ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, [orgId])
   return (rows.results ?? []).map((r) => mapPortfolioRow(r, lanesByProject))
 }
 
 /** Batched portfolio rollup for all-org dashboard/list views. */
-export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgPortfolioRow[]> {
+export async function getOrgPortfolios(
+  env: Env,
+  orgIds: number[],
+  viewer: { userId: number; isAdmin: boolean },
+): Promise<OrgPortfolioRow[]> {
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []
   const placeholders = uniqueOrgIds.map(() => "?").join(", ")
@@ -1060,9 +1094,13 @@ export async function getOrgPortfolios(env: Env, orgIds: number[]): Promise<OrgP
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN au ON au.project_id = p.id
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
+        AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,
-  ).bind(...uniqueOrgIds, ...uniqueOrgIds).all<PortfolioDbRow>()
+  ).bind(
+    ...uniqueOrgIds, ...uniqueOrgIds,
+    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+  ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
   return (rows.results ?? []).map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id }))
 }

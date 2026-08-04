@@ -4,6 +4,7 @@ import {
   listProjectMembers,
   fetchOrgMembersMatrix,
   addProjectMember,
+  addProjectMembers,
   removeProjectMember,
   type ProjectMember,
 } from "./members";
@@ -126,6 +127,47 @@ describe("addProjectMember", () => {
         body: JSON.stringify({ username: "clayton", role: 400 }),
       })
     );
+  });
+});
+
+describe("addProjectMembers (batch, AQU-736)", () => {
+  it("POSTs one batch request and returns per-person results", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          results: [
+            { username: "bob", ok: true },
+            { username: "ghost", ok: false, error: { code: "user_not_found", message: "user not found" } },
+          ],
+        }),
+        { status: 200 }
+      )
+    );
+    const results = await addProjectMembers("jwt", "p1", [
+      { username: "bob", role: 400 },
+      { username: "ghost", role: 400 },
+    ]);
+    // Single request, not one-per-person.
+    expect((global.fetch as any).mock.calls).toHaveLength(1);
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v2/projects/p1/members"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ members: [
+          { username: "bob", role: 400 },
+          { username: "ghost", role: 400 },
+        ] }),
+      })
+    );
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({ username: "bob", ok: true });
+    expect(results[1]).toMatchObject({ username: "ghost", ok: false, error: { code: "user_not_found" } });
+  });
+
+  it("throws a UserError on a whole-request failure (e.g. 400 malformed batch)", async () => {
+    (global.fetch as any).mockResolvedValueOnce(new Response("bad batch", { status: 400 }));
+    const err = await addProjectMembers("jwt", "p1", []).catch((e: unknown) => e);
+    expect((err as Error).name).toBe("UserError");
   });
 });
 

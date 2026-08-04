@@ -83,7 +83,7 @@ const ChipButton = forwardRef<HTMLButtonElement, ChipProps>(function ChipButton(
       type="button"
       aria-label={title}
       className={cn(
-        "inline-flex h-7 items-center rounded-full border border-border/70 bg-background/80 px-2 text-xs tabular-nums shadow-sm transition-all",
+        "inline-flex h-7 items-center rounded-md border border-border/70 bg-background/80 px-2 text-xs tabular-nums shadow-sm transition-all",
         "hover:border-border hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         tone === "warning" && "text-destructive",
         tone === "stuck" && "text-amber-600 dark:text-amber-500",

@@ -71,7 +71,7 @@ describe("JoinPage inline auth", () => {
 
     fireEvent.click(accept)
     await waitFor(() => expect(acceptServerInvite).toHaveBeenCalledWith("jwt", "tok"))
-    expect(navigate).toHaveBeenCalledWith("/project/p1")
+    expect(navigate).toHaveBeenCalledWith("/project/p1/editor")
   })
 
   // AQU-471: the landing page must answer "who invited me, to which workspace"
@@ -143,7 +143,7 @@ describe("JoinPage inline auth", () => {
     renderJoin()
     fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
     await waitFor(() => expect(acceptMultiInvite).toHaveBeenCalledWith("jwt", "tok"))
-    expect(navigate).toHaveBeenCalledWith("/project/pa") // first accepted project
+    expect(navigate).toHaveBeenCalledWith("/project/pa/editor") // first accepted project
   })
 })
 

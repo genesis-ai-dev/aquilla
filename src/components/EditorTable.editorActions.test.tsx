@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { createHash } from "node:crypto"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -138,6 +138,26 @@ function makeEmptyTargetStore(cellId: string): CellStore {
   const target = rows.find((r) => r.side === "target")
   if (target) target.value = ""
   store.replaceRows(rows, { full: true, maxServerSeq: 1 })
+  return store
+}
+
+function makeTwoCellStore(): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: project.id,
+    fileId: "file-1",
+    username: "tester",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  const first = makeRows("cell-1")
+  const firstTarget = first.find((row) => row.side === "target")
+  if (firstTarget) firstTarget.value = ""
+  const second = makeRows("cell-2").map((row) => ({
+    ...row,
+    canonicalRef: "GEN 1:2",
+  }))
+  store.replaceRows([...first, ...second], { full: true, maxServerSeq: 1 })
   return store
 }
 
@@ -285,6 +305,55 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     // resolves — proving the flow returns the user to the cell with a signal
     // that the change landed (the strand-after-Replace bug this fixes).
     expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+
+  it("does not steal focus back when another cell is activated before AI save resolves (AQU-618)", async () => {
+    let resolveCompletion!: (saved: boolean) => void
+    const onCompleteSingle = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveCompletion = resolve
+    }))
+    const qc = new QueryClient()
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <EditorActionsProvider value={{}}>
+          <EditorTable
+            project={project}
+            cellStore={makeTwoCellStore()}
+            username="tester"
+            isCompletionConfigured={true}
+            isCompletionAvailable={true}
+            completing={new Map()}
+            examples={new Map()}
+            errors={new Map()}
+            previews={new Map()}
+            onCompleteSingle={onCompleteSingle}
+            onCompleteBatch={() => {}}
+            healthMap={new Map()}
+            lineNumbersEnabled={false}
+            cellLabelsEnabled={false}
+            sourceTextDirection="ltr"
+            targetTextDirection="ltr"
+          />
+        </EditorActionsProvider>
+      </QueryClientProvider>,
+    )
+
+    const firstRow = container.querySelector<HTMLElement>('[data-cell-id="cell-1"]')
+    const secondRow = container.querySelector<HTMLElement>('[data-cell-id="cell-2"]')
+    expect(firstRow).not.toBeNull()
+    expect(secondRow).not.toBeNull()
+
+    fireEvent.click(within(firstRow!).getByRole("button", { name: "Translate with AI" }))
+    await waitFor(() => expect(onCompleteSingle).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(secondRow!.querySelector<HTMLElement>("[data-target-read-view]")!)
+    await waitFor(() => expect(secondRow!.querySelector(".ProseMirror")).not.toBeNull())
+    expect(secondRow).toContainElement(document.activeElement as HTMLElement)
+
+    await act(async () => resolveCompletion(true))
+    expect(await screen.findByText("Saved")).toBeInTheDocument()
+    expect(secondRow!.querySelector(".ProseMirror")).not.toBeNull()
+    expect(firstRow!.querySelector(".ProseMirror")).toBeNull()
   })
 
   it("keeps AI drafting enabled for protected IDML cells", async () => {

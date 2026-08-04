@@ -195,7 +195,7 @@ function OccurrenceRow({
             type="button"
             className={cn(
               "w-full text-left text-sm leading-relaxed",
-              canEdit && "cursor-pointer hover:bg-muted/50 rounded px-1 -mx-1 transition-colors",
+              canEdit && "hover:bg-muted/50 rounded px-1 -mx-1 transition-colors",
               !translated.trim() && "text-muted-foreground italic",
             )}
             onClick={() => canEdit && setEditing(true)}
@@ -286,7 +286,7 @@ export function TerminologyTermDetail({
       {/* Header */}
       <header className="flex items-center gap-3 border-b px-4 py-3">
         <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close detail">
-          <X className="h-4 w-4" />
+          <X />
         </Button>
         <div className="flex flex-1 items-center gap-2 min-w-0">
           <span className="text-base font-semibold truncate">{concept.sourceTerm}</span>
@@ -363,7 +363,7 @@ export function TerminologyTermDetail({
         ) : (
           <>
             {/* Column headers */}
-            <div className="mb-2 hidden items-start gap-4 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:flex">
+            <div className="mb-2 hidden items-start gap-4 text-xs text-muted-foreground sm:flex">
               <span className="w-24 shrink-0">Ref</span>
               <span className="flex-1">Source</span>
               <span className="w-20 shrink-0">Verdict</span>

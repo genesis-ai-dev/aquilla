@@ -32,7 +32,7 @@ export function MarketingLoginRoute() {
           setError("Demo is unavailable in this environment.")
           return
         }
-        navigate(`/project/${DEMO_PROJECT_ID}`, { replace: true })
+        navigate(`/project/${DEMO_PROJECT_ID}/editor`, { replace: true })
       } catch (e) {
         if (cancelled) return
         setError(e instanceof Error ? e.message : String(e))

@@ -42,6 +42,7 @@ import {
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
+import { openRouterExtras } from "../lib/llm-vendor"
 import {
   runCode,
   loadArtifact,
@@ -809,8 +810,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           messages: convo,
           tools,
           stream: true,
-          usage: { include: true },
-          reasoning: { effort: "none" },
+          ...openRouterExtras(env.OPENROUTER_BASE_URL),
         }),
         signal,
       })

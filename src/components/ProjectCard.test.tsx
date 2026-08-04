@@ -6,7 +6,7 @@
 //   3. No extra fetch attempts (N+1 stampede guard via call count).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { ProjectCard } from "./ProjectCard"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -122,6 +122,42 @@ describe("ProjectCard health ring", () => {
     // At health=0, HealthRing suppresses the SVG ring; we still show the score
     // inside the ring container
     expect(screen.getByText("0")).toBeInTheDocument()
+  })
+})
+
+describe("ProjectCard in-flight open state (AQU-737)", () => {
+  it("shows a spinner overlay and marks the card busy while pending", () => {
+    const project = makeProject()
+    render(<ProjectCard project={project} onClick={() => {}} pending />)
+    const overlay = screen.getByTestId("project-card-opening")
+    expect(overlay).toBeInTheDocument()
+    // The spinner primitive exposes role="status" for assistive tech.
+    expect(overlay.querySelector('[role="status"]')).not.toBeNull()
+    // aria-busy is set on the card container itself.
+    expect(overlay.closest('[aria-busy="true"]')).not.toBeNull()
+  })
+
+  it("swallows clicks while pending so opening cannot fire twice", () => {
+    const onClick = vi.fn()
+    const project = makeProject()
+    const { rerender } = render(
+      <ProjectCard project={project} onClick={onClick} pending />,
+    )
+    // Click the card body while it is opening — the handler must not run.
+    fireEvent.click(screen.getByText("Test Project"))
+    expect(onClick).not.toHaveBeenCalled()
+
+    // Once no longer pending the card is clickable again (abort/idle recovery).
+    rerender(<ProjectCard project={project} onClick={onClick} pending={false} />)
+    expect(screen.queryByTestId("project-card-opening")).toBeNull()
+    fireEvent.click(screen.getByText("Test Project"))
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders no overlay in the default (idle) state", () => {
+    const project = makeProject()
+    render(<ProjectCard project={project} onClick={() => {}} />)
+    expect(screen.queryByTestId("project-card-opening")).toBeNull()
   })
 })
 

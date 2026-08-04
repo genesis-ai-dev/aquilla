@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import { SelectionBar } from "./SelectionBar"
 import { emitCellValidate, emitCellUnvalidate } from "@/lib/sync/events-emit"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -146,7 +147,7 @@ function renderBar(
   myScopes: MemberScope[] = [],
   activeLane = "",
 ) {
-  return render(
+  return renderWithTooltips(
     <SelectionBar
       project={project}
       cellStore={makeStore(cells)}
@@ -214,16 +215,16 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     return screen.getByRole("button", { name: /Validate/i })
   }
 
-  it("enables Validate for a translated, human-touched, not-yet-validated cell", () => {
+  it("enables Validate for a translated, human-touched, not-yet-validated cell", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [makeCell({ id: "cell-1", translated: "bonjour" })])
     const btn = validateButton()
     expect(btn).toBeEnabled()
-    expect(btn).toHaveAttribute("title", "Validate 1 cell")
+    await expectTooltip(btn, "Validate 1 cell")
     vi.restoreAllMocks()
   })
 
-  it("AQU-633: disables Validate with an out-of-scope reason when the cell's file is not in the user's scope", () => {
+  it("AQU-633: disables Validate with an out-of-scope reason when the cell's file is not in the user's scope", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(
       makeProject(ROLE.CONTRIBUTOR),
@@ -232,7 +233,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     )
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    expect(btn).toHaveAttribute("title", "Some selected cells are outside your assigned files or lanes")
+    await expectTooltip(btn, "Some selected cells are outside your assigned files or lanes")
     vi.restoreAllMocks()
   })
 
@@ -265,34 +266,34 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     vi.restoreAllMocks()
   })
 
-  it("disables with an 'already validated by you' reason when all selected are self-validated", () => {
+  it("disables with an 'already validated by you' reason when all selected are self-validated", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [
       makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }),
     ])
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    expect(btn).toHaveAttribute("title", "All selected cells are already validated by you")
+    await expectTooltip(btn, "All selected cells are already validated by you")
     vi.restoreAllMocks()
   })
 
-  it("disables with the AI-draft reason for an untouched machine draft", () => {
+  it("disables with the AI-draft reason for an untouched machine draft", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [
       makeCell({ id: "cell-1", translated: "auto draft", aiDrafted: true }),
     ])
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    expect(btn).toHaveAttribute("title", "Nothing eligible — untouched AI drafts require individual review")
+    await expectTooltip(btn, "Nothing eligible — untouched AI drafts require individual review")
     vi.restoreAllMocks()
   })
 
-  it("disables with a 'need a translation' reason for an untranslated cell", () => {
+  it("disables with a 'need a translation' reason for an untranslated cell", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), [makeCell({ id: "cell-1", translated: "" })])
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    expect(btn).toHaveAttribute("title", "Selected cells need a translation first")
+    await expectTooltip(btn, "Selected cells need a translation first")
     vi.restoreAllMocks()
   })
 })

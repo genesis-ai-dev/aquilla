@@ -159,7 +159,11 @@ CREATE TABLE projects (
     source_link_consumes TEXT,   -- 'source' | 'target' (null = 'source')
     source_link_gate     TEXT,   -- 'head' | 'validated' (target-consumption only)
     -- Max upstream server_seq (lane-relevant) this project has mirrored.
-    source_link_cursor   BIGINT NOT NULL DEFAULT 0
+    source_link_cursor   BIGINT NOT NULL DEFAULT 0,
+    -- AQU-507: designated Project Manager (attribution, distinct from the
+    -- permission ladder / member roster). NULL = unassigned. ON DELETE SET NULL
+    -- so removing a user never orphans the row. (migration 0072)
+    pm_user_id           BIGINT REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE project_members (
@@ -730,6 +734,8 @@ CREATE INDEX idx_projects_archived ON projects(archived_at) WHERE archived_at IS
 CREATE INDEX idx_projects_created_by ON projects(created_by);
 CREATE INDEX idx_projects_org ON projects(org_id);
 CREATE INDEX idx_projects_source_project ON projects(source_project_id) WHERE source_project_id IS NOT NULL;
+-- AQU-507: partial index over assigned PMs for the overview sort/filter.
+CREATE INDEX idx_projects_pm_user ON projects(pm_user_id) WHERE pm_user_id IS NOT NULL;
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_username ON users(username);
 

@@ -79,6 +79,16 @@ interface MembersPanelProps {
    * single batch request (never a client-side fan-out).
    */
   onAdd: (usernames: string[], role: number) => Promise<MemberAddOutcome[]>;
+  /**
+   * AQU-780: map a whole-batch add failure (a thrown error where nothing
+   * landed — e.g. a 403 owner-gate, a 429, or a 5xx) to the message shown
+   * under the add row. Forwarded verbatim to MemberMultiAddRow. Without it,
+   * the row falls back to a generic "Could not add — please try again.",
+   * which hides the real cause (a non-owner was told to doubt the username
+   * exists). Return null to suppress the inline message when the caller
+   * surfaces the failure itself.
+   */
+  onAddBatchError?: (e: unknown) => string | null;
   onRemove: (userId: number) => Promise<void>;
   onChangeRole?: (username: string, role: number) => Promise<void>;
   /** Caller's own user id, used to block self-edit affordances. Pass null when
@@ -107,6 +117,7 @@ export function MembersPanel({
   roleOptions,
   newMemberDefaultRole,
   onAdd,
+  onAddBatchError,
   onRemove,
   onChangeRole,
   callerUserId,
@@ -219,6 +230,7 @@ export function MembersPanel({
         roleOptions={grantableRoles}
         defaultRole={newMemberDefaultRole}
         onAdd={onAdd}
+        onBatchErrorMessage={onAddBatchError}
         excludedUserIds={existingUserIds}
         scopedUserSearch={scopedUserSearch}
         suggestions={suggestions}

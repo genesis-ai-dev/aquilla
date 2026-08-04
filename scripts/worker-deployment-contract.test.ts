@@ -324,7 +324,7 @@ describe("worker deployment environment contract", () => {
     expect(workflow).toContain("node scripts/verify-live-environment.mjs \"${{ needs.target.outputs.live_environment }}\" --surface=spa")
     expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
     expect(workflow).toContain("command: deploy --env=${{ needs.target.outputs.wrangler_environment }}")
-    expect(workflow).toContain("command: versions upload --env=preview")
+    expect(workflow).toContain("wrangler versions upload --env=preview")
     expect(workflow).toContain("name: ${{ needs.target.outputs.github_environment }}")
     expect(workflow).not.toContain("|| '--env=development'")
     expect(deployJobHeader).toContain("env:")
@@ -333,6 +333,30 @@ describe("worker deployment environment contract", () => {
     expect(deployJobHeader).toContain("VITE_CHAT_BASE:")
     expect(workflow.match(/VITE_AUTH_BASE:/g)).toHaveLength(1)
     expect(workflow).not.toContain("refs/heads/main' && ' '")
+  })
+
+  // A preview that silently does not build is worse than no preview: the job
+  // still reports green, so nobody notices QA has nothing to click. Every
+  // non-draft PR must produce a URL, and the URL must be proven to serve the
+  // SPA before it is advertised.
+  it("uploads a preview for every non-draft PR and proves the URL works", () => {
+    const workflow = readRepoFile(".github", "workflows", "deploy.yml")
+
+    // The upload's only condition is "this is a PR". The commit-message
+    // opt-in that used to gate it (`[preview]`/`[deploy]` grepped in a
+    // `decide` step) skipped every single upload while still reporting green.
+    expect(workflow).toContain("        id: deploy_preview\n        if: github.event_name == 'pull_request'\n")
+    expect(workflow).not.toContain("steps.decide.outputs.deploy")
+
+    expect(workflow).toContain("if: github.event.pull_request.draft != true")
+    expect(workflow).toContain("ALIAS: pr-${{ github.event.number }}")
+    expect(workflow).toContain("--preview-alias \"$ALIAS\"")
+    expect(workflow).toContain("name: Smoke-check the preview URL")
+
+    // `versions upload` cannot create a Worker. Without the bootstrap the very
+    // first PR — and any PR after someone deletes aquilla-web-preview — fails
+    // with "does not yet exist".
+    expect(workflow).toContain("wrangler deploy --env=preview")
   })
 
   it("installs Chromium before running IDML browser conformance in Web CI", () => {

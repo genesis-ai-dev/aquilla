@@ -2,20 +2,24 @@ name: Deploy aquilla-web Worker
 
 # Deploys the aquilla brand of the SPA to the `aquilla-web` Cloudflare Worker
 # (Workers with static assets). Replaces the former `codex-web` Pages deploy.
-# PR previews use Workers version aliases:
-#   pr-<N>-aquilla-web.<subdomain>.workers.dev
 #
-# When previews are built:
-#   push to main / dev       → always (these are "real" deploys)
-#   PR opened / reopened     → always (give reviewers something to click)
-#   PR ready_for_review      → always (author signaled "look at this")
-#   PR synchronize (push)    → only if [preview] or [deploy] in commit message
-#   draft PR                 → never (author is iterating; not blocking quota on it)
+# When builds happen:
+#   push to main / dev       → live deploy of that branch's environment
+#   PR (non-draft)           → preview upload, on open/reopen/ready/synchronize
+#   draft PR                 → never (mark ready for review to get a preview)
 #   docs-only changes        → never (paths-ignore)
 #
-# Branch alias stays pointing at the last *deployed* commit. Iterate freely
-# without burning a build; push one [preview] commit when you want reviewers
-# to see the latest.
+# PR previews publish a Workers version alias on the route-free `preview`
+# profile: https://pr-<N>-aquilla-web-preview.blue-darkness-7674.workers.dev
+# The alias is stable for the life of the PR, so QA can keep one tab open and
+# reload it as commits land. Previews always build against the DEVELOPMENT API
+# (api.dev.aquilla.app) regardless of base branch — a preview can never write
+# to production data.
+#
+# Draft status is the throttle. Previously a preview only built when a commit
+# message carried [preview]/[deploy]; nobody used the tag, so in practice no
+# preview was ever uploaded and `aquilla-web-preview` never existed on the
+# Cloudflare account.
 
 on:
   push:
@@ -73,49 +77,20 @@ jobs:
       VITE_CHAT_BASE: ${{ needs.target.outputs.chat_base }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 2
-
-      - name: Decide whether to deploy
-        id: decide
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.action }}" = "synchronize" ]; then
-            msg=$(git log -1 --format='%s%n%b')
-            if echo "$msg" | grep -qiE '\[preview\]|\[deploy\]'; then
-              echo "deploy=true" >> "$GITHUB_OUTPUT"
-              echo "reason=preview-tag" >> "$GITHUB_OUTPUT"
-            else
-              echo "deploy=false" >> "$GITHUB_OUTPUT"
-              echo "reason=synchronize-without-tag" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-            echo "reason=${{ github.event_name }}/${{ github.event.action }}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Skip notice
-        if: steps.decide.outputs.deploy != 'true'
-        run: |
-          echo "::notice::Skipping preview deploy (${{ steps.decide.outputs.reason }}). Add [preview] to a commit message to force one."
 
       - uses: pnpm/action-setup@v6
-        if: steps.decide.outputs.deploy == 'true'
 
       - uses: actions/setup-node@v7
-        if: steps.decide.outputs.deploy == 'true'
         with:
           node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-        if: steps.decide.outputs.deploy == 'true'
 
       # DEVEX-1: typecheck + unit tests gate the deploy
       - run: npx tsc -b --noEmit
-        if: steps.decide.outputs.deploy == 'true'
 
       - run: pnpm test
-        if: steps.decide.outputs.deploy == 'true'
 
       # Branch → worker host mapping:
       #   main                        → prod     (api.aquilla.app)
@@ -129,10 +104,8 @@ jobs:
       # members, orgs — none of which the SPA calls today) would still
       # use VITE_FRONTIER_BASE if we ever needed it.
       - run: pnpm run build
-        if: steps.decide.outputs.deploy == 'true'
 
       - name: Verify built API environment
-        if: steps.decide.outputs.deploy == 'true'
         run: bash scripts/verify-dist-host.sh "${{ needs.target.outputs.api_host }}"
 
       # Workers' static-assets parser rejects the SPA `/*  /index.html  200`
@@ -141,19 +114,18 @@ jobs:
       # wrangler.toml, so strip the file before deploy. (public/_redirects
       # stays in the repo for legacy Pages deploys of other brands.)
       - name: Strip dist/_redirects (Workers static assets rejects it)
-        if: steps.decide.outputs.deploy == 'true'
         run: rm -f dist/_redirects
 
       # Pushes to main/staging/dev publish the live Worker for that branch's
       # explicit named environment. The env mapping must match the VITE_* build
       # vars above; never use a bare deploy because it can inherit the wrong
       # top-level worker name, routes, or bindings.
-      # PRs upload a preview version aliased as `pr-<N>`, reachable at
-      # https://pr-<N>-aquilla-web.<workers-subdomain>.workers.dev without
-      # touching the production version.
+      # PRs upload a preview version aliased as `pr-<N>` on the route-free
+      # `preview` profile, reachable at the aliased Workers preview URL without
+      # touching any live Worker or route.
       - name: Deploy aquilla-web (main/staging/dev)
         id: deploy_prod
-        if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -161,28 +133,80 @@ jobs:
           command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
 
       - name: Verify deployed SPA environment
-        if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=spa
 
+      # `wrangler versions upload` cannot CREATE a Worker — it fails with "You
+      # cannot upload a new version of a Worker that does not yet exist" until
+      # something has deployed the name once. `aquilla-web-preview` had never
+      # been created, because the old commit-tag gate meant this step never ran.
+      # Bootstrap it here rather than making the first preview depend on a human
+      # running a one-off command: the preview profile declares no routes, so a
+      # plain deploy publishes nothing beyond a workers.dev URL, and it also
+      # self-heals if the Worker is ever deleted.
+      #
+      # The URL is read from wrangler's own output, falling back to the
+      # deterministic alias form (`<alias>-<worker>.<subdomain>.workers.dev`) so
+      # a change in that output degrades to a still-correct link, not a blank
+      # comment. Everything interpolated reaches the script through env.
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview
-        if: steps.decide.outputs.deploy == 'true' && github.event_name == 'pull_request'
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: versions upload --env=preview --preview-alias "pr-${{ github.event.number }}" --message "PR ${{ github.event.number }} @ ${{ github.event.pull_request.head.sha }}"
+        if: github.event_name == 'pull_request'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+          ALIAS: pr-${{ github.event.number }}
+          UPLOAD_MESSAGE: PR ${{ github.event.number }} @ ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -o pipefail
+          upload() {
+            pnpm exec wrangler versions upload --env=preview \
+              --preview-alias "$ALIAS" --message "$UPLOAD_MESSAGE" 2>&1 | tee upload.log
+          }
+
+          if ! upload; then
+            grep -q "does not yet exist" upload.log || exit 1
+            echo "::notice::aquilla-web-preview does not exist yet; bootstrapping the route-free preview Worker."
+            pnpm exec wrangler deploy --env=preview
+            upload
+          fi
+
+          url=$(grep -oE "https://${ALIAS}-aquilla-web-preview\.[a-z0-9-]+\.workers\.dev" upload.log | head -1)
+          [ -n "$url" ] || url="https://${ALIAS}-aquilla-web-preview.blue-darkness-7674.workers.dev"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Fail the job if the alias does not actually serve the SPA. A green
+      # check that links QA to a 404 is worse than a red one.
+      - name: Smoke-check the preview URL
+        if: github.event_name == 'pull_request'
+        env:
+          PREVIEW_URL: ${{ steps.deploy_preview.outputs.url }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$PREVIEW_URL/app" || echo 000)
+            [ "$code" = "200" ] && echo "preview OK ($PREVIEW_URL)" && exit 0
+            echo "attempt $attempt: HTTP $code — retrying"
+            sleep 6
+          done
+          echo "::error::Preview alias did not serve the SPA at $PREVIEW_URL/app (last HTTP $code)"
+          exit 1
 
       - name: Comment preview URL on PR
-        if: github.event_name == 'pull_request' && steps.decide.outputs.deploy == 'true'
+        if: github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: pages-preview
           message: |
-            **aquilla-web Worker preview**
+            **Preview:** ${{ steps.deploy_preview.outputs.url }}
 
-            - Preview alias: `pr-${{ github.event.number }}-aquilla-web-preview.<workers-subdomain>.workers.dev`
-              (see the "Upload aquilla-web preview" step output for the full URL — first PR after this CI change will reveal the subdomain; pin it here afterwards)
-            - Commit: `${{ github.event.pull_request.head.sha }}`
+            | | |
+            | --- | --- |
+            | Commit | `${{ github.event.pull_request.head.sha }}` |
+            | API | `api.dev.aquilla.app` (development) |
 
-            Re-uploads on commits tagged `[preview]` (skip the tag to iterate without rebuilding).
+            The link is stable for the life of this PR — reload it as new
+            commits land. Previews always talk to the **development** API and
+            database, never production, whatever branch this PR targets.
+
+            Draft PRs do not build a preview; mark the PR ready for review to
+            get one.

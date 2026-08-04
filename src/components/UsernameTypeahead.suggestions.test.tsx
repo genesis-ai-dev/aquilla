@@ -1,15 +1,17 @@
 // Multi-select typeahead extensions for the member-add surfaces:
 //   - `suggestions` (eligible org colleagues) render as checkbox rows on
 //     focus, before any search, and merge dedup'd with search results.
-//   - A settled search miss in multi-select mode offers an actionable
-//     "Add by exact username" row — the scoped search (AQU-321) can't see
-//     out-of-scope users, so a miss must not dead-end the add.
-//   - Scoped multi-select miss copy doesn't claim the account doesn't exist.
+//   - A settled search miss resolves the exact typed username against the
+//     unscoped lookup (AQU-781): the scoped search (AQU-321) can't see
+//     out-of-scope users, so a miss must not dead-end the add nor claim the
+//     account doesn't exist. Only a lookup that confirms non-existence shows
+//     the definitive "no such user" copy.
 
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { useState } from "react"
 import { UsernameTypeahead, type RecipientValue } from "./UsernameTypeahead"
+import { lookupUser } from "@/lib/frontier/members"
 
 // Echo the query so searchMatchesInput passes; "bob" is findable, everything
 // else misses with a settled OK fetch.
@@ -21,6 +23,21 @@ vi.mock("@/hooks/useUserSearch", () => ({
     return { query, results, isLoading: false, needsMorePrefix: q.length < 2, lastFetchOk: true }
   },
 }))
+
+// AQU-781: the settled-miss path resolves the exact username via the unscoped
+// lookup. Provide a jwt so the hook fires and mock the lookup per-test.
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({ session: { jwt: "jwt" }, loading: false }),
+}))
+vi.mock("@/lib/frontier/members", () => ({
+  lookupUser: vi.fn(async () => null),
+}))
+
+// Default: unknown usernames don't resolve. Individual tests override.
+beforeEach(() => {
+  vi.mocked(lookupUser).mockReset()
+  vi.mocked(lookupUser).mockResolvedValue(null)
+})
 
 function Harness({
   multiSelect,
@@ -95,31 +112,41 @@ describe("UsernameTypeahead — suggestions + settled-miss staging", () => {
     expect(screen.getByText("All org members already have access.")).toBeInTheDocument()
   })
 
-  it("offers 'Add by exact username' on a settled scoped miss and stages the typed name", () => {
-    const onStageTyped = vi.fn()
-    render(<Harness multiSelect scopedSearch onStageTyped={onStageTyped} />)
+  it("AQU-781: multi-select — an out-of-scope exact match is offered as a real add, not a false 'no such user'", async () => {
+    // Scoped search misses "zed", but the unscoped lookup resolves them.
+    vi.mocked(lookupUser).mockResolvedValue({ id: 77, username: "zed" })
+    const onToggleResult = vi.fn()
+    render(<Harness multiSelect scopedSearch onToggleResult={onToggleResult} />)
     fireEvent.focus(input())
     fireEvent.change(input(), { target: { value: "zed" } })
 
-    // Scoped copy must not claim the account doesn't exist (AQU-321 scoping).
-    expect(
-      screen.getByText(/no match among people who share an org or project with you/i),
-    ).toBeInTheDocument()
+    // Must not assert non-existence for a user who exists out of scope.
+    expect(await screen.findByText(/is an aquilla user/i)).toBeInTheDocument()
     expect(screen.queryByText(/no aquilla user named/i)).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /add "zed" by exact username/i }))
-    expect(onStageTyped).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: /add zed/i }))
+    expect(onToggleResult).toHaveBeenCalledWith({ id: 77, username: "zed" })
   })
 
-  it("keeps the definitive miss copy and no staging action in single-pick mode", () => {
+  it("AQU-781: single-pick — an out-of-scope exact match can be picked (verifies the recipient)", async () => {
+    vi.mocked(lookupUser).mockResolvedValue({ id: 88, username: "zed" })
     render(<Harness multiSelect={false} scopedSearch />)
     fireEvent.focus(input())
     fireEvent.change(input(), { target: { value: "zed" } })
 
-    expect(screen.getByText(/no aquilla user named "zed"/i)).toBeInTheDocument()
-    expect(
-      screen.queryByRole("button", { name: /by exact username/i }),
-    ).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole("button", { name: /add zed/i }))
+    // Picking sets value.resolved, which surfaces the "verified" badge.
+    expect(await screen.findByText(/verified/i)).toBeInTheDocument()
+  })
+
+  it("AQU-781: shows the definitive not-found only after the unscoped lookup confirms the miss", async () => {
+    // lookupUser default → null (truly no such account).
+    render(<Harness multiSelect={false} scopedSearch />)
+    fireEvent.focus(input())
+    fireEvent.change(input(), { target: { value: "zed" } })
+
+    expect(await screen.findByText(/no aquilla user named "zed"/i)).toBeInTheDocument()
+    expect(vi.mocked(lookupUser)).toHaveBeenCalledWith("jwt", "zed")
   })
 })
 

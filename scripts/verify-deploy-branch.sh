@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Guards against deploying to prod/staging from the wrong git branch (e.g.
+# Guards against deploying to production from the wrong git branch (e.g.
 # running a prod deploy script while checked out on `dev` or a feature
 # branch). Complements verify-dist-host.sh, which only catches a stale
 # dist/ — this catches the sync-worker/auth-worker deploys too, which have
@@ -37,7 +37,7 @@ if [ "$current" != "$expected" ]; then
   exit 1
 fi
 
-# Local production/staging deploys must be reproducible from the exact remote
+# Local production deploys must be reproducible from the exact remote
 # commit. CI checkouts are already pinned to the event SHA and authenticated
 # Cloudflare Builds may not expose reusable Git remote credentials.
 if [ -z "$ci_branch" ]; then

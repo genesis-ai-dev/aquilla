@@ -2,7 +2,6 @@ name: Deploy Workers
 
 # Branch → environment mapping:
 #   push to main    → wrangler deploy --env=production → prod workers
-#   push to staging → wrangler deploy --env=staging → staging workers (staging.aquilla.app)
 #   push to dev     → wrangler deploy --env=development → dev workers (dev.aquilla.app)
 #
 # Each worker only runs if its directory changed in the push (path filter) or
@@ -13,7 +12,7 @@ name: Deploy Workers
 
 on:
   push:
-    branches: [main, staging, dev]
+    branches: [main, dev]
     paths:
       - 'sync-worker/**'
       - 'auth-worker/**'
@@ -103,12 +102,7 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: sweet-paper-88472094
           NEON_PRODUCTION_BRANCH: production
-          NEON_STAGING_BRANCH: staging
           NEON_DEV_BRANCH: dev
-          NEON_STAGING_PG_HOST: ${{ secrets.NEON_STAGING_PG_HOST }}
-          NEON_STAGING_PG_DB: ${{ secrets.NEON_STAGING_PG_DB }}
-          NEON_STAGING_PG_ROLE: ${{ secrets.NEON_STAGING_PG_ROLE }}
-          NEON_STAGING_PG_PASSWORD: ${{ secrets.NEON_STAGING_PG_PASSWORD }}
           NEON_DEV_PG_HOST: ${{ secrets.NEON_DEV_PG_HOST }}
           NEON_DEV_PG_DB: ${{ secrets.NEON_DEV_PG_DB }}
           NEON_DEV_PG_ROLE: ${{ secrets.NEON_DEV_PG_ROLE }}
@@ -116,7 +110,6 @@ jobs:
         run: |
           case "${{ needs.target.outputs.live_environment }}" in
             production) pnpm neon:status:prod ;;
-            staging) pnpm neon:status:staging ;;
             development) pnpm neon:status:dev ;;
             *) echo "::error::Unknown deployment target"; exit 1 ;;
           esac

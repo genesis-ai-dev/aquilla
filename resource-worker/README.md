@@ -45,10 +45,8 @@ OASIS/W3C schema URLs).
 3. **Build the production SPA with**
    `VITE_RESOURCES_BASE=https://resources.aquilla.app`, or the development SPA
    with `VITE_RESOURCES_BASE=https://resources.dev.aquilla.app`, so the client
-   rewrites its fetches. This Worker has no staging profile or staging hostname.
-   Do not point staging at the development proxy; provision an isolated
-   `[env.staging]` route and add it to the deployment contract before enabling
-   the proxy in a staging build.
+   rewrites its fetches. This Worker has only production and development
+   profiles; there is no third environment to point at the development proxy.
 4. **Verify** with the browser network tab open on a DCS-linked project +
    resource lookup: no client requests to non-`aquilla.app` hosts for content;
    DCS import/live-refresh still works; caching headers pass through.

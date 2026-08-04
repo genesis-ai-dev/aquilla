@@ -118,35 +118,6 @@ not_found_handling = "single-page-application"
 # Listing `/` here runs the Worker first for the root only; every other path
 # keeps the cheaper asset-first behaviour.
 run_worker_first = ["/"]
-
-# ---------------------------------------------------------------------------
-# Pre-production staging — served from staging branch, deploys to staging.aquilla.app
-# Uses same Worker code; assets deploy is separate.
-# Deploy: wrangler deploy --env=staging
-# ---------------------------------------------------------------------------
-[env.staging]
-name = "aquilla-web-staging"
-account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
-workers_dev = true
-routes = ["staging.aquilla.app/*"]
-
-[env.staging.build]
-command = "bash scripts/verify-deploy-branch.sh staging"
-
-[env.staging.assets]
-directory = "./dist"
-binding = "ASSETS"
-not_found_handling = "single-page-application"
-# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
-# to index.html there, so the Worker's aq_hint branch never executed and the
-# bare domain served the empty SPA shell to signed-out visitors and crawlers
-# alike (verified in production: `/` was byte-identical to a nonexistent path).
-# Listing `/` here runs the Worker first for the root only; every other path
-# keeps the cheaper asset-first behaviour.
-run_worker_first = ["/"]
-
-# Pull-request previews are isolated from every live Worker and route. They use
-# development API hosts but publish only a workers.dev preview alias.
 [env.preview]
 name = "aquilla-web-preview"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"

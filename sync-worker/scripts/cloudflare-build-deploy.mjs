@@ -4,8 +4,8 @@ import { pathToFileURL } from "node:url"
 /**
  * Keep the Cloudflare Workers Builds dashboard command stable while the
  * repository owns branch-to-environment selection. Only main may promote a
- * version. Staging, development, and feature branches produce preview
- * versions without changing live traffic.
+ * version. Development and feature branches produce preview versions without
+ * changing live traffic.
  */
 export function deploymentPlan(branch) {
   const normalizedBranch = branch?.trim()
@@ -21,14 +21,6 @@ export function deploymentPlan(branch) {
     }
   }
 
-  if (normalizedBranch === "staging") {
-    return {
-      mode: "preview",
-      environment: "staging",
-      args: ["versions", "upload", "--env=staging"],
-    }
-  }
-
   if (normalizedBranch === "dev" || normalizedBranch === "development") {
     return {
       mode: "preview",
@@ -39,7 +31,7 @@ export function deploymentPlan(branch) {
 
   // Cloudflare may build arbitrary feature branches. They use isolated
   // development bindings and remain preview-only; they must never inherit
-  // production or staging bindings and must never promote live traffic.
+  // production bindings and must never promote live traffic.
   return {
     mode: "preview",
     environment: "development",

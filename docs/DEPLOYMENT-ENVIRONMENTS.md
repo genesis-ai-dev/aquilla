@@ -9,13 +9,12 @@ profile or fall back from an unknown branch.
 | Deployment | Git branch | Wrangler profile | SPA | API host | SPA Worker | Identity Worker | Sync Worker | Neon branch | R2 snapshot bucket |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |
-| Staging | `staging` | `staging` | `https://staging.aquilla.app` | `api.staging.aquilla.app` | `aquilla-web-staging` | `aquilla-staging-identity` | `aquilla-sync-worker-staging` | `staging` | `aquilla-snapshots-staging` |
 | Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |
 
 Each API host exposes `/identity/*` and `/chat/*` through the identity Worker and
-`/sync/*` through the sync Worker. `api.staging.aquilla.app` is the correct staging
-hostname; `api.dev.aquilla.app` is development and must not be used as a staging
-fallback.
+`/sync/*` through the sync Worker. There are exactly two live environments.
+Staging was retired on 2026-08-04: it tracked a branch nobody pushed to, and
+`dev.aquilla.app` already covers pre-production integration testing.
 
 The Hyperdrive IDs are intentionally kept in the Wrangler files rather than
 duplicated here. A named profile binds its matching Neon branch. R2 contains media,
@@ -27,19 +26,17 @@ Postgres.
 | Target | Deploy all | Verify live |
 | --- | --- | --- |
 | Production | `pnpm run deploy:aquilla` | `pnpm run verify:live:production` |
-| Staging | `pnpm run deploy:aquilla:staging` | `pnpm run verify:live:staging` |
 | Development | `pnpm run deploy:aquilla:dev` | `pnpm run verify:live:development` |
 
-Production and staging deploy scripts refuse to run from any branch except `main`
-and `staging`, respectively. Every surface passes `--env=production`,
-`--env=staging`, or `--env=development` explicitly and verifies the public
-deployment afterward. Identity and sync deploys also run the target Neon schema
+The production deploy scripts refuse to run from any branch except `main`. Every
+surface passes `--env=production` or `--env=development` explicitly and verifies
+the public deployment afterward. Identity and sync deploys also run the target Neon schema
 guard before publishing.
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
-`wrangler deploy` therefore cannot target a production Worker. The production and
-staging named profiles also run the branch guard as a Wrangler custom-build hook,
+`wrangler deploy` therefore cannot target a production Worker. The production
+named profile also runs the branch guard as a Wrangler custom-build hook,
 covering accidental direct `wrangler deploy --env=...` calls. Local live deploys
 additionally require a clean worktree whose HEAD matches the current remote branch.
 
@@ -48,7 +45,6 @@ additionally require a clean worktree whose HEAD matches the current remote bran
 GitHub Actions deploys only these mappings:
 
 - `main` -> `--env=production`
-- `staging` -> `--env=staging`
 - `dev` -> `--env=development`
 
 Both deploy workflows resolve this mapping through
@@ -60,15 +56,17 @@ branch resolver.
 
 Cloudflare Workers Builds must run `pnpm run deploy:workers-build` for both its
 production and non-production commands. That repository-owned command deploys
-`main` to production, but uploads preview-only versions for `staging`, `dev`, and
-feature branches. It fails closed when Cloudflare does not provide the branch.
+`main` to production, but uploads preview-only versions for `dev` and feature
+branches. It fails closed when Cloudflare does not provide the branch.
 
 Never paste a branch-selection shell expression into the Cloudflare dashboard and
 never use a bare `wrangler deploy` for a live Aquilla environment.
 
-Pull requests use the route-free `preview` Wrangler profile
-(`aquilla-web-preview`) with development API targets. Preview uploads cannot mutate
-the production, staging, or development SPA Workers.
+Every non-draft pull request uses the route-free `preview` Wrangler profile
+(`aquilla-web-preview`) with development API targets, published as the aliased
+preview URL `https://pr-<N>-aquilla-web-preview.blue-darkness-7674.workers.dev`.
+Preview uploads cannot mutate the production or development SPA Workers, and the
+workflow smoke-checks the alias before advertising it on the PR.
 
 The agent sandbox and not-yet-enabled resource proxy follow the same rule: their
 production profiles are main-only, their unnamed profiles have distinct local
@@ -92,9 +90,9 @@ An environment change is one atomic contract change. Update and verify all of:
 4. `sync-worker/scripts/cloudflare-build-deploy.mjs`.
 5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.
 6. The GitHub `production` Environment branch policy (`main` only).
-7. This matrix, [Staging](STAGING.md), and the Workers Builds runbook.
+7. This matrix and the Workers Builds runbook.
 8. `scripts/worker-deployment-contract.test.ts` and its targeted test command.
-9. The live verifier for production, staging, and development before promotion.
+9. The live verifier for production and development before promotion.
 
 Do not reset a Neon branch or clear an R2 bucket to repair a routing problem. First
 identify the Worker version, named profile, Hyperdrive binding, and bucket binding,

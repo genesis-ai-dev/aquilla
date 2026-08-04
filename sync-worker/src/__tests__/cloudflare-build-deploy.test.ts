@@ -12,11 +12,14 @@ describe("Cloudflare Workers Build deployment policy", () => {
     })
   })
 
-  it("uploads staging as a preview without promoting live traffic", () => {
+  // `staging` is now an ordinary branch name with no environment of its own.
+  // If the retired branch is ever pushed again it must land in a development
+  // preview, never resurrect a staging profile.
+  it("treats a staging branch as an ordinary development preview", () => {
     expect(deploymentPlan("staging")).toEqual({
       mode: "preview",
-      environment: "staging",
-      args: ["versions", "upload", "--env=staging"],
+      environment: "development",
+      args: ["versions", "upload", "--env=development"],
     })
   })
 

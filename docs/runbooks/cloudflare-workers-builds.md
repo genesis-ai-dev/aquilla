@@ -22,7 +22,6 @@ The root directory remains `/sync-worker`. The repository command reads
 | Branch | Wrangler operation | Named environment | Changes live traffic |
 | --- | --- | --- | --- |
 | `main` | `deploy` | `production` | Yes |
-| `staging` | `versions upload` | `staging` | No |
 | `dev` or `development` | `versions upload` | `development` | No |
 | Any feature branch | `versions upload` | `development` | No |
 
@@ -31,13 +30,13 @@ Feature builds may create preview versions, but they cannot promote a version or
 change a live route.
 
 The unnamed Wrangler profile targets `aquilla-sync-worker-local`, never
-`aquilla-sync-worker`. The named production and staging profiles run the repository
+`aquilla-sync-worker`. The named production profile runs the repository
 branch guard as a Wrangler build hook, so an accidental direct deployment is
 rejected before upload unless the checkout is on the authorized branch. The build
 hook is defense in depth; Cloudflare Builds must still use the repository-owned
 command above.
 
-Actual staging and development promotion remains owned by
+Actual development promotion remains owned by
 `.github/workflows/deploy-workers.yml`, whose branch mapping always passes an
 explicit named environment.
 

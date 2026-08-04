@@ -33,7 +33,6 @@ describe("worker deployment environment contract", () => {
 
   it.each([
     ["push", "main", "production", "production", "api.aquilla.app"],
-    ["push", "staging", "staging", "staging", "api.staging.aquilla.app"],
     ["workflow_dispatch", "dev", "development", "development", "api.dev.aquilla.app"],
     ["pull_request", "123/merge", "preview", "development", "api.dev.aquilla.app"],
   ])(
@@ -80,13 +79,13 @@ describe("worker deployment environment contract", () => {
       })
       expect(allowed.status).toBe(0)
 
-      const rejected = spawnSync("bash", [guard, "staging"], {
+      const rejected = spawnSync("bash", [guard, "dev"], {
         cwd: tempRepo,
         encoding: "utf8",
         env: { GITHUB_ACTIONS: "true", GITHUB_REF_NAME: "main" },
       })
       expect(rejected.status).not.toBe(0)
-      expect(rejected.stderr).toContain("requires branch 'staging'")
+      expect(rejected.stderr).toContain("requires branch 'dev'")
     } finally {
       rmSync(tempRepo, { recursive: true, force: true })
     }
@@ -123,20 +122,29 @@ describe("worker deployment environment contract", () => {
   )
 
   it.each([
-    ["wrangler.toml", "bash scripts/verify-deploy-branch.sh staging"],
-    ["sync-worker/wrangler.toml", "bash ../scripts/verify-deploy-branch.sh staging"],
-    ["auth-worker/wrangler.toml", "bash ../scripts/verify-deploy-branch.sh staging"],
-    ["agent-worker/wrangler.toml", "bash ../scripts/verify-deploy-branch.sh staging"],
-  ])("enforces staging branch ownership in %s", (file, guardCommand) => {
-    const config = readRepoFile(...file.split("/"))
-    const stagingBuild = tomlBlock(config, "[env.staging.build]")
+    "wrangler.toml",
+    "sync-worker/wrangler.toml",
+    "auth-worker/wrangler.toml",
+    "agent-worker/wrangler.toml",
+  ])("leaves no staging profile behind in %s", (file) => {
+    expect(readRepoFile(...file.split("/"))).not.toContain("[env.staging")
+  })
 
-    expect(stagingBuild).toContain(`command = "${guardCommand}"`)
+  // scripts/ci-build.sh is the build command Cloudflare Workers Builds runs for
+  // the SPA — a second, dashboard-configured path into the same Workers that
+  // GitHub Actions deploys. It bakes VITE_* from $WORKERS_CI_BRANCH, so a stale
+  // branch arm here ships a bundle pointing at a dead API host. It is easy to
+  // miss precisely because nothing in .github/ references it.
+  it("maps Cloudflare Workers Builds branches to the two live environments", () => {
+    const script = readRepoFile("scripts", "ci-build.sh")
+
+    expect(script).toContain("main)    H=api.aquilla.app ;;")
+    expect(script).toContain("*)       H=api.dev.aquilla.app ;;")
+    expect(script).not.toContain("staging")
   })
 
   it.each([
     ["production", "production", "https://api.aquilla.app/identity"],
-    ["staging", "staging", "https://api.staging.aquilla.app/identity"],
     ["development", "development", "https://api.dev.aquilla.app/identity"],
   ])("keeps %s sync variables in one environment", (profile, environment, authWorkerUrl) => {
     const config = readRepoFile("sync-worker", "wrangler.toml")
@@ -153,13 +161,6 @@ describe("worker deployment environment contract", () => {
       "api.aquilla.app/sync/*",
       "aquilla-snapshots",
       "69bcc10e67464f2eaf4fe91a9141e7cd",
-    ],
-    [
-      "staging",
-      "aquilla-sync-worker-staging",
-      "api.staging.aquilla.app/sync/*",
-      "aquilla-snapshots-staging",
-      "822231ade4da4db5b1955702e13d1ac3",
     ],
     [
       "development",
@@ -185,7 +186,6 @@ describe("worker deployment environment contract", () => {
 
   it.each([
     ["production", "aquilla-web", "aquilla.app/*"],
-    ["staging", "aquilla-web-staging", "staging.aquilla.app/*"],
     ["development", "aquilla-web-development", "dev.aquilla.app/*"],
   ])("keeps %s SPA routing isolated", (profile, workerName, route) => {
     const config = readRepoFile("wrangler.toml")
@@ -203,14 +203,6 @@ describe("worker deployment environment contract", () => {
       "https://aquilla.app",
       "aquilla-snapshots",
       "69bcc10e67464f2eaf4fe91a9141e7cd",
-    ],
-    [
-      "staging",
-      "aquilla-staging-identity",
-      "api.staging.aquilla.app",
-      "https://staging.aquilla.app",
-      "aquilla-snapshots-staging",
-      "822231ade4da4db5b1955702e13d1ac3",
     ],
     [
       "development",
@@ -259,7 +251,6 @@ describe("worker deployment environment contract", () => {
     }
     expect(agentPackage.scripts?.deploy).toContain("verify-deploy-branch.sh main")
     expect(agentPackage.scripts?.deploy).toContain("--env=production")
-    expect(agentPackage.scripts?.["deploy:staging"]).toContain("--env=staging")
     expect(agentPackage.scripts?.["deploy:development"]).toContain("--env=development")
   })
 
@@ -268,25 +259,27 @@ describe("worker deployment environment contract", () => {
 
     for (const row of [
       "| Production | `main` | `production` | `https://aquilla.app` | `api.aquilla.app` | `aquilla-web` | `aquilla-identity` | `aquilla-sync-worker` | `production` | `aquilla-snapshots` |",
-      "| Staging | `staging` | `staging` | `https://staging.aquilla.app` | `api.staging.aquilla.app` | `aquilla-web-staging` | `aquilla-staging-identity` | `aquilla-sync-worker-staging` | `staging` | `aquilla-snapshots-staging` |",
       "| Development | `dev` | `development` | `https://dev.aquilla.app` | `api.dev.aquilla.app` | `aquilla-web-development` | `aquilla-dev-identity` | `aquilla-sync-worker-dev` | `dev` | `aquilla-snapshots-dev` |",
     ]) {
       expect(matrix).toContain(row)
     }
 
     expect(matrix).toContain("`main` -> `--env=production`")
-    expect(matrix).toContain("`staging` -> `--env=staging`")
     expect(matrix).toContain("`dev` -> `--env=development`")
     expect(matrix).toContain("`pnpm run deploy:workers-build`")
     expect(matrix).toContain("All unnamed Wrangler profiles are local-only")
     expect(matrix).toContain("deployment-branch policy")
 
     expect(readRepoFile("README.md")).toContain("docs/DEPLOYMENT-ENVIRONMENTS.md")
-    expect(readRepoFile("docs", "STAGING.md")).toContain("DEPLOYMENT-ENVIRONMENTS.md")
     expect(readRepoFile("docs", "runbooks", "cloudflare-workers-builds.md"))
       .toContain("../DEPLOYMENT-ENVIRONMENTS.md")
     expect(readRepoFile("resource-worker", "README.md"))
-      .toContain("This Worker has no staging profile or staging hostname")
+      .toContain("only production and development\n   profiles")
+
+    // Two live environments, no more. A reintroduced staging row here would
+    // silently diverge from the Wrangler profiles and the branch resolver.
+    expect(matrix).not.toContain("api.staging.aquilla.app")
+    expect(matrix).not.toContain("--env=staging")
   })
 
   it("uses explicit environments and live checks in every local deploy command", () => {
@@ -297,7 +290,6 @@ describe("worker deployment environment contract", () => {
 
     for (const [target, profile] of [
       ["aquilla", "production"],
-      ["aquilla:staging", "staging"],
       ["aquilla:dev", "development"],
     ] as const) {
       for (const surface of ["spa", "sync", "auth"] as const) {
@@ -308,7 +300,6 @@ describe("worker deployment environment contract", () => {
     }
 
     expect(scripts["verify:live:production"]).toContain("verify-live-environment.mjs production")
-    expect(scripts["verify:live:staging"]).toContain("verify-live-environment.mjs staging")
     expect(scripts["verify:live:development"]).toContain("verify-live-environment.mjs development")
   })
 

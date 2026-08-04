@@ -35,7 +35,10 @@ describe("GitLab migration configuration", () => {
     const configuredOrigins = [...config.matchAll(/^GITLAB_URL = "([^"]+)"$/gm)]
       .map((match) => match[1])
 
-    expect(configuredOrigins).toHaveLength(4)
+    // One per config block that declares GITLAB_URL: top-level (local),
+    // [env.production.vars], [env.development.vars]. Staging was retired
+    // 2026-08-04.
+    expect(configuredOrigins).toHaveLength(3)
     expect(new Set(configuredOrigins)).toEqual(new Set([LIVE_GITLAB_ORIGIN]))
     expect(config).not.toContain(RETIRED_GITLAB_ORIGIN)
   })

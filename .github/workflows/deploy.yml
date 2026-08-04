@@ -23,12 +23,12 @@ name: Deploy aquilla-web Worker
 
 on:
   push:
-    branches: [main, staging, dev]
+    branches: [main, dev]
     paths-ignore:
       - '**.md'
       - 'docs/**'
   pull_request:
-    branches: [dev, staging, main]
+    branches: [dev, main]
     types: [opened, reopened, ready_for_review, synchronize]
     paths-ignore:
       - '**.md'
@@ -94,7 +94,6 @@ jobs:
 
       # Branch → worker host mapping:
       #   main                        → prod     (api.aquilla.app)
-      #   staging                     → staging  (api.staging.aquilla.app)
       #   dev, PR                     → dev      (api.dev.aquilla.app)
       # VITE_AUTH_BASE targets aquilla-identity for auth / sync-token /
       # invite routes. VITE_CHAT_BASE targets aquilla-identity's
@@ -116,14 +115,14 @@ jobs:
       - name: Strip dist/_redirects (Workers static assets rejects it)
         run: rm -f dist/_redirects
 
-      # Pushes to main/staging/dev publish the live Worker for that branch's
+      # Pushes to main/dev publish the live Worker for that branch's
       # explicit named environment. The env mapping must match the VITE_* build
       # vars above; never use a bare deploy because it can inherit the wrong
       # top-level worker name, routes, or bindings.
       # PRs upload a preview version aliased as `pr-<N>` on the route-free
       # `preview` profile, reachable at the aliased Workers preview URL without
       # touching any live Worker or route.
-      - name: Deploy aquilla-web (main/staging/dev)
+      - name: Deploy aquilla-web (main/dev)
         id: deploy_prod
         if: github.event_name != 'pull_request'
         uses: cloudflare/wrangler-action@v4

@@ -90,15 +90,13 @@ Scripts follow the pattern `pnpm run deploy:<brand>:<target>`:
 | `pnpm run deploy:aquilla:spa` | SPA only |
 | `pnpm run deploy:aquilla:auth` | auth-worker only |
 | `pnpm run deploy:aquilla:sync` | sync-worker only |
-| `pnpm run deploy:aquilla:staging` | Full staging deploy (staging.aquilla.app) |
-| `pnpm run verify:live:staging` | Verify staging DNS, TLS, API routes, and SPA targets |
 | `pnpm run deploy:aquilla:dev` | Full development deploy (dev.aquilla.app) |
 | `pnpm run verify:live:development` | Verify development DNS, TLS, API routes, and SPA targets |
 | `pnpm run deploy:codex` | Codex brand to Cloudflare Pages |
 | `pnpm run deploy:honeycomb` | Honeycomb brand |
 | `pnpm run deploy:context` | Context brand |
 
-Production, staging, and development mappings are defined in
+Production and development mappings are defined in
 [docs/DEPLOYMENT-ENVIRONMENTS.md](docs/DEPLOYMENT-ENVIRONMENTS.md). Live Aquilla
 deploys always pass an explicit named Wrangler environment; do not use a bare
 `wrangler deploy`. Unnamed Wrangler profiles are local-only, production jobs are

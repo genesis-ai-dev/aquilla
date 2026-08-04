@@ -10,7 +10,7 @@
 //   wrangler kv:namespace create BRANCHING_SEARCH_KV --env staging
 // then drop the returned ids into sync-worker/wrangler.toml as
 //   [[kv_namespaces]] binding = "BRANCHING_SEARCH_KV"  id = "<prod-id>"
-//   [[env.staging.kv_namespaces]] binding = "BRANCHING_SEARCH_KV"
+//   [[env.development.kv_namespaces]] binding = "BRANCHING_SEARCH_KV"
 //     id = "<staging-id>"
 //
 // Until the namespace is provisioned the code stays a no-op and the route

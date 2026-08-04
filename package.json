@@ -153,6 +153,7 @@
     "@tauri-apps/cli": "^2.11.4",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
     "@types/dompurify": "^3.0.5",
     "@types/node": "^26.1.1",
     "@types/pg": "^8.20.0",

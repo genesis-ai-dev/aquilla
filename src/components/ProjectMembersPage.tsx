@@ -417,7 +417,7 @@ export function MembersTab({
                 No one has been added directly to this project yet.
               </p>
             ) : (
-              <ul className="divide-y rounded border">
+              <ul className="divide-y rounded border bg-background">
                 {projectMembers.map(renderMemberRow)}
               </ul>
             )}
@@ -436,7 +436,7 @@ export function MembersTab({
                   access through their organization role — they were not added to
                   this project directly. Remove them from the org to revoke.
                 </p>
-                <ul className="divide-y rounded border">
+                <ul className="divide-y rounded border bg-background">
                   {orgAccessMembers.map(renderMemberRow)}
                 </ul>
               </div>
@@ -447,7 +447,7 @@ export function MembersTab({
 
       {/* Add member — AQU-734 parity: multi-select staging + one batch Add.
           Eligible org colleagues show as checkbox rows on focus (AQU-672). */}
-      <div className="rounded border p-4 space-y-3">
+      <div className="space-y-3 rounded border bg-background p-4">
         <h2 className="text-sm font-medium flex items-center gap-2">
           <UserPlus className="h-4 w-4 text-muted-foreground" />
           Add member

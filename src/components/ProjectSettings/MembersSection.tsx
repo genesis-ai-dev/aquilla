@@ -71,7 +71,7 @@ function MemberRoleBadge({ name, level }: { name: string; level: number }) {
     <Badge
       variant="secondary"
       className={cn(
-        "rounded-full border-transparent font-normal",
+        "font-normal",
         elevated
           ? "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
           : "bg-muted text-muted-foreground",

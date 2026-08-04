@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import {
   Select,
@@ -10,7 +10,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Combobox,
+  ComboboxChip,
+  ComboboxChips,
+  ComboboxChipsInput,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxValue,
+  useComboboxAnchor,
+} from "@/components/ui/combobox"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
+import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { VALIDATION_FLOOR_ROLE_OPTIONS, roleDisplayText } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -29,11 +42,13 @@ const ROLE_OPTIONS: { value: ValidationRoleFloor; label: string }[] =
   }))
 
 interface Props {
+  /** Project id for loading member usernames into the named-validators combobox. */
+  projectId?: string | null
   validationCount: number
   validationCountAudio: number
   hasAnyAudioData: boolean
   validationRoleFloor?: ValidationRoleFloor
-  /** Comma-separated string representation of named users (stored as string[] in ProjectRecord). */
+  /** Named-user allowlist (usernames). Empty = any sufficiently-privileged user. */
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
   /** When true, all inputs are disabled (role/offline gate). */
@@ -60,13 +75,14 @@ interface Props {
  *  - Required validator counts (text / audio)
  *  - Role floor (minimum role that can validate)
  *  - Allow self-validation toggle
- *  - Named-user allowlist (comma-separated text input)
+ *  - Named-user allowlist (multi-select combobox of project members)
  *
  * Server enforcement of role floor, named-user, and self-validation is
  * deferred — see SWARM-TODOs in src/lib/parsers/types.ts (validationRoleFloor,
  * validationNamedUsers, allowSelfValidation fields).
  */
 export function ValidationSettingsSection({
+  projectId = null,
   validationCount,
   validationCountAudio,
   hasAnyAudioData,
@@ -77,6 +93,18 @@ export function ValidationSettingsSection({
   disabledTooltip,
   onChange,
 }: Props) {
+  const { members } = useProjectMembers(projectId)
+  const namedUsersAnchor = useComboboxAnchor()
+
+  // Offer project members, and keep any already-saved names that left the roster
+  // so chips remain removable / visible.
+  const namedUserItems = Array.from(
+    new Set([
+      ...members.map((m) => m.username),
+      ...validationNamedUsers,
+    ]),
+  ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+
   function clamp(raw: string): number {
     const n = Math.floor(Number(raw))
     if (!Number.isFinite(n)) return 1
@@ -85,22 +113,14 @@ export function ValidationSettingsSection({
     return n
   }
 
-  /** Convert comma-separated raw string to trimmed username array. */
-  function parseNamedUsers(raw: string): string[] {
-    return raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-  }
-
   return (
     <Card>
       <CardHeader>
         <CardTitle>Validation</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-col gap-4">
         {/* ── Count thresholds ── */}
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <FieldLabel htmlFor="validation-count">Required validators (text)</FieldLabel>
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Input
@@ -118,7 +138,7 @@ export function ValidationSettingsSection({
             Cells need this many distinct validators to count as fully validated.
           </p>
         </div>
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <FieldLabel htmlFor="validation-count-audio">Required validators (audio)</FieldLabel>
           <DisabledFieldTooltip
             disabled={disabled || !hasAnyAudioData}
@@ -143,7 +163,7 @@ export function ValidationSettingsSection({
         </div>
 
         {/* ── Role floor ── */}
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <FieldLabel htmlFor="validation-role-floor">Minimum validator role</FieldLabel>
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Select
@@ -186,7 +206,7 @@ export function ValidationSettingsSection({
               onCheckedChange={(checked) => onChange({ allowSelfValidation: checked })}
             />
           </DisabledFieldTooltip>
-          <div className="space-y-0.5">
+          <div className="flex flex-col gap-0.5">
             <FieldLabel htmlFor="allow-self-validation">Allow self-validation</FieldLabel>
             <p className="text-xs text-muted-foreground">
               When off, a contributor's vote on their own commit is ignored.
@@ -196,30 +216,57 @@ export function ValidationSettingsSection({
         </div>
 
         {/* ── Named-user allowlist ── */}
-        <div className="space-y-2">
+        <Field data-disabled={disabled || undefined}>
           <FieldLabel htmlFor="validation-named-users">Named validators (optional)</FieldLabel>
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
-            <Input
-              id="validation-named-users"
-              type="text"
+            <Combobox
+              multiple
+              autoHighlight
               disabled={disabled}
-              placeholder="alice, bob, carol"
-              value={validationNamedUsers.join(", ")}
-              onChange={(e) =>
-                onChange({ validationNamedUsers: parseNamedUsers(e.target.value) })
-              }
-              className="w-72"
-            />
+              items={namedUserItems}
+              value={validationNamedUsers}
+              onValueChange={(next) => {
+                onChange({
+                  validationNamedUsers: Array.isArray(next)
+                    ? next.filter((u): u is string => typeof u === "string")
+                    : [],
+                })
+              }}
+            >
+              <ComboboxChips ref={namedUsersAnchor} className="w-full max-w-md">
+                <ComboboxValue>
+                  {validationNamedUsers.map((username) => (
+                    <ComboboxChip key={username}>{username}</ComboboxChip>
+                  ))}
+                </ComboboxValue>
+                <ComboboxChipsInput
+                  id="validation-named-users"
+                  disabled={disabled}
+                  placeholder={
+                    validationNamedUsers.length === 0
+                      ? "Select project members…"
+                      : undefined
+                  }
+                />
+              </ComboboxChips>
+              <ComboboxContent anchor={namedUsersAnchor}>
+                <ComboboxEmpty>No members found.</ComboboxEmpty>
+                <ComboboxList>
+                  {(item) => (
+                    <ComboboxItem key={item} value={item}>
+                      {item}
+                    </ComboboxItem>
+                  )}
+                </ComboboxList>
+              </ComboboxContent>
+            </Combobox>
           </DisabledFieldTooltip>
-          <p className="text-xs text-muted-foreground">
-            Comma-separated usernames. When set, only these users' votes count toward the
-            threshold (AND'd with the role floor). Leave empty to allow any sufficiently-
-            privileged user.
-            {/* SWARM-TODO(server-enforcement): enforce in sync-worker cell.validate branch.
-                Full typeahead (UsernameTypeahead) would improve UX — blocked on integrating
-                the component here while keeping Props lightweight. */}
-          </p>
-        </div>
+          <FieldDescription>
+            When set, only these users&apos; votes count toward the threshold (AND&apos;d with
+            the role floor). Leave empty to allow any sufficiently-privileged user.
+            {/* SWARM-TODO(server-enforcement): enforce in sync-worker cell.validate branch. */}
+          </FieldDescription>
+        </Field>
       </CardContent>
     </Card>
   )

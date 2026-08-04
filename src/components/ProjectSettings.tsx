@@ -1876,6 +1876,7 @@ export function ProjectSettings() {
         {sectionsToRender.some((s) => s.id === "section-validation") && (
           <div id="section-validation">
             <ValidationSettingsSection
+              projectId={id}
               validationCount={validationCount}
               validationCountAudio={validationCountAudio}
               hasAnyAudioData={Boolean(project?.hasAnyAudioData)}

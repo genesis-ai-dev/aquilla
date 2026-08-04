@@ -177,7 +177,7 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
               <SelectValue placeholder="Any subject" />
             </SelectTrigger>
             {/* Grow past the narrow filter trigger so long subjects aren't clipped. */}
-            <SelectContent className="w-max min-w-(--anchor-width)" alignItemWithTrigger={false}>
+            <SelectContent>
               <SelectItem value={ANY}>Any subject</SelectItem>
               {SUBJECT_OPTIONS.map((s) => (
                 <SelectItem key={s} value={s}>{s}</SelectItem>

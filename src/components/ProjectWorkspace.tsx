@@ -6060,7 +6060,7 @@ function MoveToCorpusDialog({
             <SelectTrigger className="w-full" aria-label="Corpus">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}>
+            <SelectContent>
               <SelectGroup>
                 {existingItems.map((item) => (
                   <SelectItem key={item.value} value={item.value}>

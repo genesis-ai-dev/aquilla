@@ -339,10 +339,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   <SelectTrigger className="h-8 bg-card" aria-label="Filter members">
                     <SelectValue className="flex-none" />
                   </SelectTrigger>
-                  <SelectContent
-                    className="w-max min-w-(--anchor-width)"
-                    align="start"
-                  >
+                  <SelectContent align="start">
                     <SelectGroup>
                       <SelectItem value="all">All</SelectItem>
                       <SelectItem value="project">Project grants</SelectItem>

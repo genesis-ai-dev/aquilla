@@ -154,11 +154,10 @@ jobs:
       - name: Deploy aquilla-web (main/staging/dev)
         id: deploy_prod
         if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
-          command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node scripts/cloudflare-version-deploy.mjs web "${{ needs.target.outputs.wrangler_environment }}"
 
       - name: Verify deployed SPA environment
         if: steps.decide.outputs.deploy == 'true' && github.event_name != 'pull_request'

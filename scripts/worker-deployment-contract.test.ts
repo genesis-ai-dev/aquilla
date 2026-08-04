@@ -5,6 +5,21 @@ import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..")
+const deploymentManifest = JSON.parse(
+  readFileSync(path.join(REPO_ROOT, "config", "cloudflare-deployments.json"), "utf8"),
+) as {
+  surfaces: Record<string, {
+    directory: string
+    requiredBindings: Record<string, string>
+    environments: Record<string, {
+      worker: string
+      routes: string[]
+      plainText: Record<string, string>
+      hyperdrives: Record<string, string>
+      r2Buckets: Record<string, string>
+    }>
+  }>
+}
 
 function readRepoFile(...segments: string[]): string {
   return readFileSync(path.join(REPO_ROOT, ...segments), "utf8")
@@ -18,10 +33,21 @@ function tomlBlock(config: string, marker: string): string {
   return config.slice(start, end === -1 ? undefined : end)
 }
 
+function environmentSection(config: string, environment: string): string {
+  const start = config.indexOf(`\n[env.${environment}]\n`)
+  expect(start).toBeGreaterThan(-1)
+  const end = ["production", "staging", "development"]
+    .filter((candidate) => candidate !== environment)
+    .map((candidate) => config.indexOf(`\n[env.${candidate}]\n`, start + 2))
+    .filter((index) => index > start)
+    .sort((a, b) => a - b)[0] ?? -1
+  return config.slice(start, end === -1 ? undefined : end)
+}
+
 describe("worker deployment environment contract", () => {
   it("resolves GitHub deploys once and never falls through to an environment", () => {
     const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
-    const deployCommand = "command: deploy --env=${{ needs.target.outputs.wrangler_environment }}"
+    const deployCommand = "run: node ../scripts/cloudflare-version-deploy.mjs"
 
     expect(workflow.match(new RegExp(deployCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")))
       .toHaveLength(2)
@@ -241,17 +267,25 @@ describe("worker deployment environment contract", () => {
   )
 
   it("exposes the repository-owned Workers Builds command", () => {
+    const rootPackage = JSON.parse(readRepoFile("package.json")) as {
+      scripts?: Record<string, string>
+    }
+    expect(rootPackage.scripts?.["deploy:workers-build"])
+      .toBe("node scripts/cloudflare-build-deploy.mjs web")
+
     const workerPackage = JSON.parse(readRepoFile("sync-worker", "package.json")) as {
       scripts?: Record<string, string>
     }
 
     expect(workerPackage.scripts?.["deploy:workers-build"])
-      .toBe("node scripts/cloudflare-build-deploy.mjs")
+      .toBe("node ../scripts/cloudflare-build-deploy.mjs sync")
     expect(workerPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:sync")
 
     const authPackage = JSON.parse(readRepoFile("auth-worker", "package.json")) as {
       scripts?: Record<string, string>
     }
+    expect(authPackage.scripts?.["deploy:workers-build"])
+      .toBe("node ../scripts/cloudflare-build-deploy.mjs identity")
     expect(authPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:auth")
 
     const agentPackage = JSON.parse(readRepoFile("agent-worker", "package.json")) as {
@@ -261,6 +295,40 @@ describe("worker deployment environment contract", () => {
     expect(agentPackage.scripts?.deploy).toContain("--env=production")
     expect(agentPackage.scripts?.["deploy:staging"]).toContain("--env=staging")
     expect(agentPackage.scripts?.["deploy:development"]).toContain("--env=development")
+  })
+
+  it("keeps every Wrangler environment synchronized with the canonical manifest", () => {
+    const configFiles = {
+      web: "wrangler.toml",
+      identity: "auth-worker/wrangler.toml",
+      sync: "sync-worker/wrangler.toml",
+    } as const
+
+    for (const [surface, surfaceConfig] of Object.entries(deploymentManifest.surfaces)) {
+      const config = readRepoFile(...configFiles[surface as keyof typeof configFiles].split("/"))
+      for (const [environment, expected] of Object.entries(surfaceConfig.environments)) {
+        const section = environmentSection(config, environment)
+        expect(section).toContain(`name = "${expected.worker}"`)
+        for (const route of expected.routes) expect(section).toContain(`"${route}"`)
+        for (const [name, value] of Object.entries(expected.plainText)) {
+          expect(section).toContain(`${name} = "${value}"`)
+        }
+        for (const [name, id] of Object.entries(expected.hyperdrives)) {
+          expect(section).toContain(`binding = "${name}"`)
+          expect(section).toContain(`id = "${id}"`)
+        }
+        for (const [name, bucket] of Object.entries(expected.r2Buckets)) {
+          expect(section).toContain(`binding = "${name}"`)
+          expect(section).toContain(`bucket_name = "${bucket}"`)
+        }
+        for (const [name, type] of Object.entries(surfaceConfig.requiredBindings)) {
+          const declaration = type === "send_email" || type === "durable_object_namespace"
+            ? `name = "${name}"`
+            : `binding = "${name}"`
+          expect(section).toContain(declaration)
+        }
+      }
+    }
   })
 
   it("keeps the documented environment matrix synchronized with the executable contract", () => {
@@ -274,9 +342,9 @@ describe("worker deployment environment contract", () => {
       expect(matrix).toContain(row)
     }
 
-    expect(matrix).toContain("`main` -> `--env=production`")
-    expect(matrix).toContain("`staging` -> `--env=staging`")
-    expect(matrix).toContain("`dev` -> `--env=development`")
+    expect(matrix).toContain("`main` -> `production`")
+    expect(matrix).toContain("`staging` -> `staging`")
+    expect(matrix).toContain("`dev` -> `development`")
     expect(matrix).toContain("`pnpm run deploy:workers-build`")
     expect(matrix).toContain("All unnamed Wrangler profiles are local-only")
     expect(matrix).toContain("deployment-branch policy")
@@ -295,21 +363,37 @@ describe("worker deployment environment contract", () => {
     }
     const scripts = rootPackage.scripts ?? {}
 
-    for (const [target, profile] of [
+    for (const [target, environment] of [
       ["aquilla", "production"],
       ["aquilla:staging", "staging"],
       ["aquilla:dev", "development"],
     ] as const) {
-      for (const surface of ["spa", "sync", "auth"] as const) {
+      for (const [surface, manifestSurface] of [
+        ["spa", "web"],
+        ["sync", "sync"],
+        ["auth", "identity"],
+      ] as const) {
         const command = scripts[`deploy:${target}:${surface}`]
-        expect(command).toContain(`--env=${profile}`)
-        expect(command).toContain(`verify-live-environment.mjs ${profile} --surface=${surface}`)
+        expect(command).toContain(`cloudflare-version-deploy.mjs ${manifestSurface} ${environment}`)
+        expect(command).toContain(`verify-live-environment.mjs ${environment} --surface=${surface}`)
       }
     }
 
     expect(scripts["verify:live:production"]).toContain("verify-live-environment.mjs production")
     expect(scripts["verify:live:staging"]).toContain("verify-live-environment.mjs staging")
     expect(scripts["verify:live:development"]).toContain("verify-live-environment.mjs development")
+
+    expect(scripts["deploy:aquilla:spa"]).toContain("cloudflare-version-deploy.mjs web production")
+    expect(scripts["deploy:aquilla:sync"]).toContain("cloudflare-version-deploy.mjs sync production")
+    expect(scripts["deploy:aquilla:auth"]).toContain("cloudflare-version-deploy.mjs identity production")
+
+    const workersWorkflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+    expect(workersWorkflow).toContain("node ../scripts/cloudflare-version-deploy.mjs sync")
+    expect(workersWorkflow).toContain("node ../scripts/cloudflare-version-deploy.mjs identity")
+    expect(workersWorkflow).toContain("config/cloudflare-deployments.json")
+    expect(workersWorkflow).toContain("scripts/cloudflare-version-deploy.*")
+    const webWorkflow = readRepoFile(".github", "workflows", "deploy.yml")
+    expect(webWorkflow).toContain("node scripts/cloudflare-version-deploy.mjs web")
   })
 
   it("keeps SPA CI builds and deploys on the same explicit environment", () => {
@@ -323,7 +407,7 @@ describe("worker deployment environment contract", () => {
     expect(workflow).toContain("bash scripts/verify-dist-host.sh \"${{ needs.target.outputs.api_host }}\"")
     expect(workflow).toContain("node scripts/verify-live-environment.mjs \"${{ needs.target.outputs.live_environment }}\" --surface=spa")
     expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
-    expect(workflow).toContain("command: deploy --env=${{ needs.target.outputs.wrangler_environment }}")
+    expect(workflow).toContain("node scripts/cloudflare-version-deploy.mjs web")
     expect(workflow).toContain("command: versions upload --env=preview")
     expect(workflow).toContain("name: ${{ needs.target.outputs.github_environment }}")
     expect(workflow).not.toContain("|| '--env=development'")

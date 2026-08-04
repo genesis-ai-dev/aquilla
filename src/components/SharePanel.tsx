@@ -5,6 +5,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { FieldLabel } from "@/components/ui/field"
+import { Spinner } from "@/components/ui/spinner"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -257,7 +258,9 @@ function MembersTab({ projectId }: { projectId: string }) {
     <div>
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
       {isLoading && members.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
+        <div className="flex items-center text-muted-foreground">
+          <Spinner className="size-3.5" />
+        </div>
       ) : (
         <MembersPanel
           members={panelMembers}

@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { BookMarked, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
 import {
   InputGroup,
   InputGroupAddon,
@@ -311,7 +312,9 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
                   {data?.error ? (
                     <p className="mt-1 text-xs text-destructive">{data.error}</p>
                   ) : !data ? (
-                    <p className="mt-1 text-xs text-muted-foreground">Loading…</p>
+                    <div className="mt-1 flex items-center text-muted-foreground">
+                      <Spinner className="size-3.5" />
+                    </div>
                   ) : tracked.verse === null ? (
                     <p className="mt-1 text-xs text-muted-foreground">
                       Scroll to a verse to see its text.

@@ -115,8 +115,8 @@ export function MemberLaneScopeEditor({
       >
         <p className="font-medium">{username}'s scopes</p>
         {loading ? (
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Spinner className="size-3" /> Loading…
+          <div className="flex items-center text-muted-foreground">
+            <Spinner className="size-3" />
           </div>
         ) : (
           <>

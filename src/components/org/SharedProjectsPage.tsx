@@ -4,6 +4,7 @@ import { Share2 } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { EmptyState } from "@/components/ui/page"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { RoleLabel } from "@/components/RoleLabel"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -101,7 +102,9 @@ export function SharedProjectsPage() {
             </p>
           </div>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading&hellip;</p>
+            <div className="flex items-center text-muted-foreground">
+              <Spinner className="size-4" />
+            </div>
           ) : sharedProjects.length === 0 ? (
             <EmptyState
               icon={Share2}

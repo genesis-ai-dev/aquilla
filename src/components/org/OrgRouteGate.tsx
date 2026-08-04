@@ -7,6 +7,7 @@ import { Link, Outlet, useParams } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 
 export function OrgRouteGate() {
   const { orgId: orgIdParam } = useParams<{ orgId: string }>()
@@ -20,8 +21,8 @@ export function OrgRouteGate() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-        Loading…
+      <div className="flex h-screen items-center justify-center text-muted-foreground">
+        <Spinner className="size-5" />
       </div>
     )
   }

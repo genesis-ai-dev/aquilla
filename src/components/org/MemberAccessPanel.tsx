@@ -108,9 +108,8 @@ export function MemberAccessRow({
       {open && (
         <div className="ml-4 mt-1 space-y-2">
           {loading && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center text-muted-foreground">
               <Spinner className="size-3" />
-              Loading…
             </span>
           )}
           {error && <p className="text-[10px] text-destructive">{error}</p>}

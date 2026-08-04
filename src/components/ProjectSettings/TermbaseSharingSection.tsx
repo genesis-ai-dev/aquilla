@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   publishTermbase,
@@ -315,7 +316,9 @@ export function TermbaseSharingSection({ projectId, orgId, roleLevel }: Props) {
           <div>
             <p className="mb-2 text-sm font-medium">Available in your org</p>
             {loading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
+              <div className="flex items-center text-muted-foreground">
+                <Spinner className="size-4" />
+              </div>
             ) : available.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No other published term bases in your organization.

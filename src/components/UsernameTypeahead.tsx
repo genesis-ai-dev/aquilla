@@ -475,8 +475,8 @@ export function UsernameTypeahead({
                 )
               })}
               {isLoading && (
-                <li className="px-3 py-1 text-[10px] text-muted-foreground">
-                  Loading…
+                <li className="flex items-center px-3 py-1 text-muted-foreground">
+                  <Spinner className="size-3" />
                 </li>
               )}
             </ul>

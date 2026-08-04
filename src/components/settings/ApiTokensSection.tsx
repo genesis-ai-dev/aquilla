@@ -182,7 +182,9 @@ export function ApiTokensSection() {
       <SettingsGroup>
         <SettingsRow label="Your tokens" block>
           {loading && !credentials ? (
-            <p className="text-xs text-muted-foreground">Loading…</p>
+            <div className="flex items-center text-muted-foreground">
+              <Spinner className="size-3.5" />
+            </div>
           ) : error ? (
             <p className="text-xs text-destructive" role="alert">
               {error}

@@ -23,6 +23,7 @@ import { fetchProjectFiles, fetchFileCells } from "@/lib/sync/cells-read"
 import { cn } from "@/lib/utils"
 import { BookOpen, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 
 // Sentinel fileId for project-scoped token mints (no specific file).
 // Must match the "__project__" sentinel used by useComments,
@@ -214,7 +215,9 @@ export function TranslationNotesSidebar({
             Focus a translation cell to see notes for that verse.
           </p>
         ) : loading ? (
-          <p className="p-4 text-xs text-muted-foreground">Loading…</p>
+          <div className="flex items-center p-4 text-muted-foreground">
+            <Spinner className="size-3.5" />
+          </div>
         ) : error ? (
           <p className="p-4 text-xs text-destructive">{error}</p>
         ) : notes.length === 0 ? (

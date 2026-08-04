@@ -182,7 +182,8 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
 }
 
 async function verifySpa(config, options) {
-  const response = await options.fetchImpl(new URL(SPA_SHELL_PATH, config.appOrigin).href, {
+  const appUrl = new URL(SPA_SHELL_PATH, config.appOrigin).href
+  const response = await options.fetchImpl(appUrl, {
     headers: { Accept: "text/html" },
   })
   assertResponse(response, 200, "SPA entrypoint")
@@ -208,7 +209,7 @@ async function verifySpa(config, options) {
     throw new Error(`SPA bundle contains cross-environment hosts: ${forbidden.join(", ")}`)
   }
 
-  options.log(`[verify-live] SPA at ${config.appOrigin} targets only the expected live environment`)
+  options.log(`[verify-live] SPA at ${appUrl} targets only the expected live environment`)
 }
 
 export async function verifyLiveEnvironment(environment, {

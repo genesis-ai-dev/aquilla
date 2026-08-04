@@ -93,6 +93,11 @@ describe("live deployment environment verification", () => {
       attempts: 1,
       log: vi.fn(),
     })).resolves.toBeUndefined()
+
+    const requestedUrls = fetchImpl.mock.calls.map(([input]) => String(input))
+    expect(requestedUrls).toContain("https://staging.aquilla.app/app")
+    expect(requestedUrls).not.toContain("https://staging.aquilla.app")
+    expect(requestedUrls).not.toContain("https://staging.aquilla.app/")
   })
 
   it("rejects a staging bundle that also contains a development target", async () => {

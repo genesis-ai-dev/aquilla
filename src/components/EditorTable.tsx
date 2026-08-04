@@ -5351,7 +5351,7 @@ function EditorRow({
                     <button
                       type="button"
                       aria-label={`${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""} — open comments`}
-                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
+                      className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-blue-500 transition-colors hover:bg-blue-500/10 hover:text-blue-600"
                       onClick={() => onOpenComments(cell.id)}
                     >
                       <MessageCircle className="h-3.5 w-3.5" fill="currentColor" fillOpacity={0.15} />
@@ -6261,7 +6261,7 @@ function EditorRow({
                               disabled={!isBacktranslationConfigured || isBacktranslating}
                               onClick={() => onBacktranslate?.(cell, "regenerate")}
                               aria-label="Regenerate the back-translation"
-                              className="rounded-full text-muted-foreground hover:text-foreground"
+                              className="text-muted-foreground hover:text-foreground"
                             >
                               {isBacktranslating ? (
                                 <Spinner className="size-3.5" />
@@ -6280,7 +6280,7 @@ function EditorRow({
                               size="icon-xs"
                               onClick={handleBtEditStart}
                               aria-label="Edit the back-translation"
-                              className="rounded-full text-muted-foreground hover:text-foreground"
+                              className="text-muted-foreground hover:text-foreground"
                             >
                               <Pencil />
                             </Button>
@@ -6294,7 +6294,7 @@ function EditorRow({
                                 size="icon-xs"
                                 disabled
                                 aria-label="Contributor+ required to edit back-translations"
-                                className="rounded-full text-muted-foreground"
+                                className="text-muted-foreground"
                               >
                                 <Pencil />
                               </Button>

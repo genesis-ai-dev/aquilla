@@ -71,8 +71,13 @@ export async function synthesizeCellTts(
   })
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw new Error(`voice/tts failed (${res.status}): ${text || res.statusText}`)
+    const detail = (await res.text().catch(() => "")) || res.statusText
+    // Name the engine and keep the status code so the UI can categorize the
+    // failure (categorizeAiError → "tts-provider-unavailable"): a 503 means
+    // OmniVoice isn't configured for this environment, a 502 an upstream
+    // synthesis/clone failure. An unlabeled "voice/tts failed" read to users
+    // as "nothing happened" — the silent-clone bug in AQU-788.
+    throw new Error(`OmniVoice voice/tts failed (${res.status}): ${detail}`)
   }
 
   return (await res.json()) as SynthesizeCellTtsResult

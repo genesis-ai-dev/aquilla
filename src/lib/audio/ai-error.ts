@@ -10,6 +10,7 @@ export type ErrorCategory =
   | "no-source-text"
   | "translation-not-configured"
   | "translation-failed"
+  | "tts-provider-unavailable"
   | "git-project-unsupported"
   | "sign-in-required"
   | "network"
@@ -58,6 +59,27 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
 
+  // Hosted OmniVoice engine unavailable — not configured for this environment
+  // (503 "TTS not configured"), upstream unreachable/failed (502), or it ran
+  // but produced no audio. AQU-788: this path used to fall through to the
+  // generic "Couldn't generate" with raw text (or, worse, silently attach an
+  // empty clip), so the user couldn't tell the clone hadn't worked. Named
+  // explicitly here, before the Gemini-key check, so an upstream `detail` that
+  // happens to mention a key can't misroute it.
+  if (
+    m.includes("omnivoice") ||
+    m.includes("voice/tts") ||
+    m.includes("tts not configured") ||
+    m.includes("tts upstream") ||
+    m.includes("returned no audio")
+  ) {
+    return {
+      category: "tts-provider-unavailable",
+      title: "OmniVoice unavailable",
+      body: "The hosted OmniVoice engine couldn't generate this audio. It may not be configured for this environment. Check the project's audio settings, or switch this voice to another engine (Gemini, Kokoro, or MMS) in the Voice Studio.",
+      raw,
+    }
+  }
   if (m.includes("api key") || m.includes("api_key") || m.includes("apikey") ||
       m.includes("gemini") && m.includes("key")) {
     return {

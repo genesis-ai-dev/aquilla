@@ -388,6 +388,23 @@ describe("POST /api/v1/voice/tts", () => {
     expect(usageRows).toHaveLength(0)
   })
 
+  it("502 (records no seconds) when Modal returns 200 with an empty body", async () => {
+    // WHY (AQU-788): a broken OmniVoice clone once returned 200 with no audio.
+    // Storing that 0-byte clip and reporting success made the clone look like it
+    // silently did nothing — no error, no audio. An empty clip must fail loudly
+    // and, like any failure, record no usage.
+    const { db, usageRows } = makeStubDb()
+    const env = makeEnv(db)
+    stubModal(new Uint8Array([]), 5) // 200 OK but empty body
+    const token = await makeToken()
+    const res = (await call(env, ttsReq({ projectId: "p1", fileId: "f1", text: "silent" }, token)))!
+    expect(res.status).toBe(502)
+    expect(await res.text()).toMatch(/no audio/i)
+    // Nothing stored, no seconds billed.
+    expect(env.SNAPSHOTS._allKeys()).toHaveLength(0)
+    expect(usageRows).toHaveLength(0)
+  })
+
   it("attributes recorded seconds to the project's org_id", async () => {
     // WHY: org_id attribution is what powers the org Overview dashboard;
     // wrong org_id means the wrong org sees the usage

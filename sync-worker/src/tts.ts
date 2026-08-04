@@ -173,6 +173,17 @@ export async function handleTtsRequest(
 
   const wavBytes = await modalRes.arrayBuffer()
 
+  // A 200 with an empty body means the pipeline ran but produced nothing. A
+  // broken OmniVoice clone once masqueraded as success exactly this way — the
+  // 0-byte clip attached to the cell, "played" silently, and no error ever
+  // surfaced, so the user saw a clone that appeared to work but produced
+  // nothing. Treat an empty clip as an upstream failure (502) and record no
+  // usage, rather than storing and reporting success on a clip with no audio.
+  // (AQU-788)
+  if (wavBytes.byteLength === 0) {
+    return new Response("TTS failed: OmniVoice returned no audio", { status: 502 })
+  }
+
   // Parse the duration header (the metering unit). Guard against a malformed
   // or absent value: Number("NaN"/"inf"/junk) or a negative would corrupt the
   // audio_seconds counter (a NaN SUM permanently defeats the daily cap). Clamp

@@ -40,9 +40,11 @@ const directExecutor: IdmlExportExecutor = {
 async function importBiblicaCells(): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
   const bytes = await makeBiblicaIdml()
   const parsed = await parseIdml(bytes.slice(0))
-  const { strings } = await extractBiblicaStudyNoteStrings(bytes.slice(0), async () => parsed, {
-    splitSentences: true,
-  })
+  const { strings } = await extractBiblicaStudyNoteStrings(
+    bytes.slice(0),
+    async () => parsed,
+    { splitSentences: true },
+  )
   const { cells: bulk } = buildBulkCellsWithSpeakers(strings, {
     fileName: "Genesis-notes.idml",
     fileType: "idml",

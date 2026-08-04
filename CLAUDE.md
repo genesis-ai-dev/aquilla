@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Guidance for Claude Code working in this repo. See also **`AGENTS.md`** (testing/E2E rules,
-shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, FEATURE-STORIES;
+shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, FEATURE-STORIES;
 SPEC.md covers the separate VS Code Codex extension that uses Aquilla as a backend).
 
 ## Layout — flat single-SPA trunk
@@ -30,12 +30,19 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── infra/modal/        # Modal services: diarization.py, seed_vc.py, omnivoice_app.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
-├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers
+├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, prerender-marketing.ts,
+│                       #   brand/build helpers
 └── vite.config.ts      # drives the SPA + Tauri build; @/ → ./src
 ```
 
 `@/` resolves to `./src` (tsconfig + vite). Vitest runs in `happy-dom`; `src/test-setup.ts`
 loads `fake-indexeddb/auto` so IDB/idb tests run without a browser.
+
+The standalone marketing pages (`homepage.html`, `beta.html`, the case studies,
+`bible-translation.html`) are separate vite inputs with their own React entries. `pnpm build`
+prerenders each one to static HTML after `vite build` so crawlers and unfurlers see the whole
+page — `createRoot` then clears it and renders the live page over it. Anything those pages
+render must be DOM-free-safe. See **`docs/SEO.md`**.
 
 ## Commands
 
@@ -102,11 +109,12 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
 In-flight (uncommitted on dev): Monday.com nudge — `sync-worker/src/monday-notify.ts` fires
 best-effort throttled pushes from the DO broadcast to auth-worker `/api/v2/monday/internal/push`.
 
-Frontend wires hosts at build time: `VITE_AUTH_BASE`, `VITE_CHAT_BASE`,
-`VITE_SYNC_WORKER_HOST`. Browser-facing workers mount under `aquilla.app/api/*` via Workers
-Routes (Safari drops `*.workers.dev` — see SYNC.md). CI's CF token cannot mutate zone routes:
-keep `routes` out of the CI-deployed `wrangler.toml` top level; routes are claimed out-of-band
-by a local `wrangler deploy`.
+Frontend hosts are wired at build time through `VITE_AUTH_BASE`, `VITE_CHAT_BASE`,
+and `VITE_SYNC_WORKER_HOST`. Browser-facing API Workers mount at `/identity/*`,
+`/chat/*`, and `/sync/*` on the environment's `api.*.aquilla.app` host. Routes and
+bindings live in explicit named Wrangler profiles and are deployed by the guarded
+repository commands; unnamed profiles use local-only Worker names. See
+`docs/DEPLOYMENT-ENVIRONMENTS.md` for the executable production/staging/dev contract.
 
 ## Architecture (AD-2 / AD-3 / AD-9)
 

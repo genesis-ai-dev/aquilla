@@ -380,11 +380,17 @@ export class Workspace {
    * Reproduce the IDML pointer path from AQU-740: activate a tall empty target
    * from below its text line, type, click that same blank area again, and keep
    * typing. Both clicks must resolve to the real single-line caret.
+   *
+   * `expectedText` is what the cell should hold after the commit. It defaults
+   * to the concatenated input, but AQU-758 sanitizes whitespace at entry
+   * (doubled spaces collapse to one), so callers typing deliberate whitespace
+   * runs must pass the sanitized result explicitly.
    */
   async editIdmlCellFromBlankArea(
     index: number,
     firstText: string,
     secondText: string,
+    expectedText = `${firstText}${secondText}`,
   ): Promise<void> {
     const row = this.cellRow(index)
     await row.scrollIntoViewIfNeeded()
@@ -425,7 +431,7 @@ export class Workspace {
     expect(Math.abs((await caretTop()) - textLineTop)).toBeLessThan(5)
 
     await this.page.keyboard.type(secondText)
-    await this.commitTargetCellEdit(index, `${firstText}${secondText}`)
+    await this.commitTargetCellEdit(index, expectedText)
   }
 
   /**

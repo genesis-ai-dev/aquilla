@@ -18,6 +18,8 @@ import {
   fileIdFor,
   fileCreateEventId,
   sourceCellCreateEventId,
+  sourceCellDeleteEventId,
+  targetCellDeleteEventId,
   targetCommitEventId,
   validateEventId,
 } from "./ids"
@@ -74,6 +76,23 @@ function isCellDeleted(cell: CodexCell | undefined): boolean {
   }
   if (latestVal !== undefined) return latestVal
   return cell.metadata.data?.deleted === true
+}
+
+// Timestamp of the latest edit that set `metadata.data.deleted = true`, used as
+// the legacy `clientTs` for the retraction events so the delete carries a real
+// deletion time (falls back to the caller's synthetic ts when Codex recorded no
+// edit ledger — projection ordering is by server_seq, not clientTs, so this is
+// fidelity only). AQU-747.
+function deletionTsOf(cell: CodexCell | undefined): number | undefined {
+  if (!cell) return undefined
+  let latestTs: number | undefined
+  for (const e of cell.metadata.edits ?? []) {
+    if (e.editMap?.join(".") !== "metadata.data.deleted") continue
+    if (e.value !== true) continue
+    const ts = typeof e.timestamp === "number" ? e.timestamp : undefined
+    if (ts !== undefined && (latestTs === undefined || ts > latestTs)) latestTs = ts
+  }
+  return latestTs
 }
 
 function earliestEditTs(cell: CodexCell | undefined): number | undefined {
@@ -203,10 +222,44 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     const s = sourceById.get(cellId)
     const t = targetById.get(cellId)
 
-    // Skip cells deleted in Codex — do not recreate them, and do not advance the
-    // anchor chain through them, so surviving cells anchor to the prior live
-    // cell (AQU-673).
-    if (isCellDeleted(ordered) || isCellDeleted(t) || isCellDeleted(s)) continue
+    // A cell deleted in Codex must not survive migration. AQU-673 stopped
+    // RECREATING it, but skipping a create only helps a *fresh* project: a
+    // project migrated before that fix already has the cell materialized in the
+    // append-only event log, and there is no create to skip anymore — the row
+    // just persists. So emit an explicit retraction instead of silently
+    // continuing. `source.cell.delete` (+ the `target.cell.delete` companion
+    // when a target lane was migrated) removes the row from the projection; the
+    // ids are deterministic, so a re-run purges cells an earlier migration
+    // created and is a harmless no-op on a project that never had the cell
+    // (AQU-747). Deleted cells still do NOT advance the anchor chain, so
+    // surviving cells anchor to the prior live cell (AQU-673).
+    if (isCellDeleted(ordered) || isCellDeleted(t) || isCellDeleted(s)) {
+      const deleteTs =
+        deletionTsOf(ordered) ?? deletionTsOf(t) ?? deletionTsOf(s) ?? fallbackTs
+      events.push({
+        id: sourceCellDeleteEventId(projectId, fileId, cellId),
+        kind: "source.cell.delete",
+        fileId,
+        cellId,
+        parentId: null,
+        author: fallbackAuthor,
+        clientTs: deleteTs,
+        payload: {},
+      })
+      if (t) {
+        events.push({
+          id: targetCellDeleteEventId(projectId, fileId, cellId),
+          kind: "target.cell.delete",
+          fileId,
+          cellId,
+          parentId: null,
+          author: fallbackAuthor,
+          clientTs: deleteTs,
+          payload: {},
+        })
+      }
+      continue
+    }
 
     const anchorCell = s ?? t ?? ordered
 

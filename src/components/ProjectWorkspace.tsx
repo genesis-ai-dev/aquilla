@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useProject } from "@/hooks/useProject"
+import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
@@ -1031,10 +1032,12 @@ export function ProjectWorkspace() {
   const {
     store: cellStore,
     revalidate: revalidateCells,
+    retry: retryCells,
     revalidateCell,
     applyOptimisticTargetEdit,
     applyOptimisticTargetEdits,
     isLoading: cellsLoading,
+    isError: cellsError,
   } = useActiveCellStore({
     projectId: project?.id ?? null,
     fileId: activeFileId,
@@ -2459,8 +2462,26 @@ export function ProjectWorkspace() {
       createdBy: currentUsername,
     }
     const updated = addConcept(project, draft)
-    await patchSettings({ terminology: updated.terminology ?? [] })
+    // AQU-754: patchSettings never rejects — it resolves a PatchOutcome. The
+    // prior code ignored it, so an "add concept" from the editor silently
+    // no-op'd whenever the write was rejected (below Maintainer, offline,
+    // version conflict, or a 5xx) — the same silent-failure the Terminology
+    // page hit in AQU-749. Surface it so AddConceptDialog keeps the dialog open
+    // and shows why, instead of closing as if the concept was saved.
+    const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
+    if (failure) throw new Error(failure)
   }, [project, currentUsername, patchSettings])
+
+  // AQU-754 follow-up: when the caller is on a synced project below the
+  // termbase write floor, open AddConceptDialog pre-blocked (input + Create
+  // draft disabled, reason shown, Cancel active) instead of letting them type
+  // a draft that patchSettings is guaranteed to reject. serverRoleLevel is the
+  // server-resolved role (null = unsynced/local-only project, which saves
+  // locally and must stay writable).
+  const addConceptBlockedReason =
+    serverRoleLevel != null && serverRoleLevel < SETTINGS_EDIT_ROLE_FLOOR
+      ? describePatchFailure({ kind: "blocked", reason: "role" })
+      : null
 
   /** Called when a user manually saves an edited BT from the BT tab. */
   const saveBacktranslation = useCallback((cell: CellData, btText: string, polished: boolean) => {
@@ -3442,8 +3463,9 @@ export function ProjectWorkspace() {
       cellCount: cellSummaries.length,
       syncStatus: fileSyncStatus,
       cellsLoading,
+      cellsError,
     }),
-    [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading]
+    [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError]
   )
 
   async function handleSearchSelect(result: WorkspaceSearchResult, _query: string) {
@@ -5507,6 +5529,7 @@ export function ProjectWorkspace() {
             onAssignVoice={handleAssignVoice}
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
+            addConceptBlockedReason={addConceptBlockedReason}
             onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
@@ -5547,6 +5570,7 @@ export function ProjectWorkspace() {
             hasFiles={projectFiles.length > 0}
             filesLoaded={status === "ready"}
             onImportClick={openImportFlow}
+            onRetryClick={retryCells}
           />
         )}
         aside={

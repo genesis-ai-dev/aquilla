@@ -48,6 +48,10 @@ function orgMatchesSearch(name: string, query: string): boolean {
   return name.toLocaleLowerCase().includes(normalized)
 }
 
+function byName(a: { name: string | null }, b: { name: string | null }) {
+  return (a.name ?? "").localeCompare(b.name ?? "")
+}
+
 function OrgMark({
   name,
   allOrgs = false,
@@ -102,6 +106,11 @@ export function OrgSwitcher() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
+  // AQU-759: keep both member and guest lists alphabetical regardless of the
+  // order the backend returned them in (Joel: "Keep it alphabetical").
+  const sortedOrgs = useMemo(() => [...orgs].sort(byName), [orgs])
+  const sortedGuestOrgs = useMemo(() => [...guestOrgs].sort(byName), [guestOrgs])
+
   useEffect(() => {
     if (!open) return
     // Keep typing in the filter; menu open otherwise focuses the first item.
@@ -132,12 +141,12 @@ export function OrgSwitcher() {
       : activeOrg?.name ?? "Workspace"
 
   const filteredOrgs = useMemo(
-    () => orgs.filter((o) => orgMatchesSearch(o.name ?? "Workspace", search)),
-    [orgs, search],
+    () => sortedOrgs.filter((o) => orgMatchesSearch(o.name ?? "Workspace", search)),
+    [sortedOrgs, search],
   )
   const filteredGuestOrgs = useMemo(
-    () => guestOrgs.filter((g) => orgMatchesSearch(g.name ?? `Org #${g.id}`, search)),
-    [guestOrgs, search],
+    () => sortedGuestOrgs.filter((g) => orgMatchesSearch(g.name ?? `Org #${g.id}`, search)),
+    [sortedGuestOrgs, search],
   )
   const showAllOrgsRow = showAllOrgs && search.trim() === ""
   const listEmpty =

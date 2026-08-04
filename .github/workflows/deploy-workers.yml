@@ -31,12 +31,25 @@ permissions:
   contents: read
 
 jobs:
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      wrangler_environment: ${{ steps.resolve.outputs.wrangler_environment }}
+      live_environment: ${{ steps.resolve.outputs.live_environment }}
+      github_environment: ${{ steps.resolve.outputs.github_environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve authorized deployment target
+        run: bash scripts/resolve-deployment-target.sh
+
   # Reliable change detection. The old per-job `contains(toJSON(
   # github.event.commits.*.modified), 'sync-worker/')` guard silently
   # evaluated false (truncated/empty `commits` payloads, merge/batch
   # pushes), so worker deploys were skipped even when the worker changed.
   # Diff the actual push range instead.
   detect:
+    needs: target
     runs-on: ubuntu-latest
     outputs:
       sync: ${{ steps.f.outputs.sync }}
@@ -70,7 +83,7 @@ jobs:
   # re-run the deploy. Requires target-specific NEON_*_PG_* repo secrets for
   # dev/staging and NEON_PG_* for production; fails closed if they're missing.
   schema-guard:
-    needs: detect
+    needs: [target, detect]
     if: needs.detect.outputs.sync == 'true' || needs.detect.outputs.auth == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -101,18 +114,21 @@ jobs:
           NEON_DEV_PG_ROLE: ${{ secrets.NEON_DEV_PG_ROLE }}
           NEON_DEV_PG_PASSWORD: ${{ secrets.NEON_DEV_PG_PASSWORD }}
         run: |
-          case "${GITHUB_REF_NAME}" in
-            main) pnpm neon:status:prod ;;
+          case "${{ needs.target.outputs.live_environment }}" in
+            production) pnpm neon:status:prod ;;
             staging) pnpm neon:status:staging ;;
-            *) pnpm neon:status:dev ;;
+            development) pnpm neon:status:dev ;;
+            *) echo "::error::Unknown deployment target"; exit 1 ;;
           esac
 
   sync-worker:
     # !failure() && !cancelled(): run only when schema-guard passed, never when
     # it failed or was cancelled.
-    needs: [detect, schema-guard]
+    needs: [target, detect, schema-guard]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.sync == 'true' }}
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
     steps:
       - uses: actions/checkout@v7
 
@@ -148,12 +164,17 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: sync-worker
-          command: deploy ${{ github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+          command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
+
+      - name: Verify sync-worker route and environment
+        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=sync
 
   auth-worker:
-    needs: [detect, schema-guard]
+    needs: [target, detect, schema-guard]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.auth == 'true' }}
     runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
     steps:
       - uses: actions/checkout@v7
 
@@ -194,4 +215,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 6a80496d1e59948a9cbaa3c643ba81d7
           workingDirectory: auth-worker
-          command: deploy ${{ github.ref == 'refs/heads/main' && '--env=production' || github.ref == 'refs/heads/staging' && '--env=staging' || '--env=development' }}
+          command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
+
+      - name: Verify identity and chat routes
+        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=auth

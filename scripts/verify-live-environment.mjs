@@ -21,6 +21,14 @@ const ENVIRONMENTS = {
 
 const VALID_SURFACES = new Set(["all", "auth", "sync", "spa"])
 
+// The bare origin serves the prerendered marketing homepage (worker/index.ts),
+// whose small JS graph never imports the sync client or the chat completion
+// service — crawling it can't prove the SPA targets the right environment
+// (AQU-779). Any non-marketing path falls through to the assets binding's
+// single-page-application fallback and serves the real SPA shell; /app is a
+// stable route in the App.tsx route table.
+const SPA_SHELL_PATH = "/app"
+
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
@@ -174,7 +182,7 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
 }
 
 async function verifySpa(config, options) {
-  const response = await options.fetchImpl(config.appOrigin, {
+  const response = await options.fetchImpl(new URL(SPA_SHELL_PATH, config.appOrigin).href, {
     headers: { Accept: "text/html" },
   })
   assertResponse(response, 200, "SPA entrypoint")

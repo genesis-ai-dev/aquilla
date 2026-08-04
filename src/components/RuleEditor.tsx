@@ -235,7 +235,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
   const sentence = humanSentence(side, mode)
 
   return (
-    <div className={cn("rounded-lg border bg-card p-4 space-y-4", className)}>
+    <div className={cn("overflow-hidden rounded-lg border bg-card p-4 space-y-4", className)}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-foreground">
@@ -501,21 +501,19 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         )}
       </div>
 
-      {/* Actions */}
-      <div className="flex flex-col gap-2 pt-1">
-        {attempted && (checkError || patternError || sourcePatternError) && (
-          <FieldError>
-            {checkError ?? patternError ?? sourcePatternError}
-          </FieldError>
-        )}
-        <div className="flex gap-2">
-          <Button size="sm" onClick={handleSave}>
-            {initialRule ? "Save changes" : "Create rule"}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-        </div>
+      {/* Actions — match Terminology Add dialog DialogFooter */}
+      {attempted && (checkError || patternError || sourcePatternError) && (
+        <FieldError>
+          {checkError ?? patternError ?? sourcePatternError}
+        </FieldError>
+      )}
+      <div className="-mx-4 -mb-4 mt-1 flex flex-col-reverse gap-2 rounded-b-3xl bg-muted/40 p-4 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="button" onClick={handleSave}>
+          {initialRule ? "Save changes" : "Create rule"}
+        </Button>
       </div>
     </div>
   )

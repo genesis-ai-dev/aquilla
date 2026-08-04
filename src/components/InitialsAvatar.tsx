@@ -42,7 +42,7 @@ type InitialsAvatarProps = {
 export function InitialsAvatar({
   name,
   size = "default",
-  shape = "circle",
+  shape = "square",
   color,
   className,
   fallbackClassName,
@@ -51,7 +51,7 @@ export function InitialsAvatar({
   singleInitial = false,
   children,
 }: InitialsAvatarProps) {
-  const square = shape === "square"
+  const circle = shape === "circle"
   const label = singleInitial ? singleInitialFromName(name) : initialsFromName(name)
   const bg = color ?? colorFromName(name)
   const hasCustomFallback = Boolean(fallbackClassName)
@@ -64,13 +64,14 @@ export function InitialsAvatar({
     <Avatar
       className={cn(
         sizeClasses[size],
-        square && "rounded-md after:rounded-md",
+        // Default matches sidebar (rounded-md on Avatar). Circle is opt-in.
+        circle && "rounded-full after:rounded-full",
         className,
       )}
     >
       <AvatarFallback
         className={cn(
-          square && "rounded-md",
+          circle && "rounded-full",
           textClasses[size],
           usesColoredFallback && !menuSafe && "text-white",
           fallbackClassName,

@@ -150,6 +150,6 @@ describe("UpstreamChangesPanel", () => {
   it("navigates to the cell in the editor when 'Open' is clicked", () => {
     render(<UpstreamChangesPanel {...BASE_PROPS} roleLevel={ROLE.VIEWER} />)
     fireEvent.click(screen.getByRole("button", { name: /^Open$/i }))
-    expect(navigate).toHaveBeenCalledWith("/project/proj-1/file/file-a?cellId=cell-1")
+    expect(navigate).toHaveBeenCalledWith("/project/proj-1/editor/file/file-a?cellId=cell-1")
   })
 })

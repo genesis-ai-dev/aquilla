@@ -55,7 +55,7 @@ test("agent drafts the open file; workbench accept-all lands in the editor; undo
   await acceptAll.click()
   await expect(acceptAll).toBeHidden({ timeout: 15_000 })
 
-  // Back to the editor: /project/:id restores the last open file (the dock is
+  // Back to the editor: /project/:id/editor restores the last open file (the dock is
   // still on the Agent tab, so don't reach for the file list). The applied
   // draft must be in the first cell.
   await alice.getByRole("button", { name: "Close workbench" }).click()

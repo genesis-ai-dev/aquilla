@@ -302,9 +302,11 @@ describe("mapFilePairToEvents", () => {
     expect(create.payload.canonicalRef).toBeUndefined()
   })
 
-  it("skips cells deleted in Codex (materialized data.deleted) and does not anchor through them", () => {
-    // c1 (live) → c2 (deleted in Codex) → c3 (live). c3 must anchor to c1, and
-    // c2 must produce no events. Regression guard for AQU-673.
+  it("does not recreate cells deleted in Codex, retracts them, and does not anchor through them", () => {
+    // c1 (live) → c2 (deleted in Codex) → c3 (live). c3 must anchor to c1, c2
+    // must never be recreated, and c2 must carry an explicit retraction so a
+    // re-migration purges a row an earlier migration already created
+    // (AQU-673 no-recreate + AQU-747 retraction).
     const pair: FilePairInput = {
       relPath: "F",
       name: "F",
@@ -319,11 +321,56 @@ describe("mapFilePairToEvents", () => {
     }
     const ev = mapFilePairToEvents(pair, OPTS)
     const creates = ev.filter((e) => e.kind === "source.cell.create")
-    expect(creates.map((e) => e.cellId)).toEqual(["c1", "c3"]) // c2 dropped
-    expect(ev.some((e) => e.cellId === "c2")).toBe(false)
+    expect(creates.map((e) => e.cellId)).toEqual(["c1", "c3"]) // c2 not recreated
+    // c2 is never recreated on either lane...
+    expect(ev.some((e) => e.cellId === "c2" && e.kind === "source.cell.create")).toBe(false)
+    expect(ev.some((e) => e.cellId === "c2" && e.kind === "target.cell.commit")).toBe(false)
+    // ...but IS explicitly retracted on both lanes so a re-run removes an
+    // already-migrated row (c2 lives in the target notebook, so a target lane
+    // was migrated too).
+    expect(ev.some((e) => e.cellId === "c2" && e.kind === "source.cell.delete")).toBe(true)
+    expect(ev.some((e) => e.cellId === "c2" && e.kind === "target.cell.delete")).toBe(true)
     // c3 anchors to the prior LIVE cell (c1), not the deleted c2.
     const c3create = creates.find((e) => e.cellId === "c3")!
     expect(c3create.payload.anchorCellId).toBe("c1")
+  })
+
+  it("retraction ids are deterministic so a re-migration dedupes (AQU-747 idempotency)", () => {
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "<p>b</p>", metadata: { id: "c2", type: "text", data: { deleted: true } } },
+        ],
+      },
+    }
+    const a = mapFilePairToEvents(pair, OPTS)
+    const b = mapFilePairToEvents(pair, OPTS)
+    const idsOf = (ev: typeof a) =>
+      ev.filter((e) => e.kind.endsWith("cell.delete")).map((e) => `${e.kind}:${e.id}`)
+    // Same seeds → identical ids on re-run → INSERT OR IGNORE makes it a no-op.
+    expect(idsOf(a)).toEqual(idsOf(b))
+    expect(idsOf(a).length).toBe(2) // one source + one target retraction
+  })
+
+  it("emits no target retraction for a deleted source-only cell (AQU-747)", () => {
+    // Deleted cell present only on the SOURCE side: retract the source lane, but
+    // never emit a target delete for a lane that was never migrated.
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      source: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "<p>b</p>", metadata: { id: "c2", type: "text", data: { deleted: true } } },
+        ],
+      },
+    }
+    const ev = mapFilePairToEvents(pair, OPTS)
+    expect(ev.some((e) => e.cellId === "c2" && e.kind === "source.cell.delete")).toBe(true)
+    expect(ev.some((e) => e.kind === "target.cell.delete")).toBe(false)
   })
 
   it("treats deletion recorded in the edit ledger as latest-edit-wins (delete then restore = present)", () => {
@@ -366,10 +413,14 @@ describe("mapFilePairToEvents", () => {
         ],
       },
     }
-    const ids = mapFilePairToEvents(pair, OPTS)
-      .filter((e) => e.kind === "source.cell.create")
-      .map((e) => e.cellId)
+    const ev = mapFilePairToEvents(pair, OPTS)
+    const ids = ev.filter((e) => e.kind === "source.cell.create").map((e) => e.cellId)
     expect(ids).toEqual(["keep"])
+    // The restored cell is created, never retracted; the still-deleted cell is
+    // retracted, never created (AQU-747).
+    expect(ev.some((e) => e.cellId === "keep" && e.kind === "source.cell.delete")).toBe(false)
+    expect(ev.some((e) => e.cellId === "drop" && e.kind === "source.cell.delete")).toBe(true)
+    expect(ev.some((e) => e.cellId === "drop" && e.kind === "source.cell.create")).toBe(false)
   })
 
   it("collectSpeakers skips cells deleted in Codex", () => {

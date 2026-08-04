@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * AssignedToMe page — renders the "Assigned to me" inbox at /assigned.
@@ -10,7 +10,7 @@ import { test, expect } from "../../helpers/multi-user"
  * Alice has no assignments seeded, so this verifies the empty-state message.
  */
 test("assigned-to-me page renders heading and empty state", async ({ alice }) => {
-  await alice.goto("/assigned")
+  await alice.goto(orgRoute(alice, "/assigned"))
   await expect(alice.getByRole("heading", { name: /Assigned to me/i })).toBeVisible({ timeout: 10_000 })
 
   // Empty state message (alice has no assignments).

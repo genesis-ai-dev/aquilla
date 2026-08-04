@@ -1,0 +1,48 @@
+/* 10-bar activity indicator (Geist / iOS–style) */
+.bar-spinner {
+  --bar-spinner-orbit: 118%;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  vertical-align: middle;
+  line-height: 0;
+}
+
+.bar-spinner__ring {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  flex: none;
+}
+
+.bar-spinner__bar {
+  animation: bar-spinner-fade 1.2s linear infinite;
+  background: currentColor;
+  border-radius: 9999px;
+  height: 6%;
+  left: -11.5%;
+  position: absolute;
+  top: -3.1%;
+  width: 28%;
+}
+
+@keyframes bar-spinner-fade {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-spinner__bar {
+    animation: none !important;
+  }
+
+  .bar-spinner .bar-spinner__bar {
+    opacity: 0.55;
+  }
+}

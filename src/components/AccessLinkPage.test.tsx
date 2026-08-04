@@ -45,7 +45,7 @@ describe("AccessLinkPage", () => {
 
     await waitFor(() => {
       expect(redeemMock).toHaveBeenCalledWith("tok123", "4821")
-      expect(navigate).toHaveBeenCalledWith("/project/proj-9", { replace: true })
+      expect(navigate).toHaveBeenCalledWith("/project/proj-9/editor", { replace: true })
     })
     // Onboarding is marked complete so the fresh browser isn't bounced.
     expect(localStorage.getItem("codex:onboardingComplete")).toBe("true")

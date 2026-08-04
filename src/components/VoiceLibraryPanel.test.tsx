@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { VoiceLibraryPanel } from "./VoiceLibraryPanel"
+import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { NewVoiceModalProps } from "@/components/voice/NewVoiceModal"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
@@ -38,7 +39,7 @@ function setup(settingsOver: Partial<ProjectTtsSettings> = {}) {
     ...settingsOver,
   }
   modalProps.last = null
-  render(
+  renderWithTooltips(
     <VoiceLibraryPanel
       projectId="dev-project"
       settings={settings}
@@ -51,14 +52,19 @@ function setup(settingsOver: Partial<ProjectTtsSettings> = {}) {
 }
 
 describe("VoiceLibraryPanel (selector)", () => {
-  it("renders search, rows, narrator badge, and a single New voice button", () => {
+  it("renders search, rows, narrator badge, and a single New voice button", async () => {
     setup()
     expect(screen.getByRole("heading", { name: "Voices" })).toBeTruthy()
     expect(screen.getByPlaceholderText("Search voices…")).toBeTruthy()
     expect(screen.getByText("Mary")).toBeTruthy()
     expect(screen.getByText(/1\/2 voiced/)).toBeTruthy()
-    // The narrator (default) row carries the narrator badge.
-    expect(screen.getByTitle(/lines without an explicit speaker/)).toBeTruthy()
+    // The narrator (default) row carries the narrator badge, whose tooltip
+    // explains what "narrator" means. Scoped to the tooltip trigger because the
+    // default voice is itself *named* "Narrator", so the text alone is ambiguous.
+    await expectTooltip(
+      screen.getByText("Narrator", { selector: "[data-base-ui-tooltip-trigger]" }),
+      /lines without an explicit speaker/,
+    )
     expect(screen.getByRole("button", { name: /New voice/ })).toBeTruthy()
   })
 

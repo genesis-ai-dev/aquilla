@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Org settings — rename organization.
@@ -15,7 +15,7 @@ import { test, expect } from "../../helpers/multi-user"
  * on other tests that rely on the default org name "Acme".
  */
 test("org settings rename and save updates org name", async ({ alice }) => {
-  await alice.goto("/settings/identity")
+  await alice.goto(orgRoute(alice, "/settings/identity"))
   // Enter edit mode.
   const renameBtn = alice.getByRole("button", { name: /rename organization/i })
   await expect(renameBtn).toBeVisible({ timeout: 10_000 })

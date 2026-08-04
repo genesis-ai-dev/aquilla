@@ -13,7 +13,7 @@ export function WorkspaceSkeleton() {
         <aside className="hidden w-72 shrink-0 flex-col gap-4 p-3 sm:flex">
           <div className="flex items-center justify-between">
             <Skeleton className="size-8 rounded-lg" />
-            <Skeleton className="h-6 w-20 rounded-full" />
+            <Skeleton className="h-6 w-20 rounded-lg" />
           </div>
           <Skeleton className="h-9 w-full" />
           <Skeleton className="h-9 w-full" />

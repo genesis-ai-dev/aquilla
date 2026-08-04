@@ -13,6 +13,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+
+
+vi.mock("@/components/org/OrgSidebar", () => ({
+  OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
+}))
+vi.mock("@/components/org/OrgBreadcrumb", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  OrgBreadcrumb: ({ section, trail }: any) => (
+    <div data-testid="org-breadcrumb">
+      {section}
+      {(trail ?? []).map((t: { label: string }) => ` › ${t.label}`).join("")}
+    </div>
+  ),
+}))
+
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 // ─── Shared project stub ─────────────────────────────────────────────────────
@@ -77,6 +92,10 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
 }))
 
 vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
+  // Partial mock: ProjectSettings and other modules in its render tree read
+  // real constants from this module at module-eval time (FRONTIER_CHAT_URL via
+  // lib/ab/feedback.ts, DEFAULT_COMPLETION_MAX_TOKENS for initial state) —
+  // keep every real export and stub only the network-touching functions.
   const actual = await importOriginal<typeof import("@/lib/completion/completion-service")>()
   return {
     ...actual,
@@ -115,9 +134,10 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
 // deep-link straight there via `?section=`.
 function renderSettings() {
   return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings?section=ai`]}>
+    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/ai`]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
       </Routes>
     </MemoryRouter>,
   )

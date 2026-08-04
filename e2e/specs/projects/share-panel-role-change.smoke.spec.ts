@@ -52,21 +52,23 @@ test("share panel members tab role select changes member's role", async ({ alice
   await expect(dialog).toBeVisible({ timeout: 5_000 })
 
   // Members tab should be active by default.
-  // Add bob using the UsernameTypeahead input.
+  // Add bob using the multi-select UsernameTypeahead (AQU-734).
   const usernameInput = dialog.locator('input[placeholder*="username"], input[placeholder*="Aquilla"]').first()
   await expect(usernameInput).toBeVisible({ timeout: 5_000 })
   await usernameInput.fill("bob")
 
-  // Pick the "bob" suggestion — this closes the typeahead dropdown (which
-  // would otherwise overlay the controls below it).
-  const suggestion = alice.getByRole("button", { name: "bob", exact: true })
+  // Check the "bob" suggestion row — stages a chip; dropdown stays open.
+  const suggestion = alice.getByRole("checkbox", { name: "bob" })
   await expect(suggestion).toBeVisible({ timeout: 8_000 })
   await suggestion.click()
+  // Chip proves staging; click the dialog title to dismiss the typeahead
+  // portal without closing Share (Escape would dismiss the dialog).
+  await expect(dialog.getByRole("button", { name: "Remove bob" })).toBeVisible({ timeout: 5_000 })
+  await dialog.getByRole("heading", { name: /Share/i }).click()
 
   const addBtn = dialog.getByRole("button", { name: /^Add$/i })
-    .or(dialog.getByRole("button", { name: /Add member/i }))
-  await expect(addBtn.first()).toBeVisible({ timeout: 5_000 })
-  await addBtn.first().click()
+  await expect(addBtn).toBeEnabled({ timeout: 5_000 })
+  await addBtn.click()
 
   // Wait for bob's row to reflect the direct grant (contributor beats his
   // viewer org role, so the row is unlocked and gets the "Change role" select).

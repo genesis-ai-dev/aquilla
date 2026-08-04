@@ -4,7 +4,7 @@ import { type Page, type Locator, expect } from "@playwright/test"
  * Page object for the project settings route ("/project/:id/settings").
  *
  * Settings is a two-level index → group → sections drill-down
- * (`ProjectSettings.tsx`'s `SETTINGS_GROUPS`, `?section=<groupId>`). The
+ * (`ProjectSettings.tsx`'s `SETTINGS_GROUPS`, `/settings/<groupId>`). The
  * Languages section (`LanguagesSection.tsx`, `id="section-languages"`,
  * AQU-538 slice 2) lives in the "General" group alongside Project info /
  * Bible resources / User.
@@ -17,7 +17,7 @@ export class ProjectSettings {
   }
 
   /**
-   * Navigate from the open workspace ("/project/:id") into Settings →
+   * Navigate from the open workspace ("/project/:id/editor") into Settings →
    * General, where the Languages section renders. Mirrors the sidebar
    * "More project options" → "Settings" flow already exercised by
    * `workspace-settings-navigate.smoke.spec.ts`.
@@ -32,9 +32,9 @@ export class ProjectSettings {
     await settingsItem.click()
     await this.page.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 10_000 })
 
-    // Lands on the settings index (no `?section=` yet) — drill into "General",
+    // Lands on the settings index (index path — no section segment yet) — drill into "General",
     // which holds the Languages section. If a deep-link already put us inside
-    // a group (e.g. `?section=general`), the section is already there and the
+    // a group (e.g. `/settings/general`), the section is already there and the
     // index link never appears. NOTE: `isVisible()` reports the INSTANTANEOUS
     // state (its timeout option is ignored), so guard-then-click races the
     // index render — wait for whichever of the two states materializes first.
@@ -69,7 +69,7 @@ export class ProjectSettings {
 
   /** Navigate back to the project's workspace editor. */
   async backToEditor(): Promise<void> {
-    await this.page.getByRole("button", { name: /Back to Editor/i }).click()
-    await this.page.waitForURL(/\/project\/[^/]+(?:\/file\/[^/]+)?$/, { timeout: 10_000 })
+    await this.page.getByRole("button", { name: /^Editor$/i }).click()
+    await this.page.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 10_000 })
   }
 }

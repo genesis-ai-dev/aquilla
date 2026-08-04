@@ -107,7 +107,7 @@ export function AddFootnoteDialog({
                     )}
                   >
                     <span className={cn(
-                      "mt-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-bold",
+                      "mt-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1.5 text-xs font-bold",
                       active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
                     )}>
                       {optionPreview}
@@ -262,7 +262,7 @@ function PreviewMarker({ label, active }: { label: string; active?: boolean }) {
   return (
     <sup
       className={cn(
-        "mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none",
+        "mx-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-md px-1 text-[10px] font-bold leading-none",
         active ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary",
       )}
     >

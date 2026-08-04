@@ -162,7 +162,7 @@ function ProviderOption({
     >
       <div
         className={
-          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border " +
+          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-lg border " +
           (selected
             ? "border-primary bg-primary text-primary-foreground"
             : "border-muted-foreground/30 text-muted-foreground")

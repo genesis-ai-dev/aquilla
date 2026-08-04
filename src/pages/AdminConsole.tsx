@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
+import { orgHomePath } from "@/lib/navigation/org-paths"
 import {
   getAdminOverview,
   getAdminOrgs,
@@ -84,7 +85,7 @@ export function AdminConsole() {
   const openOrg = useCallback(
     (orgId: number) => {
       setActiveOrg(orgId)
-      navigate({ pathname: "/", search: `?org=${orgId}` })
+      navigate(orgHomePath(orgId))
     },
     [setActiveOrg, navigate],
   )
@@ -234,7 +235,7 @@ function ConsoleSkeleton() {
       templateClassName="min-h-[34rem]"
     >
       <div className="flex flex-col gap-6">
-        <Skeleton className="h-8 w-72 rounded-full" />
+        <Skeleton className="h-8 w-72 rounded-md" />
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-20 rounded-2xl border bg-card" />

@@ -9,13 +9,14 @@
 //   - Invite-link generation with expiry selector (reuses InviteLinkTab logic)
 //   - "Revoke all access" with grant-path enumeration + typed confirmation
 
-import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useState, useCallback, useEffect, useMemo } from "react"
+import { useParams } from "react-router-dom"
 import {
   ArrowLeft, UserPlus, LinkIcon, ShieldOff, RefreshCcw,
-  AlertTriangle, Copy, Lock, Users, Check,
+  AlertTriangle, Copy, Lock, Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
@@ -27,11 +28,14 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
+import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
+import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import {
   revokeAllProjectAccess, partitionMembers, type RevokeAllResult,
 } from "@/lib/frontier/members"
@@ -69,22 +73,28 @@ type ActiveTab = "members" | "invite"
 
 export function ProjectMembersPage() {
   const { id: projectId } = useParams<{ id: string }>()
-  const navigate = useNavigate()
+  // AQU-737: the workspace route is lazy; surface the load on Back to project so
+  // it spins + disables instead of sitting idle and re-clickable.
+  // `openingOverlay` blocks the rest of the page while the open is in flight.
+  const { open: openWorkspace, isPending: backPending, overlay: openingOverlay } = useOpenWorkspace()
   const [tab, setTab] = useState<ActiveTab>("members")
 
   if (!projectId) return null
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
+      {openingOverlay}
       {/* Back header */}
       <div className="flex items-center gap-3 border-b bg-background px-6 py-3">
         <Button
           variant="ghost"
           size="sm"
           className="gap-1.5 text-muted-foreground"
-          onClick={() => navigate(`/project/${projectId}`)}
+          onClick={() => openWorkspace(`/project/${projectId}/editor`)}
+          disabled={backPending}
+          aria-busy={backPending || undefined}
         >
-          <ArrowLeft className="h-4 w-4" />
+          {backPending ? <Spinner className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
           Back to project
         </Button>
         <div className="flex items-center gap-2 text-sm font-medium">
@@ -150,38 +160,36 @@ export function MembersTab({
   className?: string
 }) {
   const { session } = useFrontierSession()
-  const { members, isLoading, error, rosterHidden, refresh, add, remove } = useProjectMembers(projectId)
+  const { members, isLoading, error, rosterHidden, refresh, add, addMany, remove } = useProjectMembers(projectId)
   const callerMaxRole = ROLE.MAINTAINER
   const callerUserId = null
 
   // AQU-672: source the org roster so the add-member field can suggest
-  // colleagues instead of forcing an exact-username guess. Read the org
-  // context optionally — this surface is also embedded on the org-side
-  // ProjectOverview and unit-rendered without a provider, where we simply
-  // fall back to a free-text field. A personal (org-less) project yields no
-  // suggestions and keeps working as plain free text.
+  // colleagues instead of forcing an exact-username guess. Prefer the
+  // PROJECT's own org (the active-org picker may be on "All organizations"
+  // or a different org entirely), falling back to the optional org context —
+  // this surface is also embedded on the org-side ProjectOverview and
+  // unit-rendered without a provider. A personal (org-less) project yields
+  // no suggestions and keeps working as plain free text.
+  const projectOrgId = useProjectOrgId(projectId)
   const activeOrgId = useActiveOrgOptional()?.activeOrgId ?? null
+  const rosterOrgId = projectOrgId ?? activeOrgId
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
   useEffect(() => {
     const jwt = session?.jwt
-    if (!jwt || activeOrgId == null) {
+    if (!jwt || rosterOrgId == null) {
       // Bail without a state change when already empty so we don't force an
       // extra render (keeps this effect side-effect-free on org-less surfaces).
       setOrgMembers((prev) => (prev.length === 0 ? prev : []))
       return
     }
     let alive = true
-    listOrgMembers(jwt, activeOrgId)
+    listOrgMembers(jwt, rosterOrgId)
       .then((ms) => { if (alive) setOrgMembers(ms) })
       .catch(() => { /* suggestions are best-effort; free text still works */ })
     return () => { alive = false }
-  }, [session?.jwt, activeOrgId])
+  }, [session?.jwt, rosterOrgId])
 
-  // Add form state
-  const [newUsername, setNewUsername] = useState("")
-  const [newRole, setNewRole] = useState<number>(ROLE.CONTRIBUTOR)
-  const [adding, setAdding] = useState(false)
-  const [addError, setAddError] = useState<string | null>(null)
   // AQU-560: when the add is refused for lack of permission, surface the
   // enriched account-identity + switch-user alert instead of the bare message
   // (the denial is usually "you're on the wrong account").
@@ -192,27 +200,16 @@ export function MembersTab({
   // Remove-direct-grant confirmation (FRO-368: used to remove instantly).
   const [removeTarget, setRemoveTarget] = useState<ProjectMember | null>(null)
 
-  const handleAdd = useCallback(async () => {
-    const trimmed = newUsername.trim()
-    if (!trimmed) return
-    setAdding(true)
-    setAddError(null)
-    setAddForbidden(false)
-    try {
-      const result = await add(trimmed, newRole)
-      if (!result) {
-        setAddError("No user found with that username")
-        return
-      }
-      setNewUsername("")
-    } catch (e) {
-      const uf = toUserFacingError(e, "project")
-      setAddForbidden(uf.category === "forbidden")
-      setAddError(uf.message)
-    } finally {
-      setAdding(false)
-    }
-  }, [add, newUsername, newRole])
+  // AQU-734 parity: grant the whole staged batch in ONE request; per-person
+  // failures come back in `results` and are named by the add row itself.
+  const handleAddMany = useCallback(async (usernames: string[], role: number) => {
+    const results = await addMany(usernames.map((username) => ({ username, role })))
+    return results.map((r) => ({
+      username: r.username,
+      ok: r.ok,
+      error: r.error?.message,
+    }))
+  }, [addMany])
 
   const grantableRoles = PROJECT_ROLE_OPTIONS.filter((r) => r.level <= callerMaxRole)
 
@@ -448,63 +445,41 @@ export function MembersTab({
         )}
       </div>
 
-      {/* Add member */}
+      {/* Add member — AQU-734 parity: multi-select staging + one batch Add.
+          Eligible org colleagues show as checkbox rows on focus (AQU-672). */}
       <div className="rounded border p-4 space-y-3">
         <h2 className="text-sm font-medium flex items-center gap-2">
           <UserPlus className="h-4 w-4 text-muted-foreground" />
           Add member
         </h2>
-        <div className="flex gap-2">
-          <MemberAddCombobox
-            members={eligibleOrgMembers}
-            value={newUsername}
-            onChange={(v) => {
-              setNewUsername(v)
-              setAddError(null)
-              setAddForbidden(false)
-            }}
-            onSubmit={() => void handleAdd()}
-            disabled={adding}
-            orgLoaded={orgMembers.length > 0}
-          />
-          <Select
-            items={grantableRoles.map((r) => ({
-              value: String(r.level),
-              label: roleDisplayText(r.name),
-            }))}
-            value={String(newRole)}
-            onValueChange={(v) => setNewRole(parseInt(v ?? "", 10))}
-            disabled={adding}
-          >
-            <SelectTrigger aria-label="Role">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {grantableRoles.map((r) => (
-                  <SelectItem key={r.level} value={String(r.level)}>
-                    <RoleLabel name={r.name} />
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <Button
-            size="sm"
-            onClick={() => void handleAdd()}
-            disabled={adding || !newUsername.trim()}
-          >
-            {adding ? "Adding…" : "Add"}
-          </Button>
-        </div>
-        {addForbidden ? (
+        <MemberMultiAddRow
+          roleOptions={grantableRoles}
+          defaultRole={ROLE.CONTRIBUTOR}
+          onAdd={handleAddMany}
+          excludedUserIds={[...directGrantUserIds]}
+          suggestions={
+            orgMembers.length > 0
+              ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
+              : undefined
+          }
+          emptySuggestionsHint="All org members are already on this project."
+          onAddStart={() => setAddForbidden(false)}
+          onBatchErrorMessage={(e) => {
+            const uf = toUserFacingError(e, "project")
+            if (uf.category === "forbidden") {
+              setAddForbidden(true)
+              return null
+            }
+            return uf.message
+          }}
+          buttonSize="sm"
+        />
+        {addForbidden && (
           <PermissionDeniedAlert
             action="add members to this project"
             requiredRole="Maintainer or higher"
           />
-        ) : addError ? (
-          <p className="text-xs text-destructive">{addError}</p>
-        ) : null}
+        )}
       </div>
 
       {/* Remove-direct-grant confirmation (FRO-368) */}
@@ -772,14 +747,16 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         </p>
         <div className="flex items-center gap-1">
           <Input value={issuedUrl} readOnly className="text-xs font-mono" />
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => copyUrl(issuedUrl)}
-            title="Copy URL"
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
+          <AppTooltip content="Copy URL">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => copyUrl(issuedUrl)}
+              aria-label="Copy URL"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+          </AppTooltip>
         </div>
         {copied && <p className="text-xs text-green-600">Copied!</p>}
         <p className="text-[10px] text-muted-foreground">
@@ -933,140 +910,6 @@ function SourceBadge({ source }: { source: string }) {
     <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
       {SOURCE_LABELS[source] ?? source}
     </span>
-  )
-}
-
-/**
- * AQU-672: add-member field that suggests org members (a combobox), mirroring
- * the Team detail "Add member" dialog, while remaining a free-text input so an
- * exact username outside the suggestion list can still be granted.
- *
- *  - Clicking into / typing in the field opens a dropdown of `members`
- *    (already filtered to org members without a direct grant, pre-sorted).
- *  - The list narrows live by case-insensitive substring; picking a row fills
- *    the field. The caller's Add button grants the typed value.
- *  - When every org member already has a direct grant (`orgLoaded` and an empty
- *    `members`), the dropdown shows an explicit empty state instead of opening
- *    empty. With no org roster at all (personal project / no context) it stays
- *    a plain free-text field with no dropdown.
- */
-export function MemberAddCombobox({
-  members,
-  value,
-  onChange,
-  onSubmit,
-  disabled,
-  orgLoaded,
-}: {
-  members: OrgMember[]
-  value: string
-  onChange: (username: string) => void
-  onSubmit: () => void
-  disabled?: boolean
-  orgLoaded: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const query = value.trim().toLocaleLowerCase()
-  const filtered = useMemo(
-    () =>
-      query
-        ? members.filter((m) => m.username.toLocaleLowerCase().includes(query))
-        : members,
-    [members, query],
-  )
-
-  useEffect(() => {
-    if (!open) return
-    function onDocMouseDown(e: MouseEvent) {
-      if (containerRef.current?.contains(e.target as Node)) return
-      setOpen(false)
-    }
-    document.addEventListener("mousedown", onDocMouseDown)
-    return () => document.removeEventListener("mousedown", onDocMouseDown)
-  }, [open])
-
-  // AC6: the org has members but none are eligible → everyone already added.
-  const allAlreadyGranted = orgLoaded && members.length === 0
-
-  let content: ReactNode = null
-  if (allAlreadyGranted) {
-    content = (
-      <p className="px-2 py-2 text-xs text-muted-foreground">
-        All org members are already on this project.
-      </p>
-    )
-  } else if (filtered.length > 0) {
-    content = filtered.map((m) => {
-      const isSelected = m.username === value
-      return (
-        <button
-          key={m.userId}
-          type="button"
-          role="option"
-          aria-selected={isSelected}
-          className={cn(
-            "flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted",
-            isSelected && "bg-muted/60",
-          )}
-          onClick={() => {
-            onChange(m.username)
-            setOpen(false)
-          }}
-        >
-          <span className="truncate">{m.username}</span>
-          {isSelected && (
-            <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-          )}
-        </button>
-      )
-    })
-  } else if (query && members.length > 0) {
-    // Typed something no org member matches — still grantable as free text.
-    content = (
-      <p className="px-2 py-2 text-xs text-muted-foreground">
-        No org member matches “{value.trim()}”. Press Add to grant by exact username.
-      </p>
-    )
-  }
-
-  return (
-    <div ref={containerRef} className="relative flex-1">
-      <Input
-        placeholder="Aquilla username"
-        value={value}
-        role="combobox"
-        aria-label="Member to add"
-        aria-expanded={open}
-        aria-controls="project-member-add-list"
-        aria-autocomplete="list"
-        autoComplete="off"
-        onChange={(e) => {
-          onChange(e.target.value)
-          setOpen(true)
-        }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            setOpen(false)
-            onSubmit()
-          } else if (e.key === "Escape") {
-            setOpen(false)
-          }
-        }}
-        disabled={disabled}
-      />
-      {open && !disabled && content && (
-        <div
-          id="project-member-add-list"
-          role="listbox"
-          aria-label="Org members"
-          className="absolute inset-x-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
-        >
-          {content}
-        </div>
-      )}
-    </div>
   )
 }
 

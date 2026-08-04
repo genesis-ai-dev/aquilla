@@ -1,13 +1,14 @@
 import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
+import { pickSelectOption } from "../../helpers/base-ui"
 
 /**
  * Move to corpus dialog — FileActionMenu → Move.
  *
  * MoveToCorpusDialog opens a Dialog with:
  *   - DialogTitle "Move to corpus"
- *   - A <select> with "Ungrouped" and "Other…" options (no existing markers)
- *   - Choosing "Other…" reveals a text input for a custom corpus name
+ *   - A shadcn Select with "Ungrouped" and "Create a corpus" options (no existing markers)
+ *   - Choosing "Create a corpus" reveals a text input for a custom corpus name
  *   - Cancel closes the dialog without moving
  *
  * This spec verifies the dialog opens, the select works, and Cancel dismisses.
@@ -21,7 +22,7 @@ test("move to corpus dialog opens and shows corpus selector", async ({ alice }) 
   await expect(fileRow).toBeVisible({ timeout: 10_000 })
   await fileRow.click({ button: "right" })
 
-  // Click "Move to corpus…" in the context menu (shadcn DropdownMenu — role="menuitem").
+  // Click "Move to corpus…" in the context menu (shadcn ContextMenu — role="menuitem").
   const moveBtn = alice.getByRole("menuitem", { name: /Move to corpus/i })
   await expect(moveBtn).toBeVisible({ timeout: 3_000 })
   await moveBtn.click()
@@ -31,14 +32,14 @@ test("move to corpus dialog opens and shows corpus selector", async ({ alice }) 
   await expect(dialog).toBeVisible({ timeout: 5_000 })
   await expect(dialog.getByRole("heading", { name: /Move to corpus/i })).toBeVisible()
 
-  // The corpus <select> is present with at least "Ungrouped" option.
-  const select = dialog.locator("select")
+  // The corpus Select is present with at least "Ungrouped" option.
+  const select = dialog.getByRole("combobox", { name: /Corpus/i })
   await expect(select).toBeVisible()
 
-  // Selecting "Other…" reveals the custom corpus name input.
-  await select.selectOption({ label: "Other…" })
+  // Selecting "Create a corpus" reveals the custom corpus name input.
+  await pickSelectOption(alice, select, "Create a corpus")
   await expect(
-    dialog.locator('input[placeholder="New corpus name"]')
+    dialog.getByPlaceholder("Corpus name")
   ).toBeVisible({ timeout: 3_000 })
 
   // Cancel closes without moving.

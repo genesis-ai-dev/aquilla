@@ -21,4 +21,25 @@ describe("AppTooltip", () => {
       expect(screen.getByRole("tooltip")).toHaveTextContent("Deadline details")
     }, { timeout: 250 })
   })
+
+  it("keeps the trigger mounted when disabled toggles (popover-anchor stability)", () => {
+    const { rerender } = render(
+      <TooltipProvider delay={0}>
+        <AppTooltip content="Summary" disabled={false}>
+          <button type="button" data-testid="anchor">Ring</button>
+        </AppTooltip>
+      </TooltipProvider>,
+    )
+    const before = screen.getByTestId("anchor")
+    rerender(
+      <TooltipProvider delay={0}>
+        <AppTooltip content="Summary" disabled>
+          <button type="button" data-testid="anchor">Ring</button>
+        </AppTooltip>
+      </TooltipProvider>,
+    )
+    // Early-returning children on disable remounted PopoverTriggers and flashed
+    // anchored popovers at (0,0). disabled must pass through without remount.
+    expect(screen.getByTestId("anchor")).toBe(before)
+  })
 })

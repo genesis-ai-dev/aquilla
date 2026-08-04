@@ -90,28 +90,39 @@ function NavRow({
 }
 
 /**
- * A small "back to the index" link for the top-left of a detail/submenu page.
+ * A small "back to the index" control for the top-left of a detail/submenu page.
  * Pairs with the section card's own title below it, so a submenu page reads as
  * "‹ Settings" then the section heading — self-sufficient navigation inside the
  * main area without relying on the header breadcrumb.
+ *
+ * Prefer `to` for plain navigation. Use `onClick` when the caller needs to
+ * intercept (e.g. discard-unsaved confirmation) before leaving.
  */
 function BackLink({
   to,
+  onClick,
   label,
   className,
 }: {
-  to: string
+  to?: string
+  onClick?: () => void
   label: React.ReactNode
   className?: string
 }) {
+  const classes = cn(
+    "group -ml-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+    className,
+  )
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={classes}>
+        <ChevronLeft className="size-4" />
+        {label}
+      </button>
+    )
+  }
   return (
-    <Link
-      to={to}
-      className={cn(
-        "group -ml-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        className,
-      )}
-    >
+    <Link to={to!} className={classes}>
       <ChevronLeft className="size-4" />
       {label}
     </Link>

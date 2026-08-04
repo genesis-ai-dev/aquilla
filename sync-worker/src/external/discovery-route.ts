@@ -94,7 +94,7 @@ function apiMap(): Record<string, unknown> {
         plan_stale: '409 — state drifted since prepare; re-prepare a fresh changeset.',
         conflict: '409 — CreateProject id claimed by someone else; pick another id and re-prepare.',
         confirmation_required: '428 — ask-mode commit needs a human approval at the approvalUrl first.',
-        rate_limited: '429 — reserved, not currently enforced.',
+        rate_limited: '429 — too many requests from this credential in the trailing 15 minutes (currently enforced on /search; back off and retry later).',
         job_failed: '500 — server-side failure; safe to retry once.',
       },
     },

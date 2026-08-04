@@ -27,7 +27,7 @@ test.skip("project settings termbase sharing section renders publish toggle", as
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
+  await alice.goto(`/project/${projectId}/settings/ai`)
   // "Termbase Sharing" card title is visible.
   await expect(alice.getByText(/Termbase Sharing/i).first()).toBeVisible({ timeout: 10_000 })
 

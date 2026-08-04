@@ -844,3 +844,106 @@ describe('POST /import — request-size and field-type limits', () => {
     expect(await rows('cells')).toHaveLength(3)
   })
 })
+
+// AQU-744: staged imports (AQU-635) create the file tombstoned and reveal it
+// only at finalize — so the finalize that applies file.restore must broadcast
+// fileCreated: true, or a client whose file list was fetched during the staged
+// window never refetches and the imported file stays invisible until a hard
+// reload. The first chunk's create-time frame fires while the row is still
+// hidden, so it cannot carry the reveal.
+describe('POST /import — ProjectSync inventory notifications (AQU-744)', () => {
+  interface ProgressFrame { t: string; project: string; file: string; fileCreated: boolean }
+
+  function makeNotifyEnv(db: AquillaDb) {
+    const frames: ProgressFrame[] = []
+    const waits: Promise<unknown>[] = []
+    const env = {
+      AQUILLA_PG: db,
+      SYNC_SECRET_KEY: SECRET,
+      ProjectSync: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          fetch: async (_url: string, init?: { body?: BodyInit }) => {
+            frames.push(JSON.parse(String(init?.body)) as ProgressFrame)
+            return new Response('ok')
+          },
+        }),
+      } as unknown as DurableObjectNamespace,
+    }
+    const ctx = {
+      waitUntil: (p: Promise<unknown>) => { waits.push(p) },
+      passThroughOnException: () => {},
+    } as ExecutionContext
+    const settled = async () => { await Promise.all(waits) }
+    return { env, ctx, frames, settled }
+  }
+
+  async function send(body: Record<string, unknown>, token: string, env: object, ctx: ExecutionContext) {
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    return handleBulkImportRequest(req, env, ctx)
+  }
+
+  it('signals inventory change on the reveal finalize, and never on intermediate chunks', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+    const { env, ctx, frames, settled } = makeNotifyEnv(db)
+
+    // First chunk: file.create + stage tombstone.
+    expect((await send({
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      file: { id: 'file-evt-1', name: 'staged.usfm', fileType: 'usfm' },
+      stageEventId: 'stage-evt-1',
+      cells: [{ id: 'evt-a', cellId: 'cell-a', value: 'alpha' }],
+    }, token, env, ctx))?.status).toBe(200)
+
+    // Intermediate chunk: cells only — must stay silent.
+    expect((await send({
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      cells: [{ id: 'evt-b', cellId: 'cell-b', value: 'beta' }],
+    }, token, env, ctx))?.status).toBe(200)
+
+    // Reveal finalize: applies file.restore — must signal an inventory change.
+    expect((await send({
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      cells: [],
+      complete: true,
+      publishEventId: 'publish-evt-1',
+    }, token, env, ctx))?.status).toBe(200)
+
+    await settled()
+    expect(frames).toEqual([
+      { t: 'file.progress.updated', project: PROJECT_ID, file: FILE_ID, fileCreated: true },
+      { t: 'file.progress.updated', project: PROJECT_ID, file: FILE_ID, fileCreated: true },
+    ])
+  })
+
+  it('a finalize without a reveal stays a progress-only frame', async () => {
+    const token = await leadToken()
+    const { db } = await makeTestDb()
+    const { env, ctx, frames, settled } = makeNotifyEnv(db)
+
+    expect((await send({
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      file: { id: 'file-evt-2', name: 'plain.usfm', fileType: 'usfm' },
+      cells: [{ id: 'evt-c', cellId: 'cell-c', value: 'gamma' }],
+    }, token, env, ctx))?.status).toBe(200)
+
+    expect((await send({
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      cells: [],
+      complete: true,
+    }, token, env, ctx))?.status).toBe(200)
+
+    await settled()
+    expect(frames.map((frame) => frame.fileCreated)).toEqual([true, false])
+  })
+})

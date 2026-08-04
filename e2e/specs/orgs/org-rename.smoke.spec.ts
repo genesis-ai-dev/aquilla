@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Organization rename — Settings Identity detail page (/settings/identity).
@@ -11,7 +11,7 @@ import { test, expect } from "../../helpers/multi-user"
  * runs so this is safe.
  */
 test("org rename saves new name in settings page", async ({ alice }) => {
-  await alice.goto("/settings/identity")
+  await alice.goto(orgRoute(alice, "/settings/identity"))
   // h1 "Identity"
   await expect(
     alice.locator("h1").filter({ hasText: /^Identity$/i })

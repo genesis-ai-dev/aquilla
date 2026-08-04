@@ -43,7 +43,7 @@ test("comments page search box filters threads and clear filters resets", async 
   await expect(drawer).toContainText(uniqueText, { timeout: 8_000 })
 
   // Navigate to /comments page. With a file open the URL is
-  // /project/:id/file/:fileId, so extract the project id directly.
+  // /project/:id/editor/file/:fileId, so extract the project id directly.
   const projectId = alice.url().match(/\/project\/([^/?#]+)/)?.[1]
   expect(projectId).toBeTruthy()
 

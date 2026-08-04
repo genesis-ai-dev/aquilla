@@ -23,6 +23,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+
+
+vi.mock("@/components/org/OrgSidebar", () => ({
+  OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
+}))
+vi.mock("@/components/org/OrgBreadcrumb", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  OrgBreadcrumb: ({ section, trail }: any) => (
+    <div data-testid="org-breadcrumb">
+      {section}
+      {(trail ?? []).map((t: { label: string }) => ` › ${t.label}`).join("")}
+    </div>
+  ),
+}))
+
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const PROJECT_ID = "proj-submenu-ia"
@@ -87,6 +102,10 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
 }))
 
 vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
+  // Partial mock: ProjectSettings and other modules in its render tree read
+  // real constants from this module at module-eval time (FRONTIER_CHAT_URL via
+  // lib/ab/feedback.ts, DEFAULT_COMPLETION_MAX_TOKENS for initial state) —
+  // keep every real export and stub only the network-touching functions.
   const actual = await importOriginal<typeof import("@/lib/completion/completion-service")>()
   return {
     ...actual,
@@ -124,6 +143,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -166,14 +186,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
   })
 
   it("a `?section=` deep link renders directly into that pane", () => {
-    renderAt(`/project/${PROJECT_ID}/settings?section=ai`)
+    renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
     expect(screen.queryByLabelText(/project name/i)).toBeNull()
   })
 
   it("the back link returns to the settings index", () => {
-    renderAt(`/project/${PROJECT_ID}/settings?section=general`)
+    renderAt(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/project name/i)).toBeTruthy()
 
     fireEvent.click(screen.getByRole("link", { name: /settings/i }))
@@ -182,35 +202,50 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByLabelText(/project name/i)).toBeNull()
   })
 
+  it("search results are grouped under main section headers", () => {
+    renderAt(`/project/${PROJECT_ID}/settings`)
+
+    const search = screen.getByLabelText(/search settings/i)
+    fireEvent.change(search, { target: { value: "language" } })
+
+    // Matching cards appear under their index section label — not a flat dump.
+    expect(screen.getByText("General")).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    // Unrelated groups that have no keyword match stay out of the document.
+    expect(screen.queryByText("AI metrics")).toBeNull()
+    expect(screen.queryByText(/approved ai review effort/i)).toBeNull()
+  })
+
   // No setting lost: every section that used to live on the single scroll is
   // still reachable through exactly one sub-menu pane.
   it("every settings group renders its expected controls (no section dropped)", () => {
-    renderAt(`/project/${PROJECT_ID}/settings?section=general`)
+    renderAt(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/project name/i)).toBeTruthy()
     expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
     expect(screen.getByLabelText(/username/i)).toBeTruthy()
 
-    renderAt(`/project/${PROJECT_ID}/settings?section=source-sync`)
+    renderAt(`/project/${PROJECT_ID}/settings/source-sync`)
     // This project has a git origin but no source link, so only Git Sync
     // renders in this pane — confirms the group still mounts correctly when
     // some of its member sections are conditionally hidden.
-    expect(screen.getByText(/git sync/i)).toBeTruthy()
+    // PageHeader description also mentions "git sync", so match the card title exactly.
+    expect(screen.getByText("Git Sync")).toBeTruthy()
 
-    renderAt(`/project/${PROJECT_ID}/settings?section=ai`)
+    renderAt(`/project/${PROJECT_ID}/settings/ai`)
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
     expect(screen.getByLabelText(/preceding committed-target cells/i)).toBeTruthy()
     expect(screen.getByText(/^voice$/i)).toBeTruthy()
     expect(screen.getByRole("button", { name: /open terminology library/i })).toBeTruthy()
 
-    renderAt(`/project/${PROJECT_ID}/settings?section=validation`)
+    renderAt(`/project/${PROJECT_ID}/settings/validation`)
     expect(screen.getByLabelText(/required validators \(text\)/i)).toBeTruthy()
     expect(screen.getByText(/^harmonization$/i)).toBeTruthy()
     expect(screen.getByText(/retrieval support/i)).toBeTruthy()
 
-    renderAt(`/project/${PROJECT_ID}/settings?section=audio-media`)
+    renderAt(`/project/${PROJECT_ID}/settings/audio-media`)
     expect(screen.getByText(/audio loading/i)).toBeTruthy()
 
-    renderAt(`/project/${PROJECT_ID}/settings?section=metrics`)
+    renderAt(`/project/${PROJECT_ID}/settings/metrics`)
     // PostEditMetricsSection renders its own heading regardless of loading state.
     expect(screen.getByText(/approved ai review effort/i)).toBeTruthy()
   })
@@ -222,7 +257,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings`)
     expect(screen.queryByText(/term base sharing/i)).toBeNull()
 
-    renderAt(`/project/${PROJECT_ID}/settings?section=ai`)
+    renderAt(`/project/${PROJECT_ID}/settings/ai`)
     expect(screen.queryByText(/term base sharing/i)).toBeNull()
   })
 })

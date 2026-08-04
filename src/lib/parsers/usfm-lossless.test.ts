@@ -108,6 +108,57 @@ describe("parseUsfmLossless", () => {
     expect(hMap.get("GEN 1:s:1")).toBe("The Creation")
   })
 
+  // AQU-634: front matter imports by default; the per-project opt-out excludes it.
+  const FRONT_MATTER_RAW = `\\id GEN
+\\h Genesis
+\\toc1 The First Book of Moses
+\\mt1 Genesis
+\\imt Introduction
+\\is Author
+\\ip Moses wrote this book.
+\\io1 The creation (1–2)
+\\iot Outline
+\\c 1
+\\d A psalm of David
+\\s The Creation
+\\ms Major section
+\\v 1 In the beginning.`
+
+  it("imports book title, TOC, and the intro block as cells BY DEFAULT (AQU-634)", () => {
+    const doc = parseUsfmLossless(FRONT_MATTER_RAW)
+    const markers = doc.headings.map((h) => h.marker)
+    expect(markers).toEqual(
+      expect.arrayContaining(["h", "toc1", "mt1", "imt", "is", "ip", "io1", "iot"]),
+    )
+    // The reproduction step that previously produced no front-matter cells now does.
+    const texts = new Map(doc.headings.map((h) => [h.marker, h.text]))
+    expect(texts.get("h")).toBe("Genesis")
+    expect(texts.get("mt1")).toBe("Genesis")
+    expect(texts.get("ip")).toBe("Moses wrote this book.")
+  })
+
+  it("EXCLUDES front matter but keeps section headings + \\d when opted out (AQU-634)", () => {
+    const doc = parseUsfmLossless(FRONT_MATTER_RAW, { excludeFrontMatter: true })
+    const markers = doc.headings.map((h) => h.marker)
+    // Book-name/title/TOC + full intro block are gone…
+    for (const m of ["h", "toc1", "mt1", "imt", "is", "ip", "io1", "iot"]) {
+      expect(markers).not.toContain(m)
+    }
+    // …while in-body section headings (\s, \ms) and the Psalm title (\d) remain.
+    expect(markers).toEqual(expect.arrayContaining(["d", "s", "ms"]))
+    // Verses are unaffected in either mode.
+    expect(doc.verses).toHaveLength(1)
+    expect(doc.verses[0].text).toBe("In the beginning.")
+  })
+
+  it("round-trips byte-for-byte in BOTH modes (excludeFrontMatter never touches raw)", () => {
+    // AC4: the lossless parser/serializer is unaffected by the opt-out.
+    expect(serializeUsfmLossless(parseUsfmLossless(FRONT_MATTER_RAW))).toBe(FRONT_MATTER_RAW)
+    expect(
+      serializeUsfmLossless(parseUsfmLossless(FRONT_MATTER_RAW, { excludeFrontMatter: true })),
+    ).toBe(FRONT_MATTER_RAW)
+  })
+
   it("indexes multiple headings of the same kind per chapter", () => {
     const raw = `\\id MAT
 \\c 1

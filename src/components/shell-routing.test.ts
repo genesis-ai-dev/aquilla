@@ -58,11 +58,11 @@ describe("deriveCenterSurface", () => {
   })
 
   it("returns 'editor' for the root project path", () => {
-    expect(deriveCenterSurface("/project/proj1")).toBe("editor")
+    expect(deriveCenterSurface("/project/proj1/editor")).toBe("editor")
   })
 
   it("returns 'editor' for a file path (shell stays mounted, editor renders)", () => {
-    expect(deriveCenterSurface("/project/proj1/file/GEN.sfm")).toBe("editor")
+    expect(deriveCenterSurface("/project/proj1/editor/file/GEN.sfm")).toBe("editor")
   })
 
   it("returns 'editor' for /voice (audio lens — still the editor surface)", () => {
@@ -90,28 +90,28 @@ describe("isOverlaySurface (redirect-guard exclusion)", () => {
   })
 
   it("does NOT exclude the root project path (redirect must fire here)", () => {
-    expect(isOverlaySurface("/project/proj1")).toBe(false)
+    expect(isOverlaySurface("/project/proj1/editor")).toBe(false)
   })
 
   it("does NOT exclude a file path (redirect must fire to validate the fileId)", () => {
-    expect(isOverlaySurface("/project/proj1/file/GEN.sfm")).toBe(false)
+    expect(isOverlaySurface("/project/proj1/editor/file/GEN.sfm")).toBe(false)
   })
 })
 
 describe("shell-routing: back-nav contract", () => {
   // The back buttons in CommentsPage / LivingMemoryPage / TerminologyPage all
-  // navigate to `/project/:id` (no fileId). From there the restore-location
+  // navigate to `/project/:id/editor` (no fileId). From there the restore-location
   // effect in ProjectWorkspace reads readLastLocation() and bounces the user
   // to their last open file + scroll position. Verify the logic handles this:
   //
-  //   navigate("/project/:id")
+  //   navigate("/project/:id/editor")
   //   → isOverlaySurface = false (redirect fires)
-  //   → readLastLocation → fileId present → redirectTo /project/:id/file/:fileId
+  //   → readLastLocation → fileId present → redirectTo /project/:id/editor/file/:fileId
   //
   // We test the guard side; the readLastLocation round-trip is integration-tested.
 
-  it("navigating to /project/:id is NOT guarded — restore-location fires", () => {
-    expect(isOverlaySurface("/project/proj1")).toBe(false)
+  it("navigating to /project/:id/editor is NOT guarded — restore-location fires", () => {
+    expect(isOverlaySurface("/project/proj1/editor")).toBe(false)
   })
 
   it("overlay surface derivation covers all AQU-254 subroutes", () => {

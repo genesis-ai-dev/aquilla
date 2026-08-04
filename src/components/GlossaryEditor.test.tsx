@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import type { Concept } from "@/lib/terminology/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -96,15 +96,17 @@ describe("GlossaryEditor", () => {
     expect(arg.terminology[0].status).toBe("deprecated")
   })
 
-  it("adding a term via the append row persists a new active concept", async () => {
+  it("adding a term via the create dialog persists a new active concept", async () => {
     renderEditor()
-    fireEvent.change(screen.getByPlaceholderText(/new source term/i), {
+    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
+    const dialog = screen.getByRole("dialog")
+    fireEvent.change(within(dialog).getByPlaceholderText(/new source term/i), {
       target: { value: "mercy" },
     })
-    fireEvent.change(screen.getByPlaceholderText(/rendering/i), {
+    fireEvent.change(within(dialog).getByPlaceholderText(/rendering/i), {
       target: { value: "misericordia" },
     })
-    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
+    fireEvent.click(within(dialog).getByRole("button", { name: /add term/i }))
     await waitFor(() => expect(patchSettings).toHaveBeenCalled())
     const arg = patchSettings.mock.calls[0][0] as { terminology: Concept[] }
     const added = arg.terminology.find((c) => c.sourceTerm === "mercy")
@@ -114,13 +116,15 @@ describe("GlossaryEditor", () => {
 
   it("requires both a source and rendering before adding an active term", () => {
     renderEditor()
-    const add = screen.getByRole("button", { name: /add term/i })
+    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
+    const dialog = screen.getByRole("dialog")
+    const add = within(dialog).getByRole("button", { name: /add term/i })
     expect(add).toBeDisabled()
-    fireEvent.change(screen.getByPlaceholderText(/new source term/i), {
+    fireEvent.change(within(dialog).getByPlaceholderText(/new source term/i), {
       target: { value: "mercy" },
     })
     expect(add).toBeDisabled()
-    fireEvent.change(screen.getByPlaceholderText(/^rendering$/i), {
+    fireEvent.change(within(dialog).getByPlaceholderText(/^rendering$/i), {
       target: { value: "misericordia" },
     })
     expect(add).toBeEnabled()

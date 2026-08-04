@@ -17,6 +17,21 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+
+
+vi.mock("@/components/org/OrgSidebar", () => ({
+  OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
+}))
+vi.mock("@/components/org/OrgBreadcrumb", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  OrgBreadcrumb: ({ section, trail }: any) => (
+    <div data-testid="org-breadcrumb">
+      {section}
+      {(trail ?? []).map((t: { label: string }) => ` › ${t.label}`).join("")}
+    </div>
+  ),
+}))
+
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const PROJECT_ID = "proj-gemini-discoverability"
@@ -66,6 +81,10 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
 }))
 
 vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
+  // Partial mock: ProjectSettings and other modules in its render tree read
+  // real constants from this module at module-eval time (FRONTIER_CHAT_URL via
+  // lib/ab/feedback.ts, DEFAULT_COMPLETION_MAX_TOKENS for initial state) —
+  // keep every real export and stub only the network-touching functions.
   const actual = await importOriginal<typeof import("@/lib/completion/completion-service")>()
   return {
     ...actual,
@@ -98,6 +117,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -113,6 +133,8 @@ describe("ProjectSettings — Gemini key discoverability (AQU-522)", () => {
 
     // The buried key entry is visible immediately — no pane click-through.
     expect(screen.getByText(/gemini api key/i)).toBeTruthy()
+    // Search results are grouped under the main section header.
+    expect(screen.getByText("AI & completion")).toBeTruthy()
   })
 
   it("the deep link filters to the Voice card — no unrelated section is shown", () => {
@@ -121,6 +143,8 @@ describe("ProjectSettings — Gemini key discoverability (AQU-522)", () => {
     // A control from a different section (General → Project Name) must NOT be in
     // the document: proving the user landed on the key, not the top of the page.
     expect(screen.queryByLabelText(/project name/i)).toBeNull()
+    // And General's group header must not appear either (no matches in that group).
+    expect(screen.queryByText("General")).toBeNull()
   })
 
   it("seeds the search box so the active filter is visible and clearable", () => {

@@ -28,5 +28,10 @@ test("rule import button is disabled when LLM is not configured", async ({ alice
   await expect(importBtn).toBeVisible({ timeout: 10_000 })
   await expect(importBtn).toBeDisabled({ timeout: 3_000 })
 
-  await expect(importBtn).toHaveAttribute("title", /Configure LLM in settings first/, { timeout: 3_000 })
+  // Tooltip lives in AppTooltip on a span wrapper (disabled buttons don't
+  // receive pointerenter).
+  await alice.locator("span.inline-flex").filter({ has: importBtn }).hover()
+  await expect(alice.getByRole("tooltip", { name: /Configure LLM in settings first/i })).toBeVisible({
+    timeout: 3_000,
+  })
 })

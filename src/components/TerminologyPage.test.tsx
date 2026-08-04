@@ -52,7 +52,7 @@ vi.mock("@/hooks/useProject", () => ({
     isError: false,
     isUnreachable: false,
     roleLevel: null,
-    refresh: vi.fn(),
+    pm: null,    refresh: vi.fn(),
     patchSettings: mockPatchSettings,
   })),
 }))
@@ -124,7 +124,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
     mockPatchSettings.mockResolvedValue({ kind: "ok" })
@@ -138,7 +138,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -190,7 +190,7 @@ describe("TerminologyPage", () => {
         isError: false,
         isUnreachable: false,
         roleLevel: null,
-        refresh: vi.fn(),
+        pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
       })
       return { kind: "ok" }
@@ -226,7 +226,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -250,7 +250,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -279,7 +279,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -292,7 +292,7 @@ describe("TerminologyPage", () => {
         isError: false,
         isUnreachable: false,
         roleLevel: null,
-        refresh: vi.fn(),
+        pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
       })
       return { kind: "ok" }
@@ -337,7 +337,7 @@ describe("TerminologyPage", () => {
         isError: false,
         isUnreachable: false,
         roleLevel: null,
-        refresh: vi.fn(),
+        pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
       })
       return { kind: "ok" }
@@ -383,7 +383,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -413,7 +413,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -426,7 +426,7 @@ describe("TerminologyPage", () => {
         isError: false,
         isUnreachable: false,
         roleLevel: null,
-        refresh: vi.fn(),
+        pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
       })
       return { kind: "ok" }
@@ -469,7 +469,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -482,7 +482,7 @@ describe("TerminologyPage", () => {
         isError: false,
         isUnreachable: false,
         roleLevel: null,
-        refresh: vi.fn(),
+        pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
       })
       return { kind: "ok" }
@@ -526,7 +526,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -555,7 +555,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 
@@ -568,7 +568,7 @@ describe("TerminologyPage", () => {
         isError: false,
         isUnreachable: false,
         roleLevel: null,
-        refresh: vi.fn(),
+        pm: null,        refresh: vi.fn(),
         patchSettings: mockPatchSettings,
       })
       return { kind: "ok" }
@@ -626,7 +626,7 @@ describe("TerminologyPage", () => {
       isError: false,
       isUnreachable: false,
       roleLevel: null,
-      refresh: vi.fn(),
+      pm: null,      refresh: vi.fn(),
       patchSettings: mockPatchSettings,
     })
 

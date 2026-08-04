@@ -103,7 +103,7 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
 
 async function openLinkedTargetWithUpstream(optionName: RegExp) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
-  fireEvent.click(screen.getByText("+ New Project"))
+  fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
   fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
     target: { value: "French Episode 1" },
@@ -170,7 +170,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
 
   it("does not render when no upstream project is chosen yet", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 

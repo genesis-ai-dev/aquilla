@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button"
 import {
   InputGroup, InputGroupAddon, InputGroupButton, InputGroupText,
 } from "@/components/ui/input-group"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { ContextChipNode } from "@/lib/richtext/context-chip-node"
 import { serializeDocJSON, type ContextChip } from "@/lib/agent/context-chip"
@@ -167,19 +168,19 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         {suggestedActions && suggestedActions.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {suggestedActions.map((action) => (
-              <Button
-                key={action.label}
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={action.disabled || !isConfigured || isStreaming}
-                title={action.title}
-                onClick={action.onClick}
-                className={cn(compact ? "h-6 text-[10px]" : "h-7 text-xs")}
-              >
-                <Sparkles data-icon="inline-start" />
-                {action.label}
-              </Button>
+              <AppTooltip key={action.label} content={action.title} disabled={!action.title}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={action.disabled || !isConfigured || isStreaming}
+                  onClick={action.onClick}
+                  className={cn(compact ? "h-6 text-[10px]" : "h-7 text-xs")}
+                >
+                  <Sparkles data-icon="inline-start" />
+                  {action.label}
+                </Button>
+              </AppTooltip>
             ))}
           </div>
         )}
@@ -207,27 +208,33 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             {isStreaming ? (
               <span className="ml-auto flex items-center gap-1">
                 {queueWhileStreaming && (
-                  <InputGroupButton
-                    type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                    disabled={isEmpty} aria-label="Queue message" title="Queue — sends when the current run finishes"
-                  >
-                    <ArrowUp />
-                  </InputGroupButton>
+                  <AppTooltip content="Queue — sends when the current run finishes">
+                    <InputGroupButton
+                      type="button" variant="default" size="icon-sm" onClick={handleSendClick}
+                      disabled={isEmpty} aria-label="Queue message"
+                    >
+                      <ArrowUp />
+                    </InputGroupButton>
+                  </AppTooltip>
                 )}
-                <InputGroupButton
-                  type="button" variant="outline" size="icon-sm" onClick={onStop}
-                  aria-label="Stop" title="Stop"
-                >
-                  <Square />
-                </InputGroupButton>
+                <AppTooltip content="Stop">
+                  <InputGroupButton
+                    type="button" variant="outline" size="icon-sm" onClick={onStop}
+                    aria-label="Stop"
+                  >
+                    <Square />
+                  </InputGroupButton>
+                </AppTooltip>
               </span>
             ) : (
-              <InputGroupButton
-                type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                disabled={isEmpty || !isConfigured} className="ml-auto" aria-label="Send" title="Send"
-              >
-                <ArrowUp />
-              </InputGroupButton>
+              <AppTooltip content="Send">
+                <InputGroupButton
+                  type="button" variant="default" size="icon-sm" onClick={handleSendClick}
+                  disabled={isEmpty || !isConfigured} className="ml-auto" aria-label="Send"
+                >
+                  <ArrowUp />
+                </InputGroupButton>
+              </AppTooltip>
             )}
           </InputGroupAddon>
         </InputGroup>

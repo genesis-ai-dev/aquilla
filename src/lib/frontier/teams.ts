@@ -1,6 +1,7 @@
 import { FRONTIER_BASE } from "./auth"
 import { fetchWithTimeout } from "./orgs"
 import { UserError } from "@/lib/errors/user-error"
+import type { MemberGrantResult } from "./members"
 
 export interface TeamSummary { id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }
 export interface TeamDetail {
@@ -42,6 +43,17 @@ export async function addTeamMember(jwt: string, orgId: number, groupId: number,
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/members`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ username }) })
   if (!res.ok) throw new UserError(res.status, "", "team")
   return (await res.json()) as { userId: number; username: string }
+}
+
+/**
+ * Add several people to a team in ONE request (AQU-736). Team membership has no
+ * role, so the batch body is a plain username array. Non-atomic — returns the
+ * per-person `results` in request order.
+ */
+export async function addTeamMembers(jwt: string, orgId: number, groupId: number, usernames: string[]): Promise<MemberGrantResult[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/members`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ usernames }) })
+  if (!res.ok) throw new UserError(res.status, "", "team")
+  return ((await res.json()) as { results: MemberGrantResult[] }).results
 }
 
 export async function removeTeamMember(jwt: string, orgId: number, groupId: number, userId: number): Promise<void> {

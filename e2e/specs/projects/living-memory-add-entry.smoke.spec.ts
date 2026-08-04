@@ -4,14 +4,14 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 /**
  * Living Memory — add an Instructions entry.
  *
- * Each section (Instructions, Standards) has a "+ Add" button that opens an
- * inline EntryForm with a textarea. Typing text and clicking Save persists
- * the entry to IDB and renders it in the section.
- * Cancel closes the form without adding.
+ * Each section (Instructions, Standards) has a "+ Add" button that opens a
+ * create dialog with a textarea. Typing text and clicking Save persists
+ * the entry and renders it in the section.
+ * Cancel closes the dialog without adding.
  *
  * This spec tests the add-entry flow on the Instructions section.
  */
-test("living memory add entry form appears and Cancel closes it", async ({ alice }) => {
+test("living memory add entry dialog appears and Cancel closes it", async ({ alice }) => {
   const name = `MemAdd ${Date.now()}`
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
 
@@ -24,8 +24,9 @@ test("living memory add entry form appears and Cancel closes it", async ({ alice
   await expect(addBtn).toBeVisible({ timeout: 5_000 })
   await addBtn.click()
 
-  // Inline EntryForm appears with a textarea.
-  const textarea = instructionsSection.locator("textarea").first()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const textarea = dialog.locator("textarea").first()
   await expect(textarea).toBeVisible({ timeout: 3_000 })
 
   // Type an entry.
@@ -33,14 +34,14 @@ test("living memory add entry form appears and Cancel closes it", async ({ alice
   await textarea.fill(entryText)
 
   // Verify Save and Cancel buttons are present.
-  await expect(instructionsSection.getByRole("button", { name: /Save/i })).toBeVisible()
-  await expect(instructionsSection.getByRole("button", { name: /Cancel/i })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /Save/i })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /Cancel/i })).toBeVisible()
 
-  // Cancel closes the form without saving.
-  await instructionsSection.getByRole("button", { name: /Cancel/i }).click()
-  await expect(textarea).not.toBeVisible({ timeout: 3_000 })
+  // Cancel closes the dialog without saving.
+  await dialog.getByRole("button", { name: /Cancel/i }).click()
+  await expect(dialog).not.toBeVisible({ timeout: 3_000 })
 
-  // Add button is visible again (form closed).
+  // Add button is visible again (dialog closed).
   await expect(addBtn).toBeVisible({ timeout: 3_000 })
 })
 
@@ -53,12 +54,15 @@ test("living memory add entry saves and appears in section", async ({ alice }) =
   const addBtn = instructionsSection.getByRole("button", { name: /Add/i })
   await addBtn.click()
 
-  const textarea = instructionsSection.locator("textarea").first()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 3_000 })
+  const textarea = dialog.locator("textarea").first()
   await expect(textarea).toBeVisible({ timeout: 3_000 })
 
   const entryText = `Test instruction ${Date.now()}`
   await textarea.fill(entryText)
-  await instructionsSection.getByRole("button", { name: /Save/i }).click()
+  await dialog.getByRole("button", { name: /Save/i }).click()
+  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 
   // Entry appears in the section after save.
   await expect(instructionsSection.getByText(entryText)).toBeVisible({ timeout: 5_000 })

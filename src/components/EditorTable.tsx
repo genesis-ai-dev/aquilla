@@ -8,13 +8,16 @@ import {
 import DOMPurify from "dompurify"
 import {
   Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
-  MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
+  MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText, History as HistoryIcon,
   ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
   Languages,
   Archive,
   Lock,
   Pilcrow,
   PilcrowRight,
+  Bold,
+  Loader2,
+  VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -293,6 +296,10 @@ if (typeof window !== "undefined") {
  * A4: dismissing the popover keeps a muted "Not voiced" badge rather than
  *     clearing the failed state entirely — cell still looks unvoiced.
  */
+/** Icon shell for gutter synth status — stays inside the fixed w-5 badge column. */
+const gutterIconShell =
+  "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+
 function SynthStatusBadge({
   status, cellId: _cellId, projectId, onOpenAudioSetup,
 }: {
@@ -334,13 +341,13 @@ function SynthStatusBadge({
         : "Loading voice model"
     return (
       <AppTooltip content={tooltip}>
-        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-          <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-          {isTranslating
-            ? "Translating"
-            : pct != null
-              ? <>Loading <span className="tabular-nums">{pct}%</span></>
-              : "Loading"}
+        <span
+          role="img"
+          aria-label={tooltip}
+          data-testid="synth-status-busy"
+          className={cn(gutterIconShell, "bg-primary/15 text-primary")}
+        >
+          <Loader2 className="h-3 w-3 animate-spin" />
         </span>
       </AppTooltip>
     )
@@ -348,9 +355,13 @@ function SynthStatusBadge({
   if (status.kind === "synthesizing") {
     return (
       <AppTooltip content="Generating audio…">
-        <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">
-          <span className="h-1 w-1 animate-pulse rounded-full bg-primary" />
-          Voicing
+        <span
+          role="img"
+          aria-label="Generating audio"
+          data-testid="synth-status-busy"
+          className={cn(gutterIconShell, "bg-primary/15 text-primary")}
+        >
+          <Loader2 className="h-3 w-3 animate-spin" />
         </span>
       </AppTooltip>
     )
@@ -387,15 +398,19 @@ function SynthStatusBadge({
     if (dismissed) {
       return (
         <AppTooltip content="Audio generation failed — click Generate to retry">
-          <span className="inline-flex max-w-[80px] cursor-default items-center gap-1 truncate rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground">
-            Not voiced
+          <span
+            role="img"
+            aria-label="Not voiced"
+            data-testid="synth-status-dismissed"
+            className={cn(gutterIconShell, "bg-muted/60 text-muted-foreground")}
+          >
+            <MicOff className="h-3 w-3" />
           </span>
         </AppTooltip>
       )
     }
 
-    // A1: full error badge + popover. The trigger label "Audio failed" is more
-    // scannable than just "Failed" and the popover body is shown on first click.
+    // Icon-only trigger so the chip fits the w-5 gutter; full detail lives in the popover.
     return (
       <CellAiStatusPopover
         error={error}
@@ -404,9 +419,14 @@ function SynthStatusBadge({
         trigger={
           <button
             type="button"
-            className="inline-flex max-w-[80px] items-center gap-1 truncate rounded-md bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive hover:bg-destructive/25"
+            aria-label="Audio failed"
+            data-testid="synth-status-error"
+            className={cn(
+              gutterIconShell,
+              "bg-destructive/15 text-destructive hover:bg-destructive/25",
+            )}
           >
-            Audio failed
+            <VolumeX className="h-3 w-3" />
           </button>
         }
       />
@@ -5339,6 +5359,24 @@ function EditorRow({
                     upstreamStaleCellIds={isUpstreamStaleSource ? new Set([cell.id]) : new Set()}
                   />
                 )}
+                {showFormattingLossWarning && (
+                  <AppTooltip
+                    content="Source has inline formatting that the target does not preserve. Formatting will be lost on export."
+                    className="max-w-xs"
+                  >
+                    <span
+                      role="img"
+                      aria-label="Formatting will be lost on export"
+                      data-testid="formatting-loss-warning"
+                      className={cn(
+                        gutterIconShell,
+                        "text-amber-600 dark:text-amber-400",
+                      )}
+                    >
+                      <Bold className="h-3 w-3" />
+                    </span>
+                  </AppTooltip>
+                )}
                 {(isSynthBusy || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
                 )}
@@ -5480,14 +5518,6 @@ function EditorRow({
                 floating action rail occupies. */}
             <div data-testid="source-context-line" className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
               <span>{cell.context}</span>
-              {showFormattingLossWarning && (
-                <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
-                  <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                    <AlertTriangle className="h-2.5 w-2.5" />
-                    formatting
-                  </span>
-                </AppTooltip>
-              )}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (

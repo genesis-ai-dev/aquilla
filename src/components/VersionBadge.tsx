@@ -40,10 +40,9 @@ export function hasChromeVersionTag(pathname: string): boolean {
     return true
   }
 
-  // Project workspace (LeftDock footer VersionTag) — every /project/*/editor route except
-  // centred shells that don't mount the dock (settings, debug dumps).
+  // Project workspace (LeftDock or AppShell footer VersionTag) — editor dock routes
+  // and AppShell pages like settings. Bare debug dumps stay badge-only.
   if (root === "project" && segs.length >= 2) {
-    if (segs.length >= 3 && segs[2] === "settings") return false
     if (segs.includes("debug")) return false
     return true
   }

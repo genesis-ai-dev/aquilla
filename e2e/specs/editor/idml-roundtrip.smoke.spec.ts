@@ -111,6 +111,14 @@ test("IDML import, protected edit, and strict artifact export preserve original 
   // cursor no longer parks at the cell's first line after Enter. Also ends
   // with the cell untranslated.
   await ws.verifyIdmlTrailingBreakCaret(1)
+  // AQU-740 manual QA found that word deletion stopped at trailing whitespace,
+  // requiring a second keypress for the word itself. One modifier press owns
+  // both pieces and the probe restores the untranslated state.
+  await ws.deleteIdmlWordPastTrailingSpace(1)
+  // A committed hard break must count as one position when the cheap read view
+  // hands a line-two click to ProseMirror. The appended character proves the
+  // caret did not land between the final two existing characters.
+  await ws.verifyIdmlMultilineReentry(1)
 
   // A lossless re-import can advance the source event for IDML structure while
   // retaining exactly the same translatable source text. That must preserve

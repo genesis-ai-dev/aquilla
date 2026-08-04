@@ -489,6 +489,36 @@ describe("TranslatedEditor — protected IDML mode", () => {
     )
   })
 
+  it("deletes a trailing space and its adjacent word in one modifier keypress", async () => {
+    const onIdmlValidationError = vi.fn()
+    const emptyTargetHtml = SOURCE_HTML
+      .replace(">Source</span>", "></span>")
+      .replace(">Second</span>", "></span>")
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-delete-word"
+        initialPlain=""
+        initialHtml={emptyTargetHtml}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={vi.fn()}
+        onIdmlValidationError={onIdmlValidationError}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+
+    act(() => {
+      fireEvent.focus(surface)
+      for (const character of "alpha beta ") fireEvent.keyDown(surface, { key: character })
+      fireEvent.keyDown(surface, { key: "Backspace", altKey: true })
+    })
+
+    expect(surface.querySelector("span[data-idml-slot=\"0\"]")?.textContent).toBe("alpha ")
+    expect(onIdmlValidationError).not.toHaveBeenCalledWith(
+      expect.stringMatching(/protected InDesign formatting/i),
+    )
+  })
+
   // AQU-740: a trailing hard break inside an inline slot has no layout box, so
   // the visible caret fell back to the cell's first line until the next
   // keystroke. The view compensates with a synthetic trailing <br> widget.

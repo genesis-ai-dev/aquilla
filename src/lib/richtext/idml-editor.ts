@@ -212,6 +212,69 @@ function segmentBoundaries(text: string, granularity: "grapheme" | "word"): numb
   return boundaries
 }
 
+interface IdmlWordSegment {
+  start: number
+  end: number
+  whitespace: boolean
+}
+
+function wordSegments(text: string): IdmlWordSegment[] {
+  const segmenter = typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity: "word" })
+    : null
+  if (segmenter) {
+    return Array.from(segmenter.segment(text), ({ segment, index }) => ({
+      start: index,
+      end: index + segment.length,
+      whitespace: /^\s+$/u.test(segment),
+    }))
+  }
+
+  // Keep the fallback useful in runtimes without Intl.Segmenter: whitespace,
+  // word characters, and punctuation each form one deletion unit.
+  return Array.from(text.matchAll(/\s+|[\p{L}\p{N}\p{M}_]+|[^\s\p{L}\p{N}\p{M}_]+/gu), (match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+    whitespace: /^\s+$/u.test(match[0]),
+  }))
+}
+
+/**
+ * Native word deletion treats whitespace beside the caret as part of the
+ * adjacent word operation. Intl.Segmenter exposes that whitespace as its own
+ * segment, so using every raw segment boundary made Option/Ctrl+Backspace
+ * remove only a trailing space on its first press.
+ */
+function wordDeletionBoundary(
+  text: string,
+  offset: number,
+  direction: IdmlDeleteDirection,
+): number | null {
+  const segments = wordSegments(text)
+  if (direction === "backward") {
+    let index = segments.findLastIndex((segment) => segment.start < offset)
+    if (index < 0) return null
+
+    // Consume whitespace immediately before the caret, then the adjacent word
+    // (or punctuation unit). Whitespace before that word remains the separator
+    // from the preceding word.
+    while (index >= 0 && segments[index]?.whitespace) index -= 1
+    const boundary = segments[index]?.start ?? 0
+    return boundary < offset ? boundary : null
+  }
+
+  let index = segments.findIndex((segment) => segment.end > offset)
+  if (index < 0) return null
+  // Consume whitespace immediately after the caret, the following word (or
+  // punctuation unit), and its trailing whitespace up to the next word.
+  while (index < segments.length && segments[index]?.whitespace) index += 1
+  if (index >= segments.length) return text.length > offset ? text.length : null
+  index += 1
+  while (index < segments.length && segments[index]?.whitespace) index += 1
+  const boundary = segments[index - 1]?.end
+  return boundary !== undefined && boundary > offset ? boundary : null
+}
+
 function lineBoundaries(text: string): number[] {
   const boundaries = [0]
   for (let index = 0; index < text.length; index += 1) {
@@ -250,9 +313,16 @@ export function idmlDeletionRange(
   if (!slot) return null
   const text = slotPlainText(slot.node)
   const offset = position - slot.start
+  if (granularity === "word") {
+    const boundary = wordDeletionBoundary(text, offset, direction)
+    if (boundary === null) return null
+    return direction === "backward"
+      ? { from: slot.start + boundary, to: position }
+      : { from: position, to: slot.start + boundary }
+  }
   const boundaries = granularity === "line"
     ? lineBoundaries(text)
-    : segmentBoundaries(text, granularity === "word" ? "word" : "grapheme")
+    : segmentBoundaries(text, "grapheme")
   if (direction === "backward") {
     const previous = boundaries.filter((boundary) => boundary < offset).pop()
     if (previous === undefined) return null

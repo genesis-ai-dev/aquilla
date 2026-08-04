@@ -6,6 +6,25 @@ type CaretPointDocument = Document & {
   caretRangeFromPoint?: (x: number, y: number) => Range | null
 }
 
+function idmlRenderedOffset(fragment: DocumentFragment): number {
+  let offset = 0
+  const visit = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      offset += node.textContent?.length ?? 0
+      return
+    }
+    if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === "BR") {
+      // A ProseMirror hardBreak occupies one document position even though
+      // Range#toString omits the rendered <br> entirely.
+      offset += 1
+      return
+    }
+    node.childNodes.forEach(visit)
+  }
+  fragment.childNodes.forEach(visit)
+  return offset
+}
+
 /**
  * Capture the browser's text position while the inexpensive read surface is
  * still mounted. Activating a row replaces that DOM with ProseMirror, so the
@@ -37,7 +56,7 @@ export function idmlPointerSelectionFromPoint(
   const prefix = doc.createRange()
   prefix.selectNodeContents(root)
   prefix.setEnd(range.startContainer, range.startOffset)
-  const offset = prefix.toString().length
+  const offset = idmlRenderedOffset(prefix.cloneContents())
   if (!target) return { kind: "plain", offset }
 
   const slot = Number(target.getAttribute("data-idml-slot"))

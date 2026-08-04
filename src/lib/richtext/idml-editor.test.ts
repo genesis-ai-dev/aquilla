@@ -331,6 +331,25 @@ describe("IDML deletion ranges", () => {
     expect(rangeAt(slotEnd, "backward", "line")).toEqual({ from: slotStart, to: slotEnd })
   })
 
+  it("deletes an adjacent word together with whitespace beside the caret", () => {
+    const targetHtml = SINGLE_SLOT_SOURCE.replace(">Alpha</span>", ">alpha beta </span>")
+    const editor = createEditor(
+      vi.fn(),
+      targetHtml,
+      SINGLE_SLOT_CONFIGURATION.context,
+    )
+    const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1
+    const slotEnd = slotStart + editor.state.doc.nodeAt(slotStart - 1)!.content.size
+
+    editor.commands.setTextSelection(slotEnd)
+    expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "backward", "word"))
+      .toEqual({ from: slotStart + "alpha ".length, to: slotEnd })
+
+    editor.commands.setTextSelection(slotStart + "alpha".length)
+    expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "forward", "word"))
+      .toEqual({ from: slotStart + "alpha".length, to: slotEnd })
+  })
+
   it("steps over a whole grapheme rather than half a surrogate pair", () => {
     const editor = createEditor(vi.fn())
     const slotStart = nodePosition(editor, IDML_SLOT_NODE_NAME) + 1

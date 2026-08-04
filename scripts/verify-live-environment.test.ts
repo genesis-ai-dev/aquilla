@@ -59,11 +59,17 @@ describe("live deployment environment verification", () => {
     })).rejects.toThrow("unexpected body")
   })
 
-  it("verifies that staging SPA assets contain staging targets and no dev targets", async () => {
+  it("verifies the staging app shell instead of the marketing root", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
       if (url === "https://staging.aquilla.app") {
+        return response('<script type="module" src="/assets/marketing.js"></script>', 200, "text/html")
+      }
+      if (url === "https://staging.aquilla.app/app") {
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://staging.aquilla.app/assets/marketing.js") {
+        return response("https://api.staging.aquilla.app/identity")
       }
       if (url === "https://staging.aquilla.app/assets/index.js") {
         return response('const deps = ["assets/chunk.js"]; import "./chunk.js"')
@@ -85,12 +91,21 @@ describe("live deployment environment verification", () => {
       attempts: 1,
       log: vi.fn(),
     })).resolves.toBeUndefined()
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://staging.aquilla.app/app",
+      { headers: { Accept: "text/html" } },
+    )
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      "https://staging.aquilla.app",
+      expect.anything(),
+    )
   })
 
   it("rejects a staging bundle that also contains a development target", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
-      if (url === "https://staging.aquilla.app") {
+      if (url === "https://staging.aquilla.app/app") {
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
       }
       return response([

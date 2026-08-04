@@ -5,16 +5,19 @@ const ENVIRONMENTS = {
   production: {
     apiHost: "api.aquilla.app",
     appOrigin: "https://aquilla.app",
+    appPath: "/app",
     forbiddenBundleHosts: ["api.dev.aquilla.app", "api.staging.aquilla.app"],
   },
   staging: {
     apiHost: "api.staging.aquilla.app",
     appOrigin: "https://staging.aquilla.app",
+    appPath: "/app",
     forbiddenBundleHosts: ["api.dev.aquilla.app"],
   },
   development: {
     apiHost: "api.dev.aquilla.app",
     appOrigin: "https://dev.aquilla.app",
+    appPath: "/app",
     forbiddenBundleHosts: ["api.staging.aquilla.app"],
   },
 }
@@ -174,7 +177,8 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
 }
 
 async function verifySpa(config, options) {
-  const response = await options.fetchImpl(config.appOrigin, {
+  const appUrl = new URL(config.appPath, config.appOrigin).href
+  const response = await options.fetchImpl(appUrl, {
     headers: { Accept: "text/html" },
   })
   assertResponse(response, 200, "SPA entrypoint")
@@ -200,7 +204,7 @@ async function verifySpa(config, options) {
     throw new Error(`SPA bundle contains cross-environment hosts: ${forbidden.join(", ")}`)
   }
 
-  options.log(`[verify-live] SPA at ${config.appOrigin} targets only the expected live environment`)
+  options.log(`[verify-live] SPA at ${appUrl} targets only the expected live environment`)
 }
 
 export async function verifyLiveEnvironment(environment, {

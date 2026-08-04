@@ -237,6 +237,39 @@ describe("transcribeCell — imported media segments (AQU-646)", () => {
   })
 })
 
+// ── AQU-783: the attach emit must be AWAITED before transcribeCell resolves ──
+// The transcript/timings only surface after a completion handler flushes the
+// outbox and revalidates the cell. If the emit were fire-and-forget, that flush
+// could run before the event reached IDB — nothing to push, so the result would
+// only appear after a manual page refresh (the reported bug).
+describe("transcribeCell — durable attach before resolve (AQU-783)", () => {
+  it("does not resolve until the cell.audio.attach emit settles", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["bonjour", "monde"]))
+
+    let releaseEmit: (v: string) => void = () => {}
+    emitCellAudioAttach.mockImplementationOnce(
+      () => new Promise<string>((resolve) => { releaseEmit = resolve }),
+    )
+
+    let settled = false
+    const p = transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "fra" })
+      .then((n) => { settled = true; return n })
+
+    // Flush all pending microtasks/timers: execution should now be parked on the
+    // still-pending attach emit, so transcribeCell must NOT have resolved yet.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(emitCellAudioAttach).toHaveBeenCalledOnce()
+    expect(settled).toBe(false)
+
+    releaseEmit("evt-1")
+    const words = await p
+    expect(settled).toBe(true)
+    expect(words).toBe(2)
+    expect(getTranscribeStatus(FULL_ID).kind).toBe("done")
+  })
+})
+
 // ── SUB-29: a TAKE recorded onto a media cell is target speech ─────────────
 
 function makeMediaCellWithTake(): CellData {

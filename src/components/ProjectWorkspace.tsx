@@ -4218,15 +4218,26 @@ export function ProjectWorkspace() {
       // AQU-646 P0: merge attachments in — needsTranscription gates on
       // selectedAudioId, which raw store cells never carry.
       const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
-      void runBatchTranscribeAll({
-        cells,
-        projectId: project.id,
-        session: frontierSession ?? null,
-        // AQU-646: language follows the audio — media segments are source
-        // speech, recorded takes voice the target text (per-cell in the batch).
-        sourceLanguage: project.sourceLanguage,
-        targetLanguage: project.targetLanguage,
-      })
+      const fileId = activeFileId
+      void (async () => {
+        await runBatchTranscribeAll({
+          cells,
+          projectId: project.id,
+          session: frontierSession ?? null,
+          // AQU-646: language follows the audio — media segments are source
+          // speech, recorded takes voice the target text (per-cell in the batch).
+          sourceLanguage: project.sourceLanguage,
+          targetLanguage: project.targetLanguage,
+        })
+        // AQU-783: the batch enqueues one cell.audio.attach per cell but never
+        // revalidated, so the transcripts only surfaced after a manual reload.
+        // Flush the outbox once and revalidate the file so every transcript +
+        // timing appears immediately.
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await refreshOutboxPending()
+        revalidateCells()
+        notifyAudioAttachmentsChanged(fileId)
+      })()
     },
     runSynthAll: () => {
       if (!activeFileId || !project) return
@@ -4239,7 +4250,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, workspaceAudioByCellId])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -5459,14 +5470,20 @@ export function ProjectWorkspace() {
                   // AQU-646/SUB-29: transcribe from the detail pane — language by
                   // attachment provenance (source segment → source language;
                   // a dub take on a media cell → target language).
-                  onTranscribe={(cell) => {
+                  onTranscribe={async (cell) => {
                     if (!project) return
-                    void transcribeCell({
+                    await transcribeCell({
                       cell,
                       session: frontierSession ?? null,
                       projectId: project.id,
                       language: isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage,
                     })
+                    // AQU-783: flush the queued cell.audio.attach and revalidate
+                    // the cell (source transcript) + per-file audio (timings) so
+                    // the transcription appears in the media section without a
+                    // manual page refresh. Mirrors the per-cell text-section path.
+                    await handleCellCommitted(cell.id)
+                    notifyAudioAttachmentsChanged(cell.fileId)
                   }}
                   project={editorProject ?? project ?? undefined}
                   terminologyConcepts={(editorProject ?? project)?.terminology ?? []}

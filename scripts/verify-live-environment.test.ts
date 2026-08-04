@@ -62,7 +62,15 @@ describe("live deployment environment verification", () => {
   it("verifies that staging SPA assets contain staging targets and no dev targets", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
-      if (url === "https://staging.aquilla.app") {
+      // The bare origin serves the marketing homepage, whose JS graph lacks
+      // the sync/chat targets (AQU-779) — the verifier must crawl /app instead.
+      if (url === "https://staging.aquilla.app" || url === "https://staging.aquilla.app/") {
+        return response('<script type="module" src="/assets/homepage.js"></script>', 200, "text/html")
+      }
+      if (url === "https://staging.aquilla.app/assets/homepage.js") {
+        return response('"https://api.staging.aquilla.app/identity"')
+      }
+      if (url === "https://staging.aquilla.app/app") {
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
       }
       if (url === "https://staging.aquilla.app/assets/index.js") {
@@ -85,12 +93,17 @@ describe("live deployment environment verification", () => {
       attempts: 1,
       log: vi.fn(),
     })).resolves.toBeUndefined()
+
+    const requestedUrls = fetchImpl.mock.calls.map(([input]) => String(input))
+    expect(requestedUrls).toContain("https://staging.aquilla.app/app")
+    expect(requestedUrls).not.toContain("https://staging.aquilla.app")
+    expect(requestedUrls).not.toContain("https://staging.aquilla.app/")
   })
 
   it("rejects a staging bundle that also contains a development target", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
-      if (url === "https://staging.aquilla.app") {
+      if (url === "https://staging.aquilla.app/app") {
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
       }
       return response([

@@ -485,11 +485,16 @@ export async function handleBulkImportRequest(
       )
     }
     if (env.ProjectSync) {
+      // AQU-744: a finalize that applied the file.restore reveal is the moment
+      // the file enters the visible inventory — the create-time notification
+      // fired while the row was still stage-tombstoned, so connected clients
+      // must re-pull the file list NOW or a view loaded during the staged
+      // window never shows the file until a hard reload.
       const notify = notifyProjectDoFileProgressChanged(
         env,
         body.projectId,
         body.fileId,
-        false,
+        Boolean(body.publishEventId),
       ).catch((err) => {
         console.warn(`[import] ProjectSync completion notify failed for ${body.projectId}/${body.fileId}:`, err)
       })

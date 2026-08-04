@@ -221,6 +221,18 @@ describe("worker deployment environment contract", () => {
     expect(environment).toContain(`routes = ["${route}"]`)
   })
 
+  it("keeps pull-request previews on a route-free Worker", () => {
+    const config = readRepoFile("wrangler.toml")
+    const preview = tomlBlock(config, "[env.preview]")
+    const previewAssets = tomlBlock(config, "[env.preview.assets]")
+
+    expect(preview).toContain('name = "aquilla-web-preview"')
+    expect(preview).toContain("workers_dev = true")
+    expect(preview).toContain("preview_urls = true")
+    expect(preview).not.toContain("routes")
+    expect(previewAssets).toContain('not_found_handling = "single-page-application"')
+  })
+
   it.each([
     [
       "production",
@@ -408,8 +420,15 @@ describe("worker deployment environment contract", () => {
     expect(workflow).toContain("node scripts/verify-live-environment.mjs \"${{ needs.target.outputs.live_environment }}\" --surface=spa")
     expect(workflow).toContain("run: bash scripts/resolve-deployment-target.sh")
     expect(workflow).toContain("node scripts/cloudflare-version-deploy.mjs web")
-    expect(workflow).toContain("command: versions upload --env=preview")
+    expect(workflow).toContain("node scripts/cloudflare-pr-preview.mjs \"${{ github.event.number }}\" \"${{ github.event.pull_request.head.sha }}\"")
+    expect(workflow).toContain("verify-live-environment.mjs development --surface=spa --app-origin=\"$PREVIEW_URL\"")
+    expect(workflow).toContain("**Preview:** ${{ steps.deploy_preview.outputs.url }}")
     expect(workflow).toContain("name: ${{ needs.target.outputs.github_environment }}")
+    expect(workflow).toContain("if: github.event.pull_request.draft != true")
+    expect(workflow).not.toContain("steps.decide.outputs")
+    expect(workflow).not.toContain("[preview]")
+    expect(workflow).not.toContain("<workers-subdomain>")
+    expect(workflow).not.toContain("cloudflare/wrangler-action")
     expect(workflow).not.toContain("|| '--env=development'")
     expect(deployJobHeader).toContain("env:")
     expect(deployJobHeader).toContain("VITE_SYNC_WORKER_HOST:")

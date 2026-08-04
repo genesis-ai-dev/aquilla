@@ -123,10 +123,81 @@ describe("live deployment environment verification", () => {
     })).rejects.toThrow("cross-environment hosts: api.dev.aquilla.app")
   })
 
+  it("verifies a PR preview origin against development bundle targets", async () => {
+    const previewOrigin = "https://pr-274-aquilla-web-preview.blue-darkness-7674.workers.dev"
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === `${previewOrigin}/app`) {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === `${previewOrigin}/assets/index.js`) {
+        return response([
+          "https://api.dev.aquilla.app/identity",
+          "api.dev.aquilla.app/sync",
+          "https://api.dev.aquilla.app/chat",
+        ].join(" "))
+      }
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("development", {
+      surface: "spa",
+      appOrigin: previewOrigin,
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      log: vi.fn(),
+    })).resolves.toBeUndefined()
+
+    expect(fetchImpl).toHaveBeenCalledWith(`${previewOrigin}/app`, {
+      headers: { Accept: "text/html" },
+    })
+    expect(fetchImpl.mock.calls.flat().map(String)).not.toContain("https://dev.aquilla.app/app")
+  })
+
+  it("retries the complete preview crawl while a new alias propagates", async () => {
+    const previewOrigin = "https://pr-274-aquilla-web-preview.blue-darkness-7674.workers.dev"
+    let entryAttempts = 0
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === `${previewOrigin}/app`) {
+        entryAttempts += 1
+        if (entryAttempts === 1) return response("not found", 404)
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      return response([
+        "https://api.dev.aquilla.app/identity",
+        "api.dev.aquilla.app/sync",
+        "https://api.dev.aquilla.app/chat",
+      ].join(" "))
+    })
+
+    await expect(verifyLiveEnvironment("development", {
+      surface: "spa",
+      appOrigin: previewOrigin,
+      fetchImpl,
+      lookup,
+      attempts: 2,
+      retryDelayMs: 0,
+      log: vi.fn(),
+    })).resolves.toBeUndefined()
+    expect(entryAttempts).toBe(2)
+  })
+
   it("fails closed for unknown environments and surfaces", async () => {
     await expect(verifyLiveEnvironment("prod", { log: vi.fn() }))
       .rejects.toThrow("unknown environment")
     await expect(verifyLiveEnvironment("production", { surface: "worker" as never, log: vi.fn() }))
       .rejects.toThrow("unknown surface")
+    await expect(verifyLiveEnvironment("development", {
+      surface: "spa",
+      appOrigin: "http://preview.example.com/path",
+      log: vi.fn(),
+    })).rejects.toThrow("expected an HTTPS origin without a path")
+    await expect(verifyLiveEnvironment("development", {
+      surface: "auth",
+      appOrigin: "https://preview.example.com",
+      log: vi.fn(),
+    })).rejects.toThrow("may only be used with --surface=spa")
   })
 })

@@ -76,6 +76,26 @@ GitHub production deploy jobs also enter the repository's `production`
 Environment. GitHub's deployment-branch policy restricts that Environment to
 `main`, independently of the workflow mapping.
 
+## Pull-request web previews
+
+Every non-draft web pull request uploads the current commit to the route-free
+`aquilla-web-preview` Worker with the sanitized alias `pr-<number>`. Draft and
+documentation-only pull requests remain excluded. The alias is refreshed on
+every supported pull-request update; no commit-message tag is required.
+
+`scripts/cloudflare-pr-preview.mjs` reads Wrangler's structured NDJSON output
+and accepts only a `preview_alias_url` for the expected alias and Worker name.
+It does not scrape a display log or hard-code the account's Workers subdomain.
+If the preview Worker is missing, the helper may bootstrap only the `preview`
+Wrangler profile, which explicitly enables preview URLs and declares no custom
+routes, then retry the version upload.
+
+Before the URL is posted to the pull request, the live verifier loads `/app`
+through that exact preview origin, crawls the deployed JavaScript graph, and
+requires the development identity, sync, and chat targets. This preview process
+does not promote a version or change production, staging, or development route
+traffic. Preview bundles do use development services and data.
+
 ## Exact-version deployment and verification
 
 The repository deployer writes Wrangler's structured NDJSON output to a temporary

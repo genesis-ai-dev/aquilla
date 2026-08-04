@@ -300,6 +300,24 @@ export function trimWindowForCell(cell: CellData): { start: number; end: number 
   // nothing to do with the file timeline, so it plays in full. Provenance
   // comes from the audioId seed (source clip = fileId, takes = cellId).
   if (cell.selectedAudioId && audioIdSeededWith(cell.selectedAudioId, cell.id)) return null
+  // AQU-784: the authoritative in-clip slice is the SELECTED attachment's
+  // persisted trim window (trimStartMs/trimEndMs) — the same coordinate the
+  // timeline card, transcription, and speaker extraction all address
+  // (`att.trimStartMs ?? cell.startTime` throughout the app). Prefer it over the
+  // cell's timeline placement (startTime/endTime): a `cell.retime` drag moves
+  // the placement independently of the clip slice, and some imports time only
+  // the attachment — in both cases reading the cell placement seeks to the wrong
+  // offset (often 0), which is why "play starts at the whole clip's beginning"
+  // kept bouncing back (AQU-647 → AQU-666 → AQU-784).
+  const att = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
+  if (
+    att &&
+    typeof att.trimStartMs === "number" && Number.isFinite(att.trimStartMs) &&
+    typeof att.trimEndMs === "number" && Number.isFinite(att.trimEndMs) &&
+    att.trimEndMs > att.trimStartMs
+  ) {
+    return { start: att.trimStartMs / 1000, end: att.trimEndMs / 1000 }
+  }
   const { startTime, endTime } = cell
   if (typeof startTime !== "number" || typeof endTime !== "number") return null
   if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null

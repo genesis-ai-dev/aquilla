@@ -66,3 +66,59 @@ describe("trimWindowForCell — attachment provenance (SUB-29)", () => {
     ).toBeNull()
   })
 })
+
+// AQU-784: the selected attachment's persisted trim window (ms) is the
+// authoritative in-clip slice — the same coordinate the timeline card and
+// transcription address. It wins over the cell's timeline placement, which a
+// `cell.retime` drag (or a trim-on-attachment-only import) moves independently.
+describe("trimWindowForCell — attachment trim is the source of truth (AQU-784)", () => {
+  it("prefers the attachment trim over a diverged cell placement", () => {
+    expect(
+      trimWindowForCell(baseCell({
+        medium: "media",
+        startTime: 0, endTime: 0, // stale/wrong placement after a retime
+        selectedAudioId: "audio-file-9-1700000000-abcdefgh.mp3",
+        attachments: { "audio-file-9-1700000000-abcdefgh.mp3": { type: "audio", url: "u", trimStartMs: 10_000, trimEndMs: 22_000 } },
+      })),
+    ).toEqual({ start: 10, end: 22 })
+  })
+
+  it("times the section from the attachment even when the cell carries no placement", () => {
+    expect(
+      trimWindowForCell(baseCell({
+        medium: "media",
+        selectedAudioId: "audio-file-9-1700000000-abcdefgh.mp3",
+        attachments: { "audio-file-9-1700000000-abcdefgh.mp3": { type: "audio", url: "u", trimStartMs: 3_000, trimEndMs: 5_500 } },
+      })),
+    ).toEqual({ start: 3, end: 5.5 })
+  })
+
+  it("falls back to the cell placement when the attachment has no usable trim", () => {
+    expect(
+      trimWindowForCell(baseCell({
+        medium: "media", startTime: 2.9, endTime: 5,
+        selectedAudioId: "audio-file-9-1700000000-abcdefgh.mp3",
+        attachments: { "audio-file-9-1700000000-abcdefgh.mp3": { type: "audio", url: "u" } },
+      })),
+    ).toEqual({ start: 2.9, end: 5 })
+    // A degenerate attachment trim is ignored, not trapped at the placement.
+    expect(
+      trimWindowForCell(baseCell({
+        medium: "media", startTime: 2.9, endTime: 5,
+        selectedAudioId: "audio-file-9-1700000000-abcdefgh.mp3",
+        attachments: { "audio-file-9-1700000000-abcdefgh.mp3": { type: "audio", url: "u", trimStartMs: 5_000, trimEndMs: 5_000 } },
+      })),
+    ).toEqual({ start: 2.9, end: 5 })
+  })
+
+  it("still plays a take in full even if its attachment carries a trim", () => {
+    // Take selected (cellId-seeded) short-circuits before the attachment read.
+    expect(
+      trimWindowForCell(baseCell({
+        id: "c1", medium: "media", startTime: 2.9, endTime: 5,
+        selectedAudioId: "audio-c1-1700000000-abcdefgh.webm",
+        attachments: { "audio-c1-1700000000-abcdefgh.webm": { type: "audio", url: "u", trimStartMs: 1_000, trimEndMs: 2_000 } },
+      })),
+    ).toBeNull()
+  })
+})

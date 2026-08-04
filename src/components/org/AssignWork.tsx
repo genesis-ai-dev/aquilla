@@ -241,7 +241,7 @@ export function AssignWork({
               onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
               disabled={busy || isSelfAssignMode}
             >
-              <SelectTrigger id="assign-work-assignee" className="w-full">
+              <SelectTrigger id="assign-work-assignee">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -277,7 +277,7 @@ export function AssignWork({
               onValueChange={(v) => setFileId(v ?? "")}
               disabled={busy}
             >
-              <SelectTrigger id="assign-work-book" className="w-full">
+              <SelectTrigger id="assign-work-book">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

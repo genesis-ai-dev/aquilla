@@ -308,7 +308,7 @@ export function MultiProjectInviteDialog({
                           >
                             <SelectTrigger
                               size="sm"
-                              className="shrink-0 max-w-[8.5rem]"
+                              className="shrink-0"
                               aria-label={`Role for ${p.name}`}
                             >
                               <SelectValue />

@@ -1404,7 +1404,7 @@ export function ProjectOverview() {
                         value={fileSortMode}
                         onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
                       >
-                        <SelectTrigger aria-label="Sort files by" className="w-44">
+                        <SelectTrigger aria-label="Sort files by">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>

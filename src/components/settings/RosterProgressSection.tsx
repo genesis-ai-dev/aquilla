@@ -115,7 +115,7 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
             onValueChange={(v) => { if (v) void handleRosterChange(Number(v)) }}
             disabled={!canEdit || rosterBusy}
           >
-            <SelectTrigger id="roster-min-role" aria-label="Who can view the roster" className="w-full max-w-sm">
+            <SelectTrigger id="roster-min-role" aria-label="Who can view the roster">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -154,7 +154,7 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
             onValueChange={(v) => { if (v) void handleProgressChange(Number(v)) }}
             disabled={!canEdit || progressBusy}
           >
-            <SelectTrigger id="progress-min-role" aria-label="Who can view member progress" className="w-full max-w-sm">
+            <SelectTrigger id="progress-min-role" aria-label="Who can view member progress">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

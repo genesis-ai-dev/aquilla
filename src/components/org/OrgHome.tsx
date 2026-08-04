@@ -1078,7 +1078,7 @@ export function OrgHome() {
                               value={projectLens}
                               onValueChange={handleProjectLensChange}
                             >
-                              <SelectTrigger aria-label="Sort projects" size="sm" className="w-40 max-w-full bg-background">
+                              <SelectTrigger aria-label="Sort projects" size="sm" className="bg-background">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>

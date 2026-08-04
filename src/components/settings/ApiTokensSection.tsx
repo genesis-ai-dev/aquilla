@@ -526,7 +526,7 @@ function MintTokenDialog({
             <Field>
               <FieldLabel htmlFor="token-org">Organization</FieldLabel>
               <Select value={orgId} onValueChange={(value) => setOrgId(value ?? "")}>
-                <SelectTrigger id="token-org" className="w-full">
+                <SelectTrigger id="token-org">
                   <SelectValue placeholder="No organization (personal)" />
                 </SelectTrigger>
                 <SelectContent>
@@ -547,7 +547,7 @@ function MintTokenDialog({
             <Field>
               <FieldLabel htmlFor="token-project">Project</FieldLabel>
               <Select value={projectId} onValueChange={(value) => setProjectId(value ?? "")}>
-                <SelectTrigger id="token-project" className="w-full">
+                <SelectTrigger id="token-project">
                   <SelectValue placeholder="No project (org-wide)" />
                 </SelectTrigger>
                 <SelectContent>
@@ -568,7 +568,7 @@ function MintTokenDialog({
                 value={expiry}
                 onValueChange={(value) => setExpiry((value ?? "90d") as ExpiryPresetId)}
               >
-                <SelectTrigger id="token-expiry" className="w-full">
+                <SelectTrigger id="token-expiry">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

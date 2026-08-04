@@ -803,7 +803,7 @@ export function InviteLinkTab({
             onValueChange={(v) => setInviteRole(Number(v ?? ""))}
             disabled={!session?.jwt}
           >
-            <SelectTrigger className="w-full" aria-label="Role">
+            <SelectTrigger aria-label="Role">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -869,7 +869,7 @@ export function InviteLinkTab({
             }
             disabled={!session?.jwt}
           >
-            <SelectTrigger className="w-full" aria-label="Link expires">
+            <SelectTrigger aria-label="Link expires">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

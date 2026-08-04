@@ -454,7 +454,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                 value={field.state.value}
                                 onValueChange={(value) => field.handleChange(value ?? "")}
                               >
-                                <SelectTrigger id="upstream-project" className="w-full" aria-invalid={invalid}>
+                                <SelectTrigger id="upstream-project" aria-invalid={invalid}>
                                   <SelectValue placeholder="Choose a project to link from…" />
                                 </SelectTrigger>
                                 <SelectContent>

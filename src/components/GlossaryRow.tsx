@@ -186,7 +186,7 @@ function ExpanderRenderingRow({
         value={rendering.status}
         onValueChange={(v: string | null) => onChangeStatus((v ?? rendering.status) as RenderingStatus)}
       >
-        <SelectTrigger aria-label={`Rendering ${index + 1} status`} className="h-7 w-32 text-xs" disabled={!canManage}>
+        <SelectTrigger aria-label={`Rendering ${index + 1} status`} className="h-7 text-xs" disabled={!canManage}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

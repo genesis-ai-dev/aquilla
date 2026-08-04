@@ -499,7 +499,7 @@ export function AssignModal({
               value={scopeKind}
               onValueChange={(v) => setScopeKind(v as ScopeKind)}
             >
-              <SelectTrigger id="assign-modal-scope" className="w-full">
+              <SelectTrigger id="assign-modal-scope">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -536,7 +536,7 @@ export function AssignModal({
                 value={selectedLane}
                 onValueChange={(v) => setSelectedLane(v ?? "")}
               >
-                <SelectTrigger id="assign-modal-lane" className="w-full">
+                <SelectTrigger id="assign-modal-lane">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -633,7 +633,7 @@ export function AssignModal({
               onValueChange={(v) => setSelectedMemberId(v ?? "")}
               disabled={isSelfAssignMode}
             >
-              <SelectTrigger id="assign-modal-assignee" className="w-full">
+              <SelectTrigger id="assign-modal-assignee">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

@@ -274,7 +274,7 @@ export function LabelImportPanel({
           value={selectedFileId}
           onValueChange={(v) => setSelectedFileId(v ?? "")}
         >
-          <SelectTrigger size="sm" className="w-full text-xs">
+          <SelectTrigger size="sm" className="text-xs">
             <SelectValue placeholder="Choose a file…" />
           </SelectTrigger>
           <SelectContent>

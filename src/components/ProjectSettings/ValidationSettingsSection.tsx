@@ -43,7 +43,7 @@ const POPUP_SEARCH_CLASS =
 
 const POPUP_CONTENT_CLASS =
   // Hug list content (not trigger / not input size=20). Search stretches to match.
-  "w-max! min-w-48! max-w-(--available-width) *:data-[slot=input-group]:w-full *:data-[slot=input-group]:min-w-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
+  "w-max! min-w-0! max-w-(--available-width) *:data-[slot=input-group]:w-full *:data-[slot=input-group]:min-w-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
 
 // AQU-352: the minimum-validator-role floor draws its labels from the canonical
 // role source (roles.ts) so they read identically to the member / invite /
@@ -178,7 +178,7 @@ function NamedValidatorsCombobox({
         render={
           <Button
             variant="outline"
-            className="h-auto min-h-9 w-full max-w-md justify-between gap-2 px-2.5 py-1.5 font-normal [&>svg:last-child]:shrink-0"
+            className="h-auto min-h-9 w-fit! justify-between gap-2 px-2.5 py-1.5 font-normal [&>svg:last-child]:shrink-0"
           />
         }
       >
@@ -425,7 +425,7 @@ export function ValidationSettingsSection({
                 })
               }
             >
-              <SelectTrigger id="validation-role-floor" className="w-48">
+              <SelectTrigger id="validation-role-floor">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

@@ -72,7 +72,7 @@ export function OrgSettingsExport() {
             onValueChange={(v) => { if (v) void handleExportRoleChange(Number(v)) }}
             disabled={!canEditExportFloor || exportRoleBusy}
           >
-            <SelectTrigger id="export-min-role" aria-label="Who can export" className="w-full max-w-sm">
+            <SelectTrigger id="export-min-role" aria-label="Who can export">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

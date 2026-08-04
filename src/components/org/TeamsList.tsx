@@ -253,7 +253,7 @@ export function TeamsList() {
                 value={sort}
                 onValueChange={(v) => setSort((v ?? "name") as SortOption)}
               >
-                <SelectTrigger aria-label="Sort teams by" className="w-56">
+                <SelectTrigger aria-label="Sort teams by">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

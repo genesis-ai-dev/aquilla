@@ -170,7 +170,7 @@ export function MondayMappingEditor({
                   onValueChange={(value) => updateRow(i, { columnId: (value as string) ?? "" })}
                   disabled={disabled}
                 >
-                  <SelectTrigger aria-label="Monday column" className="w-full">
+                  <SelectTrigger aria-label="Monday column">
                     <SelectValue placeholder="Pick a column" />
                   </SelectTrigger>
                   <SelectContent>
@@ -191,7 +191,7 @@ export function MondayMappingEditor({
                   onValueChange={(value) => updateRow(i, { metric: value as MondayMetricKey })}
                   disabled={disabled}
                 >
-                  <SelectTrigger aria-label="Metric" className="w-full">
+                  <SelectTrigger aria-label="Metric">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

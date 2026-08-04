@@ -363,7 +363,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
                 onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
                 disabled={boards === null}
               >
-                <SelectTrigger aria-label="Monday board" className="w-64">
+                <SelectTrigger aria-label="Monday board">
                   <SelectValue placeholder={boards === null ? "Loading boards…" : "Pick a board"} />
                 </SelectTrigger>
                 <SelectContent>

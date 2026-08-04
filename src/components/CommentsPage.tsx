@@ -728,7 +728,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 value={filter.fileId}
                 onValueChange={(v) => onChange({ ...filter, fileId: v ?? "" })}
               >
-                <SelectTrigger size="sm" className="max-w-[180px] text-xs">
+                <SelectTrigger size="sm" className="text-xs">
                   <SelectValue className="truncate" />
                 </SelectTrigger>
                 <SelectContent>

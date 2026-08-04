@@ -1517,7 +1517,7 @@ export function ProjectSettings() {
                     value={contextSize}
                     onValueChange={(value) => setContextSize(value as ContextSize)}
                   >
-                    <SelectTrigger id="context-size" className="w-full">
+                    <SelectTrigger id="context-size">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1571,7 +1571,7 @@ export function ProjectSettings() {
                     value={fewShotExampleFormat}
                     onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
                   >
-                    <SelectTrigger id="few-shot-example-format" className="w-full">
+                    <SelectTrigger id="few-shot-example-format">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1668,7 +1668,7 @@ export function ProjectSettings() {
                       value={presetId}
                       onValueChange={(value) => handlePresetChange(value ?? "")}
                     >
-                      <SelectTrigger id="preset" className="w-full">
+                      <SelectTrigger id="preset">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1724,7 +1724,7 @@ export function ProjectSettings() {
                     <div>
                       <FieldLabel htmlFor="mdl">Model</FieldLabel>
                       <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
-                        <SelectTrigger id="mdl" className="w-full">
+                        <SelectTrigger id="mdl">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1915,7 +1915,7 @@ export function ProjectSettings() {
                     value={harmonizeMinRole}
                     onValueChange={(value) => setHarmonizeMinRole(value as "project_lead" | "maintainer")}
                   >
-                    <SelectTrigger id="harmonize-min-role" className="w-48">
+                    <SelectTrigger id="harmonize-min-role">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

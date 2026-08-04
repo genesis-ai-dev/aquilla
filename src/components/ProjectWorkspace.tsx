@@ -6057,7 +6057,7 @@ function MoveToCorpusDialog({
             value={selection}
             onValueChange={(v) => { if (v != null) setSelection(v) }}
           >
-            <SelectTrigger className="w-full" aria-label="Corpus">
+            <SelectTrigger aria-label="Corpus">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

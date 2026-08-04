@@ -485,7 +485,7 @@ function MmsLanguageField({ value, onChange }: { value: string; onChange: (v: st
             onChange(next === "__other__" ? "" : next)
           }}
         >
-          <SelectTrigger id="voice-mms-lang" className="w-full">
+          <SelectTrigger id="voice-mms-lang">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

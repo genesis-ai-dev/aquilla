@@ -328,7 +328,7 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
                 setStatus((v ?? "draft") as Concept["status"])
               }
             >
-              <SelectTrigger id="concept-status" className="w-full">
+              <SelectTrigger id="concept-status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

@@ -282,7 +282,7 @@ export function RuleCreateDialog({
                       value={field.state.value}
                       onValueChange={(value) => field.handleChange(value as "major" | "minor")}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -309,7 +309,7 @@ export function RuleCreateDialog({
                       value={field.state.value}
                       onValueChange={(value) => field.handleChange(value as UserRuleCheckType)}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>

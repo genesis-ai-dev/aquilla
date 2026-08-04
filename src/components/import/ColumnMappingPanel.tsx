@@ -82,7 +82,7 @@ function ColSelect({
         value={value === null ? "" : String(value)}
         onValueChange={(v) => onChange(v === "" || v == null ? null : parseInt(v, 10))}
       >
-        <SelectTrigger size="sm" className="flex-1 text-xs">
+        <SelectTrigger size="sm" className="text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

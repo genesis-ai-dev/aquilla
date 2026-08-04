@@ -243,6 +243,7 @@ describe("TimelineEditor", () => {
           completing: new Map(), previews: new Map(),
           onCompleteSingle: async () => {}, onAiSetupNeeded: () => {},
           onOpenComments: () => {}, onOpenHistory: () => {}, onOpenRecording: () => {},
+          onMakeCharacter: () => {},
           projectId: "p1", username: "tester",
         }}
       />,

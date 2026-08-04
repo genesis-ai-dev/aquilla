@@ -18,6 +18,7 @@ import {
   NotebookPen,
   RefreshCw,
   Sparkles,
+  UserPlus,
   VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
@@ -63,6 +64,10 @@ export interface TimelineDetailActions {
   onOpenComments(cellId: string): void
   onOpenHistory(cellId: string): void
   onOpenRecording(cellId: string): void
+  // AQU-786: turn this clip's take into a reusable Cast character — parity with
+  // the text/audio lens's clone control (CellVoicePanel's "Clone a voice from
+  // this take"). Opens the character creator seeded with this cell's take.
+  onMakeCharacter(cellId: string): void
   openCommentCounts?: Map<string, number>
   // Context CellTtsButton / CellAudioUploadButton need beyond the cell
   projectId: string
@@ -205,6 +210,18 @@ export function TimelineCellDetail({
   // clip that squats in every section's recording slot. Text cells behave
   // exactly as before (any selected recording is a take).
   const hasRecordedTake = Boolean(takeAudioId)
+  // AQU-786: a clone lifts THIS clip's take as the reference voice, so offer it
+  // only where a liftable take exists — a selected recording or generated-voice
+  // clip whose bytes are still present. Mirrors the take set the character
+  // creator builds (NewVoiceModal's audioSources) and the text lens's `hasTake`
+  // gate, so no dead button shows on an empty section.
+  const hasLiftableClip = (id: string | undefined): boolean => {
+    if (!id) return false
+    const att = cell.attachments?.[id]
+    return Boolean(att && !att.isDeleted && att.url)
+  }
+  const clonableTake =
+    hasLiftableClip(cell.selectedAudioId) || hasLiftableClip(cell.selectedGeneratedVoiceAudioId)
   const completingState = detailActions?.completing.get(cell.id)
   const busy = completingState === "searching" || completingState === "generating"
   const preview = detailActions?.previews.get(cell.id)
@@ -373,6 +390,15 @@ export function TimelineCellDetail({
                     disabled={!editable}
                     playOnly
                   />
+                )}
+                {editable && clonableTake && (
+                  <ActionIconButton
+                    label="Clone a voice from this take"
+                    testId="tl-detail-clone"
+                    onClick={() => detailActions.onMakeCharacter(cell.id)}
+                  >
+                    <UserPlus className="h-3 w-3" />
+                  </ActionIconButton>
                 )}
                 {editable && (
                   <ActionIconButton

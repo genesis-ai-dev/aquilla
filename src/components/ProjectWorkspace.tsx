@@ -3433,6 +3433,14 @@ export function ProjectWorkspace() {
     targetLanguage: project.targetLanguage,
     projectTtsSettings: project.ttsSettings,
     username: currentUsername,
+    // AQU-786: the Media lens's clone control reuses the same seed+open flow as
+    // the text/audio lens's "Clone a voice from this take" (see the audioLens
+    // memo's onMakeCharacterFromCell) so both surfaces open the identical
+    // character creator seeded with the selected clip's take.
+    onMakeCharacter: (cellId: string) => {
+      setMakeCharacterSeedCellId(cellId)
+      setMakeCharacterOpen(true)
+    },
   } : null, [project, isConfigured, isCompletionAvailable, frontierSession, completing, previews, errors,
     handleCompleteSingle, handleAiSetupNeeded, handleOpenComments, handleOpenHistory,
     handleOpenRecording, liveCellOpenCommentCount, currentUsername])

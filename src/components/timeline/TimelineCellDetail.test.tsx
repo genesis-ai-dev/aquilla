@@ -64,6 +64,7 @@ function makeActions(over: Partial<TimelineDetailActions> = {}): TimelineDetailA
     onOpenComments: vi.fn(),
     onOpenHistory: vi.fn(),
     onOpenRecording: vi.fn(),
+    onMakeCharacter: vi.fn(),
     openCommentCounts: new Map(),
     projectId: "p1",
     sourceLanguage: "en",
@@ -416,6 +417,74 @@ describe("TimelineCellDetail — audio, comments, history, footnote", () => {
     expect(screen.queryByTestId("tl-detail-footnote")).toBeNull()
     expect(screen.getByTestId("tl-detail-comments")).toBeInTheDocument()
     expect(screen.getByTestId("tl-detail-history")).toBeInTheDocument()
+  })
+})
+
+describe("TimelineCellDetail — AQU-786 clone a voice from this take", () => {
+  // A liftable recorded take (cellId-seeded audioId) with bytes present.
+  const withRecordedTake = (o: Partial<CellData> = {}) => {
+    const takeId = "audio-c1-1700000000-abcdefgh.webm"
+    return timedCell({
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: `frontier-audio://${takeId}` } },
+      ...o,
+    } as Partial<CellData>)
+  }
+
+  it("shows the clone control when a recorded take exists and fires onMakeCharacter with the cell id", () => {
+    const actions = makeActions()
+    render(
+      <TimelineCellDetail cell={withRecordedTake()} editable onCommitTarget={() => {}} detailActions={actions} />,
+    )
+    fireEvent.click(screen.getByTestId("tl-detail-clone"))
+    expect(actions.onMakeCharacter).toHaveBeenCalledWith("c1")
+  })
+
+  it("shows the clone control when only a generated-voice take exists", () => {
+    const genId = "audio-gen-1700000000-abcdefgh.wav"
+    const actions = makeActions()
+    render(
+      <TimelineCellDetail
+        cell={timedCell({
+          selectedGeneratedVoiceAudioId: genId,
+          attachments: { [genId]: { type: "audio", url: `frontier-audio://${genId}` } },
+        } as Partial<CellData>)}
+        editable
+        onCommitTarget={() => {}}
+        detailActions={actions}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-clone")).toBeInTheDocument()
+  })
+
+  it("hides the clone control on an empty section with no clonable take (no dead button)", () => {
+    render(
+      <TimelineCellDetail cell={timedCell()} editable onCommitTarget={() => {}} detailActions={makeActions()} />,
+    )
+    expect(screen.queryByTestId("tl-detail-clone")).toBeNull()
+  })
+
+  it("hides the clone control when the take's clip has been deleted", () => {
+    const takeId = "audio-c1-1700000000-abcdefgh.webm"
+    render(
+      <TimelineCellDetail
+        cell={timedCell({
+          selectedAudioId: takeId,
+          attachments: { [takeId]: { type: "audio", url: `frontier-audio://${takeId}`, isDeleted: true } },
+        } as Partial<CellData>)}
+        editable
+        onCommitTarget={() => {}}
+        detailActions={makeActions()}
+      />,
+    )
+    expect(screen.queryByTestId("tl-detail-clone")).toBeNull()
+  })
+
+  it("hides the clone control in read-only mode even with a clonable take", () => {
+    render(
+      <TimelineCellDetail cell={withRecordedTake()} editable={false} onCommitTarget={() => {}} detailActions={makeActions()} />,
+    )
+    expect(screen.queryByTestId("tl-detail-clone")).toBeNull()
   })
 })
 

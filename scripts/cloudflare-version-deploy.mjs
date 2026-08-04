@@ -59,7 +59,6 @@ async function uploadWorkerVersion({
         "versions",
         "upload",
         `--env=${expectation.environment}`,
-        `--name=${workerName}`,
         "--tag",
         tag,
         "--message",
@@ -102,7 +101,6 @@ async function promoteWorkerVersion({
       "deploy",
       `${versionId}@100%`,
       `--env=${expectation.environment}`,
-      `--name=${workerName}`,
       "--message",
       message,
       "--yes",
@@ -118,7 +116,6 @@ async function promoteWorkerVersion({
       "triggers",
       "deploy",
       `--env=${expectation.environment}`,
-      `--name=${workerName}`,
     ],
     { cwd: expectation.directory, env: commandEnvironment },
   )

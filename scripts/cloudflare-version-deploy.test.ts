@@ -67,7 +67,7 @@ describe("verified Cloudflare version deployment", () => {
     ])
   })
 
-  it("promotes the captured ID and reapplies routes and cron triggers", async () => {
+  it("uses the environment-configured Worker name while promoting the captured ID", async () => {
     const calls: string[][] = []
     const spawnCommand = ((_: string, args: readonly string[], options: {
       env?: NodeJS.ProcessEnv
@@ -103,22 +103,20 @@ describe("verified Cloudflare version deployment", () => {
         "versions",
         "upload",
         "--env=production",
-        "--name=aquilla-identity",
       ]),
       expect.arrayContaining([
         "versions",
         "deploy",
         "version-123@100%",
         "--env=production",
-        "--name=aquilla-identity",
       ]),
       expect.arrayContaining([
         "triggers",
         "deploy",
         "--env=production",
-        "--name=aquilla-identity",
       ]),
     ])
+    expect(calls.flat()).not.toContain("--name=aquilla-identity")
   })
 
   it("verifies development previews without promoting them", async () => {

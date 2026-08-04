@@ -1,4 +1,4 @@
-// Source-audio play control for the timeline clip detail pane (AQU-659).
+// Clip-audio play control for the timeline clip detail pane (AQU-659, AQU-785).
 //
 // A media clip's source is a recording attachment (slot "recording"), attached
 // by the importer / diarization / attach-media path. The detail pane used to
@@ -6,8 +6,14 @@
 // real play/pause control by reusing the same `useCellAudio` controller the
 // main editor row uses — no bespoke audio element lifecycle here.
 //
-// Mounted by TimelineCellDetail ONLY when the clip actually has a recording
-// attachment, so `useCellAudio` (which pulls the frontier session via
+// AQU-785: the same control also backs the TARGET card's recorded-take
+// playback. The imported source clip (fileId-seeded id) and the recorded take
+// (cellId-seeded id) share the one recording slot, so `selectedAudioId` alone
+// can't address both at once — the caller passes the explicit `audioId` for
+// the clip this instance should play, and `variant` picks the right labels.
+//
+// Mounted by TimelineCellDetail ONLY when the clip actually has the relevant
+// recording attachment, so `useCellAudio` (which pulls the frontier session via
 // react-query) never runs for audio-less clips or in provider-less unit tests.
 
 import { useMemo } from "react"
@@ -23,9 +29,17 @@ import { AppTooltip } from "@/components/ui/tooltip"
 export interface TimelineSourceAudioProps {
   project: ProjectRecord
   cell: CellData
+  /** Which attachment to play. Defaults to the cell's selected recording; the
+   *  source card passes the imported clip id and the target card the take id
+   *  so both stay addressable when they share the recording slot (AQU-785). */
+  audioId?: string
+  /** Distinguishes the imported source clip from a recorded target take so the
+   *  labels and testid read correctly in each card. */
+  variant?: "source" | "take"
 }
 
-export function TimelineSourceAudio({ project, cell }: TimelineSourceAudioProps) {
+export function TimelineSourceAudio({ project, cell, audioId, variant = "source" }: TimelineSourceAudioProps) {
+  const playAudioId = audioId ?? cell.selectedAudioId
   // Minimal CodexCell shape for the audio hook — useCellAudio only reads
   // metadata.selectedAudioId and metadata.attachments[selectedAudioId]
   // (mirrors EditorTable's cellForAudio construction).
@@ -34,19 +48,27 @@ export function TimelineSourceAudio({ project, cell }: TimelineSourceAudioProps)
       ({
         metadata: {
           attachments: cell.attachments,
-          selectedAudioId: cell.selectedAudioId,
+          selectedAudioId: playAudioId,
         },
       }) as unknown as CodexCell,
-    [cell.attachments, cell.selectedAudioId],
+    [cell.attachments, playAudioId],
   )
   const audio = useCellAudio(project, cellForAudio, cell.fileId)
 
+  const isTake = variant === "take"
   const busy = audio.state === "loading"
   const isError = audio.state === "error"
-  const label = audio.isPlaying ? "Pause source audio" : "Play source audio"
+  const label = isTake
+    ? audio.isPlaying
+      ? "Pause recorded take"
+      : "Play recorded take"
+    : audio.isPlaying
+      ? "Pause source audio"
+      : "Play source audio"
+  const testId = isTake ? "tl-detail-take-audio" : "tl-detail-source-audio"
 
   return (
-    <div data-testid="tl-detail-source-audio" className="mt-2 flex items-center gap-2">
+    <div data-testid={testId} className="mt-2 flex items-center gap-2">
       <AppTooltip content={label}>
         <button
           type="button"
@@ -72,7 +94,7 @@ export function TimelineSourceAudio({ project, cell }: TimelineSourceAudioProps)
       </span>
       {isError && (
         <span className="text-[11px] text-destructive">
-          {audio.error?.message ?? "Source audio unavailable"}
+          {audio.error?.message ?? (isTake ? "Recorded take unavailable" : "Source audio unavailable")}
         </span>
       )}
     </div>

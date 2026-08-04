@@ -321,6 +321,61 @@ describe("TimelineCellDetail — audio, comments, history, footnote", () => {
     expect(screen.queryByTestId("tl-detail-record")).toBeNull()
   })
 
+  it("AQU-785: a recorded take is playable in the media target card (and the source clip stays playable)", () => {
+    const qc = new QueryClient()
+    // After recording, the take (cellId-seeded) is the selected recording, but
+    // the imported source clip (fileId-seeded) is still attached. Both must be
+    // independently playable — the source in its card, the take in the target.
+    const sourceId = "audio-f1-1700000000-abcdefgh.mp3"
+    const takeId = "audio-c1-1700000000-ijklmnop.webm"
+    render(
+      <QueryClientProvider client={qc}>
+        <TimelineCellDetail
+          cell={cell({
+            selectedAudioId: takeId,
+            attachments: {
+              [sourceId]: { type: "audio", url: `frontier-audio://${sourceId}` },
+              [takeId]: { type: "audio", url: `frontier-audio://${takeId}` },
+            },
+          } as Partial<CellData>)}
+          editable
+          project={{ id: "p1" } as unknown as ProjectRecord}
+          onCommitTarget={() => {}}
+          detailActions={makeActions()}
+        />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByTestId("tl-detail-take-audio")).toBeInTheDocument()
+    expect(screen.getByLabelText("Play recorded take")).toBeInTheDocument()
+    // The imported source clip is still reachable in its own card, not hijacked
+    // by the selection flipping to the take.
+    expect(screen.getByTestId("tl-detail-source-audio")).toBeInTheDocument()
+    // Once a take exists the record affordance is gone (its playback replaces it).
+    expect(screen.queryByTestId("tl-detail-record")).toBeNull()
+  })
+
+  it("AQU-785: no take-playback control on a section that only has its imported source clip", () => {
+    const qc = new QueryClient()
+    const sourceId = "audio-f1-1700000000-abcdefgh.mp3"
+    render(
+      <QueryClientProvider client={qc}>
+        <TimelineCellDetail
+          cell={cell({
+            selectedAudioId: sourceId,
+            attachments: { [sourceId]: { type: "audio", url: `frontier-audio://${sourceId}` } },
+          } as Partial<CellData>)}
+          editable
+          project={{ id: "p1" } as unknown as ProjectRecord}
+          onCommitTarget={() => {}}
+          detailActions={makeActions()}
+        />
+      </QueryClientProvider>,
+    )
+    expect(screen.queryByTestId("tl-detail-take-audio")).toBeNull()
+    expect(screen.getByTestId("tl-detail-source-audio")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-detail-record")).toBeInTheDocument()
+  })
+
   it("Comments and History fire with the cell id; comment label counts open threads", () => {
     const actions = makeActions({ openCommentCounts: new Map([["c1", 2]]) })
     render(<TimelineCellDetail cell={timedCell()} editable onCommitTarget={() => {}} detailActions={actions} />)

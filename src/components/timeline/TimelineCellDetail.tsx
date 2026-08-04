@@ -175,14 +175,36 @@ export function TimelineCellDetail({
       : null
 
   // ── Action-row derivations (mirror the text rail's gates) ─────────────────
-  const selectedAttachment = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
-  const hasAudio = Boolean(selectedAttachment && !selectedAttachment.isDeleted)
-  const hasSourceAudio = Boolean(project && hasAudio)
+  // AQU-785: a media cell's imported SOURCE clip (fileId-seeded id) and its
+  // recorded target TAKE (cellId-seeded id) share the one "recording" slot, so
+  // `selectedAudioId` names only whichever was selected last — after a take is
+  // recorded it, not the source, is selected. Resolve each id explicitly from
+  // the live attachments so the SOURCE card always plays the imported clip and
+  // the TARGET card gets its own take-playback control, independent of which
+  // one the selection currently points at (SUB-29 provenance: takes are seeded
+  // with the cellId, the imported clip with the fileId).
+  const liveAudioIds = cell.attachments
+    ? Object.entries(cell.attachments)
+        .filter(([, a]) => !a.isDeleted)
+        .map(([id]) => id)
+    : []
+  const takeAudioId =
+    cell.medium === "media"
+      ? liveAudioIds.find((id) => audioIdSeededWith(id, cell.id))
+      : cell.selectedAudioId && liveAudioIds.includes(cell.selectedAudioId)
+        ? cell.selectedAudioId
+        : undefined
+  // The imported source clip: the live recording that isn't the take. Falls
+  // back to the selected clip so un-recorded sections (and single-attachment
+  // fixtures) still surface source playback.
+  const sourceAudioId =
+    liveAudioIds.find((id) => id !== takeAudioId && !audioIdSeededWith(id, cell.id)) ??
+    (cell.selectedAudioId && cell.selectedAudioId !== takeAudioId ? cell.selectedAudioId : undefined)
+  const hasSourceAudio = Boolean(project && sourceAudioId)
   // SUB-29: the mic/upload gate counts recorded TAKES, not the imported source
-  // clip that squats in every section's recording slot (audioId provenance:
-  // takes are seeded with the cellId). Text cells behave exactly as before.
-  const hasRecordedTake =
-    hasAudio && (cell.medium !== "media" || audioIdSeededWith(cell.selectedAudioId, cell.id))
+  // clip that squats in every section's recording slot. Text cells behave
+  // exactly as before (any selected recording is a take).
+  const hasRecordedTake = Boolean(takeAudioId)
   const completingState = detailActions?.completing.get(cell.id)
   const busy = completingState === "searching" || completingState === "generating"
   const preview = detailActions?.previews.get(cell.id)
@@ -277,7 +299,9 @@ export function TimelineCellDetail({
           <div data-testid="tl-detail-source" className="text-sm leading-snug text-foreground">
             {cell.transcription || cell.original || "—"}
           </div>
-          {hasSourceAudio && project && <TimelineSourceAudio project={project} cell={cell} />}
+          {hasSourceAudio && project && sourceAudioId && (
+            <TimelineSourceAudio project={project} cell={cell} audioId={sourceAudioId} />
+          )}
         </div>
         <div className="rounded-lg border border-border bg-card p-2.5">
           <div className="mb-1 flex items-center justify-between gap-2">
@@ -420,6 +444,13 @@ export function TimelineCellDetail({
               }}
             />
           </div>
+          {/* AQU-785: play the recorded take right where it was captured — the
+              media surface must play back what it recorded, not only the text
+              view. Mounted only when a real take exists (and project is present
+              for the session), mirroring the source control above. */}
+          {hasRecordedTake && project && takeAudioId && (
+            <TimelineSourceAudio project={project} cell={cell} audioId={takeAudioId} variant="take" />
+          )}
         </div>
       </div>
       {detailActions && (

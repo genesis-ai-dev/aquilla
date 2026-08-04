@@ -134,6 +134,7 @@ export function FileRow(props: FileRowProps) {
                 if (e.key === "Enter") { e.preventDefault(); onEditCommit(draft) }
                 else if (e.key === "Escape") { e.preventDefault(); onEditCancel() }
               }}
+              autoComplete="off"
               className="w-full select-text rounded-lg bg-background px-2 py-0.5 text-sm outline-none"
               onClick={(e) => e.stopPropagation()}
             />

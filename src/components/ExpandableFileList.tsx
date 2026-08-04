@@ -145,6 +145,7 @@ export function ExpandableFileList({
                       {isEditingCorpus ? (
                         <input
                           autoFocus
+                          autoComplete="off"
                           defaultValue={group.label}
                           onClick={(e) => e.stopPropagation()}
                           onBlur={(e) => {

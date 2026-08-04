@@ -176,7 +176,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   }
 
   return (
-    <div className="flex h-full w-96 flex-col border-l bg-card">
+    <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           Edit history {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}

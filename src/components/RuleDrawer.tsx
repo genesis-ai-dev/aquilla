@@ -41,7 +41,7 @@ export function RuleDrawer({
   }
 
   return (
-    <div className="flex h-full w-80 flex-col border-l bg-card">
+    <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-2">
           <SeverityIcon className={`h-4 w-4 ${severityColor}`} />

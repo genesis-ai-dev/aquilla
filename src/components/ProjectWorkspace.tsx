@@ -4884,6 +4884,7 @@ export function ProjectWorkspace() {
       <AppShell
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
+        asideStorageKey={projectId}
         logoAccessory={
           dockTab !== null ? (
             <AppTooltip content="Collapse sidebar" side="right">
@@ -5561,87 +5562,118 @@ export function ProjectWorkspace() {
             onRetryClick={retryCells}
           />
         )}
-        aside={
-          <>
-            {/* Parallel Bibles (helloao): edge tab → slide-out panel showing the
-                scroll-tracked verse in other bible versions. Scripture files only. */}
-            {centerSurface === "editor" && activeFile && fileHasSections(activeFile) && (
-              <ParallelBiblesSidebar
-                key={activeFile.id}
-                trackedRef={trackedCellRef}
-                open={parallelBiblesOpen}
-                onToggle={() => {
-                  const next = !parallelBiblesOpen
-                  setParallelBiblesOpen(next)
-                  if (projectId) writeParallelBiblesOpen(projectId, next)
-                }}
-              />
-            )}
-            {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
-                and a translation cell with a matching canonicalRef is focused. */}
-            <TranslationNotesSidebar
-              projectId={projectId!}
-              canonicalRef={focusedCellCanonicalRef}
-              getToken={getTokenForFile}
-              visible={tnSidebarVisible}
+        aside={(() => {
+          const showParallelBibles =
+            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+          const hasRightAside =
+            (showParallelBibles && parallelBiblesOpen) ||
+            tnSidebarVisible ||
+            checkOpen ||
+            drawerRuleId !== null ||
+            !!commentsCell ||
+            !!historyCell
+          if (!hasRightAside) return undefined
+          return (
+            <>
+              {/* Parallel Bibles (helloao): open panel only — collapsed edge tab
+                  rides in asideEdge so it isn't stretched by Resizable. */}
+              {showParallelBibles && parallelBiblesOpen && (
+                <ParallelBiblesSidebar
+                  key={activeFile!.id}
+                  trackedRef={trackedCellRef}
+                  open
+                  onToggle={() => {
+                    const next = !parallelBiblesOpen
+                    setParallelBiblesOpen(next)
+                    if (projectId) writeParallelBiblesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {/* FRO-179: Translation Notes sidebar — shown when a TN file exists
+                  and a translation cell with a matching canonicalRef is focused. */}
+              {tnSidebarVisible && (
+                <TranslationNotesSidebar
+                  projectId={projectId!}
+                  canonicalRef={focusedCellCanonicalRef}
+                  getToken={getTokenForFile}
+                  visible={tnSidebarVisible}
+                  onToggle={() => {
+                    const next = !tnSidebarVisible
+                    setTnSidebarVisible(next)
+                    if (projectId) writeTnSidebarVisible(projectId, next)
+                  }}
+                />
+              )}
+              {checkOpen && (
+                <CheckFindingsDrawer
+                  result={checkResult}
+                  running={checkRunning}
+                  cells={legacyCells}
+                  onClose={() => setCheckOpen(false)}
+                  onNavigateToCell={jumpToCellId}
+                  onOpenComments={(cellId) => {
+                    // Reuse the existing comments drawer; one aside at a time.
+                    setCheckOpen(false)
+                    setCommentsCellId(cellId)
+                  }}
+                />
+              )}
+              {drawerRuleId && (
+                <RuleDrawer
+                  rule={drawerRule}
+                  infractions={drawerInfractions}
+                  cells={legacyCells}
+                  onClose={() => setDrawerRuleId(null)}
+                  onNavigateToCell={() => {}}
+                  project={project}
+                  username={currentUsername}
+                  refresh={refresh}
+                  cellsByFile={drawerCellsByFile}
+                />
+              )}
+              {commentsCell && (
+                <CommentsDrawer
+                  project={project} cell={commentsCell}
+                  liveComments={allProjectComments.filter(
+                    (c) => c.cellId === commentsCell.id && c.deletedAt === null
+                  )}
+                  onClose={() => setCommentsCellId(null)}
+                  onNewThread={(text) => addThread(commentsCell.id, text)}
+                  onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
+                  onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
+                  onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+                />
+              )}
+              {historyCell && (
+                <HistoryDrawer
+                  cell={historyCell}
+                  onClose={() => setHistoryCellId(null)}
+                  projectId={project?.id ?? null}
+                  fileId={activeFileId}
+                  getTokenForFile={getTokenForFile}
+                  isSynced={!!project?.syncRole}
+                  onPromote={handlePromoteToCurrentCell}
+                />
+              )}
+            </>
+          )
+        })()}
+        asideEdge={
+          centerSurface === "editor" &&
+          activeFile &&
+          fileHasSections(activeFile) &&
+          !parallelBiblesOpen ? (
+            <ParallelBiblesSidebar
+              key={`${activeFile.id}-edge`}
+              trackedRef={trackedCellRef}
+              open={false}
               onToggle={() => {
-                const next = !tnSidebarVisible
-                setTnSidebarVisible(next)
-                if (projectId) writeTnSidebarVisible(projectId, next)
+                const next = !parallelBiblesOpen
+                setParallelBiblesOpen(next)
+                if (projectId) writeParallelBiblesOpen(projectId, next)
               }}
             />
-            {checkOpen && (
-              <CheckFindingsDrawer
-                result={checkResult}
-                running={checkRunning}
-                cells={legacyCells}
-                onClose={() => setCheckOpen(false)}
-                onNavigateToCell={jumpToCellId}
-                onOpenComments={(cellId) => {
-                  // Reuse the existing comments drawer; one aside at a time.
-                  setCheckOpen(false)
-                  setCommentsCellId(cellId)
-                }}
-              />
-            )}
-            {drawerRuleId && (
-              <RuleDrawer
-                rule={drawerRule}
-                infractions={drawerInfractions}
-                cells={legacyCells}
-                onClose={() => setDrawerRuleId(null)}
-                onNavigateToCell={() => {}}
-                project={project}
-                username={currentUsername}
-                refresh={refresh}
-                cellsByFile={drawerCellsByFile}
-              />
-            )}
-            {commentsCell && (
-              <CommentsDrawer
-                project={project} cell={commentsCell}
-                liveComments={allProjectComments.filter(
-                  (c) => c.cellId === commentsCell.id && c.deletedAt === null
-                )}
-                onClose={() => setCommentsCellId(null)}
-                onNewThread={(text) => addThread(commentsCell.id, text)}
-                onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
-                onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
-                onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
-              />
-            )}
-            {historyCell && (
-              <HistoryDrawer
-                cell={historyCell}
-                onClose={() => setHistoryCellId(null)}
-                projectId={project?.id ?? null}
-                fileId={activeFileId}
-                getTokenForFile={getTokenForFile}
-                isSynced={!!project?.syncRole}
-                onPromote={handlePromoteToCurrentCell}
-              />
-            )}
-          </>
+          ) : null
         }
         statusBar={
           (() => {

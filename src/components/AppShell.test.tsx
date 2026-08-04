@@ -110,4 +110,38 @@ describe("AppShell main-content error containment", () => {
 
     expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
   })
+
+  it("wraps a right aside in a resizable panel with a drag handle", () => {
+    const { container, rerender } = render(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          sidebar={<div>sidebar</div>}
+          main={<div>main</div>}
+          aside={<div data-testid="right-aside">comments</div>}
+          asideStorageKey="test-project"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId("right-aside")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="app-shell-aside"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="resizable-handle"]')).toBeInTheDocument()
+
+    rerender(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          sidebar={<div>sidebar</div>}
+          main={<div>main</div>}
+          asideEdge={<div data-testid="aside-edge">tab</div>}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId("aside-edge")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="app-shell-aside"]')).not.toBeInTheDocument()
+  })
 })

@@ -251,8 +251,9 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
     : null
 
   return (
-    <div className={cn("hidden h-full w-80 shrink-0 flex-col border-l bg-card text-sm sm:flex", className)}>
-      {/* Header — p-2 matches the other side panels' header strip. */}
+    <div className={cn("hidden h-full min-w-0 flex-1 flex-col border-l bg-card text-sm sm:flex", className)}>
+      {/* Header — p-2 matches the other side panels' header strip. Width is
+          owned by AppShell's right-aside ResizablePanel. */}
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-1.5 font-medium">
           <BookMarked className="h-4 w-4 text-muted-foreground" />

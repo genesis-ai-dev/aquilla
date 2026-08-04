@@ -77,6 +77,7 @@ import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
+import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -4949,8 +4950,17 @@ function EditorRow({
     // are SOURCE speech (→ sourceLanguage); recorded takes voice the TARGET
     // text (→ targetLanguage). Mapping to a Whisper tag happens downstream.
     const language = isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage
-    void transcribeCell({ cell, session: rowSession, projectId: project.id, language })
-  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage])
+    await transcribeCell({ cell, session: rowSession, projectId: project.id, language })
+    // AQU-783: transcription persists a cell.audio.attach (source transcript on
+    // cells.transcription + karaoke timings) through the outbox but, unlike an
+    // editor commit, fired no completion callback — so the result only landed
+    // in the local projection after a manual page refresh. Reuse the commit
+    // callback (flush outbox + revalidate the cell row → picks up the new
+    // transcription) and poke the per-file audio read (timings) so the result
+    // appears immediately in both the text and media sections.
+    await onCellCommitted?.(cell.id)
+    notifyAudioAttachmentsChanged(cell.fileId)
+  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage, onCellCommitted])
 
   const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
   const authoritativeSelfValidated = cell.activeValidators.includes(username)

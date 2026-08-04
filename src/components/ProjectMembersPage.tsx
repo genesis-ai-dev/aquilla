@@ -527,7 +527,7 @@ interface RevokeAllDialogProps {
   onRevoked: () => void
 }
 
-function RevokeAllDialog({
+export function RevokeAllDialog({
   member, projectId, onClose, onRevoked,
 }: RevokeAllDialogProps) {
   const { session } = useFrontierSession()
@@ -674,7 +674,14 @@ function RevokeAllDialog({
 // Invite-link tab (reuses SharePanel's InviteLinkTab logic)
 // ──────────────────────────────────────────────────────────────────────────
 
-function InviteLinkTab({ projectId }: { projectId: string }) {
+export function InviteLinkTab({
+  projectId,
+  embedded = false,
+}: {
+  projectId: string
+  /** When true (settings Card), drop the page-style max-width + duplicate title. */
+  embedded?: boolean
+}) {
   const { session } = useFrontierSession()
   const [inviteRole, setInviteRole] = useState<number>(DEFAULT_INVITE_ROLE)
   const [inviteEmail, setInviteEmail] = useState<string>("")
@@ -684,6 +691,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
   const [issuedUrl, setIssuedUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const wrapClass = embedded ? "space-y-4" : "mx-auto max-w-lg space-y-4"
 
   async function handleCreate() {
     setEmailError(null)
@@ -737,11 +745,13 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
 
   if (issuedUrl) {
     return (
-      <div className="mx-auto max-w-lg space-y-4">
-        <h2 className="text-sm font-medium flex items-center gap-2">
-          <LinkIcon className="h-4 w-4 text-muted-foreground" />
-          Invite link ready
-        </h2>
+      <div className={wrapClass}>
+        {!embedded && (
+          <h2 className="text-sm font-medium flex items-center gap-2">
+            <LinkIcon className="h-4 w-4 text-muted-foreground" />
+            Invite link ready
+          </h2>
+        )}
         <p className="text-sm text-muted-foreground">
           Send this link to the recipient. Anyone with the link can join.
         </p>
@@ -762,7 +772,7 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
         <p className="text-[10px] text-muted-foreground">
           The recipient signs in (or signs up) and is added as{" "}
           {LINK_ROLE_OPTIONS.find((o) => o.level === inviteRole)?.name ?? "a member"}.
-          To revoke later, use the Members tab to remove them.
+          To revoke later, use Project settings → Members to remove them.
         </p>
         <Button size="sm" variant="outline" onClick={reset} className="w-full">
           Create another link
@@ -772,13 +782,15 @@ function InviteLinkTab({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <h2 className="text-sm font-medium flex items-center gap-2">
-        <LinkIcon className="h-4 w-4 text-muted-foreground" />
-        Create invite link
-      </h2>
+    <div className={wrapClass}>
+      {!embedded && (
+        <h2 className="text-sm font-medium flex items-center gap-2">
+          <LinkIcon className="h-4 w-4 text-muted-foreground" />
+          Create invite link
+        </h2>
+      )}
 
-      <div className="rounded border p-4 space-y-4">
+      <div className={cn("space-y-4", !embedded && "rounded border p-4")}>
         {/* Role */}
         <div className="space-y-1">
           <FieldLabel className="text-xs">Role</FieldLabel>

@@ -28,8 +28,9 @@ import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
 import { cn } from "@/lib/utils"
 import { Search } from "lucide-react"
 
-function columnAlignClass(meta: unknown) {
-  return (meta as { align?: "right" } | undefined)?.align === "right" ? "text-right" : undefined
+function columnMetaClass(meta: unknown) {
+  const m = meta as { align?: "right"; className?: string } | undefined
+  return cn(m?.align === "right" && "text-right", m?.className)
 }
 
 /**
@@ -107,7 +108,7 @@ function DataTable<TData, TValue>({
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex flex-wrap items-center gap-3">
           {searchPlaceholder ? (
-            <InputGroup className="h-9 max-w-sm">
+            <InputGroup className={cn("max-w-sm bg-card", dense ? "h-8" : "h-9")}>
               <InputGroupAddon>
                 <Search />
               </InputGroupAddon>
@@ -136,7 +137,7 @@ function DataTable<TData, TValue>({
                     className={cn(
                       dense && "h-9 py-1.5",
                       header.column.id === "expand" ? "w-8" : undefined,
-                      columnAlignClass(header.column.columnDef.meta),
+                      columnMetaClass(header.column.columnDef.meta),
                     )}
                   >
                     {header.isPlaceholder
@@ -167,7 +168,7 @@ function DataTable<TData, TValue>({
                           key={cell.id}
                           className={cn(
                             dense && "py-1.5",
-                            columnAlignClass(cell.column.columnDef.meta),
+                            columnMetaClass(cell.column.columnDef.meta),
                           )}
                         >
                           {flexRender(cell.column.columnDef.cell, cell.getContext())}

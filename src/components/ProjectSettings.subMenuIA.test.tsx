@@ -20,7 +20,7 @@
 //   5. The back link returns to the index.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 
@@ -138,7 +138,44 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   }),
 }))
 
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: () => ({
+    members: [],
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+    refresh: vi.fn(),
+    add: vi.fn(),
+    addMany: vi.fn().mockResolvedValue([]),
+    remove: vi.fn(),
+    changeRole: vi.fn(),
+  }),
+}))
+
+vi.mock("@/hooks/useProjectOrgId", () => ({
+  useProjectOrgId: () => null,
+}))
+
+vi.mock("@/context/OrgContext", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/context/OrgContext")>()
+  return {
+    ...original,
+    useActiveOrgOptional: () => null,
+  }
+})
+
+vi.mock("@/hooks/useUserSearch", () => ({
+  useUserSearch: () => ({
+    query: "",
+    results: [],
+    isLoading: false,
+    needsMorePrefix: true,
+    lastFetchOk: true,
+  }),
+}))
+
 function renderAt(path: string) {
+  cleanup()
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -159,6 +196,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     // The index is a NavList of groups...
     expect(screen.getByText("General")).toBeTruthy()
+    expect(screen.getByText("Members")).toBeTruthy()
     expect(screen.getByText("AI & completion")).toBeTruthy()
     expect(screen.getByText("Validation & health")).toBeTruthy()
 
@@ -223,6 +261,20 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByLabelText(/project name/i)).toBeTruthy()
     expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
     expect(screen.getByLabelText(/username/i)).toBeTruthy()
+    // Form panes stay on Page size="default" (max-w-3xl).
+    expect(screen.getByLabelText(/project name/i).closest(".max-w-3xl")).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i).closest(".max-w-6xl")).toBeNull()
+
+    renderAt(`/project/${PROJECT_ID}/settings/members`)
+    expect(screen.getByTestId("settings-members-section")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /add a member/i })).toBeTruthy()
+    // Table panes use Page size="wide" (max-w-6xl) and hide the settings search
+    // (the roster DataTable has its own member search).
+    expect(
+      screen.getByTestId("settings-members-section").closest(".max-w-6xl"),
+    ).toBeTruthy()
+    expect(screen.queryByLabelText(/search settings/i)).toBeNull()
+    expect(screen.getByLabelText(/search by name or email/i)).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings/source-sync`)
     // This project has a git origin but no source link, so only Git Sync

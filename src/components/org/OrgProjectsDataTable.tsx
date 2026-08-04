@@ -384,7 +384,7 @@ export function OrgProjectsDataTable({
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
-                  onClick={() => navigate(`/project/${p.id}/members`)}
+                  onClick={() => navigate(`/project/${p.id}/settings/members`)}
                 >
                   Add member
                 </DropdownMenuItem>

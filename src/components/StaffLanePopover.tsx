@@ -249,7 +249,7 @@ export function StaffLanePopover({
             <p className="text-[11px] text-muted-foreground">
               Searches your organization only. Adding someone from outside it?{" "}
               <Link
-                to={`/project/${projectId}/members`}
+                to={`/project/${projectId}/settings/members`}
                 className="font-medium text-foreground underline underline-offset-2"
                 onClick={() => setOpen(false)}
               >

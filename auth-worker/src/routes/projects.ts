@@ -857,6 +857,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     members: members.map((m) => ({
       userId: m.userId,
       username: m.username,
+      email: m.email,
       role: {
         level: m.roleLevel,
         name: roleNameFor(m.roleLevel),

@@ -4,6 +4,7 @@ import { projectSettingsPath } from "@/lib/navigation/org-paths"
 import {
   Check, CheckCircle, XCircle, ChevronDown, Sparkles, Save, HardDriveDownload,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
+  Users,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -70,6 +71,7 @@ import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSec
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { MembersSection } from "./ProjectSettings/MembersSection"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -868,6 +870,7 @@ export function ProjectSettings() {
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
+    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["system prompt", "ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
@@ -916,6 +919,8 @@ export function ProjectSettings() {
     description: string
     icon: ComponentType<{ className?: string }>
     sectionIds: string[]
+    /** Roster / DataTable panes use Page `wide` (max-w-6xl); form panes stay default. */
+    wide?: boolean
   }[] = [
     {
       id: "general",
@@ -923,6 +928,14 @@ export function ProjectSettings() {
       description: "Name, languages, username, Bible resources",
       icon: SlidersHorizontal,
       sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
+    },
+    {
+      id: "members",
+      label: "Members",
+      description: "Who can access this project, invites, and roles",
+      icon: Users,
+      wide: true,
+      sectionIds: ["section-members"],
     },
     {
       id: "source-sync",
@@ -1019,6 +1032,7 @@ export function ProjectSettings() {
       "section-languages",
       "section-bible-resources",
       "section-user",
+      "section-members",
       "section-ai-instructions",
       "section-draft-context",
       "section-advanced-llm",
@@ -1061,6 +1075,9 @@ export function ProjectSettings() {
   const pageDescription = lowerQuery || !activeGroup
     ? "Configure this project. Changes apply to everyone with access."
     : activeGroup.description
+  // Table panes (Members roster) need the wider content well; form panes stay
+  // intentional/narrow. Search flattens across groups → keep default width.
+  const pageSize = activeGroup?.wide && !lowerQuery ? "wide" : "default"
 
   const headerActions = (
     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1134,7 +1151,7 @@ export function ProjectSettings() {
         header={breadcrumb}
         statusBar={null}
         main={
-          <Page>
+          <Page size={pageSize}>
             <LoadingPanel label="Loading project settings" />
           </Page>
         }
@@ -1148,7 +1165,7 @@ export function ProjectSettings() {
       header={breadcrumb}
       statusBar={null}
       main={
-        <Page>
+        <Page size={pageSize}>
           <div className="space-y-6">
             {!showIndex && (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -1161,7 +1178,10 @@ export function ProjectSettings() {
               actions={headerActions}
             />
 
-            <SettingsNav onSearch={setSearchQuery} searchQuery={searchQuery} />
+            {/* Table panes already have their own search; skip the settings filter. */}
+            {!(activeGroup?.wide && !lowerQuery) && (
+              <SettingsNav onSearch={setSearchQuery} searchQuery={searchQuery} />
+            )}
 
             {showIndex && !lowerQuery ? (
               <NavList>
@@ -1395,6 +1415,11 @@ export function ProjectSettings() {
               <p className="mt-1 text-xs text-muted-foreground">Used as author name in translation history.</p>
             </CardContent>
           </Card>
+        )}
+
+        {searchGroupLabel("section-members")}
+        {id && sectionsToRender.some((s) => s.id === "section-members") && (
+          <MembersSection projectId={id} />
         )}
 
         {searchGroupLabel("section-ai-instructions")}

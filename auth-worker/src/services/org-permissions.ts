@@ -286,6 +286,8 @@ export interface SecondarySrc {
 export interface EffectiveMember {
   userId: number
   username: string
+  /** Account email when known; null only if the users row has none. */
+  email: string | null
   roleLevel: number
   /** Path that produced the user's max-wins role (AD-12). */
   source: "override" | "group" | "org" | "creator"
@@ -318,31 +320,37 @@ export async function listEffectiveProjectMembers(
   // Each path is fetched separately and merged via max-wins so attribution
   // is exact (a JOIN-based approach would lose per-user attribution).
   const direct = await env.AQUILLA_PG.prepare(
-    `SELECT pm.user_id AS user_id, u.username AS username, pm.role_level AS role_level
+    `SELECT pm.user_id AS user_id, u.username AS username, u.email AS email, pm.role_level AS role_level
      FROM project_members pm
      INNER JOIN users u ON u.id = pm.user_id
      WHERE pm.project_id = ?`,
   )
     .bind(projectId)
-    .all<{ user_id: number; username: string; role_level: number }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number }>()
 
   // Collect ALL per-path contributions keyed by userId, then derive the
   // winner and secondarySources in a second pass.
   type PathEntry = { source: EffectiveMember["source"]; level: number; priority: number }
-  const allPaths = new Map<number, { username: string; paths: PathEntry[] }>()
+  const allPaths = new Map<number, { username: string; email: string | null; paths: PathEntry[] }>()
 
   const record = (
     userId: number,
     username: string,
+    email: string | null,
     source: EffectiveMember["source"],
     level: number,
   ): void => {
-    if (!allPaths.has(userId)) allPaths.set(userId, { username, paths: [] })
+    const existing = allPaths.get(userId)
+    if (!existing) {
+      allPaths.set(userId, { username, email, paths: [] })
+    } else if (!existing.email && email) {
+      existing.email = email
+    }
     allPaths.get(userId)!.paths.push({ source, level, priority: SOURCE_PRIORITY[source] })
   }
 
   for (const r of direct.results ?? []) {
-    record(r.user_id, r.username, "override", r.role_level)
+    record(r.user_id, r.username, r.email, "override", r.role_level)
   }
 
   // AD-12: surface every user who reaches the project via a group attached
@@ -351,51 +359,52 @@ export async function listEffectiveProjectMembers(
   const groupRows = await env.AQUILLA_PG.prepare(
     `SELECT gm.user_id AS user_id,
             u.username AS username,
+            u.email AS email,
             MAX(gpg.role_level) AS role_level
        FROM group_project_grants gpg
        JOIN group_members gm ON gm.group_id = gpg.group_id
        JOIN users u          ON u.id = gm.user_id
       WHERE gpg.project_id = ?
-      GROUP BY gm.user_id, u.username`,
+      GROUP BY gm.user_id, u.username, u.email`,
   )
     .bind(projectId)
-    .all<{ user_id: number; username: string; role_level: number | null }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number | null }>()
 
   for (const r of groupRows.results ?? []) {
     if (r.role_level == null) continue
-    record(r.user_id, r.username, "group", r.role_level)
+    record(r.user_id, r.username, r.email, "group", r.role_level)
   }
 
   if (orgId != null) {
     const orgMembers = await env.AQUILLA_PG.prepare(
-      `SELECT om.user_id AS user_id, u.username AS username, om.role_level AS role_level
+      `SELECT om.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level
        FROM org_members om
        INNER JOIN users u ON u.id = om.user_id
        WHERE om.org_id = ?`,
     )
       .bind(orgId)
-      .all<{ user_id: number; username: string; role_level: number }>()
+      .all<{ user_id: number; username: string; email: string | null; role_level: number }>()
 
     for (const r of orgMembers.results ?? []) {
       // AQU-435: only Maintainer+ org roles are an access path — a
       // sub-maintainer org member does NOT appear as having access via org.
       if (r.role_level < ORG_WIDE_ACCESS_FLOOR) continue
-      record(r.user_id, r.username, "org", r.role_level)
+      record(r.user_id, r.username, r.email, "org", r.role_level)
     }
   }
 
   const creatorRow = await env.AQUILLA_PG.prepare(
-    "SELECT id, username FROM users WHERE id = ?",
+    "SELECT id, username, email FROM users WHERE id = ?",
   )
     .bind(createdBy)
-    .first<{ id: number; username: string }>()
+    .first<{ id: number; username: string; email: string | null }>()
   if (creatorRow) {
-    record(creatorRow.id, creatorRow.username, "creator", 700)
+    record(creatorRow.id, creatorRow.username, creatorRow.email, "creator", 700)
   }
 
   // Derive winner + secondarySources for each user.
   const results: EffectiveMember[] = []
-  for (const [userId, { username, paths }] of allPaths) {
+  for (const [userId, { username, email, paths }] of allPaths) {
     // Sort paths: highest level first, ties broken by priority (higher wins).
     paths.sort((a, b) => b.level - a.level || b.priority - a.priority)
     const winner = paths[0]
@@ -406,6 +415,7 @@ export async function listEffectiveProjectMembers(
     results.push({
       userId,
       username,
+      email,
       roleLevel: winner.level,
       source: winner.source,
       secondarySources: secondary,
@@ -433,10 +443,10 @@ type PathEntry = { source: EffectiveMember["source"]; level: number; priority: n
  * on attribution semantics.
  */
 function deriveEffectiveMembers(
-  allPaths: Map<number, { username: string; paths: PathEntry[] }>,
+  allPaths: Map<number, { username: string; email?: string | null; paths: PathEntry[] }>,
 ): EffectiveMember[] {
   const results: EffectiveMember[] = []
-  for (const [userId, { username, paths }] of allPaths) {
+  for (const [userId, { username, email = null, paths }] of allPaths) {
     paths.sort((a, b) => b.level - a.level || b.priority - a.priority)
     const winner = paths[0]
     const secondary: SecondarySrc[] = paths
@@ -446,6 +456,7 @@ function deriveEffectiveMembers(
     results.push({
       userId,
       username,
+      email,
       roleLevel: winner.level,
       source: winner.source,
       secondarySources: secondary,

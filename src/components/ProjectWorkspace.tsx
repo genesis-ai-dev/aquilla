@@ -230,10 +230,6 @@ const LivingMemoryPageContent = lazy(() =>
 const GlossaryEditorContent = lazy(() =>
   import("./GlossaryEditor").then((mod) => ({ default: mod.GlossaryEditor })),
 )
-// FRO-180: per-project members management surface.
-const ProjectMembersPageContent = lazy(() =>
-  import("./ProjectMembersPage").then((mod) => ({ default: mod.ProjectMembersPage })),
-)
 // FRO-249 fix (Fix 2): module-level promise chain that serializes
 // handleImported's getProject→updateProject read-modify-write so that
 // concurrent imports don't race and the last write doesn't silently drop
@@ -620,15 +616,15 @@ export function ProjectWorkspace() {
     if (!project || !projectId) return
 
     // The in-project overlay surfaces (/rules, /comments, /memory, /terminology,
-    // /members) deliberately carry no file in the URL — don't treat that as
+    // /agent) deliberately carry no file in the URL — don't treat that as
     // "no file selected" and bounce back to the editor, or these surfaces become
-    // unreachable. (FRO-194 added /rules; FRO-254 adds the others; FRO-180 adds /members.)
+    // unreachable. (FRO-194 added /rules; FRO-254 adds the others.)
+    // Members live at /project/:id/settings/members (not a workspace surface).
     if (
       location.pathname.endsWith("/rules") ||
       location.pathname.endsWith("/comments") ||
       location.pathname.endsWith("/memory") ||
       location.pathname.endsWith("/terminology") ||
-      location.pathname.endsWith("/members") ||
       location.pathname.endsWith("/agent")
     ) return
 
@@ -695,14 +691,13 @@ export function ProjectWorkspace() {
 
   // Center surface — derived from the URL path so deep-links work and the
   // shell (sidebar + top bar + bottom status bar) never unmounts.
-  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology";
-  // FRO-180 adds "members".
-  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "members" | "agent" =
+  // FRO-194 added "rules"; FRO-254 adds "comments", "memory", "terminology".
+  // Members live under /project/:id/settings/members (ProjectSettings), not here.
+  const centerSurface: "editor" | "rules" | "comments" | "memory" | "terminology" | "agent" =
     location.pathname.endsWith("/rules") ? "rules" :
     location.pathname.endsWith("/comments") ? "comments" :
     location.pathname.endsWith("/memory") ? "memory" :
     location.pathname.endsWith("/terminology") ? "terminology" :
-    location.pathname.endsWith("/members") ? "members" :
     location.pathname.endsWith("/agent") ? "agent" :
     "editor"
 
@@ -5376,13 +5371,6 @@ export function ProjectWorkspace() {
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label="Loading terminology" />}>
               <GlossaryEditorContent files={projectFiles} />
-            </Suspense>
-          </div>
-        ) : centerSurface === "members" ? (
-          // FRO-180: Per-project members management inside the shell.
-          <div className="h-full overflow-y-auto">
-            <Suspense fallback={<LoadingPanel label="Loading members" />}>
-              <ProjectMembersPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "agent" ? (

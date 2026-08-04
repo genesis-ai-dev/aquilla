@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react"
-import { Navigate, Routes, Route, useParams } from "react-router-dom"
+import { Navigate, Routes, Route } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgRouteGate } from "@/components/org/OrgRouteGate"
@@ -137,12 +137,6 @@ function AppEntry() {
   return <Navigate to={resumeOrgPath()} replace />
 }
 
-/** Former `/project/:id/members` workspace surface → settings Members pane. */
-function RedirectProjectMembersToSettings() {
-  const { id } = useParams<{ id: string }>()
-  return <Navigate to={`/project/${id}/settings/members`} replace />
-}
-
 /** Fallback used while lazy route chunks are loading (e.g. the workspace). */
 function RouteLoadingFallback() {
   return <LoadingOverlay />
@@ -250,7 +244,6 @@ function AppRoutes() {
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
         <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/members" element={<RedirectProjectMembersToSettings />} />
 
         {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
             path is registered with Monday, so it cannot carry an org segment. */}

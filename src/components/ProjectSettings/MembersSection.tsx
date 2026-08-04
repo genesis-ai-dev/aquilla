@@ -1,9 +1,8 @@
 // Project settings — Members pane (DataTable roster).
 //
-// Lives at `/project/:id/settings/members`. Same grant/revoke contracts as the
-// former `/project/:id/members` surface and MembersTab. Uses the shared
-// DataTable (search + TanStack sort headers). "Add a member" opens a dialog
-// with tabs: add people from the org, or create an invite link.
+// Lives at `/project/:id/settings/members`. Uses the shared DataTable
+// (search + TanStack sort headers). "Add a member" opens a dialog with tabs:
+// add people from the org, or create an invite link.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"

@@ -75,8 +75,6 @@ export function deriveNavTitle(pathname: string): string {
         return "Comments"
       case "memory":
         return "Project memory"
-      case "members":
-        return "Project members"
       default:
         return "Project"
     }

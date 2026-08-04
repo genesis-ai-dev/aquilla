@@ -1,22 +1,17 @@
-// AQU-180: Per-project members page (/project/:id/members).
+// Shared project-members building blocks.
 //
-// Renders inside the ProjectWorkspace shell (AQU-254 surface-swap pattern).
-// Shell stays mounted; only the center content area swaps.
+// Canonical UI: `/project/:id/settings/members` (MembersSection).
 //
-// Features:
-//   - Effective member list (GET /projects/:id/members) incl. secondarySources
-//   - Direct-grant add / change-role / remove (reuses useProjectMembers hook)
-//   - Invite-link generation with expiry selector (reuses InviteLinkTab logic)
-//   - "Revoke all access" with grant-path enumeration + typed confirmation
+// This module keeps the pieces still embedded elsewhere:
+//   - MembersTab — org-side ProjectOverview Members card
+//   - InviteLinkTab / RevokeAllDialog — settings MembersSection + MembersTab
 
 import { useState, useCallback, useEffect, useMemo } from "react"
-import { useParams } from "react-router-dom"
 import {
-  ArrowLeft, UserPlus, LinkIcon, ShieldOff, RefreshCcw,
-  AlertTriangle, Copy, Lock, Users,
+  UserPlus, LinkIcon, ShieldOff, RefreshCcw,
+  AlertTriangle, Copy, Lock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
@@ -28,7 +23,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -66,89 +60,11 @@ const EXPIRY_OPTIONS: { label: string; value: number | null }[] = [
 const DEFAULT_EXPIRY_DAYS = 7
 
 // ──────────────────────────────────────────────────────────────────────────
-// Main surface
-// ──────────────────────────────────────────────────────────────────────────
-
-type ActiveTab = "members" | "invite"
-
-export function ProjectMembersPage() {
-  const { id: projectId } = useParams<{ id: string }>()
-  // AQU-737: the workspace route is lazy; surface the load on Back to project so
-  // it spins + disables instead of sitting idle and re-clickable.
-  // `openingOverlay` blocks the rest of the page while the open is in flight.
-  const { open: openWorkspace, isPending: backPending, overlay: openingOverlay } = useOpenWorkspace()
-  const [tab, setTab] = useState<ActiveTab>("members")
-
-  if (!projectId) return null
-
-  return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      {openingOverlay}
-      {/* Back header */}
-      <div className="flex items-center gap-3 border-b bg-background px-6 py-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1.5 text-muted-foreground"
-          onClick={() => openWorkspace(`/project/${projectId}/editor`)}
-          disabled={backPending}
-          aria-busy={backPending || undefined}
-        >
-          {backPending ? <Spinner className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
-          Back to project
-        </Button>
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          Members
-        </div>
-      </div>
-
-      {/* Tab bar */}
-      <div className="flex gap-2 border-b px-6">
-        <button
-          type="button"
-          onClick={() => setTab("members")}
-          className={cn(
-            "px-3 py-2 text-sm",
-            tab === "members"
-              ? "border-b-2 border-primary font-medium"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          Members
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("invite")}
-          className={cn(
-            "px-3 py-2 text-sm",
-            tab === "invite"
-              ? "border-b-2 border-primary font-medium"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          Invite link
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        {tab === "members" ? (
-          <MembersTab projectId={projectId} />
-        ) : (
-          <InviteLinkTab projectId={projectId} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ──────────────────────────────────────────────────────────────────────────
 // Members tab
 //
 // Exported (AQU-335) so the org-side ProjectOverview (/projects/:id) can
-// embed the same members add/change-role/revoke surface the in-project
-// members page offers — one implementation, two surfaces.
+// embed the same members add/change-role/revoke surface — one implementation,
+// two surfaces (overview card + settings MembersSection helpers).
 // ──────────────────────────────────────────────────────────────────────────
 
 export function MembersTab({

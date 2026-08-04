@@ -13,6 +13,7 @@ const SEEDED_PROJECT_ID = "41ee4729-6862-51b1-b89c-47401d1a7850" // bestalu-bibl
 const PROJECT_ROUTES = [
   `/project/${SEEDED_PROJECT_ID}/editor`,
   `/project/${SEEDED_PROJECT_ID}/settings`,
+  `/project/${SEEDED_PROJECT_ID}/settings/members`,
   `/project/${SEEDED_PROJECT_ID}/rules`,
   `/project/${SEEDED_PROJECT_ID}/terminology`,
   `/project/${SEEDED_PROJECT_ID}/comments`,

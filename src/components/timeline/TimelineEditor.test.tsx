@@ -541,8 +541,8 @@ describe("TimelineEditor — audio-first mode", () => {
   it("the detail readout shows DURATIONS only — file-clock ranges lie against the re-flowed track (2026-08-06)", () => {
     renderAt("audioFirst", { initialSelectedCellId: "v1" })
     // v1: original 6s, translation 11s.
-    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Src: 6.0s")
-    expect(screen.getByTestId("tl-detail-tgt-duration")).toHaveTextContent("Tgt: 11.0s")
+    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Source: 6.0s")
+    expect(screen.getByTestId("tl-detail-tgt-duration")).toHaveTextContent("Target: 11.0s")
     expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
   })
 

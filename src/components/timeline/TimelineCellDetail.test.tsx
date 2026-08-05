@@ -121,7 +121,7 @@ describe("TimelineCellDetail", () => {
     expect(onCommit).not.toHaveBeenCalled()
   })
 
-  it("labels the pills Src/Tgt/Diff and shows range + duration for both sides", () => {
+  it("labels the pills Source/Target/Diff and shows range + duration for both sides", () => {
     render(
       <TimelineCellDetail
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
@@ -130,8 +130,8 @@ describe("TimelineCellDetail", () => {
         onCommitTarget={() => {}}
       />,
     )
-    expect(screen.getByText(/Src: 0:10\.0–0:15\.0 · 5\.0s/)).toBeInTheDocument()
-    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Tgt: 0:10.0–0:14.3")
+    expect(screen.getByText(/Source: 0:10\.0–0:15\.0 · 5\.0s/)).toBeInTheDocument()
+    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Target: 0:10.0–0:14.3")
     expect(screen.getByTestId("tl-detail-duration")).toHaveTextContent("4.3s")
     expect(screen.getByTestId("tl-detail-enddiff")).toHaveTextContent("Diff: +0.7s")
   })
@@ -187,8 +187,8 @@ describe("TimelineCellDetail", () => {
         onCommitTarget={() => {}}
       />,
     )
-    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Src: 1.6s")
-    expect(screen.getByTestId("tl-detail-tgt-duration")).toHaveTextContent("Tgt: 4.6s")
+    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Source: 1.6s")
+    expect(screen.getByTestId("tl-detail-tgt-duration")).toHaveTextContent("Target: 4.6s")
     // No ranges, no diff, no overlap — the file clock doesn't match the track.
     expect(screen.queryByText(/0:13\.8/)).toBeNull()
     expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
@@ -205,7 +205,7 @@ describe("TimelineCellDetail", () => {
         onCommitTarget={() => {}}
       />,
     )
-    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Src: 1.6s")
+    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Source: 1.6s")
     expect(screen.queryByTestId("tl-detail-tgt-duration")).toBeNull()
   })
 
@@ -220,7 +220,7 @@ describe("TimelineCellDetail", () => {
     expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
     expect(screen.queryByTestId("tl-detail-enddiff")).toBeNull()
     // A chip-less cell's range pill stays unlabeled — nothing to contrast with.
-    expect(screen.queryByText(/^Src:/)).toBeNull()
+    expect(screen.queryByText(/^Source:/)).toBeNull()
   })
 
   it("renders an empty state with no selection", () => {

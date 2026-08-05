@@ -265,14 +265,14 @@ export function TimelineCellDetail({
             {chipStats.srcDurationSec != null && (
               <Pill>
                 <span data-testid="tl-detail-src-duration" className="font-mono tabular-nums">
-                  Src: {chipStats.srcDurationSec.toFixed(1)}s
+                  Source: {chipStats.srcDurationSec.toFixed(1)}s
                 </span>
               </Pill>
             )}
             {chipStats.tgtDurationSec != null && (
               <Pill>
                 <span data-testid="tl-detail-tgt-duration" className="font-mono tabular-nums">
-                  Tgt: {chipStats.tgtDurationSec.toFixed(1)}s
+                  Target: {chipStats.tgtDurationSec.toFixed(1)}s
                 </span>
               </Pill>
             )}
@@ -280,7 +280,7 @@ export function TimelineCellDetail({
         ) : (
           <Pill>
             <span className="font-mono tabular-nums">
-              {chipStats ? "Src: " : ""}
+              {chipStats ? "Source: " : ""}
               {fmtClock(start, true)}–{fmtClock(end, true)}
               {" · "}
               {(end - start).toFixed(1)}s
@@ -290,7 +290,7 @@ export function TimelineCellDetail({
         {chipStats?.kind === "dubbing" && (
           <Pill>
             <span data-testid="tl-detail-dub-range" className="font-mono tabular-nums">
-              Tgt: {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
+              Target: {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
               {" · "}
               <span data-testid="tl-detail-duration">{chipStats.durationSec.toFixed(1)}s</span>
             </span>

@@ -237,7 +237,7 @@ export function TeamsList() {
           {/* Search + sort bar */}
           {!loading && teams.length > 0 && (
             <div className="mb-6 flex flex-wrap items-center gap-2">
-              <InputGroup className="min-w-0 flex-1">
+              <InputGroup className="min-w-0 flex-1 bg-card">
                 <InputGroupAddon>
                   <Search />
                 </InputGroupAddon>

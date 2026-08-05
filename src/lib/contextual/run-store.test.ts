@@ -239,7 +239,15 @@ describe("start", () => {
     await attachContextualRun("p1", "file-1")
     const ok = await startContextualRun("p1", "file-1")
     expect(ok).toBe(true)
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined)
     expect(getContextualRunState()).toMatchObject({ runId: RUN_A, status: "running" })
+  })
+
+  it("forwards the anchor cell so the first wave starts where the user is looking", async () => {
+    const transport = makeTransport()
+    setContextualTransport(transport)
+    await attachContextualRun("p1", "file-1")
+    await startContextualRun("p1", "file-1", "cell-42")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42")
   })
 })

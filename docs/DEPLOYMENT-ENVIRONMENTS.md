@@ -17,10 +17,11 @@ Each API host exposes `/identity/*` and `/chat/*` through the identity Worker an
 hostname; `api.dev.aquilla.app` is development and must not be used as a staging
 fallback.
 
-The Hyperdrive IDs are intentionally kept in the Wrangler files rather than
-duplicated here. A named profile binds its matching Neon branch. R2 contains media,
-import sources, and agent artifacts; event and projection state lives only in Neon
-Postgres.
+`config/cloudflare-deployments.json` is the machine-readable source for Worker
+names, routes, environment-selecting variables, Hyperdrive IDs, R2 buckets, and
+required binding names. Contract tests keep all three Wrangler files synchronized
+with it. R2 contains media, import sources, and agent artifacts; event and
+projection state lives only in Neon Postgres.
 
 ## Supported commands
 
@@ -31,10 +32,11 @@ Postgres.
 | Development | `pnpm run deploy:aquilla:dev` | `pnpm run verify:live:development` |
 
 Production and staging deploy scripts refuse to run from any branch except `main`
-and `staging`, respectively. Every surface passes `--env=production`,
-`--env=staging`, or `--env=development` explicitly and verifies the public
-deployment afterward. Identity and sync deploys also run the target Neon schema
-guard before publishing.
+and `staging`, respectively. Every surface selects `production`, `staging`, or
+`development` explicitly. The shared deployer uploads a version, validates its
+exact ID and bindings, promotes it, reapplies routes/triggers, and confirms the
+same ID owns 100% traffic before public verification. Identity and sync deploys
+also run the target Neon schema guard before publishing.
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
@@ -47,9 +49,9 @@ additionally require a clean worktree whose HEAD matches the current remote bran
 
 GitHub Actions deploys only these mappings:
 
-- `main` -> `--env=production`
-- `staging` -> `--env=staging`
-- `dev` -> `--env=development`
+- `main` -> `production`
+- `staging` -> `staging`
+- `dev` -> `development`
 
 Both deploy workflows resolve this mapping through
 `scripts/resolve-deployment-target.sh`. Unsupported live refs fail before any
@@ -58,10 +60,14 @@ jobs enter the GitHub `production` Environment, whose deployment-branch policy
 admits only `main`. This is a server-side backstop independent of the workflow's
 branch resolver.
 
-Cloudflare Workers Builds must run `pnpm run deploy:workers-build` for both its
-production and non-production commands. That repository-owned command deploys
-`main` to production, but uploads preview-only versions for `staging`, `dev`, and
-feature branches. It fails closed when Cloudflare does not provide the branch.
+Cloudflare Workers Builds for the SPA, identity, and sync Workers must run
+`pnpm run deploy:workers-build` for both their production and non-production
+commands. That repository-owned command verifies the exact uploaded version,
+then promotes `main` to production. `staging`, `dev`, and feature branches remain
+verified preview-only versions; all feature branches intentionally share the
+development resources. It fails closed when Cloudflare does not provide Workers
+CI branch and commit metadata. Production binding verification happens before
+promotion, with exact-version traffic verification afterward.
 
 Never paste a branch-selection shell expression into the Cloudflare dashboard and
 never use a bare `wrangler deploy` for a live Aquilla environment.
@@ -89,7 +95,8 @@ An environment change is one atomic contract change. Update and verify all of:
 1. The three Wrangler files and their Worker routes/bindings.
 2. `package.json` deploy and live-verification commands.
 3. `.github/workflows/deploy.yml` and `deploy-workers.yml`.
-4. `sync-worker/scripts/cloudflare-build-deploy.mjs`.
+4. `config/cloudflare-deployments.json`, `scripts/cloudflare-build-deploy.mjs`,
+   `cloudflare-version-deploy.mjs`, and `verify-worker-deployment.mjs`.
 5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.
 6. The GitHub `production` Environment branch policy (`main` only).
 7. This matrix, [Staging](STAGING.md), and the Workers Builds runbook.

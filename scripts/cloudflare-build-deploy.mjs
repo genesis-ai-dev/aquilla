@@ -1,5 +1,8 @@
-import { spawn } from "node:child_process"
 import { pathToFileURL } from "node:url"
+import { deploymentExpectation, WORKER_SURFACES } from "./cloudflare-deployment-manifest.mjs"
+import { runVerifiedDeployment } from "./cloudflare-version-deploy.mjs"
+
+const SUPPORTED_SURFACES = new Set(WORKER_SURFACES)
 
 /**
  * Keep the Cloudflare Workers Builds dashboard command stable while the
@@ -17,7 +20,7 @@ export function deploymentPlan(branch) {
     return {
       mode: "production",
       environment: "production",
-      args: ["deploy", "--env=production"],
+      promote: true,
     }
   }
 
@@ -25,67 +28,59 @@ export function deploymentPlan(branch) {
     return {
       mode: "preview",
       environment: "staging",
-      args: ["versions", "upload", "--env=staging"],
+      promote: false,
     }
   }
 
-  if (normalizedBranch === "dev" || normalizedBranch === "development") {
-    return {
-      mode: "preview",
-      environment: "development",
-      args: ["versions", "upload", "--env=development"],
-    }
-  }
-
-  // Cloudflare may build arbitrary feature branches. They use isolated
-  // development bindings and remain preview-only; they must never inherit
-  // production or staging bindings and must never promote live traffic.
+  // Development and arbitrary feature branches are isolated behind the
+  // development profile. A version upload creates a previewable version but
+  // cannot change live traffic or routes.
   return {
     mode: "preview",
     environment: "development",
-    args: ["versions", "upload", "--env=development"],
+    promote: false,
   }
 }
 
 export async function runDeployment({
+  surface,
   branch = process.env.WORKERS_CI_BRANCH,
   workersCi = process.env.WORKERS_CI,
-  spawnCommand = spawn,
+  commitSha = process.env.WORKERS_CI_COMMIT_SHA,
+  buildUuid = process.env.WORKERS_CI_BUILD_UUID,
+  deployVersion = runVerifiedDeployment,
 } = {}) {
   if (workersCi !== "1") {
     throw new Error("WORKERS_CI=1 is required; use the environment-specific local deploy scripts")
   }
+  if (!SUPPORTED_SURFACES.has(surface)) {
+    throw new Error(`Worker surface is required; expected ${[...SUPPORTED_SURFACES].join(", ")}`)
+  }
+  if (!commitSha?.trim()) {
+    throw new Error("WORKERS_CI_COMMIT_SHA is required; refusing an untraceable deployment")
+  }
+
   const plan = deploymentPlan(branch)
   console.log(
-    `[workers-build] branch=${branch} mode=${plan.mode} environment=${plan.environment}`,
+    `[workers-build] surface=${surface} branch=${branch} mode=${plan.mode} environment=${plan.environment}`,
   )
 
-  const child = spawnCommand("pnpm", ["exec", "wrangler", ...plan.args], {
-    env: process.env,
-    stdio: "inherit",
+  const productionWorker = deploymentExpectation(surface, "production").worker
+  return deployVersion({
+    surface,
+    environment: plan.environment,
+    promote: plan.promote,
+    expectedWorker: productionWorker,
+    sourceId: commitSha,
+    sourceLabel: `workers-build:${branch}:${buildUuid || "unknown-build"}`,
   })
-
-  const exitCode = await new Promise((resolve, reject) => {
-    child.once("error", reject)
-    child.once("exit", (code, signal) => {
-      if (signal) {
-        reject(new Error(`Wrangler terminated by ${signal}`))
-        return
-      }
-      resolve(code ?? 1)
-    })
-  })
-
-  if (exitCode !== 0) {
-    throw new Error(`Wrangler exited with status ${exitCode}`)
-  }
 }
 
 const isEntrypoint = process.argv[1]
   && import.meta.url === pathToFileURL(process.argv[1]).href
 
 if (isEntrypoint) {
-  runDeployment().catch((error) => {
+  runDeployment({ surface: process.argv[2] }).catch((error) => {
     console.error(`[workers-build] ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1
   })

@@ -30,6 +30,9 @@ export class JWTService {
       sub: username,
       iat: now,
       exp: now + expiresIn,
+      // [Pen test] Auth & session mgmt (2026-08-03): unique id so a logged-out
+      // token can be denylisted individually — see utils/token-revocation.ts.
+      jti: crypto.randomUUID(),
     }
 
     // hono/jwt's `sign` typing rejects arbitrary strings for `alg`, but we

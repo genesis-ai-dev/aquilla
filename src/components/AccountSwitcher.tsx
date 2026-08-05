@@ -3,8 +3,8 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
-import { hydrateSessionEmails } from "@/lib/frontier/auth"
-import { clearSession, removeSession, sessionKey } from "@/lib/frontier/session-store"
+import { hydrateSessionEmails, logout as revokeServerSide } from "@/lib/frontier/auth"
+import { clearSession, listAllSessionJwts, removeSession, sessionKey } from "@/lib/frontier/session-store"
 import { clearAllLocalData } from "@/lib/store/project-index"
 import { outboxPendingCount } from "@/lib/sync/outbox"
 import {
@@ -127,10 +127,18 @@ export function AccountSwitcher({
     await doLogout(scope)
   }
 
+  // [Pen test] Auth & session mgmt (2026-08-03): this used to only drop
+  // tokens client-side (clearSession/removeSession) — a stolen token kept
+  // authenticating server-side for up to its full 30-day expiry. Denylist
+  // server-side first, best-effort (revokeServerSide never throws, so a
+  // network hiccup never blocks the local sign-out).
   async function doLogout(scope: LogoutScope) {
     if (scope === "all") {
+      const jwts = await listAllSessionJwts()
+      await Promise.all(jwts.map((jwt) => revokeServerSide(jwt)))
       await clearSession()
     } else if (active) {
+      await revokeServerSide(active.jwt)
       await removeSession(sessionKey(active))
     }
     await clearAllLocalData()

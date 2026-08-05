@@ -104,6 +104,9 @@ name = "EMAIL"
 [observability]
 enabled = true
 
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 # Smart Placement: run the Worker near its backend (Hyperdrive→Neon, US-side)
 # instead of at the requester's edge PoP. Primary reason is geo: outbound
 # fetches to OpenRouter then egress from a US region, so Anthropic models stop
@@ -141,6 +144,7 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
+DEPLOYMENT_WORKER_NAME = "aquilla-identity-local"
 # AQU-713 legacy identity bridge. Production enables JIT migration by default;
 # all three migration secrets above must be provisioned before deployment.
 LEGACY_USER_MIGRATION_ENABLED = "true"
@@ -198,6 +202,9 @@ crons = ["*/5 * * * *"]
 [env.production.observability]
 enabled = true
 
+[env.production.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [[env.production.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "69bcc10e67464f2eaf4fe91a9141e7cd"
@@ -228,6 +235,7 @@ BASE_URL = "https://aquilla.app"
 SYNC_WORKER_URL = "https://api.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "production"
+DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
@@ -283,6 +291,9 @@ bucket_name = "aquilla-snapshots-dev"
 [[env.development.send_email]]
 name = "EMAIL"
 
+[env.development.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.development.vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
@@ -302,6 +313,7 @@ BASE_URL = "https://dev.aquilla.app"
 SYNC_WORKER_URL = "https://api.dev.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "development"
+DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
@@ -364,6 +376,9 @@ bucket_name = "aquilla-snapshots-staging"
 [[env.staging.send_email]]
 name = "EMAIL"
 
+[env.staging.version_metadata]
+binding = "CF_VERSION_METADATA"
+
 [env.staging.vars]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = "43200"
@@ -383,6 +398,7 @@ BASE_URL = "https://staging.aquilla.app"
 SYNC_WORKER_URL = "https://api.staging.aquilla.app/sync"
 DEFAULT_LLM_MODEL = "anthropic/claude-sonnet-4.5"
 ENVIRONMENT = "staging"
+DEPLOYMENT_WORKER_NAME = "aquilla-staging-identity"
 LEGACY_USER_MIGRATION_ENABLED = "false"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"

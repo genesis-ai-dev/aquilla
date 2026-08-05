@@ -33,6 +33,12 @@ export interface Env {
   /** Postgres (Neon) via Hyperdrive — the sole datastore. index.ts builds
    *  AQUILLA_PG from this; required (the worker fails fast when absent). */
   HYPERDRIVE?: Hyperdrive
+  DEPLOYMENT_WORKER_NAME?: string
+  CF_VERSION_METADATA?: {
+    id: string
+    tag: string
+    timestamp: string
+  }
 
   // Frontier JWT signing. Rotated for the clean break — tokens minted by
   // the legacy frontier-server no longer verify here.
@@ -232,6 +238,10 @@ export interface Env {
 
 export type Variables = {
   user: AuthUser
+  /** The verified JWT payload for the current request, set by authMiddleware
+   *  so routes (e.g. POST /auth/logout) can read `jti`/`exp` without
+   *  re-verifying the token. */
+  tokenPayload: JWTPayload
 }
 
 /**
@@ -280,6 +290,10 @@ export interface JWTPayload {
   sub: string
   exp: number
   iat: number
+  /** Unique token id, checked against revoked_tokens on logout (migration
+   *  0073). Optional — tokens minted before this field existed have none
+   *  and simply aren't individually revocable. */
+  jti?: string
   [k: string]: unknown
 }
 

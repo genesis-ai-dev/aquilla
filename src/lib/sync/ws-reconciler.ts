@@ -44,7 +44,17 @@ import type { TargetPresenceSelection } from "./presence-store"
 import type {
   ContextualFrame,
   ContextualRunStatus,
+  ContextualSpanPhase,
 } from "@/lib/contextual/run-store"
+import type { ContextualDraftsFrame } from "@/lib/contextual/drafts-store"
+
+/**
+ * Everything a `contextual.activity` message may carry. Run/lane frames drive
+ * the pill (run-store); draft bursts drive the in-cell suggestions
+ * (drafts-store). They travel on the same channel but land in different
+ * stores, so the union lives here rather than in either one.
+ */
+export type ContextualActivityFrame = ContextualFrame | ContextualDraftsFrame
 
 const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
@@ -88,7 +98,7 @@ export type ProjectWsServerMessage =
   /** Contextual translation pipeline activity (slice D2). LOSSY — never
    *  load-bearing; the run-store mirror re-hydrates from the transport
    *  snapshot on file open. `frame` feeds `applyRemoteFrame` directly. */
-  | { t: "contextual.activity"; project: string; frame: ContextualFrame }
+  | { t: "contextual.activity"; project: string; frame: ContextualActivityFrame }
 
 /**
  * True when an `event.applied` frame is the echo of a write THIS client just
@@ -515,9 +525,19 @@ const CONTEXTUAL_FRAME_STATUSES: ReadonlySet<string> = new Set([
   "running", "paused", "parked", "done", "failed", "terminated",
 ])
 
+/** Within-span phases a `contextual.phase` frame may carry. */
+const CONTEXTUAL_SPAN_PHASES: ReadonlySet<string> = new Set([
+  "reading", "drafting", "checking", "staging",
+])
+
+/** Ceiling on drafts in one `contextual.drafts` frame — mirrors
+ *  MAX_DRAFTS_PER_FRAME in auth-worker/src/lib/contextual/tick.ts. Beyond it
+ *  the frame is rejected and the client refetches the authoritative list. */
+const MAX_CONTEXTUAL_DRAFTS_PER_FRAME = 40
+
 /** Defensive parse of the `frame` payload of a `contextual.activity` message.
  * Field names must match run-store's frame interfaces exactly. */
-function parseContextualFrame(value: unknown): ContextualFrame | null {
+function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const f = value as Record<string, unknown>
   if (typeof f.runId !== "string" || f.runId.length === 0) return null
@@ -546,7 +566,8 @@ function parseContextualFrame(value: unknown): ContextualFrame | null {
     if (
       typeof f.sceneBriefId !== "string" ||
       typeof f.spanLabel !== "string" ||
-      typeof f.ambiguityCount !== "number"
+      typeof f.ambiguityCount !== "number" ||
+      (f.spanId !== undefined && typeof f.spanId !== "string")
     ) {
       return null
     }
@@ -556,6 +577,71 @@ function parseContextualFrame(value: unknown): ContextualFrame | null {
       sceneBriefId: f.sceneBriefId,
       spanLabel: f.spanLabel,
       ambiguityCount: f.ambiguityCount,
+      ...(typeof f.spanId === "string" ? { spanId: f.spanId } : {}),
+    }
+  }
+  if (f.type === "contextual.span.start") {
+    if (
+      typeof f.fileId !== "string" ||
+      typeof f.spanId !== "string" ||
+      f.spanId.length === 0 ||
+      typeof f.spanLabel !== "string"
+    ) {
+      return null
+    }
+    return {
+      type: "contextual.span.start",
+      runId: f.runId,
+      fileId: f.fileId,
+      spanId: f.spanId,
+      spanLabel: f.spanLabel,
+    }
+  }
+  if (f.type === "contextual.phase") {
+    if (
+      typeof f.spanId !== "string" ||
+      f.spanId.length === 0 ||
+      typeof f.spanLabel !== "string" ||
+      typeof f.phase !== "string" ||
+      !CONTEXTUAL_SPAN_PHASES.has(f.phase)
+    ) {
+      return null
+    }
+    return {
+      type: "contextual.phase",
+      runId: f.runId,
+      spanId: f.spanId,
+      spanLabel: f.spanLabel,
+      phase: f.phase as ContextualSpanPhase,
+    }
+  }
+  if (f.type === "contextual.drafts") {
+    if (
+      typeof f.fileId !== "string" ||
+      typeof f.spanLabel !== "string" ||
+      !Array.isArray(f.drafts) ||
+      f.drafts.length === 0 ||
+      f.drafts.length > MAX_CONTEXTUAL_DRAFTS_PER_FRAME ||
+      (f.truncated !== undefined && typeof f.truncated !== "boolean")
+    ) {
+      return null
+    }
+    const drafts: { draftId: string; cellId: string; text: string }[] = []
+    for (const raw of f.drafts as unknown[]) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null
+      const d = raw as Record<string, unknown>
+      if (typeof d.draftId !== "string" || d.draftId.length === 0) return null
+      if (typeof d.cellId !== "string" || d.cellId.length === 0) return null
+      if (typeof d.text !== "string") return null
+      drafts.push({ draftId: d.draftId, cellId: d.cellId, text: d.text })
+    }
+    return {
+      type: "contextual.drafts",
+      runId: f.runId,
+      fileId: f.fileId,
+      spanLabel: f.spanLabel,
+      drafts,
+      ...(f.truncated === true ? { truncated: true } : {}),
     }
   }
   if (f.type === "contextual.span") {
@@ -563,7 +649,8 @@ function parseContextualFrame(value: unknown): ContextualFrame | null {
       typeof f.spanLabel !== "string" ||
       typeof f.staged !== "number" ||
       typeof f.skipped !== "number" ||
-      typeof f.verdictSummary !== "string"
+      typeof f.verdictSummary !== "string" ||
+      (f.spanId !== undefined && typeof f.spanId !== "string")
     ) {
       return null
     }
@@ -574,6 +661,7 @@ function parseContextualFrame(value: unknown): ContextualFrame | null {
       staged: f.staged,
       skipped: f.skipped,
       verdictSummary: f.verdictSummary,
+      ...(typeof f.spanId === "string" ? { spanId: f.spanId } : {}),
     }
   }
   return null

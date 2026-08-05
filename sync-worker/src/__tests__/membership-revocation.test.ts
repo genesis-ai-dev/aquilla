@@ -125,14 +125,26 @@ describe('AQU-346 — membership re-check on POST /events', () => {
     expect(result.rejected.map((r) => r.reason)).toEqual(['membership revoked', 'membership revoked'])
   })
 
-  it('keeps accepting when an org grant survives — removing the direct row is not a demotion (AD-12)', async () => {
+  it('keeps accepting when a Maintainer+ org grant survives — removing the direct row is not a demotion (AD-12)', async () => {
     const { db } = await makeTestDb({
       projects: [projectRow({ org_id: 5 })],
-      org_members: [{ org_id: 5, user_id: 1, role_level: 400 }],
+      org_members: [{ org_id: 5, user_id: 1, role_level: 600 }],
     })
     const result = await post(db, [commitEvent('evt-org', 1)], await tokenFor(1))
     expect(result.accepted.map((a) => a.id)).toContain('evt-org')
     expect(result.rejected).toHaveLength(0)
+  })
+
+  it('AQU-435: a sub-Maintainer org grant does NOT survive — the org path only contributes at Maintainer(600)+', async () => {
+    const { db } = await makeTestDb({
+      projects: [projectRow({ org_id: 5 })],
+      org_members: [{ org_id: 5, user_id: 1, role_level: 400 }],
+    })
+    const result = await post(db, [commitEvent('evt-org-below-floor', 1)], await tokenFor(1))
+    expect(result.accepted).toHaveLength(0)
+    expect(result.rejected).toEqual([
+      { id: 'evt-org-below-floor', status: 403, reason: 'membership revoked' },
+    ])
   })
 
   it('keeps accepting when a group grant survives', async () => {

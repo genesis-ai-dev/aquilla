@@ -151,6 +151,7 @@ run_worker_first = ["/"]
 name = "aquilla-web-preview"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 workers_dev = true
+preview_urls = true
 
 [env.preview.assets]
 directory = "./dist"

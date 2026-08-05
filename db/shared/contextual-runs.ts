@@ -69,6 +69,10 @@ export interface ContextualRun {
   callsSpent: number
   lastError: string | null
   steeringCursor: string | null
+  /** Where the user was looking at start — rotates the first wave's seeds. */
+  anchorCellId: string | null
+  /** Shared across every run one project-wide start created. */
+  scopeGroup: string | null
   createdAt: string
   updatedAt: string
 }
@@ -172,6 +176,8 @@ interface RunRow {
   calls_spent: number
   last_error: string | null
   steering_cursor: unknown
+  anchor_cell_id: string | null
+  scope_group: string | null
   created_at: unknown
   updated_at: unknown
 }
@@ -199,6 +205,8 @@ function rowToRun(r: RunRow): ContextualRun {
     callsSpent: Number(r.calls_spent),
     lastError: r.last_error,
     steeringCursor: r.steering_cursor == null ? null : toIso(r.steering_cursor),
+    anchorCellId: r.anchor_cell_id ?? null,
+    scopeGroup: r.scope_group ?? null,
     createdAt: toIso(r.created_at),
     updatedAt: toIso(r.updated_at),
   }
@@ -206,7 +214,7 @@ function rowToRun(r: RunRow): ContextualRun {
 
 const RUN_COLS = `id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
-  last_error, steering_cursor, created_at, updated_at`
+  last_error, steering_cursor, anchor_cell_id, scope_group, created_at, updated_at`
 
 interface SteeringRow {
   id: string
@@ -283,6 +291,10 @@ export interface CreateRunInput {
   targetLang?: string
   initiatedBy?: string | null
   roleSnapshot?: RoleSnapshot | null
+  /** Cell the user was looking at — rotates the first wave to start there. */
+  anchorCellId?: string | null
+  /** Shared across every run one project-wide start created. */
+  scopeGroup?: string | null
 }
 
 export type CreateRunResult =
@@ -308,8 +320,10 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
   try {
     const row = await db
       .prepare(
-        `INSERT INTO contextual_runs (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot)
-         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb)
+        `INSERT INTO contextual_runs
+            (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
+             anchor_cell_id, scope_group)
+         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?)
          RETURNING ${RUN_COLS}`,
       )
       .bind(
@@ -319,6 +333,8 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
         lane,
         input.initiatedBy ?? null,
         input.roleSnapshot ? JSON.stringify(input.roleSnapshot) : null,
+        input.anchorCellId ?? null,
+        input.scopeGroup ?? null,
       )
       .first<RunRow>()
     if (!row) throw new Error("insert returned no row")
@@ -460,22 +476,26 @@ export async function setSpanCursor(
   return row ? rowToRun(row) : null
 }
 
-export interface SpanOutcomeInput {
+export interface WaveOutcomeInput {
   cursor: SpanCursor
-  outcome: "done" | "failed"
+  /** Spans in the wave that finished with staged work. */
+  doneCount: number
+  /** Spans in the wave that failed or staged nothing. */
+  failedCount: number
   unitsUsed: number
   callsUsed: number
   lastError?: string | null
   steeringCursor?: string
 }
 
-/** Record one span's outcome: cursor advance + counters in ONE UPDATE, so a
- *  crash between "span worked" and "cursor advanced" can only replay a span,
- *  never skip one. */
-export async function recordSpanOutcome(
+/** Record a WAVE's outcome: cursor advance + counters in ONE UPDATE, so a
+ *  crash between "spans worked" and "cursor advanced" can only replay a wave,
+ *  never skip one. Re-proposing a draft on the same cell is idempotent
+ *  (insertDrafts supersedes), so a replay costs tokens, never correctness. */
+export async function recordWaveOutcome(
   db: AquillaDb,
   runId: string,
-  input: SpanOutcomeInput,
+  input: WaveOutcomeInput,
 ): Promise<ContextualRun | null> {
   const row = await db
     .prepare(
@@ -495,8 +515,8 @@ export async function recordSpanOutcome(
     .bind(
       JSON.stringify(input.cursor),
       input.cursor.seeds.length,
-      input.outcome === "done" ? 1 : 0,
-      input.outcome === "failed" ? 1 : 0,
+      Math.max(0, Math.round(input.doneCount)),
+      Math.max(0, Math.round(input.failedCount)),
       Math.max(0, Math.round(input.unitsUsed)),
       Math.max(0, Math.round(input.callsUsed)),
       input.lastError ?? null,
@@ -505,6 +525,43 @@ export async function recordSpanOutcome(
     )
     .first<RunRow>()
   return row ? rowToRun(row) : null
+}
+
+export interface SpanOutcomeInput {
+  cursor: SpanCursor
+  outcome: "done" | "failed"
+  unitsUsed: number
+  callsUsed: number
+  lastError?: string | null
+  steeringCursor?: string
+}
+
+/** Single-span form of {@link recordWaveOutcome} (a wave of one). */
+export async function recordSpanOutcome(
+  db: AquillaDb,
+  runId: string,
+  input: SpanOutcomeInput,
+): Promise<ContextualRun | null> {
+  const { outcome, ...rest } = input
+  return recordWaveOutcome(db, runId, {
+    ...rest,
+    doneCount: outcome === "done" ? 1 : 0,
+    failedCount: outcome === "failed" ? 1 : 0,
+  })
+}
+
+/**
+ * Heartbeat: prove a driver is alive without changing any run state.
+ *
+ * `updated_at` doubles as the driver lease — {@link claimStrandedRuns} only
+ * adopts runs whose heartbeat has gone quiet, so a wave that legitimately
+ * takes minutes must touch the row before it starts.
+ */
+export async function touchRun(db: AquillaDb, runId: string): Promise<void> {
+  await db
+    .prepare(`UPDATE contextual_runs SET updated_at = now() WHERE id = ? AND status = 'running'`)
+    .bind(runId)
+    .run()
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -612,9 +669,19 @@ export interface InsertDraftsInput {
   }[]
 }
 
-/** Stage span drafts. A new proposal supersedes any existing `proposed` row on
- *  the same cell — the supersede UPDATE and the INSERTs run in one atomic
- *  batch, so the partial UNIQUE (contextual_drafts_live) never conflicts. */
+/**
+ * Stage span drafts. A new proposal supersedes any existing `proposed` row on
+ * the same cell — the supersede UPDATE and the INSERTs run in one atomic
+ * batch, so the partial UNIQUE (contextual_drafts_live) never conflicts
+ * *within* this call.
+ *
+ * ON CONFLICT closes the ACROSS-call race that waves introduce: two spans in
+ * the same wave can overlap a cell (a `refresh_span` re-enqueue, or a seed
+ * subdivided after new cells landed). Serially that was impossible, so a bare
+ * INSERT was safe; concurrently a bare INSERT would throw a unique violation
+ * and fail an otherwise-good span. Last writer wins the live proposal, which
+ * matches the supersede rule the serial path already had.
+ */
 export async function insertDrafts(
   db: AquillaDb,
   input: InsertDraftsInput,
@@ -635,7 +702,16 @@ export async function insertDrafts(
         .prepare(
           `INSERT INTO contextual_drafts
               (id, run_id, project_id, file_id, cell_id, scene_brief_id, text, verdicts, provenance)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+           ON CONFLICT (project_id, file_id, cell_id) WHERE status = 'proposed'
+           DO UPDATE SET
+             id = EXCLUDED.id,
+             run_id = EXCLUDED.run_id,
+             scene_brief_id = EXCLUDED.scene_brief_id,
+             text = EXCLUDED.text,
+             verdicts = EXCLUDED.verdicts,
+             provenance = EXCLUDED.provenance,
+             created_at = now()`,
         )
         .bind(
           uuidv7(),
@@ -712,6 +788,248 @@ export async function reviewDraft(
     .first<DraftRow>()
   if (!current) return { status: "not_found" }
   return { status: "invalid_state", current: current.status }
+}
+
+/**
+ * Which of these cells already hold human (or previously-applied) target text.
+ *
+ * Called immediately before staging, as late as possible: the pipeline works
+ * from a pairs snapshot taken at wave start, and a translator may well have
+ * typed into one of these cells in the minute since. A draft is a proposal and
+ * can never overwrite anything — but a proposal stacked on top of someone's
+ * fresh work is noise they have to dismiss, and that is how a translator
+ * learns to distrust the whole feature.
+ */
+export async function findOccupiedCells(
+  db: AquillaDb,
+  scope: { projectId: string; fileId: string; cellIds: string[] },
+): Promise<Set<string>> {
+  if (scope.cellIds.length === 0) return new Set()
+  const placeholders = scope.cellIds.map(() => "?").join(",")
+  const { results } = await db
+    .prepare(
+      `SELECT cell_id FROM cells
+        WHERE project_id = ? AND file_id = ? AND side = 'target'
+          AND cell_id IN (${placeholders})
+          AND COALESCE(value, '') <> ''`,
+    )
+    .bind(scope.projectId, scope.fileId, ...scope.cellIds)
+    .all<{ cell_id: string }>()
+  return new Set(results.map((r) => r.cell_id))
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Driver recovery
+// ──────────────────────────────────────────────────────────────────────────
+
+/** How long a 'running' run may go without a heartbeat before the sweeper
+ *  treats its driver as dead. Comfortably longer than the slowest wave. */
+export const DRIVER_STALE_SECONDS = 300
+
+/**
+ * Adopt runs whose driver is gone, returning the ones this caller now owns.
+ *
+ * Two strandings, both previously terminal:
+ *   - `running` with a quiet heartbeat — the Worker request that owned the
+ *     self-tick loop ended (eviction, deploy, an uncaught throw past the
+ *     handler). `resumeRun` refuses a 'running' run, so nothing could restart
+ *     it and the pill span forever.
+ *   - `parked` with spans still on the cursor — the loop hit its wave cap and
+ *     parked deliberately. Waking it is how a file larger than one loop's cap
+ *     finishes without the user clicking anything.
+ *
+ * The UPDATE is the claim: exactly one sweeper can win a given row per pass,
+ * because the guard requires the stale heartbeat it then overwrites.
+ */
+export async function claimStrandedRuns(
+  db: AquillaDb,
+  limit = 10,
+  staleSeconds: number = DRIVER_STALE_SECONDS,
+): Promise<ContextualRun[]> {
+  const { results } = await db
+    .prepare(
+      `UPDATE contextual_runs SET status = 'running', updated_at = now()
+        WHERE id IN (
+          SELECT id FROM contextual_runs
+           WHERE updated_at < now() - make_interval(secs => ?)
+             AND (
+               status = 'running'
+               OR (status = 'parked'
+                   AND span_cursor IS NOT NULL
+                   AND (span_cursor ->> 'nextIndex')::int
+                       < jsonb_array_length(span_cursor -> 'seeds'))
+             )
+           ORDER BY updated_at ASC
+           LIMIT ?
+        )
+        RETURNING ${RUN_COLS}`,
+    )
+    .bind(staleSeconds, Math.max(1, Math.min(100, limit)))
+    .all<RunRow>()
+  return results.map(rowToRun)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Project-wide fan-out
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Key/value catalogs have no discourse to construe — mirrors the SPA's
+ *  `src/lib/contextual/discourse-file.ts` NON_DISCOURSE_TYPES. */
+const NON_DISCOURSE_KINDS = ["json", "po", "properties"]
+/** Tabular files qualify only when they carry canonical Scripture refs
+ *  (the SPA's `fileHasSections` test, expressed in SQL). */
+const TABULAR_KINDS = new Set(["csv", "tsv", "xlsx"])
+
+export interface AutopilotCandidateFile {
+  fileId: string
+  name: string
+  kind: string
+  untranslatedCells: number
+}
+
+/**
+ * Discourse files in this project with work left, most work first.
+ *
+ * This is the unit that makes fan-out worth its overhead: one file is a chain
+ * of spans, but a project is dozens of files that share nothing at all — no
+ * briefs, no cells, no ordering. Whole books can run at once.
+ */
+export async function listAutopilotCandidateFiles(
+  db: AquillaDb,
+  projectId: string,
+): Promise<AutopilotCandidateFile[]> {
+  const placeholders = NON_DISCOURSE_KINDS.map(() => "?").join(",")
+  const { results } = await db
+    .prepare(
+      `SELECT f.id, f.name, COALESCE(f.kind, '') AS kind,
+              COUNT(*) FILTER (WHERE COALESCE(t.value, '') = '') AS untranslated,
+              BOOL_OR(s.canonical_ref IS NOT NULL) AS has_refs
+         FROM files f
+         JOIN cells s
+           ON s.project_id = f.project_id AND s.file_id = f.id AND s.side = 'source'
+         LEFT JOIN cells t
+           ON t.project_id = s.project_id AND t.file_id = s.file_id
+          AND t.cell_id = s.cell_id AND t.side = 'target'
+        WHERE f.project_id = ? AND f.deleted_at IS NULL
+          AND COALESCE(f.kind, '') NOT IN (${placeholders})
+        GROUP BY f.id, f.name, f.kind
+       HAVING COUNT(*) FILTER (WHERE COALESCE(t.value, '') = '') > 0
+        ORDER BY untranslated DESC`,
+    )
+    .bind(projectId, ...NON_DISCOURSE_KINDS)
+    .all<{ id: string; name: string; kind: string; untranslated: number; has_refs: boolean | null }>()
+
+  return results
+    .filter((r) => !TABULAR_KINDS.has(r.kind) || r.has_refs === true)
+    .map((r) => ({
+      fileId: r.id,
+      name: r.name,
+      kind: r.kind,
+      untranslatedCells: Number(r.untranslated),
+    }))
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Project-level rollup (PM observability)
+// ──────────────────────────────────────────────────────────────────────────
+
+export interface ProjectAutopilotFileRow {
+  fileId: string
+  runId: string
+  status: ContextualRunStatus
+  doneSpans: number
+  totalSpans: number
+  failedSpans: number
+  unitsSpent: number
+  proposedDrafts: number
+  appliedDrafts: number
+  updatedAt: string
+  lastError: string | null
+}
+
+export interface ProjectAutopilotSummary {
+  files: ProjectAutopilotFileRow[]
+  activeRuns: number
+  doneSpans: number
+  totalSpans: number
+  failedSpans: number
+  unitsSpent: number
+  proposedDrafts: number
+  appliedDrafts: number
+}
+
+/**
+ * One query per project for the overview: the newest run per file plus its
+ * draft counts. This is the PM's answer to "what is the robot doing and what
+ * is waiting on my team", which no per-file surface can give.
+ */
+export async function getProjectAutopilotSummary(
+  db: AquillaDb,
+  projectId: string,
+): Promise<ProjectAutopilotSummary> {
+  const { results } = await db
+    .prepare(
+      `WITH newest AS (
+         SELECT DISTINCT ON (file_id)
+                id, file_id, status, done_spans, total_spans, failed_spans,
+                units_spent, last_error, updated_at
+           FROM contextual_runs
+          WHERE project_id = ?
+          ORDER BY file_id, created_at DESC
+       ),
+       drafts AS (
+         SELECT file_id,
+                COUNT(*) FILTER (WHERE status = 'proposed') AS proposed,
+                COUNT(*) FILTER (WHERE status = 'applied')  AS applied
+           FROM contextual_drafts
+          WHERE project_id = ?
+          GROUP BY file_id
+       )
+       SELECT n.*, COALESCE(d.proposed, 0) AS proposed, COALESCE(d.applied, 0) AS applied
+         FROM newest n LEFT JOIN drafts d ON d.file_id = n.file_id
+        ORDER BY n.updated_at DESC`,
+    )
+    .bind(projectId, projectId)
+    .all<{
+      id: string
+      file_id: string
+      status: ContextualRunStatus
+      done_spans: number
+      total_spans: number
+      failed_spans: number
+      units_spent: number
+      last_error: string | null
+      updated_at: unknown
+      proposed: number
+      applied: number
+    }>()
+
+  const files: ProjectAutopilotFileRow[] = results.map((r) => ({
+    fileId: r.file_id,
+    runId: r.id,
+    status: r.status,
+    doneSpans: Number(r.done_spans),
+    totalSpans: Number(r.total_spans),
+    failedSpans: Number(r.failed_spans),
+    unitsSpent: Number(r.units_spent),
+    proposedDrafts: Number(r.proposed),
+    appliedDrafts: Number(r.applied),
+    updatedAt: toIso(r.updated_at),
+    lastError: r.last_error,
+  }))
+
+  const sum = (pick: (f: ProjectAutopilotFileRow) => number) =>
+    files.reduce((n, f) => n + pick(f), 0)
+  return {
+    files,
+    activeRuns: files.filter((f) => ACTIVE_STATUSES.includes(f.status)).length,
+    doneSpans: sum((f) => f.doneSpans),
+    totalSpans: sum((f) => f.totalSpans),
+    failedSpans: sum((f) => f.failedSpans),
+    unitsSpent: sum((f) => f.unitsSpent),
+    proposedDrafts: sum((f) => f.proposedDrafts),
+    appliedDrafts: sum((f) => f.appliedDrafts),
+  }
 }
 
 /** Draft counts by status for the pill's snapshot. */

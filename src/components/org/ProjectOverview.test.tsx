@@ -75,10 +75,20 @@ const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: n
 // (the org overview's PM column joins from it, AQU-507). Default to empty so
 // it never interferes with pre-existing tests.
 const fetchAccessibleProjects = vi.fn(async (_jwt: string): Promise<unknown[]> => [])
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// Spread the real module rather than replacing it: ProjectOverview's tree
+// reaches cloud-projects through several paths (useProject -> resolveCloudProjectResult
+// / minimalProjectRecord, SharePanel, useProjectOrgId), and a factory listing
+// only the three functions this file drives makes every one of those an
+// "export is not defined on the mock" failure the moment a new caller appears.
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sync/cloud-projects")>()),
   setProjectDeadline: vi.fn(),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
+  // MembersTab -> useProjectOrgId (AQU-672) resolves the project's own org to
+  // seed member-add suggestions. These tests drive the roster through the
+  // member-scopes mock, so a miss keeps the suggestion path inert.
+  resolveCloudProjectResult: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
 }))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({

@@ -4,6 +4,7 @@
 // Cells without startTime/endTime are skipped.
 
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { assignedCastVoiceId, findVoice } from "@/lib/audio/voices"
 import { escapeVoiceName } from "@/lib/export/vtt-voice"
@@ -16,7 +17,7 @@ export function exportVtt(cells: CellData[], settings: ProjectTtsSettings | unde
   const cues: string[] = []
   for (const cell of cells) {
     if (cell.startTime == null || cell.endTime == null) continue
-    const raw = (cell.translated || cell.original || "").trim()
+    const raw = (cell.translated || effectiveSourceText(cell) || "").trim()
     if (!raw) continue
     const text = stripHtml(raw)
     const voiceId = assignedCastVoiceId(settings, cell.id)

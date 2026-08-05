@@ -3,6 +3,7 @@
 // not expressed as TMX <ph>/<bpt>/<ept> elements; plain-text values only. A
 // proper round-trip would require inline-element extraction from source markup.
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 
 function xmlEscape(s: string): string {
   return s
@@ -15,10 +16,14 @@ function xmlEscape(s: string): string {
 export function exportTmx(cells: CellData[], sourceLanguage = "und", targetLanguage = "und"): Blob {
   const now = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")
   const tus = cells
-    .filter((c) => c.original.trim() && c.translated.trim())
+    // Media cells speak through their transcription (effectiveSourceText) —
+    // an UNTRANSCRIBED media cell therefore drops out of the TU list
+    // entirely, which is correct for a translation memory: the filename was
+    // never a source segment.
+    .filter((c) => effectiveSourceText(c).trim() && c.translated.trim())
     .map((c) => {
       const tuid = xmlEscape(c.group || c.id)
-      const src = xmlEscape(c.original)
+      const src = xmlEscape(effectiveSourceText(c))
       const tgt = xmlEscape(c.translated)
       return [
         `    <tu tuid="${tuid}">`,

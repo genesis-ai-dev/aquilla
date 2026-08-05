@@ -1,7 +1,8 @@
 name: CI
 
-# AQU-799: checks and the SPA deployment share one workflow so deployment can
-# consume the exact artifact that passed the build/environment gate. Required
+# AQU-799: checks and route-free PR previews share one workflow so a preview can
+# consume the exact artifact that passed the build/environment gate. Pushes run
+# CI only; live environments require an explicit operator deployment. Required
 # check names are pinned by worker-deployment-contract.test.ts.
 
 on:
@@ -214,9 +215,9 @@ jobs:
       - run: docker build --tag aquilla-agent-sandbox:ci .
         working-directory: agent-worker
 
-  deploy:
+  preview:
     needs: [target, lint, typecheck, unit, build]
-    if: github.event.pull_request.draft != true
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     environment:
       name: ${{ needs.target.outputs.github_environment }}
@@ -237,34 +238,19 @@ jobs:
           name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
           path: dist
 
-      - name: Deploy aquilla-web (main/staging/dev)
-        id: deploy_live
-        if: github.event_name != 'pull_request'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
-        run: node scripts/cloudflare-version-deploy.mjs web "${{ needs.target.outputs.wrangler_environment }}"
-
-      - name: Verify deployed SPA environment
-        if: github.event_name != 'pull_request'
-        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=spa
-
       - name: Upload aquilla-web preview (PR)
         id: deploy_preview
-        if: github.event_name == 'pull_request'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
         run: node scripts/cloudflare-pr-preview.mjs "${{ github.event.number }}" "${{ github.event.pull_request.head.sha }}"
 
       - name: Verify aquilla-web preview environment
-        if: github.event_name == 'pull_request'
         env:
           PREVIEW_URL: ${{ steps.deploy_preview.outputs.url }}
         run: node scripts/verify-live-environment.mjs development --surface=spa --app-origin="$PREVIEW_URL"
 
       - name: Comment preview URL on PR
-        if: github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: pages-preview

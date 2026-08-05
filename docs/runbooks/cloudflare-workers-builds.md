@@ -3,25 +3,30 @@
 This runbook implements the Cloudflare Builds section of the canonical
 [deployment environment matrix](../DEPLOYMENT-ENVIRONMENTS.md).
 
-GitHub Actions is the intended owner of production, staging, and development
-deployments. Cloudflare Workers Builds must not remain a second live deployment
-owner: its Worker-name override can place a development-bound feature version in
-a production Worker's version history even when the repository selected a named
-development profile. A later manual promotion can then bypass the branch policy.
+Explicit operator commands are the intended owner of production, staging, and
+development deployments. Neither GitHub pushes nor Cloudflare Git integrations
+may automatically deploy live traffic. A Workers Builds Worker-name override can
+place a development-bound feature version in a production Worker's version
+history even when the repository selected a named development profile. A later
+manual promotion can then bypass the branch policy.
 
 ## Control-plane cutover
 
-Do not disable the existing Builds connections until all of these gates pass:
+Disable the existing Builds connections before publishing the manual-ownership
+workflow change. Use this order:
 
-1. GitHub Actions organization billing allows hosted jobs to start.
-2. Required Cloudflare and target Neon secrets are present.
-3. The consolidated CI workflow deploys and verifies `dev` successfully.
-4. The same exact-version path deploys and verifies `main` successfully.
+1. Confirm the authenticated operator can inspect and deploy all three Workers.
+2. Put every still-connected build on the repository-owned containment command.
+3. Disable automatic Workers Builds for `aquilla-web`, `aquilla-identity`, and
+   `aquilla-sync-worker` without deleting Workers, versions, bindings, or routes.
+4. Publish the workflow change, merge it to `dev`, and run the complete local
+   development deployment from a clean, current `dev` checkout.
+5. Verify exact versions, bindings, traffic, routes, and public health.
+6. After development validation and promotion to `main`, repeat the same explicit
+   production deployment from a clean, current `main` checkout.
 
-Then disable automatic Workers Builds for `aquilla-web`, `aquilla-identity`, and
-`aquilla-sync-worker`. Do not delete the Workers, routes, versions, or bindings.
 Web pull-request previews continue through GitHub Actions on the route-free
-`aquilla-web-preview` Worker.
+`aquilla-web-preview` Worker when hosted runners are available.
 
 While any Builds connection remains enabled during the cutover, set both its
 production and non-production deploy commands to the repository-owned command:
@@ -78,17 +83,19 @@ rejected before upload unless the checkout is on the authorized branch. The buil
 hook is defense in depth; Cloudflare Builds must still use the repository-owned
 command above.
 
-Live promotion is owned by `.github/workflows/ci.yml` for the SPA and
-`.github/workflows/deploy-workers.yml` for identity and sync. Both workflows pass
-an explicit named environment and use the same exact-version verifier.
+Live promotion is owned by an explicit operator running the `deploy:aquilla*`
+commands from the matching clean branch. `.github/workflows/ci.yml` is CI and
+pull-request-preview only. `.github/workflows/deploy-workers.yml` has no push
+trigger; its optional dispatch path uses the same named environments and
+exact-version verifier when GitHub-hosted runners are available.
 
 Removing the staging Workers or staging routes is explicitly deferred. This
 incident recovery only prevents non-production Workers Builds from changing
 traffic.
 
-GitHub production deploy jobs also enter the repository's `production`
-Environment. GitHub's deployment-branch policy restricts that Environment to
-`main`, independently of the workflow mapping.
+Explicitly dispatched GitHub production Worker jobs enter the repository's
+`production` Environment. GitHub's deployment-branch policy restricts that
+Environment to `main`, independently of the workflow mapping.
 
 ## Pull-request web previews
 

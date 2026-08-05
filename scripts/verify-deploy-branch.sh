@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Guards against deploying to prod/staging from the wrong git branch (e.g.
-# running a prod deploy script while checked out on `dev` or a feature
-# branch). Complements verify-dist-host.sh, which only catches a stale
-# dist/ — this catches the sync-worker/auth-worker deploys too, which have
-# no build step for verify-dist-host.sh to check.
+# Guards against deploying any live environment from the wrong git branch
+# (for example, running a development deploy from a feature branch).
+# Complements verify-dist-host.sh, which only catches a stale dist/ — this
+# catches the sync-worker/auth-worker deploys too, which have no SPA build.
 #
 # Usage: verify-deploy-branch.sh <expected-branch>
 set -euo pipefail
@@ -33,13 +32,13 @@ fi
 
 if [ "$current" != "$expected" ]; then
   echo "ABORT: this deploy target requires branch '$expected' (currently on '$current')." >&2
-  echo "Checkout '$expected' first, or use the matching 'npm run deploy:aquilla:dev:*' script to test a feature branch against the dev environment." >&2
+  echo "Checkout the clean, current '$expected' branch and use its matching deploy command." >&2
   exit 1
 fi
 
-# Local production/staging deploys must be reproducible from the exact remote
-# commit. CI checkouts are already pinned to the event SHA and authenticated
-# Cloudflare Builds may not expose reusable Git remote credentials.
+# Local live deploys must be reproducible from the exact remote commit. CI
+# checkouts are already pinned to the event SHA and authenticated Cloudflare
+# Builds may not expose reusable Git remote credentials.
 if [ -z "$ci_branch" ]; then
   if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
     echo "ABORT: deploys require a clean working tree." >&2

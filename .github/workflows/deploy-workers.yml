@@ -1,38 +1,18 @@
-name: Deploy Workers
+name: Manual Deploy Workers
 
-# Branch → environment mapping:
-#   push to main    → wrangler deploy --env=production → prod workers
-#   push to staging → wrangler deploy --env=staging → staging workers (staging.aquilla.app)
-#   push to dev     → wrangler deploy --env=development → dev workers (dev.aquilla.app)
+# This workflow has no push trigger. A human must select the authorized branch
+# and explicitly dispatch it. The same deployment is available locally through
+# package.json and is the usable path while GitHub-hosted runners are unavailable.
 #
-# Each worker only runs if its directory changed in the push (path filter) or
-# if invoked explicitly via workflow_dispatch.
+# Branch → environment mapping for an explicit dispatch:
+#   main    → production
+#   staging → staging
+#   dev     → development
 #
 # DEVEX-1: deploy steps are ordered after their test steps in the same job,
 # so tests must pass before wrangler deploy runs.
 
 on:
-  push:
-    branches: [main, staging, dev]
-    paths:
-      - '.github/workflows/deploy-workers.yml'
-      - 'sync-worker/**'
-      - 'auth-worker/**'
-      - 'db/**'
-      - 'shared/**'
-      - 'src/lib/migrate/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'tsconfig*.json'
-      - 'config/cloudflare-deployments.json'
-      - 'scripts/cloudflare-build-deploy.*'
-      - 'scripts/cloudflare-deployment-manifest.*'
-      - 'scripts/cloudflare-version-deploy.*'
-      - 'scripts/resolve-deployment-target.sh'
-      - 'scripts/resolve-worker-test-scope.*'
-      - 'scripts/verify-deploy-branch.sh'
-      - 'scripts/verify-live-environment.*'
-      - 'scripts/verify-worker-deployment.*'
   workflow_dispatch:
     inputs:
       worker:
@@ -63,11 +43,9 @@ jobs:
         name: Resolve authorized deployment target
         run: bash scripts/resolve-deployment-target.sh
 
-  # Reliable change detection. The old per-job `contains(toJSON(
-  # github.event.commits.*.modified), 'sync-worker/')` guard silently
-  # evaluated false (truncated/empty `commits` payloads, merge/batch
-  # pushes), so worker deploys were skipped even when the worker changed.
-  # Diff the actual push range instead.
+  # The operator selects the exact worker set. There is deliberately no diff
+  # inference here: a manual deployment must never silently skip a requested
+  # surface because a push payload or comparison range is incomplete.
   detect:
     needs: target
     runs-on: ubuntu-latest
@@ -75,30 +53,11 @@ jobs:
       sync: ${{ steps.f.outputs.sync }}
       auth: ${{ steps.f.outputs.auth }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - id: f
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            w="${{ github.event.inputs.worker }}"
-            [ "$w" = "all" ] || [ "$w" = "sync-worker" ] && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
-            [ "$w" = "all" ] || [ "$w" = "auth-worker" ] && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          base="${{ github.event.before }}"
-          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            echo "::notice::No usable diff base; deploying every Worker."
-            node scripts/resolve-worker-test-scope.mjs --all
-            exit 0
-          fi
-          if ! changed=$(git diff --name-only "$base" "${{ github.sha }}"); then
-            echo "::notice::Diff failed; deploying every Worker."
-            node scripts/resolve-worker-test-scope.mjs --all
-            exit 0
-          fi
-          echo "$changed"
-          printf '%s\n' "$changed" | node scripts/resolve-worker-test-scope.mjs
+          w="${{ github.event.inputs.worker }}"
+          [ "$w" = "all" ] || [ "$w" = "sync-worker" ] && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
+          [ "$w" = "all" ] || [ "$w" = "auth-worker" ] && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
 
   # Worker deploys are blocked until the target Neon schema is current — the
   # recurring 500 class (AQU-135/150/158, projects.is_active/source_link_*) was

@@ -31,12 +31,13 @@ projection state lives only in Neon Postgres.
 | Staging | `pnpm run deploy:aquilla:staging` | `pnpm run verify:live:staging` |
 | Development | `pnpm run deploy:aquilla:dev` | `pnpm run verify:live:development` |
 
-Production and staging deploy scripts refuse to run from any branch except `main`
-and `staging`, respectively. Every surface selects `production`, `staging`, or
-`development` explicitly. The shared deployer uploads a version, validates its
-exact ID and bindings, promotes it, reapplies routes/triggers, and confirms the
-same ID owns 100% traffic before public verification. Identity and sync deploys
-also run the target Neon schema guard before publishing.
+Production, staging, and development deploy scripts refuse to run from any branch
+except `main`, `staging`, and `dev`, respectively. Every surface selects
+`production`, `staging`, or `development` explicitly. The shared deployer uploads
+a version, validates its exact ID and bindings, promotes it, reapplies
+routes/triggers, and confirms the same ID owns 100% traffic before public
+verification. Identity and sync deploys also run the target Neon schema guard
+before publishing.
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
@@ -45,38 +46,41 @@ staging named profiles also run the branch guard as a Wrangler custom-build hook
 covering accidental direct `wrangler deploy --env=...` calls. Local live deploys
 additionally require a clean worktree whose HEAD matches the current remote branch.
 
-## Automation ownership
+## Deployment ownership
 
-GitHub Actions is the sole intended owner of live Aquilla deployments. It deploys
-only these mappings:
+Live Aquilla deployments require an explicit human/operator action. No push to
+GitHub and no Cloudflare Git integration is authorized to deploy live traffic.
+The canonical full-environment entrypoints are the local commands above, run from
+a clean checkout whose HEAD exactly matches the corresponding remote branch:
 
 - `main` -> `production`
 - `staging` -> `staging`
 - `dev` -> `development`
 
-The SPA CI/deploy workflow and the worker deploy workflow resolve this mapping through
-`scripts/resolve-deployment-target.sh`. Unsupported live refs fail before any
-schema, build, or deploy step; there is no default environment. Production deploy
-jobs enter the GitHub `production` Environment, whose deployment-branch policy
-admits only `main`. This is a server-side backstop independent of the workflow's
-branch resolver.
+The optional `.github/workflows/deploy-workers.yml` workflow is
+`workflow_dispatch`-only. It provides the same explicit, verified identity/sync
+path once GitHub-hosted runners are available, and resolves its selected branch
+through `scripts/resolve-deployment-target.sh`. Unsupported refs fail before any
+schema, build, or deploy step; there is no default environment. Production jobs
+enter the GitHub `production` Environment, whose deployment-branch policy admits
+only `main`.
 
-Cloudflare Workers Builds must not be a second live deployment owner. After the
-GitHub workflow has successfully deployed and verified development and production,
-disable automatic Workers Builds for the SPA, identity, and sync repositories
-without deleting their existing Workers. Until that control-plane cutover is
-complete, every still-connected build must use the repository-owned
+Cloudflare Workers Builds must not be a live deployment owner. Disable automatic
+Workers Builds for the SPA, identity, and sync repositories without deleting
+their existing Workers. Until that control-plane cutover is complete, every
+still-connected build must use the repository-owned
 `pnpm run deploy:workers-build` command. It fails closed without Workers CI branch
 and commit metadata, verifies the exact uploaded version, promotes only `main`, and
 keeps every other branch preview-only. This transition rule prevents an unsafe
-dashboard command while GitHub-hosted runners or required secrets are unavailable.
+dashboard command during the cutover.
 
 Never paste a branch-selection shell expression into the Cloudflare dashboard and
 never use a bare `wrangler deploy` for a live Aquilla environment.
 
-The consolidated `.github/workflows/ci.yml` builds the SPA exactly once, verifies
-its API target, uploads that exact artifact, and deploys it only after the required
-lint, typecheck, unit, and build jobs pass. Pull requests use the route-free
+The consolidated `.github/workflows/ci.yml` runs checks on pushes and pull
+requests but never deploys a live environment. It builds the SPA exactly once,
+verifies its API target, and uploads that exact artifact. Non-draft pull requests
+use the route-free
 `preview` Wrangler profile
 (`aquilla-web-preview`) with development API targets. Preview uploads cannot mutate
 the production, staging, or development SPA Workers.
@@ -99,7 +103,7 @@ An environment change is one atomic contract change. Update and verify all of:
 
 1. The three Wrangler files and their Worker routes/bindings.
 2. `package.json` deploy and live-verification commands.
-3. `.github/workflows/ci.yml` and `deploy-workers.yml`.
+3. `.github/workflows/ci.yml` and the dispatch-only `deploy-workers.yml`.
 4. `config/cloudflare-deployments.json`, `scripts/cloudflare-build-deploy.mjs`,
    `cloudflare-version-deploy.mjs`, and `verify-worker-deployment.mjs`.
 5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.

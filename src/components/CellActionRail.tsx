@@ -46,6 +46,9 @@ export function RailButton({
 
   return (
     <div className="relative">
+      {/* AQU-755: AppTooltip (not native `title`) so the tooltip surfaces on
+          keyboard focus as well as hover. `data-tooltip` stays as the e2e/test
+          hook; AppTooltip strips `title` so nothing double-renders. */}
       <AppTooltip content={tooltip}>
         <Button
           type="button"

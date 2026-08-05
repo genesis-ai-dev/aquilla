@@ -1,15 +1,17 @@
 // aquilla-web Worker entry
 //
-// Routes requests on aquilla.app to either the SPA (index.html) or one of the
-// static marketing pages (homepage.html, beta.html) based on the presence of
-// the aq_hint=1 cookie — a non-credential, host-only 1-bit cookie written by
-// the SPA's session-store whenever there is an active IDB session.
+// Routes requests on aquilla.app to either one of the static marketing pages
+// (homepage.html, beta.html, …) or the SPA (index.html). The root is the
+// marketing homepage for everyone — identity is resolved in the browser
+// (AppEntryBanner), not here, so `/` stays edge-cacheable.
 //
 // Request flow:
 //   <static page>      → always serve its .html (bypass for QA / sharing / SEO)
-//   /  (no aq_hint)   → serve homepage.html  (signed-out visitor)
-//   /  (aq_hint=1)    → serve index.html      (signed-in user)
+//   /                  → serve homepage.html (everyone; shared-cached)
 //   /* (anything else) → env.ASSETS.fetch(req) (SPA fallback, React Router handles it)
+//
+// Every response on a non-canonical host (dev.aquilla.app, *.workers.dev)
+// additionally carries X-Robots-Tag: noindex.
 //
 // Marketing pages are statically-served, standalone HTML documents (their own
 // build entry + this route). Adding one = a vite input + a STATIC_PAGES line.
@@ -91,15 +93,33 @@ async function route(req: Request, env: Env): Promise<Response> {
     return env.ASSETS.fetch(target.toString())
   }
 
-  // Root: serve SPA or homepage based on the auth hint cookie.
-  // Must not be CDN-cached (response depends on Cookie header).
+  // Root: always the marketing homepage, for everyone.
+  //
+  // This used to branch on the aq_hint cookie and serve the SPA to signed-in
+  // users. Three reasons it doesn't any more:
+  //
+  //  1. It never actually worked. Cloudflare's asset router resolves `/` to
+  //     index.html before the Worker runs, so the branch never executed and
+  //     the bare domain served the empty app shell to everyone, crawlers
+  //     included. `run_worker_first = ["/"]` in wrangler.toml is what makes
+  //     this handler reachable at all.
+  //  2. A Cookie-dependent root can never be edge-cached — it forced
+  //     `private, no-store` on the most-requested URL we have.
+  //  3. It isn't what comparable products do. linear.app and cursor.com both
+  //     serve one shared-cached marketing page at `/` and neither varies on
+  //     Cookie.
+  //
+  // Identity is now resolved in the browser instead: AppEntryBanner reads the
+  // session from IndexedDB after mount and offers signed-in visitors a way
+  // into the workspace at /app. That keeps this response identical for every
+  // visitor, so it caches.
   if (url.pathname === "/") {
-    const cookie = req.headers.get("Cookie") ?? ""
-    const signedIn = /(?:^|;\s*)aq_hint=1(?:;|$)/.test(cookie)
-    const target = new URL(signedIn ? "/index.html" : "/homepage.html", req.url)
+    const target = new URL("/homepage.html", req.url)
     const asset = await env.ASSETS.fetch(target.toString())
     const res = new Response(asset.body, asset)
-    res.headers.set("Cache-Control", "private, no-store")
+    // Revalidate per browser request, cache at the edge, and keep serving
+    // stale while revalidating so a deploy never leaves visitors waiting.
+    res.headers.set("Cache-Control", "public, max-age=0, s-maxage=600, stale-while-revalidate=86400")
     return res
   }
 

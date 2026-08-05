@@ -93,6 +93,10 @@ import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { sweepStrandedContextualRuns } from "./routes/contextual"
+import {
+  deploymentEnvironmentError,
+  scheduledDeploymentEnvironmentError,
+} from "./environment-guard"
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -320,6 +324,17 @@ app.onError((err, c) => {
 // silent fallback to an empty local D1).
 const baseFetch = app.fetch.bind(app)
 app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
+  const environmentError = deploymentEnvironmentError(request.url, env ?? {})
+  if (environmentError) {
+    console.error("Refusing request with cross-environment identity bindings", {
+      environmentError,
+    })
+    return new Response(
+      "Worker deployment configuration does not match this API environment",
+      { status: 503, headers: CORS_HEADERS },
+    )
+  }
+
   if (env?.AQUILLA_PG) return baseFetch(request, env, ctx)
   if (!env?.HYPERDRIVE) {
     return new Response(
@@ -355,6 +370,14 @@ const scheduled = async (
   env: Env,
   ctx: ExecutionContext,
 ): Promise<void> => {
+  const environmentError = scheduledDeploymentEnvironmentError(env)
+  if (environmentError) {
+    console.error("Refusing scheduled work with cross-environment identity bindings", {
+      environmentError,
+    })
+    return
+  }
+
   let runEnv = env
   let shim: ReturnType<typeof makePostgres> | null = null
   if (!env.AQUILLA_PG) {

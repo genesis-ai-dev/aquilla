@@ -68,6 +68,30 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
+  /** Select and commit one translation through the eBible corpus picker. */
+  async importEBibleCorpus(translationTitle: string): Promise<void> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+
+    const dialog = this.page.getByRole("dialog")
+    const ebibleCard = dialog.getByRole("button", { name: /^eBible Corpus/i }).first()
+    await expect(ebibleCard).toBeVisible({ timeout: 5_000 })
+    await ebibleCard.click()
+
+    const search = dialog.getByRole("textbox", { name: "Search eBible translations" })
+    await expect(search).toBeEnabled({ timeout: 10_000 })
+    await search.fill(translationTitle)
+
+    const result = dialog.locator("button").filter({ hasText: translationTitle }).first()
+    await expect(result).toBeVisible({ timeout: 5_000 })
+    await result.click()
+
+    const importButton = dialog.getByRole("button", { name: /^Import$/i }).last()
+    await expect(importButton).toBeEnabled({ timeout: 5_000 })
+    await importButton.click()
+    await this.waitForImportSettled()
+  }
+
   /**
    * Import through a specialized importer's own panel (Biblica, Macula,
    * Translation Notes …). These panels commit from their own Import button
@@ -258,6 +282,13 @@ export class Workspace {
       .click()
   }
 
+  /** Wait for a named file to be present in the authoritative sidebar inventory. */
+  async waitForFileInSidebar(nameSubstring: string): Promise<void> {
+    await expect(
+      this.page.locator("aside").getByText(nameSubstring, { exact: false }).first(),
+    ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
   async waitForEditor(expectedCellId?: string): Promise<void> {
     // Seeded fixture ids are UUIDs, so they are safe in this quoted attribute
     // selector. Passing the expected id prevents a file navigation from being
@@ -296,19 +327,19 @@ export class Workspace {
     let activatedFromReadView = false
     if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
       const readView = this.targetReadView(index)
-      await expect(readView).toBeVisible({ timeout: 10_000 })
+      await expect(readView).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
       await readView.click()
       activatedFromReadView = true
     }
 
-    await expect(target).toBeVisible({ timeout: 10_000 })
+    await expect(target).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
     // A read-view click is the user's one activation. Clicking the newly
     // mounted editor again normalizes IDML's caret through handleClick and can
     // hide focus-placement regressions that only occur on first activation.
     if (!activatedFromReadView) {
       await target.click()
     }
-    await expect(target).toBeFocused({ timeout: 10_000 })
+    await expect(target).toBeFocused({ timeout: EDITOR_READY_TIMEOUT_MS })
     return target
   }
 
@@ -349,11 +380,17 @@ export class Workspace {
    * Reproduce the IDML pointer path from AQU-740: activate a tall empty target
    * from below its text line, type, click that same blank area again, and keep
    * typing. Both clicks must resolve to the real single-line caret.
+   *
+   * `expectedText` is what the cell should hold after the commit. It defaults
+   * to the concatenated input, but AQU-758 sanitizes whitespace at entry
+   * (doubled spaces collapse to one), so callers typing deliberate whitespace
+   * runs must pass the sanitized result explicitly.
    */
   async editIdmlCellFromBlankArea(
     index: number,
     firstText: string,
     secondText: string,
+    expectedText = `${firstText}${secondText}`,
   ): Promise<void> {
     const row = this.cellRow(index)
     await row.scrollIntoViewIfNeeded()
@@ -394,7 +431,7 @@ export class Workspace {
     expect(Math.abs((await caretTop()) - textLineTop)).toBeLessThan(5)
 
     await this.page.keyboard.type(secondText)
-    await this.commitTargetCellEdit(index, `${firstText}${secondText}`)
+    await this.commitTargetCellEdit(index, expectedText)
   }
 
   /**

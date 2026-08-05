@@ -33,6 +33,12 @@ export interface Env {
   /** Postgres (Neon) via Hyperdrive — the sole datastore. index.ts builds
    *  AQUILLA_PG from this; required (the worker fails fast when absent). */
   HYPERDRIVE?: Hyperdrive
+  DEPLOYMENT_WORKER_NAME?: string
+  CF_VERSION_METADATA?: {
+    id: string
+    tag: string
+    timestamp: string
+  }
 
   // Frontier JWT signing. Rotated for the clean break — tokens minted by
   // the legacy frontier-server no longer verify here.

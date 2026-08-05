@@ -3,6 +3,7 @@ export type LiveSurface = "all" | "auth" | "sync" | "spa"
 
 export interface LiveVerificationOptions {
   surface?: LiveSurface
+  appOrigin?: string
   fetchImpl?: typeof fetch
   lookup?: (
     hostname: string,

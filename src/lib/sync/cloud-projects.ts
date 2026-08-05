@@ -219,6 +219,29 @@ export async function setProjectDeadline(
 }
 
 /**
+ * PATCH /api/v2/projects/:id — rename a project (AQU-765). Maintainer+ only
+ * (server-enforced: a contributor gets a 403). `projects.name` is the source
+ * of truth every surface reads, so on success the org list, breadcrumbs,
+ * portfolio, and search all reflect the new name after they refetch. Throws a
+ * UserError on failure (401/403/404/…), so the caller can distinguish a
+ * permission block from other failures.
+ */
+export async function renameProject(
+  jwt: string,
+  projectId: string,
+  name: string,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<{ id: string; name: string }> {
+  const res = await fetch(`${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  return (await res.json()) as { id: string; name: string }
+}
+
+/**
  * AQU-507: PATCH /api/v2/projects/:id/pm — assign (userId) or clear (null) the
  * project's designated Project Manager. Maintainer+ only (server-enforced);
  * the server also rejects a target who is not a member of the project. Returns

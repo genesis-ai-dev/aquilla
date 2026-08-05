@@ -6,6 +6,21 @@
     %BRAND_ICON_TAGS%
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="%BRAND_DESCRIPTION%" />
+    <!-- This file is the APP shell. Every marketing page has its own prerendered
+         HTML entry (homepage.html, beta.html, case-study*.html) and its own
+         indexable content; index.html is only ever served for client-rendered
+         app routes and for shared invite links. Those render nothing without JS
+         and several are private, so the whole shell is noindex.
+
+         This is what keeps the app out of the index without re-basing every app
+         route under a prefix: one rule that covers routes we haven't written
+         yet, rather than a robots.txt denylist someone has to remember to
+         extend. Social meta above still works — noindex doesn't affect
+         unfurling.
+
+         ⚠ If you ever add a marketing page as a SPA route, it will inherit this
+         noindex. Give it its own prerendered entry instead — docs/SEO.md. -->
+    <meta name="robots" content="noindex, follow" />
     <title>%BRAND_TITLE%</title>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="%BRAND_NAME%" />

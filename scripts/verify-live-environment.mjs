@@ -21,6 +21,14 @@ const ENVIRONMENTS = {
 
 const VALID_SURFACES = new Set(["all", "auth", "sync", "spa"])
 
+// The bare origin serves the prerendered marketing homepage (worker/index.ts),
+// whose small JS graph never imports the sync client or the chat completion
+// service — crawling it can't prove the SPA targets the right environment
+// (AQU-779). Any non-marketing path falls through to the assets binding's
+// single-page-application fallback and serves the real SPA shell; /app is a
+// stable route in the App.tsx route table.
+const SPA_SHELL_PATH = "/app"
+
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
@@ -50,6 +58,25 @@ async function requestWithRetry(url, init, verify, options) {
       if (attempt < attempts) {
         log(`[verify-live] retrying ${url} (${attempt}/${attempts})`)
         await delay(retryDelayMs)
+      }
+    }
+  }
+
+  throw lastError
+}
+
+async function operationWithRetry(description, operation, options) {
+  let lastError
+
+  for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    try {
+      await operation()
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt < options.attempts) {
+        options.log(`[verify-live] retrying ${description} (${attempt}/${options.attempts})`)
+        await delay(options.retryDelayMs)
       }
     }
   }
@@ -174,7 +201,8 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
 }
 
 async function verifySpa(config, options) {
-  const response = await options.fetchImpl(config.appOrigin, {
+  const appUrl = new URL(SPA_SHELL_PATH, config.appOrigin).href
+  const response = await options.fetchImpl(appUrl, {
     headers: { Accept: "text/html" },
   })
   assertResponse(response, 200, "SPA entrypoint")
@@ -200,24 +228,51 @@ async function verifySpa(config, options) {
     throw new Error(`SPA bundle contains cross-environment hosts: ${forbidden.join(", ")}`)
   }
 
-  options.log(`[verify-live] SPA at ${config.appOrigin} targets only the expected live environment`)
+  options.log(`[verify-live] SPA at ${appUrl} targets only the expected live environment`)
+}
+
+function withAppOrigin(config, appOrigin, surface) {
+  if (appOrigin === undefined) return config
+  if (surface !== "spa") {
+    throw new Error("--app-origin may only be used with --surface=spa")
+  }
+
+  let parsed
+  try {
+    parsed = new URL(appOrigin)
+  } catch {
+    throw new Error(`invalid app origin ${JSON.stringify(appOrigin)}`)
+  }
+  if (
+    parsed.protocol !== "https:"
+    || parsed.username
+    || parsed.password
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash
+  ) {
+    throw new Error(`invalid app origin ${JSON.stringify(appOrigin)}; expected an HTTPS origin without a path`)
+  }
+  return { ...config, appOrigin: parsed.origin }
 }
 
 export async function verifyLiveEnvironment(environment, {
   surface = "all",
+  appOrigin,
   fetchImpl = fetch,
   lookup = dnsLookup,
   attempts = 5,
   retryDelayMs = 1_000,
   log = console.log,
 } = {}) {
-  const config = ENVIRONMENTS[environment]
-  if (!config) {
+  const environmentConfig = ENVIRONMENTS[environment]
+  if (!environmentConfig) {
     throw new Error(`unknown environment ${JSON.stringify(environment)}; expected production, staging, or development`)
   }
   if (!VALID_SURFACES.has(surface)) {
     throw new Error(`unknown surface ${JSON.stringify(surface)}; expected all, auth, sync, or spa`)
   }
+  const config = withAppOrigin(environmentConfig, appOrigin, surface)
 
   const options = { fetchImpl, lookup, attempts, retryDelayMs, log }
   if (surface === "all" || surface === "auth" || surface === "sync") {
@@ -225,7 +280,9 @@ export async function verifyLiveEnvironment(environment, {
   }
   if (surface === "all" || surface === "auth") await verifyAuth(config, options)
   if (surface === "all" || surface === "sync") await verifySync(config, options)
-  if (surface === "all" || surface === "spa") await verifySpa(config, options)
+  if (surface === "all" || surface === "spa") {
+    await operationWithRetry(config.appOrigin, () => verifySpa(config, options), options)
+  }
 
   log(`[verify-live] ${environment}/${surface} verification passed`)
 }
@@ -233,9 +290,11 @@ export async function verifyLiveEnvironment(environment, {
 function parseCliArgs(argv) {
   const environment = argv[0]
   const surfaceArg = argv.find((arg) => arg.startsWith("--surface="))
+  const appOriginArg = argv.find((arg) => arg.startsWith("--app-origin="))
   return {
     environment,
     surface: surfaceArg?.slice("--surface=".length) || "all",
+    appOrigin: appOriginArg?.slice("--app-origin=".length),
   }
 }
 
@@ -243,8 +302,8 @@ const isEntrypoint = process.argv[1]
   && import.meta.url === pathToFileURL(process.argv[1]).href
 
 if (isEntrypoint) {
-  const { environment, surface } = parseCliArgs(process.argv.slice(2))
-  verifyLiveEnvironment(environment, { surface }).catch((error) => {
+  const { environment, surface, appOrigin } = parseCliArgs(process.argv.slice(2))
+  verifyLiveEnvironment(environment, { surface, appOrigin }).catch((error) => {
     console.error(`[verify-live] ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1
   })

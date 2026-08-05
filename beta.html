@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="%BRAND_FAVICON%" />
     %BRAND_ICON_TAGS%
+    <!-- Marketing faces. In the document head rather than injected by JS on
+         mount (as they were) so the preload scanner finds them and the
+         prerendered page paints in its real typeface instead of swapping. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..620;1,9..144,300..560&amp;display=swap" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Aquilla is in public beta — free today, evolving fast. See what's shipping now and what's next on the roadmap." />
     <link rel="canonical" href="https://aquilla.app/beta" />

@@ -93,8 +93,15 @@ export function clearAuthHint(): void {
   document.cookie = `${HINT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
 }
 
-/** Returns true when the auth-hint cookie (aq_hint=1) is present. */
+/**
+ * Returns true when the auth-hint cookie (aq_hint=1) is present.
+ *
+ * Marketing pages call this during render and are also rendered in Node by the
+ * build-time prerender (scripts/prerender-marketing.ts), where there is no
+ * `document` — the prerendered fallback is always the signed-out variant.
+ */
 export function hasAuthHintCookie(): boolean {
+  if (typeof document === "undefined") return false
   return /(?:^|;\s*)aq_hint=1(?:;|$)/.test(document.cookie)
 }
 // --------------------------

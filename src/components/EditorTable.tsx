@@ -675,6 +675,9 @@ interface EditorTableProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  /** Non-null when the user cannot write to the termbase (below Maintainer) —
+   *  AddConceptDialog opens blocked with this reason instead of accepting input. */
+  addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -749,7 +752,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
@@ -1893,6 +1896,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onOpenAudioSetup={onOpenAudioSetup}
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
+          addConceptBlockedReason={addConceptBlockedReason}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -2409,6 +2413,7 @@ interface MemoizedRowProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -2481,7 +2486,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -2640,6 +2645,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
         onAddConceptFromSelection={onAddConceptFromSelection}
+        addConceptBlockedReason={addConceptBlockedReason}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -2797,6 +2803,7 @@ interface EditorRowProps {
   onProjectChanged?: () => void
   /** Add-from-selection: create a DRAFT concept from a selected source token. */
   onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -3639,7 +3646,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -3757,6 +3764,13 @@ function EditorRow({
   const translatedEditorRef = useRef<TranslatedEditorHandle | null>(null)
   const targetReadContentRef = useRef<HTMLDivElement | null>(null)
   const pendingIdmlPointerSelectionRef = useRef<IdmlPointerSelection | null>(null)
+  // AQU-746: activation is async (read view → TipTap mount → rAF focus), so a
+  // printable keydown typed in that window has no focused editor to land in and
+  // is silently dropped. Buffer those keys on the (synchronously refocused) row
+  // wrapper and replay them once the editor reports focus, so a fast typist
+  // never loses the first character(s). See requestTargetEdit / handleGridRowKeyDown.
+  const awaitingEditorFocusRef = useRef(false)
+  const pendingActivationInputRef = useRef<string>("")
   const pendingFootnoteAnchorRef = useRef<FootnoteInsertionAnchor | null>(null)
   const [activeFootnoteIndex, setActiveFootnoteIndex] = useState<number | null>(null)
   const [addFootnoteOpen, setAddFootnoteOpen] = useState(false)
@@ -4437,6 +4451,14 @@ function EditorRow({
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
     if (!editable || isLoading || lockHolderLabel) return
     pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
+    // AQU-746: open the keystroke-buffer window and move focus to the persistent
+    // row wrapper *synchronously*, before React swaps the read view out. Without
+    // this the read view unmounts, focus falls to <body>, and any keydown before
+    // the editor focuses is lost. On the row wrapper those keydowns are catchable
+    // (handleGridRowKeyDown) and get replayed on editor focus.
+    awaitingEditorFocusRef.current = true
+    pendingActivationInputRef.current = ""
+    rowRef.current?.focus({ preventScroll: true })
     onActivateEditor(cell.id)
   }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
 
@@ -4446,12 +4468,19 @@ function EditorRow({
 
   const handleEditorFocus = useCallback(() => {
     editorFocusedRef.current = true
+    // AQU-746: the editor now owns the caret — stop buffering; TranslatedEditor
+    // replays whatever was captured during activation (see its onFocus).
+    awaitingEditorFocusRef.current = false
     onActivateEditor(cell.id)
     onClaimCell?.(cell.id)
     onAckRemoteChange?.(cell.id)
   }, [cell.id, onActivateEditor, onClaimCell, onAckRemoteChange])
 
   const handleEditorBlurOuter = useCallback(() => {
+    // AQU-746: activation was abandoned without the editor ever focusing — drop
+    // any buffered keys so they can't leak into a later, unrelated activation.
+    awaitingEditorFocusRef.current = false
+    pendingActivationInputRef.current = ""
     if (editorFocusedRef.current) {
       editorFocusedRef.current = false
       onReleaseCell?.(cell.id)
@@ -5153,6 +5182,23 @@ function EditorRow({
     // Only act when the grid row wrapper itself is focused, not a child element
     // (child interactive elements handle their own keyboard events).
     if (e.target !== e.currentTarget) return
+    // AQU-746: while the editor is mounting/focusing after an activation, capture
+    // printable keystrokes here (the row wrapper holds focus in that window) and
+    // buffer them for replay. Without this the character is dropped: it fires
+    // before any editor exists to receive it. Only single printable keys — no
+    // modifier chords, no navigation/IME keys — are text; everything else falls
+    // through to the normal grid-navigation handling below.
+    if (
+      awaitingEditorFocusRef.current
+      && e.key.length === 1
+      && !e.metaKey
+      && !e.ctrlKey
+      && !e.altKey
+    ) {
+      e.preventDefault()
+      pendingActivationInputRef.current += e.key
+      return
+    }
     if (e.key === "ArrowDown" || e.key === "j") {
       e.preventDefault()
       onGridRowKeyNav("next")
@@ -5330,33 +5376,28 @@ function EditorRow({
             controls (character picker, generate, play, make-a-character). In
             Text mode it shows the source text as usual. */}
         {audioLens ? (
-          (() => {
-            const vid = assignedCastVoiceId(audioLens.settings, cell.id) ?? audioLens.defaultVoiceId
-            const resolvedVoice =
-              audioLens.voices.find((v) => v.id === vid) ?? audioLens.voices[0]
-            if (!resolvedVoice) return <div />
-            return (
-              <div
-                className={cn("flex flex-col transition-opacity", isSynthBusy && "opacity-70")}
-                dir="ltr"
-              >
-                <CellVoicePanel
-                  cell={cell}
-                  project={audioLens.project}
-                  projectId={audioLens.projectId}
-                  settings={audioLens.settings}
-                  voices={audioLens.voices}
-                  resolvedVoice={resolvedVoice}
-                  session={audioLens.session}
-                  username={audioLens.username}
-                  onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
-                  onAfterGenerate={audioLens.onAfterGenerate}
-                  onPlay={() => audioLens.onPlayCell(cell.id, cell)}
-                  onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
-                />
-              </div>
-            )
-          })()
+          // AQU-768: the panel resolves this line's active voice from `settings`
+          // itself — don't pre-resolve it here (a stale-prone JSX IIFE deep in
+          // this huge row let the React Compiler serve a stale voice, so a
+          // freshly-picked voice didn't stick in the trigger).
+          <div
+            className={cn("flex flex-col transition-opacity", isSynthBusy && "opacity-70")}
+            dir="ltr"
+          >
+            <CellVoicePanel
+              cell={cell}
+              project={audioLens.project}
+              projectId={audioLens.projectId}
+              settings={audioLens.settings}
+              voices={audioLens.voices}
+              session={audioLens.session}
+              username={audioLens.username}
+              onAssign={(voiceId) => audioLens.onAssignCast(cell.id, voiceId)}
+              onAfterGenerate={audioLens.onAfterGenerate}
+              onPlay={() => audioLens.onPlayCell(cell.id, cell)}
+              onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
+            />
+          </div>
         ) : (
           <div
             data-showcase="editor.source"
@@ -5574,6 +5615,7 @@ function EditorRow({
                     // local human draft — then `visibleTranslated` IS cell.translated.
                     aiDrafted={!localTargetDraft && cell.aiDrafted}
                     onCommit={handleEditorCommit}
+                    pendingInputRef={pendingActivationInputRef}
                     onFocus={handleEditorFocus}
                     onBlur={handleEditorBlurOuter}
                     onSelectionChange={handleTargetPresenceSelection}
@@ -6831,6 +6873,7 @@ function EditorRow({
         <AddConceptDialog
           open={showAddConceptDialog}
           sourceTerm={sourceSelection ?? ""}
+          blockedReason={addConceptBlockedReason}
           onConfirm={handleAddConceptConfirm}
           onCancel={handleAddConceptCancel}
         />

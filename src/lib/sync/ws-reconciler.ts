@@ -120,6 +120,26 @@ export function isOwnWriteEcho(msg: { by?: string }, currentUserId: string): boo
 }
 
 /**
+ * True when a `file.progress.updated` frame means the project's visible file
+ * inventory changed, so the client must re-pull its file list.
+ *
+ * `fileCreated` is the server's explicit signal (first chunk's file.create,
+ * and — post-AQU-744 — a finalize that applied the file.restore reveal). The
+ * membership check is the defensive layer: staged imports (AQU-635) create the
+ * file tombstoned and reveal it only at finalize, so a client whose list was
+ * fetched during the staged window receives this frame for a file id it has
+ * never seen. That frame IS the reveal, whatever an older deployed worker put
+ * in `fileCreated` — without the refetch the file stays invisible until a hard
+ * reload.
+ */
+export function fileInventoryChanged(
+  msg: { file: string; fileCreated: boolean },
+  knownFileIds: { has(id: string): boolean },
+): boolean {
+  return msg.fileCreated || !knownFileIds.has(msg.file)
+}
+
+/**
  * True when an `event.applied` frame is a validation-state change
  * (`cell.validate` / `cell.unvalidate`). These events project into the
  * audit-stats read (`activeValidators` → the validation pill), NOT the

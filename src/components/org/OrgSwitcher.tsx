@@ -33,8 +33,7 @@ import {
 } from "@/components/ui/empty"
 
 const ORG_MENU_ITEM_CLASS =
-  // hover: only — Base UI highlight-on-hover would steal focus from the search input.
-  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5 hover:bg-accent"
+  "grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-0 gap-x-2 px-2 py-1.5"
 
 /** Muted meta (role / "All projects") — `!` beats menu `focus:**:text-accent-foreground`. */
 const ORG_MENU_META_CLASS = "text-xs text-muted-foreground!"
@@ -205,7 +204,7 @@ export function OrgSwitcher() {
 
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={handleOpenChange} highlightItemOnHover={false}>
+      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger
           render={
             <button

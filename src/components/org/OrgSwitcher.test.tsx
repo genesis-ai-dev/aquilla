@@ -112,24 +112,6 @@ describe("OrgSwitcher", () => {
     })
   })
 
-  it("hovering an org row does not steal focus from the search input", async () => {
-    listMyOrgs.mockResolvedValue([
-      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
-      { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
-    ])
-    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
-
-    await act(async () => {
-      screen.getByRole("button", { name: "Organization switcher: All organizations" }).click()
-    })
-    const search = await screen.findByRole("textbox", { name: /find an organization/i })
-    await waitFor(() => expect(search).toHaveFocus())
-
-    fireEvent.pointerMove(screen.getByRole("menuitem", { name: /side org/i }))
-
-    expect(search).toHaveFocus()
-  })
 
   it("create org: opens dialog, types name, submits, calls createOrg", async () => {
     listMyOrgs

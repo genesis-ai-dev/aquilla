@@ -54,17 +54,20 @@ import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompl
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
   AudioMediaStrategy,
+  AudioTimingMode,
   CompletionProvider,
   CompletionSettings,
   ContextSize,
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
+import { resolveAudioTimingMode } from "@/lib/sync/project-settings"
 import { projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
+import { AudioTimingModeSection } from "./ProjectSettings/AudioTimingModeSection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
@@ -169,6 +172,9 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  /** 2026-08-05: the Media timeline's layout mode — shared, structure-level
+   *  (absent = "dubbing" via resolveAudioTimingMode). */
+  audioTimingMode: AudioTimingMode
 }
 
 function buildBaseline(project: ProjectRecord): Baseline {
@@ -209,6 +215,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    audioTimingMode: resolveAudioTimingMode(project),
   }
 }
 
@@ -337,6 +344,8 @@ export function ProjectSettings() {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  // 2026-08-05: the Media timeline's layout mode (shared, structure-level).
+  const [audioTimingMode, setAudioTimingMode] = useState<AudioTimingMode>("dubbing")
 
   // Per-device user-scoped key — not part of the project record, not server-
   // synced, no race with the project save flow. Kept on its own immediate-save
@@ -390,6 +399,7 @@ export function ProjectSettings() {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
+    setAudioTimingMode(b.audioTimingMode)
   }, [])
 
   // Seed once when the project first loads. We intentionally don't reseed on
@@ -425,6 +435,21 @@ export function ProjectSettings() {
     // Only overwrite the draft value if the user hasn't diverged from the
     // (possibly-stale) baseline yet — otherwise we'd stomp an in-progress toggle.
     setBibleResourcesEnabled((prev) => (prev === baseline.bibleResourcesEnabled ? project.bibleResourcesEnabled : prev))
+  }, [project, baseline, sharedSettingsFetched])
+
+  // Same two-phase hydration race for the timing mode (2026-08-05): the
+  // settings overlay that carries audioTimingMode lands AFTER the baseline
+  // seeds, so a Free-timing project would display "Original's timing" until a
+  // refresh. Re-sync once when the fetch confirms, unless the user diverged.
+  const timingModeResyncedRef = useRef(false)
+  useEffect(() => {
+    if (!project || !baseline || !sharedSettingsFetched) return
+    if (timingModeResyncedRef.current) return
+    timingModeResyncedRef.current = true
+    const server = resolveAudioTimingMode(project)
+    if (server === baseline.audioTimingMode) return
+    setBaseline((prev) => (prev ? { ...prev, audioTimingMode: server } : prev))
+    setAudioTimingMode((prev) => (prev === baseline.audioTimingMode ? server : prev))
   }, [project, baseline, sharedSettingsFetched])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
@@ -488,7 +513,8 @@ export function ProjectSettings() {
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
-      importExcludeFrontMatter !== baseline.importExcludeFrontMatter
+      importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
+      audioTimingMode !== baseline.audioTimingMode
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
@@ -498,7 +524,7 @@ export function ProjectSettings() {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells, importExcludeFrontMatter,
+    precedingTargetCells, importExcludeFrontMatter, audioTimingMode,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -513,6 +539,11 @@ export function ProjectSettings() {
   }, [isDirty])
 
   const [discardOpen, setDiscardOpen] = useState(false)
+  // Flow A (2026-08-05): warn before saving a switch TO Free timing when the
+  // project has a linked video. The ref lets the dialog's Confirm re-run the
+  // zero-arg handleSave past the check exactly once.
+  const [timingWarningOpen, setTimingWarningOpen] = useState(false)
+  const timingSwitchConfirmedRef = useRef(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   // Distinct from `saveError`: a shared-settings save blocked by the active
@@ -588,6 +619,19 @@ export function ProjectSettings() {
   // source of truth for shared fields anyway.
   const handleSave = useCallback(async (): Promise<boolean> => {
     if (!id || !baseline) return false
+    // Decision 2026-08-05 (Flow A): switching a video-bearing project TO Free
+    // timing hides the video — warn first. The ref bypass lets the dialog's
+    // Confirm re-run this same zero-arg callback (it's bound directly as an
+    // onClick, so an options parameter would receive the MouseEvent).
+    if (
+      !timingSwitchConfirmedRef.current &&
+      audioTimingMode === "audioFirst" &&
+      baseline.audioTimingMode !== "audioFirst" &&
+      (project?.files ?? []).some((f) => f.coreMediaUrl)
+    ) {
+      setTimingWarningOpen(true)
+      return false
+    }
     setSaving(true)
     setSaveError(null)
     setPermissionBlocked(false)
@@ -664,6 +708,7 @@ export function ProjectSettings() {
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
+      if (audioTimingMode !== baseline.audioTimingMode) { sharedUpdates.audioTimingMode = audioTimingMode; changedFieldLabels.push("timing mode") }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
@@ -734,6 +779,7 @@ export function ProjectSettings() {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
+        audioTimingMode,
       }
       setBaseline(newBaseline)
       // Refresh `useProject` in the background so other components see the
@@ -768,7 +814,7 @@ export function ProjectSettings() {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter,
+    precedingTargetCells, importExcludeFrontMatter, audioTimingMode,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -824,6 +870,7 @@ export function ProjectSettings() {
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-decay", label: "Decay", keywords: ["decay", "decay threshold", "half life"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
+    { id: "section-timing-mode", label: "Timing", keywords: ["timing", "timing mode", "original timing", "free timing", "dubbing", "audio first", "video"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
@@ -905,9 +952,9 @@ export function ProjectSettings() {
     {
       id: "audio-media",
       label: "Audio media",
-      description: "How audio is fetched from storage",
+      description: "Timing mode and how audio is fetched from storage",
       icon: AudioLines,
-      sectionIds: ["section-audio-media"],
+      sectionIds: ["section-timing-mode", "section-audio-media"],
     },
     {
       id: "metrics",
@@ -975,6 +1022,7 @@ export function ProjectSettings() {
       "section-local-models",
       "section-decay",
       "section-validation",
+      "section-timing-mode",
       "section-audio-media",
       "section-git-sync",
       "section-terminology",
@@ -1850,6 +1898,18 @@ export function ProjectSettings() {
           </Card>
         )}
 
+        {searchGroupLabel("section-timing-mode")}
+        {sectionsToRender.some((s) => s.id === "section-timing-mode") && (
+          <div id="section-timing-mode">
+            <AudioTimingModeSection
+              value={audioTimingMode}
+              onChange={setAudioTimingMode}
+              disabled={!canEditShared}
+              disabledTooltip={sharedDisabledTooltip}
+            />
+          </div>
+        )}
+
         {searchGroupLabel("section-audio-media")}
         {sectionsToRender.some((s) => s.id === "section-audio-media") && (
           <div id="section-audio-media">
@@ -1963,6 +2023,39 @@ export function ProjectSettings() {
           <DialogFooter>
             <Button variant="ghost" onClick={handleDiscardCancel}>Keep editing</Button>
             <Button variant="destructive" onClick={handleDiscardConfirm}>Discard</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Flow A (2026-08-05): switching a video-bearing project to Free
+          timing hides the video — confirm before the save goes through.
+          Not destructive: the switch is lossless and fully reversible. */}
+      <Dialog open={timingWarningOpen} onOpenChange={(open) => { if (!open) setTimingWarningOpen(false) }}>
+        <DialogContent data-testid="timing-video-warning">
+          <DialogHeader>
+            <DialogTitle>Switch to Free timing and hide the video?</DialogTitle>
+            <DialogDescription>
+              This project has a linked video. The video plays on the original
+              recording's timing — in Free timing the timeline re-flows to each
+              translation's own length, so the video can't follow it and will
+              be hidden in the Media view. Nothing is lost: recordings and
+              timings are untouched, and switching back to Original's timing
+              restores the video and the exact same layout.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTimingWarningOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => {
+                timingSwitchConfirmedRef.current = true
+                setTimingWarningOpen(false)
+                void handleSave().finally(() => {
+                  timingSwitchConfirmedRef.current = false
+                })
+              }}
+            >
+              Switch to Free timing
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

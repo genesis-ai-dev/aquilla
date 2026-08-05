@@ -141,6 +141,7 @@ import { ExpandableFileList } from "./ExpandableFileList"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
+import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
@@ -1680,7 +1681,7 @@ export function ProjectWorkspace() {
 
   // Timeline editor: set/clear the file's core video URL (preview master clock).
   // coreMediaUrl lives on the file row, so refresh the project (not just cells).
-  const handleLinkVideo = useCallback(
+  const applyLinkVideo = useCallback(
     async (url: string | null) => {
       if (!project?.id || !activeFileId) return
       await emitFileVideoSet({
@@ -1693,6 +1694,21 @@ export function ProjectWorkspace() {
       refresh()
     },
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+  )
+  // Flow B (2026-08-05): linking a video while in Free timing prompts to
+  // switch back (declinable, with the video-stays-hidden warning). NOTE the
+  // mode is computed INLINE — the `timingMode` const is declared ~2,700 lines
+  // below this callback (a temporal-dead-zone hazard in the deps).
+  const [pendingVideoUrl, setPendingVideoUrl] = useState<string | null>(null)
+  const handleLinkVideo = useCallback(
+    (url: string | null) => {
+      if (url && resolveAudioTimingMode(project ?? undefined) === "audioFirst") {
+        setPendingVideoUrl(url)
+        return
+      }
+      void applyLinkVideo(url) // clearing never prompts
+    },
+    [project, applyLinkVideo],
   )
 
   const [videoDialogOpen, setVideoDialogOpen] = useState(false)
@@ -5666,7 +5682,7 @@ export function ProjectWorkspace() {
                   onLinkVideo={handleLinkVideo}
                   onSeekToTime={handleTimelineSeekToTime}
                   timingMode={timingMode}
-                  onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
+                  onOpenTimingSettings={() => navigate(`/project/${projectId}/settings/audio-media`)}
                   // AQU-646/SUB-29: transcribe from the detail pane — language by
                   // attachment provenance (source segment → source language;
                   // a dub take on a media cell → target language).
@@ -6168,6 +6184,27 @@ export function ProjectWorkspace() {
         confirmLabel="Move to Recently deleted"
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
+      />
+      {/* Flow B (2026-08-05): linking a video under Free timing. The two
+          writes on "switch" are independent channels (file event vs settings
+          PATCH); handleChangeTimingMode's toasts cover its failures. */}
+      <LinkVideoTimingDialog
+        open={pendingVideoUrl !== null}
+        canSwitch={canEditTimingMode}
+        onCancel={() => setPendingVideoUrl(null)}
+        onLinkAnyway={() => {
+          const u = pendingVideoUrl
+          setPendingVideoUrl(null)
+          if (u) void applyLinkVideo(u)
+        }}
+        onSwitchToOriginal={() => {
+          const u = pendingVideoUrl
+          setPendingVideoUrl(null)
+          if (u) {
+            void applyLinkVideo(u)
+            handleChangeTimingMode("dubbing")
+          }
+        }}
       />
       {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's
           More menu (project_lead+); was an inline expander in the files panel. */}

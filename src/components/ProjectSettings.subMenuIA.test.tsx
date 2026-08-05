@@ -244,6 +244,8 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     renderAt(`/project/${PROJECT_ID}/settings/audio-media`)
     expect(screen.getByText(/audio loading/i)).toBeTruthy()
+    // 2026-08-05: the timing-mode card joined this pane.
+    expect(screen.getByTestId("settings-timing-mode")).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings/metrics`)
     // PostEditMetricsSection renders its own heading regardless of loading state.

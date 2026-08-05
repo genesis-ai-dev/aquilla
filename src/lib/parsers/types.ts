@@ -325,6 +325,20 @@ export interface CellTtsSettings {
  */
 export type AudioTimingMode = "dubbing" | "audioFirst"
 
+/** The one place the two modes' user-facing names live — consumed by the
+ *  Project Settings card AND the media-lens toolbar note (2026-08-05: the
+ *  control moved into settings; the toolbar shows a note). */
+export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { name: string; description: string }> = {
+  dubbing: {
+    name: "Original's timing",
+    description: "The translation is fitted to the original recording's timing.",
+  },
+  audioFirst: {
+    name: "Free timing",
+    description: "Verses are laid end to end — each takes as much room as its longer side.",
+  },
+}
+
 export interface ProjectRecord {
   id: string
   name: string

@@ -30,7 +30,7 @@ import { useTimelineClock } from "./useTimelineClock"
 import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
 import type { Concept } from "@/lib/terminology/types"
-import type { AudioTimingMode, ProjectRecord, RuleInfraction } from "@/lib/parsers/types"
+import { AUDIO_TIMING_MODE_LABELS, type AudioTimingMode, type ProjectRecord, type RuleInfraction } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -80,9 +80,10 @@ export interface TimelineEditorProps {
    *  track against the imported recording's clock; "audioFirst" lays the
    *  verses out end to end at their real lengths. */
   timingMode?: AudioTimingMode
-  /** SUB-53: change the project's mode. Absent = the control is read-only
-   *  (the server requires maintainer to write project settings). */
-  onChangeTimingMode?(mode: AudioTimingMode): void
+  /** 2026-08-05: the mode control lives in Project Settings now — this
+   *  navigates there (Audio media group). Absent (focused tests) = the note
+   *  renders as plain text with no link. */
+  onOpenTimingSettings?(): void
   /** Forwarded to the clip detail pane so it can resolve/stream source audio. */
   project?: ProjectRecord
   /** Active managed terminology concepts for the detail-pane editor's chips. */
@@ -161,7 +162,7 @@ export function TimelineEditor({
   initialSelectedCellId,
   onSelectedCellChange,
   timingMode = "dubbing",
-  onChangeTimingMode,
+  onOpenTimingSettings,
   project,
   terminologyConcepts,
   infractions,
@@ -614,50 +615,28 @@ export function TimelineEditor({
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">Timeline</span>
-        {/* SUB-53: which job this project is for. Audio-first lays the verses
-            out end to end so a translation that runs long stops dragging
-            everything after it out of line. Read-only below maintainer — the
-            server requires that role to write project settings. */}
+        {/* Decision 2026-08-05: the mode CONTROL moved into Project Settings
+            (it changes the project's structure — settings-level authority);
+            this is the note that says which mode is active and where to
+            change it. The wrapper keeps its testid + data-mode so browser
+            passes read the mode exactly as before. */}
         <div
           data-testid="tl-timing-mode"
           data-mode={timingMode}
-          className="ml-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
+          className="ml-2 inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-foreground/70"
         >
-          {(
-            [
-              { mode: "dubbing" as const, label: "Original's timing", hint: "The translation is fitted to the original recording's timing." },
-              { mode: "audioFirst" as const, label: "Free timing", hint: "Verses are laid end to end — each takes as much room as its longer side." },
-            ]
-          ).map(({ mode, label, hint }) =>
-            onChangeTimingMode ? (
-              <button
-                key={mode}
-                type="button"
-                data-testid={`tl-timing-mode-${mode}`}
-                aria-pressed={timingMode === mode}
-                title={hint}
-                onClick={() => {
-                  if (timingMode !== mode) onChangeTimingMode(mode)
-                }}
-                className={cn(
-                  "px-2 py-1",
-                  timingMode === mode
-                    ? "bg-sky-100 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-                    : "bg-background text-foreground/60 hover:bg-muted",
-                )}
-              >
-                {label}
-              </button>
-            ) : timingMode === mode ? (
-              <span
-                key={mode}
-                data-testid={`tl-timing-mode-${mode}`}
-                title={`${hint} Only a maintainer can change this.`}
-                className="px-2 py-1 text-foreground/70"
-              >
-                {label}
-              </span>
-            ) : null,
+          <AppTooltip content={AUDIO_TIMING_MODE_LABELS[timingMode].description}>
+            <span>{AUDIO_TIMING_MODE_LABELS[timingMode].name}</span>
+          </AppTooltip>
+          {onOpenTimingSettings && (
+            <button
+              type="button"
+              data-testid="tl-timing-mode-settings-link"
+              onClick={onOpenTimingSettings}
+              className="text-muted-foreground underline-offset-2 hover:underline"
+            >
+              · set in Project Settings
+            </button>
           )}
         </div>
         <div className="ml-auto flex items-center gap-1.5">

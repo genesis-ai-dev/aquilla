@@ -559,20 +559,23 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(px(screen.getByTestId("tl-target-v1"), "left")).toBe(0)
   })
 
-  it("hides the snap toggle and shows the mode, switchable only when allowed", () => {
-    const onChange = vi.fn()
+  it("hides the snap toggle and shows the mode as a NOTE pointing at Project Settings", () => {
+    // 2026-08-05: the mode CONTROL moved into Project Settings — the toolbar
+    // shows which mode is active (wrapper keeps data-mode for the browser
+    // passes) and, when wired, a link to the settings page.
+    const onOpen = vi.fn()
     const { unmount } = renderAt("audioFirst")
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
-    // Read-only without a change handler…
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
-    expect(screen.getByTestId("tl-timing-mode-audioFirst").tagName).toBe("SPAN")
+    expect(screen.getByText("Free timing")).toBeInTheDocument()
+    // No per-mode buttons anymore, and no link without the callback.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
+    expect(screen.queryByTestId("tl-timing-mode-settings-link")).toBeNull()
     unmount()
 
-    // …a control when it is there.
-    renderAt("audioFirst", { onChangeTimingMode: onChange })
-    fireEvent.click(screen.getByTestId("tl-timing-mode-dubbing"))
-    expect(onChange).toHaveBeenCalledWith("dubbing")
+    renderAt("audioFirst", { onOpenTimingSettings: onOpen })
+    fireEvent.click(screen.getByTestId("tl-timing-mode-settings-link"))
+    expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
   it("hides a linked video and says why — it runs on the original's timing", () => {

@@ -1,4 +1,4 @@
-import { useMemo, useState, type SyntheticEvent } from "react"
+import { useEffect, useMemo, useState, type SyntheticEvent } from "react"
 import { Check, CheckCheck, Circle, Trash2 } from "lucide-react"
 import type { EditValidationSummary, ValidationStatus } from "@/hooks/useCells"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -110,6 +110,11 @@ export function TargetValidationControl({
     authoritativeAtRequest: boolean
   } | null>(null)
   const authoritativeSelfValidated = activeValidators.includes(currentUsername)
+  useEffect(() => {
+    if (pendingValidation && authoritativeSelfValidated === pendingValidation.value) {
+      setPendingValidation(null)
+    }
+  }, [authoritativeSelfValidated, pendingValidation])
   const optimisticSelfValidation = pendingValidation
     && authoritativeSelfValidated === pendingValidation.authoritativeAtRequest
     ? pendingValidation.value

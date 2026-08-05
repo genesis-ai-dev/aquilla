@@ -476,6 +476,11 @@ export function AudioRecordingModal({
       // Typing into an input? let it through.
       const target = e.target as HTMLElement
       if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return
+      // Another dialog stacked ON TOP of the recorder (the timing-mode
+      // heads-up) owns the keyboard while it holds focus — without this,
+      // Escape would dismiss it AND close the recorder in one press.
+      const dialogOf = target?.closest?.('[data-slot="dialog-content"], [role="dialog"]')
+      if (dialogOf && !dialogOf.hasAttribute("data-recorder-dialog")) return
 
       if (e.key === "Escape") {
         e.preventDefault()
@@ -527,6 +532,7 @@ export function AudioRecordingModal({
         ref={dialogSurfaceRef}
         initialFocus={dialogSurfaceRef}
         finalFocus={false}
+        data-recorder-dialog=""
         className="flex max-w-3xl flex-col gap-0 p-0"
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}

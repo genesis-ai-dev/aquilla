@@ -144,4 +144,33 @@ describe("AudioRecordingModal — offline gate", () => {
     fireEvent.keyDown(window, { key: " " })
     expect(probeMic).toHaveBeenCalledTimes(1)
   })
+
+  it("keys originating in a STACKED dialog never reach the recorder (2026-08-06)", async () => {
+    // The timing-mode heads-up can open ON TOP of the recorder (a cell
+    // transition surfaces it). Escape there must dismiss only the heads-up —
+    // not also close the recorder — and Space must not start a recording.
+    // Uses the REAL dialog so Base UI's own popup stack participates.
+    const { TimingModeChangedDialog } = await import("@/components/timeline/TimingModeChangedDialog")
+    const onClose = vi.fn()
+    const onAcknowledge = vi.fn()
+    render(
+      <>
+        <AudioRecordingModal
+          open
+          project={project}
+          cells={[cell]}
+          activeCellId="c1"
+          username="sam"
+          onActiveCellChange={() => {}}
+          onClose={onClose}
+        />
+        <TimingModeChangedDialog ack={{ from: "dubbing", to: "audioFirst" }} onAcknowledge={onAcknowledge} />
+      </>,
+    )
+    const okButton = screen.getByTestId("timing-ack-ok")
+    fireEvent.keyDown(okButton, { key: " " })
+    expect(probeMic).not.toHaveBeenCalled()
+    fireEvent.keyDown(okButton, { key: "Escape" })
+    expect(onClose).not.toHaveBeenCalled()
+  })
 })

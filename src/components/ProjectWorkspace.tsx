@@ -142,6 +142,8 @@ import { SidebarProjectSection } from "./SidebarProjectSection"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
+import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
+import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
@@ -4411,6 +4413,13 @@ export function ProjectWorkspace() {
   // the behaviour every project had before this. Changed in Project Settings
   // only (2026-08-06) — the timeline shows a note, never a control.
   const timingMode = resolveAudioTimingMode(project ?? undefined)
+  // A REMOTE mode change gets an acknowledged heads-up — deferred while the
+  // user is in the text view or has the recorder open (a cell transition
+  // inside the recorder ends the wait; the take is confirmed by then).
+  const timingAck = useTimingModeAck({
+    timingMode,
+    eligible: lens === "audio" && recordingCellId === null,
+  })
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.
   useEffect(() => {
@@ -5989,6 +5998,9 @@ export function ProjectWorkspace() {
             // when the modal closes.
             const idx = cellStore.findIndexByCellId(cellId)
             if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+            // A cell transition (auto-advance or Next/Prev) means the take is
+            // confirmed — stop deferring a pending timing-mode heads-up.
+            timingAck.surfaceNow()
           }}
           onClose={() => setRecordingCellId(null)}
         />
@@ -6160,6 +6172,8 @@ export function ProjectWorkspace() {
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
       />
+      {/* A remote timing-mode change, acknowledged (2026-08-06). */}
+      <TimingModeChangedDialog ack={timingAck.ack} onAcknowledge={timingAck.acknowledge} />
       {/* Flow B (2026-08-05, simplified 2026-08-06): linking a video under
           Free timing warns that it will stay hidden. Mode changes stay in
           Project Settings only — no combined switch-and-link action. */}

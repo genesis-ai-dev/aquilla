@@ -1159,14 +1159,24 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   calls_spent integer NOT NULL DEFAULT 0,
   last_error text,
   steering_cursor timestamptz,          -- last steering read; informational
+  anchor_cell_id text,                  -- where the user was looking at start; rotates the first wave
+  scope_group text,                     -- shared id across runs one project-wide start created
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );
 -- One ACTIVE run per (project, file, lane). Partial UNIQUE both serves the
 -- pill's hydrate lookup and enforces createRun's refuse-double-active.
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_runs_active
   ON contextual_runs(project_id, file_id, target_lang)
   WHERE status IN ('running','pausing','paused','parked');
+-- Stranded-run sweeper: 'running' with a quiet heartbeat (dead driver) or
+-- 'parked' with spans still on the cursor (loop hit its wave cap).
+CREATE INDEX IF NOT EXISTS contextual_runs_driver
+  ON contextual_runs(status, updated_at)
+  WHERE status IN ('running', 'parked');
+CREATE INDEX IF NOT EXISTS contextual_runs_scope_group
+  ON contextual_runs(scope_group)
+  WHERE scope_group IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS contextual_steering (
   id text PRIMARY KEY,                  -- uuidv7

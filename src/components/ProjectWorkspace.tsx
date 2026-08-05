@@ -38,6 +38,12 @@ import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFil
 import { isFlagEnabled } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import { applyRemoteFrame as applyContextualFrame } from "@/lib/contextual/run-store"
+import {
+  applyContextualDraftsFrame,
+  hydrateContextualDrafts,
+  resetContextualDraftsStore,
+} from "@/lib/contextual/drafts-store"
+import { fetchContextualDrafts } from "@/lib/contextual/transport"
 import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
@@ -1237,6 +1243,34 @@ export function ProjectWorkspace() {
   syncStaleSourceNowRef.current = syncStaleSourceNow
   const revalidateCellsRef = useRef<() => void>(() => {})
   revalidateCellsRef.current = revalidateCells
+
+  // Autopilot drafts: the WebSocket burst is the fast path, this is the
+  // authoritative one. Called on file open, and whenever a burst reports it
+  // carried only part of a wave. Failing soft is deliberate — a missing
+  // review surface must never keep a file from opening.
+  const refreshContextualDrafts = useCallback(async () => {
+    const projectId = project?.id
+    const fileId = activeFileId
+    if (!projectId || !fileId) return
+    try {
+      const drafts = await fetchContextualDrafts(projectId, fileId)
+      hydrateContextualDrafts(fileId, drafts)
+    } catch {
+      /* backend not deployed, offline, or signed out — pill reports the run */
+    }
+  }, [project?.id, activeFileId])
+  const refreshContextualDraftsRef = useRef<() => Promise<void>>(async () => {})
+  refreshContextualDraftsRef.current = refreshContextualDrafts
+
+  // Hydrate on file switch, and clear on unmount so a draft from one document
+  // can never render against another's cells.
+  useEffect(() => {
+    if (!project?.id || !activeFileId) return
+    hydrateContextualDrafts(activeFileId, [])
+    void refreshContextualDrafts()
+  }, [project?.id, activeFileId, refreshContextualDrafts])
+
+  useEffect(() => () => { resetContextualDraftsStore() }, [])
 
   // Audio lens: TTS settings (engine, voice library, cast) hydrated from IDB
   // and overlaid onto the project so generation uses the real engine/key/cast.
@@ -3176,6 +3210,15 @@ export function ProjectWorkspace() {
               // via useSyncExternalStore. Lossy: a missed frame self-heals on
               // the next attachContextualRun snapshot.
               if (msg.project !== pid) return
+              if (msg.frame.type === "contextual.drafts") {
+                // The run's actual OUTPUT: verified translations landing in
+                // their cells. A truncated burst means the wave staged more
+                // than one frame carries — refetch rather than show part of a
+                // wave as if it were all of it.
+                const { needsRefetch } = applyContextualDraftsFrame(msg.frame)
+                if (needsRefetch) void refreshContextualDraftsRef.current()
+                return
+              }
               applyContextualFrame(msg.frame)
             } else if (msg.t === "link.upstream-changed") {
               // FRO-479: an upstream live-link project committed lane-relevant
@@ -5435,6 +5478,7 @@ export function ProjectWorkspace() {
                 projectId={project.id}
                 fileId={activeFile.id}
                 onSetupNeeded={handleAiSetupNeeded}
+                anchorCellId={focusedCellId}
               />
             )}
             {activeFileId && lens === "audio" && activeFile && fileOrderedBy(activeFile) === "time" ? (

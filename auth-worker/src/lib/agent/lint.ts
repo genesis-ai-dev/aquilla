@@ -13,6 +13,10 @@
 export interface LintRule {
   id: string
   name: string
+  /** Human sentence describing what the rule requires. Terminology rules carry
+   *  the approved/forbidden renderings here — which is the only place a model
+   *  can learn them, so the contextual performer prompts from this, not `name`. */
+  description?: string
   enabled: boolean
   check:
     | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
@@ -36,7 +40,7 @@ const LEAD_BOUNDARY = "(?<!\\p{L})"
 const TRAIL_BOUNDARY = "(?!\\p{L})"
 const WILDCARD = "\\p{L}*"
 
-function termToRegexSource(term: string): string | null {
+export function termToRegexSource(term: string): string | null {
   const trimmed = term.trim()
   if (!trimmed) return null
   const hasLeadingStar = trimmed.startsWith("*")

@@ -28,22 +28,24 @@ beforeEach(async () => {
 })
 
 describe("ExperimentalFlagsSection", () => {
-  it("renders the contextual drafting toggle, off by default", async () => {
+  it("renders the contextual drafting toggle, on by default", async () => {
+    // Default-on: the flag gates whether the play button is discoverable, and
+    // a run still costs nothing until someone clicks it.
     await createProject(makeProject())
     render(<ExperimentalFlagsSection projectId="p1" />)
     const toggle = await screen.findByRole("switch", { name: "Contextual drafting" })
-    expect(toggle).not.toBeChecked()
+    expect(toggle).toBeChecked()
   })
 
-  it("toggle persists to the IDB record and isFlagEnabled reads it back", async () => {
+  it("toggle persists the opt-out to the IDB record and isFlagEnabled reads it back", async () => {
     await createProject(makeProject())
     render(<ExperimentalFlagsSection projectId="p1" />)
     const toggle = await screen.findByRole("switch", { name: "Contextual drafting" })
     fireEvent.click(toggle)
     await waitFor(async () => {
       const stored = await getProject("p1")
-      expect(stored?.experimentalFlags).toEqual({ contextualTranslation: true })
-      expect(isFlagEnabled(stored!, "contextualTranslation")).toBe(true)
+      expect(stored?.experimentalFlags).toEqual({ contextualTranslation: false })
+      expect(isFlagEnabled(stored!, "contextualTranslation")).toBe(false)
     })
   })
 
@@ -57,9 +59,9 @@ describe("ExperimentalFlagsSection", () => {
     fireEvent.click(toggle)
     await waitFor(async () => {
       const stored = await getProject("p-server-only")
-      expect(stored?.experimentalFlags).toEqual({ contextualTranslation: true })
+      expect(stored?.experimentalFlags).toEqual({ contextualTranslation: false })
       expect(stored?.name).toBe("Test Project")
-      expect(isFlagEnabled(stored!, "contextualTranslation")).toBe(true)
+      expect(isFlagEnabled(stored!, "contextualTranslation")).toBe(false)
     })
   })
 

@@ -132,10 +132,13 @@ jobs:
         run: bash scripts/verify-dist-host.sh "${{ needs.target.outputs.api_host }}"
       - name: Strip dist/_redirects (Workers static assets rejects it)
         run: rm -f dist/_redirects
+      - name: Verify deployment artifact exclusion policy
+        run: node scripts/verify-deployment-artifacts.mjs dist
       - uses: actions/upload-artifact@v4
         with:
           name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
           path: dist
+          include-hidden-files: true
           retention-days: 3
           if-no-files-found: error
 

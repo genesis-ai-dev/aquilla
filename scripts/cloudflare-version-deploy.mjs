@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 import { randomUUID } from "node:crypto"
 import { deploymentExpectation } from "./cloudflare-deployment-manifest.mjs"
+import { assertSafeDeploymentArtifacts } from "./verify-deployment-artifacts.mjs"
 import {
   verifyActiveDeployment,
   verifyWorkerVersion,
@@ -142,12 +143,14 @@ export async function runVerifiedDeployment({
   verifyVersion = verifyWorkerVersion,
   promoteVersion = promoteWorkerVersion,
   verifyDeployment = verifyActiveDeployment,
+  verifyArtifacts = assertSafeDeploymentArtifacts,
 } = {}) {
   const expectation = deploymentExpectation(surface, environment)
   const workerName = expectedWorker ?? expectation.worker
   if (promote && workerName !== expectation.worker) {
     throw new Error(`refusing to promote ${environment} bindings to ${workerName}; expected ${expectation.worker}`)
   }
+  if (surface === "web") verifyArtifacts(join(expectation.directory, "dist"))
   const tag = deploymentVersionTag(workerName, environment, sourceId)
   const message = `${sourceLabel} ${tag}`
 

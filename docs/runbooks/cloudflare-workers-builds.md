@@ -34,6 +34,16 @@ branch, or not at the current `origin/<branch>` commit. The deployer uploads one
 version, validates its exact bindings, promotes that exact ID to 100%, reapplies
 routes/triggers, verifies traffic, and then checks public health.
 
+Before any SPA version upload, `public/.assetsignore` tells Wrangler to exclude
+workstation metadata such as `.DS_Store`, AppleDouble files, `Thumbs.db`, and
+`desktop.ini` even when macOS recreates those files inside `dist/`. The
+`scripts/verify-deployment-artifacts.mjs` guard fails closed if that native
+ignore policy is missing or incomplete. The same guard runs for local live
+deployments and route-free pull-request previews. Wrangler Pages has different
+ignore semantics, so the branded Codex, Honeycomb, and Context deploy commands
+remove the same metadata (and the Workers-only policy file) from `dist/` before
+uploading, then fail if any metadata remains.
+
 `.github/workflows/deploy-workers.yml` is an optional
 `workflow_dispatch`-only equivalent for web, identity, and sync once hosted
 runners are available. It accepts only `main` or `dev`, requires an explicit

@@ -5,17 +5,16 @@ const ENVIRONMENTS = {
   production: {
     apiHost: "api.aquilla.app",
     appOrigin: "https://aquilla.app",
-    forbiddenBundleHosts: ["api.dev.aquilla.app", "api.staging.aquilla.app"],
-  },
-  staging: {
-    apiHost: "api.staging.aquilla.app",
-    appOrigin: "https://staging.aquilla.app",
     forbiddenBundleHosts: ["api.dev.aquilla.app"],
   },
   development: {
     apiHost: "api.dev.aquilla.app",
     appOrigin: "https://dev.aquilla.app",
-    forbiddenBundleHosts: ["api.staging.aquilla.app"],
+    // Nothing left to forbid now that staging is gone. `api.aquilla.app`
+    // cannot go on this list: it is the compiled-in default in auth.ts,
+    // sync-token.ts, sync-worker-host.ts and completion-service.ts, so it
+    // appears in every bundle regardless of the VITE_* targets.
+    forbiddenBundleHosts: [],
   },
 }
 
@@ -267,7 +266,7 @@ export async function verifyLiveEnvironment(environment, {
 } = {}) {
   const environmentConfig = ENVIRONMENTS[environment]
   if (!environmentConfig) {
-    throw new Error(`unknown environment ${JSON.stringify(environment)}; expected production, staging, or development`)
+    throw new Error(`unknown environment ${JSON.stringify(environment)}; expected production or development`)
   }
   if (!VALID_SURFACES.has(surface)) {
     throw new Error(`unknown surface ${JSON.stringify(surface)}; expected all, auth, sync, or spa`)

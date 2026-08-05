@@ -10,7 +10,9 @@
       "environments": {
         "production": {
           "worker": "aquilla-web",
-          "routes": ["aquilla.app/*"],
+          "routes": [
+            "aquilla.app/*"
+          ],
           "requiredSecrets": [
             "DIARIZATION_MODAL_URL",
             "DIARIZATION_PUBLIC_BASE"
@@ -19,17 +21,11 @@
           "hyperdrives": {},
           "r2Buckets": {}
         },
-        "staging": {
-          "worker": "aquilla-web-staging",
-          "routes": ["staging.aquilla.app/*"],
-          "requiredSecrets": [],
-          "plainText": {},
-          "hyperdrives": {},
-          "r2Buckets": {}
-        },
         "development": {
           "worker": "aquilla-web-development",
-          "routes": ["dev.aquilla.app/*"],
+          "routes": [
+            "dev.aquilla.app/*"
+          ],
           "requiredSecrets": [],
           "plainText": {},
           "hyperdrives": {},
@@ -77,27 +73,6 @@
             "SNAPSHOTS": "aquilla-snapshots"
           }
         },
-        "staging": {
-          "worker": "aquilla-staging-identity",
-          "apiHost": "api.staging.aquilla.app",
-          "routes": [
-            "api.staging.aquilla.app/identity/*",
-            "api.staging.aquilla.app/chat/*"
-          ],
-          "requiredSecrets": [],
-          "plainText": {
-            "ENVIRONMENT": "staging",
-            "BASE_URL": "https://staging.aquilla.app",
-            "SYNC_WORKER_URL": "https://api.staging.aquilla.app/sync",
-            "DEPLOYMENT_WORKER_NAME": "aquilla-staging-identity"
-          },
-          "hyperdrives": {
-            "HYPERDRIVE": "822231ade4da4db5b1955702e13d1ac3"
-          },
-          "r2Buckets": {
-            "SNAPSHOTS": "aquilla-snapshots-staging"
-          }
-        },
         "development": {
           "worker": "aquilla-dev-identity",
           "apiHost": "api.dev.aquilla.app",
@@ -138,7 +113,9 @@
         "production": {
           "worker": "aquilla-sync-worker",
           "apiHost": "api.aquilla.app",
-          "routes": ["api.aquilla.app/sync/*"],
+          "routes": [
+            "api.aquilla.app/sync/*"
+          ],
           "requiredSecrets": [
             "DIARIZATION_MODAL_URL",
             "DIARIZATION_PUBLIC_BASE",
@@ -161,29 +138,12 @@
             "SNAPSHOTS": "aquilla-snapshots"
           }
         },
-        "staging": {
-          "worker": "aquilla-sync-worker-staging",
-          "apiHost": "api.staging.aquilla.app",
-          "routes": ["api.staging.aquilla.app/sync/*"],
-          "requiredSecrets": [
-            "SEED_VC_TOKEN",
-            "SEED_VC_URL"
-          ],
-          "plainText": {
-            "ENVIRONMENT": "staging",
-            "AUTH_WORKER_URL": "https://api.staging.aquilla.app/identity"
-          },
-          "hyperdrives": {
-            "HYPERDRIVE": "822231ade4da4db5b1955702e13d1ac3"
-          },
-          "r2Buckets": {
-            "SNAPSHOTS": "aquilla-snapshots-staging"
-          }
-        },
         "development": {
           "worker": "aquilla-sync-worker-dev",
           "apiHost": "api.dev.aquilla.app",
-          "routes": ["api.dev.aquilla.app/sync/*"],
+          "routes": [
+            "api.dev.aquilla.app/sync/*"
+          ],
           "requiredSecrets": [],
           "plainText": {
             "ENVIRONMENT": "development",

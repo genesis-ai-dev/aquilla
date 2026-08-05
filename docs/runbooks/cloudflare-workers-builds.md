@@ -3,99 +3,51 @@
 This runbook implements the Cloudflare Builds section of the canonical
 [deployment environment matrix](../DEPLOYMENT-ENVIRONMENTS.md).
 
-Explicit operator commands are the intended owner of production, staging, and
-development deployments. Neither GitHub pushes nor Cloudflare Git integrations
-may automatically deploy live traffic. A Workers Builds Worker-name override can
-place a development-bound feature version in a production Worker's version
-history even when the repository selected a named development profile. A later
-manual promotion can then bypass the branch policy.
+Explicit operator commands own production and development deployments. Neither
+GitHub pushes nor Cloudflare Git integrations may automatically deploy live
+traffic. Pull requests may publish only a route-free preview version.
 
-## Control-plane cutover
+## Control-plane state
 
-Disable the existing Builds connections before publishing the manual-ownership
-workflow change. Use this order:
+The Git connections for `aquilla-web`, `aquilla-identity`, and
+`aquilla-sync-worker` are disconnected. `versification-tool` was already
+disconnected. The cutover did not delete or alter the existing Workers, versions,
+bindings, routes, or traffic allocations, and production verification passed
+after the change.
 
-1. Confirm the authenticated operator can inspect and deploy all three Workers.
-2. Put every still-connected build on the repository-owned containment command.
-3. Disable automatic Workers Builds for `aquilla-web`, `aquilla-identity`, and
-   `aquilla-sync-worker` without deleting Workers, versions, bindings, or routes.
-4. Publish the workflow change, merge it to `dev`, and run the complete local
-   development deployment from a clean, current `dev` checkout.
-5. Verify exact versions, bindings, traffic, routes, and public health.
-6. After development validation and promotion to `main`, repeat the same explicit
-   production deployment from a clean, current `main` checkout.
+Do not reconnect a Git repository or add a dashboard deploy command. The former
+`deploy:workers-build` helper and Cloudflare-specific build script were removed
+with the connections so they cannot become a second deployment owner later.
+
+## Explicit deployments
+
+Run live deployments only from a clean checkout whose HEAD exactly equals the
+current remote branch:
+
+| Branch | Command | Named environment |
+| --- | --- | --- |
+| `main` | `pnpm run deploy:aquilla` | `production` |
+| `dev` | `pnpm run deploy:aquilla:dev` | `development` |
+
+The branch guard fails before Wrangler if the checkout is dirty, on the wrong
+branch, or not at the current `origin/<branch>` commit. The deployer uploads one
+version, validates its exact bindings, promotes that exact ID to 100%, reapplies
+routes/triggers, verifies traffic, and then checks public health.
+
+`.github/workflows/deploy-workers.yml` is an optional
+`workflow_dispatch`-only equivalent for web, identity, and sync once hosted
+runners are available. It accepts only `main` or `dev`, requires an explicit
+Worker selection, runs the relevant build/tests and Neon schema guard, and uses
+the same branch-guarded package commands. It has no push trigger.
+
+Staging has been retired from the repository's Wrangler profiles, deployment
+manifest, scripts, guards, and public verifier. The staging Workers were removed
+separately in Cloudflare. Any retained Neon branch or R2 data is not deployable
+application infrastructure and requires its own backup/retention decision before
+deletion.
 
 Web pull-request previews continue through GitHub Actions on the route-free
 `aquilla-web-preview` Worker when hosted runners are available.
-
-While any Builds connection remains enabled during the cutover, set both its
-production and non-production deploy commands to the repository-owned command:
-
-```sh
-pnpm run deploy:workers-build
-```
-
-Root directories remain `/`, `/auth-worker`, and `/sync-worker`, respectively.
-Each directory exposes the same `pnpm run deploy:workers-build` command. Clean
-identity and sync builds must install both the repository root and the worker
-package because they import shared `db/`, `shared/`, and migration modules. The
-repository helper requires `WORKERS_CI=1`, reads `WORKERS_CI_BRANCH`, and applies
-this policy:
-
-| Branch | Wrangler operation | Named environment | Changes live traffic |
-| --- | --- | --- | --- |
-| `main` | upload → verify exact version → promote → verify traffic | `production` | Yes, after verification |
-| `staging` | upload → verify exact version | `staging` | No |
-| `dev` or `development` | upload → verify exact version | `development` | No |
-| Any feature branch | upload → verify exact version | `development` | No |
-
-If `WORKERS_CI=1`, `WORKERS_CI_BRANCH`, or `WORKERS_CI_COMMIT_SHA` is absent,
-the command fails without invoking Wrangler.
-Feature builds may create preview versions, but they cannot promote a version or
-change a live route. Feature previews intentionally share development Hyperdrive
-and R2 resources; the verifier ensures they cannot inherit production or staging
-bindings.
-
-Until the helper commit reaches `main`, keep these containment commands inline
-in the dashboard for `aquilla-web` and `aquilla-identity`:
-
-Production deploy command:
-
-```sh
-npx wrangler deploy --env=production
-```
-
-Non-production branch deploy command:
-
-```sh
-if [ "$WORKERS_CI_BRANCH" = staging ]; then npx wrangler versions upload --env=staging; else npx wrangler versions upload --env=development; fi
-```
-
-Do not add `--preview-alias "$WORKERS_CI_BRANCH"`; Git branch names may contain
-slashes, which are invalid Cloudflare version aliases. Keep
-`aquilla-sync-worker` on `pnpm run deploy:workers-build`; it already uses the
-repository policy.
-
-The unnamed Wrangler profile targets `aquilla-sync-worker-local`, never
-`aquilla-sync-worker`. The named production and staging profiles run the repository
-branch guard as a Wrangler build hook, so an accidental direct deployment is
-rejected before upload unless the checkout is on the authorized branch. The build
-hook is defense in depth; Cloudflare Builds must still use the repository-owned
-command above.
-
-Live promotion is owned by an explicit operator running the `deploy:aquilla*`
-commands from the matching clean branch. `.github/workflows/ci.yml` is CI and
-pull-request-preview only. `.github/workflows/deploy-workers.yml` has no push
-trigger; its optional dispatch path uses the same named environments and
-exact-version verifier when GitHub-hosted runners are available.
-
-Removing the staging Workers or staging routes is explicitly deferred. This
-incident recovery only prevents non-production Workers Builds from changing
-traffic.
-
-Explicitly dispatched GitHub production Worker jobs enter the repository's
-`production` Environment. GitHub's deployment-branch policy restricts that
-Environment to `main`, independently of the workflow mapping.
 
 ## Pull-request web previews
 
@@ -114,8 +66,8 @@ routes, then retry the version upload.
 Before the URL is posted to the pull request, the live verifier loads `/app`
 through that exact preview origin, crawls the deployed JavaScript graph, and
 requires the development identity, sync, and chat targets. This preview process
-does not promote a version or change production, staging, or development route
-traffic. Preview bundles do use development services and data.
+does not promote a version or change production or development route traffic.
+Preview bundles do use development services and data.
 
 ## Exact-version deployment and verification
 

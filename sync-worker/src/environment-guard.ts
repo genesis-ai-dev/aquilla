@@ -1,4 +1,4 @@
-export type DeploymentEnvironment = "production" | "staging" | "development"
+export type DeploymentEnvironment = "production" | "development"
 
 interface DeploymentBindings {
   ENVIRONMENT?: string
@@ -14,10 +14,6 @@ const EXPECTED_DEPLOYMENTS: Record<string, ExpectedDeployment> = {
   "api.aquilla.app": {
     environment: "production",
     authHostname: "api.aquilla.app",
-  },
-  "api.staging.aquilla.app": {
-    environment: "staging",
-    authHostname: "api.staging.aquilla.app",
   },
   "api.dev.aquilla.app": {
     environment: "development",

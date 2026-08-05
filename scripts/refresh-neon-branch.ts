@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process"
 import process from "node:process"
 
-type Target = "dev" | "staging"
+type Target = "dev"
 
 const DEFAULT_PROJECT_ID = "sweet-paper-88472094"
 const DEFAULT_SOURCE_BRANCH = "production"
@@ -16,15 +16,13 @@ const DEFAULT_NEON_CLI_VERSION = "2.30.0"
 const TARGET_ALIASES: Record<string, Target> = {
   dev: "dev",
   development: "dev",
-  staging: "staging",
-  stage: "staging",
 }
 
 const TARGET_DEFAULTS: Record<
   Target,
   {
     branch: string
-    envPrefix: "DEV" | "STAGING"
+    envPrefix: "DEV"
     healthUrl: string
   }
 > = {
@@ -33,15 +31,10 @@ const TARGET_DEFAULTS: Record<
     envPrefix: "DEV",
     healthUrl: "https://api.dev.aquilla.app/identity/api/v2/health",
   },
-  staging: {
-    branch: "staging",
-    envPrefix: "STAGING",
-    healthUrl: "https://api.staging.aquilla.app/identity/api/v2/health",
-  },
 }
 
 function usage(): never {
-  console.error("usage: tsx scripts/refresh-neon-branch.ts <dev|staging>")
+  console.error("usage: tsx scripts/refresh-neon-branch.ts <dev>")
   process.exit(1)
 }
 

@@ -13,8 +13,6 @@ ci_branch=""
 
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   ci_branch="${GITHUB_REF_NAME:-}"
-elif [ "${WORKERS_CI:-}" = "1" ]; then
-  ci_branch="${WORKERS_CI_BRANCH:-}"
 fi
 
 if [ -n "$git_branch" ]; then
@@ -36,9 +34,8 @@ if [ "$current" != "$expected" ]; then
   exit 1
 fi
 
-# Local live deploys must be reproducible from the exact remote commit. CI
-# checkouts are already pinned to the event SHA and authenticated Cloudflare
-# Builds may not expose reusable Git remote credentials.
+# Local live deploys must be reproducible from the exact remote commit. GitHub
+# Actions checkouts are already pinned to the explicitly dispatched ref.
 if [ -z "$ci_branch" ]; then
   if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
     echo "ABORT: deploys require a clean working tree." >&2

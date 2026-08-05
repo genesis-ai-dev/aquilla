@@ -44,4 +44,42 @@ describe("SidebarProjectSection", () => {
     expect(screen.getByRole("button", { name: /^Rules$/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^Settings$/i })).toBeInTheDocument()
   })
+
+  // Opening the popover inserts Base UI focus-guard spans next to the trigger.
+  // Those guards must not become siblings of Comments/Terminology in the nav
+  // list — space-y margins on the extra siblings used to grow the section and
+  // jump the More row upward when pressed.
+  it("keeps More wrapped so focus guards stay out of the nav list", () => {
+    const { container } = render(
+      <SidebarProjectSection
+        items={[
+          {
+            id: "comments",
+            label: "Comments",
+            icon: MessagesSquare,
+            pinned: true,
+            onClick: vi.fn(),
+          },
+          {
+            id: "terminology",
+            label: "Terminology",
+            icon: BookOpen,
+            pinned: true,
+            onClick: vi.fn(),
+          },
+          { id: "settings", label: "Settings", icon: Settings, onClick: vi.fn() },
+        ]}
+      />,
+    )
+
+    const more = screen.getByRole("button", { name: /^More project options$/i })
+    const navList = container.querySelector(".flex.flex-col.gap-0\\.5")
+    expect(navList).not.toBeNull()
+    expect(navList!.children).toHaveLength(3)
+    // More lives inside a wrapper; Comments/Terminology are direct rows.
+    expect(navList!.children[0]).toBe(screen.getByRole("button", { name: /^Comments$/i }))
+    expect(navList!.children[1]).toBe(screen.getByRole("button", { name: /^Terminology$/i }))
+    expect(navList!.children[2].contains(more)).toBe(true)
+    expect(navList!.children[2]).not.toBe(more)
+  })
 })

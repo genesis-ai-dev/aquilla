@@ -23,7 +23,12 @@ import {
   listDrafts,
 } from "../../../db/shared/contextual-runs"
 import { listSceneBriefs } from "../../../db/shared/scene-briefs"
-import { runOneTick, makeLlmCall, type ContextualProgressFrame } from "../lib/contextual/tick"
+import {
+  runOneTick,
+  makeLlmCall,
+  resolveContextualModels,
+  type ContextualProgressFrame,
+} from "../lib/contextual/tick"
 import { scriptMockResponse } from "../../../scripts/mock-openrouter"
 
 const db = env.AQUILLA_PG
@@ -65,6 +70,14 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.stubGlobal("fetch", realFetch)
+})
+
+it("defaults every contextual tier to GPT-5.6 Luna", () => {
+  expect(resolveContextualModels({}, {})).toEqual({
+    fast: "openai/gpt-5.6-luna",
+    mid: "openai/gpt-5.6-luna",
+    deep: "openai/gpt-5.6-luna",
+  })
 })
 
 const llm = () =>

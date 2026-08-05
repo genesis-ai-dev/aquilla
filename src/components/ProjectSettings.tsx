@@ -49,7 +49,7 @@ import { Page, PageHeader } from "@/components/ui/page"
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { getProject, updateProject } from "@/lib/store/project-index"
-import { DEFAULT_COMPLETION_MAX_TOKENS, fetchModels, resolveProvider } from "@/lib/completion/completion-service"
+import { DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, fetchModels, resolveProvider } from "@/lib/completion/completion-service"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
@@ -187,7 +187,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     temperature: project.completionSettings?.temperature ?? 0.3,
     systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
-    top_k: project.completionSettings?.top_k ?? 15,
+    top_k: project.completionSettings?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: project.completionSettings?.contextSize ?? "medium",
     useOnlyValidatedExamples: true,
     main_chat_language: project.completionSettings?.main_chat_language ?? "",
@@ -328,7 +328,7 @@ export function ProjectSettings() {
   const [temperature, setTemperature] = useState(0.3)
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
-  const [topK, setTopK] = useState(15)
+  const [topK, setTopK] = useState(DEFAULT_APPROVED_EXAMPLE_COUNT)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
   const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
   const [fewShotExampleFormat, setFewShotExampleFormat] = useState<"source-and-target" | "target-only">("source-and-target")
@@ -1436,7 +1436,7 @@ export function ProjectSettings() {
                     onChange={(e) => setTopK(Math.max(1, Math.min(20, Number(e.target.value))))}
                   />
                   <p className="text-xs text-muted-foreground">
-                    How many reference examples the AI retrieves per translation (1–20). Default: 5.
+                    Total approved reference-example budget per translation (1–20). Default: {DEFAULT_APPROVED_EXAMPLE_COUNT}.
                   </p>
                 </div>
 

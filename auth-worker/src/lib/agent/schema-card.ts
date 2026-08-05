@@ -129,7 +129,7 @@ All tables carry project_id; ALWAYS filter with :project.
 // three short calls.
 const DRAFTING_RECIPE = `## Canonical drafting recipe (the 80% case — use this, do not re-derive it)
 1. read({ref:"MRK 4", filter:"untranslated"}) — see what needs work (or skip straight to 2 when the user named the scope).
-2. draft({ref:"MRK 4"}) — the drafting pipeline translates with the project's exemplars + rules and STAGES a proposal. Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
+2. draft({ref:"MRK 4"}) — the drafting pipeline runs a separate evidence-research pass, then translates from that record with the project's validated exemplars, discourse context, brief, and rules, and STAGES a proposal. Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
 3. Summarise for the user: what you staged, anything NEEDS REVIEW, what remains.
 Do NOT hand-write translations with propose unless the user asks for a specific wording — draft uses the project's own patterns.`
 

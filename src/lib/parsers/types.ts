@@ -572,8 +572,8 @@ export interface CompletionSettings {
   // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
 
   /**
-   * How many few-shot examples to retrieve per completion call.
-   * Spec key: `top_k`. Default 15.
+   * Total approved few-shot example budget per completion call.
+   * Spec key: `top_k`. Default 10 for Luna.
    */
   top_k?: number
 

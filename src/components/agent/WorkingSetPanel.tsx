@@ -53,13 +53,30 @@ export interface WorkingSetPanelProps {
   lintRow?: (row: WorkingSetRow, text: string) => string[]
   /** Disables the apply buttons while an apply is in flight. */
   busy?: boolean
+  /** Hide source when it already has a dedicated workbench pane. */
+  showSource?: boolean
+  /** Pane heading; defaults to the legacy label. */
+  title?: string
+  /** Optional language label beside the heading. */
+  language?: string | null
 }
 
 const rowKey = (row: WorkingSetRow): string =>
   row.proposalId ? proposalRowKey(row.proposalId, row.cellId) : row.cellId
 
 export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanelProps>(
-  function WorkingSetPanel({ rows, onAccept, onReject, onAcceptAll, onJumpToCell, lintRow, busy }, ref) {
+  function WorkingSetPanel({
+    rows,
+    onAccept,
+    onReject,
+    onAcceptAll,
+    onJumpToCell,
+    lintRow,
+    busy,
+    showSource = true,
+    title = "Working set",
+    language,
+  }, ref) {
     const pending = useMemo(() => pendingRows(rows), [rows])
     const [focusIdx, setFocusIdx] = useState(0)
     const [editing, setEditing] = useState(false)
@@ -172,8 +189,9 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
         <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center text-muted-foreground">
           <ListChecks className="h-5 w-5" />
           <p className="text-xs">
-            The cells the agent reads and drafts appear here — source on the left, translation on the
-            right, with staged drafts to accept or reject.
+            {showSource
+              ? "The cells the agent reads and drafts appear here — source on the left, translation on the right, with staged drafts to accept or reject."
+              : "The agent’s staged drafts appear here for you to edit, accept, or reject."}
           </p>
         </div>
       )
@@ -184,14 +202,16 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
         ref={containerRef}
         tabIndex={0}
         onKeyDown={handleKeyDown}
-        aria-label="Working set"
+        role="region"
+        aria-label={title === "Working set" ? "Working set" : `${title} review pane`}
         className="flex h-full min-h-0 flex-col outline-none"
       >
-        <div className="flex items-center gap-2 border-b px-3 py-1.5">
-          <span className="text-xs font-medium">Working set</span>
-          <span className="text-[11px] text-muted-foreground">
-            {rows.length} cell{rows.length === 1 ? "" : "s"}
-            {pending.length > 0 && ` · ${pending.length} to review`}
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/70 px-3">
+          <span className="text-[11px] font-semibold tracking-tight text-foreground/90">{title}</span>
+          <span className="truncate text-[10px] text-muted-foreground">
+            {[language || null, `${rows.length} cell${rows.length === 1 ? "" : "s"}`, pending.length > 0 ? `${pending.length} to review` : null]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
           {pending.length > 0 && onAcceptAll && (
             <AppTooltip content="Accept every pending draft, with your edits (Shift+A)">
@@ -241,6 +261,7 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
               onAccept={onAccept ? () => acceptAndAdvance(idx) : undefined}
               onReject={onReject ? () => rejectAndAdvance(idx) : undefined}
               onJumpToCell={onJumpToCell}
+              showSource={showSource}
             />
           ))}
         </div>
@@ -271,6 +292,7 @@ interface RowViewProps {
   onAccept?: () => void
   onReject?: () => void
   onJumpToCell?: (fileId: string, cellId: string) => void
+  showSource: boolean
 }
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -282,7 +304,7 @@ const OUTCOME_LABEL: Record<string, string> = {
 
 const WorkingSetRowView = memo(function WorkingSetRowView({
   row, index, focused, editing, editValue, busy, lintRow,
-  onFocus, onStartEdit, onEditChange, onEditRevert, onAccept, onReject, onJumpToCell,
+  onFocus, onStartEdit, onEditChange, onEditRevert, onAccept, onReject, onJumpToCell, showSource,
 }: RowViewProps) {
   const isPending = row.proposed !== undefined && row.stagedEvent
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -326,7 +348,8 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
       data-row-index={index}
       onClick={onFocus}
       className={cn(
-        "grid grid-cols-[minmax(64px,7rem)_1fr_1fr] gap-x-4 border-b border-l-2 px-3 py-2 text-xs",
+        "grid gap-x-4 border-b border-l-2 px-3 py-2 text-xs",
+        showSource ? "grid-cols-[minmax(64px,7rem)_1fr_1fr]" : "grid-cols-[minmax(64px,6rem)_1fr]",
         focused && !editing && "bg-accent/50",
         rowStripe(row, editing),
       )}
@@ -352,7 +375,9 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
         )}
       </div>
 
-      <div className="whitespace-pre-wrap break-words text-muted-foreground">{row.source || "∅"}</div>
+      {showSource && (
+        <div className="whitespace-pre-wrap break-words text-muted-foreground">{row.source || "∅"}</div>
+      )}
 
       <div className="flex min-w-0 flex-col gap-1.5">
         {isPending ? (

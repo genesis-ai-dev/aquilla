@@ -1,6 +1,6 @@
 import { useCallback } from "react"
 import { getProject, updateProject } from "@/lib/store/project-index"
-import { DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, resolveProvider } from "@/lib/completion/completion-service"
+import { DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, resolveProvider } from "@/lib/completion/completion-service"
 import type { ProjectRecord, CompletionSettings } from "@/lib/parsers/types"
 
 /**
@@ -31,7 +31,7 @@ export function buildCompletionSettings(
     // called with only e.g. a systemPrompt override, dropped whatever the
     // user had set entirely) — the ProjectSettings.tsx Save Changes handler
     // funnels every completion-settings edit through this function.
-    top_k: overrides.top_k ?? base?.top_k ?? 15,
+    top_k: overrides.top_k ?? base?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: overrides.contextSize ?? base?.contextSize ?? "medium",
     // Approved-only retrieval is a production trust invariant. Preserve the
     // legacy field for wire compatibility, but never allow a project/device

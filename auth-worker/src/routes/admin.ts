@@ -27,6 +27,7 @@ import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-sett
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import { sendAdminElevationCodeEmail } from "../services/email"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
   countRecentEvents,
@@ -623,9 +624,9 @@ admin.get("/settings", async (c) => {
     updatedBy: rec.updatedBy,
     effective: {
       defaultLlmModel:
-        rec.settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5",
+        rec.settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID,
       agentModel:
-        rec.settings.agentModel || c.env.AGENT_MODEL_DEFAULT || "anthropic/claude-haiku-4-5",
+        rec.settings.agentModel || c.env.AGENT_MODEL_DEFAULT || DEFAULT_LLM_MODEL_ID,
       allowedModels: allowedMenu,
     },
   })
@@ -684,7 +685,7 @@ admin.patch("/settings", zValidator("json", platformSettingsPatchSchema), async 
   if (mergedAb?.enabled) {
     const challenger = mergedAb.challengerModel.trim()
     const champion =
-      merged.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
+      merged.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
     if (!challenger || !mergedAllowed.has(challenger)) {
       return c.json(
         {

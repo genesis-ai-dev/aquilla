@@ -19,6 +19,52 @@ export interface ValidatedPair {
 }
 
 /**
+ * Research-backed default for Luna: keep the global approved-example pool
+ * small enough to stay focused, while leaving room for local discourse
+ * context. This is a TOTAL prompt budget, not a per-retriever allowance.
+ */
+export const DEFAULT_APPROVED_EXAMPLE_COUNT = 10
+
+function normalizedExampleSource(source: string): string {
+  return source.trim().replace(/\s+/g, " ").toLowerCase()
+}
+
+/**
+ * Merge canonical retrieval with the local approved-cell fallback into one
+ * bounded prompt pool. Retrieved examples win; local cells only fill unused
+ * slots. Examples already present in the live request or immediate discourse
+ * window are excluded, and source text is preserved in full.
+ */
+export function selectApprovedExamples(
+  retrieved: ValidatedPair[],
+  fallback: ValidatedPair[],
+  limit: number,
+  excludedContext: { source: string }[] = [],
+): ValidatedPair[] {
+  if (limit <= 0) return []
+
+  const excludedSources = new Set(
+    excludedContext.map((context) => normalizedExampleSource(context.source)).filter(Boolean),
+  )
+  const seenSources = new Set<string>()
+  const seenCellIds = new Set<string>()
+  const selected: ValidatedPair[] = []
+
+  for (const example of [...retrieved, ...fallback]) {
+    if (selected.length >= limit) break
+    const sourceKey = normalizedExampleSource(example.source)
+    if (!sourceKey || !example.target.trim() || excludedSources.has(sourceKey)) continue
+    if (seenSources.has(sourceKey) || (example.cellId && seenCellIds.has(example.cellId))) continue
+
+    selected.push(example)
+    seenSources.add(sourceKey)
+    if (example.cellId) seenCellIds.add(example.cellId)
+  }
+
+  return selected
+}
+
+/**
  * Extract validated source→target pairs from a snapshot of the project's
  * cells. Only cells with `status === "validated"` and non-empty content on
  * both sides are included.
@@ -288,6 +334,8 @@ export function buildBatchPrompt(options: {
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
+  /** Approved bilingual pairs immediately preceding the first live cell. */
+  precedingContext?: { source: string; target: string }[]
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -334,6 +382,13 @@ export function buildBatchPrompt(options: {
       user += `Translation:\n${renderSide(cells, "target")}\n\n`
     } else {
       user += `Source:\n${renderSide(cells, "source")}\n\nTranslation:\n${renderSide(cells, "target")}\n\n`
+    }
+  }
+  // Keep immediate discourse context closest to the live batch, matching the
+  // single-cell and paragraph recipes.
+  for (const ctx of options.precedingContext ?? []) {
+    if (ctx.source.trim() && ctx.target.trim()) {
+      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
     }
   }
   const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")

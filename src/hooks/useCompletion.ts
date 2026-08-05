@@ -26,7 +26,7 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, type PassageExample } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
@@ -45,7 +45,6 @@ import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth } from "@/lib/completion/frontier-health"
 import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
-import { compressExampleSource, dedupeExamples, dropPrecedingContextDuplicates, dropValidatedPairDuplicates } from "@/lib/completion/compress-examples"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
 import { gatherPrecedingContext, gatherFollowingSource, DEFAULT_DRAFT_CONTEXT, type DraftContextSettings } from "@/lib/completion/draft-context"
@@ -85,7 +84,7 @@ export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = {
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   llmHealthPenalty: 0.1,
-  top_k: 15,
+  top_k: DEFAULT_APPROVED_EXAMPLE_COUNT,
   contextSize: "medium",
   useOnlyValidatedExamples: true,
   main_chat_language: "",
@@ -99,7 +98,7 @@ type CommitCompletedCell = (
   provenance: AiDraftProvenance,
 ) => Promise<void>
 
-const PROMPT_VERSION = "translation-draft-v1"
+const PROMPT_VERSION = "translation-draft-v2"
 
 function promptFingerprint(prompt: string): string {
   let hash = 0x811c9dc5
@@ -112,6 +111,22 @@ function promptFingerprint(prompt: string): string {
 
 function uniqueExampleIds(...groups: Array<Array<string | undefined>>): string[] {
   return Array.from(new Set(groups.flat().filter((id): id is string => Boolean(id))))
+}
+
+function passageCandidates(passages: PassageHit[]): ValidatedPair[] {
+  return passages.flatMap((passage) => {
+    // Preserve retriever ranking, but keep the direct hit ahead of its passage
+    // neighbors when the configured global budget fills up.
+    const ordered = [
+      ...passage.cells.filter((cell) => cell.hit),
+      ...passage.cells.filter((cell) => !cell.hit),
+    ]
+    return ordered.map((cell) => ({
+      cellId: cell.cellId,
+      source: cell.source,
+      target: cell.target,
+    }))
+  })
 }
 
 /**
@@ -241,7 +256,7 @@ export function useCompletion(
     // top_k controls how many approved examples are requested. The injected
     // search adapter is drafting-specific and enforces validatedOnly=true on
     // the server; this is not a user-tunable trust boundary.
-    const topK = effectiveSettings.top_k ?? 15
+    const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
     let found: ScoredPair[] = []
     try {
       found = await search(sourceText, topK, cell.id)
@@ -251,11 +266,7 @@ export function useCompletion(
     setExamples((p) => new Map(p).set(cell.id, found))
     setCompleting((p) => new Map(p).set(cell.id, "generating"))
 
-    // Collect validated pairs from the project's cells, ranked by relevance to
-    // the cell being drafted. These represent human corrections — "fix it once,
-    // the system learns." Limit to top_k most-relevant to keep the prompt tight.
     const corpusCells = getAllCells()
-    const validatedPairs = collectValidatedPairs(corpusCells, sourceText, topK)
 
     try {
       // Left-context = committed target of the preceding cells (D4).
@@ -265,23 +276,15 @@ export function useCompletion(
         draftContext.precedingTargetCells,
       )
 
-      // Compress the retrieved examples (deterministic source-span truncation using the
-      // matched-token provenance the search already returns) and drop near-duplicates,
-      // so the freed budget can hold the discourse window below. (D6)
-      // Examples that duplicate a preceding-context cell OR a validated pair are dropped
-      // first (on the FULL source, before compression, so the match is exact cell
-      // identity): preceding-context and validated pairs are the stronger, exact signals
-      // and both render ahead of retrieved examples in the prompt, so we keep them and
-      // avoid rendering the same cell twice (which only bloats the prompt / prefill —
-      // AQU-617).
-      const compressedExamples = dedupeExamples(
-        dropValidatedPairDuplicates(
-          dropPrecedingContextDuplicates(found, precedingContext),
-          validatedPairs,
-        ).map((e) => ({
-          source: compressExampleSource(e.source, { matchedTokens: e.matchedTokens }),
-          target: e.target,
-        })),
+      // One total approved-example budget: canonical retrieval wins and the
+      // local validated corpus fills any remaining slots. Immediate context is
+      // kept separate and closest to the live source. Research did not support
+      // source compression, so examples retain their full source and target.
+      const approvedExamples = selectApprovedExamples(
+        found,
+        collectValidatedPairs(corpusCells, sourceText, topK * 2),
+        topK,
+        [...precedingContext, { source: sourceText }],
       )
 
       // AQU-662: decompose any inline footnote markers into clean base text +
@@ -304,9 +307,9 @@ export function useCompletion(
         sourceLanguage, targetLanguage,
         systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
         sourceText: idmlCompletionPromptSource(cell, prepared.promptSource),
-        examples: compressedExamples,
+        examples: [],
         rules,
-        validatedPairs,
+        validatedPairs: approvedExamples,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
         precedingContext,
@@ -346,8 +349,8 @@ export function useCompletion(
         model: modelName,
         source_language: sourceLanguage,
         target_language: targetLanguage,
-        example_count: found.length,
-        validated_pair_count: validatedPairs.length,
+        example_count: approvedExamples.length,
+        validated_pair_count: approvedExamples.length,
         rule_count: (rules ?? []).filter((r) => r.enabled).length,
         regenerate: Boolean(opts?.regenerate),
       })
@@ -386,8 +389,8 @@ export function useCompletion(
         llmAuthor,
         draftProvenance(
           "single",
-          uniqueExampleIds(found.map((example) => example.cellId), validatedPairs.map((example) => example.cellId)),
-          corpusCells.filter((candidate) => candidate.status === "validated").length,
+          uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
+          approvedExamples.length,
         ),
       )
       setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
@@ -519,24 +522,36 @@ export function useCompletion(
           }
         }
 
-        const examplesForPrompt: PassageExample[] = passages.map((p) => ({
-          cells: p.cells.map((c) => ({ source: c.source, target: c.target })),
-        }))
-        // Use the chunk's concatenated text as the relevance query so validated
-        // pairs about the same topic/terms are ranked highest.
-        const batchTopK = effectiveSettings.top_k ?? 15
-        const batchValidatedPairs = collectValidatedPairs(corpusCells, concatenated, batchTopK)
+        const precedingContext = gatherPrecedingContext(
+          corpusCells,
+          chunk[0].id,
+          draftContext.precedingTargetCells,
+        )
+        // The global examples are one bounded pool across passage retrieval
+        // and the local approved fallback. They stay separate from the
+        // configured immediately preceding bilingual context window.
+        const batchTopK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
+        const batchApprovedExamples = selectApprovedExamples(
+          passageCandidates(passages),
+          collectValidatedPairs(corpusCells, concatenated, batchTopK * 2),
+          batchTopK,
+          [
+            ...precedingContext,
+            ...chunk.map((cell) => ({ source: effectiveSourceText(cell) })),
+          ],
+        )
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
           systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
           cells: chunk.map((c) => ({
             source: idmlCompletionPromptSource(c, effectiveSourceText(c)),
           })),
-          examples: examplesForPrompt,
+          examples: [],
           rules,
-          validatedPairs: batchValidatedPairs,
+          validatedPairs: batchApprovedExamples,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
           briefSummary,
+          precedingContext,
           systemAddendum: idmlCompletionSystemAddendum(chunk),
         })
 
@@ -638,11 +653,8 @@ export function useCompletion(
                   llmAuthor,
                   draftProvenance(
                     "batch",
-                    uniqueExampleIds(
-                      passages.flatMap((passage) => passage.cells.map((example) => example.cellId)),
-                      batchValidatedPairs.map((example) => example.cellId),
-                    ),
-                    corpusCells.filter((candidate) => candidate.status === "validated").length,
+                    uniqueExampleIds(batchApprovedExamples.map((example) => example.cellId)),
+                    batchApprovedExamples.length,
                   ),
                 )
               } catch (err) {
@@ -690,8 +702,8 @@ export function useCompletion(
           cell_count: chunk.length,
           filled_count: filledText.size,
           fallback_count: chunk.length - filledText.size,
-          example_count: flatExamples.length,
-          validated_pair_count: batchValidatedPairs.length,
+          example_count: batchApprovedExamples.length,
+          validated_pair_count: batchApprovedExamples.length,
           rule_count: (rules ?? []).filter((r) => r.enabled).length,
         })
       }
@@ -725,7 +737,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, rules, getAllCells, briefSummary, draftProvenance])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -779,13 +791,10 @@ export function useCompletion(
         cells,
         startCellId,
         draftContext.precedingTargetCells,
-        true, // D4 source-fallback: paragraph path shows preceding source when no target committed yet
       )
 
-      // Validated pairs from living memory for relevance-ranked few-shot.
-      const topK = effectiveSettings.top_k ?? 15
+      const topK = effectiveSettings.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT
       const concatenated = draftCells.map((c) => effectiveSourceText(c)).join(" ")
-      const validatedPairs = collectValidatedPairs(cells, concatenated, topK)
 
       // Retrieve passage examples for the paragraph's source text.
       let passages: import("./useSearchIndex").PassageHit[] = []
@@ -795,9 +804,15 @@ export function useCompletion(
         console.warn("[useCompletion] completeParagraph: passage retrieval failed:", err)
       }
 
-      const examplesForPrompt: PassageExample[] = passages.map((p) => ({
-        cells: p.cells.map((c) => ({ source: c.source, target: c.target })),
-      }))
+      const approvedExamples = selectApprovedExamples(
+        passageCandidates(passages),
+        collectValidatedPairs(cells, concatenated, topK * 2),
+        topK,
+        [
+          ...precedingContext,
+          ...groupCells.map((cell) => ({ source: effectiveSourceText(cell) })),
+        ],
+      )
 
       // 3. Build the paragraph prompt.
       const messages = buildParagraphPrompt({
@@ -815,8 +830,8 @@ export function useCompletion(
           source: idmlCompletionPromptSource(c, effectiveSourceText(c)),
           ...(c.status === "validated" ? { lockedTarget: c.translated } : {}),
         })),
-        examples: examplesForPrompt,
-        validatedPairs,
+        examples: [],
+        validatedPairs: approvedExamples,
         rules,
         briefSummary,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
@@ -900,11 +915,8 @@ export function useCompletion(
           llmAuthor,
           draftProvenance(
             "paragraph",
-            uniqueExampleIds(
-              passages.flatMap((passage) => passage.cells.map((example) => example.cellId)),
-              validatedPairs.map((example) => example.cellId),
-            ),
-            cells.filter((candidate) => candidate.status === "validated").length,
+            uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
+            approvedExamples.length,
           ),
         )
         committedIds.add(cellId)

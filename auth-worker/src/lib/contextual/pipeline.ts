@@ -37,8 +37,8 @@ import {
 } from "./types"
 
 /** Retrieval target for few-shot examples (draft tool's EXAMPLES_N). */
-export const EXAMPLES_TARGET = 8
-const PRECEDING_CONTEXT = 3
+export const EXAMPLES_TARGET = 10
+const PRECEDING_CONTEXT = 5
 /** Barrier at quorum: minimum successful verifier votes with the full panel. */
 const MIN_PANEL_SUCCESS = 2
 

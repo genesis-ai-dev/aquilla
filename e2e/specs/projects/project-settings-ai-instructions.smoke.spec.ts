@@ -21,6 +21,11 @@ test("project settings AI instructions textarea makes form dirty", async ({ alic
   const textarea = alice.locator("#sp")
   await expect(textarea).toBeVisible({ timeout: 10_000 })
 
+  // Luna's research-backed defaults: one ten-example approved pool plus a
+  // separate five-cell bilingual discourse window.
+  await expect(alice.locator("#top-k")).toHaveValue("10")
+  await expect(alice.locator("#preceding-target-cells")).toHaveValue("5")
+
   // Fill it with something unique.
   const instruction = `Translate clearly and concisely. (test-${Date.now()})`
   await textarea.fill(instruction)

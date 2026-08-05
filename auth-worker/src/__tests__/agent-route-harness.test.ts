@@ -71,6 +71,13 @@ describe("agent route — harness tool registration & dispatch", () => {
   it("serves the new tools to the model and dispatches read_memory", async () => {
     await seedWorld()
     const jwt = await jwtFor("alice")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings)
+       VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = excluded.settings`,
+    )
+      .bind(PROJECT, JSON.stringify({ sourceLanguage: "English", targetLanguage: "Urdu" }))
+      .run()
 
     const upstreamBodies: { tools?: { function: { name: string } }[]; messages: { role: string; content: string }[] }[] = []
     const script = [
@@ -88,6 +95,13 @@ describe("agent route — harness tool registration & dispatch", () => {
     })
     expect(res.status).toBe(200)
     const frames = parseFrames(await res.text())
+    const systemPrompt = upstreamBodies[0].messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n")
+    expect(systemPrompt).toContain("language of the user's latest message")
+    expect(systemPrompt).toContain("target language applies only to translated content")
+    expect(systemPrompt).not.toContain("Reply to the user in Urdu")
 
     // Tool registration: the served tool list carries every new harness tool.
     const toolNames = (upstreamBodies[0].tools ?? []).map((t) => t.function.name)

@@ -44,11 +44,9 @@ import { runSpan, EXAMPLES_TARGET } from "./pipeline"
 import type { ExamplePair } from "./draft"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import type { LlmCall, SpanSeed, SpanReport, Tier } from "./types"
+import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
-
-/** Default fast-tier model (Haiku-class, same default as the agent loop). */
-const DEFAULT_FAST_MODEL = "anthropic/claude-haiku-4-5"
 
 export interface ContextualModels {
   fast: string
@@ -70,10 +68,10 @@ export function resolveContextualModels(
   env: ModelEnv,
   settings: { agentModel?: string; agentDraftModel?: string },
 ): ContextualModels {
-  const agentModel = settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_FAST_MODEL
+  const agentModel = settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_LLM_MODEL_ID
   const mid = settings.agentDraftModel || env.AGENT_DRAFT_MODEL_DEFAULT || agentModel
   return {
-    fast: env.CONTEXTUAL_FAST_MODEL || DEFAULT_FAST_MODEL,
+    fast: env.CONTEXTUAL_FAST_MODEL || DEFAULT_LLM_MODEL_ID,
     mid,
     deep: env.CONTEXTUAL_DEEP_MODEL || mid,
   }

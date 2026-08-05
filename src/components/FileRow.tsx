@@ -16,6 +16,7 @@ interface FileRowProps {
   file: FileReference
   active: boolean
   expanded: boolean
+  expandable?: boolean
   progress?: FileStats
   openCommentCount?: number
   hasSuggestion?: boolean
@@ -61,11 +62,9 @@ export function FileRow(props: FileRowProps) {
     }
   }, [editing, file.name])
 
-  const translatedPct = progress && progress.total > 0
-    ? Math.round((progress.translated / progress.total) * 100) : 0
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : 0
-  const canExpand = fileHasSections(file)
+  const canExpand = props.expandable ?? fileHasSections(file)
   // Timeline-segment-model: a file is either time-true (timeline spine) or
   // sequence-true (intrinsic order). Sequence is the default, so only the
   // exceptional timeline files carry a marker — repeating an icon on every
@@ -167,19 +166,27 @@ export function FileRow(props: FileRowProps) {
             data-testid="file-row-progress-slot"
             aria-label={
               progress && progress.total > 0
-                ? `${translatedPct}% translated, ${validatedPct}% validated`
+                ? `${progress.validated} of ${progress.total} cells validated (${validatedPct}%)`
                 : undefined
             }
           >
             {progress && progress.total > 0 && (
-              <>
-                <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
-                  <span className="block h-full bg-amber-500" style={{ width: `${translatedPct}%` }} />
+              <AppTooltip content={`${progress.validated} of ${progress.total} cells validated (${validatedPct}%)`} side="right">
+                <span
+                  role="progressbar"
+                  aria-label={`Validation progress for ${file.name}`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={validatedPct}
+                  className="block h-1.5 w-12 overflow-hidden rounded-full bg-muted"
+                >
+                  <span
+                    data-testid="file-row-validation-progress"
+                    className="block h-full rounded-full bg-emerald-500 transition-[width] duration-300"
+                    style={{ width: `${validatedPct}%` }}
+                  />
                 </span>
-                <span className="h-2 w-6 rounded-full bg-muted overflow-hidden">
-                  <span className="block h-full bg-emerald-500" style={{ width: `${validatedPct}%` }} />
-                </span>
-              </>
+              </AppTooltip>
             )}
           </div>
         )}

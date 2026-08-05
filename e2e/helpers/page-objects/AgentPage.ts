@@ -128,11 +128,11 @@ export class AgentPage {
     return proposal
   }
 
-  /** Switch the workbench's tab slot to "memory" — contracts §5: AgentWorkbench
-   * adds a `sessions | memory` tab slot, memory tab lazy-imports
+  /** Switch the workbench's tab slot to project knowledge — contracts §5:
+   * AgentWorkbench keeps the underlying `sessions | memory` state while the UI
    * W1E's `AgentMemoryTab`. */
   async openMemoryTab(): Promise<void> {
-    await this.page.getByRole("tab", { name: "Memory" }).click()
+    await this.page.getByRole("tab", { name: "Project knowledge" }).click()
   }
 
   /** Approve a proposed-memory row by its path (e.g. "observations/foo.md"). */

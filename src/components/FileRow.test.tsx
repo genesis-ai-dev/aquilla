@@ -86,6 +86,18 @@ describe("FileRow — AQU-341 truncation consistency", () => {
     )
   })
 
+  it("shows validation as one conventional, explicitly labelled progress bar", () => {
+    const { container } = renderRow({ progress: { translated: 8, validated: 5, total: 10 } })
+
+    const progressbar = within(container).getByRole("progressbar", {
+      name: `Validation progress for ${LONG_NAME}`,
+    })
+    expect(progressbar).toHaveAttribute("aria-valuenow", "50")
+    expect(progressbar).toHaveAttribute("aria-valuemin", "0")
+    expect(progressbar).toHaveAttribute("aria-valuemax", "100")
+    expect(within(container).getByTestId("file-row-validation-progress")).toHaveStyle({ width: "50%" })
+  })
+
   it("exposes the full (untruncated) name so the user can recover it", () => {
     const { container } = renderRow()
     // The accessible name is the full string even though it renders truncated.

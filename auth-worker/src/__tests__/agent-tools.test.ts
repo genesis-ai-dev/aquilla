@@ -13,7 +13,7 @@ import { parseRefRange, orderPairs, statusOf, type CellPair } from "../lib/agent
 import { executeRead } from "../lib/agent/tools/read"
 import { executeExamples, orTsquery } from "../lib/agent/tools/examples"
 import { executeSearch } from "../lib/agent/tools/search"
-import { executeDraft, parseDraftReply } from "../lib/agent/tools/draft"
+import { executeDraft } from "../lib/agent/tools/draft"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
 const FILE = "22222222-2222-4222-8222-222222222222"
@@ -228,15 +228,18 @@ describe("executeDraft", () => {
 
   it("drafts untranslated cells via the model and stages them through emit-stage", async () => {
     await seedWorld()
-    let draftRequest: { messages: { role: string; content: string }[] } | null = null
+    const draftRequests: { messages: { role: string; content: string }[] }[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
-      draftRequest = JSON.parse(String(init?.body))
+      draftRequests.push(JSON.parse(String(init?.body)))
+      const isResearch = draftRequests.length === 1
       return new Response(
         JSON.stringify({
           choices: [
             {
               message: {
-                content: '[{"i":1,"t":"¡Oíd! He aquí, el sembrador salió a sembrar"},{"i":2,"t":"Y cuando estuvo solo"}]',
+                content: isResearch
+                  ? "MRK 4:3: preserve command, sower, departure, and purpose; attested teaching register [E1]. MRK 4:10: preserve temporal relation and solitude."
+                  : '[{"i":1,"t":"¡Oíd! He aquí, el sembrador salió a sembrar"},{"i":2,"t":"Y cuando estuvo solo"}]',
               },
             },
           ],
@@ -266,7 +269,7 @@ describe("executeDraft", () => {
         ai_draft: {
           model: "test/drafter",
           provider: "platform",
-          promptVersion: "agent-draft-v1",
+          promptVersion: "agent-draft-v3-staged-research",
           mode: "agent",
           projectState: {
             sourceLanguage: "English",
@@ -281,27 +284,42 @@ describe("executeDraft", () => {
     expect(out.data?.cells?.map((c) => c.status)).toEqual(["untranslated", "untranslated"])
     expect(out.data?.cells?.every((c) => c.target === "")).toBe(true)
     expect(progress).toEqual([
+      { label: "Researching 2 cells", done: 0, total: 2 },
+      { label: "Researching 2 cells", done: 2, total: 2 },
       { label: "Drafting 2 cells", done: 0, total: 2 },
       { label: "Drafting 2 cells", done: 2, total: 2 },
     ])
-    expect(usage).toHaveLength(1)
+    expect(usage).toHaveLength(2)
 
-    // The drafting prompt carried the project's own pairs + language pair.
-    const sys = draftRequest!.messages[0].content
-    expect(sys).toContain("into Spanish")
-    expect(sys).toContain("Y comenzó otra vez a enseñar") // exemplar rode along
-    expect(sys).not.toContain("Y les enseñaba muchas cosas") // unapproved target never becomes context
-    expect(draftRequest!.messages[1].content).toContain("1. [MRK 4:3]")
+    // Research is genuinely a separate call, and only its compact evidence
+    // record crosses into generation. Both passes carry approved project data.
+    expect(draftRequests).toHaveLength(2)
+    const researchSystem = draftRequests[0].messages[0].content
+    expect(researchSystem).toContain("RESEARCH pass")
+    expect(researchSystem).toContain("directly attested")
+    expect(researchSystem).toContain("into Spanish")
+    expect(researchSystem).toContain("Y comenzó otra vez a enseñar")
+    expect(researchSystem).not.toContain("Y les enseñaba muchas cosas") // unapproved target never becomes context
+    expect(draftRequests[0].messages[1].content).toContain("Research these 2 source segments")
+
+    const generationSystem = draftRequests[1].messages[0].content
+    expect(generationSystem).toContain("GENERATION pass")
+    expect(generationSystem).toContain("semantic role")
+    expect(draftRequests[1].messages[1].content).toContain("Evidence record from the completed research pass")
+    expect(draftRequests[1].messages[1].content).toContain("preserve command, sower")
+    expect(draftRequests[1].messages[1].content).toContain("1. [MRK 4:3]")
   })
 
   it("reports scope exhaustion and remaining work honestly", async () => {
     await seedWorld()
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-      new Response(
-        JSON.stringify({ choices: [{ message: { content: '[{"i":1,"t":"borrador"}]' } }] }),
+    let calls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls++
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: calls % 2 === 1 ? "compact evidence" : '[{"i":1,"t":"borrador"}]' } }] }),
         { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    )
+      )
+    })
     const { ctx } = draftCtx()
     const out = await executeDraft(
       env.AQUILLA_PG,

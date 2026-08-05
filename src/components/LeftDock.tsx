@@ -4,7 +4,6 @@
  * Collapsible left dock that replaces the fixed-width sidebar.
  * Hosts multiple surfaces as icon-tab switchers (like Claude's sidebar):
  *   - files   : project file list (was the old sidebar content)
- *   - agent   : AI agent (was a right-side Sheet drawer — AQU-320)
  *   - search  : search / parallel passages / find-replace panel
  *
  * Collapsed: renders a narrow rail of icon buttons only (no labels).
@@ -21,7 +20,6 @@ import {
 } from "react"
 import {
   Files,
-  Bot,
   Search,
   AudioLines,
   PanelLeftOpen,
@@ -38,20 +36,16 @@ import { Button } from "@/components/ui/button"
 // Types
 // ---------------------------------------------------------------------------
 
-export type DockTab = "files" | "agent" | "search" | "voices"
+export type DockTab = "files" | "search" | "voices"
 
 export interface LeftDockProps {
   /** Slot rendered when "files" tab is active */
   filesPanel: ReactNode
-  /** Slot rendered when "agent" tab is active */
-  agentPanel: ReactNode
   /** Slot rendered when "search" tab is active */
   searchPanel: ReactNode
   /** Slot rendered when "voices" tab is active. When omitted, the Voices tab
    *  is hidden (e.g. a project without the Audio lens available). */
   voicesPanel?: ReactNode
-  /** Badge on the agent tab (e.g. unread) */
-  agentBadge?: number
   /** Default tab to show when dock opens */
   defaultTab?: DockTab
   /** Externally controlled active tab (useful for "open chat" button in header) */
@@ -68,7 +62,6 @@ type TabMeta = { id: DockTab; icon: typeof Files; label: string }
 const TAB_META: TabMeta[] = [
   { id: "files", icon: Files, label: "Files" },
   { id: "voices", icon: AudioLines, label: "Voices" },
-  { id: "agent", icon: Bot, label: "Agent" },
   { id: "search", icon: Search, label: "Search" },
 ]
 
@@ -79,12 +72,11 @@ const TAB_META: TabMeta[] = [
 interface TabRailProps {
   tabs: TabMeta[]
   activeTab: DockTab | null
-  agentBadge?: number
   onTabClick: (tab: DockTab) => void
   orientation: "left" | "top"
 }
 
-function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRailProps) {
+function TabRail({ tabs, activeTab, onTabClick, orientation }: TabRailProps) {
   const isTop = orientation === "top"
 
   return (
@@ -125,19 +117,6 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
           >
             <Icon className={cn("shrink-0", isTop ? "h-3 w-3" : "h-4 w-4")} />
             {isTop && isActive && <span className="truncate">{label}</span>}
-            {id === "agent" && agentBadge != null && agentBadge > 0 && (
-              <span
-                aria-label={`${agentBadge} unread`}
-                className={cn(
-                  "flex items-center justify-center rounded-md bg-primary text-primary-foreground",
-                  isTop
-                    ? "ml-0.5 h-4 min-w-4 px-1 text-[9px]"
-                    : "absolute -right-0.5 -top-0.5 h-3.5 w-3.5 text-[9px]",
-                )}
-              >
-                {agentBadge > 9 ? "9+" : agentBadge}
-              </span>
-            )}
           </button>
         )
         return isTop ? (
@@ -158,10 +137,8 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
 
 export function LeftDock({
   filesPanel,
-  agentPanel,
   searchPanel,
   voicesPanel,
-  agentBadge,
   activeTab: controlledTab,
   onActiveTabChange,
 }: LeftDockProps) {
@@ -199,7 +176,6 @@ export function LeftDock({
   // ---- content map ---------------------------------------------------------
   const panels: Record<DockTab, ReactNode> = {
     files: filesPanel,
-    agent: agentPanel,
     search: searchPanel,
     voices: voicesPanel,
   }
@@ -238,7 +214,6 @@ export function LeftDock({
             <TabRail
               tabs={visibleTabs}
               activeTab={activeTab}
-              agentBadge={agentBadge}
               onTabClick={handleRailIconClick}
               orientation="top"
             />
@@ -254,7 +229,6 @@ export function LeftDock({
               <TabRail
                 tabs={visibleTabs}
                 activeTab={activeTab}
-                agentBadge={agentBadge}
                 onTabClick={handleRailIconClick}
                 orientation="left"
               />

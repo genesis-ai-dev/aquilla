@@ -114,7 +114,7 @@ describe("AgentRunView", () => {
       />,
     )
     expect(
-      screen.getByText(/12,000 prompt \+ 3,400 completion tokens · 13 cr/),
+      screen.getByText(/13 cr · 15,400 tokens/),
     ).toBeInTheDocument()
   })
 

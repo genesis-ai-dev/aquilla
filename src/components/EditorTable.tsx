@@ -1,20 +1,21 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
+import { createPortal } from "react-dom"
 import {
   LegendList,
   type LegendListRef,
   type LegendListRenderItemProps,
   type OnViewableItemsChangedInfo,
 } from "@legendapp/list/react"
-import DOMPurify from "dompurify"
 import {
-  Check, CheckCheck, Circle, Trash2, AlertTriangle, AlertCircle, RefreshCw,
-  MessageCircle, Play, Pause, Mic, Sparkles, FileText, History as HistoryIcon,
+  Check, AlertTriangle, AlertCircle, RefreshCw,
+  MessageCircle, Play, Pause, Mic, Sparkles, FileText,
   ArrowRight, Activity, NotebookPen, Info, Pencil, ChevronRight, ChevronDown, Music, Braces,
   Languages,
   Archive,
   Lock,
   Pilcrow,
   PilcrowRight,
+  Bot,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -44,10 +45,16 @@ import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellU
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
-import { needsAttention, needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
+import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
-import { HealthRing } from "./HealthRing"
+import { HealthRibbon } from "./HealthRibbon"
+import {
+  buildHealthRibbon,
+  preTranslationEvidence,
+  type HealthRibbonPoint,
+  type HealthRibbonStage,
+} from "@/lib/health/health-ribbon"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { CellWaveform } from "./CellWaveform"
 import { CellAudioButton } from "./CellAudioButton"
@@ -85,7 +92,7 @@ import {
   useIsSelected,
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverContent } from "@/components/ui/popover"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -98,6 +105,20 @@ import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
 import { CellNumberPill } from "./cell/CellNumberPill"
+import {
+  EditorSourceCellSurface,
+  EditorTargetCellColumn,
+  EditorTargetCellWell,
+  EditorTargetReadSurface,
+} from "./cell/EditorCellSurface"
+import {
+  SanitizedRichHtml,
+  TargetIdmlHtml,
+  TargetRichHtml,
+  UsfmNoteChip,
+} from "./cell/EditorCellContent"
+import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
+import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { InterlinearAlignmentPanel } from "./InterlinearAlignmentPanel"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
@@ -134,7 +155,6 @@ import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
-import { getSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { AddConceptDialog } from "./AddConceptDialog"
@@ -161,8 +181,6 @@ import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import {
   hasMeaningfulRichText,
-  prepareReadOnlyRichTextHtml,
-  sanitizeIdmlEditorHtml,
 } from "@/lib/richtext/editor-content"
 import {
   resolveIdmlEditorConfiguration,
@@ -415,73 +433,6 @@ function SynthStatusBadge({
   return null
 }
 
-function ValidationHistoryTimeline({
-  entries, currentUsername,
-}: {
-  entries: import("@/hooks/useCells").EditValidationSummary[]
-  currentUsername: string
-}) {
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
-  // entries are value-editMap only, oldest-first. The last entry IS the current
-  // state (already shown above the divider), so skip it. Show remaining newest-first.
-  const historical = entries.slice(0, -1).reverse()
-  if (historical.length === 0) return null
-
-  return (
-    <>
-      <div className="my-1 h-px bg-border" />
-      <div className="mb-1 px-1 text-xs text-muted-foreground">History</div>
-      <ul className="space-y-0.5">
-        {historical.map((entry, i) => {
-          const snippet = typeof entry.value === "string"
-            ? (entry.value.length > 40 ? entry.value.slice(0, 40) + "…" : entry.value)
-            : ""
-          const date = new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })
-          const authors = entry.authors.join(", ")
-          const expanded = expandedIdx === i
-          return (
-            <li key={`${entry.timestamp}-${i}`} className="rounded text-xs">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between gap-2 px-1 py-1 text-left hover:bg-muted/50"
-                onClick={() => setExpandedIdx(expanded ? null : i)}
-              >
-                <span className="truncate">
-                  <span className="text-muted-foreground">{date} · </span>
-                  <span>{authors}</span>
-                </span>
-              </button>
-              {snippet && (
-                <div className="px-1 pb-1 text-[11px] italic text-muted-foreground/80 truncate">"{snippet}"</div>
-              )}
-              {expanded && (
-                <ul className="border-l border-border/50 pl-2 ml-1 mb-1 space-y-0.5">
-                  {entry.validatorsAll.length === 0 ? (
-                    <li className="px-1 py-0.5 text-[11px] text-muted-foreground/60">No validators on this state</li>
-                  ) : entry.validatorsAll.map(v => (
-                    <li
-                      key={v.username}
-                      className={cn(
-                        "px-1 py-0.5 text-[11px] flex items-center gap-1",
-                        v.isDeleted && "text-muted-foreground/50 line-through",
-                      )}
-                    >
-                      <span>{v.username}{v.username === currentUsername ? " (you)" : ""}</span>
-                      <span className="text-muted-foreground/60 ml-auto">
-                        {new Date(v.updatedTimestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-    </>
-  )
-}
-
 // Stable empty sentinels so per-cell "map.get(id) ?? []" derivations keep a
 // steady reference when the cell has no entry — otherwise every render would
 // mint a fresh [] and break React.memo for every row.
@@ -732,6 +683,11 @@ interface EditorTableProps {
   onFootnoteCreated?: () => void
   /** Optional controls on the right of the chapter navigation row. */
   chapterNavTrailing?: React.ReactNode
+  /** Move chapter navigation into a shell-owned header slot. `null` reserves
+   *  the slot while it mounts; `undefined` keeps the legacy in-editor row. */
+  chapterNavPortalTarget?: HTMLElement | null
+  /** Open the Agent as the center pane between Source and Target. */
+  onAgentToggle?: () => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -772,6 +728,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
+  chapterNavPortalTarget,
+  onAgentToggle,
 }, ref) {
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
   // repair path treats any hand-edited source cell as damage and overwrites
@@ -970,6 +928,39 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [audioByCellId, project.id])
 
   const ruleMap = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
+
+  // Cell-level quality estimates are noisy. Present a symmetric local trend
+  // instead of a progress ring, while keeping the three evidence stages
+  // separate so validated 100s never inflate nearby automatic estimates.
+  const healthRibbonByCellId = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => buildHealthRibbon(
+      displayCellIds.map((id) => {
+        const view = cellStore.getCellView(id)
+        if (!view) return { id, scope: "missing", stage: "untranslated" as const }
+
+        const stage: HealthRibbonStage = view.status === "validated"
+          ? "validated"
+          : view.status === "empty" || !view.translated.trim()
+            ? "untranslated"
+            : "automatic"
+        const pre = stage === "untranslated"
+          ? preTranslationEvidence(effectiveSourceText(view), examples.get(id) ?? EMPTY_EXAMPLES)
+          : null
+
+        return {
+          id,
+          scope: `${view.fileId}:${view.group || view.section || "document"}`,
+          stage,
+          rawScore: stage === "validated"
+            ? 100
+            : stage === "automatic"
+              ? healthMap.get(id)
+              : pre?.score,
+          evidenceWeight: pre?.evidenceWeight ?? 1,
+        }
+      }),
+    )),
+  [cellStore, cellStoreVersion, displayCellIds, examples, healthMap])
 
   // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
@@ -1856,7 +1847,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           completing={completing}
           errors={errors}
           previews={previews}
-          healthMap={healthMap}
+          healthRibbonPoint={healthRibbonByCellId.get(cell.id)!}
           infractions={infractions}
           ruleMap={ruleMap}
           onCompleteSingle={onCompleteSingle}
@@ -1964,7 +1955,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     handleGridRowKeyNav,
     handleNavigateCell,
     handleSelectionPointerDown,
-    healthMap,
+    healthRibbonByCellId,
     infractions,
     isAnonymous,
     isBacktranslationConfigured,
@@ -2014,6 +2005,58 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     [cellStoreVersion, renderListItem],
   )
 
+  const renderChapterNavigation = (portaled: boolean) => {
+    const hasChapterNavigation = milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
+    if (!hasChapterNavigation && !chapterNavTrailing) return null
+
+    return (
+      <div
+        className={cn(
+          "relative flex min-w-0 items-center gap-2",
+          portaled
+            ? "max-w-[min(58vw,52rem)]"
+            : "border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl",
+        )}
+      >
+        {!portaled && hasChapterNavigation ? (
+          <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
+        ) : null}
+        {hasChapterNavigation ? (
+          <div
+            data-chapter-nav-slot=""
+            className={cn(
+              "flex min-w-24 max-w-full items-center",
+              portaled
+                ? "min-w-0 shrink"
+                : "mr-auto flex-1 lg:mr-0 lg:flex-none lg:shrink",
+            )}
+          >
+            <div className={cn("min-w-0 max-w-full", portaled ? "w-auto" : "w-full lg:w-auto")}>
+              <MilestoneNavigator
+                items={milestoneNavigationItems}
+                activeKey={activeChapterLabel!}
+                activeSubsectionKey={activeSubsectionKey}
+                onSelect={handleChapterSelect}
+              />
+            </div>
+          </div>
+        ) : null}
+        {chapterNavTrailing ? (
+          <div
+            className={cn(
+              "flex shrink-0 items-center",
+              !portaled && hasChapterNavigation ? "lg:flex-1 lg:justify-end" : "ml-auto",
+            )}
+          >
+            {chapterNavTrailing}
+          </div>
+        ) : !portaled && hasChapterNavigation ? (
+          <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
+        ) : null}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       <div className="shrink-0 bg-background">
@@ -2024,46 +2067,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        {(milestoneNavigationItems.length > 0 && activeChapterLabel) || chapterNavTrailing ? (
-          // Below lg: in-flow left picker + end toolbar. lg+: equal flex
-          // balancers keep the picker centered without absolute overlay — the
-          // old inset-0 layer painted under Text/Audio + ⋯ when space was tight.
-          // min-w-24 floors the picker at prev + chevron + next (three size-8s).
-          // gap-2 matches FileChapterToolbar's tabs ↔ ⋯ spacing.
-          <div className="relative flex items-center gap-2 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
-            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
-              <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
-            ) : null}
-            {milestoneNavigationItems.length > 0 && activeChapterLabel ? (
-              <div
-                data-chapter-nav-slot=""
-                className="mr-auto flex min-w-24 max-w-full flex-1 items-center lg:mr-0 lg:flex-none lg:shrink"
-              >
-                <div className="min-w-0 w-full max-w-full lg:w-auto">
-                  <MilestoneNavigator
-                    items={milestoneNavigationItems}
-                    activeKey={activeChapterLabel}
-                    activeSubsectionKey={activeSubsectionKey}
-                    onSelect={handleChapterSelect}
-                  />
-                </div>
-              </div>
-            ) : null}
-            {chapterNavTrailing ? (
-              <div
-                className={
-                  milestoneNavigationItems.length > 0 && activeChapterLabel
-                    ? "flex shrink-0 items-center lg:flex-1 lg:justify-end"
-                    : "ml-auto flex shrink-0 items-center"
-                }
-              >
-                {chapterNavTrailing}
-              </div>
-            ) : milestoneNavigationItems.length > 0 && activeChapterLabel ? (
-              <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
-            ) : null}
-          </div>
-        ) : null}
+        {chapterNavPortalTarget
+          ? createPortal(renderChapterNavigation(true), chapterNavPortalTarget)
+          : null}
+        {chapterNavPortalTarget === undefined ? renderChapterNavigation(false) : null}
         <div className={cn("grid gap-2 border-b border-border pl-2.5 pr-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
           {/* Unlabeled track: combined select + badges + number gutter. */}
           <div aria-hidden="true" />
@@ -2077,7 +2084,20 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2 pl-3">
+          <div className="relative flex items-center justify-end gap-2 pl-6 pr-2 text-right">
+            {onAgentToggle ? (
+              <AppTooltip content="Open Agent between source and target">
+                <button
+                  type="button"
+                  aria-label="Open Agent between source and target"
+                  onClick={onAgentToggle}
+                  className="absolute left-0 top-1/2 z-10 flex h-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1.5 rounded-full border border-primary/40 bg-background px-2.5 text-primary shadow-md ring-4 ring-background transition-all hover:scale-105 hover:bg-primary/10 hover:text-primary"
+                >
+                  <Bot className="h-4 w-4" />
+                  <span className="text-[11px] font-semibold">Agent</span>
+                </button>
+              </AppTooltip>
+            ) : null}
             Target
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -2361,7 +2381,7 @@ interface MemoizedRowProps {
   completing: Map<string, string>
   errors: Map<string, string>
   previews: Map<string, string>
-  healthMap: Map<string, number>
+  healthRibbonPoint: HealthRibbonPoint
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
   // AQU-670: resolves whether the draft actually committed — the rail's
@@ -2457,7 +2477,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, examples, completing, errors, previews, healthMap, infractions,
+    cell, examples, completing, errors, previews, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     activeCueIndex, rowIndex, contentNumber, gridCols,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -2546,7 +2566,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         ? "generating"
         : null
   const error = errors.get(cellId)
-  const health = healthMap.get(cellId)
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
@@ -2608,7 +2627,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         cellExamples={cellExamples}
         highlights={highlights}
         error={error}
-        health={health}
+        healthRibbonPoint={healthRibbonPoint}
         cellInfractions={activeInfractions}
         waivedInfractions={waivedInfractions}
         ruleMap={ruleMap}
@@ -2740,7 +2759,7 @@ interface EditorRowProps {
   cellExamples: ScoredPair[]
   highlights: ReturnType<typeof buildHighlightsFromExamples>
   error?: string
-  health: number | undefined
+  healthRibbonPoint: HealthRibbonPoint
   cellInfractions: RuleInfraction[]
   waivedInfractions: RuleInfraction[]
   ruleMap: Map<string, TranslationRule>
@@ -2961,47 +2980,6 @@ function SourceWithTermLookup({
 // popover. The stored value is untouched — violation ranges are clipped from
 // raw-text offsets into each segment via clipRangesToSegment.
 
-function UsfmNoteChip({
-  note,
-  ordinal,
-  panelActive,
-}: {
-  note: UsfmNoteSegment
-  ordinal: number
-  panelActive?: boolean
-}) {
-  const label =
-    note.noteKind === "xref" ? "†" : note.caller && note.caller !== "+" && note.caller !== "-" ? note.caller : String(ordinal)
-  const kindLabel = note.noteKind === "xref" ? "Cross reference" : note.noteKind === "endnote" ? "Endnote" : "Footnote"
-  const tooltipContent = (
-    <div className="max-w-72 text-xs">
-      <div className="mb-0.5 flex items-center gap-1.5">
-        <span className="text-[9px] font-medium text-muted-foreground">{kindLabel}</span>
-        {note.ref && <span className="font-mono text-[10px] text-muted-foreground">{note.ref}</span>}
-      </div>
-      <div>{note.text || <span className="italic text-muted-foreground">(empty)</span>}</div>
-    </div>
-  )
-  const chip = (
-    <button
-      type="button"
-      className={cn(
-        "mx-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-md bg-muted px-0.5 align-super text-[9px] font-bold leading-none text-muted-foreground transition-colors hover:bg-primary/15 hover:text-primary focus-visible:bg-primary/15 focus-visible:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
-        panelActive ? "cursor-default" : "cursor-help",
-      )}
-      aria-label={`${kindLabel}${note.ref ? ` ${note.ref}` : ""}`}
-    >
-      {label}
-    </button>
-  )
-
-  return (
-    <AppTooltip content={tooltipContent} side="bottom">
-      {chip}
-    </AppTooltip>
-  )
-}
-
 function humanFootnoteCellRef(cell: CellData): string {
   const value = (cell.group || cell.context || "").trim()
   if (!value || looksLikeUuid(value)) return ""
@@ -3140,18 +3118,6 @@ function UsfmSourceText(props: SourceWithTermLookupProps) {
   })
 
   return <div>{parts}</div>
-}
-
-function SanitizedRichHtml({ html }: { html: string }) {
-  const safeHtml = useMemo(() => DOMPurify.sanitize(html), [html])
-  const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
-
-  return (
-    <div
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={innerHtml}
-    />
-  )
 }
 
 interface RemotePresenceOverlayItem {
@@ -3340,46 +3306,6 @@ function textNodePositionForOffset(
   }
   if (lastText) return { node: lastText, offset: lastText.data.length }
   return null
-}
-
-function TargetRichHtml({
-  html,
-  footnotePanelActive,
-  footnoteNumberOffset = 0,
-}: {
-  html: string
-  footnotePanelActive?: boolean
-  footnoteNumberOffset?: number
-}) {
-  const safeHtml = useMemo(
-    () => prepareReadOnlyRichTextHtml(html, {
-      footnoteNumberOffset,
-      showFootnoteTooltips: !footnotePanelActive,
-    }),
-    [footnoteNumberOffset, footnotePanelActive, html],
-  )
-  const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
-
-  return (
-    <div
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={innerHtml}
-    />
-  )
-}
-
-function TargetIdmlHtml({ html }: { html: string }) {
-  const safeHtml = useMemo(() => sanitizeIdmlEditorHtml(html), [html])
-  const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
-  return (
-    <div
-      // Keep canonical slot identities in the read surface so a pointer click
-      // can survive the subsequent ProseMirror remount without flattening
-      // ambiguous adjacent style runs into one text offset.
-      // eslint-disable-next-line react/no-danger
-      dangerouslySetInnerHTML={innerHtml}
-    />
-  )
 }
 
 function TargetReadText({
@@ -3632,7 +3558,7 @@ function EditorRow({
   project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
-  cellExamples, highlights, error, health,
+  cellExamples, highlights, error, healthRibbonPoint,
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
   onCompleteParagraph, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
@@ -4406,13 +4332,13 @@ function EditorRow({
     setTermChipState({ term, anchor })
   }, [])
 
-  const emitValidationChange = useCallback((validated: boolean) => {
+  const emitValidationChange = useCallback(async (validated: boolean) => {
     // FRO-273: role-mirror guard — viewer/commenter should never reach here
     // (canValidate=false disables the button) but guard defensively so a
     // guaranteed-403 never enters the outbox.
     if (!canPerform(validated ? "cell.validate" : "cell.unvalidate", project.syncRole?.level ?? null)) {
       console.warn("[validate] aborting: role too low for", validated ? "cell.validate" : "cell.unvalidate")
-      return
+      return false
     }
     // AQU-633: additive lane/file scope guard. A scoped member's validate on an
     // out-of-scope cell is a guaranteed 403 — don't optimistically flip then
@@ -4420,30 +4346,31 @@ function EditorRow({
     // keyboard/programmatic triggers too. Unscoped members are always in scope.
     if (!isInMemberScope(myScopes, cell.fileId, activeLane)) {
       console.warn("[validate] aborting: cell out of the caller's assigned scope")
-      return
+      return false
     }
     const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
-    if (!project.id || !editEventId) return
-    setOptimisticSelfValidation(validated)
+    if (!project.id || !editEventId) return false
     // AQU-538: scope the validation to the active lane. emitCellValidate/
     // emitCellUnvalidate omit `''` (default lane) on the wire, so N=1 is
     // byte-identical.
     const emit = validated ? emitCellValidate : emitCellUnvalidate
-    void emit({
-      projectId: project.id,
-      fileId: cell.fileId,
-      cellId: cell.id,
-      editEventId,
-      author: username,
-      targetLang: activeLane,
-    }).then(() => {
-      void onCellCommitted?.(cell.id)
-    }).catch((err) => {
-      setOptimisticSelfValidation(null)
+    try {
+      await emit({
+        projectId: project.id,
+        fileId: cell.fileId,
+        cellId: cell.id,
+        editEventId,
+        author: username,
+        targetLang: activeLane,
+      })
+      await onCellCommitted?.(cell.id)
+      return true
+    } catch (err) {
       console.warn(`[${validated ? "validate" : "unvalidate"}] emit failed:`, err)
       // FRO-274: surface enqueue failure inline.
       setWriteError("Couldn't save this change locally — copy your text and reload.")
-    })
+      return false
+    }
   }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted])
 
   const editorFocusedRef = useRef(false)
@@ -4536,7 +4463,8 @@ function EditorRow({
   const showFormattingLossWarning =
     sourceHasFormatting && !targetHasFormatting && visibleTranslated.trim().length > 0
 
-  const healthValue = health ?? (cell.status === "validated" ? 100 : 0)
+  const healthValue = healthRibbonPoint.rawScore
+  const smoothedHealthValue = healthRibbonPoint.smoothedScore
 
   const selectedAudio = cell.selectedAudioId ? cell.attachments?.[cell.selectedAudioId] : undefined
   const hasAudio = Boolean(selectedAudio && !selectedAudio.isDeleted)
@@ -4639,94 +4567,19 @@ function EditorRow({
     void transcribeCell({ cell, session: rowSession, projectId: project.id, language })
   }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage])
 
-  const [validationPopoverOpen, setValidationPopoverOpen] = useState(false)
-  const authoritativeSelfValidated = cell.activeValidators.includes(username)
-  const [optimisticSelfValidation, setOptimisticSelfValidation] = useState<boolean | null>(null)
-  useEffect(() => {
-    if (optimisticSelfValidation !== null && authoritativeSelfValidated === optimisticSelfValidation) {
-      setOptimisticSelfValidation(null)
-    }
-  }, [authoritativeSelfValidated, optimisticSelfValidation])
-  const isSelfValidated = optimisticSelfValidation ?? authoritativeSelfValidated
-  const displayedValidators = useMemo(() => {
-    if (optimisticSelfValidation === null) return cell.activeValidators
-    if (optimisticSelfValidation) {
-      return cell.activeValidators.includes(username)
-        ? cell.activeValidators
-        : [...cell.activeValidators, username]
-    }
-    return cell.activeValidators.filter((validator) => validator !== username)
-  }, [cell.activeValidators, optimisticSelfValidation, username])
-  const validationRequirement = readValidationCount(project)
-  const vs = optimisticSelfValidation === true
-    ? displayedValidators.length >= validationRequirement ? "full-self" : "self"
-    : optimisticSelfValidation === false
-      ? displayedValidators.length >= validationRequirement ? "full-others" : displayedValidators.length > 0 ? "others" : "none"
-      : cell.validationStatus
-  const hasValidatorInfo = displayedValidators.length > 0 || cell.validationHistory.length > 1
-
-  // Gate Base UI's auto-toggle: clicks on an unvalidated cell should validate
-  // (not open the popover), and hovers should only open when there's actually
-  // something to show. Everything else passes through to the default behavior,
-  // including outside-press / escape-key closes.
-  function handleOpenChange(
-    nextOpen: boolean,
-    details: { reason: string; cancel(): void },
-  ) {
-    if (!nextOpen) {
-      setValidationPopoverOpen(false)
-      return
-    }
-    // "keyboard" fires when activated via Space/Enter; "trigger-press" fires
-    // on pointer press. The trigger button's own click handler performs the
-    // validation, so the popover only needs to stay closed on first touch.
-    if (details.reason === "trigger-press" || details.reason === "keyboard") {
-      if (canValidateThisCell && !isSelfValidated) {
-        details.cancel()
-        return
-      }
-      setValidationPopoverOpen(true)
-      return
-    }
-    if (details.reason === "trigger-hover" && !hasValidatorInfo) {
-      details.cancel()
-      return
-    }
-    setValidationPopoverOpen(true)
-  }
-
-  // "others" now uses a filled Circle (lucide has no dedicated filled-circle
-  // icon; we render Circle with fill="currentColor"). Matches codex-editor
-  // desktop AudioValidationStatusIcon's circle-filled codicon.
-  // full-self = fully validated and current user is one of the validators (double-check, green)
-  // full-others = fully validated but current user has NOT validated (double-check, green)
-  const ValidationIcon =
-    vs === "full-self" || vs === "full-others" ? CheckCheck :
-    vs === "self" ? Check :
-    Circle
-  const validationColorClass =
-    vs === "full-self" ? "text-green-500" :
-    vs === "full-others" ? "text-green-500" :
-    vs === "self" ? "text-green-500" :
-    vs === "others" ? "text-muted-foreground/60" :
-    "text-muted-foreground/30"
-
   const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
 
-  // AD-14 amendment 2026-06-04: use server-derived confidence score from
-  // healthMap when available (set by the confidence overlay in ProjectWorkspace
-  // via useCellConfidence). Falls back to endorsement_count decay for
-  // local-only projects or while the server confidence loads.
-  // Absence of the marker is silence, not endorsement — no green "done" ring.
+  // The automatic stage uses the smoothed server-derived estimate. Missing
+  // evidence is unknown, not an endorsement-derived zero. Validation is a
+  // separate authoritative stage and automatic rule issues stay visible.
   const decayConfig = useMemo(
     () => resolveDecayConfig(project.decaySettings, readValidationCount(project)),
     [project.decaySettings, project.validationCount],
   )
-  const cellNeedsAttention = hasContent && (
-    health !== undefined
-      ? needsAttentionFromConfidence(health, decayConfig.decayWarnThreshold)
-      : needsAttention(cell.endorsementCount ?? 0, decayConfig)
-  )
+  const cellNeedsAttention = hasContent
+    && healthRibbonPoint.stage === "automatic"
+    && smoothedHealthValue !== undefined
+    && needsAttentionFromConfidence(smoothedHealthValue, decayConfig.decayWarnThreshold)
 
   const hasMajorInfraction = cellInfractions.some(
     (i) => ruleMap.get(i.ruleId)?.severity === "major",
@@ -5031,146 +4884,24 @@ function EditorRow({
   const cellRef = cell.context?.trim()
     || cell.globalReferences?.[0]?.trim()
     || `row ${rowIndex + 1}`
-  const validationTooltip = canValidateThisCell
-    ? "Not validated — click to validate"
-    : canValidate
-      ? "Outside your assigned files or lanes" // AQU-633: scoped-out, not a role gate
-      : "Validation unavailable"
-  type PreventableReactEvent<T> = React.SyntheticEvent<T> & {
-    preventBaseUIHandler?: () => void
-  }
-  const renderValidationButton = (onClick?: () => void) => (
-    <button
-      type="button"
-      data-showcase="cell.health"
-      // FRO-297: button role + aria-pressed so screen readers announce the
-      // validated/unvalidated toggle state. aria-label provides full context.
-      aria-pressed={isSelfValidated}
-      aria-label={
-        isSelfValidated
-          ? `Validated — ${cellRef}. Click to remove your validation.`
-          : vs === "full-others" || vs === "others"
-            ? `Validated by others — ${cellRef}. Click to add your validation.`
-            : `Not validated — ${cellRef}. Click to validate.`
-      }
-      onClick={(e) => {
-        if (!onClick) return
-        onClick()
-        ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
-      }}
-      onKeyDown={(e) => {
-        if (!onClick || (e.key !== " " && e.key !== "Enter")) return
-        e.preventDefault()
-        e.stopPropagation()
-        onClick()
-        ;(e as PreventableReactEvent<HTMLButtonElement>).preventBaseUIHandler?.()
-      }}
-      className={cn(
-        "relative flex h-6 w-6 items-center justify-center rounded-lg transition-[transform,color,background-color] duration-150 ease-out",
-        "active:scale-[0.88] disabled:cursor-not-allowed disabled:opacity-30",
-        "hover:bg-muted/80",
-        validationColorClass,
-        vs === "none" && "hover:text-green-500",
-        vs === "others" && "hover:text-green-500",
-        vs === "full-others" && "hover:text-green-500",
-      )}
-      disabled={!canValidateThisCell}
-    >
-      <HealthRing
-        health={healthValue}
-        size={22}
-        strokeWidth={2}
-        className="pointer-events-none"
-        style={{ position: "absolute", inset: 0, margin: "auto" }}
-      />
-      <ValidationIcon
-        className="relative h-3.5 w-3.5"
-        strokeWidth={2.5}
-        {...(vs === "others" ? { fill: "currentColor" } : {})}
-      />
-    </button>
-  )
-  // AQU-592: the validation control (health ring + validate toggle, with the
-  // validators popover) renders to the LEFT of the TARGET editing cell — see the
-  // target column below — instead of in the far-left gutter beside the source.
-  // A reviewer no longer has to cross the screen from the target to validate.
-  // AQU-687: reserve a stable-width gutter for the validation control whether or
-  // not the cell has content yet. Collapsing this slot to `null` for empty cells
-  // made the target editor snap narrower the instant a prediction/draft filled
-  // the cell (hasContent flips true → the 24px button + gap appears). Keeping a
-  // fixed `w-6` slot at all times holds the editor width steady.
   const validationControl = (
-    <div data-testid="validation-gutter" className="flex w-6 shrink-0 items-start pt-1">
-      {hasContent ? (
-        hasValidatorInfo ? (
-        <Popover open={validationPopoverOpen} onOpenChange={handleOpenChange}>
-          <PopoverTrigger
-            openOnHover
-            delay={400}
-            closeDelay={100}
-            render={renderValidationButton(
-              canValidateThisCell && !isSelfValidated
-                ? () => emitValidationChange(true)
-                : undefined,
-            )}
-          />
-          {vs !== "empty" && (
-            <PopoverContent
-              side="right"
-              align="start"
-              className="w-72 rounded-xl p-2"
-            >
-              <ul className="space-y-0.5">
-                <li className="mb-1 px-1 text-xs text-muted-foreground">
-                  Validated by
-                </li>
-                {displayedValidators.length === 0 ? (
-                  <li className="px-1 py-1 text-xs text-muted-foreground">No active validators</li>
-                ) : (
-                  displayedValidators.map((v) => (
-                    <li key={v} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
-                      <span className="truncate">{v}{v === username ? " (you)" : ""}</span>
-                      {v === username && canValidate && (
-                        <AppTooltip content="Remove your validation">
-                          <button
-                            type="button"
-                            aria-label="Remove your validation"
-                            className="flex-shrink-0 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                            onClick={() => {
-                              emitValidationChange(false)
-                              setValidationPopoverOpen(false)
-                            }}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </AppTooltip>
-                      )}
-                    </li>
-                  ))
-                )}
-              </ul>
-              {cell.validationHistory.length > 0 && (
-                <ValidationHistoryTimeline entries={cell.validationHistory} currentUsername={username} />
-              )}
-            </PopoverContent>
-          )}
-        </Popover>
-      ) : (
-        <AppTooltip content={validationTooltip}>
-          {renderValidationButton(
-            canValidateThisCell && !isSelfValidated
-              ? () => emitValidationChange(true)
-              : undefined,
-          )}
-        </AppTooltip>
-        )
-      ) : null}
-    </div>
+    <TargetValidationControl
+      cellRef={cellRef}
+      hasContent={hasContent}
+      validationStatus={cell.validationStatus}
+      activeValidators={cell.activeValidators}
+      validationHistory={cell.validationHistory}
+      currentUsername={username}
+      validationRequirement={readValidationCount(project)}
+      canValidate={canValidate}
+      canValidateThisCell={canValidateThisCell}
+      onValidationChange={emitValidationChange}
+    />
   )
   const cellStateLabel =
     cell.status === "validated" ? "validated" :
     cell.status === "empty" ? "empty" :
-    isSelfValidated ? "self-validated" :
+    cell.activeValidators.includes(username) ? "self-validated" :
     "unvalidated"
   const editorAriaLabel = `${cellRef} — ${cellStateLabel}`
 
@@ -5398,87 +5129,17 @@ function EditorRow({
             />
           </div>
         ) : (
-          <div
+          <EditorSourceCellSurface
             data-showcase="editor.source"
             ref={sourceColRef}
-            className={cn(
-              // The showcase node IS the text surface so it fills the whole
-              // source column. pr-7 clears the floating pencil.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pr-7 transition-[colors,opacity]",
-              // Match the target well — same muted fill + ring (not a darker
-              // primary-tinted edit chrome).
-              "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
-              sourceEditing && "bg-muted ring-1 ring-ring/40 ring-inset",
-              isSynthBusy && "opacity-70",
-            )}
             dir={sourceCellDirection}
             aria-label="Source text"
-            data-cell-type="source"
-            style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
+            fontSize={sourceFontSize}
+            editing={sourceEditing}
+            busy={isSynthBusy}
             onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection)) ? handleSourceMouseUp : undefined}
-          >
-            {/* Source-selection toolbar. Appears when source text is selected:
-                "Ask AI" pushes the selection into the agent as a context chip,
-                "Add to terms" promotes it to a DRAFT concept, and a "View term"
-                button appears when the selection matches an active concept. */}
-            {sourceSelection && (
-              <SourceSelectionToolbar
-                sourceSelection={sourceSelection}
-                concepts={terminologyConcepts}
-                onAskAi={handleAskAiFromSelection}
-                onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
-                onTermApply={handleTermApply}
-                onToolbarMouseDown={handleToolbarMouseDown}
-                onToolbarMouseUp={handleToolbarMouseUp}
-              />
-            )}
-            {/* Source-edit affordance (project_lead+, non-live projects). Emits
-                source.cell.commit — the template-owner correction that propagates
-                downstream. Read-only source stays the default; editing is explicit.
-                Floated to the column's top-right so it costs no layout, rather
-                than taking a slot in the context line below — that line is
-                reserved for column alignment and is usually empty, so it has no
-                room to spare. */}
-            {canEditSourceForCell ? (
-              <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
-                  aria-pressed={sourceEditing}
-                  onClick={() => setSourceEditing((v) => !v)}
-                  className={cn(
-                    "absolute right-1 top-1 z-10 shrink-0",
-                    sourceEditing
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
-                  )}
-                >
-                  <Pencil />
-                </Button>
-              </AppTooltip>
-            ) : sourceReadOnlyReasonForCell ? (
-              // Force-locked source lane (DCS pin): keep an explained
-              // affordance where the pencil would be instead of letting it
-              // silently vanish (AQU-615 review nit).
-              <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
-                <span
-                  aria-label="Source is locked"
-                  className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                  <Lock className="size-3" />
-                </span>
-              </AppTooltip>
-            ) : null}
-            {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
-                mirrors the target column's header lane, and that mirror is what
-                puts the two columns' first text lines on the same baseline. Drop
-                it for context-free cells and every such row's source text rides
-                20px above its translation — the target lane can't be made
-                conditional to match, because it also reserves the strip the
-                floating action rail occupies. */}
-            <div data-testid="source-context-line" className="mb-1 flex h-4 items-center justify-center gap-1 text-center text-xs text-muted-foreground" dir="ltr">
+            header={(
+              <>
               <span>{cell.context}</span>
               {showFormattingLossWarning && (
                 <AppTooltip content="Source has inline formatting that the target does not preserve. Formatting will be lost on export." className="max-w-xs">
@@ -5488,7 +5149,53 @@ function EditorRow({
                   </span>
                 </AppTooltip>
               )}
-            </div>
+              </>
+            )}
+            overlay={(
+              <>
+                {sourceSelection && (
+                  <SourceSelectionToolbar
+                    sourceSelection={sourceSelection}
+                    concepts={terminologyConcepts}
+                    onAskAi={handleAskAiFromSelection}
+                    onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
+                    onTermApply={handleTermApply}
+                    onToolbarMouseDown={handleToolbarMouseDown}
+                    onToolbarMouseUp={handleToolbarMouseUp}
+                  />
+                )}
+                {canEditSourceForCell ? (
+                  <AppTooltip content={sourceEditing ? "Done editing source" : "Edit source text"}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={sourceEditing ? "Done editing source" : "Edit source text"}
+                      aria-pressed={sourceEditing}
+                      onClick={() => setSourceEditing((v) => !v)}
+                      className={cn(
+                        "absolute right-1 top-1 z-10 shrink-0",
+                        sourceEditing
+                          ? "bg-primary/10 text-primary"
+                          : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                      )}
+                    >
+                      <Pencil />
+                    </Button>
+                  </AppTooltip>
+                ) : sourceReadOnlyReasonForCell ? (
+                  <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
+                    <span
+                      aria-label="Source is locked"
+                      className="absolute right-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Lock className="size-3" />
+                    </span>
+                  </AppTooltip>
+                ) : null}
+              </>
+            )}
+          >
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
               <TranslatedEditor
@@ -5534,28 +5241,26 @@ function EditorRow({
                 onExpandedChange={setExamplesExpanded}
               />
             )}
-          </div>
+          </EditorSourceCellSurface>
         )}
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions
             detail) lives in the expansion panel. pr-9 reserves space for the
             ever-present chevron at the right edge. */}
-        <div
+        <EditorTargetCellColumn
           data-showcase="editor.target"
-          className={cn(
-            "relative flex flex-col pl-3 pr-9 transition-opacity",
-            isSynthBusy && "opacity-70",
+          fontSize={targetFontSize}
+          busy={isSynthBusy}
+          leading={(
+            <HealthRibbon
+              point={healthRibbonPoint}
+              hasMajorIssue={hasMajorInfraction}
+              hasIssue={hasAnyIssue}
+            />
           )}
-          dir="ltr"
-          style={{ fontSize: `${targetFontSize}px`, lineHeight: "1.6" }}
-        >
-          {/* Header lane — mirrors the source column's context line so the
-              target's first text line aligns with the source text, and gives
-              the floating action rail a lane of its own instead of letting it
-              cover the first line of target text. The cast/character label
-              lives here (left side), not squished into the line-number pill. */}
-          <div data-testid="target-header-lane" className="mb-1 flex h-4 items-center justify-between gap-2 text-xs text-muted-foreground" dir="ltr">
+          header={(
+            <>
             {showCellLabel && (
               <AppTooltip content={labelText} disabled={!labelText}>
                 <span className="max-w-[60%] truncate">
@@ -5573,7 +5278,9 @@ function EditorRow({
                 AI draft · review required
               </Badge>
             )}
-          </div>
+            </>
+          )}
+        >
           <div className="flex flex-1 flex-col">
             {/* Target is a cheap read surface at rest. It upgrades to TipTap
                 only for the active cell, which keeps scrolling from mounting
@@ -5582,8 +5289,7 @@ function EditorRow({
                 so validating keeps the reviewer's gaze on the TARGET. */}
             <div className="flex flex-1 gap-1.5">
               {validationControl}
-            <div
-              data-cell-type="target"
+            <EditorTargetCellWell
               onClick={(event) => {
                 if (isEditorActive) return
                 event.stopPropagation()
@@ -5591,12 +5297,8 @@ function EditorRow({
                   ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                   : null)
               }}
-              className={cn(
-                "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
-                hasInlineFootnotes && "min-h-0 py-0.5",
-                "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
-                !visibleTranslated?.trim() && "bg-muted/40",
-              )}
+              compact={hasInlineFootnotes}
+              empty={!visibleTranslated?.trim()}
             >
                 {isEditorActive ? (
                   <TranslatedEditor
@@ -5652,21 +5354,16 @@ function EditorRow({
                     onEscapeToGrid={onEscapeToGrid}
                   />
                 ) : (
-                  <div
-                    role="textbox"
-                    aria-multiline="true"
+                  <EditorTargetReadSurface
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
                     aria-label={editorAriaLabel}
                     data-target-read-view
                     dir={targetCellDirection}
                     lang={project.targetLanguage || undefined}
                     tabIndex={editable && !isLoading && !lockHolderLabel ? 0 : undefined}
-                    className={cn(
-                      "relative min-h-[40px] w-full flex-1 cursor-text whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
-                      "focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
-                      showCompletionOverlay && "opacity-30 transition-opacity",
-                      !visibleTranslated?.trim() && "text-muted-foreground/60",
-                    )}
+                    editable={editable && !isLoading && !lockHolderLabel}
+                    subdued={showCompletionOverlay}
+                    empty={!visibleTranslated?.trim()}
                     onClick={(event) => {
                       event.stopPropagation()
                       requestTargetEdit(idmlConfiguration
@@ -5715,7 +5412,7 @@ function EditorRow({
                       contentRef={targetReadContentRef}
                       peers={remoteCellPresence}
                     />
-                  </div>
+                  </EditorTargetReadSurface>
                 )}
               {/* FRO-204: Terminology chip popover — controlled via termChipState.
                   Anchored to the chip DOM element that was clicked. Apply is
@@ -5778,7 +5475,7 @@ function EditorRow({
                   )}
                 </div>
               )}
-            </div>
+            </EditorTargetCellWell>
             </div>
             {hasInlineFootnotes && (
               <FootnoteInline
@@ -5860,7 +5557,7 @@ function EditorRow({
               </div>
             )}
           </div>
-        </div>
+        </EditorTargetCellColumn>
 
         {/* Floating action rail — anchored to the row's right edge, aligned
             with the target column's header lane so it never covers the target
@@ -5888,63 +5585,20 @@ function EditorRow({
               alwaysShowChevron
               expansionAttentionDot={chevronAttentionDot}
             >
-              {/* Always-visible #1: AI Generate */}
-              <RailButton
-                icon={<Sparkles className="h-3.5 w-3.5" />}
-                tooltip={
-                  isAnonymous
-                    ? "Sign in for AI translations"
-                    : !editable
-                      ? "Read-only (imported from git)"
-                      : !isCompletionConfigured
-                        ? "Set up AI to enable"
-                        : !isCompletionAvailable
-                          ? "AI service unavailable — try again shortly"
-                          : isLoading
-                            ? "Generating…"
-                            : "Translate with AI"
-                }
-                onClick={() => {
-                  if (isLoading) return
-                  if (!isCompletionConfigured && editable && !isAnonymous) {
-                    onAiSetupNeeded?.()
-                    return
-                  }
-                  if (
-                    isCompletionConfigured &&
-                    isCompletionAvailable &&
-                    editable &&
-                    !isAnonymous
-                  ) {
-                    // FRO-278: if the cell already has human text, confirm
-                    // before letting the AI overwrite it. Empty cells proceed
-                    // immediately (byte-identical to previous behavior).
-                    // AQU-591: users can opt out of the confirm for
-                    // non-validated cells. Validated cells always confirm —
-                    // replacing them clears validation, which is more
-                    // destructive and always deserves an explicit confirm.
-                    if (visibleTranslated.trim()) {
-                      const isValidated = cell.status === "validated"
-                      if (!isValidated && getSkipReplaceConfirm()) {
-                        void completeSingleAndReturn()
-                      } else {
-                        setShowGenerateConfirm(true)
-                      }
-                    } else {
-                      void completeSingleAndReturn()
-                    }
-                  }
-                }}
-                disabled={
-                  (!isCompletionConfigured && !onAiSetupNeeded) ||
-                  !isCompletionAvailable ||
-                  !editable ||
-                  isAnonymous ||
-                  isLoading
-                }
-                pulsing={isLoading}
-                onMouseDown={onDragStart}
-                onMouseEnter={onDragEnter}
+              <TargetDraftActions
+                targetText={visibleTranslated}
+                status={cell.status}
+                editable={editable}
+                isAnonymous={Boolean(isAnonymous)}
+                isCompletionConfigured={isCompletionConfigured}
+                isCompletionAvailable={isCompletionAvailable}
+                isLoading={isLoading}
+                onDraft={completeSingleAndReturn}
+                onRegenerate={() => onCompleteSingle(cell, { regenerate: true })}
+                onAiSetupNeeded={onAiSetupNeeded}
+                onDragStart={onDragStart}
+                onDragEnter={onDragEnter}
+                onConfirmOpenChange={setShowGenerateConfirm}
               />
 
               {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
@@ -5984,44 +5638,6 @@ function EditorRow({
                   />
                 )
               })()}
-
-              {/* AQU-620: Regenerate — ask the AI for another iteration of an
-                  existing prediction. Shown only for a NON-validated cell that
-                  already has a draft (validated cells route through the Sparkles
-                  overwrite confirm instead — clearing validation is destructive).
-                  Regenerate raises the sampling temperature (useCompletion) so
-                  the new candidate differs, and overwrites the current draft
-                  (last-write-wins; the prior text stays in cell history). */}
-              {editable && !isAnonymous && cell.status !== "validated" && visibleTranslated.trim() && (
-                <RailButton
-                  icon={<RefreshCw className="h-3.5 w-3.5" />}
-                  tooltip={
-                    !isCompletionConfigured
-                      ? "Set up AI to enable"
-                      : !isCompletionAvailable
-                        ? "AI service unavailable — try again shortly"
-                        : isLoading
-                          ? "Generating…"
-                          : "Regenerate — another AI variation"
-                  }
-                  onClick={() => {
-                    if (isLoading) return
-                    if (!isCompletionConfigured) {
-                      onAiSetupNeeded?.()
-                      return
-                    }
-                    if (isCompletionAvailable) {
-                      void onCompleteSingle(cell, { regenerate: true })
-                    }
-                  }}
-                  disabled={
-                    (!isCompletionConfigured && !onAiSetupNeeded) ||
-                    !isCompletionAvailable ||
-                    isLoading
-                  }
-                  pulsing={isLoading}
-                />
-              )}
 
               {/* FRO-237: Direct mic button on the rail when no audio — one-click
                   action without needing to open a popover ("just hit the record
@@ -6156,31 +5772,12 @@ function EditorRow({
                 />
               )}
 
-              {onOpenComments && (
-                <RailButton
-                  icon={<MessageCircle className="h-3.5 w-3.5" />}
-                  tooltip={
-                    openCommentCount > 0
-                      ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`
-                      : "Add comment"
-                  }
-                  onClick={() => onOpenComments(cell.id)}
-                  toneClass={
-                    openCommentCount > 0
-                      ? "text-primary hover:text-primary"
-                      : undefined
-                  }
-                  dot={openCommentCount > 0 ? "primary" : undefined}
-                />
-              )}
-
-              {onOpenHistory && (
-                <RailButton
-                  icon={<HistoryIcon className="h-3.5 w-3.5" />}
-                  tooltip="Edit history"
-                  onClick={() => onOpenHistory(cell.id)}
-                />
-              )}
+              <TargetReferenceActions
+                cellId={cell.id}
+                openCommentCount={openCommentCount}
+                onOpenComments={onOpenComments}
+                onOpenHistory={onOpenHistory}
+              />
 
               {onSeekToCue && (
                 <RailButton
@@ -6213,16 +5810,46 @@ function EditorRow({
               label: "Retrieval support",
               renderContent: () => (
                 <div className="space-y-1.5 py-3 text-xs text-muted-foreground">
-                  <p>
-                    <span className="font-medium text-foreground">{cell.endorsementCount ?? 0}</span>
-                    {" "}endorsement{(cell.endorsementCount ?? 0) === 1 ? "" : "s"} · support{" "}
-                    <span className="font-medium text-foreground">{healthValue}%</span>
-                  </p>
-                  <p>
-                    {cellNeedsAttention
-                      ? "Lower retrieval support — review terminology and context closely."
-                      : "Better retrieval support — human review is still required."}
-                  </p>
+                  {healthRibbonPoint.stage === "validated" ? (
+                    <>
+                      <p><span className="font-medium text-foreground">100% assurance</span> · human validated</p>
+                      <p>
+                        {cellInfractions.length > 0
+                          ? "Validation is authoritative, but automatic checks still found an issue."
+                          : "Human review is complete. Automatic evidence remains available as context."}
+                      </p>
+                    </>
+                  ) : healthRibbonPoint.stage === "automatic" ? (
+                    healthValue === undefined ? (
+                      <p>Automatic health is awaiting enough translation evidence.</p>
+                    ) : (
+                      <>
+                        <p>
+                          Cell estimate <span className="font-medium text-foreground">{Math.round(healthValue)}%</span>
+                          {smoothedHealthValue !== undefined && (
+                            <> · local trend <span className="font-medium text-foreground">{Math.round(smoothedHealthValue)}%</span></>
+                          )}
+                        </p>
+                        <p>
+                          {cellNeedsAttention
+                            ? "Lower local support — review terminology and context closely."
+                            : "Better local support — human review is still required."}
+                        </p>
+                      </>
+                    )
+                  ) : healthValue === undefined ? (
+                    <p>Pre-translation source evidence is not available yet.</p>
+                  ) : (
+                    <>
+                      <p>
+                        Source evidence <span className="font-medium text-foreground">{Math.round(healthValue)}%</span>
+                        {smoothedHealthValue !== undefined && (
+                          <> · local trend <span className="font-medium text-foreground">{Math.round(smoothedHealthValue)}%</span></>
+                        )}
+                      </p>
+                      <p>This estimates available support, not the quality of a translation that has not been written.</p>
+                    </>
+                  )}
                 </div>
               ),
             },
@@ -6863,19 +6490,6 @@ function EditorRow({
         />
       )}
 
-      {/* FRO-278: confirm before AI Generate overwrites non-empty cell.
-          AQU-591: a "Don't ask again" opt-out for non-validated cells. */}
-      <GenerateOverwriteDialog
-        open={showGenerateConfirm}
-        isValidated={cell.status === "validated"}
-        onConfirm={(dontAskAgain) => {
-          setShowGenerateConfirm(false)
-          if (dontAskAgain) setSkipReplaceConfirm(true)
-          void completeSingleAndReturn()
-        }}
-        onCancel={() => setShowGenerateConfirm(false)}
-      />
-
       {/* p1-paragraph-ui-wiring (Task 3): confirm before drafting the whole
           paragraph group as one unit. Always confirms — no per-preference
           opt-out exists for this action (unlike the single-cell Replace
@@ -6907,12 +6521,6 @@ function EditorRow({
   )
 }
 
-// ---------------------------------------------------------------------------
-// FRO-278 — GenerateOverwriteDialog: extracted to its own module (AQU-646) so
-// the media-lens detail pane can reuse it without importing this whole file.
-// Re-imported here for the row-level confirm below.
-// ---------------------------------------------------------------------------
-
 import {
   Dialog,
   DialogContent,
@@ -6921,7 +6529,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { GenerateOverwriteDialog } from "./GenerateOverwriteDialog"
 
 // ---------------------------------------------------------------------------
 // p1-paragraph-ui-wiring (Task 3) — ParagraphDraftConfirmDialog

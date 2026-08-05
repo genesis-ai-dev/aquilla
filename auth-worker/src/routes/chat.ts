@@ -23,6 +23,7 @@ import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { openRouterExtras } from "../lib/llm-vendor"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   AB_OUTCOMES,
   pickAbArm,
@@ -79,7 +80,7 @@ function isDefaultRequest(requested: string): boolean {
  */
 function resolveModel(env: Env, requested: string, settings: PlatformSettings): string {
   const fallback =
-    settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
+    settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
   if (isDefaultRequest(requested)) return fallback
   return requested
 }

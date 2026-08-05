@@ -216,7 +216,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                     type="button"
                     size="icon-sm"
                     variant="ghost"
-                    className="opacity-0 transition-none group-hover:bg-accent group-hover:opacity-100 group-hover:text-accent-foreground focus-visible:bg-accent focus-visible:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+                    className="opacity-0 transition-none group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
                     aria-label={`Actions for ${m.username}`}
                   >
                     <MoreHorizontal className="size-4" />

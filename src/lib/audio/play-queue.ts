@@ -176,6 +176,14 @@ function soundingCellIds(): ReadonlySet<string> {
  *  iff the last applied overlay plan was "arm". */
 let pendingDub: { cellId: string; dueSec: number } | null = null
 
+/** Meeting 2026-08-05 (end-based drag bounds): a dub belonging to a LATER
+ *  section whose audible start falls inside the CURRENT section's window — a
+ *  chip slid backwards into the previous verse's slack. Armed alongside
+ *  pendingDub (both slots legitimately coexist); the master tick is the ONLY
+ *  fire point. Derived state: unconditionally recomputed at every point the
+ *  current cell/position/cells change, so it can never go stale. Dubbing-only. */
+let pendingEarlyDub: { cellId: string; dueSec: number } | null = null
+
 // AQU-646: mutable current-segment state, readable by the element handlers.
 // With seamless same-clip advance the element OUTLIVES the cell it was opened
 // for — handlers must not close over a stale index/trim, they read these.
@@ -242,6 +250,7 @@ function disposeCurrent(): void {
   // (Overlay removal alone deliberately does NOT clear pendingDub: a
   // previous dub ending is unrelated to the next section's armed one.)
   pendingDub = null
+  pendingEarlyDub = null
   disposeAllOverlays()
   if (currentAudio) {
     // Detach handlers BEFORE clearing src: setting src="" re-runs the media
@@ -927,6 +936,7 @@ async function progPlaySlot(
   // volume keep applying to it exactly as they do in dubbing mode.
   disposeAllOverlays()
   pendingDub = null
+  pendingEarlyDub = null // belt-and-braces: dubbing-only state, dead in audio-first
 
   const target = slot.targetWindow ? activeTargetForCell(cell) : null
   const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
@@ -1243,6 +1253,73 @@ export function planTargetOverlay(
   }
 }
 
+/**
+ * The first LATER section whose dub is due before the CURRENT section's
+ * window ends — a chip slid backwards (end-based drag bounds). Plans are
+ * otherwise only made per adopted section, so without this lookahead the
+ * slid-back head would be silently swallowed at adoption ("both will sound"
+ * demands it actually sounds early). One slot, first-eligible-cell-decides:
+ * a chain where N+2 reaches back while N+1 has a normal dub fires N+2 at
+ * N+1's adoption instead — a pathological layout, accepted for simplicity.
+ */
+export function planEarlyDub(
+  cells: CellData[],
+  index: number,
+  sounding: ReadonlySet<string>,
+): { cellId: string; dueSec: number } | null {
+  const cell = cells[index]
+  const windowEnd = cell ? trimWindowForCell(cell)?.end : null
+  if (windowEnd == null) return null
+  for (let i = index + 1; i < cells.length; i++) {
+    const next = cells[i]
+    const target = activeTargetForCell(next)
+    // Dub-less / take-only sections can't fire an overlay — keep scanning.
+    if (!target || !sourceClipAudioForCell(next)) continue
+    if (sounding.has(next.id)) return null // already ringing — never re-arm
+    const due = targetChipGeom(next, next.attachments?.[target.audioId])?.start ?? next.startTime ?? 0
+    return due < windowEnd ? { cellId: next.id, dueSec: due } : null
+  }
+  return null
+}
+
+/** Recompute the early-dub slot for the current transport position. Called
+ *  after every current-cell overlay plan and on cell re-flows — arming with a
+ *  due already in the past is fine (the next tick fires it at offset). */
+function armEarlyDub(): void {
+  if (timingMode !== "dubbing") {
+    pendingEarlyDub = null
+    return
+  }
+  pendingEarlyDub = planEarlyDub(activeContext?.cells ?? [], currentIndex, soundingCellIds())
+}
+
+/** QA/debug snapshot — a read-only view of the dub machinery for browser
+ *  passes (overlay elements are never in the DOM, so there is nothing to
+ *  query otherwise). Not for product code. */
+export function getDubDebugSnapshot(): {
+  pendingDub: { cellId: string; dueSec: number } | null
+  pendingEarlyDub: { cellId: string; dueSec: number } | null
+  pool: { cellId: string; audioId: string; clipSec: number | null }[]
+} {
+  return {
+    pendingDub: pendingDub ? { ...pendingDub } : null,
+    pendingEarlyDub: pendingEarlyDub ? { ...pendingEarlyDub } : null,
+    pool: overlayPool.map((e) => ({
+      cellId: e.cellId,
+      audioId: e.audioId,
+      clipSec: e.element ? e.element.currentTime : null,
+    })),
+  }
+}
+
+// Dev-only QA seam: browser passes must read the LIVE module's state — a
+// bare-path dynamic import from page.evaluate can resolve to a SECOND module
+// instance once HMR has stamped the graph (its pool would read forever-empty).
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  ;(window as unknown as Record<string, unknown>).__aqDubDebugSnapshot = getDubDebugSnapshot
+  ;(window as unknown as Record<string, unknown>).__aqQueueState = getQueueState
+}
+
 /** Execute an overlay plan. Overlay failures are non-fatal — a dub that can't
  *  load just doesn't sound; the master keeps the clock. Every applied plan
  *  overwrites `pendingDub` (the arm invariant). */
@@ -1264,6 +1341,14 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
     return
   }
   pendingDub = null
+  executeFire(plan)
+}
+
+/** The fire body, callable WITHOUT touching `pendingDub` — the early-dub tick
+ *  fires a LATER section's dub while the current section's own dub can still
+ *  be legitimately armed; running it through applyTargetOverlay would clobber
+ *  that arm. */
+function executeFire(plan: Extract<TargetOverlayPlan, { kind: "fire" }>): void {
   const ctx = activeContext
   if (!ctx) return
   const cell = ctx.cells.find((c) => c.id === plan.cellId)
@@ -1637,6 +1722,7 @@ function adoptCell(
   applyTargetOverlay(
     planTargetOverlay(ctx.cells, index, soundingCellIds(), overlayReason, overlayAtSec ?? seekTo ?? audio.currentTime),
   )
+  armEarlyDub()
 }
 
 /** `explicit` marks a user-chosen start on a specific cell (AQU-660): a
@@ -1778,6 +1864,22 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
         planTargetOverlay(activeContext?.cells ?? [], currentIndex, soundingCellIds(), "advance", audio.currentTime),
       )
     }
+    // A LATER section's backward-slid dub fires here too — planTargetOverlay
+    // at the EARLY cell's index supplies the trim-aware offset, past-end
+    // suppression, and the sounding guard for free; executeFire (not
+    // applyTargetOverlay) leaves the current cell's own arm untouched.
+    if (pendingEarlyDub && audio.currentTime >= pendingEarlyDub.dueSec) {
+      const early = pendingEarlyDub
+      pendingEarlyDub = null
+      const cells = activeContext?.cells ?? []
+      const earlyIdx = cells.findIndex((c) => c.id === early.cellId)
+      const plan =
+        earlyIdx >= 0
+          ? planTargetOverlay(cells, earlyIdx, soundingCellIds(), "advance", audio.currentTime)
+          : null
+      if (plan?.kind === "fire") executeFire(plan)
+      armEarlyDub() // self-healing: the next candidate, or null
+    }
     // A media segment's window ends before the shared clip does — treat
     // reaching the window end as this cell's "ended" and advance.
     if (currentTrim && audio.currentTime >= currentTrim.end) {
@@ -1834,6 +1936,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
           applyTargetOverlay(
             planTargetOverlay(activeContext?.cells ?? [], currentIndex, soundingCellIds(), "seek", audio.currentTime),
           )
+          armEarlyDub()
         } catch (e) {
           if (seq !== currentSeq) return
           if (isMissingAudioError(e)) { skipMissingFrom(cell.id); return }
@@ -1851,6 +1954,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   applyTargetOverlay(
     planTargetOverlay(ctx.cells, index, soundingCellIds(), "seek", opts.atSeconds ?? currentTrim?.start ?? 0),
   )
+  armEarlyDub()
 
   if (!autoplay || !dubbingWantPlay) {
     // AQU-646 cue-without-play: element loaded + positioned, transport shows
@@ -1977,6 +2081,7 @@ export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}):
     // Same cell, new position — re-derive the dub for it (join mid-clip,
     // re-arm ahead of it, or cut).
     applyTargetOverlay(planTargetOverlay(ctx.cells, plan.index, soundingCellIds(), "seek", plan.seconds))
+    armEarlyDub()
     syncPlayState(wantPlay)
     return
   }
@@ -2277,6 +2382,9 @@ export function updateQueueCells(cells: CellData[]): void {
     const due = cell ? targetDueSec(cell, target ? cell.attachments?.[target.audioId] : undefined) : null
     if (due != null) pendingDub = { cellId, dueSec: due }
   }
+  // The early-dub slot re-derives wholesale — a mid-play drag, take swap or
+  // delete simply changes what (if anything) it points at.
+  armEarlyDub()
 }
 
 /** Whether any cell in the list has playable audio. Drives the bar's

@@ -157,6 +157,87 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     expect(parseFloat(chip.style.width)).toBeCloseTo(3 * 40) // 4 - 1
   })
 
+  it("END-based bounds: a chip can slide back into the previous section's space", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 320 }) // −2s → start 8, before section start 10
+    fireEvent.pointerUp(window, { clientX: 320 })
+    const [, anchor] = onRetimeTarget.mock.calls[0] as [string, number]
+    expect(anchor).toBeCloseTo(8)
+  })
+
+  it("END-based bounds: the chip's END may not move before its section's start", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 0 }) // −10s → way past the bound
+    fireEvent.pointerUp(window, { clientX: 0 })
+    const [, anchor] = onRetimeTarget.mock.calls[0] as [string, number]
+    // len 4, section 10–20, ε 0.05 → floor = 10 + 0.05 − 4: a sliver of the
+    // chip's tail stays in-section.
+    expect(anchor).toBeCloseTo(6.05)
+  })
+
+  it("END-based bounds: the stored anchor can never go below file zero", () => {
+    const onRetimeTarget = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({}, 12000, "c1", { trimStartMs: 1000 })]}
+        onRetimeTarget={onRetimeTarget}
+      />,
+    )
+    // Visual [11, 22] (anchor 10, trimmed head). End-bound would allow start
+    // −0.95, but audible start ≥ trimStart keeps the anchor ≥ 0.
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 440, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 0 }) // −11s
+    fireEvent.pointerUp(window, { clientX: 0 })
+    const [, anchor] = onRetimeTarget.mock.calls[0] as [string, number]
+    expect(anchor).toBeCloseTo(0)
+  })
+
+  it("the left trim handle follows a chip that begins before its section", () => {
+    const onTrimTarget = vi.fn()
+    // c1's section is 20–30; the chip slid back: anchor 16, head-trimmed to 17.
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          item(
+            { startTime: 20, endTime: 30, metadata: { target_start_ms: 16000 } } as Partial<CellData>,
+            6000,
+            "c1",
+            { trimStartMs: 1000 },
+          ),
+        ]}
+        onTrimTarget={onTrimTarget}
+      />,
+    )
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 680, pointerId: 1 }) // visual start 17s
+    fireEvent.pointerMove(window, { clientX: 600 }) // toward 15s → clamps at the ANCHOR (16), not section start (20)
+    fireEvent.pointerUp(window, { clientX: 600 })
+    const [, , trims] = onTrimTarget.mock.calls[0] as [string, string, { trimStartMs?: number }]
+    expect(trims.trimStartMs).toBeUndefined() // back at the clip edge = cleared
+  })
+
+  it("at EXACT start equality the covered chip collapses to a reachable sliver", () => {
+    const first = item({}, 12000) // [10, 22]
+    const second = item(
+      { startTime: 20, endTime: 30, metadata: { target_start_ms: 10000 } } as Partial<CellData>,
+      6000,
+      "c2",
+    ) // slid to exactly 10 — same start as c1
+    render(<TargetAudioLane {...base} items={[first, second]} />)
+    const c1 = screen.getByTestId("tl-target-c1")
+    expect(c1).toHaveAttribute("data-truncated", "true")
+    expect(parseFloat(c1.style.width)).toBe(10) // the min-width sliver
+  })
+
   it("moving a head-trimmed chip commits the ANCHOR, not the visual left", () => {
     const onRetimeTarget = vi.fn()
     render(

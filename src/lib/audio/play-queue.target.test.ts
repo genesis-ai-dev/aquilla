@@ -5,7 +5,7 @@
 // EXCLUSIVE on seek), keep, arm ahead of a moved chip, or fall silent.
 
 import { describe, expect, it } from "vitest"
-import { planTargetOverlay } from "./play-queue"
+import { planEarlyDub, planTargetOverlay } from "./play-queue"
 import type { CellData } from "@/hooks/useCells"
 
 const NONE: ReadonlySet<string> = new Set()
@@ -229,5 +229,55 @@ describe("planTargetOverlay — trim-aware (round 7)", () => {
     const plan = planTargetOverlay(cells, 0, NONE, "seek", 14.5)
     expect(plan.kind).toBe("fire")
     expect(plan.kind === "fire" && plan.startAtClipSec).toBeCloseTo(2.5) // 1 + 1.5
+  })
+})
+
+describe("planEarlyDub — a later section's backward-slid dub (end-based bounds)", () => {
+  it("arms the NEXT section's dub when its chip starts inside the current window", () => {
+    const cells = [sourceCell(0, 10), movedDubCell(10, 20, 8000, 6000)] // chip at 8, window ends 10
+    const plan = planEarlyDub(cells, 0, NONE)
+    expect(plan).toEqual({ cellId: cells[1].id, dueSec: 8 })
+  })
+
+  it("stays null when the next chip starts at or after the window end", () => {
+    const cells = [sourceCell(0, 10), movedDubCell(10, 20, 10000, 6000)]
+    expect(planEarlyDub(cells, 0, NONE)).toBeNull()
+  })
+
+  it("scans past dub-less sections to the first eligible cell", () => {
+    const cells = [sourceCell(0, 10), sourceCell(10, 20), movedDubCell(20, 30, 7000, 6000)]
+    const plan = planEarlyDub(cells, 0, NONE)
+    expect(plan).toEqual({ cellId: cells[2].id, dueSec: 7 })
+  })
+
+  it("skips take-only sections (their dub rides the MASTER, not the pool)", () => {
+    const cells = [sourceCell(0, 10), takeOnlyCell(10, 20), movedDubCell(20, 30, 6000, 6000)]
+    const plan = planEarlyDub(cells, 0, NONE)
+    expect(plan).toEqual({ cellId: cells[2].id, dueSec: 6 })
+  })
+
+  it("refuses a dub that is already sounding — never a re-fire restart", () => {
+    const cells = [sourceCell(0, 10), movedDubCell(10, 20, 8000, 6000)]
+    expect(planEarlyDub(cells, 0, sounding(cells[1].id))).toBeNull()
+  })
+
+  it("the due time is the AUDIBLE start — trim-aware", () => {
+    const cells = [sourceCell(0, 10), trimmedDubCell(10, 20, 8000, 6000, { trimStartMs: 1000 })]
+    const plan = planEarlyDub(cells, 0, NONE)
+    expect(plan?.dueSec).toBe(9) // anchor 8 + head trim 1
+  })
+
+  it("the first eligible cell DECIDES: an in-place near dub blocks a farther slid-back one", () => {
+    // c2's dub sits at its own section (12 ≥ window end 10) → null, even
+    // though c3's chip reaches back to 5. Documented one-slot simplification.
+    const cells = [sourceCell(0, 10), movedDubCell(10, 20, 12000, 4000), movedDubCell(20, 30, 5000, 20000)]
+    expect(planEarlyDub(cells, 0, NONE)).toBeNull()
+  })
+
+  it("no current window (text cell) → null", () => {
+    const bare = { ...sourceCell(0, 10) } as CellData & { startTime?: number; endTime?: number }
+    delete bare.startTime
+    delete bare.endTime
+    expect(planEarlyDub([bare, movedDubCell(10, 20, 8000, 6000)], 0, NONE)).toBeNull()
   })
 })

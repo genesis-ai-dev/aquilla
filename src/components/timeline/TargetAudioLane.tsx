@@ -130,10 +130,17 @@ function TargetAudioChip({
         const span = geom.usingFallback ? { start, end: start } : { start, end: start + len }
         start = snapSpan(span, "move", snap.candidates, thresholdSec).start
       }
-      // Audible start stays within the section; the epsilon scales with the
-      // section so tiny sections can't pin the chip (round-7 fix).
-      const maxStart = section.end - Math.min(0.05, Math.max(0.001, (section.end - section.start) / 2))
-      start = Math.min(Math.max(start, section.start), Math.max(section.start, maxStart))
+      // END-based bounds (meeting 2026-08-05): the chip may slide back into
+      // the previous section's space — a long translation borrowing a short
+      // neighbour's slack — but its END may not move before its section's
+      // START, and its START may not move past the section's END. The epsilon
+      // keeps an audible sliver in-section on both edges and scales with the
+      // section so tiny sections can't pin the chip (round-7 fix). Hard floor
+      // last: audible start ≥ trimStart ⇔ stored anchor ≥ 0, so nothing
+      // renders or persists before file time zero.
+      const eps = Math.min(0.05, Math.max(0.001, (section.end - section.start) / 2))
+      start = Math.min(start, Math.max(section.start, section.end - eps))
+      start = Math.max(start, section.start + eps - len, geom.trimStartSec)
       return { start, end: start + len }
     }
     if (mode === "resize-l") {
@@ -141,8 +148,11 @@ function TargetAudioChip({
       if (snap.enabled) {
         start = snapSpan({ start, end: geom.end }, "resize-l", snap.candidates, thresholdSec).start
       }
-      // trimStart ≥ 0 (start ≥ anchor), audible start in-section, len ≥ min.
-      const lo = Math.max(section.start, geom.anchor)
+      // trimStart ≥ 0 (start ≥ anchor), len ≥ min. No section term: a chip
+      // may legitimately begin before its section now (end-based bounds), so
+      // the left trim handle follows the CLIP, not the section. (In free
+      // timing chipSection.start === geom.anchor, so this is identical there.)
+      const lo = geom.anchor
       start = Math.min(Math.max(start, lo), geom.end - MIN_TARGET_LEN_SEC)
       return { start, end: geom.end }
     }
@@ -182,11 +192,13 @@ function TargetAudioChip({
   // stayed selected — the very symptom this fixes.
   const engaged = hovered || drag !== null
   const paintedEnd =
-    // `nextChipStartSec > span.start` matters: a chip dragged to sit BEFORE its
-    // predecessor would otherwise clamp to its own start and collapse to a
-    // sliver. Nothing is buried in that case anyway — it starts first.
+    // `nextChipStartSec >= span.start` matters: a chip dragged to sit BEFORE
+    // its predecessor would otherwise clamp to its own start and collapse to
+    // a sliver. Nothing is buried in that case anyway — it starts first. At
+    // EXACT equality (snap can land there) this chip clamps to the min-width
+    // sliver + chevron so the mover underneath stays reachable.
     // SUB-53: inert in audio-first (chips never overlap), but harmless.
-    !audioFirst && !engaged && nextChipStartSec != null && nextChipStartSec > span.start && span.end > nextChipStartSec
+    !audioFirst && !engaged && nextChipStartSec != null && nextChipStartSec >= span.start && span.end > nextChipStartSec
       ? nextChipStartSec
       : span.end
   const truncated = paintedEnd < span.end - 0.0005

@@ -60,6 +60,11 @@ export function AudioRecordingModal({
   // wrong when working one line over and over. Persisted per device.
   const autoAdvance = useRecordingAutoAdvance()
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // SUB-52 + the button-focus rule below need each other: Space on a focused
+  // button activates THAT button, so the dialog must not OPEN with a button
+  // focused (Base UI's default first-tabbable) or bare Space does nothing.
+  // Focus the dialog surface instead; Tab still reaches every control.
+  const dialogSurfaceRef = useRef<HTMLDivElement | null>(null)
   const [phase, setPhase] = useState<Phase>("idle")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -489,7 +494,15 @@ export function AudioRecordingModal({
           so it never clips at 100% zoom on 1280×800 or smaller viewports.
           The dialog is split into a fixed header, a scrollable stage+takes
           middle, and a fixed footer so navigation buttons stay reachable. */}
+      {/* finalFocus={false}: closing must NOT return focus to the opener —
+          the lane's mic buttons are hover-revealed, so focus would sit on an
+          INVISIBLE button where Space re-opens the recorder instead of
+          driving the transport. Released focus falls to the page, where
+          Space belongs to playback again. */}
       <DialogContent
+        ref={dialogSurfaceRef}
+        initialFocus={dialogSurfaceRef}
+        finalFocus={false}
         className="flex max-w-3xl flex-col gap-0 p-0"
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}

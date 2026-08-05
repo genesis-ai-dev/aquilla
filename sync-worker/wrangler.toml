@@ -25,10 +25,10 @@ AUTH_WORKER_URL = "http://127.0.0.1:8788"
 # =============================================================================
 # Routes live in `[env.production]` and `[env.development]` below. This file is
 # the source of truth — don't add or remove routes via the Cloudflare
-# dashboard. GitHub Actions always passes an explicit named environment.
-# Cloudflare Workers Builds calls `pnpm run deploy:workers-build`, which
-# promotes `main` with production bindings and uploads preview-only versions
-# for every other branch. Routes can also be applied by a LOCAL deploy:
+# dashboard. Live deployments are explicit operator actions. The local package
+# commands and optional dispatch-only GitHub workflow always pass a named
+# environment; neither a Git push nor Cloudflare Git integration deploys. Routes
+# are applied by the matching deploy command:
 #
 #   pnpm run deploy:aquilla:sync        # = wrangler deploy --env=production
 #   (cd sync-worker && wrangler deploy --env=development)

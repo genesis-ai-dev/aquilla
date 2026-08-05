@@ -3,74 +3,51 @@
 This runbook implements the Cloudflare Builds section of the canonical
 [deployment environment matrix](../DEPLOYMENT-ENVIRONMENTS.md).
 
-The SPA (`aquilla-web`), identity (`aquilla-identity`), and sync
-(`aquilla-sync-worker`) Workers are connected to Cloudflare Workers Builds.
-Environment selection belongs to this repository; the dashboard must not infer
-an environment from a missing profile or use a command that can promote a
-feature build.
+Explicit operator commands own production and development deployments. Neither
+GitHub pushes nor Cloudflare Git integrations may automatically deploy live
+traffic. Pull requests may publish only a route-free preview version.
 
-## Dashboard settings
+## Control-plane state
 
-After the shared helper is present on `main`, set both the production and
-non-production deploy commands for all three Workers to:
+The Git connections for `aquilla-web`, `aquilla-identity`, and
+`aquilla-sync-worker` are disconnected. `versification-tool` was already
+disconnected. The cutover did not delete or alter the existing Workers, versions,
+bindings, routes, or traffic allocations, and production verification passed
+after the change.
 
-```sh
-pnpm run deploy:workers-build
-```
+Do not reconnect a Git repository or add a dashboard deploy command. The former
+`deploy:workers-build` helper and Cloudflare-specific build script were removed
+with the connections so they cannot become a second deployment owner later.
 
-Root directories remain `/`, `/auth-worker`, and `/sync-worker`, respectively.
-Each directory exposes the same `pnpm run deploy:workers-build` command. The
-repository helper requires `WORKERS_CI=1`, reads `WORKERS_CI_BRANCH`, and applies
-this policy:
+## Explicit deployments
 
-| Branch | Wrangler operation | Named environment | Changes live traffic |
-| --- | --- | --- | --- |
-| `main` | upload → verify exact version → promote → verify traffic | `production` | Yes, after verification |
-| `dev` or `development` | upload → verify exact version | `development` | No |
-| Any feature branch | upload → verify exact version | `development` | No |
+Run live deployments only from a clean checkout whose HEAD exactly equals the
+current remote branch:
 
-If `WORKERS_CI=1`, `WORKERS_CI_BRANCH`, or `WORKERS_CI_COMMIT_SHA` is absent,
-the command fails without invoking Wrangler.
-Feature builds may create preview versions, but they cannot promote a version or
-change a live route. Feature previews intentionally share development Hyperdrive
-and R2 resources; the verifier ensures they cannot inherit production
-bindings.
+| Branch | Command | Named environment |
+| --- | --- | --- |
+| `main` | `pnpm run deploy:aquilla` | `production` |
+| `dev` | `pnpm run deploy:aquilla:dev` | `development` |
 
-Until the helper commit reaches `main`, keep these containment commands inline
-in the dashboard for `aquilla-web` and `aquilla-identity`:
+The branch guard fails before Wrangler if the checkout is dirty, on the wrong
+branch, or not at the current `origin/<branch>` commit. The deployer uploads one
+version, validates its exact bindings, promotes that exact ID to 100%, reapplies
+routes/triggers, verifies traffic, and then checks public health.
 
-Production deploy command:
+`.github/workflows/deploy-workers.yml` is an optional
+`workflow_dispatch`-only equivalent for web, identity, and sync once hosted
+runners are available. It accepts only `main` or `dev`, requires an explicit
+Worker selection, runs the relevant build/tests and Neon schema guard, and uses
+the same branch-guarded package commands. It has no push trigger.
 
-```sh
-npx wrangler deploy --env=production
-```
+Staging has been retired from the repository's Wrangler profiles, deployment
+manifest, scripts, guards, and public verifier. The staging Workers were removed
+separately in Cloudflare. Any retained Neon branch or R2 data is not deployable
+application infrastructure and requires its own backup/retention decision before
+deletion.
 
-Non-production branch deploy command: **leave empty**, and disable "builds for
-non-production branches". A connection is bound to one Worker script, so a
-non-production build cannot deploy a differently-named Worker — it silently
-uploads to the bound (production) script instead. That is how feature-branch
-versions once landed on the production SPA Worker. QA gets its own three
-connections bound to the development scripts with `dev` as their production
-branch.
-
-The unnamed Wrangler profile targets `aquilla-sync-worker-local`, never
-`aquilla-sync-worker`. The named production profile runs the repository
-branch guard as a Wrangler build hook, so an accidental direct deployment is
-rejected before upload unless the checkout is on the authorized branch. The build
-hook is defense in depth; Cloudflare Builds must still use the repository-owned
-command above.
-
-Actual development promotion remains owned by
-`.github/workflows/deploy-workers.yml`, whose branch mapping always passes an
-explicit named environment.
-
-Staging was retired on 2026-08-05; its Workers, routes, R2 bucket and Neon
-branch are pending manual teardown in the Cloudflare and Neon dashboards.
-traffic.
-
-GitHub production deploy jobs also enter the repository's `production`
-Environment. GitHub's deployment-branch policy restricts that Environment to
-`main`, independently of the workflow mapping.
+Web pull-request previews continue through GitHub Actions on the route-free
+`aquilla-web-preview` Worker when hosted runners are available.
 
 ## Pull-request web previews
 
@@ -89,8 +66,8 @@ routes, then retry the version upload.
 Before the URL is posted to the pull request, the live verifier loads `/app`
 through that exact preview origin, crawls the deployed JavaScript graph, and
 requires the development identity, sync, and chat targets. This preview process
-does not promote a version or change production or development route
-traffic. Preview bundles do use development services and data.
+does not promote a version or change production or development route traffic.
+Preview bundles do use development services and data.
 
 ## Exact-version deployment and verification
 

@@ -14,9 +14,15 @@
 //     never evict clips to make room for other clips (a naive sweep of an
 //     over-budget project would evict its own beginning and end up protecting
 //     exactly the wrong region);
-//   - abort()able — leaving the lens abandons the sweep mid-flight.
+//   - abort()able — leaving the lens abandons the sweep mid-flight;
+//   - (2026-08-05) it always YIELDS to live playback — while the transport is
+//     waiting on bytes every worker parks, and while it is playing at most
+//     one fetch runs;
+//   - (2026-08-05) it adapts to the CONNECTION — a metered (saveData) or 2g
+//     link stops the sweep entirely, 3g runs one worker. See warm-policy.ts.
 
 import { activeTargetForCell } from "./track-audio"
+import { warmGate } from "./warm-policy"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheAvailable, audioCacheBudget, audioCacheHas, audioCachePut, audioCacheUsage } from "./bytes-cache"
@@ -29,6 +35,10 @@ import type { FrontierSession } from "@/lib/frontier/types"
 const BUDGET_HEADROOM_BYTES = 4 * 1024 * 1024
 const budgetHeadroom = (budget: number): number =>
   Math.min(BUDGET_HEADROOM_BYTES, Math.floor(budget / 50))
+
+/** How often a parked worker re-asks the gate. */
+const YIELD_POLL_MS = 250
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 export interface WarmFileDubsArgs {
   cells: readonly CellData[]
@@ -45,7 +55,7 @@ export interface WarmFileDubsResult {
   alreadyCached: number
   failed: number
   /** Why the sweep ended. */
-  stopped: "done" | "aborted" | "budget" | "cache-unavailable"
+  stopped: "done" | "aborted" | "budget" | "cache-unavailable" | "metered" | "slow"
 }
 
 interface WarmTarget {
@@ -103,14 +113,29 @@ export async function warmFileDubs(args: WarmFileDubsArgs): Promise<WarmFileDubs
   const budget = await audioCacheBudget()
   const getSyncToken = audioSyncTokenFetcherForSession(session)
   let cursor = 0
-  let halted: "aborted" | "budget" | null = null
+  let halted: "aborted" | "budget" | "metered" | "slow" | null = null
 
-  const worker = async (): Promise<void> => {
+  const worker = async (workerIndex: number): Promise<void> => {
     while (true) {
       if (halted) return
       if (signal?.aborted) {
         halted = "aborted"
         return
+      }
+      // Manners check BEFORE claiming an item — a parked worker never holds
+      // one. Park (don't exit) for "wait" and for surplus workers, so full
+      // speed resumes by itself when playback pauses or the link recovers.
+      // (An in-flight fetchCellAudio can't be cancelled — the residual is at
+      // most `concurrency` clips overlapping the moment playback starts.)
+      const gate = warmGate()
+      if (gate.kind === "stop") {
+        halted = gate.reason
+        return
+      }
+      if (gate.kind === "wait" || workerIndex >= gate.maxWorkers) {
+        if (cursor >= order.length) return // nothing left to wait FOR
+        await sleep(YIELD_POLL_MS)
+        continue
       }
       const idx = cursor++
       if (idx >= order.length) return
@@ -150,7 +175,7 @@ export async function warmFileDubs(args: WarmFileDubsArgs): Promise<WarmFileDubs
     }
   }
 
-  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+  await Promise.all(Array.from({ length: concurrency }, (_, i) => worker(i)))
   if (halted) result.stopped = halted
   return result
 }

@@ -34,6 +34,13 @@ vi.mock("./bytes-cache", () => ({
 vi.mock("./sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: () => async () => "tok",
 }))
+const gateState = vi.hoisted(() => ({
+  value: { kind: "go", maxWorkers: Number.POSITIVE_INFINITY } as
+    | { kind: "stop"; reason: "metered" | "slow" }
+    | { kind: "wait" }
+    | { kind: "go"; maxWorkers: number },
+}))
+vi.mock("./warm-policy", () => ({ warmGate: () => gateState.value }))
 
 import { planWarmOrder, warmFileDubs } from "./warm-dubs"
 import type { CellData } from "@/hooks/useCells"
@@ -62,6 +69,7 @@ beforeEach(() => {
   budget = 1024 * 1024
   failIds = new Set()
   cacheAvailable = true
+  gateState.value = { kind: "go", maxWorkers: Number.POSITIVE_INFINITY }
 })
 
 afterEach(() => vi.clearAllMocks())
@@ -149,5 +157,85 @@ describe("warmFileDubs", () => {
       session: { jwt: "" } as unknown as FrontierSession,
     })
     expect(res).toMatchObject({ warmed: 0, stopped: "done" })
+  })
+})
+
+describe("warmFileDubs — connection manners (2026-08-05)", () => {
+  it("a metered connection stops the sweep before any fetch", async () => {
+    gateState.value = { kind: "stop", reason: "metered" }
+    const res = await warmFileDubs({ cells: [dubbed("a"), dubbed("b")], projectId: "p", session })
+    expect(res.stopped).toBe("metered")
+    expect(fetched.length).toBe(0)
+  })
+
+  it("a 2g-class connection likewise", async () => {
+    gateState.value = { kind: "stop", reason: "slow" }
+    const res = await warmFileDubs({ cells: [dubbed("a")], projectId: "p", session })
+    expect(res.stopped).toBe("slow")
+    expect(fetched.length).toBe(0)
+  })
+
+  it("yields while live playback loads, then proceeds when it clears", async () => {
+    vi.useFakeTimers()
+    try {
+      gateState.value = { kind: "wait" }
+      const p = warmFileDubs({ cells: [dubbed("a"), dubbed("b")], projectId: "p", session })
+      await vi.advanceTimersByTimeAsync(600) // a few park cycles
+      expect(fetched.length).toBe(0)
+      gateState.value = { kind: "go", maxWorkers: Number.POSITIVE_INFINITY }
+      await vi.advanceTimersByTimeAsync(300)
+      const res = await p
+      expect(res).toMatchObject({ warmed: 2, stopped: "done" })
+      expect(fetched.length).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("maxWorkers 1 bounds the fetches actually in flight", async () => {
+    vi.useFakeTimers()
+    try {
+      gateState.value = { kind: "go", maxWorkers: 1 }
+      let inFlight = 0
+      let maxInFlight = 0
+      const upload = await import("./upload")
+      vi.mocked(upload.fetchCellAudio).mockImplementation(async ({ audioId }: { audioId: string }) => {
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        await new Promise((r) => setTimeout(r, 50))
+        inFlight--
+        fetched.push(audioId)
+        return new Uint8Array(1024)
+      })
+      const p = warmFileDubs({
+        cells: [dubbed("a"), dubbed("b"), dubbed("c")],
+        projectId: "p",
+        session,
+        concurrency: 2,
+      })
+      await vi.advanceTimersByTimeAsync(2000)
+      const res = await p
+      expect(res.warmed).toBe(3)
+      expect(maxInFlight).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("a connection that flips to metered mid-sweep stops after the current item", async () => {
+    const upload = await import("./upload")
+    vi.mocked(upload.fetchCellAudio).mockImplementation(async ({ audioId }: { audioId: string }) => {
+      fetched.push(audioId)
+      gateState.value = { kind: "stop", reason: "metered" } // flips DURING the first fetch
+      return new Uint8Array(1024)
+    })
+    const res = await warmFileDubs({
+      cells: [dubbed("a"), dubbed("b"), dubbed("c")],
+      projectId: "p",
+      session,
+      concurrency: 1,
+    })
+    expect(res.stopped).toBe("metered")
+    expect(fetched.length).toBe(1)
   })
 })

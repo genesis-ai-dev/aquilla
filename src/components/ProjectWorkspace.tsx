@@ -4407,7 +4407,9 @@ export function ProjectWorkspace() {
   // on-device byte cache with the open file's dub clips (nearest the selection
   // first, budget-aware, abandoned on lens exit). Clip ids are immutable, so
   // this is a once-per-device cost — afterwards playback, scrubbing and seeks
-  // never wait on the network. Cells/selection are read through refs: the
+  // never wait on the network. The sweep is connection-adaptive and always
+  // yields to live playback (policy in lib/audio/warm-policy.ts) — no gate
+  // needed here; every warm fetch re-asks before it starts. Cells/selection are read through refs: the
   // sweep keys on the FILE, not on every cell revalidation.
   const warmCellsRef = useRef<CellData[]>([])
   warmCellsRef.current = audioMergedCells

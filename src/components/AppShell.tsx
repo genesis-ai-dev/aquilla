@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState, type ReactNode } from "react"
-import { useLocation } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { usePanelRef } from "react-resizable-panels"
 import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
@@ -153,13 +153,13 @@ export function AppShell({
   // don't mount BrandProvider; the logo link is chrome, not a hard dependency.
   const brand = useContext(BrandContext)
   const resolvedLogo = logoSlot ?? (brand ? (
-    <a
-      href="/homepage"
-      aria-label={`${brand.app.name} — homepage`}
+    <Link
+      to="/"
+      aria-label={`${brand.app.name} — home`}
       className="flex w-fit cursor-default items-center rounded-md p-1.5 hover:bg-accent/60"
     >
       <brand.logo.Mark className="h-6 w-6 shrink-0" aria-hidden />
-    </a>
+    </Link>
   ) : null)
 
   const dockPanelRef = usePanelRef()

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate, Navigate } from "react-router-dom"
+import { Link, useNavigate, Navigate } from "react-router-dom"
 import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import {
   ChevronRight, Cloud, Settings as SettingsIcon, Trash2, Users, FolderOpen, Filter,
@@ -247,14 +247,13 @@ export function Dashboard() {
       <header className="border-b">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-2">
-            {/* Hard <a>: /homepage is the separate marketing entry point. */}
-            <a
-              href="/homepage"
-              aria-label={`${brand.app.name} — homepage`}
+            <Link
+              to="/"
+              aria-label={`${brand.app.name} — home`}
               className="-m-1 shrink-0 rounded-md p-1 hover:bg-accent/60"
             >
               <brand.logo.Mark className="h-7 w-7" aria-hidden />
-            </a>
+            </Link>
             <h1 className="hidden truncate text-xl font-semibold sm:inline">{brand.app.name}</h1>
           </div>
           <div className="flex shrink-0 items-center gap-2">

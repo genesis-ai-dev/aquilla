@@ -1,0 +1,410 @@
+name: CI
+
+# One workflow for checks AND the SPA deploy, because they were duplicating
+# each other. `deploy.yml` used to re-run install + `tsc -b` + `pnpm test` +
+# `pnpm run build` that `web-ci.yml` had just run in parallel — about 13 of its
+# 14 minutes. That was nearly free while the deploy job skipped every step, and
+# stopped being free the moment PR previews started building for real.
+#
+# Merging them buys two things beyond the runner time:
+#
+#  1. The gate becomes honest. A workflow cannot gate a job in another
+#     workflow, so `deploy.yml`'s inline tests were the ONLY thing standing
+#     between a red test and a deploy. Here `deploy` simply `needs:` the checks.
+#  2. The artifact that gets verified is the artifact that ships. `web-ci`'s
+#     build job set no VITE_* at all, so it compiled against the hardcoded
+#     `api.aquilla.app` fallback and threw dist/ away. Now `build` compiles once
+#     with the resolved environment's targets and hands that exact dist/ to
+#     `deploy`.
+#
+# DELIBERATELY NOT path-ignored. `lint`, `typecheck`, `unit` and `build` are
+# required status checks on both `main` and `dev`; a required check skipped by
+# a paths filter never reports, and the PR can never merge. The old
+# `deploy.yml` could carry `paths-ignore` only because it held no required
+# check. The worker suites below are path-filtered precisely because they are
+# not required checks.
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+# Kill superseded runs for the same PR / branch.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Resolve the deployment target once. Unknown live refs fail closed here
+  # rather than defaulting to an environment.
+  #
+  # `build` depends on this, which means a required check inherits its failure
+  # mode. That is safe: for `pull_request` events the resolver returns the
+  # preview target unconditionally, and pull requests are the only context
+  # where required checks are consulted. worker-deployment-contract.test.ts
+  # pins that invariant.
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      wrangler_environment: ${{ steps.resolve.outputs.wrangler_environment }}
+      live_environment: ${{ steps.resolve.outputs.live_environment }}
+      github_environment: ${{ steps.resolve.outputs.github_environment }}
+      api_host: ${{ steps.resolve.outputs.api_host }}
+      sync_worker_host: ${{ steps.resolve.outputs.sync_worker_host }}
+      auth_base: ${{ steps.resolve.outputs.auth_base }}
+      chat_base: ${{ steps.resolve.outputs.chat_base }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve authorized deployment target
+        run: bash scripts/resolve-deployment-target.sh
+
+  # Which worker packages did this change touch? The three worker suites cost
+  # ~22 minutes combined and are irrelevant to a SPA-only change. Same git-diff
+  # approach as deploy-workers.yml — the `github.event.commits.*` payload is
+  # unreliable on merge and batch pushes.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      auth: ${{ steps.f.outputs.auth }}
+      sync: ${{ steps.f.outputs.sync }}
+      agent: ${{ steps.f.outputs.agent }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: f
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # Shared root deps (pnpm-lock, db/shim) can break any worker, so a
+          # change to those runs everything. Anything we cannot diff runs
+          # everything too — failing open on detection is right here, because
+          # the cost of a missed suite is a broken deploy.
+          base="$BASE_SHA"
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::notice::No usable diff base; running every worker suite."
+            for w in auth sync agent; do echo "$w=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$base" "$HEAD_SHA")
+          echo "$changed"
+
+          if echo "$changed" | grep -qE '^(pnpm-lock\.yaml|package\.json|db/)'; then
+            echo "::notice::Shared root dependency changed; running every worker suite."
+            for w in auth sync agent; do echo "$w=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+
+          echo "$changed" | grep -q '^auth-worker/'  && echo "auth=true"  >> "$GITHUB_OUTPUT" || echo "auth=false"  >> "$GITHUB_OUTPUT"
+          echo "$changed" | grep -q '^sync-worker/'  && echo "sync=true"  >> "$GITHUB_OUTPUT" || echo "sync=false"  >> "$GITHUB_OUTPUT"
+          echo "$changed" | grep -q '^agent-worker/' && echo "agent=true" >> "$GITHUB_OUTPUT" || echo "agent=false" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Required status checks: lint, typecheck, unit, build.
+  # Renaming any of these silently breaks branch protection on main and dev —
+  # the required context stops reporting and PRs become unmergeable. Rename
+  # only together with the protection settings.
+  # ---------------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # QW-6/TEST-6: lint enforced in CI
+      - run: pnpm lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npx tsc -b --noEmit
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:idml
+
+  # AQU-219: must stay as `pnpm run build` (the tsc -b chain), never
+  # `tsc --noEmit` — a plain noEmit does NOT catch project-reference /
+  # erasableSyntaxOnly violations (AQU-213 reached main before this was here).
+  #
+  # This job now also produces the deployable artifact, so it builds with the
+  # resolved environment's VITE_* rather than the hardcoded fallbacks. The
+  # variables sit at job scope on purpose: step-scoped values vanish before
+  # verify-dist-host.sh runs and used to block every otherwise-valid deploy.
+  build:
+    needs: target
+    runs-on: ubuntu-latest
+    env:
+      VITE_SYNC_WORKER_HOST: ${{ needs.target.outputs.sync_worker_host }}
+      VITE_AUTH_BASE: ${{ needs.target.outputs.auth_base }}
+      VITE_CHAT_BASE: ${{ needs.target.outputs.chat_base }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run build
+
+      - name: Verify built API environment
+        run: bash scripts/verify-dist-host.sh "${{ needs.target.outputs.api_host }}"
+
+      # Workers' static-assets parser rejects the SPA `/*  /index.html  200`
+      # rule in _redirects (error 100324 — "infinite loop"). SPA fallback comes
+      # from `not_found_handling = "single-page-application"` in wrangler.toml.
+      # Strip it before the artifact is uploaded so no consumer can ship it.
+      # (public/_redirects stays for legacy Pages deploys of other brands.)
+      - name: Strip dist/_redirects (Workers static assets rejects it)
+        run: rm -f dist/_redirects
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ needs.target.outputs.live_environment }}
+          path: dist
+          retention-days: 3
+          if-no-files-found: error
+
+  schema-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Static check: every table in schema.sql must have a CREATE TABLE in
+      # db/postgres/migrations/ (or be in the pre-migration baseline set).
+      # No DB connection required. Catches the ai_usage_daily class of drift.
+      - run: pnpm neon:check
+
+  # ---------------------------------------------------------------------------
+  # Worker suites — path-filtered. Not required status checks, so a skip here
+  # cannot wedge a PR.
+  # ---------------------------------------------------------------------------
+  auth-worker-tests:
+    needs: changes
+    if: needs.changes.outputs.auth == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
+      # Shared db shims live outside the worker dir and resolve their own bare
+      # imports from the repo root.
+      - run: pnpm install --frozen-lockfile
+      # Worker-local install proves the worker package owns its direct deps.
+      - run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
+      - run: pnpm run type-check
+        working-directory: auth-worker
+      - run: pnpm test
+        working-directory: auth-worker
+
+  sync-worker-tests:
+    needs: changes
+    if: needs.changes.outputs.sync == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sync-worker/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: sync-worker
+      - run: pnpm run type-check
+        working-directory: sync-worker
+      # TEST-1: sync-worker tests run in CI
+      - run: pnpm test
+        working-directory: sync-worker
+
+  agent-worker-tests:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent-worker/package-lock.json
+      # Agent route tests inject a fake Sandbox binding, so PR validation does
+      # not require Docker or another local container engine.
+      - run: npm ci
+        working-directory: agent-worker
+      - run: npm run type-check
+        working-directory: agent-worker
+      - run: npm test
+        working-directory: agent-worker
+      # The route suite deliberately needs no container engine. Deployment does
+      # build this image, though, so CI must prove the pinned SDK base and the
+      # Python package layer still resolve.
+      - run: docker build --tag aquilla-agent-sandbox:ci .
+        working-directory: agent-worker
+
+  # ---------------------------------------------------------------------------
+  # Deploy / preview. Consumes the artifact `build` produced — no second build,
+  # no second test run. Gated on the same checks the old deploy.yml ran inline
+  # (typecheck + unit), deliberately NOT on lint: a lint error should not stop
+  # QA from looking at a preview.
+  # ---------------------------------------------------------------------------
+  deploy:
+    needs: [target, typecheck, unit, build]
+    if: github.event.pull_request.draft != true && (github.event_name != 'pull_request' || contains(fromJSON('["dev","main"]'), github.base_ref))
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    steps:
+      # scripts/ and wrangler.toml are needed; dist/ arrives as the artifact.
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ needs.target.outputs.live_environment }}
+          path: dist
+
+      # Pushes to main/dev publish the live Worker for that branch's explicit
+      # named environment. Never a bare deploy — it can inherit the wrong
+      # top-level worker name, routes, or bindings.
+      - name: Deploy aquilla-web (main/dev)
+        id: deploy_prod
+        if: github.event_name != 'pull_request'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: 6a80496d1e59948a9cbaa3c643ba81d7
+          command: deploy --env=${{ needs.target.outputs.wrangler_environment }}
+
+      - name: Verify deployed SPA environment
+        if: github.event_name != 'pull_request'
+        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=spa
+
+      # `wrangler versions upload` cannot CREATE a Worker — it fails with "You
+      # cannot upload a new version of a Worker that does not yet exist" until
+      # something has deployed the name once. Bootstrap it here rather than
+      # making the first preview depend on a human running a one-off command:
+      # the preview profile declares no routes, so a plain deploy publishes
+      # nothing beyond a workers.dev URL, and this self-heals if the Worker is
+      # ever deleted.
+      #
+      # The URL is read from wrangler's own output, falling back to the
+      # deterministic alias form (`<alias>-<worker>.<subdomain>.workers.dev`) so
+      # a change in that output degrades to a still-correct link, not a blank
+      # comment. Everything interpolated reaches the script through env.
+      - name: Upload aquilla-web preview (PR)
+        id: deploy_preview
+        if: github.event_name == 'pull_request'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+          ALIAS: pr-${{ github.event.number }}
+          UPLOAD_MESSAGE: PR ${{ github.event.number }} @ ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -o pipefail
+          upload() {
+            pnpm exec wrangler versions upload --env=preview \
+              --preview-alias "$ALIAS" --message "$UPLOAD_MESSAGE" 2>&1 | tee upload.log
+          }
+
+          if ! upload; then
+            grep -q "does not yet exist" upload.log || exit 1
+            echo "::notice::aquilla-web-preview does not exist yet; bootstrapping the route-free preview Worker."
+            pnpm exec wrangler deploy --env=preview
+            upload
+          fi
+
+          url=$(grep -oE "https://${ALIAS}-aquilla-web-preview\.[a-z0-9-]+\.workers\.dev" upload.log | head -1)
+          [ -n "$url" ] || url="https://${ALIAS}-aquilla-web-preview.blue-darkness-7674.workers.dev"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Fail the job if the alias does not actually serve the SPA. A green
+      # check that links QA to a 404 is worse than a red one.
+      - name: Smoke-check the preview URL
+        if: github.event_name == 'pull_request'
+        env:
+          PREVIEW_URL: ${{ steps.deploy_preview.outputs.url }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$PREVIEW_URL/app" || echo 000)
+            [ "$code" = "200" ] && echo "preview OK ($PREVIEW_URL)" && exit 0
+            echo "attempt $attempt: HTTP $code — retrying"
+            sleep 6
+          done
+          echo "::error::Preview alias did not serve the SPA at $PREVIEW_URL/app (last HTTP $code)"
+          exit 1
+
+      - name: Comment preview URL on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: pages-preview
+          message: |
+            **Preview:** ${{ steps.deploy_preview.outputs.url }}
+
+            | | |
+            | --- | --- |
+            | Commit | `${{ github.event.pull_request.head.sha }}` |
+            | API | `api.dev.aquilla.app` (development) |
+
+            The link is stable for the life of this PR — reload it as new
+            commits land. Previews always talk to the **development** API and
+            database, never production, whatever branch this PR targets.
+
+            Draft PRs do not build a preview; mark the PR ready for review to
+            get one.

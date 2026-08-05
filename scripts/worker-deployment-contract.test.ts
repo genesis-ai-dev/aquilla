@@ -304,11 +304,14 @@ describe("worker deployment environment contract", () => {
   })
 
   it("keeps SPA CI builds and deploys on the same explicit environment", () => {
-    const workflow = readRepoFile(".github", "workflows", "deploy.yml")
-    const deployJobStart = workflow.indexOf("  deploy:")
-    const deployJobHeader = workflow.slice(
-      deployJobStart,
-      workflow.indexOf("    steps:", deployJobStart),
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    // The VITE_* targets now live on the `build` job, because build produces
+    // the artifact that deploy ships. They must stay at job scope: step-scoped
+    // values vanish before verify-dist-host.sh runs.
+    const buildJobStart = workflow.indexOf("  build:")
+    const buildJobHeader = workflow.slice(
+      buildJobStart,
+      workflow.indexOf("    steps:", buildJobStart),
     )
 
     expect(workflow).toContain("bash scripts/verify-dist-host.sh \"${{ needs.target.outputs.api_host }}\"")
@@ -318,12 +321,68 @@ describe("worker deployment environment contract", () => {
     expect(workflow).toContain("wrangler versions upload --env=preview")
     expect(workflow).toContain("name: ${{ needs.target.outputs.github_environment }}")
     expect(workflow).not.toContain("|| '--env=development'")
-    expect(deployJobHeader).toContain("env:")
-    expect(deployJobHeader).toContain("VITE_SYNC_WORKER_HOST:")
-    expect(deployJobHeader).toContain("VITE_AUTH_BASE:")
-    expect(deployJobHeader).toContain("VITE_CHAT_BASE:")
+    expect(buildJobHeader).toContain("env:")
+    expect(buildJobHeader).toContain("VITE_SYNC_WORKER_HOST:")
+    expect(buildJobHeader).toContain("VITE_AUTH_BASE:")
+    expect(buildJobHeader).toContain("VITE_CHAT_BASE:")
     expect(workflow.match(/VITE_AUTH_BASE:/g)).toHaveLength(1)
     expect(workflow).not.toContain("refs/heads/main' && ' '")
+  })
+
+  // Checks and deploy used to live in separate workflows, which meant the
+  // deploy had to re-run install + typecheck + tests + build to gate itself —
+  // roughly 13 wasted minutes per push, and a gate that only worked because it
+  // was duplicated. One workflow lets deploy simply depend on the checks.
+  it("runs the checks once and gates the deploy on them", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const deployJob = workflow.slice(workflow.indexOf("  deploy:"))
+
+    expect(deployJob).toContain("needs: [target, typecheck, unit, build]")
+
+    // Deploy consumes the artifact build produced; it must not rebuild or
+    // re-test. `pnpm run build` and `pnpm test` belong to build/unit only.
+    expect(deployJob).toContain("actions/download-artifact@v4")
+    expect(deployJob).not.toContain("pnpm run build")
+    expect(deployJob).not.toContain("run: pnpm test")
+
+    // The SPA is built exactly once per run, and the root suite runs exactly
+    // once. The worker suites also invoke `pnpm test`, but always with a
+    // working-directory, so exclude those.
+    expect(workflow.match(/run: pnpm run build/g)).toHaveLength(1)
+    const rootSuiteRuns = workflow
+      .match(/^ +- run: pnpm test$(?:\n +working-directory:)?/gm)
+      ?.filter((match) => !match.includes("working-directory"))
+    expect(rootSuiteRuns).toHaveLength(1)
+  })
+
+  // A required status check that never reports blocks the PR forever. GitHub
+  // does not run a job filtered out by `paths-ignore`, so the workflow holding
+  // the required checks must not carry one — the old deploy.yml could only do
+  // that because it held no required check.
+  it("never lets a required status check be skipped", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+
+    // Assert on the trigger block, not the whole file — the prose above it
+    // explains why there is no path filter and would match a naive grep.
+    const triggers = workflow.slice(
+      workflow.indexOf("\non:"),
+      workflow.indexOf("\nconcurrency:"),
+    )
+    expect(triggers).not.toContain("paths-ignore")
+    expect(triggers).not.toContain("paths:")
+
+    // Branch protection on main and dev requires exactly these four contexts.
+    // Renaming one here silently makes PRs unmergeable.
+    for (const job of ["  lint:", "  typecheck:", "  unit:", "  build:"]) {
+      expect(workflow).toContain(job)
+    }
+
+    // ...and none of them may be conditional.
+    const requiredSection = workflow.slice(
+      workflow.indexOf("  lint:"),
+      workflow.indexOf("  schema-migrations:"),
+    )
+    expect(requiredSection).not.toContain("if:")
   })
 
   // A preview that silently does not build is worse than no preview: the job
@@ -331,7 +390,7 @@ describe("worker deployment environment contract", () => {
   // non-draft PR must produce a URL, and the URL must be proven to serve the
   // SPA before it is advertised.
   it("uploads a preview for every non-draft PR and proves the URL works", () => {
-    const workflow = readRepoFile(".github", "workflows", "deploy.yml")
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
 
     // The upload's only condition is "this is a PR". The commit-message
     // opt-in that used to gate it (`[preview]`/`[deploy]` grepped in a
@@ -350,8 +409,8 @@ describe("worker deployment environment contract", () => {
     expect(workflow).toContain("wrangler deploy --env=preview")
   })
 
-  it("installs Chromium before running IDML browser conformance in Web CI", () => {
-    const workflow = readRepoFile(".github", "workflows", "web-ci.yml")
+  it("installs Chromium before running IDML browser conformance", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
     const installBrowser = workflow.indexOf("pnpm exec playwright install --with-deps chromium")
     const runIdmlTests = workflow.indexOf("pnpm test:idml")
 

@@ -19,6 +19,7 @@ import {
   setQueueTimingMode,
   skipForward,
   startQueue,
+  startQueueAtTime,
   stopQueue,
   updateQueueCells,
   type PlayContext,
@@ -570,5 +571,206 @@ describe("audio-first readiness gate", () => {
     // No source onplay exists to flip the state — the gate must do it itself.
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
     expect(dubEl("v1")!.paused).toBe(false)
+  })
+})
+
+// ── Fortify round: live-truth boundaries + transport hardening ──────────────
+// Regression net for the adversarial-sweep findings: the programme (not
+// values frozen into pool entries) is the ONE authority for verse boundaries,
+// so mid-playback edits — trims, deleted takes, deleted verses — act on the
+// truth; and the transport can never wedge in a silent "playing".
+
+describe("audio-first fortify — live edits during playback", () => {
+  it("trimming the PLAYING verse's dub applies immediately — no ghost tail, advance at the new end", async () => {
+    // v1: original 4s, dub 12s (dub clocks). Trim the dub to 6s at t≈5.
+    const cells = [verse("v1", 0, 4, 12_000), verse("v2", 4, 8, 3_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    sourceEl()!.tick(4) // original done; dub-solo tail
+    dubEl("v1")!.tick(5)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+
+    const trimmed = [verse("v1", 0, 4, 12_000), verse("v2", 4, 8, 3_000)]
+    const att = trimmed[0].attachments!["audio-v1-1700000000-take.webm"] as Record<string, number>
+    att.trimEndMs = 6_000
+    updateQueueCells(trimmed)
+
+    // The next tick past the LIVE end (6s) must end the verse — the frozen
+    // cue-time stop (12s) is no longer consulted.
+    dubEl("v1")!.tick(6.1)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+  })
+
+  it("deleting the PLAYING take silences it and moves on instead of wedging", async () => {
+    const cells = [verse("v1", 0, 4, 12_000), verse("v2", 4, 8, 3_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    sourceEl()!.tick(4) // dub-solo tail — nothing else can carry the verse
+    dubEl("v1")!.tick(5)
+
+    const deleted = [verse("v1", 0, 4, 12_000), verse("v2", 4, 8, 3_000)]
+    const att = deleted[0].attachments!["audio-v1-1700000000-take.webm"] as Record<string, unknown>
+    att.isDeleted = true
+    updateQueueCells(deleted)
+    await settle()
+
+    // The removed dub was the only sounding side → transport moved to v2
+    // rather than sitting in silent "playing" forever.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+    expect(dubEl("v2")!.paused).toBe(false)
+  })
+
+  it("deleting the PLAYING VERSE re-enters at the next surviving verse", async () => {
+    const cells = [verse("v1", 0, 4, 5_000), verse("v2", 4, 8, 3_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ cellId: "v1" })
+
+    updateQueueCells([verse("v2", 4, 8, 3_000)]) // v1 gone entirely
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+  })
+
+  it("deleting the LAST verse while it plays finishes cleanly (no dead-end 'playing')", async () => {
+    const cells = [verse("v1", 0, 4, 5_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    updateQueueCells([])
+    await settle()
+    expect(getQueueState().kind).toBe("idle")
+  })
+})
+
+describe("audio-first fortify — transport can never wedge", () => {
+  const dubDeferred = (id: string) => (src: string) => src.includes(`/${id}.webm`)
+
+  it("cue-paused verse resumed BEFORE the dub resolves: the dub joins itself when ready", async () => {
+    const cells = [verse("v1", 0, 3, 8_000)]
+    FakeAudio.deferSrc = dubDeferred("v1")
+    setQueueTimingMode("audioFirst")
+    // Cue paused at the verse (no gate on this path), then resume immediately.
+    startQueueAtTime(ctxFor(cells), 0.5, { play: false })
+    await settle()
+    expect(getQueueState().kind).toBe("paused")
+    await resumeQueue()
+    // The dub element may not even exist yet — resume could only start the
+    // source. When the dub's bytes land, it must join by itself.
+    dubEl("v1")?.makeReady()
+    await settle()
+    expect(getQueueState().kind).toBe("playing")
+    expect(dubEl("v1")!.paused).toBe(false)
+  })
+
+  it("the gate's patience timer is SUSPENDED while paused — the dub survives a long pause", async () => {
+    vi.useFakeTimers()
+    try {
+      const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000)]
+      FakeAudio.deferSrc = dubDeferred("v2")
+      setQueueTimingMode("audioFirst")
+      startQueue(ctxFor(cells), 0)
+      await vi.advanceTimersByTimeAsync(0)
+      sourceEl()!.tick(3)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(getQueueState().kind).toBe("loading")
+
+      pauseQueue() // user answers the door…
+      await vi.advanceTimersByTimeAsync(30_000) // …for 30 seconds
+      // The dub was NOT struck while nobody was listening.
+      expect(dubEl("v2")).toBeDefined()
+
+      await resumeQueue()
+      expect(getQueueState().kind).toBe("loading")
+      dubEl("v2")!.makeReady()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+      expect(dubEl("v2")!.paused).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("resume with nothing left to start ADVANCES instead of reporting silent 'playing'", async () => {
+    vi.useFakeTimers()
+    try {
+      // Dub-only verse whose dub load fails while paused.
+      const takeId = "audio-v1-1700000000-take.webm"
+      const dubOnly = {
+        id: "v1", fileId: "f1", medium: "media", startTime: 0, endTime: 4,
+        selectedAudioId: takeId,
+        attachments: { [takeId]: { type: "audio", url: "http://audio.test/v1.webm", durationMs: 5_000 } },
+      } as unknown as CellData
+      const cells = [dubOnly, verse("v2", 4, 8, 3_000)]
+      FakeAudio.deferSrc = dubDeferred("v1")
+      setQueueTimingMode("audioFirst")
+      startQueue(ctxFor(cells), 0)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(getQueueState().kind).toBe("loading")
+
+      pauseQueue()
+      dubEl("v1")!.failLoad() // the only side of the verse dies while paused
+      await vi.advanceTimersByTimeAsync(0)
+      await resumeQueue()
+      await vi.advanceTimersByTimeAsync(0)
+      // Not a silent wedge: the transport moved to the next verse.
+      expect(getQueueState()).toMatchObject({ cellId: "v2" })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("seeking past the programme end lands at the END, not a full last-verse replay", async () => {
+    const cells = [verse("v1", 0, 3, 2_000), verse("v2", 3, 7, 3_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    seekQueueToTime(999)
+    await settle()
+    // The bug was replaying v2 from its TOP (programme second 3). Landing at
+    // the final moment may legitimately play the verse's last instant — what
+    // must never happen is a rewind to the verse start.
+    expect(getQueueProgress().currentTime).toBeGreaterThan(6.9)
+  })
+})
+
+describe("audio-first fortify — plain content falls back to the dubbing path", () => {
+  it("a TEXT cell in an audioFirst project still plays (single-line play button)", async () => {
+    const textCell = {
+      id: "t1", fileId: "f1", medium: "text",
+      selectedGeneratedVoiceAudioId: "gen-1",
+      attachments: { "gen-1": { type: "audio", url: "http://audio.test/gen-1.wav" } },
+    } as unknown as CellData
+    setQueueTimingMode("audioFirst")
+    startQueue({ ...ctxFor([textCell]), snapshot: true }, 0)
+    await settle()
+    // The empty programme fell through to the plain path — audio plays.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "t1" })
+  })
+
+  it("a snapshot context survives updateQueueCells — single-line play never marches on", async () => {
+    const textCell = {
+      id: "t1", fileId: "f1", medium: "text",
+      selectedGeneratedVoiceAudioId: "gen-1",
+      attachments: { "gen-1": { type: "audio", url: "http://audio.test/gen-1.wav" } },
+    } as unknown as CellData
+    const fullFile = [
+      textCell,
+      { id: "t2", fileId: "f1", medium: "text", selectedGeneratedVoiceAudioId: "gen-2",
+        attachments: { "gen-2": { type: "audio", url: "http://audio.test/gen-2.wav" } } } as unknown as CellData,
+    ]
+    setQueueTimingMode("dubbing")
+    startQueue({ ...ctxFor([textCell]), snapshot: true }, 0)
+    await settle()
+    updateQueueCells(fullFile) // the bar's keep-fresh effect fires
+    // The one-cell snapshot was NOT clobbered: ending the clip ends playback.
+    const el = [...FakeAudio.instances].reverse().find((a) => a.src.includes("gen-1"))!
+    el.ended = true
+    el.onended?.()
+    await settle()
+    expect(getQueueState().kind).toBe("idle")
   })
 })

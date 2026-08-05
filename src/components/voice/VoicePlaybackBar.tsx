@@ -93,6 +93,11 @@ export function VoicePlaybackBar({
 
   const onPlayPause = useCallback(() => {
     if (isPlaying) { pauseQueue(); return }
+    // FORTIFY: during a cold load the button shows a spinner — clicking it (or
+    // Space) must CANCEL the pending start, not dispose the in-flight load and
+    // start over from the top (which also made the transport unstoppable
+    // until sound was already playing).
+    if (queue.kind === "loading") { pauseQueue(); return }
     if (queue.kind === "paused") { void resumeQueue(); return }
     // Start from the highlighted section when one is selected, else the top of
     // the file (AQU-666). A selected start is "explicit": if that clip's audio

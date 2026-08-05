@@ -1273,7 +1273,9 @@ export function ProjectWorkspace() {
               const cell = enrichedCell ?? cellStore.getCellView(cellId)
               if (!cell) return
               startQueue(
-                { cells: [cell], projectId: audioProject.id, session: frontierSession },
+                // snapshot: the bar's keep-cells-fresh effect must not swap
+                // the full file in — this is "play just this line", full stop.
+                { cells: [cell], projectId: audioProject.id, session: frontierSession, snapshot: true },
                 0,
               )
             },

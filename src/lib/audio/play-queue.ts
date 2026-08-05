@@ -203,6 +203,10 @@ let progIndex = -1
 /** Set while WE quiet an element mid-verse; its onpause must not report the
  *  whole programme as paused. */
 let progSuppressPause = 0
+/** FORTIFY: pause-during-a-cold-dubbing-load has no element to pause — this
+ *  flag carries the cancellation across playAt's resolve so the load lands
+ *  CUED instead of auto-playing after the user said stop. Reset by playAt. */
+let dubbingWantPlay = true
 
 const coordinatorController: ActiveAudioController = {
   isPlaying: () => Boolean(currentAudio && !currentAudio.paused),
@@ -557,6 +561,15 @@ function progGateTimeout(gate: ProgGate): void {
     if (side === "target") {
       const entry = overlayPool.find((e) => e.cellId === gate.cellId)
       if (entry) removeOverlayEntry(entry)
+    } else if (currentAudio) {
+      // FORTIFY: park a struck SOURCE out of contention — it sits cued at the
+      // verse top, and a later pause/resume would otherwise start it there
+      // while the dub is already mid-verse: the two sides audibly playing
+      // DIFFERENT parts of the verse, the exact misalignment the gate
+      // prevents. Seeking it past its window makes resume's "still has audio
+      // left" check correctly skip it; the next verse re-cues it fresh.
+      const slot = programme?.byCellId.get(gate.cellId)
+      if (slot?.sourceWindow) currentAudio.currentTime = slot.sourceWindow.end
     }
     progGateSideFailed(gate, side)
   }
@@ -619,19 +632,32 @@ function progStartSides(gate: ProgGate): void {
 const PROG_ENDSTOP_MS = 60
 let progEndStopTimer: ReturnType<typeof setInterval> | null = null
 
+// FORTIFY: this is the SINGLE authority for audio-first verse boundaries, and
+// it reads the LIVE programme — never values copied into a pool entry at cue
+// time. That one property is what makes mid-verse edits safe: trimming the
+// playing verse, a collaborator swapping its take, or a delete all re-flow the
+// programme, and the very next 60ms check acts on the new truth (the frozen
+// stopAtClipSec copy remains ONLY for the dubbing fire path, whose windows
+// cannot re-flow). The element timeupdate handlers delegate here, so the
+// conditions cannot diverge.
 function progCheckBoundary(): void {
   if (timingMode !== "audioFirst" || state.kind !== "playing") return
   const slot = progCurrentSlot()
   if (!slot) return
-  // The dub's trim end-stop (same condition as its element handler).
   const entry = overlayPool.find((e) => e.cellId === slot.cellId)
   const dubAudio = entry?.element
-  if (entry && dubAudio && entry.stopAtClipSec != null && !dubAudio.paused && dubAudio.currentTime >= entry.stopAtClipSec) {
-    removeOverlayEntry(entry)
-    progOnTargetFinished(entry, "ended")
-    return
+  if (entry && dubAudio && !dubAudio.paused) {
+    const win = slot.targetWindow
+    // A re-flow that removed the dub (deleted/replaced take) OR the live trim
+    // end being reached both end the dub NOW — no ghost audio from a window
+    // that no longer exists.
+    if (win == null || dubAudio.currentTime >= win.end) {
+      removeOverlayEntry(entry)
+      progOnTargetFinished(entry, "ended")
+      return
+    }
   }
-  // The source's window end (same condition as its timeupdate handler).
+  // The source's window end (live).
   const el = currentAudio
   if (el && slot.sourceWindow && !el.paused && el.currentTime >= slot.sourceWindow.end) {
     if (progEffectiveClock(slot) === "source") progAdvance()
@@ -664,17 +690,20 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error"): v
     progGateSideFailed(gate, "target")
     return
   }
+  // Advancing is a PLAYING-transport act — a dub ending while paused (its last
+  // tick delivered just before the pause) must not auto-start the next verse.
+  if (state.kind !== "playing") return
   const slot = progCurrentSlot()
-  // Only the side that was MEANT to clock this verse ends it. A dub that runs
-  // out early just goes quiet while the original finishes.
   if (!slot || slot.cellId !== entry.cellId) return
-  if (
-    reason === "error" &&
+  // Can the original still carry this verse? (Playing, with window left.)
+  const sourceCanCarry = Boolean(
     slot.sourceWindow &&
     currentAudio &&
     !currentAudio.paused &&
-    currentAudio.currentTime < slot.sourceWindow.end
-  ) {
+    !currentAudio.ended &&
+    currentAudio.currentTime < slot.sourceWindow.end,
+  )
+  if (reason === "error" && sourceCanCarry) {
     // Mid-verse dub death (expired stream token, decode fault) with the
     // original still sounding: let the original carry the rest of the verse —
     // with the entry gone, progEffectiveClock already reports "source", so its
@@ -682,24 +711,33 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error"): v
     // HERE would throw away the remaining source audio.
     return
   }
-  if (slot.clock !== "target") return
-  progAdvance()
+  // FORTIFY: decide by what can actually still SOUND, not by the slot's
+  // declared clock. A re-flow can flip clock to "source" (or null) while the
+  // source is already spent/quiet — returning on the clock label alone left
+  // the transport in a permanent silent "playing" (the trim/delete stalls).
+  if (slot.clock === "target" || !sourceCanCarry) progAdvance()
 }
 
-/** Keep the programme clock in step with a dub that is clocking its verse. */
+/** Keep the programme clock in step with a dub that is clocking its verse.
+ *  FORTIFY: clamped to the verse's own span — a live head-trim shifts the
+ *  window under an unmoved element, and an unclamped mapping let the playhead
+ *  jump outside the verse being heard. */
 function progTargetTick(entry: OverlayEntry, audio: HTMLAudioElement): void {
   const slot = progCurrentSlot()
   if (!slot || slot.cellId !== entry.cellId) return
   if (slot.clock !== "target" || !slot.targetWindow) return
-  setProgress({ currentTime: slot.startSec + (audio.currentTime - slot.targetWindow.start) })
+  const t = slot.startSec + (audio.currentTime - slot.targetWindow.start)
+  setProgress({
+    currentTime: Math.min(Math.max(t, slot.startSec), slot.startSec + slot.slotLenSec),
+  })
 }
 
-/** Open (or re-position) the imported clip for this verse's original. */
-async function progOpenSource(
-  cell: CellData,
-  atClipSec: number,
-  autoplay: boolean,
-): Promise<void> {
+/** CUE the imported clip for this verse's original — position it, never start
+ *  it. FORTIFY: the old autoplay parameter was never passed true, and its dead
+ *  branches encoded a way to start the source WITHOUT the readiness gate —
+ *  exactly the bug the gate exists to prevent. Starting sides is exclusively
+ *  progStartSides' job now. */
+async function progOpenSource(cell: CellData, atClipSec: number): Promise<void> {
   const ctx = activeContext
   if (!ctx) return
   const src = sourceClipAudioForCell(cell) ?? pickPlayableAudio(cell)
@@ -712,11 +750,7 @@ async function progOpenSource(
   if (currentAudio && currentAttachmentUrl === src.url) {
     const el = currentAudio
     el.currentTime = atClipSec
-    if (autoplay && el.paused) {
-      try { await el.play() } catch { /* user-driven, ignore */ }
-    } else if (!autoplay && !el.paused) {
-      progQuiet(el)
-    }
+    if (!el.paused) progQuiet(el)
     return
   }
 
@@ -756,8 +790,9 @@ async function progOpenSource(
     if (seq !== currentSeq) return
     const slot = progCurrentSlot()
     if (!slot?.sourceWindow) return
-    // ~250ms of tick slop, the same tolerance the dubbing path lives with.
     if (audio.currentTime >= slot.sourceWindow.end) {
+      // FORTIFY: same boundary decision as the 60ms authority (which also
+      // covers this — the handler just makes an in-between tick land now).
       if (progEffectiveClock(slot) === "source") progAdvance()
       else {
         // Going quiet for the rest of the verse. Stamp the clock at exactly
@@ -792,14 +827,39 @@ async function progOpenSource(
     const slot = progCurrentSlot()
     if (slot && progEffectiveClock(slot) === "source") progAdvance()
   }
+  let triedBlobFallback = false
   audio.onerror = () => {
     if (seq !== currentSeq) return
+    // FORTIFY: the dubbing master retries a failed streaming src once via the
+    // full-bytes blob path (expired stream token after a long pause, transient
+    // network) — the audio-first source deserves the same self-heal instead of
+    // silently losing its side for the rest of the session.
+    if (resolved.streaming && resolved.frontier && !triedBlobFallback) {
+      triedBlobFallback = true
+      void (async () => {
+        try {
+          const url = await fetchFullBlobUrl(resolved.frontier!, ctx.projectId, cell.fileId, ctx.session)
+          if (seq !== currentSeq) {
+            URL.revokeObjectURL(url)
+            return
+          }
+          currentUrl = url
+          audio.src = url
+          // Re-position at the verse's cue point; if the transport is playing
+          // (the gate opened without us), rejoin.
+          pendingStartSeconds = atClipSec
+          if (state.kind === "playing") void audio.play().catch(() => { /* user-driven */ })
+        } catch {
+          if (seq !== currentSeq) return
+          const slot = progCurrentSlot()
+          if (slot && !progTargetEntry()) progAdvance()
+        }
+      })()
+      return
+    }
     // The original can't be loaded — let the dub carry the verse if it can.
     const slot = progCurrentSlot()
     if (slot && !progTargetEntry()) progAdvance()
-  }
-  if (autoplay) {
-    try { await audio.play() } catch { /* user-driven, ignore */ }
   }
 }
 
@@ -883,7 +943,7 @@ async function progPlaySlot(
     // resumeQueue (which replays the pool + a still-windowed source).
     if (dubDue && target) progCueTarget(slot, cell, target, into, null)
     if (sourceDue && slot.sourceWindow) {
-      await progOpenSource(cell, slot.sourceWindow.start + into, false)
+      await progOpenSource(cell, slot.sourceWindow.start + into)
     } else {
       progQuiet(currentAudio)
     }
@@ -939,10 +999,13 @@ function progSeekTo(sec: number, wantPlay: boolean): void {
   const at = Math.max(0, sec)
   const slot = slotAtProgrammeSec(prog, at)
   if (!slot) {
-    // Past the end — land on the last verse's final moment rather than nowhere.
+    // Past the end — land on the last verse's FINAL moment rather than
+    // nowhere. FORTIFY: this used to pass the verse's START, so dragging the
+    // scrubber to the far right replayed the whole last verse.
     const last = progPrevPlayable(prog.slots.length - 1)
     if (last < 0) return
-    void progPlaySlot(last, prog.slots[last].startSec, wantPlay)
+    const s = prog.slots[last]
+    void progPlaySlot(last, s.startSec + Math.max(0, s.slotLenSec - 0.001), wantPlay)
     return
   }
   void progPlaySlot(prog.slots.indexOf(slot), at, wantPlay)
@@ -972,6 +1035,10 @@ export interface PlayContext {
   session: FrontierSession
   /** Called when a cell starts playing — useful for scrolling into view. */
   onCellChange?: (cellIndex: number, cellId: string) => void
+  /** FORTIFY: a deliberate one-cell context ("play just this line") — the
+   *  bar's keep-cells-fresh effect must NOT swap the full file list in, or
+   *  single-line play marches on through the file. */
+  snapshot?: boolean
 }
 
 let activeContext: PlayContext | null = null
@@ -1264,12 +1331,17 @@ function wireOverlayElement(
   }
   if (audio.readyState >= 1) {
     // Metadata already loaded (adopted element): position it NOW — its
-    // prefetch pre-seek may be stale after a re-flow.
+    // prefetch pre-seek may be stale after a re-flow — and clear any old
+    // pre-seek handler so it can't fire later with a stale offset.
+    audio.onloadedmetadata = null
     applySeek()
-  } else if (startAtClipSec > 0.05) {
-    // Join the clip at the offset (trim head and/or mid-dub seek). Safari
-    // rejects pre-metadata seeks (same trick as the master's
-    // pendingStartSeconds).
+  } else if ("element" in media || startAtClipSec > 0.05) {
+    // Join the clip at the offset. Safari rejects pre-metadata seeks (same
+    // trick as the master's pendingStartSeconds). FORTIFY: an ADOPTED element
+    // whose metadata hasn't landed yet must ALWAYS get this handler — its
+    // stash-time pre-seek could target a trim that no longer exists, and
+    // leaving the old handler in place started the dub seconds into the clip,
+    // silently skipping the words the user just un-trimmed.
     audio.onloadedmetadata = () => {
       if (!overlayPool.includes(entry)) return
       applySeek()
@@ -1284,12 +1356,19 @@ function wireOverlayElement(
     progOnTargetFinished(entry, "error")
   }
   if (entry.stopAtClipSec != null) {
-    // Pool entries own their trim end-stop (~250ms timeupdate slop; pause
-    // immediately at the threshold to bound it).
     audio.ontimeupdate = () => {
       // SUB-53: when this dub is the longer side of its verse it also drives
       // the programme clock (audio-first only; a no-op in dubbing mode).
       progTargetTick(entry, audio)
+      if (timingMode === "audioFirst") {
+        // FORTIFY: audio-first boundaries have ONE authority reading the LIVE
+        // programme (mid-verse trims/deletes re-flow it); this handler just
+        // pokes it so a tick between interval beats still lands promptly.
+        progCheckBoundary()
+        return
+      }
+      // Dubbing: pool entries own their frozen trim end-stop (~250ms
+      // timeupdate slop; pause immediately at the threshold to bound it).
       if (entry.stopAtClipSec != null && audio.currentTime >= entry.stopAtClipSec) {
         removeOverlayEntry(entry)
         progOnTargetFinished(entry, "ended")
@@ -1393,6 +1472,13 @@ function progPrefetchNext(): void {
     el.preload = "auto"
     stash.element = el
     stash.objectUrl = resolved.objectUrl
+    // FORTIFY: a stash that dies while stocked (network blip, sleep/wake,
+    // expired stream token) must not be adopted — its error already fired, so
+    // the gate's onReady would never come and every affected boundary parked
+    // for the full patience window. Drop it; the cue path resolves fresh.
+    el.onerror = () => {
+      if (progPrefetch === stash) disposeProgPrefetch()
+    }
     if (preSeekSec > 0.05) {
       el.onloadedmetadata = () => {
         const d = el.duration
@@ -1431,21 +1517,43 @@ function progCueTarget(
   overlayPool.push(entry)
   const startAtClipSec = win.start + into
 
+  // FORTIFY: the gate-less cue (positioning while paused) still needs an
+  // onReady — if the user resumes BEFORE the resolve lands, resumeQueue can
+  // only start elements that exist, so a late-arriving dub must join by
+  // itself or the verse plays half-silent (or stalls when the dub clocks it).
+  const cueOpts = {
+    autostart: false,
+    onReady: gate
+      ? () => progGateSideReady(gate, "target")
+      : () => {
+          if (
+            timingMode === "audioFirst" &&
+            state.kind === "playing" &&
+            progCurrentSlot()?.cellId === entry.cellId &&
+            entry.element &&
+            overlayPool.includes(entry)
+          ) {
+            void entry.element.play().catch(() => { /* user-driven, ignore */ })
+          }
+        },
+  }
+
   // Adoption: identity must match EXACTLY — updateQueueCells re-flows can
   // swap the active take between stash time and now; a mismatch is discarded.
+  // FORTIFY: a stash whose element already errored (network blip while
+  // stocked) is dead weight — adopting it would park the gate for the full
+  // patience window; fall through to a fresh resolve instead.
   const stash = progPrefetch
   if (
     stash &&
     stash.element &&
+    stash.element.error == null &&
     stash.cellId === slot.cellId &&
     stash.audioId === target.audioId &&
     stash.url === target.url
   ) {
     progPrefetch = null
-    wireOverlayElement(entry, { element: stash.element, objectUrl: stash.objectUrl }, startAtClipSec, {
-      autostart: false,
-      onReady: gate ? () => progGateSideReady(gate, "target") : undefined,
-    })
+    wireOverlayElement(entry, { element: stash.element, objectUrl: stash.objectUrl }, startAtClipSec, cueOpts)
     return
   }
   void (async () => {
@@ -1461,10 +1569,7 @@ function progCueTarget(
       if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
       return
     }
-    wireOverlayElement(entry, { resolved }, startAtClipSec, {
-      autostart: false,
-      onReady: gate ? () => progGateSideReady(gate, "target") : undefined,
-    })
+    wireOverlayElement(entry, { resolved }, startAtClipSec, cueOpts)
   })()
 }
 
@@ -1475,7 +1580,7 @@ function progCueTarget(
  * fresh open reports on 'canplay'.
  */
 function progCueSource(cell: CellData, atClipSec: number, gate: ProgGate): void {
-  void progOpenSource(cell, atClipSec, false).then(() => {
+  void progOpenSource(cell, atClipSec).then(() => {
     if (progGate !== gate) return
     const el = currentAudio
     if (!el || state.kind === "error") {
@@ -1538,6 +1643,7 @@ function adoptCell(
  *  missing clip there surfaces its "missing" state instead of skipping to a
  *  neighbour, which auto-advance is allowed to do. */
 async function playAt(index: number, opts: { atSeconds?: number; autoplay?: boolean; explicit?: boolean } = {}): Promise<void> {
+  dubbingWantPlay = true // each open starts wanting to play; pause-mid-load clears it
   const ctx = activeContext
   if (!ctx) return
   const cell = ctx.cells[index]
@@ -1746,10 +1852,13 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     planTargetOverlay(ctx.cells, index, soundingCellIds(), "seek", opts.atSeconds ?? currentTrim?.start ?? 0),
   )
 
-  if (!autoplay) {
+  if (!autoplay || !dubbingWantPlay) {
     // AQU-646 cue-without-play: element loaded + positioned, transport shows
     // paused at the cue point; play/resumeQueue starts exactly there. The
     // coordinator is only claimed onplay, so a cue never steals active audio.
+    // FORTIFY: !dubbingWantPlay = the user pressed pause DURING this cold
+    // load (there was no element to pause yet) — honor the cancellation by
+    // cueing instead of blasting audio a second after they said stop.
     setState({ kind: "paused", cellIndex: index, cellId: cell.id })
     return
   }
@@ -1773,15 +1882,52 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
  *  cell with audio if the start index has none). `explicit` marks a
  *  user-chosen start (e.g. a selected timeline clip) so a missing clip there
  *  surfaces its "missing" state rather than skipping to a neighbour. */
+/** FORTIFY: the audio-first programme only exists for contexts that actually
+ *  contain timed media cells. A text/voicing file (or a single-cell snapshot
+ *  from a line's play button) in an audioFirst PROJECT must fall through to
+ *  the plain dubbing path — routing it through an empty programme silently
+ *  killed every play control on non-media files. Returns true when the
+ *  programme is live for this context; false = use the dubbing path. Always
+ *  clears leftover programme machinery so a prior run's gate/interval/
+ *  prefetch can't survive into (or resurrect from) the fallback. */
+function progEngageForContext(): boolean {
+  progClearGate()
+  progStopEndStop()
+  disposeProgPrefetch()
+  progRebuild()
+  if (programme && programme.slots.length > 0) return true
+  programme = null
+  progIndex = -1
+  return false
+}
+
+/** The programme slot index to start from for a cells-array index: the cell's
+ *  own verse, or scanning FORWARD for the next cell that is one (a selected
+ *  subtitle/untimed cell starts playback at the nearest following verse, the
+ *  same contract as the dubbing path's findNextPlayable). */
+function progStartIndexFor(cells: readonly CellData[], fromIndex: number): number {
+  const prog = programme
+  if (!prog) return -1
+  for (let ci = Math.max(0, fromIndex); ci < cells.length; ci++) {
+    const slot = prog.byCellId.get(cells[ci].id)
+    if (slot) {
+      const idx = prog.slots.indexOf(slot)
+      const playable = progNextPlayable(idx)
+      if (playable >= 0) return playable
+    }
+  }
+  return progNextPlayable(0)
+}
+
 export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false): void {
   activeContext = ctx
-  if (timingMode === "audioFirst") {
-    progRebuild()
-    const cellId = ctx.cells[Math.max(0, fromIndex)]?.id
-    const from = cellId ? (programme?.slots.findIndex((s) => s.cellId === cellId) ?? -1) : 0
-    const start = progNextPlayable(from < 0 ? 0 : from)
+  if (timingMode === "audioFirst" && progEngageForContext()) {
+    const start = progStartIndexFor(ctx.cells, fromIndex)
     if (start < 0) {
-      setState(IDLE)
+      // FORTIFY: exit through progFinish so the gate/interval/prefetch die
+      // with the attempt — a bare IDLE left a pending gate's timer alive,
+      // which could resurrect playback from idle seconds later.
+      progFinish()
       disposeCurrent()
       return
     }
@@ -1809,9 +1955,11 @@ export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}):
   const ctx = activeContext
   if (!ctx) return
   if (state.kind === "idle" || state.kind === "error") return
-  if (timingMode === "audioFirst") {
+  if (timingMode === "audioFirst" && programme && programme.slots.length > 0) {
     // SUB-53: `seconds` is a PROGRAMME second here — the ruler, the playhead
-    // and the transport all speak that clock in audio-first.
+    // and the transport all speak that clock in audio-first. (When the
+    // programme isn't driving — plain content playing through the dubbing
+    // fallback — file-second seeking below applies as normal.)
     progSeekTo(seconds, opts.play ?? (state.kind === "playing" || state.kind === "loading"))
     return
   }
@@ -1856,8 +2004,7 @@ function syncPlayState(wantPlay: boolean): void {
  *  back to the first playable cell when no window owns the time. */
 export function startQueueAtTime(ctx: PlayContext, seconds: number, opts: { play?: boolean } = {}): void {
   activeContext = ctx
-  if (timingMode === "audioFirst") {
-    progRebuild()
+  if (timingMode === "audioFirst" && progEngageForContext()) {
     progSeekTo(seconds, opts.play ?? true)
     return
   }
@@ -1878,12 +2025,19 @@ export function startQueueAtTime(ctx: PlayContext, seconds: number, opts: { play
 }
 
 export function pauseQueue(): void {
-  if (timingMode === "audioFirst") {
+  if (timingMode === "audioFirst" && (progGate || progIndex >= 0)) {
     // Pausing DURING a gate (the verse is still loading): nothing is sounding
-    // yet — just tell the gate not to start when it opens. The gate stays
-    // armed so resume needs no re-cue.
+    // yet — just tell the gate not to start when it opens, and SUSPEND its
+    // patience timer (FORTIFY: a timer that kept counting through a long
+    // pause struck the dub while nobody was listening, so resume silently
+    // played the verse half-sided). The gate stays armed so resume needs no
+    // re-cue.
     if (progGate) {
       progGate.wantPlay = false
+      if (progGate.timer != null) {
+        clearTimeout(progGate.timer)
+        progGate.timer = null
+      }
       setState({ kind: "paused", ...progStateCell() })
       return
     }
@@ -1891,18 +2045,31 @@ export function pauseQueue(): void {
     // the dub carries on — pause BOTH, then say so once.
     progQuiet(currentAudio)
     for (const e of overlayPool) e.element?.pause()
-    if (progIndex >= 0) setState({ kind: "paused", ...progStateCell() })
+    setState({ kind: "paused", ...progStateCell() })
+    return
+  }
+  // Dubbing (or audio-first playing plain content through the dubbing path).
+  // FORTIFY: during a cold "loading" there is no element yet — remember the
+  // cancellation so playAt cues instead of auto-playing when the load lands.
+  if (state.kind === "loading" && !currentAudio) {
+    dubbingWantPlay = false
+    setState({ kind: "paused", cellIndex: state.cellIndex, cellId: state.cellId })
     return
   }
   currentAudio?.pause()
 }
 
 export async function resumeQueue(): Promise<void> {
-  if (timingMode === "audioFirst") {
-    // Resuming into a still-pending gate: re-arm it and report the honest
-    // state — the sides start together the moment the gate opens.
+  if (timingMode === "audioFirst" && (progGate || progIndex >= 0)) {
+    // Resuming into a still-pending gate: re-arm it (and its suspended
+    // patience timer) and report the honest state — the sides start together
+    // the moment the gate opens.
     if (progGate) {
-      progGate.wantPlay = true
+      const gate = progGate
+      gate.wantPlay = true
+      if (gate.timer == null && gate.pending.size > 0) {
+        gate.timer = setTimeout(() => progGateTimeout(gate), GATE_TIMEOUT_MS)
+      }
       setState({ kind: "loading", ...progStateCell() })
       return
     }
@@ -1911,13 +2078,33 @@ export async function resumeQueue(): Promise<void> {
     // Only the sides that still have audio left in this verse come back. Ask
     // the ELEMENTS, not the clock — an element's own position is the truth,
     // and a dub that has finished is already out of the pool.
+    let started = 0
     if (currentAudio && slot.sourceWindow && currentAudio.currentTime < slot.sourceWindow.end) {
+      started++
       try { await currentAudio.play() } catch { /* user-driven, ignore */ }
     }
     for (const e of overlayPool) {
-      if (e.element) void e.element.play().catch(() => { /* user-driven */ })
+      if (e.element) {
+        started++
+        void e.element.play().catch(() => { /* user-driven */ })
+      }
+    }
+    // FORTIFY: never report "playing" with zero elements started — a verse
+    // whose sides all died while paused (struck dub, spent source) would
+    // otherwise become a permanent silent "playing" with nothing to tick.
+    // Advance instead: the next verse re-cues everything from scratch.
+    if (started === 0) {
+      progAdvance()
+      return
     }
     setState({ kind: "playing", ...progStateCell() })
+    return
+  }
+  // Dubbing: a resume during a cancelled cold load re-arms the autoplay the
+  // pause cancelled (the element may not exist yet).
+  if (state.kind === "paused" && !currentAudio) {
+    dubbingWantPlay = true
+    setState({ kind: "loading", cellIndex: state.cellIndex, cellId: state.cellId })
     return
   }
   if (!currentAudio) return
@@ -1936,9 +2123,22 @@ export function stopQueue(): void {
   activeContext = null
 }
 
+/** FORTIFY: skips must continue from the errored cell too — AQU-660's
+ *  missing-clip error state carries a cellId, and skipping "next" from it
+ *  used to restart playback from the top of the file. */
+function dubbingSkipAnchor(): number {
+  if (state.kind === "playing" || state.kind === "paused" || state.kind === "loading") {
+    return state.cellIndex
+  }
+  if (state.kind === "error" && state.cellId && activeContext) {
+    return activeContext.cells.findIndex((c) => c.id === state.cellId)
+  }
+  return -1
+}
+
 export function skipForward(): void {
   if (!activeContext) return
-  if (timingMode === "audioFirst") {
+  if (timingMode === "audioFirst" && progIndex >= 0) {
     const next = progNextPlayable(progIndex + 1)
     if (next < 0) {
       stopQueue()
@@ -1947,10 +2147,7 @@ export function skipForward(): void {
     void progPlaySlot(next, null, true)
     return
   }
-  const cur = state.kind === "playing" || state.kind === "paused" || state.kind === "loading"
-    ? state.cellIndex
-    : -1
-  const next = findNextPlayable(activeContext.cells, cur + 1)
+  const next = findNextPlayable(activeContext.cells, dubbingSkipAnchor() + 1)
   if (next < 0) {
     stopQueue()
     return
@@ -1960,15 +2157,13 @@ export function skipForward(): void {
 
 export function skipBack(): void {
   if (!activeContext) return
-  if (timingMode === "audioFirst") {
+  if (timingMode === "audioFirst" && progIndex >= 0) {
     const prev = progPrevPlayable(progIndex - 1)
     if (prev < 0) return
     void progPlaySlot(prev, null, true)
     return
   }
-  const cur = state.kind === "playing" || state.kind === "paused" || state.kind === "loading"
-    ? state.cellIndex
-    : -1
+  const cur = dubbingSkipAnchor()
   const prev = findPrevPlayable(activeContext.cells, cur - 1)
   if (prev < 0) return
   void playAt(prev)
@@ -1978,20 +2173,72 @@ export function skipBack(): void {
  *  Useful when the user generates voice mid-playback and we want the queue
  *  to reflect the new attachments on the next advance. */
 export function updateQueueCells(cells: CellData[]): void {
-  if (activeContext) activeContext.cells = cells
-  if (timingMode === "audioFirst") {
+  if (activeContext) {
+    // FORTIFY: a single-cell snapshot (a line's own play button) must NOT be
+    // clobbered with the full file list — that made "play this line" march on
+    // through the rest of the file and mislabel the now-playing line.
+    if (!activeContext.snapshot) activeContext.cells = cells
+  }
+  if (timingMode === "audioFirst" && progIndex >= 0) {
     // SUB-53: a new take or a trim re-flows the layout. Rebuild and keep the
     // transport on the SAME verse — its slot may well have moved.
     const onCellId = programme?.slots[progIndex]?.cellId ?? null
     progRebuild()
-    if (onCellId) {
-      const i = programme?.slots.findIndex((s) => s.cellId === onCellId) ?? -1
-      if (i >= 0) progIndex = i
+    const slots = programme?.slots ?? []
+    const i = onCellId ? slots.findIndex((s) => s.cellId === onCellId) : -1
+    if (i >= 0) {
+      progIndex = i
+      // FORTIFY: reconcile the SOUNDING dub against the re-flowed truth. A
+      // deleted or replaced take otherwise kept its old element ringing
+      // (ghost audio) — and once nothing else could sound, the transport sat
+      // in a permanent silent "playing".
+      const entry = overlayPool.find((e) => e.cellId === onCellId)
+      if (entry) {
+        const cell = activeContext?.cells.find((c) => c.id === onCellId)
+        const target = cell ? activeTargetForCell(cell) : null
+        const slot = slots[i]
+        if (!target || !slot.targetWindow || target.audioId !== entry.audioId) {
+          removeOverlayEntry(entry)
+          if (
+            state.kind === "playing" &&
+            !(currentAudio && !currentAudio.paused) &&
+            !progGate
+          ) {
+            // The removed dub was the only thing sounding — move on.
+            progAdvance()
+            return
+          }
+        }
+      }
+    } else if (onCellId) {
+      // FORTIFY: the playing verse left the programme entirely (deleted /
+      // merged / timing zeroed). A dangling numeric index mapped the clock
+      // through the WRONG verse (or none — a dead-end stuck in "playing").
+      // Re-enter cleanly at the nearest surviving verse, or finish.
+      const from = Math.min(progIndex, Math.max(0, slots.length - 1))
+      const next = slots.length > 0 ? progNextPlayable(from) : -1
+      if (next >= 0) {
+        void progPlaySlot(next, null, state.kind === "playing")
+      } else {
+        progFinish()
+      }
+      return
     }
     // The re-flow may have changed what the NEXT verse's dub is — restock
     // (no-op when the stash still matches; adoption double-checks identity).
     if (progIndex >= 0) progPrefetchNext()
     return
+  }
+  // FORTIFY (dubbing): the transport's identity is a raw index into a swapped
+  // array — re-anchor it by cellId so a collaborator's insert/delete above the
+  // playing section can't shift which cell is "current", and refresh the trim
+  // window so retiming the playing section applies to its end-stop.
+  if (!activeContext?.snapshot && (state.kind === "playing" || state.kind === "paused" || state.kind === "loading")) {
+    const idx = cells.findIndex((c) => c.id === state.cellId)
+    if (idx >= 0) {
+      currentIndex = idx
+      currentTrim = trimWindowForCell(cells[idx])
+    }
   }
   // Round 6/7: an armed dub's due time is a snapshot — refresh it (trim-aware)
   // if the chip was dragged or trimmed while we were waiting on it.

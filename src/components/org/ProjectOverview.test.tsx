@@ -79,6 +79,8 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
   setProjectDeadline: vi.fn(),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
+  // MembersTab → useProjectOrgId reads this; keep it quiet so overview chrome still mounts.
+  resolveCloudProjectResult: vi.fn(async () => ({ ok: true as const, project: { id: "p1", orgId: 1 } })),
 }))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({
@@ -569,7 +571,10 @@ describe("ProjectOverview file-breakdown column headers (AQU-492)", () => {
 // ── Archive / restore ──────────────────────────────────────────────────────
 
 describe("ProjectOverview archive/restore", () => {
-  it("owner sees Archive in overflow; clicking archives and returns to /projects", async () => {
+  const ARCHIVE_CHECKBOX =
+    "I understand this project will be hidden from the active list."
+
+  it("owner sees Archive in overflow; confirming archives and returns to /projects", async () => {
     useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
     archiveProjectRemote.mockResolvedValue({ kind: "archived", archivedAt: "now", archivedBy: { id: 1, username: "wendi" } })
     renderOverview()
@@ -581,8 +586,31 @@ describe("ProjectOverview archive/restore", () => {
     const btn = await screen.findByRole("menuitem", { name: "Archive" })
     fireEvent.click(btn)
 
+    // Confirm dialog — archive does not run until the checkbox is checked.
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(archiveProjectRemote).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled()
+
+    fireEvent.click(screen.getByText(ARCHIVE_CHECKBOX))
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }))
+
     await waitFor(() => expect(archiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
     expect(navigate).toHaveBeenCalledWith("/projects")
+  })
+
+  it("canceling the archive dialog does not archive", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }))
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(archiveProjectRemote).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   it("non-owner does not see the overflow menu (no archive)", async () => {

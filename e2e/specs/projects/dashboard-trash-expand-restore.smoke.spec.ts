@@ -23,11 +23,15 @@ test("archived project can be restored back to active projects", async ({ alice 
   await alice.goto(`/projects/${seeded.projectId}`)
   await expect(alice.getByRole("heading", { name })).toBeVisible({ timeout: 10_000 })
 
-  // Archive via the header overflow menu.
+  // Archive via the header overflow menu + ConfirmActionDialog.
   await alice.getByRole("button", { name: /More actions/i }).click()
   const archiveItem = alice.getByRole("menuitem", { name: /^Archive$/ })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await dialog.getByRole("checkbox", { name: /I understand this project will be hidden/i }).check()
+  await dialog.getByRole("button", { name: /^Archive$/ }).click()
   await alice.waitForURL(new RegExp(`/orgs/${alice.orgId}$`), { timeout: 10_000 })
 
   // The Archived page (sidebar "Archived" link) lists the project.

@@ -4,18 +4,20 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 /**
  * Project archive / restore lifecycle.
  *
- * Flow (matching ProjectOverview.tsx handleArchive / ArchivedProjects.tsx handleRestore):
+ * Flow (matching ProjectOverview.tsx ConfirmActionDialog + handleArchive /
+ * ArchivedProjects.tsx handleRestore):
  *
  *  1. Create a project → router lands on /projects/:id (overview).
  *  2. Open the ⋯ overflow menu (aria-label "More actions") → click "Archive".
+ *  3. ConfirmActionDialog opens — check acknowledgement, click "Archive".
  *     handleArchive() calls archiveProjectRemote, then navigate("/projects")
  *     — the app redirects to the active projects list automatically.
- *  3. The project is NOT in the active list at /projects.
- *  4. Navigate to /projects/archived — the project IS listed there with a
+ *  4. The project is NOT in the active list at /projects.
+ *  5. Navigate to /projects/archived — the project IS listed there with a
  *     "Restore" button rendered by ArchivedProjects.tsx.
- *  5. Click Restore → handleRestore() calls unarchiveProjectRemote + load().
+ *  6. Click Restore → handleRestore() calls unarchiveProjectRemote + load().
  *     The project disappears from the archived list.
- *  6. Navigate to /projects — the project is back in the active list.
+ *  7. Navigate to /projects — the project is back in the active list.
  */
 test("archive a project and restore it", async ({ alice }) => {
   const name = `Archive ${Date.now()}`
@@ -30,6 +32,12 @@ test("archive a project and restore it", async ({ alice }) => {
   const archiveItem = alice.getByRole("menuitem", { name: "Archive" })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
+
+  // ConfirmActionDialog — acknowledge + confirm.
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await dialog.getByRole("checkbox", { name: /I understand this project will be hidden/i }).check()
+  await dialog.getByRole("button", { name: /^Archive$/ }).click()
 
   // handleArchive() navigates to "/projects", which is a replace-redirect to the
   // org home. Wait for the settled URL, not the transient one.

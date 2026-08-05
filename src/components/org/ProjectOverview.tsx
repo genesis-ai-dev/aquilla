@@ -14,6 +14,7 @@ import { useProject } from "@/hooks/useProject"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
+import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
 import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
@@ -534,6 +535,7 @@ export function ProjectOverview() {
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
   const [audio, setAudio] = useState<PortfolioProject | null>(null)
   const [files, setFiles] = useState<FileSummary[]>([])
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
@@ -1037,7 +1039,7 @@ export function ProjectOverview() {
                           )}
                           {isOwner && (
                             <DropdownMenuItem
-                              onClick={handleArchive}
+                              onClick={() => setArchiveConfirmOpen(true)}
                               disabled={busy}
                               variant="destructive"
                             >
@@ -1049,6 +1051,23 @@ export function ProjectOverview() {
                     )}
                   </div>
                 </div>
+
+                <ConfirmActionDialog
+                  open={archiveConfirmOpen}
+                  onOpenChange={setArchiveConfirmOpen}
+                  title="Archive project"
+                  description={
+                    project?.name
+                      ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects.`
+                      : "Archive this project? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects."
+                  }
+                  confirmLabel="Archive"
+                  checkboxLabel="I understand this project will be hidden from the active list."
+                  variant="destructive"
+                  onConfirm={() => {
+                    void handleArchive()
+                  }}
+                />
 
                 {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
               </div>

@@ -31,11 +31,15 @@ test("Archive removes project from active projects list", async ({ alice }) => {
   await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
   await expect(alice.getByRole("heading", { name: archiveName })).toBeVisible({ timeout: 10_000 })
 
-  // Open the header overflow menu and click "Archive".
+  // Open the header overflow menu and click "Archive", then confirm.
   await alice.getByRole("button", { name: /More actions/i }).click()
   const archiveItem = alice.getByRole("menuitem", { name: /^Archive$/ })
   await expect(archiveItem).toBeVisible({ timeout: 3_000 })
   await archiveItem.click()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await dialog.getByRole("checkbox", { name: /I understand this project will be hidden/i }).check()
+  await dialog.getByRole("button", { name: /^Archive$/ }).click()
 
   // Archiving navigates to "/projects", which is a replace-redirect to the org
   // home. Wait for the settled URL, not the transient one.

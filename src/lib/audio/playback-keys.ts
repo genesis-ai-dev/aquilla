@@ -25,20 +25,24 @@ function isInteractiveOrEditable(target: EventTarget | null): boolean {
     case "INPUT":
     case "TEXTAREA":
     case "SELECT":
-    case "BUTTON":
     case "AUDIO":
     case "VIDEO":
       return true
+    case "BUTTON":
+      // Real buttons refuse Space (it activates them natively) — except
+      // transport surfaces that opt in: timeline dub CHIPS are buttons whose
+      // "activation" is selection, already done by the click that focused
+      // them, so click-a-chip-then-Space must play, not go dead. The check is
+      // OWN-attribute (never closest): a control nested INSIDE an opted-in
+      // surface — the chip's corner record button — keeps its native Space.
+      return !el.hasAttribute?.("data-spacebar-transport")
   }
   switch (el.getAttribute?.("role")) {
     case "button":
-      // role="button" DIVs fork two ways: dialog dropzones and voice cards are
-      // real controls (refuse), but timeline cards/clips are the playback
-      // surface itself — their "activation" is selection, which the click that
-      // focused them already did. Those opt in with data-spacebar-transport so
-      // click-a-verse-then-Space plays instead of going dead. Real <button>
-      // elements never reach here (caught by tagName above).
-      return el.closest?.("[data-spacebar-transport]") == null
+      // role="button" DIVs fork the same two ways: dialog dropzones and voice
+      // cards are real controls (refuse), but timeline cards opt in with
+      // data-spacebar-transport so click-a-verse-then-Space plays.
+      return !el.hasAttribute?.("data-spacebar-transport")
     case "textbox":
     case "slider":
     case "menuitem":

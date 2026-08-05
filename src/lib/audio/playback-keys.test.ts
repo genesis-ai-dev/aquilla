@@ -70,4 +70,24 @@ describe("spacebarShouldToggle", () => {
     card.appendChild(mute)
     expect(spacebarShouldToggle(evt({ target: mute }))).toBe(false)
   })
+
+  it("toggles on a real <button> that opts in as transport surface (dub chip)", () => {
+    // Click-a-chip-then-Space: the chip is a real <button>, so the click
+    // focuses it — Space must still play, not go dead.
+    const chip = document.createElement("button")
+    chip.setAttribute("data-spacebar-transport", "")
+    expect(spacebarShouldToggle(evt({ target: chip }))).toBe(true)
+  })
+
+  it("a control nested INSIDE an opted-in chip keeps its native Space (corner record)", () => {
+    // OWN-attribute rule: the chip's corner record button must not inherit
+    // the transport opt-in from its parent.
+    const chip = document.createElement("button")
+    chip.setAttribute("data-spacebar-transport", "")
+    const record = document.createElement("span")
+    record.setAttribute("role", "button")
+    record.tabIndex = 0
+    chip.appendChild(record)
+    expect(spacebarShouldToggle(evt({ target: record }))).toBe(false)
+  })
 })

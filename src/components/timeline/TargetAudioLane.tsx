@@ -313,6 +313,9 @@ function TargetAudioChip({
     <button
       type="button"
       data-testid={`tl-target-${cell.id}`}
+      // Space after clicking a chip belongs to the TRANSPORT (same opt-in as
+      // the timeline cards); the corner record button inside stays native.
+      data-spacebar-transport=""
       data-kind={chip.item.kind}
       data-overflow={overflow}
       {...(geom.usingFallback ? { "data-unknown-length": "true" } : {})}

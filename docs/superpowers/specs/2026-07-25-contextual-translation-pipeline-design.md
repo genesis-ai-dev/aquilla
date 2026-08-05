@@ -220,13 +220,22 @@ over. Each step completion POSTs a compact outcome event to the existing `Projec
 
 ```
 contextual.run.state   {runId, fileId, status: running|paused|done|failed, done, total}
-contextual.scene       {runId, sceneBriefId, spanLabel, ambiguityCount}
-contextual.span        {runId, spanLabel, staged, skipped, verdictSummary}
+contextual.span.start  {runId, fileId, spanId, spanLabel}
+contextual.phase       {runId, spanId, spanLabel, phase: reading|drafting|checking|staging}
+contextual.scene       {runId, sceneBriefId, spanLabel, ambiguityCount, spanId?}
+contextual.span        {runId, spanLabel, staged, skipped, verdictSummary, spanId?}
+contextual.drafts      {runId, fileId, spanLabel, drafts: [{draftId, cellId, text}], truncated?}
 ```
 
 Outcomes only — **never token deltas, never model reasoning**. A client that was closed
 missed nothing: state is reconstructable from rows (`scene_briefs`, staged drafts,
 `agent_runs` accounting); the DO feed is a live view, not the record.
+
+`contextual.drafts` carries the run's actual product — text that already cleared
+verification — so it can land in the cells it was written for. It is still an outcome,
+not a stream: a cell's draft appears once, whole, after quorum. `span.start` and `phase`
+exist because a wave runs several passages at once, and the construal loop is long enough
+that a lane with no frame reads as a hang.
 
 > **v1 implementation notes (2026-07-26).** Two deliberate narrowings shipped in the first
 > build: (1) the durable engine is a Postgres-backed run row (`contextual_runs`) driven by
@@ -237,6 +246,33 @@ missed nothing: state is reconstructable from rows (`scene_briefs`, staged draft
 > table reviewed via the existing client apply path, with the full external-changeset
 > (preconditions/digest) migration as follow-up. Neither changes the graph, the human
 > gate, or the frame contract.
+
+> **Wave execution (2026-08-02).** The one-span-per-tick executor became a
+> **wave** executor: `runOneTick` drives up to `waveSize(spansRemaining)` spans
+> concurrently, and the three verifiers inside a span dispatch together. Nothing about
+> the graph changed — the spans were always independent (see the concurrency note in the
+> graph spec), so the sequencing was buying wall-clock and nothing else. A 100-span book
+> that took an hour of serial ticks now finishes in a fraction of it.
+>
+> Three properties had to be re-established under concurrency, because serial execution
+> had been giving them away for free:
+>
+> - **Coverage.** The cursor advances past the whole wave in one guarded write. A crash
+>   replays a wave (re-proposing a draft is idempotent per cell) and never skips one.
+> - **Isolation.** `insertDrafts` takes `ON CONFLICT DO UPDATE`: two spans in a wave can
+>   overlap a cell (a `refresh_span` re-enqueue, a re-subdivided seed), and a bare INSERT
+>   would fail an otherwise-good span on the partial UNIQUE. Staging also re-reads live
+>   target text and drops any cell a human filled while the wave was in flight.
+> - **Liveness.** `resumeRun` accepts only `paused|parked`, so a run whose Worker request
+>   died stayed `running` with no driver and no way back — which every file past the
+>   loop's wave cap eventually hit. The loop now parks on cap, `updated_at` doubles as a
+>   driver heartbeat, and a cron sweep (`sweepStrandedContextualRuns`) adopts runs that
+>   went quiet or parked with spans left.
+>
+> Two ordering changes came with it, neither affecting coverage: runs carry an
+> `anchor_cell_id` and rotate the first wave to start at the user's position, and a
+> project-wide start (`POST /runs {scope:"project"}`) fans out across every discourse
+> file with work left, dividing a global concurrency ceiling across them.
 
 **Persisted proposals (the gate moves from System A to System B).** With no client
 guaranteed present, in-memory `AgentProposal` frames can't carry the human gate. Staged

@@ -181,6 +181,14 @@ export interface SkippedCell {
 
 export type ClosureExit = "model-closed" | "fixpoint" | "window-exhausted" | "max-iterations" | "budget"
 
+/**
+ * Coarse progress phase within one span, reported for live UI only — never a
+ * control signal. A span always moves reading → drafting → checking → staging,
+ * but may exit at any of them (budget, barrier, quorum), so consumers must
+ * treat every phase as potentially terminal.
+ */
+export type SpanPhase = "reading" | "drafting" | "checking" | "staging"
+
 export interface SpanReport {
   spanId: string
   fileId: string

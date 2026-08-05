@@ -23,7 +23,13 @@ export const FLAGS: Record<string, FeatureFlagDefinition> = {
     label: "Contextual drafting",
     description:
       "An assistant that reads whole passages, drafts translations from the surrounding context, and stages them for your review. Early preview — stays on this device.",
-    default: false,
+    // Default ON: this flag gates DISCOVERY, not spend. It decides whether the
+    // play button is visible; a run only starts, and only costs anything, when
+    // someone deliberately clicks it. Defaulting it off meant the feature could
+    // only be found by someone who already knew it existed and went looking in
+    // project settings for it — which is not a discovery path, it's a hiding
+    // place. Flip this single line to hide it again.
+    default: true,
   },
 }
 

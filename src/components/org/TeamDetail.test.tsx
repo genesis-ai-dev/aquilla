@@ -118,34 +118,35 @@ describe("TeamDetail admin management", () => {
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
     const picker = screen.getByRole("combobox", { name: /members to add/i })
-    expect(picker).toHaveTextContent("Search members...")
+    expect(picker).toHaveTextContent("Select members…")
     fireEvent.click(picker)
-    // anna is already in the team — never offered as a checkbox.
-    expect(screen.queryByRole("checkbox", { name: /^anna$/ })).toBeNull()
-    // Check Ben, then narrow the search to zara — Ben must stay staged.
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
-    expect(screen.getByRole("button", { name: /remove Ben/i })).toBeInTheDocument()
-    fireEvent.change(screen.getByRole("textbox", { name: /search org members/i }), {
+    // anna is already in the team — never offered as an option.
+    expect(screen.queryByRole("option", { name: /^anna$/ })).toBeNull()
+    // Select Ben, then narrow the search to zara — Ben must stay staged on the trigger.
+    fireEvent.click(await screen.findByRole("option", { name: /^Ben$/ }))
+    expect(picker).toHaveTextContent("Ben")
+    fireEvent.change(screen.getByRole("combobox", { name: /search members/i }), {
       target: { value: "za" },
     })
-    expect(screen.queryByRole("checkbox", { name: /^Ben$/ })).toBeNull()
-    expect(screen.getByRole("button", { name: /remove Ben/i })).toBeInTheDocument()
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^zara$/ }))
+    expect(screen.queryByRole("option", { name: /^Ben$/ })).toBeNull()
+    expect(picker).toHaveTextContent("Ben")
+    fireEvent.click(await screen.findByRole("option", { name: /^zara$/ }))
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
     // ONE batch call carrying both usernames — no client-side fan-out.
     await waitFor(() => expect(addTeamMembers).toHaveBeenCalledTimes(1))
     expect(addTeamMembers).toHaveBeenCalledWith("jwt", 1, 10, ["Ben", "zara"])
   })
 
-  it("Add is disabled until someone is staged, and removing the last chip re-disables it", async () => {
+  it("Add is disabled until someone is staged, and deselecting the last member re-disables it", async () => {
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
     expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
     fireEvent.click(screen.getByRole("combobox", { name: /members to add/i }))
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
+    fireEvent.click(await screen.findByRole("option", { name: /^Ben$/ }))
     expect(screen.getByRole("button", { name: /^add$/i })).toBeEnabled()
-    fireEvent.click(screen.getByRole("button", { name: /remove Ben/i }))
+    // Toggle Ben off again (same checkbox option).
+    fireEvent.click(screen.getByRole("option", { name: /^Ben$/ }))
     expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
     expect(addTeamMembers).not.toHaveBeenCalled()
   })
@@ -158,16 +159,17 @@ describe("TeamDetail admin management", () => {
     renderDetail()
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     await act(async () => { (await screen.findByRole("button", { name: /add member/i })).click() })
-    fireEvent.click(screen.getByRole("combobox", { name: /members to add/i }))
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^Ben$/ }))
-    fireEvent.click(await screen.findByRole("checkbox", { name: /^zara$/ }))
+    const picker = screen.getByRole("combobox", { name: /members to add/i })
+    fireEvent.click(picker)
+    fireEvent.click(await screen.findByRole("option", { name: /^Ben$/ }))
+    fireEvent.click(await screen.findByRole("option", { name: /^zara$/ }))
     await act(async () => { screen.getByRole("button", { name: /^add$/i }).click() })
     await waitFor(() =>
       expect(screen.getByText(/zara \(not an org member\)/)).toBeInTheDocument(),
     )
     // zara (failed) stays staged for a retry; Ben (succeeded) is dropped.
-    expect(screen.getByRole("button", { name: /remove zara/i })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /remove Ben/i })).toBeNull()
+    expect(picker).toHaveTextContent("zara")
+    expect(picker).not.toHaveTextContent("Ben")
   })
 
   it("removes a member", async () => {

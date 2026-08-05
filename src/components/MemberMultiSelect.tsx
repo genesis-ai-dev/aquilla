@@ -21,6 +21,8 @@ interface MemberMultiSelectProps {
   onValueChange: (next: string[]) => void
   /** Set this to pair the trigger with a FieldLabel `htmlFor`. */
   id?: string
+  /** Accessible name when there is no visible FieldLabel. */
+  "aria-label"?: string
   disabled?: boolean
   placeholder?: string
   searchPlaceholder?: string
@@ -43,6 +45,7 @@ export function MemberMultiSelect({
   value,
   onValueChange,
   id,
+  "aria-label": ariaLabel,
   disabled = false,
   placeholder = "Select members…",
   searchPlaceholder = "Search members…",
@@ -59,8 +62,12 @@ export function MemberMultiSelect({
       onValueChange={onValueChange}
       disabled={disabled}
     >
-      <MultiSelectComboboxTrigger id={id} size={size} className={className}>
-        <MultiSelectComboboxValue placeholder={placeholder}>
+      <MultiSelectComboboxTrigger
+        id={id}
+        size={size}
+        className={className}
+        aria-label={ariaLabel}
+      >        <MultiSelectComboboxValue placeholder={placeholder}>
           {(names) => {
             const shown = names.slice(0, avatarCap)
             const overflow = names.length - shown.length

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { useNavigate, useParams } from "react-router-dom"
-import { ChevronDown, FolderGit2, Search, Users, X } from "lucide-react"
+import { FolderGit2, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
+import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Button } from "@/components/ui/button"
@@ -11,13 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { Page, PageHeader, Section, EmptyState } from "@/components/ui/page"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -146,8 +141,9 @@ export function TeamDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  // Add member UI state — multi-select (AQU-735): stage several org members as
-  // chips and grant them all in one batch request.
+  // Add member UI state — multi-select (AQU-735): stage several org members via
+  // MemberMultiSelect (same checkbox combobox as named validators) and grant
+  // them all in one batch request.
   const [addingMember, setAddingMember] = useState(false)
   const [stagedUsernames, setStagedUsernames] = useState<string[]>([])
   const [addBusy, setAddBusy] = useState(false)
@@ -188,13 +184,6 @@ export function TeamDetail() {
         .sort((a, b) => a.username.localeCompare(b.username, undefined, { sensitivity: "base" })),
     [orgMembers, team?.members],
   )
-
-  const toggleStaged = useCallback((username: string) => {
-    setAddError(null)
-    setStagedUsernames((prev) =>
-      prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username],
-    )
-  }, [])
 
   function closeAddMember() {
     setAddingMember(false)
@@ -460,37 +449,29 @@ export function TeamDetail() {
                 >
                   {isAdmin && (
                     <Dialog open={addingMember} onOpenChange={(o) => { if (!o) closeAddMember() }}>
-                      <DialogContent className="max-w-md">
+                      <DialogContent className="max-w-md gap-4">
                         <DialogHeader>
                           <DialogTitle>Add members to &apos;{team.name}&apos;</DialogTitle>
                         </DialogHeader>
-                        <div className="space-y-2">
-                          <TeamMemberCombobox
-                            members={availableOrgMembers}
-                            staged={stagedUsernames}
-                            onToggle={toggleStaged}
-                            disabled={availableOrgMembers.length === 0}
-                          />
-                          {stagedUsernames.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {stagedUsernames.map((username) => (
-                                <span
-                                  key={username}
-                                  className="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"
-                                >
-                                  {username}
-                                  <button
-                                    type="button"
-                                    aria-label={`Remove ${username}`}
-                                    onClick={() => toggleStaged(username)}
-                                    className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
-                          )}
+                        <div className="flex w-full flex-col gap-2">
+                          <div className="w-full">
+                            <MemberMultiSelect
+                              id="team-add-members"
+                              aria-label="Members to add"
+                              className="w-full!"
+                              members={availableOrgMembers.map((m) => m.username)}
+                              value={stagedUsernames}
+                              disabled={availableOrgMembers.length === 0}
+                              placeholder="Select members…"
+                              searchPlaceholder="Search members…"
+                              searchLabel="Search members"
+                              emptyMessage="No available members match."
+                              onValueChange={(next) => {
+                                setAddError(null)
+                                setStagedUsernames(next)
+                              }}
+                            />
+                          </div>
                           {availableOrgMembers.length === 0 && stagedUsernames.length === 0 && (
                             <p className="text-xs text-muted-foreground">
                               All org members are already in this team.
@@ -502,7 +483,7 @@ export function TeamDetail() {
                             </p>
                           )}
                         </div>
-                        <DialogFooter>
+                        <DialogFooter className="mt-0">
                           <Button type="button" variant="outline" onClick={closeAddMember}>
                             Cancel
                           </Button>
@@ -725,116 +706,5 @@ export function TeamDetail() {
         </Page>
       }
     />
-  )
-}
-
-/**
- * Multi-select org-member picker (AQU-735). Each available org member is a
- * checkbox row; checking accumulates the person in `staged` (rendered as
- * removable chips by the caller). The popover stays open on toggle so several
- * people can be picked in one pass, and typing filters the list without
- * dropping anyone already checked.
- */
-function TeamMemberCombobox({
-  members,
-  staged,
-  onToggle,
-  disabled,
-}: {
-  members: OrgMember[]
-  staged: string[]
-  onToggle: (username: string) => void
-  disabled?: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const filteredMembers = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase()
-    if (!normalizedQuery) return members
-    return members.filter((member) =>
-      member.username.toLocaleLowerCase().includes(normalizedQuery)
-    )
-  }, [members, query])
-
-  function handleOpenChange(nextOpen: boolean) {
-    setOpen(nextOpen)
-    if (nextOpen) setQuery("")
-  }
-
-  const triggerLabel =
-    staged.length === 0
-      ? "Search members..."
-      : `${staged.length} selected`
-
-  return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        render={
-          <button
-            type="button"
-            role="combobox"
-            aria-label="Members to add"
-            aria-expanded={open}
-            aria-controls="team-member-combobox-list"
-            disabled={disabled}
-            className="inline-flex h-8 min-w-64 items-center justify-between gap-2 rounded-lg border border-input bg-background px-2.5 text-left text-sm outline-none transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          />
-        }
-      >
-        <span className={staged.length > 0 ? "truncate" : "truncate text-muted-foreground"}>
-          {triggerLabel}
-        </span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-      </PopoverTrigger>
-      <PopoverContent className="w-72 p-2" side="bottom" sideOffset={4}>
-        <InputGroup className="mb-2">
-          <InputGroupAddon>
-            <Search />
-          </InputGroupAddon>
-          <InputGroupInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search org members..."
-            aria-label="Search org members"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            autoFocus
-          />
-        </InputGroup>
-        <div
-          id="team-member-combobox-list"
-          role="group"
-          aria-label="Org members"
-          className="max-h-56 overflow-y-auto rounded-md border bg-background p-1"
-        >
-          {filteredMembers.length === 0 ? (
-            <p className="px-2 py-2 text-xs text-muted-foreground">
-              No available members match.
-            </p>
-          ) : (
-            filteredMembers.map((member) => {
-              const checked = staged.includes(member.username)
-              return (
-                <label
-                  key={member.userId}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted"
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={member.username}
-                    checked={checked}
-                    onChange={() => onToggle(member.username)}
-                    className="h-4 w-4 shrink-0 rounded border-input accent-primary"
-                  />
-                  <span className="truncate">{member.username}</span>
-                </label>
-              )
-            })
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
   )
 }

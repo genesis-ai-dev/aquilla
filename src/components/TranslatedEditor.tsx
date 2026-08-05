@@ -27,7 +27,7 @@ import { Bold, Italic, Underline as UnderlineIcon, Strikethrough, Code } from "l
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type MutableRefObject } from "react"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { createViolationDecorationExtension, violationPluginKey } from "@/lib/richtext/violation-decoration-plugin"
 import { createKaraokeExtension, karaokePluginKey, type KaraokePluginState } from "@/lib/richtext/karaoke-plugin"
@@ -35,6 +35,7 @@ import { createTerminologyChipExtension, terminologyChipPluginKey } from "@/lib/
 import { createFootnoteDecorationExtension, footnoteDecorationPluginKey } from "@/lib/richtext/footnote-decoration-plugin"
 import { UsfmFootnote } from "@/lib/richtext/footnote-node"
 import {
+  IDML_SLOT_NODE_NAME,
   idmlEditableSlotPosition,
   idmlEditableSlotOffsetPosition,
   idmlEditablePlainOffsetPosition,
@@ -42,6 +43,7 @@ import {
   idmlEditorExtensions,
   isEditableIdmlSelection,
   prepareIdmlEditorContent,
+  sanitizeIdmlSlotInsertion,
   serializeIdmlEditorDocument,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
@@ -153,10 +155,33 @@ interface IdmlInsertedRange {
   to: number
 }
 
+/**
+ * AQU-758: the slot character immediately before/after an insertion point,
+ * used to decide whether an inserted space would create spurious whitespace.
+ * Returns "" at a slot edge or against a protected token / line break — anything
+ * that is not literal slot text reads as a boundary.
+ */
+function idmlSlotBoundaryChar(
+  doc: ProseMirrorNode,
+  pos: number,
+  side: "before" | "after",
+): string {
+  const resolved = doc.resolve(pos)
+  if (resolved.parent.type.name !== IDML_SLOT_NODE_NAME) return ""
+  const offset = resolved.parentOffset
+  if (side === "before") {
+    if (offset <= 0) return ""
+    return resolved.parent.textBetween(offset - 1, offset)
+  }
+  if (offset >= resolved.parent.content.size) return ""
+  return resolved.parent.textBetween(offset, offset + 1)
+}
+
 function replaceIdmlSelectionWithPlainText(
   view: EditorView,
   text: string,
   requestedRange?: IdmlInsertedRange,
+  mode: "paste" | "type" = "type",
 ): IdmlInsertedRange | null {
   const selection = view.state.selection
   const fallbackPosition = idmlEditableSlotPosition(view.state.doc)
@@ -166,7 +191,9 @@ function replaceIdmlSelectionWithPlainText(
     ?? (isEditableIdmlSelection(selection) ? selection.to : fallbackPosition)
   if (from === null || to === null) return null
 
-  const normalized = text.replace(/\r\n?/g, "\n")
+  const before = idmlSlotBoundaryChar(view.state.doc, from, "before")
+  const after = idmlSlotBoundaryChar(view.state.doc, to, "after")
+  const normalized = sanitizeIdmlSlotInsertion(text, before, after, mode).replace(/\r\n?/g, "\n")
   const lines = normalized.split("\n")
   const nodes = lines.flatMap((line, index) => [
     ...(line.length > 0 ? [view.state.schema.text(line)] : []),
@@ -222,6 +249,13 @@ interface TranslatedEditorProps {
    */
   aiDrafted?: boolean
   onCommit: (snapshot: TranslatedEditorCommit) => void
+  /**
+   * AQU-746: keystrokes a fast typist enters after clicking a cell but before
+   * this editor has mounted + focused are buffered by the parent row (they have
+   * no editor to land in yet). On focus, once the caret is placed, this editor
+   * drains the buffer into the document so the first character(s) are never lost.
+   */
+  pendingInputRef?: MutableRefObject<string>
   onFocus?: () => void
   onBlur?: () => void
   onSelectionChange?: (selection: TargetPresenceSelection | null) => void
@@ -313,6 +347,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   onIdmlValidationError,
   aiDrafted = false,
   onCommit,
+  pendingInputRef,
   onFocus,
   onBlur,
   onSelectionChange,
@@ -625,7 +660,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         const plainText = event.clipboardData?.getData("text/plain")
           ?? slice.content.textBetween(0, slice.content.size, "\n")
         event.preventDefault()
-        replaceIdmlSelectionWithPlainText(view, plainText)
+        // AQU-758: paste mode strips leading/trailing/doubled spaces so a paste
+        // never injects the spurious whitespace the health check later flags.
+        replaceIdmlSelectionWithPlainText(view, plainText, undefined, "paste")
         return true
       },
       handleDoubleClick(view, pos, event) {
@@ -1001,6 +1038,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         if (position !== null) editor.commands.setTextSelection(position)
       }
       onFocus?.()
+      // AQU-746: drain any keystrokes the parent row buffered while this editor
+      // was mounting/focusing (a fast typist after a click). The caret is now
+      // placed — IDML at its protected slot position above, plain at end via the
+      // insert path — so replaying preserves order and lands where a normal edit
+      // would. Route through the same insertion logic as live typing.
+      const buffered = pendingInputRef?.current
+      if (buffered) {
+        pendingInputRef.current = ""
+        if (idmlContext) {
+          replaceIdmlSelectionWithPlainText(editor.view, buffered)
+        } else {
+          // Insert as a literal text node (not HTML) so characters like "<" or
+          // "&" are preserved verbatim rather than parsed as markup. Buffered
+          // content is printable single keys only — never a newline.
+          editor.chain().focus("end").insertContent({ type: "text", text: buffered }).run()
+        }
+      }
       publishSelection(editor)
     },
     onBlur({ editor }) {
@@ -1351,7 +1405,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           <button
             type="button"
             onClick={onDiscardLocal}
-            className="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
+            className="rounded-md bg-amber-500/20 px-2 py-0.5 text-amber-900 hover:bg-amber-500/30 dark:text-amber-100"
           >
             Discard and reload
           </button>
@@ -1397,7 +1451,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleBold().run()}
               aria-label="Bold"
-              className={cn("rounded-full", editor.isActive("bold") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("bold") && "bg-accent")}
             >
               <Bold className="h-3 w-3" />
             </Button>
@@ -1409,7 +1463,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleItalic().run()}
               aria-label="Italic"
-              className={cn("rounded-full", editor.isActive("italic") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("italic") && "bg-accent")}
             >
               <Italic className="h-3 w-3" />
             </Button>
@@ -1421,7 +1475,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleUnderline().run()}
               aria-label="Underline"
-              className={cn("rounded-full", editor.isActive("underline") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("underline") && "bg-accent")}
             >
               <UnderlineIcon className="h-3 w-3" />
             </Button>
@@ -1433,7 +1487,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleStrike().run()}
               aria-label="Strikethrough"
-              className={cn("rounded-full", editor.isActive("strike") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("strike") && "bg-accent")}
             >
               <Strikethrough className="h-3 w-3" />
             </Button>
@@ -1445,7 +1499,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
               size="icon-xs"
               onClick={() => editor.chain().focus().toggleCode().run()}
               aria-label="Inline code"
-              className={cn("rounded-full", editor.isActive("code") && "bg-accent")}
+              className={cn("rounded-md", editor.isActive("code") && "bg-accent")}
             >
               <Code className="h-3 w-3" />
             </Button>

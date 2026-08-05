@@ -57,31 +57,16 @@ describe("GET /api/v2/users/lookup — whitespace/case robustness (AQU-457)", ()
     expect(body.username).toBe("CaseUser")
   })
 
-  it("prefers the exact-case match over a lower-id case-collision (hardening)", async () => {
-    // 'Bob' has the LOWER id — a naive `ORDER BY id ASC LIMIT 1` over a
-    // case-insensitive match would silently resolve 'bob' to 'Bob'. The
-    // exact-match-first lookup must return the exact 'bob' row instead.
+  it("prevents case-only account collisions before lookup can become ambiguous", async () => {
+    // AQU-713 added a database-level UNIQUE(LOWER(username)) invariant. Keep
+    // this assertion at the real schema boundary so lookup tests cannot drift
+    // back to constructing an identity state production rejects.
     await seedUser(308, "Bob")
-    await seedUser(309, "bob")
-    await seedUser(310, "caller-collision-1")
-
-    const res = await app.request(
-      `/api/v2/users/lookup?username=${encodeURIComponent("bob")}`,
-      { method: "GET", headers: authHeader(await jwtFor("caller-collision-1")) },
-      env,
-    )
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as { id: number; username: string }
-    expect(body.username).toBe("bob")
-    expect(body.id).toBe(309)
+    await expect(seedUser(309, "bob")).rejects.toThrow("idx_users_username_ci")
   })
 
-  it("returns not-found (not a silent guess) when case-insensitive match is ambiguous", async () => {
-    // Querying 'BOB' has no exact row, and matches BOTH 'Bob' and 'bob'
-    // case-insensitively. Picking either one risks granting membership to
-    // the wrong account, so this must 404 rather than guess.
+  it("resolves a differently-cased query under the unique-identity invariant", async () => {
     await seedUser(311, "Bob2")
-    await seedUser(312, "bob2")
     await seedUser(313, "caller-collision-2")
 
     const res = await app.request(
@@ -89,7 +74,9 @@ describe("GET /api/v2/users/lookup — whitespace/case robustness (AQU-457)", ()
       { method: "GET", headers: authHeader(await jwtFor("caller-collision-2")) },
       env,
     )
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { id: number; username: string }
+    expect(body).toEqual({ id: 311, username: "Bob2" })
   })
 
   it("still 404s for a genuinely-absent username", async () => {

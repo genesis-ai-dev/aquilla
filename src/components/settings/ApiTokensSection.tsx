@@ -33,7 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
-import { Section } from "@/components/ui/page"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
@@ -164,10 +164,11 @@ export function ApiTokensSection() {
   }
 
   return (
-    <Section
-      title="API tokens"
-      description="Personal access tokens for the Agent API. Anyone holding a token can act with your access, up to its scope — treat it like a password."
-      action={
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-4 px-1">
+        <p className="font-heading text-base font-medium tracking-tight text-foreground">
+          Access
+        </p>
         <MintTokenDialog
           jwt={jwt}
           orgs={orgs}
@@ -177,31 +178,34 @@ export function ApiTokensSection() {
             refresh()
           }}
         />
-      }
-    >
-      {loading && !credentials ? (
-        <p className="text-xs text-muted-foreground">Loading…</p>
-      ) : error ? (
-        <p className="text-xs text-destructive" role="alert">
-          {error}
-        </p>
-      ) : !credentials || credentials.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          No tokens yet. Mint one to let an agent call the Agent API on your behalf.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {credentials.map((cred) => (
-            <CredentialRow
-              key={cred.id}
-              credential={cred}
-              orgs={orgs}
-              projects={projects}
-              onRevoke={() => setRevokeTarget(cred)}
-            />
-          ))}
-        </ul>
-      )}
+      </div>
+      <SettingsGroup>
+        <SettingsRow label="Your tokens" block>
+          {loading && !credentials ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : error ? (
+            <p className="text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          ) : !credentials || credentials.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No tokens yet. Mint one to let an agent call the Agent API on your behalf.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {credentials.map((cred) => (
+                <CredentialRow
+                  key={cred.id}
+                  credential={cred}
+                  orgs={orgs}
+                  projects={projects}
+                  onRevoke={() => setRevokeTarget(cred)}
+                />
+              ))}
+            </ul>
+          )}
+        </SettingsRow>
+      </SettingsGroup>
 
       {revokeTarget && (
         <RevokeCredentialDialog
@@ -218,7 +222,7 @@ export function ApiTokensSection() {
       {mintResult && (
         <ShowOnceTokenDialog result={mintResult} onClose={() => setMintResult(null)} />
       )}
-    </Section>
+    </div>
   )
 }
 

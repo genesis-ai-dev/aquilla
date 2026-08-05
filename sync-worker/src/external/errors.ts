@@ -61,11 +61,17 @@ export class ExternalError extends Error {
   }
 }
 
-/** Map any thrown value to an error Response — ExternalError verbatim, else 500. */
+/**
+ * Map any thrown value to an error Response — ExternalError verbatim, else a
+ * generic 500. Unexpected errors (driver/DB exceptions, etc.) are logged
+ * server-side but never echoed to the caller: the external Agent API is
+ * reachable by PAT holders outside the org's trust boundary, and raw
+ * exception text can leak schema/query internals.
+ */
 export function toErrorResponse(err: unknown): Response {
   if (err instanceof ExternalError) return err.toResponse()
-  const message = err instanceof Error ? err.message : String(err)
-  return errorResponse('job_failed', message)
+  console.error('external API unexpected error:', err)
+  return errorResponse('job_failed', 'internal error')
 }
 
 /**

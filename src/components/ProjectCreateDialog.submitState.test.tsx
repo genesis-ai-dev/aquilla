@@ -66,7 +66,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
     fillValidSelfContained()
 
     const button = screen.getByRole("button", { name: /Create Project/i })
@@ -89,7 +89,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
     fillValidSelfContained()
 
     const button = screen.getByRole("button", { name: /Create Project/i })
@@ -115,7 +115,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     mockCreateCloudProject.mockRejectedValueOnce(new Error("network blip"))
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByText("+ New Project"))
+    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
     fillValidSelfContained()
 
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))

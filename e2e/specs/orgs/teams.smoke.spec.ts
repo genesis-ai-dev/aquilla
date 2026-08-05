@@ -1,4 +1,4 @@
-import { test, expect } from "../../helpers/multi-user"
+import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /**
  * Teams — create a team.
@@ -14,7 +14,7 @@ import { test, expect } from "../../helpers/multi-user"
  * Teams are org-scoped. Alice is logged in as the owner of "Acme" org.
  */
 test("create a team and navigate to its detail page", async ({ alice }) => {
-  await alice.goto("/teams")
+  await alice.goto(orgRoute(alice, "/teams"))
   // 1. "New team" button is visible (only rendered for owners/admins).
   const newTeamBtn = alice.getByRole("button", { name: /New team/i })
   await expect(newTeamBtn).toBeVisible({ timeout: 10_000 })

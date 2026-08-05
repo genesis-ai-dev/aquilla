@@ -2,11 +2,13 @@ import { Suspense, lazy } from "react"
 import { Navigate, Routes, Route } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
+import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
+import { resumeOrgPath } from "@/lib/navigation/org-paths"
 import { JoinPage } from "@/components/JoinPage"
 import { AccessLinkPage } from "@/components/AccessLinkPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
@@ -26,6 +28,7 @@ import { OutboxProvider } from "@/context/OutboxContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import { Toaster } from "@/components/ui/sonner"
 import { AiModelConsentDialog } from "@/components/AiModelConsentDialog"
 import { AiModelDownloadChip } from "@/components/AiModelDownloadChip"
 import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
@@ -112,32 +115,26 @@ function SyncFreezeOverlay() {
 }
 
 /**
- * Root-path guard: visitors without the aq_hint=1 cookie are sent to
- * /homepage (the marketing page). Returning/authenticated users who have
- * the cookie proceed to OrgHome as before.
+ * Workspace entry point, mounted at both `/app` and `/`.
  *
- * This is a client-side defence-in-depth layer. The aquilla-web Worker
- * already does the same check at the edge (worker/index.ts) — this guard
- * only fires if the SPA is somehow reached without the Worker (e.g. local
- * dev without `wrangler dev`, or a Worker not yet deployed).
+ * `/` is served as the marketing homepage to every visitor now — the Worker
+ * doesn't branch on a cookie any more (see worker/index.ts), which is what lets
+ * that page be edge-cached. So a fresh load never reaches this component at `/`;
+ * only in-app navigation does. `/app` is the URL that opens the workspace, and
+ * it's where the marketing nav and AppEntryBanner point.
  *
- * Loop-safety: /homepage is served as homepage.html (a separate entry point
- * that never mounts this component), so this redirect can never loop back.
+ * Signed-out visitors go to /login rather than back to the marketing page:
+ * anyone arriving here clicked something that said "open the app", and bouncing
+ * them to the page they just left would read as a broken link. A user who
+ * completed onboarding counts as signed in — they may be working on local-only
+ * projects without a Frontier account.
+ *
+ * Signed-in visitors resume their last org (`/orgs/$id` or `/orgs/all`).
  */
-function RootRedirect() {
-  // A user who has completed onboarding is a real user of the app (they may be
-  // working with local-only projects without a Frontier account), so don't
-  // bounce them to the marketing homepage — only un-onboarded, signed-out
-  // visitors get sent there.
+function AppEntry() {
   const onboarded = localStorage.getItem("codex:onboardingComplete") === "true"
-  if (!hasAuthHintCookie() && !onboarded) {
-    // Hard redirect so the Worker (or server) can serve homepage.html.
-    // A client-side <Navigate> would stay inside the SPA bundle and find
-    // no React Router match for /homepage.
-    window.location.replace("/homepage")
-    return null
-  }
-  return <OrgHome />
+  if (!hasAuthHintCookie() && !onboarded) return <Navigate to="/login" replace />
+  return <Navigate to={resumeOrgPath()} replace />
 }
 
 /** Fallback used while lazy route chunks are loading (e.g. the workspace). */
@@ -174,6 +171,7 @@ export default function App() {
         <GlobalAudioShortcuts />
         <VersionBadge />
         <UpdateBanner />
+        <Toaster />
       </SyncingProvider>
     </TooltipProvider>
   )
@@ -184,10 +182,12 @@ function AppRoutes() {
     <Suspense fallback={<RouteLoadingFallback />}>
       <Routes>
         {/* Eager — needed for first paint / sign-in flow */}
-        <Route path="/" element={<RootRedirect />} />
-        <Route path="/projects" element={<Navigate to="/" replace />} />
+        <Route path="/" element={<AppEntry />} />
+        {/* The workspace entry. `/` is marketing at the edge, so this is the
+            URL that opens the app — marketing nav + AppEntryBanner point here. */}
+        <Route path="/app" element={<AppEntry />} />
+        <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
-        <Route path="/assigned" element={<AssignedToMe />} />
         <Route path="/shared" element={<SharedProjectsPage />} />
         <Route path="/join/:token" element={<JoinPage />} />
         {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
@@ -209,44 +209,47 @@ function AppRoutes() {
         {/* Curated marketing/demo auto-login — see components/MarketingLoginRoute.tsx */}
         <Route path="/__marketing/login" element={<MarketingLoginRoute />} />
 
-        {/* Lazy — org-level pages */}
-        <Route path="/projects/archived" element={<ArchivedProjects />} />
         <Route path="/preferences" element={<Preferences />} />
-        {/* Preferences detail sub-pages — index of nav rows lives at /preferences */}
         <Route path="/preferences/:section" element={<Preferences />} />
 
-        {/* Lazy — heavy workspace tree (pulls in tiptap, editor deps, react-player) */}
-        <Route path="/project/:id" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/file/:fileId" element={<ProjectWorkspace />} />
+        {/* Org shell — path is authoritative for active org. `/orgs/all` is home-only. */}
+        <Route path="/orgs/all" element={<OrgHome />} />
+        <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
+          <Route index element={<OrgHome />} />
+          <Route path="assigned" element={<AssignedToMe />} />
+          <Route path="archived" element={<ArchivedProjects />} />
+          <Route path="teams" element={<TeamsList />} />
+          <Route path="teams/:groupId" element={<TeamDetail />} />
+          <Route path="members" element={<MembersPage />} />
+          <Route path="members/matrix" element={<MembersPage />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="settings/identity" element={<OrgSettingsIdentity />} />
+          <Route path="settings/export" element={<OrgSettingsExport />} />
+          <Route path="settings/roster" element={<OrgSettingsRoster />} />
+          <Route path="settings/assignment" element={<OrgSettingsAssignment />} />
+          <Route path="settings/providers" element={<OrgSettingsProviders />} />
+          <Route path="settings/monday" element={<OrgSettingsMonday />} />
+        </Route>
+
+        {/* Project routes stay flat (not nested under /orgs).
+            Default work surface is explicit: /project/:id/editor[/file/:fileId].
+            Bare /project/:id and /project/:id/file/:fileId are intentionally dead. */}
+        <Route path="/project/:id/editor" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
-        {/* AQU-194: /rules deep-link renders inside ProjectWorkspace shell — shell stays mounted. */}
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
         <Route path="/project/:id/rules" element={<ProjectWorkspace />} />
-        {/* Agent workbench — full-screen agent surface inside the shell (agent-mode-v2 §4). */}
         <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
-        {/* ISSUE-3 fix: /voice deep-link — workspace detects suffix and activates audio lens. */}
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
-        {/* AQU-254: terminology/comments/memory now render inside the ProjectWorkspace shell
-            (fixed sidebar + top bar + bottom status bar). The shell detects the path suffix
-            and swaps only the main content area, same pattern as /rules. */}
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
         <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
-        {/* AQU-180: per-project members management inside the ProjectWorkspace shell. */}
         <Route path="/project/:id/members" element={<ProjectWorkspace />} />
 
-        {/* Lazy — org admin pages */}
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/settings/identity" element={<OrgSettingsIdentity />} />
-        <Route path="/settings/export" element={<OrgSettingsExport />} />
-        <Route path="/settings/roster" element={<OrgSettingsRoster />} />
-        <Route path="/settings/assignment" element={<OrgSettingsAssignment />} />
-        <Route path="/settings/providers" element={<OrgSettingsProviders />} />
-        <Route path="/settings/monday" element={<OrgSettingsMonday />} />
-        {/* Monday.com OAuth redirect URI (top-level; see MondayOAuthCallback). */}
+        {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
+            path is registered with Monday, so it cannot carry an org segment. */}
         <Route path="/oauth/callback" element={<MondayOAuthCallback />} />
-        <Route path="/members" element={<MembersPage />} />
-        <Route path="/teams" element={<TeamsList />} />
-        <Route path="/teams/:groupId" element={<TeamDetail />} />
+
 
         {/* Lazy — site-wide admin console (platform operators only; gated
             client-side by usePlatformAdmin and server-side by ADMIN_EMAILS) */}

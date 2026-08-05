@@ -77,6 +77,25 @@ export const sourceArtifactBindingIdFor = (
   sourceSha256: string,
 ): string => u5(`source-artifact-binding:${projectId}:${fileId}:${sourceSha256.toLowerCase()}`)
 
+/** event id for the `source.cell.delete` that retracts a cell deleted in Codex.
+ *  Keyed only by (project, file, cell) so a re-migration derives the same id and
+ *  the delete stays idempotent (INSERT OR IGNORE), which is what lets a re-run
+ *  purge a cell an earlier (pre-AQU-673) migration already created (AQU-747). */
+export const sourceCellDeleteEventId = (
+  projectId: string,
+  fileId: string,
+  cellId: string,
+): string => u5(`cell-delete-source:${projectId}:${fileId}:${cellId}`)
+
+/** event id for the `target.cell.delete` companion of a Codex-deleted cell —
+ *  removes the target-lane row a prior migration's `target.cell.commit`
+ *  materialized. Distinct seed prefix from the source delete (AQU-747). */
+export const targetCellDeleteEventId = (
+  projectId: string,
+  fileId: string,
+  cellId: string,
+): string => u5(`cell-delete-target:${projectId}:${fileId}:${cellId}`)
+
 /** event id for the i-th `target.cell.commit` in a cell's edit history.
  *  `editIdx` is the 0-based index into the legacy `metadata.edits[]` (the
  *  source of full-history fidelity); commit_sha is deliberately excluded so a

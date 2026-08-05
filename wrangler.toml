@@ -19,16 +19,15 @@
 # VITE_AUTH_BASE / VITE_SYNC_WORKER_HOST / VITE_CHAT_BASE wired in deploy.yml.
 #
 # aquilla.app is the canonical app domain. web.aquilla.app is retired.
-# Signed-out visitors see public/homepage.html; signed-in users go straight
-# to the SPA via the aq_hint cookie check in worker/index.ts.
+# `/` serves the marketing homepage for everyone (worker/index.ts); identity
+# is resolved in the browser, so the root stays edge-cacheable.
 #
 # =============================================================================
 # ROUTE / ENV CONVENTION — same pattern as auth-worker / sync-worker
 # =============================================================================
-# Routes live in `[env.production]` below. This file is the source of truth
-# — don't touch routes via the Cloudflare dashboard. CI's token lacks
-# zone-route perms, so CI runs bare `wrangler deploy` (top-level config,
-# code only). Routes are applied by a LOCAL deploy with a zone-perm token:
+# Routes live in the named environment blocks below. This file is the source
+# of truth — don't touch routes via the Cloudflare dashboard. GitHub Actions
+# and local deploy scripts always pass the target environment explicitly:
 #
 #   pnpm run deploy:aquilla:spa          # builds + deploys SPA, syncs routes
 #   pnpm run deploy:aquilla:web          # umbrella: SPA + sync-worker + auth-worker
@@ -38,7 +37,9 @@
 # for the full convention doc.
 # =============================================================================
 
-name = "aquilla-web"
+# The unnamed profile is local-only. Live deploys must select a named profile;
+# a bare `wrangler deploy` therefore cannot overwrite the production Worker.
+name = "aquilla-web-local"
 main = "worker/index.ts"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 compatibility_date = "2025-05-01"
@@ -60,11 +61,17 @@ enabled = true
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
+# to index.html there, so the Worker's aq_hint branch never executed and the
+# bare domain served the empty SPA shell to signed-out visitors and crawlers
+# alike (verified in production: `/` was byte-identical to a nonexistent path).
+# Listing `/` here runs the Worker first for the root only; every other path
+# keeps the cheaper asset-first behaviour.
+run_worker_first = ["/"]
 
 # ---------------------------------------------------------------------------
 # Production environment — attaches aquilla.app/* to this Worker. web.aquilla.app is retired.
-# Same worker name as top-level (aquilla-web), so CI's bare `wrangler deploy`
-# and local `wrangler deploy --env=production` target the same Worker.
+# The production deploy is always `wrangler deploy --env=production`.
 # `[env.production.assets]` re-declared because env blocks don't inherit
 # the top-level assets binding.
 # ---------------------------------------------------------------------------
@@ -74,13 +81,23 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 workers_dev = true
 routes = ["aquilla.app/*"]
 
+[env.production.build]
+command = "bash scripts/verify-deploy-branch.sh main"
+
 [env.production.assets]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
+# to index.html there, so the Worker's aq_hint branch never executed and the
+# bare domain served the empty SPA shell to signed-out visitors and crawlers
+# alike (verified in production: `/` was byte-identical to a nonexistent path).
+# Listing `/` here runs the Worker first for the root only; every other path
+# keeps the cheaper asset-first behaviour.
+run_worker_first = ["/"]
 
 # ---------------------------------------------------------------------------
-# Development staging — served from dev branch, deploys to dev.aquilla.app
+# Development — served from dev branch, deploys to dev.aquilla.app
 # Uses same Worker code; assets deploy is separate.
 # Deploy: wrangler deploy --env=development
 # ---------------------------------------------------------------------------
@@ -94,6 +111,13 @@ routes = ["dev.aquilla.app/*"]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
+# to index.html there, so the Worker's aq_hint branch never executed and the
+# bare domain served the empty SPA shell to signed-out visitors and crawlers
+# alike (verified in production: `/` was byte-identical to a nonexistent path).
+# Listing `/` here runs the Worker first for the root only; every other path
+# keeps the cheaper asset-first behaviour.
+run_worker_first = ["/"]
 
 # ---------------------------------------------------------------------------
 # Pre-production staging — served from staging branch, deploys to staging.aquilla.app
@@ -106,7 +130,33 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 workers_dev = true
 routes = ["staging.aquilla.app/*"]
 
+[env.staging.build]
+command = "bash scripts/verify-deploy-branch.sh staging"
+
 [env.staging.assets]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# The asset router serves matching assets BEFORE the Worker runs. `/` resolves
+# to index.html there, so the Worker's aq_hint branch never executed and the
+# bare domain served the empty SPA shell to signed-out visitors and crawlers
+# alike (verified in production: `/` was byte-identical to a nonexistent path).
+# Listing `/` here runs the Worker first for the root only; every other path
+# keeps the cheaper asset-first behaviour.
+run_worker_first = ["/"]
+
+# Pull-request previews are isolated from every live Worker and route. They use
+# development API hosts but publish only a workers.dev preview alias.
+[env.preview]
+name = "aquilla-web-preview"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+preview_urls = true
+
+[env.preview.assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# Same as every other environment: run the Worker first for `/` so previews
+# exercise the same root routing as production instead of the raw SPA shell.
+run_worker_first = ["/"]

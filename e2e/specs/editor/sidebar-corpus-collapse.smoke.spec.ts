@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
+import { pickSelectOption } from "../../helpers/base-ui"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -18,7 +19,7 @@ const CHAPTER_1_MD = path.resolve(__dirname, "../../fixtures/chapter-1.md")
  * Setup to create two groups:
  *   1. Import two files (both land in "Ungrouped").
  *   2. Move one file to a named corpus "TestCorpus" via the context-menu
- *      Move dialog (select "Other…" → type name → click Save).
+ *      Move dialog (select "Create a corpus" → type name → click Save).
  *   3. Now two corpus groups exist.
  *
  * The Collapse button only appears on the group header for non-Ungrouped
@@ -48,20 +49,20 @@ test("sidebar corpus group collapses and expands", async ({ alice }) => {
   const firstFileRow = alice.locator("aside").getByText(/sample/i).first()
   await firstFileRow.click({ button: "right" })
 
-  // Click "Move to corpus…" (shadcn DropdownMenu — role="menuitem").
+  // Click "Move to corpus…" (shadcn ContextMenu — role="menuitem").
   const moveBtn = alice.getByRole("menuitem", { name: /Move to corpus/i })
   await expect(moveBtn).toBeVisible({ timeout: 3_000 })
   await moveBtn.click()
 
-  // MoveToCorpusDialog — select "Other…" to enter a custom corpus name.
+  // MoveToCorpusDialog — select "Create a corpus" to enter a custom corpus name.
   const dialog = alice.getByRole("dialog")
   await expect(dialog.getByRole("heading", { name: /Move to corpus/i })).toBeVisible({
     timeout: 5_000,
   })
-  const select = dialog.locator("select")
-  await select.selectOption({ label: "Other…" })
+  const select = dialog.getByRole("combobox", { name: /Corpus/i })
+  await pickSelectOption(alice, select, "Create a corpus")
 
-  const corpusNameInput = dialog.locator('input[placeholder="New corpus name"]')
+  const corpusNameInput = dialog.getByPlaceholder("Corpus name")
   await expect(corpusNameInput).toBeVisible({ timeout: 3_000 })
   await corpusNameInput.fill("TestCorpus")
 

@@ -7,7 +7,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * When cells are selected via the selection checkbox, the SelectionBar
  * (aria-label="Selection actions") shows a "Validate N" button.
  * Clicking it emits a validate event for each selected cell.
- * After bulk validation a success toast is shown (role="status").
+ * After bulk validation a success toast is shown (sonner data-sonner-toast).
  *
  * Direct human edits auto-validate. This spec removes that validation, then
  * selects the reviewed cell → clicks "Validate" in the SelectionBar → asserts
@@ -41,7 +41,8 @@ test("SelectionBar bulk validate marks selected cells as validated", async ({ al
   await expect(validateBtn).toBeEnabled({ timeout: 3_000 })
   await validateBtn.click()
 
-  // Status toast with validated count.
-  const statusMsg = alice.locator('[role="status"]').filter({ hasText: /Validated/i }).first()
+  // Status toast with validated count (sonner uses data-sonner-toast).
+  const statusMsg = alice.locator("[data-sonner-toast]").filter({ hasText: /Validated/i }).first()
   await expect(statusMsg).toBeVisible({ timeout: 8_000 })
+  await expect(ws.validationToggle(0)).toHaveAttribute("aria-pressed", "true", { timeout: 8_000 })
 })

@@ -17,7 +17,7 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
   return (
     <div className="space-y-6">
       <div className="text-center space-y-2">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <ShieldCheck className="h-6 w-6" />
         </div>
         <h2 className="text-2xl font-semibold">Help us improve</h2>

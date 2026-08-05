@@ -49,7 +49,7 @@ test("setup checklist invite step Create link shows join URL and copy button", a
   await expect(linkInput).toBeVisible({ timeout: 8_000 })
   await expect(linkInput).toHaveValue(/\/join\//, { timeout: 8_000 })
 
-  // Copy button is present.
-  const copyBtn = alice.locator('button[title="Copy"], button[aria-label="Copy"]').first()
+  // Copy button is present (InviteStep aria-label).
+  const copyBtn = alice.getByRole("button", { name: /Copy invite link/i }).first()
   await expect(copyBtn).toBeVisible({ timeout: 2_000 })
 })

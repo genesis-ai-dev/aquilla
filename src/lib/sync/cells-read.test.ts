@@ -10,7 +10,7 @@
 // the lost cell forever.
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { streamFileCells, fetchFileCells, fetchCellsDelta, fetchCellsByIds } from "./cells-read"
+import { CellsReadError, streamFileCells, fetchFileCells, fetchCellsDelta, fetchCellsByIds } from "./cells-read"
 import type { CellRow } from "./cells-read-types"
 
 function makeRow(cellId: string): CellRow {
@@ -96,6 +96,41 @@ describe("streamFileCells onMeta (B2)", () => {
       },
     )
     expect(metas).toEqual([undefined, undefined])
+  })
+})
+
+describe("AQU-775: transient cell-read recovery", () => {
+  it("retries a browser transport/CORS failure and returns the recovered page", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(pageResponse({ cells: [makeRow("recovered")], nextCursor: null, total: 1 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const page = await fetchFileCells("proj", "file", { side: "source" }, "jwt")
+
+    expect(page.cells.map((row) => row.cellId)).toEqual(["recovered"])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("exhausts the bounded retry budget for repeated 5xx responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("temporarily unavailable", { status: 503 }),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(fetchFileCells("proj", "file", {}, "jwt"))
+      .rejects.toMatchObject({ name: "CellsReadError", status: 503 })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not retry deterministic authorization failures", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("forbidden", { status: 403 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(fetchFileCells("proj", "file", {}, "jwt"))
+      .rejects.toBeInstanceOf(CellsReadError)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 

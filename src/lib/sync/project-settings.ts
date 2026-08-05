@@ -100,6 +100,15 @@ export interface ProjectWideSettings {
    * tag from here. Case-insensitive to match the lane-registry dedupe rule.
    */
   archivedLanes?: string[]
+  /**
+   * AQU-634: per-project opt-out for USFM front matter. When true, a USFM import
+   * (primary upload, Paratext project, DCS/Door43 resource, and target-language
+   * matching) EXCLUDES book-name/running-header/TOC, main title, and the whole
+   * introduction block — restoring the AQU-585 filtering for Biblica-style
+   * projects. Absent/false (the default) imports front matter as translatable
+   * cells. In-body section headings and Psalm titles import in both modes.
+   */
+  importExcludeFrontMatter?: boolean
 }
 
 export interface ProjectSettingsResponse {

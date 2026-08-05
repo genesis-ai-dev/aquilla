@@ -17,7 +17,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("project settings validation count and role floor can be changed", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `ValCount ${Date.now()}` })
 
-  await alice.goto(`/project/${seeded.projectId}/settings?section=validation`)
+  await alice.goto(`/project/${seeded.projectId}/settings/validation`)
   // Scroll to Validation section.
   const validationSection = alice.locator("#section-validation")
   await expect(validationSection).toBeVisible({ timeout: 10_000 })

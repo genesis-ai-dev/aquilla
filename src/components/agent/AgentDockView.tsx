@@ -9,7 +9,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
-import { Bot, Loader2, Paperclip, X } from "lucide-react"
+import { Bot, Paperclip, X } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
 import { InputGroupButton } from "@/components/ui/input-group"
@@ -344,7 +345,7 @@ export function AgentDockView({
               title="Attach a file for the agent"
               onClick={() => fileInputRef.current?.click()}
             >
-              {uploading ? <Loader2 className="animate-spin" /> : <Paperclip />}
+              {uploading ? <Spinner /> : <Paperclip />}
             </InputGroupButton>
           </>
         }

@@ -64,8 +64,10 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   const threadInput = commentDrawer.locator('textarea, [contenteditable="true"]').first()
   await expect(threadInput).toBeVisible({ timeout: 10_000 })
   await threadInput.fill("Alice's initial comment")
-  const submitBtn = commentDrawer.getByRole("button", { name: /send|submit|post|comment/i }).first()
-  await submitBtn.click()
+  // Match the button by its actual name. A loose /send|submit|post|comment/
+  // alternation also matches the drawer's "Close comments" control, which comes
+  // first in DOM order — so .first() closed the drawer instead of posting.
+  await commentDrawer.getByRole("button", { name: "Post" }).click()
 
   // Confirm alice's comment appears.
   await expect(commentDrawer.getByText("Alice's initial comment").first()).toBeVisible({ timeout: 8_000 })
@@ -87,10 +89,30 @@ test("bob can reply to alice's comment in a shared project", async ({ alice, bob
   // Replies are intentionally NOT wired from the comments page (CommentsPage's
   // composer says "Replies from this view are not yet wired — open the cell in
   // the editor to reply"), so bob replies from the cell's comments drawer.
-  await bob.goto(`/project/${projectId}`)
+  // AQU-775 regression boundary: a transient cells-read failure must recover
+  // within the real editor load. Before the fix, useActiveCellStore stopped
+  // after this response and mislabeled the durable file as empty.
+  let transientCellsFailureInjected = false
+  await bob.route(/\/api\/v1\/projects\/[^/]+\/files\/[^/]+\/cells\?side=target$/, async (route) => {
+    if (route.request().method() !== "GET" || transientCellsFailureInjected) {
+      await route.continue()
+      return
+    }
+    transientCellsFailureInjected = true
+    await route.fulfill({
+      status: 503,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "text/plain",
+      },
+      body: "transient cells read failure",
+    })
+  })
+  await bob.goto(`/project/${projectId}/editor`)
   const bobWs = new Workspace(bob)
   await bobWs.openFileBySubstring("sample")
   await bobWs.waitForEditor()
+  expect(transientCellsFailureInjected).toBe(true)
 
   const bobRow = bobWs.cellRow(0)
   await bobRow.scrollIntoViewIfNeeded()

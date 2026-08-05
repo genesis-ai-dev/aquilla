@@ -9,7 +9,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("project settings custom provider reveals endpoint and model inputs", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AiCustom ${Date.now()}` })
   // AQU-501: Advanced LLM lives under the AI & completion settings pane.
-  await alice.goto(`/project/${seeded.projectId}/settings?section=ai`)
+  await alice.goto(`/project/${seeded.projectId}/settings/ai`)
 
   const advancedSummary = alice.getByText("Advanced LLM settings").first()
   await expect(advancedSummary).toBeVisible({ timeout: 10_000 })

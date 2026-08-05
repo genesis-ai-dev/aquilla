@@ -31,7 +31,7 @@ test.skip("termbase sharing publish switch toggles on and off", async ({ alice }
 
   // AQU-501: termbase sharing lives in the "AI & completion" sub-menu pane
   // (still feature-flag hidden — this spec stays skipped until it's shown).
-  await alice.goto(`/project/${projectId}/settings?section=ai`)
+  await alice.goto(`/project/${projectId}/settings/ai`)
   const publishSwitch = alice.locator('[aria-label="Publish termbase to org"]')
   await expect(publishSwitch).toBeVisible({ timeout: 10_000 })
 

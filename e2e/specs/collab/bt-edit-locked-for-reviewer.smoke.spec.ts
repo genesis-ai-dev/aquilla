@@ -137,7 +137,7 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   await addProjectMember(aliceSession.jwt, projectId!, "bob", ROLE.REVIEWER)
 
   // Bob opens the project and file.
-  await bob.goto(`/project/${projectId}`)
+  await bob.goto(`/project/${projectId}/editor`)
   const bobWs = new Workspace(bob)
   await bobWs.openFileBySubstring("sample")
   await bobWs.waitForEditor()

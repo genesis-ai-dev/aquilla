@@ -1,18 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, SlidersHorizontal } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useProject } from "@/hooks/useProject"
+import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
-import { setProjectDeadline } from "@/lib/sync/cloud-projects"
+import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
@@ -59,6 +62,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
@@ -72,7 +76,11 @@ import {
   type StatKey,
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import {
   Select,
   SelectContent,
@@ -110,7 +118,7 @@ function ProjectOverviewSkeleton() {
       <div className="rounded-xl border bg-card shadow-sm p-6 space-y-2">
         <div className="flex items-center gap-2">
           <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-5 w-16 rounded-full" />
+          <Skeleton className="h-5 w-16 rounded-md" />
         </div>
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-20" />
@@ -220,7 +228,7 @@ function LanePill({ active, onClick, testId, children }: {
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors",
+        "rounded-md border px-2.5 py-0.5 text-xs font-medium transition-colors",
         active
           ? "border-transparent bg-primary text-primary-foreground"
           : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -385,10 +393,9 @@ function ChapterRow({
       {open && verses != null && (
         <ul className="ml-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={`${chapter.chapter} verses`}>
           {verses.map((verse, index) => (
+            <AppTooltip key={`${verse.ref}:${index}`} content={verse.ref}>
             <li
-              key={`${verse.ref}:${index}`}
               data-testid="verse-cell"
-              title={verse.ref}
               className={cn(
                 "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
                 verse.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
@@ -398,6 +405,7 @@ function ChapterRow({
             >
               {verse.verseLabel}
             </li>
+            </AppTooltip>
           ))}
         </ul>
       )}
@@ -495,67 +503,24 @@ function FileCanonicalRollup({
   )
 }
 
-// ── Overflow menu (archive / download) ───────────────────────────────────────
-
-function OverflowMenu({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener("mousedown", onClickOutside)
-    return () => document.removeEventListener("mousedown", onClickOutside)
-  }, [open])
-
-  return (
-    <div ref={ref} className="relative">
-      <Button
-        type="button"
-        size="icon-sm"
-        variant="outline"
-        aria-label="More actions"
-        onClick={() => setOpen((v) => !v)}
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </Button>
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-md border bg-popover shadow-md py-1">
-          {children}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function OverflowItem({ onClick, disabled, className, children }: {
-  onClick: () => void
-  disabled?: boolean
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent/40 disabled:opacity-50 ${className ?? ""}`}
-    >
-      {children}
-    </button>
-  )
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function ProjectOverview() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const { project, status, refresh } = useProject(id)
+  // AQU-737: the workspace is a lazy route; surface the load on the Open project
+  // button so it spins + disables instead of sitting idle and re-clickable.
+  // `openingOverlay` blocks the rest of the page while the open is in flight.
+  const { open: openWorkspace, isPending: openPending, overlay: openingOverlay } = useOpenWorkspace()
+  const { project, status, refresh, pm } = useProject(id)
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const { activeOrgId } = useActiveOrg()
+  // AQU-507: candidate PMs = the project's effective members. Only fetched for
+  // maintainer+ (the only role that can assign a PM); viewers never trigger the
+  // roster read.
+  const canManagePm = (project?.syncRole?.level ?? 0) >= 600
+  const { members: pmCandidates } = useProjectMembers(canManagePm ? id : null)
+  const { activeOrgId, refreshAccessibleProjects } = useActiveOrg()
 
   // AQU-696: landing on a project's overview counts as "opening" it — this is
   // the page a shared-projects row links to. Recording it here clears the
@@ -573,6 +538,10 @@ export function ProjectOverview() {
   const [files, setFiles] = useState<FileSummary[]>([])
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
+  // AQU-507: PM assignment dialog. `pmSelection` holds the picker value (a
+  // stringified userId, or "" for unassigned) while the dialog is open.
+  const [pmDialogOpen, setPmDialogOpen] = useState(false)
+  const [pmSelection, setPmSelection] = useState<string>("")
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
@@ -856,6 +825,26 @@ export function ProjectOverview() {
     }
   }
 
+  async function savePm(pmUserId: number | null) {
+    if (!jwt) return
+    setBusy(true)
+    setError(null)
+    try {
+      await setProjectPm(jwt, id, pmUserId)
+      await refresh()
+      // AQU-507: the org overview's PM column joins from the app-wide
+      // accessible-projects directory (OrgContext, fetched once per session) —
+      // revalidate it so the new PM shows there without a hard reload. Not
+      // awaited: the PM card above reads useProject, not the directory.
+      void refreshAccessibleProjects()
+      setPmDialogOpen(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleDownloadBundle() {
     if (!jwt || !project) return
     const fileId = project.files[0]?.id
@@ -955,6 +944,7 @@ export function ProjectOverview() {
       statusBar={null}
       main={
         <div className="h-full overflow-y-auto">
+          {openingOverlay}
           {isFrozen && status === "ready" && project && (
             <InactiveProjectBanner
               projectName={project.name}
@@ -993,8 +983,20 @@ export function ProjectOverview() {
                     <p className="mt-0.5 text-sm text-muted-foreground">{project?.files.length ?? 0} files</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" onClick={() => navigate(`/project/${id}`)}>
-                      Open project
+                    <Button
+                      size="sm"
+                      onClick={() => openWorkspace(`/project/${id}/editor`)}
+                      disabled={openPending}
+                      aria-busy={openPending || undefined}
+                    >
+                      {openPending ? (
+                        <>
+                          <Spinner className="size-4" />
+                          Opening…
+                        </>
+                      ) : (
+                        "Open project"
+                      )}
                     </Button>
                     {isOwner && isArchived && (
                       <Button size="sm" variant="outline" onClick={handleRestore} disabled={busy}>
@@ -1003,33 +1005,47 @@ export function ProjectOverview() {
                     )}
                     {/* Archive + Download + Lifecycle moved into overflow menu */}
                     {(canManage || isOwner || canToggleLifecycle) && !isArchived && (
-                      <OverflowMenu>
-                        {canManage && (
-                          <OverflowItem
-                            onClick={handleDownloadBundle}
-                            disabled={busy || (project?.files.length ?? 0) === 0}
-                          >
-                            Download deliverable
-                          </OverflowItem>
-                        )}
-                        {canToggleLifecycle && (
-                          <OverflowItem
-                            onClick={handleToggleLifecycle}
-                            disabled={lifecycleBusy}
-                          >
-                            {isFrozen ? "Mark as Active" : "Mark as Inactive"}
-                          </OverflowItem>
-                        )}
-                        {isOwner && (
-                          <OverflowItem
-                            onClick={handleArchive}
-                            disabled={busy}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            Archive
-                          </OverflowItem>
-                        )}
-                      </OverflowMenu>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="outline"
+                              aria-label="More actions"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent align="end" className="min-w-40">
+                          {canManage && (
+                            <DropdownMenuItem
+                              onClick={handleDownloadBundle}
+                              disabled={busy || (project?.files.length ?? 0) === 0}
+                            >
+                              Download deliverable
+                            </DropdownMenuItem>
+                          )}
+                          {canToggleLifecycle && (
+                            <DropdownMenuItem
+                              onClick={handleToggleLifecycle}
+                              disabled={lifecycleBusy}
+                            >
+                              {isFrozen ? "Mark as Active" : "Mark as Inactive"}
+                            </DropdownMenuItem>
+                          )}
+                          {isOwner && (
+                            <DropdownMenuItem
+                              onClick={handleArchive}
+                              disabled={busy}
+                              variant="destructive"
+                            >
+                              Archive
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
                   </div>
                 </div>
@@ -1056,7 +1072,7 @@ export function ProjectOverview() {
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-xl border bg-card p-5" data-testid="progress-card">
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progress</h2>
+                    <h2 className="text-xs font-semibold text-muted-foreground">Progress</h2>
                     <div className="flex items-center gap-1.5">
                       {/* AQU-593: hide stat widgets you don't find helpful. */}
                       {availableStatKeys.length > 0 && (
@@ -1306,7 +1322,7 @@ export function ProjectOverview() {
                 return (
                   <div className="rounded-xl border bg-card p-5">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      <h2 className="text-xs font-semibold text-muted-foreground">
                         Files {!showAllFiles && hidden > 0 ? `(top ${FILE_ROW_CAP} of ${sorted.length})` : `(${sorted.length})`}
                       </h2>
                       <span className="flex items-center gap-3 text-[10px] text-muted-foreground">
@@ -1371,14 +1387,18 @@ export function ProjectOverview() {
                       after its row moves.
                     */}
                     <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <Input
-                        type="text"
-                        placeholder="Filter files by name…"
-                        aria-label="Filter files by name"
-                        value={fileNameFilter}
-                        onChange={(e) => setFileNameFilter(e.target.value)}
-                        className="max-w-56"
-                      />
+                      <InputGroup className="h-9 max-w-56">
+                        <InputGroupAddon>
+                          <Search />
+                        </InputGroupAddon>
+                        <InputGroupInput
+                          type="text"
+                          placeholder="Filter files by name…"
+                          aria-label="Filter files by name"
+                          value={fileNameFilter}
+                          onChange={(e) => setFileNameFilter(e.target.value)}
+                        />
+                      </InputGroup>
                       <Select
                         items={FILE_SORT_MODES}
                         value={fileSortMode}
@@ -1409,7 +1429,7 @@ export function ProjectOverview() {
                         kept as a redundant, not load-bearing, explainer.
                       */}
                       <div
-                        className="mb-1.5 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                        className="mb-1.5 flex items-center gap-3 text-xs font-medium text-muted-foreground"
                         data-testid="file-breakdown-header"
                       >
                         <span className="w-5 shrink-0" />
@@ -1498,7 +1518,7 @@ export function ProjectOverview() {
 
               {/* ── Deadline card ── */}
               <div className="rounded-xl border bg-card p-5">
-                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Deadline</h2>
+                <h2 className="mb-2 text-xs font-semibold text-muted-foreground">Deadline</h2>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   {audio?.deadlineAt ? (
                     <span className="flex items-center gap-2 font-medium">
@@ -1580,6 +1600,107 @@ export function ProjectOverview() {
                 </DialogContent>
               </Dialog>
 
+              {/* ── Project manager card (AQU-507) ── */}
+              <div className="rounded-xl border bg-card p-5">
+                <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">Project manager</h2>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  {pm ? (
+                    <span className="font-medium" data-testid="overview-pm-name">{pm.username}</span>
+                  ) : (
+                    <span className="text-muted-foreground" data-testid="overview-pm-name">Unassigned</span>
+                  )}
+                  {canManage && (
+                    <ButtonGroup>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        data-testid="overview-pm-edit"
+                        onClick={() => {
+                          setPmSelection(pm ? String(pm.id) : "")
+                          setPmDialogOpen(true)
+                        }}
+                      >
+                        {pm ? "Change" : "Assign"}
+                      </Button>
+                      {pm && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => savePm(null)}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </ButtonGroup>
+                  )}
+                </div>
+              </div>
+
+              <Dialog open={pmDialogOpen} onOpenChange={setPmDialogOpen}>
+                <DialogContent className="sm:max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>{pm ? "Change project manager" : "Assign project manager"}</DialogTitle>
+                    <DialogDescription>
+                      The project manager is responsible for this project. They must be a member
+                      of the project.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="project-pm">Project manager</FieldLabel>
+                      {/* `items` maps values → labels so the trigger shows the
+                          member's username, not the raw stringified userId. */}
+                      <Select
+                        value={pmSelection}
+                        onValueChange={(v) => setPmSelection(v ?? "")}
+                        items={[
+                          { value: "", label: "Unassigned" },
+                          ...pmCandidates.map((m) => ({
+                            value: String(m.userId),
+                            label: m.username,
+                          })),
+                        ]}
+                      >
+                        <SelectTrigger id="project-pm" aria-label="Project manager">
+                          <SelectValue placeholder="Select a member" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectGroup>
+                            <SelectItem value="">Unassigned</SelectItem>
+                            {pmCandidates.map((m) => (
+                              <SelectItem key={m.userId} value={String(m.userId)}>
+                                {m.username}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </FieldGroup>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => setPmDialogOpen(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => savePm(pmSelection === "" ? null : Number(pmSelection))}
+                    >
+                      Save
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
               {/* ── Team / Assignments card ── */}
               {/* AQU-486: per-assignee progress is gated by the AQU-485
                   memberProgressViewMinRole floor (same "who sees each
@@ -1593,7 +1714,7 @@ export function ProjectOverview() {
               >
                 <div className={cn("relative rounded-xl border bg-card p-5", sectionTintClass(orgSettings.memberProgressViewMinRole))}>
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</h2>
+                    <h2 className="text-xs font-semibold text-muted-foreground">Team</h2>
                     <SectionVisibilityBadge
                       minRole={orgSettings.memberProgressViewMinRole}
                       canEdit={canEditVisibility}
@@ -1686,7 +1807,7 @@ export function ProjectOverview() {
                     data-testid="overview-members-card"
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Members</h2>
+                      <h2 className="text-xs font-semibold text-muted-foreground">Members</h2>
                       <SectionVisibilityBadge
                         minRole={orgSettings.rosterViewMinRole}
                         canEdit={canEditVisibility}

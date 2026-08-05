@@ -108,7 +108,7 @@ export function EBibleTargetReviewPanel({ translation, matchResult, onApply, onC
       {/* Orphan summary */}
       {orphans.length > 0 && (
         <details className="rounded-md border p-2 text-xs">
-          <summary className="cursor-pointer select-none text-muted-foreground">
+          <summary className="select-none text-muted-foreground">
             {orphans.length} orphan verse{orphans.length === 1 ? "" : "s"} (in eBible but no matching source cell)
           </summary>
           <ul className="mt-2 max-h-32 space-y-0.5 overflow-auto pl-2">
@@ -165,7 +165,7 @@ function MatchedCellRow({ cell, checked, onToggle }: MatchedCellRowProps) {
         checked && cell.hasConflict && "bg-amber-100 dark:bg-amber-900/30",
       )}
     >
-      <label className="flex cursor-pointer items-start gap-2">
+      <label className="flex items-start gap-2">
         <Checkbox
           className="mt-0.5"
           checked={checked}

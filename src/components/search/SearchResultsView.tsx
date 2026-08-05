@@ -98,11 +98,11 @@ export function SearchResultsView({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon-sm"
           onClick={onClose}
           aria-label="Close search results"
         >
-          <X className="h-4 w-4" />
+          <X />
         </Button>
       </div>
 

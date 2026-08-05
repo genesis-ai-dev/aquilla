@@ -85,7 +85,6 @@ export function HighlightedText({
               tabIndex={onRangeClick ? 0 : undefined}
               onClick={onRangeClick ? (e) => onRangeClick(chunk.range!.ruleId, e.currentTarget) : undefined}
               className={cn(
-                "cursor-pointer",
                 chunk.range.kind === "violation-major" && "decoration-wavy decoration-red-500 underline underline-offset-[3px]",
                 chunk.range.kind === "violation-minor" && "decoration-wavy decoration-amber-500 underline underline-offset-[3px]",
                 chunk.range.kind === "violation-waived" && "decoration-wavy decoration-muted-foreground/60 underline underline-offset-[3px] opacity-60",

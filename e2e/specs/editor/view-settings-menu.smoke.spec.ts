@@ -4,9 +4,9 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
 /**
  * ViewSettingsMenu — opened from the workspace header ⋯ overflow (AQU-331).
  *
- * Menu contains toggleable items:
- *   - "Show line numbers" (Pill toggle)
- *   - "Show cell labels" (Pill toggle)
+ * Popover contains toggleable items:
+ *   - "Show line numbers" (Switch)
+ *   - "Show cell labels" (Switch)
  *   - Text direction: Source and Target (DirPill)
  */
 test("view settings menu opens and toggles show line numbers", async ({ alice }) => {
@@ -15,10 +15,12 @@ test("view settings menu opens and toggles show line numbers", async ({ alice })
 
   await ws.openViewSettingsMenu()
 
-  const lineNumbersItem = alice.getByText(/Show line numbers/i).first()
-  await expect(lineNumbersItem).toBeVisible({ timeout: 3_000 })
-  await expect(alice.getByText(/Show cell labels/i).first()).toBeVisible({ timeout: 3_000 })
+  const panel = alice.getByTestId("view-settings-popover")
+  const lineNumbers = panel.getByRole("switch", { name: /Show line numbers/i })
+  await expect(lineNumbers).toBeVisible({ timeout: 3_000 })
+  await expect(panel.getByRole("switch", { name: /Show cell labels/i })).toBeVisible({ timeout: 3_000 })
 
-  await lineNumbersItem.click()
-  await expect(lineNumbersItem).not.toBeVisible({ timeout: 3_000 })
+  const wasChecked = await lineNumbers.isChecked()
+  await lineNumbers.click()
+  await expect(lineNumbers).toHaveAttribute("aria-checked", wasChecked ? "false" : "true")
 })

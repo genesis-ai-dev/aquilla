@@ -37,7 +37,13 @@ test("formatting loss warning appears when target drops source formatting", asyn
   // Edit the target cell with plain text (no bold markup).
   await ws.editCell(1, "plain translation without bold")
 
-  // The formatting loss warning should appear on this row.
-  const warningIcon = row.locator('[data-tooltip="Source has inline formatting that the target does not preserve. Formatting will be lost on export."]')
-  await expect(warningIcon).toBeVisible({ timeout: 8_000 })
+  // The formatting loss warning chip should appear on this row (AppTooltip wraps it).
+  const warningChip = row.getByText("formatting", { exact: true })
+  await expect(warningChip).toBeVisible({ timeout: 8_000 })
+  await warningChip.hover()
+  await expect(
+    alice.getByRole("tooltip", {
+      name: /Source has inline formatting that the target does not preserve/i,
+    })
+  ).toBeVisible({ timeout: 3_000 })
 })

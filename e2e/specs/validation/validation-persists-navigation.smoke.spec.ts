@@ -34,7 +34,7 @@ test("validated cell stays validated after navigating away and back", async ({ a
   })
 
   // Navigate back to the project workspace.
-  await alice.goto(`/project/${seeded.projectId}`)
+  await alice.goto(`/project/${seeded.projectId}/editor`)
   const ws2 = new Workspace(alice)
   await ws2.openFileBySubstring("sample")
   await ws2.waitForEditor()

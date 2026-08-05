@@ -201,7 +201,7 @@ function ExpanderRenderingRow({
       </Select>
       {canManage && (
         <Button variant="ghost" size="icon-sm" aria-label={`Remove rendering ${index + 1}`} onClick={onRemove}>
-          <X className="h-4 w-4" />
+          <X />
         </Button>
       )}
     </div>
@@ -298,7 +298,7 @@ export function GlossaryRow({
                 <Check className="h-4 w-4 text-emerald-600" />
               </Button>
               <Button variant="ghost" size="icon-sm" aria-label="Dismiss term" onClick={() => onDismiss(concept.id)}>
-                <X className="h-4 w-4" />
+                <X />
               </Button>
             </>
           )}

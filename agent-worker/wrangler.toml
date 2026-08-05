@@ -1,4 +1,6 @@
-name = "aquilla-agent-sandbox"
+# The unnamed profile is local-only. Live deploys must select a named profile;
+# a bare `wrangler deploy` therefore cannot overwrite the production Worker.
+name = "aquilla-agent-sandbox-local"
 main = "src/index.ts"
 compatibility_date = "2025-05-01"
 compatibility_flags = ["nodejs_compat"]
@@ -88,6 +90,9 @@ bucket_name = "aquilla-snapshots-dev"
 name = "aquilla-agent-sandbox-staging"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 
+[env.staging.build]
+command = "bash ../scripts/verify-deploy-branch.sh staging"
+
 [env.staging.observability]
 enabled = true
 
@@ -116,6 +121,9 @@ bucket_name = "aquilla-snapshots-staging"
 [env.production]
 name = "aquilla-agent-sandbox"
 account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+
+[env.production.build]
+command = "bash ../scripts/verify-deploy-branch.sh main"
 
 [env.production.observability]
 enabled = true

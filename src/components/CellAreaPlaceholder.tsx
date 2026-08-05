@@ -2,7 +2,7 @@
 // has no cells yet. Mirrors the EditorTable's grid columns so there's no
 // layout shift when real rows arrive.
 
-import { FileText, FolderOpen, Sparkles, Upload } from "lucide-react"
+import { CloudOff, FileText, FolderOpen, RefreshCw, Sparkles, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
@@ -24,6 +24,7 @@ interface CellAreaPlaceholderProps {
    *  spurious "Import" click on a project that already has files. */
   filesLoaded?: boolean
   onImportClick?: () => void
+  onRetryClick?: () => void
 }
 
 export function CellAreaPlaceholder({
@@ -32,6 +33,7 @@ export function CellAreaPlaceholder({
   hasFiles,
   filesLoaded,
   onImportClick,
+  onRetryClick,
 }: CellAreaPlaceholderProps) {
   if (state.kind === "ready") return null
   if (state.kind === "no-file") return (
@@ -44,7 +46,36 @@ export function CellAreaPlaceholder({
   if (state.kind === "ready-empty") {
     return <ReadyEmpty fileName={fileName} onImportClick={onImportClick} />
   }
+  if (state.kind === "load-error") {
+    return <LoadError fileName={fileName} onRetryClick={onRetryClick} />
+  }
   return <SkeletonRows />
+}
+
+function LoadError({
+  fileName,
+  onRetryClick,
+}: {
+  fileName?: string
+  onRetryClick?: () => void
+}) {
+  return (
+    <EmptyState
+      variant="inline"
+      className="h-full p-8"
+      icon={CloudOff}
+      title={fileName ? `Couldn't load ${fileName}` : "Couldn't load this file"}
+      description="The file is still safe. Check your connection and try loading it again."
+      action={
+        onRetryClick ? (
+          <Button size="sm" variant="outline" onClick={onRetryClick}>
+            <RefreshCw data-icon="inline-start" />
+            Retry loading file
+          </Button>
+        ) : undefined
+      }
+    />
+  )
 }
 
 function SkeletonRows() {

@@ -2,7 +2,7 @@
 //
 // One sub-row per lane: lane label | translated % (bar) | validated % | last
 // activity (relative) | actions. Actions:
-//   Open   → the workspace at that lane (/project/:id?lane=<tag>)
+//   Open   → the workspace at that lane (/project/:id/editor?lane=<tag>)
 //   Assign → AssignModal pre-scoped to the lane (via OrgLaneAssignModal)
 //   Staff  → StaffLanePopover (add-person-to-lane in one gesture)
 //
@@ -36,8 +36,8 @@ export interface ProjectLaneSubRowsProps {
 
 function laneOpenTo(projectId: string, lane: string): string {
   return lane
-    ? `/project/${projectId}?lane=${encodeURIComponent(lane)}`
-    : `/project/${projectId}`
+    ? `/project/${projectId}/editor?lane=${encodeURIComponent(lane)}`
+    : `/project/${projectId}/editor`
 }
 
 export function ProjectLaneSubRows({

@@ -90,6 +90,25 @@ describe("PassageCard", () => {
     expect(fetchCells).toHaveBeenCalledTimes(1)
   })
 
+  it("names the in-flight chapter fetch specifically, not just 'Loading'", async () => {
+    // Regression guard: the shared Spinner defaults to aria-label="Loading", which
+    // says nothing about which of a card's async operations is running. The
+    // consolidation onto Spinner silently dropped this label once already.
+    let release: (rows: CellRow[]) => void = () => {}
+    const fetchCells = vi.fn(
+      () => new Promise<CellRow[]>((resolve) => { release = resolve }),
+    )
+    render(
+      <PassageCard cardKey="k5" rows={rows} projectId="p1" jwt="jwt" fetchCells={fetchCells} />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Next chapter" }))
+    expect(await screen.findByLabelText("Loading chapter")).toBeInTheDocument()
+
+    release([cellRow({ cellId: "c10", side: "source", value: "ch5", canonicalRef: "MRK 5:1" })])
+    await waitFor(() => expect(screen.queryByLabelText("Loading chapter")).toBeNull())
+  })
+
   it("is a static card without a jwt (no nav affordances)", () => {
     render(<PassageCard cardKey="k3" rows={rows} projectId="p1" jwt={null} />)
     expect(screen.queryByRole("button", { name: "Next chapter" })).toBeNull()

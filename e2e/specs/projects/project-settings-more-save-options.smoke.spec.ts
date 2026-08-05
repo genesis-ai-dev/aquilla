@@ -15,7 +15,7 @@ import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
 test("project settings More save options shows Close without saving", async ({ alice }) => {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `MoreSave ${Date.now()}` })
 
-  await alice.goto(`/project/${seeded.projectId}/settings?section=general`)
+  await alice.goto(`/project/${seeded.projectId}/settings/general`)
   const sourceLanguage = alice.locator("#sl")
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
   await sourceLanguage.fill("English (US)")

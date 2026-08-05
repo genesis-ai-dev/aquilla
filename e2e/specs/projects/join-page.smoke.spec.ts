@@ -10,7 +10,7 @@ import { createProjectServerSide, createProjectInvite } from "../../helpers/fron
  *     redeem() fails and sets phase = "error" with an error message.
  *   - The card header shows "Joining Project".
  *   - An AlertCircle + error text appears.
- *   - "Back to projects" button navigates to /.
+ *   - "Back to projects" returns the signed-in user to their scoped org home.
  *
  * We can test this with a bogus token — the API will reject it and we'll
  * see the error state without needing a real invite.
@@ -26,10 +26,12 @@ test("join page with invalid token shows error state and Back to projects", asyn
     alice.getByRole("button", { name: /Back to projects/i })
   ).toBeVisible({ timeout: 10_000 })
 
-  // "Back to projects" navigates home. "/" renders the org Overview
-  // (RootRedirect → OrgHome) — it no longer redirects to /projects.
+  // "Back to projects" navigates through RootRedirect to the user's scoped
+  // organization home. Assert the durable destination, not the transient "/"
+  // route that immediately redirects and may never be observable.
   await alice.getByRole("button", { name: /Back to projects/i }).click()
-  await alice.waitForURL((url) => url.pathname === "/", { timeout: 5_000 })
+  await expect(alice).toHaveURL(/\/orgs\/[^/?]+$/, { timeout: 10_000 })
+  await expect(alice.getByRole("heading", { name: "Acme", exact: true })).toBeVisible()
 })
 
 /**

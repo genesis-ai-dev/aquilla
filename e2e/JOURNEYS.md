@@ -63,7 +63,7 @@
 | Settings    | Preferences page Privacy section renders             | `e2e/specs/orgs/preferences.smoke.spec.ts`                    |   ✅   |
 | Settings    | Appearance theme selection persists without accent presets | `e2e/specs/orgs/preferences-theme.smoke.spec.ts`          |   ✅   |
 | Export      | Primary "Download <file>" in the file's own format   | `e2e/specs/editor/export.smoke.spec.ts`                       |   ✅   |
-| Export      | IDML import → story milestone with 50-cell subsection navigation → empty and populated single-activation edits preserve pointer position, spacing, and caret order → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
+| Export      | IDML import → story milestone with 50-cell subsection navigation → empty and populated single-activation edits preserve pointer position and caret order while sanitizing spurious whitespace at entry (AQU-758) → strict artifact export preserves original character-style runs | `e2e/specs/editor/idml-roundtrip.smoke.spec.ts` | ✅ |
 | Export      | Convert to another format (collapsed section)        | `e2e/specs/editor/export-format-switch.smoke.spec.ts` (partial — native format pre-selected, switch to CSV) | ✅ |
 | Marketing   | Homepage "book a call": Google Calendar booking link + contact form → POST /api/v2/contact/book-call → sent state | `e2e/specs/marketing/book-call.smoke.spec.ts` | ✅ |
 | Editor      | Formatting bubble menu (bold/italic/underline/strikethrough/code) | `e2e/specs/editor/formatting-bubble-menu.smoke.spec.ts` + `formatting-inline-code-toggle.smoke.spec.ts` + `formatting-underline-strikethrough.smoke.spec.ts` | ✅ |
@@ -129,11 +129,13 @@
 | Projects    | Archive and restore project                           | `e2e/specs/projects/archive.smoke.spec.ts`                    |   ✅   |
 | Projects    | Archived projects page lists archived items           | `e2e/specs/projects/archived-projects-page.smoke.spec.ts`     |   ✅   |
 | Projects    | Project deadline set and clear                        | `e2e/specs/projects/project-deadline.smoke.spec.ts`           |   ✅   |
+| Projects    | Project manager assign/clear on overview; org overview PM column updates without reload (AQU-507) | `e2e/specs/projects/project-overview-pm-assignment.smoke.spec.ts` | ✅ |
 | Projects    | Project overview assign work form                     | `e2e/specs/projects/project-overview-assign-work.smoke.spec.ts` + `project-overview-assign-work-submit.smoke.spec.ts` | ✅ |
 | Projects    | Project overview overflow menu (archive/share/etc.)   | `e2e/specs/projects/project-overview-overflow-menu.smoke.spec.ts` |   ✅   |
 | Projects    | Projects list page renders project cards              | `e2e/specs/projects/projects-list-page.smoke.spec.ts`         |   ✅   |
 | Projects    | Project overview shows scoped loading progress, then opens editor; breadcrumbs preserve clickable organization ancestry | `e2e/specs/projects/project-overview.smoke.spec.ts` | ✅ |
-| Projects    | Project settings keeps synced name read-only and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
+| Projects    | Opening a project blocks the surface with an "Opening project" overlay until the workspace chunk lands; back-navigation aborts to idle (AQU-737) | `e2e/specs/projects/open-project-blocking-overlay.smoke.spec.ts` | ✅ |
+| Projects    | Project settings renames the project (AQU-765 server rename) and persists source language | `e2e/specs/projects/project-settings.smoke.spec.ts` | ✅ |
 | Projects    | Project card role badge shows user's role             | `e2e/specs/projects/project-card-role-badge.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home project name filter narrows list             | `e2e/specs/projects/org-home-project-filter.smoke.spec.ts`    |   ✅   |
 | Projects    | Org home status filter (All/Stalled/Overdue/Needs attention)   | `e2e/specs/projects/org-home-status-filter.smoke.spec.ts`     |   ✅   |
@@ -146,6 +148,7 @@
 | Projects    | Project settings API key show/hide toggle             | `e2e/specs/projects/project-settings-api-key-toggle.smoke.spec.ts` |   ✅   |
 | Projects    | Project settings termbase sharing section             | `e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts` | ⏸ hidden |
 | Projects    | Multi-project invite submit from share panel          | `e2e/specs/projects/multi-project-invite-submit.smoke.spec.ts` |   ✅   |
+| Projects    | Multi-select member add on project surfaces (overview Members card + `/project/:id/members` + Share modal suggestions) | `e2e/specs/projects/project-members-add-multiselect.smoke.spec.ts` + `share-invite-username-verified.smoke.spec.ts` | ✅ |
 | Orgs        | Org rename from settings page                         | `e2e/specs/orgs/org-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Org settings page renders and shows rename            | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
@@ -163,6 +166,7 @@
 | Editor      | CellExpansion tabs ArrowRight/Home/End keyboard nav   | `e2e/specs/editor/cell-expansion-tab-arrow-nav.smoke.spec.ts` |   ✅   |
 | Editor      | Tab / Shift+Tab moves focus between target cells      | `e2e/specs/editor/cell-tab-navigation.smoke.spec.ts`          |   ✅   |
 | Editor      | Select source text → Add to termbase creates draft concept | `e2e/specs/editor/add-to-termbase-from-selection.smoke.spec.ts` | ✅ |
+| Editor      | Below-Maintainer: Add to termbase dialog opens blocked (disabled input/submit, role message, Cancel) | `e2e/specs/editor/add-to-termbase-from-selection.smoke.spec.ts` | ✅ |
 | Editor      | /project/:id/voice deep-link activates audio lens     | `e2e/specs/editor/voice-deep-link.smoke.spec.ts`              |   ✅   |
 | Editor      | Cell history drawer shows edit history                | `e2e/specs/editor/cell-history-drawer.smoke.spec.ts`          |   ✅   |
 | Editor      | HistoryDrawer show/hide intermediate edits toggle     | `e2e/specs/editor/history-drawer-intermediate-edits.smoke.spec.ts` | ✅ |
@@ -184,7 +188,7 @@
 | Editor      | No-file placeholder renders when no file open         | `e2e/specs/editor/editor-no-file-placeholder.smoke.spec.ts`   |   ✅   |
 | Editor      | Sidebar corpus collapse toggle                        | `e2e/specs/editor/sidebar-corpus-collapse.smoke.spec.ts`      |   ✅   |
 | Editor      | Import dialog opens and shows upload/eBible options   | `e2e/specs/editor/import-dialog.smoke.spec.ts`                |   ✅   |
-| Editor      | eBible import search and select corpus                | `e2e/specs/editor/import-dialog-ebible.smoke.spec.ts` + `import-dialog-ebible-search.smoke.spec.ts` | ✅ |
+| Editor      | eBible import search/select and imported file persists across reload | `e2e/specs/editor/import-dialog-ebible.smoke.spec.ts` + `import-dialog-ebible-search.smoke.spec.ts` + `import-ebible-persists-reload.smoke.spec.ts` | ✅ |
 | Editor      | Export scope toggle (file vs project)                 | `e2e/specs/editor/export-scope-toggle.smoke.spec.ts`          |   ✅   |
 | Editor      | Export lossy format warning badge                     | `e2e/specs/editor/export-lossy-warning.smoke.spec.ts`         |   ✅   |
 | Editor      | Search scope toggle (file / project / passages)       | `e2e/specs/editor/search-scope-toggle.smoke.spec.ts`          |   ✅   |
@@ -195,7 +199,7 @@
 | Editor      | Outbox inspector popover shows pending ops            | `e2e/specs/editor/outbox-inspector-popover.smoke.spec.ts`     |   ✅   |
 | Editor      | Selection bar bulk validate + unvalidate              | `e2e/specs/editor/selection-bar.smoke.spec.ts` + `selection-bar-bulk-validate.smoke.spec.ts` + `selection-bar-unvalidate.smoke.spec.ts` + `selection-bar-clear.smoke.spec.ts` | ✅ |
 | Editor      | Formatting italic toggle via toolbar                  | `e2e/specs/editor/formatting-italic-toggle.smoke.spec.ts`     |   ✅   |
-| Editor      | View settings menu toggles line numbers + cell labels | `e2e/specs/editor/view-settings-menu.smoke.spec.ts` + `view-settings-cell-labels-toggle.smoke.spec.ts` + `view-settings-text-direction.smoke.spec.ts` | ✅ |
+| Editor      | Editor settings popover toggles line numbers + cell labels | `e2e/specs/editor/view-settings-menu.smoke.spec.ts` + `view-settings-cell-labels-toggle.smoke.spec.ts` + `view-settings-text-direction.smoke.spec.ts` | ✅ |
 | Editor      | Manual direction mismatch warning can be dismissed without changing the override | `e2e/specs/editor/rtl-hint-dismiss.smoke.spec.ts` | ✅ |
 | Editor      | Video attachment remove clears saved URL              | `e2e/specs/editor/video-attachment-dialog.smoke.spec.ts`      |   ✅   |
 | Editor      | Setup checklist drawer expands items + skip           | `e2e/specs/editor/setup-checklist.smoke.spec.ts` + `setup-checklist-item-expand.smoke.spec.ts` + `setup-checklist-skip.smoke.spec.ts` | ✅ |
@@ -224,6 +228,7 @@
 | Rules       | Rules page add rule dialog opens                      | `e2e/specs/rules/rules-page-add-rule-dialog.smoke.spec.ts`    |   ✅   |
 | Rules       | Rules page back to editor navigation                  | `e2e/specs/rules/rules-page-back-to-editor.smoke.spec.ts`     |   ✅   |
 | Rules       | Rule create dialog test button                        | `e2e/specs/rules/rule-create-dialog-test-button.smoke.spec.ts` |   ✅   |
+| Editor      | Sidebar pins Terminology below Comments; Glossary removed from file-list top | `e2e/specs/editor/sidebar-terminology-nav.smoke.spec.ts` | ✅ |
 | Terminology | Glossary renders and inline append row creates an active term | `e2e/specs/projects/terminology.smoke.spec.ts` + `terminology-add-concept.smoke.spec.ts` | ✅ |
 | Terminology | Edit a glossary source term inline                    | `e2e/specs/projects/terminology-edit-concept.smoke.spec.ts`   | ✅ |
 | Terminology | Glossary lifecycle archives and restores an active term | `e2e/specs/projects/terminology-concept-status-select.smoke.spec.ts` | ✅ |

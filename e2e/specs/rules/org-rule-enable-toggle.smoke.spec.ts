@@ -20,26 +20,28 @@ test("org rule enable toggle disables and re-enables an org rule", async ({ alic
   })
 
   await alice.goto(`/project/${seeded.projectId}/rules`)
-  // Create an org rule. "+ Add Org Rule" opens an INLINE RuleEditor inside
-  // the Org Rules card (no dialog — rules refactor 0f70ff11f).
+  // Create an org rule. "+ Add Org Rule" opens a create dialog.
   const addOrgRuleBtn = alice.getByRole("button", { name: /Add Org Rule/i }).first()
   await expect(addOrgRuleBtn).toBeVisible({ timeout: 10_000 })
   await addOrgRuleBtn.click()
 
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+
   const ruleName = `OrgToggle ${Date.now()}`
-  const nameInput = alice.locator("#re-name")
+  const nameInput = dialog.locator("#re-name")
   await expect(nameInput).toBeVisible({ timeout: 5_000 })
   await nameInput.fill(ruleName)
 
-  const patInput = alice.locator("#re-pat")
+  const patInput = dialog.locator("#re-pat")
   await expect(patInput).toBeVisible({ timeout: 3_000 })
   await patInput.fill("test-org-pattern")
 
-  const saveBtn = alice.getByRole("button", { name: /^Create rule$/ })
+  const saveBtn = dialog.getByRole("button", { name: /^Create rule$/ })
   await expect(saveBtn).toBeEnabled({ timeout: 3_000 })
   await saveBtn.click()
-  // Editor closes after save.
-  await expect(nameInput).not.toBeVisible({ timeout: 5_000 })
+  // Dialog closes after save.
+  await expect(dialog).not.toBeVisible({ timeout: 5_000 })
 
   // The org rule is now enabled. Find the "Disable org rule: ..." switch.
   const disableSwitch = alice.locator(`[aria-label="Disable org rule: ${ruleName}"]`)

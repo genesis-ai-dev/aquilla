@@ -31,6 +31,9 @@ export interface ImportDcsArgs {
   getToken: (fileId: string) => Promise<string | null>
   /** Persisted in the returned cursor. Defaults to "release". */
   trackMode?: DcsTrackMode
+  /** Per-project front-matter opt-out (AQU-634). When true, book-name/title/TOC
+   *  + intro-block cells are excluded from the imported USFM. Default: false. */
+  excludeFrontMatter?: boolean
   onProgress?: (uploaded: number, total: number) => void
   signal?: AbortSignal
 }
@@ -139,7 +142,12 @@ export async function importDcsResource(args: ImportDcsArgs): Promise<ImportDcsS
   }
 
   // 3. Parse → deterministic-id cells.
-  const parsedFiles = route.parse({ entry, manifest, files })
+  const parsedFiles = route.parse({
+    entry,
+    manifest,
+    files,
+    options: { excludeFrontMatter: args.excludeFrontMatter },
+  })
 
   // 4. Emit one bulk upload per parsed file.
   let totalCells = 0

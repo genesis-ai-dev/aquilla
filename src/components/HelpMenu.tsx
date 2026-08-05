@@ -84,6 +84,12 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
           sideOffset={4}
         >
           <DropdownMenuGroup>
+            {showTour ? (
+              <DropdownMenuItem onClick={handleTour}>
+                <Map />
+                Take the tour
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem
               render={
                 // Hard <a>: /homepage is the separate marketing entry point.
@@ -99,12 +105,6 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               Homepage
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
-            {showTour ? (
-              <DropdownMenuItem onClick={handleTour}>
-                <Map />
-                Take the tour
-              </DropdownMenuItem>
-            ) : null}
             <DropdownMenuItem
               render={
                 <a

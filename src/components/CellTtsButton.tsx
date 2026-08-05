@@ -17,6 +17,7 @@ import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { audioMimeForExt } from "@/lib/audio/mime"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type {
@@ -360,7 +361,10 @@ async function fetchAttachmentBlob(args: {
       ext: frontier.ext,
       getSyncToken: audioSyncTokenFetcherForSession(args.session),
     })
-    return new Blob([bytes as BlobPart], { type: "audio/wav" })
+    // Fortify pass: type the blob by its REAL container — generations are
+    // webm/opus now; Safari/Firefox reject mislabeled bytes with a bare
+    // onerror (Chromium sniffs, which masked this in Chrome-only testing).
+    return new Blob([bytes as BlobPart], { type: audioMimeForExt(frontier.ext) })
   }
   // Fallback for direct URLs (e.g. blob:, http:). Legacy LFS attachments
   // aren't supported anymore — their bytes are no longer reachable.

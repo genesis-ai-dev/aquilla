@@ -1056,6 +1056,11 @@ export function ProjectWorkspace() {
   }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
+  // Fortify pass: raw store cells carry NO audio attachments — any handler
+  // that reads `cell.attachments` must merge them in first. The per-file map
+  // rides a ref so early-declared callbacks can reach it without stale-closure
+  // or dependency-ordering problems (it is assigned where the hook runs).
+  const workspaceAudioByCellIdRef = useRef<Parameters<typeof mergeCellsWithAudio>[1]>(new Map())
 
   // FRO-IMPORT-OPT: when the active file's queued target commits finish draining
   // to the server, do ONE soft refetch to reconcile the read model and clear the
@@ -1544,10 +1549,20 @@ export function ProjectWorkspace() {
   const handleTrimTarget = useCallback(
     async (cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }) => {
       if (!project?.id || !activeFileId) return
-      const cell = getActiveCells().find((c) => c.id === cellId)
+      // Fortify pass: raw store cells never carry attachments/selectedAudioId
+      // — reading them unmerged made every timeline chip trim a SILENT NO-OP
+      // (att was always undefined). Merge the per-file audio reads in, the
+      // same way runTranscribeAll does.
+      const cell = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current)
+        .find((c) => c.id === cellId)
       const att = cell?.attachments?.[audioId]
       if (!cell || !att) return
       const slot = audioId === cell.selectedAudioId ? "recording" : "generatedVoice"
+      // No mimeType on a trim re-attach — the merged attachment's `type` field
+      // is the literal discriminator "audio", NOT a MIME; sending it would
+      // permanently overwrite the clip's real container type (the projection
+      // COALESCEs, so an ABSENT field keeps the stored value — exactly what a
+      // trim wants for every clip property it isn't changing).
       const trimP = emitCellAudioAttach({
         projectId: project.id,
         fileId: activeFileId,
@@ -1555,7 +1570,6 @@ export function ProjectWorkspace() {
         audioId,
         url: att.url,
         slot,
-        ...(att.type ? { mimeType: att.type } : {}),
         ...(att.voiceId ? { voiceId: att.voiceId } : {}),
         ...(att.referenceAudioId ? { referenceAudioId: att.referenceAudioId } : {}),
         ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
@@ -1567,7 +1581,7 @@ export function ProjectWorkspace() {
         audioId,
         url: att.url,
         slot,
-        mimeType: att.type ?? null,
+        mimeType: null,
         voiceId: att.voiceId ?? null,
         referenceAudioId: att.referenceAudioId ?? null,
         durationMs: att.durationMs ?? null,
@@ -4175,6 +4189,7 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     lens === "audio" ? activeFileId : null,
   )
+  workspaceAudioByCellIdRef.current = workspaceAudioByCellId
 
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
   // sharing the exact filters the batch runners use (needsTranscription /

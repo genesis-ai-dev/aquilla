@@ -15,6 +15,7 @@ import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { audioMimeForExt } from "@/lib/audio/mime"
 import { emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
   injectOptimisticAudioAttachment,
@@ -119,7 +120,10 @@ export function TakesStrip({
           projectId, fileId, audioId: frontier.audioId, ext: frontier.ext,
           getSyncToken: audioSyncTokenFetcherForSession(session),
         })
-        src = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "audio/wav" }))
+        // Fortify pass: type the blob by its REAL container (takes are webm,
+        // generations may be webm/opus or wav) — Safari/Firefox trust the
+        // declared type and reject mislabeled bytes with a bare onerror.
+        src = URL.createObjectURL(new Blob([bytes as BlobPart], { type: audioMimeForExt(frontier.ext) }))
         urlRef.current = src
       }
       const audio = new Audio(src)

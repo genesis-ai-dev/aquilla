@@ -4408,11 +4408,9 @@ export function ProjectWorkspace() {
   )
 
   // AQU-646 SUB-53: which job the Media lens is for. Absent means dubbing —
-  // the behaviour every project had before this. Only a maintainer can change
-  // it (the server's floor for writing project settings), so below that the
-  // timeline shows the mode as a plain label instead of a control.
+  // the behaviour every project had before this. Changed in Project Settings
+  // only (2026-08-06) — the timeline shows a note, never a control.
   const timingMode = resolveAudioTimingMode(project ?? undefined)
-  const canEditTimingMode = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.
   useEffect(() => {
@@ -4458,29 +4456,6 @@ export function ProjectWorkspace() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cells/selection via refs; keyed on the open file + attachments-arrived
   }, [lens, activeFileId, project?.id, frontierSession?.jwt, warmHasAttachments])
-  const handleChangeTimingMode = useCallback(
-    (mode: AudioTimingMode) => {
-      // FORTIFY(finding 44): a failed patch silently reverts the toggle a few
-      // seconds later (optimistic local write, then the server refresh wins).
-      // Tell the user why instead of looking haunted.
-      void patchSettings({ audioTimingMode: mode }).then((outcome) => {
-        if (outcome.kind === "ok") return
-        if (outcome.kind === "conflict") {
-          toast.warning("Timing mode changed by someone else — showing the latest setting.")
-        } else if (outcome.kind === "blocked") {
-          toast.warning(
-            outcome.reason === "offline"
-              ? "You're offline — the timing mode change couldn't be saved."
-              : "You don't have permission to change the timing mode.",
-          )
-        } else {
-          toast.error(`Couldn't save the timing mode: ${outcome.message}`)
-        }
-      })
-    },
-    [patchSettings],
-  )
-
   // AQU-646: timeline seeks (ruler click, clean card click) drive the audio
   // queue in file-timeline seconds. Live queue → jump preserving play/pause;
   // idle queue → CUE paused at the position (Sam's decision: clicking while
@@ -6185,25 +6160,16 @@ export function ProjectWorkspace() {
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
       />
-      {/* Flow B (2026-08-05): linking a video under Free timing. The two
-          writes on "switch" are independent channels (file event vs settings
-          PATCH); handleChangeTimingMode's toasts cover its failures. */}
+      {/* Flow B (2026-08-05, simplified 2026-08-06): linking a video under
+          Free timing warns that it will stay hidden. Mode changes stay in
+          Project Settings only — no combined switch-and-link action. */}
       <LinkVideoTimingDialog
         open={pendingVideoUrl !== null}
-        canSwitch={canEditTimingMode}
         onCancel={() => setPendingVideoUrl(null)}
         onLinkAnyway={() => {
           const u = pendingVideoUrl
           setPendingVideoUrl(null)
           if (u) void applyLinkVideo(u)
-        }}
-        onSwitchToOriginal={() => {
-          const u = pendingVideoUrl
-          setPendingVideoUrl(null)
-          if (u) {
-            void applyLinkVideo(u)
-            handleChangeTimingMode("dubbing")
-          }
         }}
       />
       {/* FRO-272: "Recently deleted" trash list — opened from the sidebar's

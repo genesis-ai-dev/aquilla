@@ -149,12 +149,16 @@ function TargetAudioChip({
       // neighbour's slack — but its END may not move before its section's
       // START, and its START may not move past the section's END. The epsilon
       // keeps an audible sliver in-section on both edges and scales with the
-      // section so tiny sections can't pin the chip (round-7 fix). Hard floor
-      // last: audible start ≥ trimStart ⇔ stored anchor ≥ 0, so nothing
-      // renders or persists before file time zero.
+      // section so tiny sections can't pin the chip (round-7 fix).
+      // 2026-08-06 (Sam): the start also may not pass the PREVIOUS CHIP's
+      // start — overlapping a neighbour's tail is a borrowable corner, but
+      // leapfrogging or fully covering another chip painted as an unreadable
+      // stack and can never be intentional. Hard floor last: audible start ≥
+      // trimStart ⇔ stored anchor ≥ 0, so nothing renders or persists before
+      // file time zero.
       const eps = Math.min(0.05, Math.max(0.001, (section.end - section.start) / 2))
       start = Math.min(start, Math.max(section.start, section.end - eps))
-      start = Math.max(start, section.start + eps - len, geom.trimStartSec)
+      start = Math.max(start, section.start + eps - len, prevChip?.start ?? -Infinity, geom.trimStartSec)
       return { start, end: start + len }
     }
     if (mode === "resize-l") {
@@ -296,7 +300,7 @@ function TargetAudioChip({
               −{tailOverlapSec.toFixed(1)}s{" "}
             </span>
           )}
-          <span className="opacity-90">Overlaps the next dub — both will sound</span>
+          <span className="opacity-90">Overlaps the next dub</span>
         </div>,
       )
     }
@@ -311,7 +315,7 @@ function TargetAudioChip({
               −{headOverlapSec.toFixed(1)}s{" "}
             </span>
           )}
-          <span className="opacity-90">Overlaps the previous dub — both will sound</span>
+          <span className="opacity-90">Overlaps the previous dub</span>
         </div>,
       )
     }
@@ -368,7 +372,11 @@ function TargetAudioChip({
         // letting a placeholder width pass for the real thing.
         geom.usingFallback && "border-dashed",
         overflow === "soft" && "border-amber-500 ring-1 ring-amber-400/70",
-        overflow === "overlap" && "border-red-500 ring-1 ring-red-500/70",
+        // 2026-08-06 (Sam): overlapping chips are ALWAYS a problem — the
+        // whole body goes red, not just the border, so it can't be mistaken
+        // for the informational src/tgt end difference.
+        overflow === "overlap" &&
+          "border-red-500 ring-1 ring-red-500/70 bg-red-100/80 text-red-800 dark:bg-red-950/70 dark:text-red-300",
         canMove && "cursor-grab active:cursor-grabbing",
         "hover:brightness-105",
         selected && "ring-2 ring-sky-500",

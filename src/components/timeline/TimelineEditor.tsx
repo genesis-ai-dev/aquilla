@@ -8,6 +8,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
+import { chipOverlaps } from "@/lib/timeline/lane-timing"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
@@ -364,21 +365,38 @@ export function TimelineEditor({
   )
   // Meeting note (2026-08-05): the detail readout carries the dub's own
   // numbers — its range, its duration, and ALWAYS the end-to-end difference
-  // (original end − dub end). Ends are what timing work cares about; the diff
-  // goes negative exactly when the dub outruns its verse. Dubbing only, and
-  // never from a guessed width (SUB-48).
+  // (original end − dub end). 2026-08-06 (Sam): the diff is INFORMATIONAL (a
+  // difference can be intentional) — chip-vs-chip OVERLAP is the warning, a
+  // separate number computed with the same trespasser gating the lane uses.
+  // Dubbing only, and never from a guessed width (SUB-48).
   const selectedChipStats = useMemo(() => {
     if (audioFirst || !selectedCell) return null
-    const item = targetItems.find((t) => t.cell.id === selectedCell.id)
-    if (!item) return null
-    const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId])
+    const i = targetItems.findIndex((t) => t.cell.id === selectedCell.id)
+    if (i < 0) return null
+    const geomOf = (t: (typeof targetItems)[number] | undefined) =>
+      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
+    const geom = geomOf(targetItems[i])
     if (!geom || geom.usingFallback) return null
-    const sectionEnd = selectedCell.endTime
+    const { startTime, endTime } = selectedCell
+    const prev = geomOf(targetItems[i - 1])
+    const next = geomOf(targetItems[i + 1])
+    const { headSec, tailSec } = chipOverlaps(
+      { start: geom.start, end: geom.end },
+      prev ? { start: prev.start, end: prev.end } : null,
+      next?.start ?? null,
+    )
+    // Blame the trespasser (same rule as the chip): only territory THIS chip
+    // left its own section to claim counts toward its overlap number.
+    const tailTrespass = tailSec != null && typeof endTime === "number" && geom.end > endTime ? tailSec : 0
+    const headTrespass =
+      headSec != null && typeof startTime === "number" && geom.start < startTime ? headSec : 0
+    const overlapSec = tailTrespass + headTrespass
     return {
       startSec: geom.start,
       endSec: geom.end,
       durationSec: geom.end - geom.start,
-      endDiffSec: typeof sectionEnd === "number" ? sectionEnd - geom.end : null,
+      endDiffSec: typeof endTime === "number" ? endTime - geom.end : null,
+      overlapSec: overlapSec > 0 ? overlapSec : null,
     }
   }, [audioFirst, selectedCell, targetItems, layout])
   const selectedClipAudio = useMemo(

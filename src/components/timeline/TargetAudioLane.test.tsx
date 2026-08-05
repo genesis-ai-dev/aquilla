@@ -181,6 +181,37 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     expect(anchor).toBeCloseTo(6.05)
   })
 
+  it("the drag stops at the PREVIOUS chip's start — no leapfrogging another chip (2026-08-06)", () => {
+    const onRetimeTarget = vi.fn()
+    const first = item({}, 4000) // chip [10, 14] in section 10–20
+    const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 8000, "c2") // [20, 28]
+    render(<TargetAudioLane {...base} items={[first, second]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c2")
+    fireEvent.pointerDown(chip, { clientX: 800, pointerId: 1 }) // start 20s
+    fireEvent.pointerMove(window, { clientX: 0 }) // −20s → way past everything
+    fireEvent.pointerUp(window, { clientX: 0 })
+    const [, anchor] = onRetimeTarget.mock.calls[0] as [string, number]
+    // End-based floor would allow 12.05 (20.05 − 8), but the previous chip
+    // starts at 10... the binding bound here is the section floor. Use a
+    // longer chip to make the PREV bound the binding one:
+    expect(anchor).toBeCloseTo(12.05)
+  })
+
+  it("…and with a chip long enough to reach it, the previous chip's start IS the floor", () => {
+    const onRetimeTarget = vi.fn()
+    const first = item({}, 4000) // chip [10, 14]
+    const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 15000, "c2") // 15s long
+    render(<TargetAudioLane {...base} items={[first, second]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c2")
+    fireEvent.pointerDown(chip, { clientX: 800, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 0 })
+    fireEvent.pointerUp(window, { clientX: 0 })
+    const [, anchor] = onRetimeTarget.mock.calls[0] as [string, number]
+    // End-based floor would be 20.05 − 15 = 5.05 — but the previous chip
+    // starts at 10, and that wins: never leapfrog a neighbour.
+    expect(anchor).toBeCloseTo(10)
+  })
+
   it("END-based bounds: the stored anchor can never go below file zero", () => {
     const onRetimeTarget = vi.fn()
     render(

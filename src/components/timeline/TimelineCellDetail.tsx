@@ -89,7 +89,12 @@ export interface TimelineCellDetailProps {
     startSec: number
     endSec: number
     durationSec: number
+    /** Src end − Tgt end. INFORMATIONAL (2026-08-06): a difference can be
+     *  intentional — never styled as a warning. */
     endDiffSec: number | null
+    /** How much of this chip double-sounds over its NEIGHBOURS' chips
+     *  (trespasser-gated). Overlap is ALWAYS a problem — shown red. */
+    overlapSec: number | null
   } | null
   editable: boolean
   /** Emits a target commit. `valueHtml` carries the rich-text form so media
@@ -244,6 +249,7 @@ export function TimelineCellDetail({
         </Pill>
         <Pill>
           <span className="font-mono tabular-nums">
+            {chipStats ? "Src: " : ""}
             {fmtClock(start, true)}–{fmtClock(end, true)}
             {" · "}
             {(end - start).toFixed(1)}s
@@ -252,7 +258,7 @@ export function TimelineCellDetail({
         {chipStats && (
           <Pill>
             <span data-testid="tl-detail-dub-range" className="font-mono tabular-nums">
-              Dub {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
+              Tgt: {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
               {" · "}
               <span data-testid="tl-detail-duration">{chipStats.durationSec.toFixed(1)}s</span>
             </span>
@@ -260,26 +266,34 @@ export function TimelineCellDetail({
         )}
         {chipStats?.endDiffSec != null &&
           (() => {
-            // One-decimal display; the sign follows the DISPLAYED value so a
-            // −0.04 never prints as a red "−0.0s".
+            // One-decimal display; the sign follows the DISPLAYED value.
+            // INFORMATIONAL by decision (2026-08-06): an end difference can
+            // be intentional — chip OVERLAP below is the warning.
             const tenths = Math.round(chipStats.endDiffSec * 10) / 10
-            const negative = tenths < 0
             return (
               <Pill>
                 <span
                   data-testid="tl-detail-enddiff"
-                  title="Original end − dub end: negative means the dub runs past its verse"
-                  className={cn(
-                    "font-mono tabular-nums",
-                    negative && "font-semibold text-red-600 dark:text-red-400",
-                  )}
+                  title="Src end − Tgt end: negative means the target audio ends after its verse"
+                  className="font-mono tabular-nums"
                 >
-                  {negative ? "−" : "+"}
+                  Diff: {tenths < 0 ? "−" : "+"}
                   {Math.abs(tenths).toFixed(1)}s
                 </span>
               </Pill>
             )
           })()}
+        {chipStats?.overlapSec != null && (
+          <Pill>
+            <span
+              data-testid="tl-detail-overlap"
+              title="This target audio sounds over a neighbouring verse's target audio"
+              className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+            >
+              Overlap: −{chipStats.overlapSec.toFixed(1)}s
+            </span>
+          </Pill>
+        )}
         {castName && (
           <Pill>
             Speaker <b className="font-semibold text-foreground">{castName}</b>

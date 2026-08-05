@@ -121,48 +121,61 @@ describe("TimelineCellDetail", () => {
     expect(onCommit).not.toHaveBeenCalled()
   })
 
-  it("shows the dub's range, duration, and a positive end-diff when it fits", () => {
+  it("labels the pills Src/Tgt/Diff and shows range + duration for both sides", () => {
     render(
       <TimelineCellDetail
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
-        chipStats={{ startSec: 10, endSec: 14.3, durationSec: 4.3, endDiffSec: 0.7 }}
+        chipStats={{ startSec: 10, endSec: 14.3, durationSec: 4.3, endDiffSec: 0.7, overlapSec: null }}
         editable
         onCommitTarget={() => {}}
       />,
     )
-    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("0:10.0–0:14.3")
+    expect(screen.getByText(/Src: 0:10\.0–0:15\.0 · 5\.0s/)).toBeInTheDocument()
+    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Tgt: 0:10.0–0:14.3")
     expect(screen.getByTestId("tl-detail-duration")).toHaveTextContent("4.3s")
-    const diff = screen.getByTestId("tl-detail-enddiff")
-    expect(diff).toHaveTextContent("+0.7s")
-    expect(diff.className).not.toContain("text-red")
+    expect(screen.getByTestId("tl-detail-enddiff")).toHaveTextContent("Diff: +0.7s")
   })
 
-  it("shows a red negative end-diff when the dub outruns its verse", () => {
+  it("a negative Diff is INFORMATIONAL — labeled, never red (2026-08-06)", () => {
     render(
       <TimelineCellDetail
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
-        chipStats={{ startSec: 11, endSec: 15.8, durationSec: 4.8, endDiffSec: -0.8 }}
+        chipStats={{ startSec: 11, endSec: 15.8, durationSec: 4.8, endDiffSec: -0.8, overlapSec: null }}
         editable
         onCommitTarget={() => {}}
       />,
     )
     const diff = screen.getByTestId("tl-detail-enddiff")
-    expect(diff).toHaveTextContent("−0.8s")
-    expect(diff.className).toContain("text-red-600")
+    expect(diff).toHaveTextContent("Diff: −0.8s")
+    expect(diff.className).not.toContain("text-red")
   })
 
-  it("a diff that rounds to zero is never painted red", () => {
+  it("chip-vs-chip OVERLAP gets its own red pill — the real warning", () => {
     render(
       <TimelineCellDetail
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
-        chipStats={{ startSec: 10, endSec: 15.04, durationSec: 5.04, endDiffSec: -0.04 }}
+        chipStats={{ startSec: 9, endSec: 14, durationSec: 5, endDiffSec: 1, overlapSec: 1.8 }}
         editable
         onCommitTarget={() => {}}
       />,
     )
-    const diff = screen.getByTestId("tl-detail-enddiff")
-    expect(diff).toHaveTextContent("+0.0s")
-    expect(diff.className).not.toContain("text-red")
+    const overlap = screen.getByTestId("tl-detail-overlap")
+    expect(overlap).toHaveTextContent("Overlap: −1.8s")
+    expect(overlap.className).toContain("text-red-600")
+    // …and the informational Diff stays neutral beside it.
+    expect(screen.getByTestId("tl-detail-enddiff").className).not.toContain("text-red")
+  })
+
+  it("no overlap pill when the chip doesn't collide", () => {
+    render(
+      <TimelineCellDetail
+        cell={cell({ original: "x", startTime: 10, endTime: 15 })}
+        chipStats={{ startSec: 10, endSec: 14, durationSec: 4, endDiffSec: 1, overlapSec: null }}
+        editable
+        onCommitTarget={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
   })
 
   it("shows no dub numbers without chipStats (no measured dub / free timing)", () => {
@@ -175,6 +188,8 @@ describe("TimelineCellDetail", () => {
     )
     expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
     expect(screen.queryByTestId("tl-detail-enddiff")).toBeNull()
+    // A chip-less cell's range pill stays unlabeled — nothing to contrast with.
+    expect(screen.queryByText(/^Src:/)).toBeNull()
   })
 
   it("renders an empty state with no selection", () => {

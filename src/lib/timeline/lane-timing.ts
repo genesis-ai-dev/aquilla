@@ -18,6 +18,12 @@ export interface SpanSec {
 /** Threshold past the section end before a chip counts as "running long". */
 export const OVERFLOW_SOFT_SEC = 0.5
 
+/** Sub-perceptual slack before neighbouring chips count as overlapping —
+ *  drag/trim maths land within a few ms of an edge, and a "−0.0s" warning is
+ *  a lie (2026-08-06: Sam hit exactly that). Below the display's own 0.1s
+ *  resolution. */
+export const OVERLAP_EPS_SEC = 0.05
+
 function metaNumber(meta: CellData["metadata"], key: string): number | null {
   const v = meta?.[key]
   return typeof v === "number" && Number.isFinite(v) ? v : null
@@ -144,11 +150,13 @@ export function chipOverlaps(
   nextChipStartSec: number | null,
 ): { headSec: number | null; tailSec: number | null } {
   const tailSec =
-    nextChipStartSec != null && span.end > nextChipStartSec ? span.end - nextChipStartSec : null
+    nextChipStartSec != null && span.end > nextChipStartSec + OVERLAP_EPS_SEC
+      ? span.end - nextChipStartSec
+      : null
   // The prevChip.start < span.end guard: a chip slid entirely BEFORE the
   // previous chip's box does not intersect it — that is not an overlap.
   const headSec =
-    prevChip != null && prevChip.end > span.start && prevChip.start < span.end
+    prevChip != null && prevChip.end > span.start + OVERLAP_EPS_SEC && prevChip.start < span.end
       ? Math.min(prevChip.end, span.end) - span.start
       : null
   return { headSec, tailSec }

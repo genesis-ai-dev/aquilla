@@ -185,4 +185,19 @@ describe("chipOverlaps", () => {
       tailSec: 1,
     })
   })
+
+  it("sub-perceptual intrusions are NOT overlaps — a '−0.0s' warning is a lie (2026-08-06)", () => {
+    // 30ms past the next chip's start: drag maths land within a few ms of an
+    // edge; below the 0.1s display resolution nothing should warn.
+    expect(chipOverlaps({ start: 15, end: 23.03 }, null, 23)).toEqual({ headSec: null, tailSec: null })
+    expect(chipOverlaps({ start: 18.97, end: 23 }, { start: 15, end: 19 }, null)).toEqual({
+      headSec: null,
+      tailSec: null,
+    })
+    // …while a tenth of a second is real.
+    expect(chipOverlaps({ start: 15, end: 23.1 }, null, 23)).toEqual({
+      headSec: null,
+      tailSec: expect.closeTo(0.1, 5),
+    })
+  })
 })

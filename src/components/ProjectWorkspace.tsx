@@ -4434,7 +4434,23 @@ export function ProjectWorkspace() {
   }, [lens, activeFileId, project?.id, frontierSession?.jwt, warmHasAttachments])
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      void patchSettings({ audioTimingMode: mode })
+      // FORTIFY(finding 44): a failed patch silently reverts the toggle a few
+      // seconds later (optimistic local write, then the server refresh wins).
+      // Tell the user why instead of looking haunted.
+      void patchSettings({ audioTimingMode: mode }).then((outcome) => {
+        if (outcome.kind === "ok") return
+        if (outcome.kind === "conflict") {
+          toast.warning("Timing mode changed by someone else — showing the latest setting.")
+        } else if (outcome.kind === "blocked") {
+          toast.warning(
+            outcome.reason === "offline"
+              ? "You're offline — the timing mode change couldn't be saved."
+              : "You don't have permission to change the timing mode.",
+          )
+        } else {
+          toast.error(`Couldn't save the timing mode: ${outcome.message}`)
+        }
+      })
     },
     [patchSettings],
   )

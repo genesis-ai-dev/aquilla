@@ -174,6 +174,12 @@ export function __resetAudioCacheMemo(): void {
   indexChain = Promise.resolve()
 }
 
+/** @internal — tests: await every queued index operation (fire-and-forget
+ *  write-throughs land behind the serialization chain). */
+export function __flushAudioCacheForTests(): Promise<void> {
+  return indexChain.then(() => undefined)
+}
+
 // ── Eviction ──────────────────────────────────────────────────────────────────
 
 async function evictIfNeeded(fs: OpfsFs, index: CacheIndex): Promise<void> {

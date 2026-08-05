@@ -11,6 +11,7 @@
 import { synthesizeForCell } from "./tts"
 import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
 import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
+import { audioCachePutBlob } from "./bytes-cache"
 import { resolveVoice } from "./voices"
 import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
@@ -135,6 +136,8 @@ export async function generateAndAttachCellVoice(
   // Clone conversions come back from the worker as WAV; the plain-TTS branch
   // overrides this when it compresses.
   let generatedMimeType = "audio/wav"
+  /** Sample-exact duration from the opus encoder, when that path ran. */
+  let encodedDurationMs: number | null = null
 
   if (voice.referenceAudioId) {
     // 2a. Clone: re-voice TTS output into the reference timbre. The worker
@@ -177,8 +180,15 @@ export async function generateAndAttachCellVoice(
         uploadBlob = encoded.blob
         uploadMime = encoded.mimeType
         ext = encoded.ext
-      } catch {
-        /* keep the WAV */
+        // FORTIFY: the encoder's duration is sample-exact — re-probing the
+        // blob with a media element (which can time out and leave the chip
+        // "length unknown") threw away a value we had in hand.
+        encodedDurationMs = encoded.durationMs
+      } catch (e) {
+        // FORTIFY: never silent — a browser whose AudioEncoder rejects the
+        // opus config would otherwise fall back to WAV on EVERY generation,
+        // invisibly, forever.
+        console.warn("[generate-voice] opus compress failed; uploading WAV", e)
       }
     }
     const res = await uploadCellAudio({
@@ -195,12 +205,18 @@ export async function generateAndAttachCellVoice(
     generatedMimeType = uploadMime
   }
 
+  // FORTIFY: local-first parity with mic and denoised takes — the exact
+  // playable bytes are in hand, so stock the byte cache. Without this, the
+  // very first Media-lens playback / peaks / transcription of a just-generated
+  // clip re-downloaded from R2 (and parked the verse in "loading" for it).
+  void audioCachePutBlob(audioId, ext, playable)
+
   // 3. Attach durably (generatedVoice slot). The bus poke surfaces it via the
   // per-file read; the WS broadcast does the same for collaborators.
   // Round 6: probe the clip's duration so its Target-track chip renders at
   // the generated audio's real length (best-effort).
   const objectName = `${audioId}.${ext}`
-  const generatedDurationMs = await probeDurationMsSafe(playable)
+  const generatedDurationMs = encodedDurationMs ?? (await probeDurationMsSafe(playable))
   const attachEventId = await emitCellAudioAttach({
     projectId: args.projectId,
     fileId: args.fileId,

@@ -21,6 +21,9 @@ import { synthesizeForCell, setTtsStatus, ttsStatusKey } from "./tts"
 import { resolveCastVoice } from "./voices"
 import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
+import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
+import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
+import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
@@ -104,6 +107,9 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
     let audioId: string
     let ext: string
     let url: string
+    // Server-side branches (omnivoice, clone) return WAV; the client-synth
+    // branch overrides when it compresses.
+    let combinedMime = "audio/wav"
 
     if (provider === "omnivoice") {
       // Server-side: one OmniVoice call for the whole joined clip; the worker
@@ -156,11 +162,31 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         url = conv.url
         await fetchCellAudio({ projectId: project.id, fileId, audioId: conv.audioId, ext: conv.ext, getSyncToken })
       } else {
+        // FORTIFY: combined "voice together" clips are the LARGEST client-
+        // synth generations in the app (up to 12 cells of prosody in one
+        // file) and were still uploading raw WAV after the compression round
+        // shipped — the exact block generate-voice.ts uses, same fallback.
         const baseId = buildAudioId(chosen[0].id)
+        let uploadBlob = ttsBlob
         ext = "wav"
-        const res = await uploadCellAudio({ projectId: project.id, fileId, audioId: baseId, ext, blob: ttsBlob, getSyncToken })
+        combinedMime = "audio/wav"
+        if (canEncodeOpus()) {
+          try {
+            const samples = await decodeToMono48k(new Uint8Array(await ttsBlob.arrayBuffer()))
+            const encoded = await encodeMonoToWebmOpus(samples, TARGET_RATE)
+            uploadBlob = encoded.blob
+            combinedMime = encoded.mimeType
+            ext = encoded.ext
+          } catch (e) {
+            console.warn("[combined-voice] opus compress failed; uploading WAV", e)
+          }
+        }
+        const res = await uploadCellAudio({ projectId: project.id, fileId, audioId: baseId, ext, blob: uploadBlob, getSyncToken })
         audioId = res.audioId
         url = res.url
+        // Local-first: the exact playable bytes are in hand — stock the byte
+        // cache so first playback/peaks/transcription need no re-download.
+        void audioCachePutBlob(res.audioId, ext, uploadBlob)
       }
     }
     const objectName = `${audioId}.${ext}`
@@ -175,7 +201,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         audioId: objectName,
         url,
         slot: "generatedVoice",
-        mimeType: "audio/wav",
+        mimeType: combinedMime,
         voiceId: voice.id,
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
         author: username,

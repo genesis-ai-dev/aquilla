@@ -42,6 +42,7 @@ import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio/auto-transcribe"
+import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLane } from "./project-workspace-lane-deeplink"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -4376,6 +4377,36 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setQueueTimingMode(timingMode)
   }, [timingMode])
+
+  // Smooth-playback layer 1: while the Media lens is open, quietly stock the
+  // on-device byte cache with the open file's dub clips (nearest the selection
+  // first, budget-aware, abandoned on lens exit). Clip ids are immutable, so
+  // this is a once-per-device cost — afterwards playback, scrubbing and seeks
+  // never wait on the network. Cells/selection are read through refs: the
+  // sweep keys on the FILE, not on every cell revalidation.
+  const warmCellsRef = useRef<CellData[]>([])
+  warmCellsRef.current = audioMergedCells
+  const warmNearRef = useRef<string | null>(null)
+  warmNearRef.current = timelineSelectedCellId
+  useEffect(() => {
+    if (lens !== "audio" || !activeFileId || !project?.id || !frontierSession?.jwt) return
+    const controller = new AbortController()
+    // Give the lens a beat to render before spending bandwidth.
+    const t = setTimeout(() => {
+      void warmFileDubs({
+        cells: warmCellsRef.current,
+        projectId: project.id,
+        session: frontierSession,
+        signal: controller.signal,
+        nearCellId: warmNearRef.current,
+      }).catch(() => { /* best-effort — playback streams on a cache miss */ })
+    }, 1_500)
+    return () => {
+      clearTimeout(t)
+      controller.abort()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cells/selection via refs; keyed on the open file
+  }, [lens, activeFileId, project?.id, frontierSession?.jwt])
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
       void patchSettings({ audioTimingMode: mode })

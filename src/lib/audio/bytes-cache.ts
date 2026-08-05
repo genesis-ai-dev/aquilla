@@ -22,7 +22,38 @@
 import { createOpfsFs, type OpfsFs } from "@/lib/fs/opfs-fs"
 import { markOpfsUnavailable } from "@/lib/storage/opfs-availability"
 
-const MAX_TOTAL_BYTES = 200 * 1024 * 1024 // 200 MB
+// Smooth-playback round: the budget adapts to what the browser actually
+// grants. 200 MB was a fixed courtesy constant; browsers typically grant an
+// origin gigabytes (Chrome: up to ~60% of free disk), and a whole project's
+// dubs only stay warm if they fit. Floor 200 MB (estimate() missing or
+// stingy), ceiling ~1.5 GB, never more than a fifth of the granted quota.
+const FLOOR_BYTES = 200 * 1024 * 1024
+const CEILING_BYTES = 1536 * 1024 * 1024
+const QUOTA_FRACTION = 0.2
+
+let budgetCache: number | null = null
+
+/** The cache's byte budget for this session (resolved once, then memoized). */
+export async function audioCacheBudget(): Promise<number> {
+  if (budgetCache != null) return budgetCache
+  let budget = FLOOR_BYTES
+  try {
+    const est = await navigator.storage?.estimate?.()
+    const quota = est?.quota
+    if (typeof quota === "number" && Number.isFinite(quota) && quota > 0) {
+      budget = Math.min(CEILING_BYTES, Math.max(FLOOR_BYTES, Math.floor(quota * QUOTA_FRACTION)))
+    }
+  } catch {
+    /* keep the floor */
+  }
+  budgetCache = budget
+  return budget
+}
+
+/** @internal — test seam for the adaptive budget. */
+export function __setBudgetForTests(bytes: number | null): void {
+  budgetCache = bytes
+}
 
 /** Exposed for tests. */
 export const AUDIO_BYTES_DIR = "/audio-bytes"
@@ -102,10 +133,11 @@ async function writeIndex(fs: OpfsFs, index: CacheIndex): Promise<void> {
 // ── Eviction ──────────────────────────────────────────────────────────────────
 
 async function evictIfNeeded(fs: OpfsFs, index: CacheIndex): Promise<void> {
-  if (index.totalBytes <= MAX_TOTAL_BYTES) return
+  const budget = await audioCacheBudget()
+  if (index.totalBytes <= budget) return
   // Sort entries oldest-last (we shift from the front).
   // The list is already maintained in insertion/access order (oldest first).
-  while (index.totalBytes > MAX_TOTAL_BYTES && index.entries.length > 0) {
+  while (index.totalBytes > budget && index.entries.length > 0) {
     const oldest = index.entries.shift()!
     try {
       await fs.promises.unlink(bytesPath(oldest.audioId, oldest.ext))
@@ -210,6 +242,34 @@ export async function audioCachePutBlob(
  * deleted so subsequent opens don't serve stale bytes from a re-used key —
  * unlikely with UUIDv7 ids but included for correctness).
  */
+/**
+ * Cheap existence check — the warmer's "already stocked?" question. Reads only
+ * the index (no bytes into memory) and deliberately does NOT bump LRU: merely
+ * planning a warm sweep must not reorder eviction against clips someone is
+ * actually listening to.
+ */
+export async function audioCacheHas(audioId: string, ext: string): Promise<boolean> {
+  const fs = await rootFs()
+  if (!fs) return false
+  try {
+    const index = await readIndex(fs)
+    return index.entries.some((e) => e.audioId === audioId && e.ext === ext)
+  } catch {
+    return false
+  }
+}
+
+/** Current cache occupancy in bytes (index-only read). */
+export async function audioCacheUsage(): Promise<number> {
+  const fs = await rootFs()
+  if (!fs) return 0
+  try {
+    return (await readIndex(fs)).totalBytes
+  } catch {
+    return 0
+  }
+}
+
 export async function audioCacheEvict(audioId: string, ext: string): Promise<void> {
   const fs = await rootFs()
   if (!fs) return

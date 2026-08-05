@@ -473,6 +473,7 @@ function progPrevPlayable(from: number): number {
 
 function progFinish(): void {
   progClearGate()
+  disposeProgPrefetch()
   progQuiet(currentAudio)
   disposeAllOverlays()
   progIndex = -1
@@ -601,6 +602,8 @@ function progStartSides(gate: ProgGate): void {
   if (srcEl) void srcEl.play().catch(() => { /* user-driven, ignore */ })
   if (dubEl) void dubEl.play().catch(() => { /* user-driven, ignore */ })
   setState({ kind: "playing", ...progStateCell() })
+  // This verse is rolling — stock the NEXT one so its boundary is warm.
+  progPrefetchNext()
 }
 
 /** A dub stopped — at its trim end, its natural end, or because it failed. */
@@ -837,6 +840,7 @@ async function progPlaySlot(
       progQuiet(currentAudio)
     }
     setState({ kind: "paused", ...progStateCell() })
+    progPrefetchNext()
     return
   }
 
@@ -1181,7 +1185,7 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
       if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
       return
     }
-    wireOverlayElement(entry, resolved, startAtClipSec, { autostart: true })
+    wireOverlayElement(entry, { resolved }, startAtClipSec, { autostart: true })
   })()
 }
 
@@ -1189,28 +1193,38 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
  * Build and wire a pool entry's element. Shared by the dubbing fire path
  * (autostart: today's exact condition) and the audio-first CUE path
  * (autostart false + onReady — the readiness gate starts sides itself, so a
- * half-loaded dub can never self-start while the source is held).
+ * half-loaded dub can never self-start while the source is held). `media` is
+ * either a resolved src (fresh element) or an ADOPTED prefetched element.
  */
 function wireOverlayElement(
   entry: OverlayEntry,
-  resolved: ResolvedAudioSrc,
+  media: { resolved: ResolvedAudioSrc } | { element: HTMLAudioElement; objectUrl: string | null },
   startAtClipSec: number,
   opts: { autostart: boolean; onReady?: () => void },
 ): void {
-  const audio = new Audio(resolved.src)
+  const audio = "element" in media ? media.element : new Audio(media.resolved.src)
   entry.element = audio
-  entry.url = resolved.objectUrl
+  entry.url = "element" in media ? media.objectUrl : media.resolved.objectUrl
+  // (Re-)stamp the live properties: an adopted prefetch element sat OUTSIDE
+  // the pool, so rate/volume/audibility sweeps that ran meanwhile missed it.
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
   audio.muted = !audibility.target
-  if (startAtClipSec > 0.05) {
+  const applySeek = () => {
+    const d = audio.duration
+    audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtClipSec, d)) : startAtClipSec
+  }
+  if (audio.readyState >= 1) {
+    // Metadata already loaded (adopted element): position it NOW — its
+    // prefetch pre-seek may be stale after a re-flow.
+    applySeek()
+  } else if (startAtClipSec > 0.05) {
     // Join the clip at the offset (trim head and/or mid-dub seek). Safari
     // rejects pre-metadata seeks (same trick as the master's
     // pendingStartSeconds).
     audio.onloadedmetadata = () => {
       if (!overlayPool.includes(entry)) return
-      const d = audio.duration
-      audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtClipSec, d)) : startAtClipSec
+      applySeek()
     }
   }
   audio.onended = () => {
@@ -1254,10 +1268,98 @@ function wireOverlayElement(
   }
 }
 
+// ── Next-verse prefetch (smooth-playback round) ─────────────────────────────
+// While verse N plays, verse N+1's dub is resolved into a cued, pre-seeked
+// element. At the boundary the cue path ADOPTS it — readiness is synchronous,
+// so the gate opens in the same tick and warm boundaries never flicker
+// "loading". Single-slot: the boundary only ever needs the next verse.
+
+interface ProgPrefetch {
+  cellId: string
+  audioId: string
+  url: string
+  element: HTMLAudioElement | null
+  objectUrl: string | null
+}
+
+let progPrefetch: ProgPrefetch | null = null
+
+function disposeProgPrefetch(): void {
+  const stash = progPrefetch
+  if (!stash) return
+  progPrefetch = null
+  if (stash.element) {
+    stash.element.onloadedmetadata = null
+    stash.element.pause()
+    stash.element.src = ""
+  }
+  if (stash.objectUrl) URL.revokeObjectURL(stash.objectUrl)
+}
+
+/** Stock the stash with the NEXT playable verse's dub (no-op when it already
+ *  holds it, or when the next verse has none). */
+function progPrefetchNext(): void {
+  if (timingMode !== "audioFirst") return
+  const ctx = activeContext
+  const prog = programme
+  if (!ctx || !prog) return
+  const next = progNextPlayable(progIndex + 1)
+  const slot = next >= 0 ? prog.slots[next] : null
+  const cell = slot ? ctx.cells.find((c) => c.id === slot.cellId) : null
+  const target = cell && slot?.targetWindow ? activeTargetForCell(cell) : null
+  if (!slot || !cell || !target) {
+    disposeProgPrefetch()
+    return
+  }
+  if (
+    progPrefetch &&
+    progPrefetch.cellId === slot.cellId &&
+    progPrefetch.audioId === target.audioId &&
+    progPrefetch.url === target.url
+  ) {
+    return // already stocked
+  }
+  disposeProgPrefetch()
+  const stash: ProgPrefetch = {
+    cellId: slot.cellId,
+    audioId: target.audioId,
+    url: target.url,
+    element: null,
+    objectUrl: null,
+  }
+  progPrefetch = stash
+  const preSeekSec = slot.targetWindow?.start ?? 0
+  void (async () => {
+    let resolved: ResolvedAudioSrc
+    try {
+      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session)
+    } catch {
+      if (progPrefetch === stash) progPrefetch = null
+      return
+    }
+    if (progPrefetch !== stash || timingMode !== "audioFirst") {
+      if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+      return
+    }
+    const el = new Audio(resolved.src)
+    el.preload = "auto"
+    stash.element = el
+    stash.objectUrl = resolved.objectUrl
+    if (preSeekSec > 0.05) {
+      el.onloadedmetadata = () => {
+        const d = el.duration
+        el.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(preSeekSec, d)) : preSeekSec
+      }
+    }
+  })()
+}
+
 /**
  * Audio-first: cue a verse's dub WITHOUT starting it. The entry joins the
  * pool synchronously (membership doubles as the re-entry guard, same as the
  * fire path); readiness/failure is reported to `gate` when one is given.
+ * A matching prefetched element is adopted on the spot — synchronous
+ * readiness, no resolve round-trip.
  */
 function progCueTarget(
   slot: ProgrammeSlot,
@@ -1280,6 +1382,24 @@ function progCueTarget(
   }
   overlayPool.push(entry)
   const startAtClipSec = win.start + into
+
+  // Adoption: identity must match EXACTLY — updateQueueCells re-flows can
+  // swap the active take between stash time and now; a mismatch is discarded.
+  const stash = progPrefetch
+  if (
+    stash &&
+    stash.element &&
+    stash.cellId === slot.cellId &&
+    stash.audioId === target.audioId &&
+    stash.url === target.url
+  ) {
+    progPrefetch = null
+    wireOverlayElement(entry, { element: stash.element, objectUrl: stash.objectUrl }, startAtClipSec, {
+      autostart: false,
+      onReady: gate ? () => progGateSideReady(gate, "target") : undefined,
+    })
+    return
+  }
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
@@ -1293,7 +1413,7 @@ function progCueTarget(
       if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
       return
     }
-    wireOverlayElement(entry, resolved, startAtClipSec, {
+    wireOverlayElement(entry, { resolved }, startAtClipSec, {
       autostart: false,
       onReady: gate ? () => progGateSideReady(gate, "target") : undefined,
     })
@@ -1758,6 +1878,7 @@ export async function resumeQueue(): Promise<void> {
 
 export function stopQueue(): void {
   progClearGate()
+  disposeProgPrefetch()
   disposeCurrent()
   programme = null
   progIndex = -1
@@ -1818,6 +1939,9 @@ export function updateQueueCells(cells: CellData[]): void {
       const i = programme?.slots.findIndex((s) => s.cellId === onCellId) ?? -1
       if (i >= 0) progIndex = i
     }
+    // The re-flow may have changed what the NEXT verse's dub is — restock
+    // (no-op when the stash still matches; adoption double-checks identity).
+    if (progIndex >= 0) progPrefetchNext()
     return
   }
   // Round 6/7: an armed dub's due time is a snapshot — refresh it (trim-aware)

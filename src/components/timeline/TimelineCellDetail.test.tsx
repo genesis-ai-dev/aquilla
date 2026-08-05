@@ -125,7 +125,7 @@ describe("TimelineCellDetail", () => {
     render(
       <TimelineCellDetail
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
-        chipStats={{ startSec: 10, endSec: 14.3, durationSec: 4.3, endDiffSec: 0.7, overlapSec: null }}
+        chipStats={{ kind: "dubbing", startSec: 10, endSec: 14.3, durationSec: 4.3, endDiffSec: 0.7, overlapSec: null }}
         editable
         onCommitTarget={() => {}}
       />,
@@ -140,7 +140,7 @@ describe("TimelineCellDetail", () => {
     render(
       <TimelineCellDetail
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
-        chipStats={{ startSec: 11, endSec: 15.8, durationSec: 4.8, endDiffSec: -0.8, overlapSec: null }}
+        chipStats={{ kind: "dubbing", startSec: 11, endSec: 15.8, durationSec: 4.8, endDiffSec: -0.8, overlapSec: null }}
         editable
         onCommitTarget={() => {}}
       />,
@@ -154,7 +154,7 @@ describe("TimelineCellDetail", () => {
     render(
       <TimelineCellDetail
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
-        chipStats={{ startSec: 9, endSec: 14, durationSec: 5, endDiffSec: 1, overlapSec: 1.8 }}
+        chipStats={{ kind: "dubbing", startSec: 9, endSec: 14, durationSec: 5, endDiffSec: 1, overlapSec: 1.8 }}
         editable
         onCommitTarget={() => {}}
       />,
@@ -170,12 +170,43 @@ describe("TimelineCellDetail", () => {
     render(
       <TimelineCellDetail
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
-        chipStats={{ startSec: 10, endSec: 14, durationSec: 4, endDiffSec: 1, overlapSec: null }}
+        chipStats={{ kind: "dubbing", startSec: 10, endSec: 14, durationSec: 4, endDiffSec: 1, overlapSec: null }}
         editable
         onCommitTarget={() => {}}
       />,
     )
     expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
+  })
+
+  it("FREE TIMING: durations only — the file-clock range never renders (2026-08-06)", () => {
+    render(
+      <TimelineCellDetail
+        cell={cell({ original: "x", startTime: 13.8, endTime: 15.4 })}
+        chipStats={{ kind: "free", srcDurationSec: 1.6, tgtDurationSec: 4.6 }}
+        editable
+        onCommitTarget={() => {}}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Src: 1.6s")
+    expect(screen.getByTestId("tl-detail-tgt-duration")).toHaveTextContent("Tgt: 4.6s")
+    // No ranges, no diff, no overlap — the file clock doesn't match the track.
+    expect(screen.queryByText(/0:13\.8/)).toBeNull()
+    expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
+    expect(screen.queryByTestId("tl-detail-enddiff")).toBeNull()
+    expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
+  })
+
+  it("FREE TIMING: an unmeasured dub shows only the source duration", () => {
+    render(
+      <TimelineCellDetail
+        cell={cell({ original: "x", startTime: 13.8, endTime: 15.4 })}
+        chipStats={{ kind: "free", srcDurationSec: 1.6, tgtDurationSec: null }}
+        editable
+        onCommitTarget={() => {}}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Src: 1.6s")
+    expect(screen.queryByTestId("tl-detail-tgt-duration")).toBeNull()
   })
 
   it("shows no dub numbers without chipStats (no measured dub / free timing)", () => {

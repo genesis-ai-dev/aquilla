@@ -85,17 +85,28 @@ export interface TimelineCellDetailProps {
    *  by TimelineEditor (this component never reads lane geometry). Null when
    *  there is no measured dub, or in free-timing mode. `endDiffSec` =
    *  original end − dub end: negative exactly when the dub outruns its verse. */
-  chipStats?: {
-    startSec: number
-    endSec: number
-    durationSec: number
-    /** Src end − Tgt end. INFORMATIONAL (2026-08-06): a difference can be
-     *  intentional — never styled as a warning. */
-    endDiffSec: number | null
-    /** How much of this chip double-sounds over its NEIGHBOURS' chips
-     *  (trespasser-gated). Overlap is ALWAYS a problem — shown red. */
-    overlapSec: number | null
-  } | null
+  chipStats?:
+    | {
+        kind: "dubbing"
+        startSec: number
+        endSec: number
+        durationSec: number
+        /** Src end − Tgt end. INFORMATIONAL (2026-08-06): a difference can be
+         *  intentional — never styled as a warning. */
+        endDiffSec: number | null
+        /** How much of this chip double-sounds over its NEIGHBOURS' chips
+         *  (trespasser-gated). Overlap is ALWAYS a problem — shown red. */
+        overlapSec: number | null
+      }
+    | {
+        /** Free timing (2026-08-06): file-clock ranges are meaningless
+         *  against the re-flowed track — durations are the only honest
+         *  numbers, so that's all this variant carries. */
+        kind: "free"
+        srcDurationSec: number | null
+        tgtDurationSec: number | null
+      }
+    | null
   editable: boolean
   /** Emits a target commit. `valueHtml` carries the rich-text form so media
    *  edits persist identically to the main table (footnotes, marks, blots). */
@@ -247,15 +258,36 @@ export function TimelineCellDetail({
         <Pill>
           <b className="font-semibold text-foreground">{isDialogue ? "Dialogue" : "Subtitle"}</b>
         </Pill>
-        <Pill>
-          <span className="font-mono tabular-nums">
-            {chipStats ? "Src: " : ""}
-            {fmtClock(start, true)}–{fmtClock(end, true)}
-            {" · "}
-            {(end - start).toFixed(1)}s
-          </span>
-        </Pill>
-        {chipStats && (
+        {/* Free timing: no ranges — the file clock doesn't match the
+            re-flowed track. Durations only (2026-08-06). */}
+        {chipStats?.kind === "free" ? (
+          <>
+            {chipStats.srcDurationSec != null && (
+              <Pill>
+                <span data-testid="tl-detail-src-duration" className="font-mono tabular-nums">
+                  Src: {chipStats.srcDurationSec.toFixed(1)}s
+                </span>
+              </Pill>
+            )}
+            {chipStats.tgtDurationSec != null && (
+              <Pill>
+                <span data-testid="tl-detail-tgt-duration" className="font-mono tabular-nums">
+                  Tgt: {chipStats.tgtDurationSec.toFixed(1)}s
+                </span>
+              </Pill>
+            )}
+          </>
+        ) : (
+          <Pill>
+            <span className="font-mono tabular-nums">
+              {chipStats ? "Src: " : ""}
+              {fmtClock(start, true)}–{fmtClock(end, true)}
+              {" · "}
+              {(end - start).toFixed(1)}s
+            </span>
+          </Pill>
+        )}
+        {chipStats?.kind === "dubbing" && (
           <Pill>
             <span data-testid="tl-detail-dub-range" className="font-mono tabular-nums">
               Tgt: {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
@@ -264,7 +296,8 @@ export function TimelineCellDetail({
             </span>
           </Pill>
         )}
-        {chipStats?.endDiffSec != null &&
+        {chipStats?.kind === "dubbing" &&
+          chipStats.endDiffSec != null &&
           (() => {
             // One-decimal display; the sign follows the DISPLAYED value.
             // INFORMATIONAL by decision (2026-08-06): an end difference can
@@ -283,7 +316,7 @@ export function TimelineCellDetail({
               </Pill>
             )
           })()}
-        {chipStats?.overlapSec != null && (
+        {chipStats?.kind === "dubbing" && chipStats.overlapSec != null && (
           <Pill>
             <span
               data-testid="tl-detail-overlap"

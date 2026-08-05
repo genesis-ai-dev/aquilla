@@ -370,7 +370,20 @@ export function TimelineEditor({
   // separate number computed with the same trespasser gating the lane uses.
   // Dubbing only, and never from a guessed width (SUB-48).
   const selectedChipStats = useMemo(() => {
-    if (audioFirst || !selectedCell) return null
+    if (!selectedCell) return null
+    // Free timing (2026-08-06, Sam): the file-clock RANGES are meaningless
+    // against the re-flowed track — the only honest numbers are durations.
+    // Src = the original's window length, Tgt = the dub's measured length.
+    if (audioFirst) {
+      const { startTime, endTime } = selectedCell
+      const srcDurationSec =
+        typeof startTime === "number" && typeof endTime === "number" ? endTime - startTime : null
+      const item = targetItems.find((t) => t.cell.id === selectedCell.id)
+      const geom = item ? layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId]) : null
+      const tgtDurationSec = geom && !geom.usingFallback ? geom.end - geom.start : null
+      if (srcDurationSec == null && tgtDurationSec == null) return null
+      return { kind: "free" as const, srcDurationSec, tgtDurationSec }
+    }
     const i = targetItems.findIndex((t) => t.cell.id === selectedCell.id)
     if (i < 0) return null
     const geomOf = (t: (typeof targetItems)[number] | undefined) =>
@@ -392,6 +405,7 @@ export function TimelineEditor({
       headSec != null && typeof startTime === "number" && geom.start < startTime ? headSec : 0
     const overlapSec = tailTrespass + headTrespass
     return {
+      kind: "dubbing" as const,
       startSec: geom.start,
       endSec: geom.end,
       durationSec: geom.end - geom.start,

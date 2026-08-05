@@ -9,6 +9,8 @@
 // blob is the converted clip, fetched back from R2).
 
 import { synthesizeForCell } from "./tts"
+import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
+import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { resolveVoice } from "./voices"
 import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
@@ -130,6 +132,9 @@ export async function generateAndAttachCellVoice(
   let ext: string
   let url: string
   let playable: Blob
+  // Clone conversions come back from the worker as WAV; the plain-TTS branch
+  // overrides this when it compresses.
+  let generatedMimeType = "audio/wav"
 
   if (voice.referenceAudioId) {
     // 2a. Clone: re-voice TTS output into the reference timbre. The worker
@@ -155,20 +160,39 @@ export async function generateAndAttachCellVoice(
     })
     playable = new Blob([bytes as BlobPart], { type: "audio/wav" })
   } else {
-    // 2b. Plain TTS: upload the blob as-is.
+    // 2b. Plain TTS. Smooth-playback round: compress before upload — raw WAV
+    // is ~14× the size of the webm/opus mic takes already use, and generated
+    // voices were the single biggest reason projects grew heavy. WebCodecs
+    // encodes many× realtime; where it's unavailable (or the clip defeats
+    // decode) fall back to uploading the WAV as before — a size regression,
+    // never a broken generation. Existing WAV clips are untouched.
     const baseId = buildAudioId(args.cellId)
+    let uploadBlob = ttsBlob
+    let uploadMime = "audio/wav"
     ext = "wav"
+    if (canEncodeOpus()) {
+      try {
+        const samples = await decodeToMono48k(new Uint8Array(await ttsBlob.arrayBuffer()))
+        const encoded = await encodeMonoToWebmOpus(samples, TARGET_RATE)
+        uploadBlob = encoded.blob
+        uploadMime = encoded.mimeType
+        ext = encoded.ext
+      } catch {
+        /* keep the WAV */
+      }
+    }
     const res = await uploadCellAudio({
       projectId: args.projectId,
       fileId: args.fileId,
       audioId: baseId,
       ext,
-      blob: ttsBlob,
+      blob: uploadBlob,
       getSyncToken,
     })
     audioId = res.audioId
     url = res.url
-    playable = ttsBlob
+    playable = uploadBlob
+    generatedMimeType = uploadMime
   }
 
   // 3. Attach durably (generatedVoice slot). The bus poke surfaces it via the
@@ -184,7 +208,7 @@ export async function generateAndAttachCellVoice(
     audioId: objectName,
     url,
     slot: "generatedVoice",
-    mimeType: "audio/wav",
+    mimeType: generatedMimeType,
     voiceId: voice.id,
     ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
     ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
@@ -196,7 +220,7 @@ export async function generateAndAttachCellVoice(
     audioId: objectName,
     url,
     slot: "generatedVoice",
-    mimeType: "audio/wav",
+    mimeType: generatedMimeType,
     voiceId: voice.id,
     referenceAudioId: voice.referenceAudioId ?? null,
     durationMs: generatedDurationMs ?? null,

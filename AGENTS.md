@@ -189,9 +189,9 @@ makes the work impossible to review or revert cleanly.
 > flags issues whose code shipped but whose status lagged, `Deployed`/`Done` issues with no
 > traceable merge, and commits that landed without a ticket. Read-only; never moves the board.
 
-> **Staging** lives at `https://staging.aquilla.app` (API `api.staging.aquilla.app`), backed by the
-> Neon `staging` branch via Hyperdrive. Deploy with `pnpm run deploy:aquilla:staging`. Setup
-> + provisioning and verification are in [`docs/STAGING.md`](docs/STAGING.md).
+> **Pre-production** is `https://dev.aquilla.app` (API `api.dev.aquilla.app`), backed by
+> the Neon `dev` branch and deployed by Cloudflare Workers Builds on every push to `dev`.
+> Staging was retired 2026-08-05; see [`docs/DEPLOYMENT-ENVIRONMENTS.md`](docs/DEPLOYMENT-ENVIRONMENTS.md).
 
 ## Useful slash commands
 

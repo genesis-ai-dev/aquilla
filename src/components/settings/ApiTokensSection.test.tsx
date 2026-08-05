@@ -238,4 +238,77 @@ describe("ApiTokensSection", () => {
     await waitFor(() => expect(mockRevokeCredential).toHaveBeenCalledWith("test-jwt", "cred-1"))
     await waitFor(() => expect(screen.queryByText("Revoke token?")).not.toBeInTheDocument())
   })
+
+  // WHY: minting a token is only half the job — a user still has to tell their
+  // agent what the token is for. These two paths are the whole handoff. The
+  // post-mint copy is the ONLY one that can carry the plaintext token (it is
+  // never stored), and the per-row copy must never leak one it doesn't have.
+  describe("agent instructions", () => {
+    beforeEach(() => {
+      // happy-dom's navigator.clipboard is getter-only — define it per AQU-277's
+      // ImportDialog.partial-import.test.tsx pattern.
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        writable: true,
+        configurable: true,
+      })
+    })
+
+    it("post-mint: copies a prompt carrying the plaintext token and that token's mode", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_freshplaintext",
+        credential: {
+          id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
+          projectId: "proj-maint", tokenPrefix: "aqk_fresh",
+          createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null,
+        },
+      })
+
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Deploy bot" } })
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await screen.findByText("aqk_freshplaintext")
+
+      fireEvent.click(screen.getByRole("button", { name: /Copy agent instructions/i }))
+
+      await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+      const prompt = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+      // The whole point: the agent gets a usable token, not a placeholder.
+      expect(prompt).toContain("Authorization: Bearer aqk_freshplaintext")
+      expect(prompt).toContain("/api/v1/external")
+      // Act-mode credential → the prompt must not tell the agent to wait for approval.
+      expect(prompt).toContain("applied immediately")
+      expect(prompt).not.toMatch(/wait for me to approve/)
+      // The credential's resolved scope travels with it.
+      expect(prompt).toContain("Maintainer Project")
+    })
+
+    it("per-token: shows a placeholder prompt matching that credential's mode and scope", async () => {
+      render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      await screen.findByText(/aqk_abc123/)
+
+      // Only the live credential offers it; the revoked one has no buttons.
+      const setupButtons = screen.getAllByRole("button", { name: "Agent setup" })
+      expect(setupButtons).toHaveLength(1)
+      fireEvent.click(setupButtons[0])
+
+      await screen.findByText("Instructions for your agent")
+      fireEvent.click(screen.getByRole("button", { name: /Copy instructions/i }))
+
+      await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
+      const prompt = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0] as string
+      // The plaintext is gone forever by now — the prompt must say so, not
+      // invent a token or emit `undefined`.
+      expect(prompt).toContain("aqk_paste_your_token_here")
+      expect(prompt).not.toContain("undefined")
+      // ASK_CREDENTIAL is ask-mode and unscoped: the safety instruction is present.
+      expect(prompt).toMatch(/ask-mode/)
+      expect(prompt).toContain("Unscoped (personal)")
+    })
+  })
 })

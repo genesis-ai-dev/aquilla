@@ -19,9 +19,16 @@ export interface TimelinePlayheadProps {
   rate?: number
 }
 
+/** Smooth-playback round: how far past the last clock anchor the rAF may
+ *  extrapolate. Ticks land ~every 250ms, so 0.45s never clamps healthy
+ *  playback — but a clock that has silently stopped ticking (rebuffer, a
+ *  loading verse, tab jank) PARKS the playhead just past its anchor instead
+ *  of running away and snapping back when the next real tick lands. */
+export const MAX_EXTRAPOLATION_SEC = 0.45
+
 /** Pure interpolation math (exported for tests — rAF isn't testable). */
 export function interpolatedSec(baseSec: number, baseT: number, now: number, rate: number): number {
-  return baseSec + ((now - baseT) / 1000) * rate
+  return baseSec + Math.min((now - baseT) / 1000, MAX_EXTRAPOLATION_SEC) * rate
 }
 
 export function TimelinePlayhead({ currentSec, pxPerSec, playing = false, rate = 1 }: TimelinePlayheadProps) {

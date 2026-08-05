@@ -473,6 +473,7 @@ function progPrevPlayable(from: number): number {
 
 function progFinish(): void {
   progClearGate()
+  progStopEndStop()
   disposeProgPrefetch()
   progQuiet(currentAudio)
   disposeAllOverlays()
@@ -604,6 +605,52 @@ function progStartSides(gate: ProgGate): void {
   setState({ kind: "playing", ...progStateCell() })
   // This verse is rolling — stock the NEXT one so its boundary is warm.
   progPrefetchNext()
+}
+
+// ── Precise end-stop (smooth-playback round) ────────────────────────────────
+// timeupdate fires ~every 250ms, so a verse used to run up to ~250ms past its
+// boundary before advancing — the extrapolating playhead followed it out and
+// snapped back ~5-9px at every boundary. While the programme is PLAYING, a
+// 60ms interval reads the live element clocks and fires the same boundary
+// conditions the timeupdate handlers check (which stay as fallback; both
+// paths are idempotent — progIndex moves synchronously, and a stale check
+// re-derives the NEXT verse whose conditions don't hold).
+
+const PROG_ENDSTOP_MS = 60
+let progEndStopTimer: ReturnType<typeof setInterval> | null = null
+
+function progCheckBoundary(): void {
+  if (timingMode !== "audioFirst" || state.kind !== "playing") return
+  const slot = progCurrentSlot()
+  if (!slot) return
+  // The dub's trim end-stop (same condition as its element handler).
+  const entry = overlayPool.find((e) => e.cellId === slot.cellId)
+  const dubAudio = entry?.element
+  if (entry && dubAudio && entry.stopAtClipSec != null && !dubAudio.paused && dubAudio.currentTime >= entry.stopAtClipSec) {
+    removeOverlayEntry(entry)
+    progOnTargetFinished(entry, "ended")
+    return
+  }
+  // The source's window end (same condition as its timeupdate handler).
+  const el = currentAudio
+  if (el && slot.sourceWindow && !el.paused && el.currentTime >= slot.sourceWindow.end) {
+    if (progEffectiveClock(slot) === "source") progAdvance()
+    else {
+      setProgress({ currentTime: slot.startSec + slot.sourceLenSec })
+      progQuiet(el)
+    }
+  }
+}
+
+function progStartEndStop(): void {
+  if (progEndStopTimer != null) return
+  progEndStopTimer = setInterval(progCheckBoundary, PROG_ENDSTOP_MS)
+}
+
+function progStopEndStop(): void {
+  if (progEndStopTimer == null) return
+  clearInterval(progEndStopTimer)
+  progEndStopTimer = null
 }
 
 /** A dub stopped — at its trim end, its natural end, or because it failed. */
@@ -806,6 +853,7 @@ async function progPlaySlot(
   }
 
   progIndex = index
+  progStartEndStop() // idempotent; killed on finish/stop
   const at = Math.max(
     slot.startSec,
     Math.min(atProgrammeSec ?? slot.startSec, slot.startSec + slot.slotLenSec - 0.001),
@@ -1878,6 +1926,7 @@ export async function resumeQueue(): Promise<void> {
 
 export function stopQueue(): void {
   progClearGate()
+  progStopEndStop()
   disposeProgPrefetch()
   disposeCurrent()
   programme = null

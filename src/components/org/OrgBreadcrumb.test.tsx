@@ -87,14 +87,13 @@ describe("OrgBreadcrumb", () => {
 
     const list = container.querySelector('[data-slot="breadcrumb-list"]')
     expect(list).toHaveClass(
+      "scroll-fade-x",
+      "scroll-fade-8",
       "flex-nowrap",
       "overflow-x-auto",
       "overscroll-x-contain",
       "whitespace-nowrap",
       "scrollbar-none",
     )
-    // Edge fades match TabStrip — present even when unused (opacity toggled).
-    const fades = container.querySelectorAll('[data-slot="breadcrumb"] > span[aria-hidden]')
-    expect(fades).toHaveLength(2)
   })
 })

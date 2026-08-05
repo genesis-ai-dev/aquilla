@@ -29,6 +29,10 @@ const CLIP = "http://audio.test/imported.mp3" // direct URL → no token/network
 
 class FakeAudio {
   static instances: FakeAudio[] = []
+  /** Readiness gate tests: sources matching this predicate construct UNREADY
+   *  (readyState 0, no metadata, play() held) until `makeReady()` is called —
+   *  a clip still crossing the network. Default: everything ready instantly. */
+  static deferSrc: (src: string) => boolean = () => false
   currentTime = 0
   duration = 600
   paused = true
@@ -36,21 +40,34 @@ class FakeAudio {
   muted = false
   volume = 1
   playbackRate = 1
+  /** HAVE_ENOUGH_DATA by default; 0 while deferred. */
+  readyState = 4
   src: string
   onended: (() => void) | null = null
   onerror: (() => void) | null = null
   ontimeupdate: (() => void) | null = null
   onloadedmetadata: (() => void) | null = null
+  oncanplay: (() => void) | null = null
   onplay: (() => void) | null = null
   onpause: (() => void) | null = null
+  /** play() promises issued while unready — resolved by makeReady(). */
+  private pendingPlays: (() => void)[] = []
+  private deferred: boolean
   constructor(src: string) {
     this.src = src
+    this.deferred = FakeAudio.deferSrc(src)
+    if (this.deferred) this.readyState = 0
     FakeAudio.instances.push(this)
     // A real element announces metadata shortly after the src is set, which is
     // when the queue applies a pending seek (Safari rejects earlier ones).
-    queueMicrotask(() => this.onloadedmetadata?.())
+    if (!this.deferred) queueMicrotask(() => this.onloadedmetadata?.())
   }
   async play(): Promise<void> {
+    if (this.deferred) {
+      // A real element's play() during buffering resolves once playback can
+      // begin — hold it, like the network would.
+      await new Promise<void>((res) => this.pendingPlays.push(res))
+    }
     this.paused = false
     this.onplay?.()
   }
@@ -59,10 +76,46 @@ class FakeAudio {
     this.paused = true
     this.onpause?.()
   }
+  /** The deferred clip's bytes arrived: fire metadata + canplay, release
+   *  held play() calls. */
+  makeReady(): void {
+    if (!this.deferred) return
+    this.deferred = false
+    this.readyState = 4
+    this.onloadedmetadata?.()
+    this.oncanplay?.()
+    this.emit("canplay")
+    const held = this.pendingPlays.splice(0)
+    for (const res of held) res()
+  }
+  /** Simulate a network/decode failure for a deferred clip. */
+  failLoad(): void {
+    this.deferred = false
+    this.pendingPlays.splice(0) // held play() promises just never resolve play
+    this.onerror?.()
+    this.emit("error")
+  }
   /** Drive a timeupdate tick, the way a real element would ~4×/second. */
   tick(t: number): void {
     this.currentTime = t
     this.ontimeupdate?.()
+  }
+  // Listener support for the gate's source-readiness watch (canplay/seeked/
+  // error). makeReady/failLoad fire these alongside the on* fields.
+  private listeners = new Map<string, Set<() => void>>()
+  addEventListener(type: string, fn: () => void): void {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set())
+    this.listeners.get(type)!.add(fn)
+    // Matches real elements closely enough for the gate: a ready element
+    // fires canplay-class listeners immediately after subscription in our
+    // fake (the gate checks readyState first, so this is rarely reached).
+    if (!this.deferred && (type === "canplay" || type === "seeked")) queueMicrotask(() => this.emit(type))
+  }
+  removeEventListener(type: string, fn: () => void): void {
+    this.listeners.get(type)?.delete(fn)
+  }
+  private emit(type: string): void {
+    for (const fn of [...(this.listeners.get(type) ?? [])]) fn()
   }
 }
 
@@ -110,6 +163,7 @@ const dubEl = (id: string): FakeAudio | undefined =>
 
 beforeEach(() => {
   FakeAudio.instances = []
+  FakeAudio.deferSrc = () => false
   vi.stubGlobal("Audio", FakeAudio)
 })
 
@@ -299,5 +353,222 @@ describe("audio-first transport — pausing, seeking and re-flowing", () => {
 
     setQueueTimingMode("dubbing")
     expect(getQueueState().kind).toBe("idle")
+  })
+})
+
+// ── The readiness gate (smooth-playback round) ──────────────────────────────
+// A verse's audio starts only when every DUE side is ready: until then the
+// state says "loading" and the clock PARKS at the boundary (the fix for the
+// PR-#229 "jumpy" rejection — the old flow reported "playing" while the dub
+// still resolved, so the playhead ran ahead and snapped back, and the source
+// started without its partner).
+
+describe("audio-first readiness gate", () => {
+  const dubDeferred = (id: string) => (src: string) => src.includes(`/${id}.webm`)
+
+  it("a cold verse parks the clock as 'loading', then starts BOTH sides together", async () => {
+    const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000)]
+    FakeAudio.deferSrc = dubDeferred("v2")
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+
+    // v1's original runs out → the boundary. v2's dub is still "loading".
+    sourceEl()!.tick(3)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "v2" })
+    // The clock is PARKED at the verse top — no run-ahead to snap back from.
+    expect(getQueueProgress().currentTime).toBe(3)
+    // The source is HELD, not started without its partner.
+    expect(sourceEl()!.paused).toBe(true)
+    expect(dubEl("v2")!.paused).toBe(true)
+
+    // Bytes arrive → the gate opens → both sides start as one.
+    dubEl("v2")!.makeReady()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+    expect(sourceEl()!.paused).toBe(false)
+    expect(dubEl("v2")!.paused).toBe(false)
+    expect(getQueueProgress().currentTime).toBe(3)
+  })
+
+  it("pause during a gate cancels the pending start; resume re-arms it", async () => {
+    const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000)]
+    FakeAudio.deferSrc = dubDeferred("v2")
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    sourceEl()!.tick(3)
+    await settle()
+    expect(getQueueState().kind).toBe("loading")
+
+    pauseQueue()
+    expect(getQueueState().kind).toBe("paused")
+    dubEl("v2")!.makeReady()
+    await settle()
+    // The gate opened while paused: everything cued at the verse top, silent.
+    expect(getQueueState().kind).toBe("paused")
+    expect(sourceEl()!.paused).toBe(true)
+    expect(dubEl("v2")!.paused).toBe(true)
+
+    await resumeQueue()
+    expect(getQueueState().kind).toBe("playing")
+    expect(dubEl("v2")!.paused).toBe(false)
+  })
+
+  it("resume during a still-pending gate stays 'loading' (nothing to play yet)", async () => {
+    const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000)]
+    FakeAudio.deferSrc = dubDeferred("v2")
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    sourceEl()!.tick(3)
+    await settle()
+
+    pauseQueue()
+    await resumeQueue()
+    expect(getQueueState().kind).toBe("loading")
+    dubEl("v2")!.makeReady()
+    await settle()
+    expect(getQueueState().kind).toBe("playing")
+  })
+
+  it("a dub that FAILS to load opens the gate with the original alone", async () => {
+    const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000)]
+    FakeAudio.deferSrc = dubDeferred("v2")
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    sourceEl()!.tick(3)
+    await settle()
+    expect(getQueueState().kind).toBe("loading")
+
+    dubEl("v2")!.failLoad()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+    expect(sourceEl()!.paused).toBe(false)
+  })
+
+  it("a gate that outlasts its patience starts what's ready", async () => {
+    vi.useFakeTimers()
+    try {
+      const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000)]
+      FakeAudio.deferSrc = dubDeferred("v2")
+      setQueueTimingMode("audioFirst")
+      startQueue(ctxFor(cells), 0)
+      await vi.advanceTimersByTimeAsync(0)
+      sourceEl()!.tick(3)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(getQueueState().kind).toBe("loading")
+
+      await vi.advanceTimersByTimeAsync(6_100)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v2" })
+      expect(sourceEl()!.paused).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("seeking away orphans a pending gate — the landing verse plays, the old one never fires", async () => {
+    const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000), verse("v3", 7, 10, 2_000)]
+    FakeAudio.deferSrc = dubDeferred("v2")
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    sourceEl()!.tick(3)
+    await settle()
+    expect(getQueueState().kind).toBe("loading")
+    const orphaned = dubEl("v2")!
+
+    // Seek into v3 (programme second 8.5 = 1.5s into v3's slot at 7… v1=3s,
+    // v2=max(4,5)=5s → v3 starts at 8).
+    seekQueueToTime(8.5)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v3" })
+
+    // The orphaned dub coming ready must not touch the transport.
+    orphaned.makeReady()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v3" })
+  })
+
+  it("a dub that DIES mid-verse leaves the original to carry the rest", async () => {
+    // v1: original 6s, dub 11s → the dub clocks the verse.
+    const cells = [verse("v1", 0, 6, 11_000), verse("v2", 6, 9, 2_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+
+    // 2s in, the dub's stream dies. The original still has 4s of this verse.
+    sourceEl()!.tick(2)
+    dubEl("v1")!.tick(2)
+    dubEl("v1")!.failLoad()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+
+    // …and the original's window end now advances the verse (clock fell back).
+    sourceEl()!.tick(6)
+    await settle()
+    expect(getQueueState()).toMatchObject({ cellId: "v2" })
+  })
+
+  it("a MUTED dub still gates the start — positional unmute depends on it", async () => {
+    const { setQueueAudibility } = await import("./play-queue")
+    setQueueAudibility({ source: true, target: false })
+    try {
+      const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000)]
+      FakeAudio.deferSrc = dubDeferred("v2")
+      setQueueTimingMode("audioFirst")
+      startQueue(ctxFor(cells), 0)
+      await settle()
+      sourceEl()!.tick(3)
+      await settle()
+      // Muted or not, the verse waits for its dub so both start aligned.
+      expect(getQueueState().kind).toBe("loading")
+      dubEl("v2")!.makeReady()
+      await settle()
+      expect(getQueueState().kind).toBe("playing")
+      expect(dubEl("v2")!.muted).toBe(true)
+      expect(dubEl("v2")!.paused).toBe(false)
+    } finally {
+      setQueueAudibility({ source: true, target: true })
+    }
+  })
+
+  it("skipForward during a gate lands cleanly on the next verse", async () => {
+    const cells = [verse("v1", 0, 3), verse("v2", 3, 7, 5_000), verse("v3", 7, 10, 2_000)]
+    FakeAudio.deferSrc = dubDeferred("v2")
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    sourceEl()!.tick(3)
+    await settle()
+    expect(getQueueState().kind).toBe("loading")
+
+    skipForward()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v3" })
+  })
+
+  it("a dub-only verse gates and then reports 'playing' on its own", async () => {
+    const takeId = "audio-v1-1700000000-take.webm"
+    const dubOnly = {
+      id: "v1", fileId: "f1", medium: "media", startTime: 0, endTime: 4,
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "http://audio.test/v1.webm", durationMs: 5_000 } },
+    } as unknown as CellData
+    FakeAudio.deferSrc = dubDeferred("v1")
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor([dubOnly]), 0)
+    await settle()
+    expect(getQueueState().kind).toBe("loading")
+
+    dubEl("v1")!.makeReady()
+    await settle()
+    // No source onplay exists to flip the state — the gate must do it itself.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+    expect(dubEl("v1")!.paused).toBe(false)
   })
 })

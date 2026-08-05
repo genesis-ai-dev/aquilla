@@ -195,20 +195,28 @@ export function TimelineEditor({
     (queueState.kind === "playing" || queueState.kind === "paused" || queueState.kind === "loading") &&
     cellIdSet.has(queueState.cellId)
   const queuePlaying = queueState.kind === "playing" && cellIdSet.has(queueState.cellId)
+  // Smooth-playback round: the readiness gate flips playing→loading→playing at
+  // a cold verse boundary. `queuePlaying` stays STRICT (the playhead's rAF
+  // interpolation must park during a gate — that's the whole point), but the
+  // follow re-engage below keys on running-or-loading, or every cold boundary
+  // would re-yank a user who deliberately scrolled away mid-playback.
+  const queueRunning =
+    (queueState.kind === "playing" || queueState.kind === "loading") && cellIdSet.has(queueState.cellId)
   useEffect(() => {
     if (queueActive) clock.setCurrentSec(queueProgress.currentTime)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queueActive, queueProgress.currentTime])
   useEffect(() => {
-    if (queuePlaying) {
-      clock.play()
-      // Starting playback is an explicit "watch this" — re-engage follow.
-      setFollow(true)
-    } else {
-      clock.pause()
-    }
+    if (queuePlaying) clock.play()
+    else clock.pause()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queuePlaying])
+  useEffect(() => {
+    // Starting playback is an explicit "watch this" — re-engage follow. Keyed
+    // on running (playing OR loading) so a gate's brief "loading" dip doesn't
+    // count as a fresh start.
+    if (queueRunning) setFollow(true)
+  }, [queueRunning])
 
   // Measure the scroll viewport before first paint + on resizes — the
   // windowing math and follow-scroll both need a real clientWidth.

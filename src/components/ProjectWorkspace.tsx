@@ -4415,7 +4415,9 @@ export function ProjectWorkspace() {
       (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
       audioMergedCells.some((c) => c.id === qs.cellId)
     if (activeForThisFile) {
-      if (qs.kind === "playing") pauseQueue()
+      // "loading" counts as playing for the toggle: Space during a readiness
+      // gate cancels the pending start rather than futilely resuming it.
+      if (qs.kind === "playing" || qs.kind === "loading") pauseQueue()
       else void resumeQueue()
       return
     }

@@ -472,6 +472,7 @@ function progPrevPlayable(from: number): number {
 }
 
 function progFinish(): void {
+  progClearGate()
   progQuiet(currentAudio)
   disposeAllOverlays()
   progIndex = -1
@@ -488,13 +489,150 @@ function progAdvance(): void {
   void progPlaySlot(next, null, true)
 }
 
+// ── The readiness gate (smooth-playback round) ──────────────────────────────
+// The rule: a verse's audio starts only when every DUE side is ready. Before
+// this, progPlaySlot reported "playing" and parked the clock while the dub
+// still resolved over the network — the playhead's rAF extrapolation ran ahead
+// through the fetch and snapped back on the dub's first tick, and the source
+// (an instant seek) started on time while the dub joined late from the verse
+// top, so the verse's two sides audibly did not start together. Now both sides
+// are CUED, the state says "loading" while anything is cold (the playhead
+// parks honestly), and the moment the last side reports ready they start as
+// one. Prefetch + the warmed byte-cache make the cold case rare.
+
+/** How long a cold side may keep the verse parked before we start without it —
+ *  mirrors progEffectiveClock's dead-dub fallback. */
+const GATE_TIMEOUT_MS = 6_000
+
+interface ProgGate {
+  /** Identity token — a newer slot open orphans this gate. */
+  token: number
+  /** The verse, by cellId (never by slot object — updateQueueCells re-flows
+   *  can move slot geometry mid-gate; re-resolve at start time). */
+  cellId: string
+  /** Seconds into the verse where playback will begin. */
+  into: number
+  /** Flipped by pause/resume while the gate is pending. */
+  wantPlay: boolean
+  timer: ReturnType<typeof setTimeout> | null
+  /** Sides cued and not yet ready. */
+  pending: Set<"source" | "target">
+  /** Sides that should START when the gate opens (a side that fails while
+   *  pending is struck from here). */
+  dueSource: boolean
+  dueTarget: boolean
+}
+
+let progGate: ProgGate | null = null
+let progGateSeq = 0
+
+function progClearGate(): void {
+  if (progGate?.timer != null) clearTimeout(progGate.timer)
+  progGate = null
+}
+
+function progGateSideReady(gate: ProgGate, side: "source" | "target"): void {
+  if (progGate !== gate) return
+  gate.pending.delete(side)
+  if (gate.pending.size === 0) progStartSides(gate)
+}
+
+function progGateSideFailed(gate: ProgGate, side: "source" | "target"): void {
+  if (progGate !== gate) return
+  gate.pending.delete(side)
+  if (side === "source") gate.dueSource = false
+  else gate.dueTarget = false
+  // Start without the dead side once nothing else is pending — the same
+  // degrade-to-what-plays rule progEffectiveClock encodes for a vanished dub.
+  if (gate.pending.size === 0) progStartSides(gate)
+}
+
+/** A side outlasted the patience window: strike whatever is still pending and
+ *  start what's ready (or advance past a fully dead verse). */
+function progGateTimeout(gate: ProgGate): void {
+  if (progGate !== gate) return
+  for (const side of [...gate.pending]) {
+    if (side === "target") {
+      const entry = overlayPool.find((e) => e.cellId === gate.cellId)
+      if (entry) removeOverlayEntry(entry)
+    }
+    progGateSideFailed(gate, side)
+  }
+}
+
+/**
+ * The gate is open: start every due side TOGETHER, or advance when the verse
+ * has nothing left to play. Sets the transport state itself — a dub-only verse
+ * has no source `onplay` to do it (and the stamp must come from the CURRENT
+ * slot geometry, which may have re-flowed since the gate was armed).
+ */
+function progStartSides(gate: ProgGate): void {
+  if (progGate !== gate) return
+  progClearGate()
+  const prog = programme
+  if (!prog) return
+  // Re-resolve the verse by cellId — geometry may have moved under the gate.
+  let slot = progCurrentSlot()
+  if (!slot || slot.cellId !== gate.cellId) {
+    const idx = prog.slots.findIndex((s) => s.cellId === gate.cellId)
+    if (idx < 0) {
+      progAdvance()
+      return
+    }
+    progIndex = idx
+    slot = prog.slots[idx]
+  }
+  const into = Math.min(gate.into, Math.max(0, slot.slotLenSec - 0.001))
+  setProgress({ currentTime: slot.startSec + into, duration: prog.totalSec })
+
+  const dubEl = gate.dueTarget
+    ? (overlayPool.find((e) => e.cellId === gate.cellId)?.element ?? null)
+    : null
+  const srcEl = gate.dueSource && currentAudio ? currentAudio : null
+
+  if (!gate.wantPlay) {
+    setState({ kind: "paused", ...progStateCell() })
+    return
+  }
+  if (!dubEl && !srcEl) {
+    progAdvance()
+    return
+  }
+  if (srcEl) void srcEl.play().catch(() => { /* user-driven, ignore */ })
+  if (dubEl) void dubEl.play().catch(() => { /* user-driven, ignore */ })
+  setState({ kind: "playing", ...progStateCell() })
+}
+
 /** A dub stopped — at its trim end, its natural end, or because it failed. */
-function progOnTargetFinished(entry: OverlayEntry): void {
+function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error"): void {
   if (timingMode !== "audioFirst") return
+  // While a gate is pending for this verse, a cued dub can only FAIL here —
+  // route to the gate (which starts what's ready) instead of advancing; both
+  // its own error path and the gate acting would double-advance.
+  const gate = progGate
+  if (gate && gate.cellId === entry.cellId) {
+    progGateSideFailed(gate, "target")
+    return
+  }
   const slot = progCurrentSlot()
   // Only the side that was MEANT to clock this verse ends it. A dub that runs
   // out early just goes quiet while the original finishes.
-  if (!slot || slot.cellId !== entry.cellId || slot.clock !== "target") return
+  if (!slot || slot.cellId !== entry.cellId) return
+  if (
+    reason === "error" &&
+    slot.sourceWindow &&
+    currentAudio &&
+    !currentAudio.paused &&
+    currentAudio.currentTime < slot.sourceWindow.end
+  ) {
+    // Mid-verse dub death (expired stream token, decode fault) with the
+    // original still sounding: let the original carry the rest of the verse —
+    // with the entry gone, progEffectiveClock already reports "source", so its
+    // ticks resume the clock and the window end advances as normal. Advancing
+    // HERE would throw away the remaining source audio.
+    return
+  }
+  if (slot.clock !== "target") return
   progAdvance()
 }
 
@@ -617,6 +755,10 @@ async function progOpenSource(
 
 /** Tear down just the source element — the dub pool belongs to the verse. */
 function disposeCurrentSourceOnly(): void {
+  // A suppressed pause can still be in flight when the element (and its
+  // handler) dies — without this reset the counter leaks and a later GENUINE
+  // user pause gets swallowed once.
+  progSuppressPause = 0
   if (currentAudio) {
     currentAudio.onended = null
     currentAudio.onerror = null
@@ -667,36 +809,75 @@ async function progPlaySlot(
   )
   const into = at - slot.startSec
 
+  // A newer slot open orphans any pending gate (and its timeout — a stale
+  // 6s timer must never fire into this verse's cue).
+  progClearGate()
   // The dub side rides the overlay pool, so the speaker buttons, rate and
   // volume keep applying to it exactly as they do in dubbing mode.
   disposeAllOverlays()
   pendingDub = null
-  const target = slot.targetWindow ? activeTargetForCell(cell) : null
-  if (slot.targetWindow && target && into < slot.targetLenSec) {
-    applyTargetOverlay({
-      kind: "fire",
-      cellId: slot.cellId,
-      audioId: target.audioId,
-      url: target.url,
-      startAtClipSec: slot.targetWindow.start + into,
-      stopAtClipSec: slot.targetWindow.end,
-      exclusive: true,
-    })
-  }
 
+  const target = slot.targetWindow ? activeTargetForCell(cell) : null
+  const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
+  const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
+
+  // Park the clock at the landing position. Under a gate this is where the
+  // playhead honestly WAITS (state "loading" — no rAF extrapolation) instead
+  // of running ahead and snapping back when the dub's first tick lands.
   setProgress({ currentTime: at, duration: prog.totalSec })
-  setState({ kind: autoplay ? "playing" : "paused", ...progStateCell() })
   ctx.onCellChange?.(progStateCell().cellIndex, slot.cellId)
 
-  if (slot.sourceWindow && into < slot.sourceLenSec) {
-    await progOpenSource(cell, slot.sourceWindow.start + into, autoplay)
+  if (!autoplay) {
+    // Cue paused: position both sides, no gate. Resume re-enters via
+    // resumeQueue (which replays the pool + a still-windowed source).
+    if (dubDue && target) progCueTarget(slot, cell, target, into, null)
+    if (sourceDue && slot.sourceWindow) {
+      await progOpenSource(cell, slot.sourceWindow.start + into, false)
+    } else {
+      progQuiet(currentAudio)
+    }
+    setState({ kind: "paused", ...progStateCell() })
+    return
+  }
+
+  if (!dubDue && !sourceDue) {
+    // Nothing in this verse can sound from here (both sides already spent,
+    // or neither loadable) — don't sit in silence.
+    progQuiet(currentAudio)
+    progAdvance()
+    return
+  }
+
+  // The readiness gate: cue every due side, start them TOGETHER when the
+  // last one reports ready. Cached/prefetched sides report synchronously, so
+  // a warm boundary starts in the same tick with no loading flicker.
+  const gate: ProgGate = {
+    token: ++progGateSeq,
+    cellId: slot.cellId,
+    into,
+    wantPlay: true,
+    timer: null,
+    pending: new Set(),
+    dueSource: sourceDue,
+    dueTarget: dubDue,
+  }
+  if (dubDue) gate.pending.add("target")
+  if (sourceDue) gate.pending.add("source")
+  progGate = gate
+
+  if (dubDue && target) progCueTarget(slot, cell, target, into, gate)
+  if (sourceDue && slot.sourceWindow) {
+    progCueSource(cell, slot.sourceWindow.start + into, gate)
   } else {
     progQuiet(currentAudio)
   }
 
-  // Nothing in this verse can end it (both sides already spent, or neither
-  // loadable) — don't sit here in silence.
-  if (autoplay && progIndex === index && progEffectiveClock(slot) == null) progAdvance()
+  // Still pending after the synchronous cue round → genuinely cold. Say so
+  // (parks the playhead) and bound the wait.
+  if (progGate === gate && gate.pending.size > 0) {
+    setState({ kind: "loading", ...progStateCell() })
+    gate.timer = setTimeout(() => progGateTimeout(gate), GATE_TIMEOUT_MS)
+  }
 }
 
 /** Seek on the PROGRAMME clock. Re-opens the landing verse from that point. */
@@ -992,7 +1173,7 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
       removeOverlayEntry(entry)
       // SUB-53: in audio-first this dub may have been the one clocking its
       // verse — hand the job on rather than stall the whole programme.
-      progOnTargetFinished(entry)
+      progOnTargetFinished(entry, "error")
       return
     }
     if (!overlayPool.includes(entry)) {
@@ -1000,49 +1181,160 @@ function applyTargetOverlay(plan: TargetOverlayPlan): void {
       if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
       return
     }
-    const audio = new Audio(resolved.src)
-    entry.element = audio
-    entry.url = resolved.objectUrl
-    audio.playbackRate = progress.rate
-    audio.volume = progress.volume
-    audio.muted = !audibility.target
-    if (startAtClipSec > 0.05) {
-      // Join the clip at the offset (trim head and/or mid-dub seek). Safari
-      // rejects pre-metadata seeks (same trick as the master's
-      // pendingStartSeconds).
-      audio.onloadedmetadata = () => {
-        if (!overlayPool.includes(entry)) return
-        const d = audio.duration
-        audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtClipSec, d)) : startAtClipSec
+    wireOverlayElement(entry, resolved, startAtClipSec, { autostart: true })
+  })()
+}
+
+/**
+ * Build and wire a pool entry's element. Shared by the dubbing fire path
+ * (autostart: today's exact condition) and the audio-first CUE path
+ * (autostart false + onReady — the readiness gate starts sides itself, so a
+ * half-loaded dub can never self-start while the source is held).
+ */
+function wireOverlayElement(
+  entry: OverlayEntry,
+  resolved: ResolvedAudioSrc,
+  startAtClipSec: number,
+  opts: { autostart: boolean; onReady?: () => void },
+): void {
+  const audio = new Audio(resolved.src)
+  entry.element = audio
+  entry.url = resolved.objectUrl
+  audio.playbackRate = progress.rate
+  audio.volume = progress.volume
+  audio.muted = !audibility.target
+  if (startAtClipSec > 0.05) {
+    // Join the clip at the offset (trim head and/or mid-dub seek). Safari
+    // rejects pre-metadata seeks (same trick as the master's
+    // pendingStartSeconds).
+    audio.onloadedmetadata = () => {
+      if (!overlayPool.includes(entry)) return
+      const d = audio.duration
+      audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(startAtClipSec, d)) : startAtClipSec
+    }
+  }
+  audio.onended = () => {
+    removeOverlayEntry(entry)
+    progOnTargetFinished(entry, "ended")
+  }
+  audio.onerror = () => {
+    removeOverlayEntry(entry)
+    progOnTargetFinished(entry, "error")
+  }
+  if (entry.stopAtClipSec != null) {
+    // Pool entries own their trim end-stop (~250ms timeupdate slop; pause
+    // immediately at the threshold to bound it).
+    audio.ontimeupdate = () => {
+      // SUB-53: when this dub is the longer side of its verse it also drives
+      // the programme clock (audio-first only; a no-op in dubbing mode).
+      progTargetTick(entry, audio)
+      if (entry.stopAtClipSec != null && audio.currentTime >= entry.stopAtClipSec) {
+        removeOverlayEntry(entry)
+        progOnTargetFinished(entry, "ended")
       }
     }
-    audio.onended = () => {
-      removeOverlayEntry(entry)
-      progOnTargetFinished(entry)
-    }
-    audio.onerror = () => {
-      removeOverlayEntry(entry)
-      progOnTargetFinished(entry)
-    }
-    if (entry.stopAtClipSec != null) {
-      // Pool entries own their trim end-stop (~250ms timeupdate slop; pause
-      // immediately at the threshold to bound it).
-      audio.ontimeupdate = () => {
-        // SUB-53: when this dub is the longer side of its verse it also drives
-        // the programme clock (audio-first only; a no-op in dubbing mode).
-        progTargetTick(entry, audio)
-        if (entry.stopAtClipSec != null && audio.currentTime >= entry.stopAtClipSec) {
-          removeOverlayEntry(entry)
-          progOnTargetFinished(entry)
-        }
-      }
-    }
+  }
+  if (opts.autostart) {
     // SUB-53: in audio-first a verse can be dub-only, so the source element
     // may legitimately be paused (or absent) while the programme plays.
     if (progRunning() || (currentAudio && !currentAudio.paused)) {
       void audio.play().catch(() => { /* user-driven, ignore */ })
     }
+  }
+  if (opts.onReady) {
+    const ready = opts.onReady
+    // HAVE_FUTURE_DATA now (cached bytes / adopted prefetch) or on canplay.
+    if (audio.readyState >= 3) ready()
+    else {
+      audio.oncanplay = () => {
+        audio.oncanplay = null
+        ready()
+      }
+    }
+  }
+}
+
+/**
+ * Audio-first: cue a verse's dub WITHOUT starting it. The entry joins the
+ * pool synchronously (membership doubles as the re-entry guard, same as the
+ * fire path); readiness/failure is reported to `gate` when one is given.
+ */
+function progCueTarget(
+  slot: ProgrammeSlot,
+  cell: CellData,
+  target: { audioId: string; url: string },
+  into: number,
+  gate: ProgGate | null,
+): void {
+  const ctx = activeContext
+  const win = slot.targetWindow
+  if (!ctx || !win) return
+  const prior = overlayPool.find((e) => e.cellId === slot.cellId)
+  if (prior) removeOverlayEntry(prior)
+  const entry: OverlayEntry = {
+    cellId: slot.cellId,
+    audioId: target.audioId,
+    element: null,
+    url: null,
+    stopAtClipSec: win.end,
+  }
+  overlayPool.push(entry)
+  const startAtClipSec = win.start + into
+  void (async () => {
+    let resolved: ResolvedAudioSrc
+    try {
+      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session)
+    } catch {
+      removeOverlayEntry(entry)
+      progOnTargetFinished(entry, "error") // routes to the gate while pending
+      return
+    }
+    if (!overlayPool.includes(entry)) {
+      if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
+      return
+    }
+    wireOverlayElement(entry, resolved, startAtClipSec, {
+      autostart: false,
+      onReady: gate ? () => progGateSideReady(gate, "target") : undefined,
+    })
   })()
+}
+
+/**
+ * Audio-first: cue the source at a clip position and report its readiness to
+ * the gate. The same-clip path is a seek on the already-open element (near
+ * instant when buffered; 'seeked' covers a streamed unbuffered range); a
+ * fresh open reports on 'canplay'.
+ */
+function progCueSource(cell: CellData, atClipSec: number, gate: ProgGate): void {
+  void progOpenSource(cell, atClipSec, false).then(() => {
+    if (progGate !== gate) return
+    const el = currentAudio
+    if (!el || state.kind === "error") {
+      progGateSideFailed(gate, "source")
+      return
+    }
+    if (el.readyState >= 3) {
+      progGateSideReady(gate, "source")
+      return
+    }
+    const cleanup = () => {
+      el.removeEventListener("canplay", onReady)
+      el.removeEventListener("seeked", onReady)
+      el.removeEventListener("error", onFail)
+    }
+    const onReady = () => {
+      cleanup()
+      progGateSideReady(gate, "source")
+    }
+    const onFail = () => {
+      cleanup()
+      progGateSideFailed(gate, "source")
+    }
+    el.addEventListener("canplay", onReady, { once: true })
+    el.addEventListener("seeked", onReady, { once: true })
+    el.addEventListener("error", onFail, { once: true })
+  })
 }
 
 /** Make `index` the current cell WITHOUT touching the audio element's source —
@@ -1419,6 +1711,14 @@ export function startQueueAtTime(ctx: PlayContext, seconds: number, opts: { play
 
 export function pauseQueue(): void {
   if (timingMode === "audioFirst") {
+    // Pausing DURING a gate (the verse is still loading): nothing is sounding
+    // yet — just tell the gate not to start when it opens. The gate stays
+    // armed so resume needs no re-cue.
+    if (progGate) {
+      progGate.wantPlay = false
+      setState({ kind: "paused", ...progStateCell() })
+      return
+    }
     // The source may already be quiet (its part of the verse is over) while
     // the dub carries on — pause BOTH, then say so once.
     progQuiet(currentAudio)
@@ -1431,6 +1731,13 @@ export function pauseQueue(): void {
 
 export async function resumeQueue(): Promise<void> {
   if (timingMode === "audioFirst") {
+    // Resuming into a still-pending gate: re-arm it and report the honest
+    // state — the sides start together the moment the gate opens.
+    if (progGate) {
+      progGate.wantPlay = true
+      setState({ kind: "loading", ...progStateCell() })
+      return
+    }
     const slot = progCurrentSlot()
     if (!slot) return
     // Only the sides that still have audio left in this verse come back. Ask
@@ -1450,6 +1757,7 @@ export async function resumeQueue(): Promise<void> {
 }
 
 export function stopQueue(): void {
+  progClearGate()
   disposeCurrent()
   programme = null
   progIndex = -1

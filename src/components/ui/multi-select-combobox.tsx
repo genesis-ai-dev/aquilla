@@ -24,11 +24,12 @@ const POPUP_SEARCH_CLASS =
 
 const POPUP_CONTENT_CLASS =
   // Hug list content (not trigger / not input size=20). Search stretches to match.
-  "w-max! min-w-0! max-w-(--available-width) *:data-[slot=input-group]:w-full *:data-[slot=input-group]:min-w-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
+  "w-max! min-w-48! max-w-(--available-width) *:data-[slot=input-group]:w-full *:data-[slot=input-group]:min-w-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
 
 const triggerVariants = cva(
   // w-fit! so the trigger hugs its avatar stack + names instead of the field.
-  "h-auto w-fit! justify-between gap-2 font-normal [&>svg:last-child]:shrink-0",
+  // Kill outline Button hover/open fills — resting bg only (no muted on hover or expanded).
+  "h-auto w-fit! justify-between gap-2 font-normal hover:bg-background aria-expanded:bg-background dark:hover:bg-input/30 dark:aria-expanded:bg-input/30 [&>svg:last-child]:shrink-0",
   {
     variants: {
       size: {

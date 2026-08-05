@@ -649,17 +649,21 @@ describe("audio-first fortify — live edits during playback", () => {
 describe("audio-first fortify — transport can never wedge", () => {
   const dubDeferred = (id: string) => (src: string) => src.includes(`/${id}.webm`)
 
-  it("cue-paused verse resumed BEFORE the dub resolves: the dub joins itself when ready", async () => {
+  it("cue-paused verse resumed BEFORE the dub resolves parks as 'loading', then starts both", async () => {
     const cells = [verse("v1", 0, 3, 8_000)]
     FakeAudio.deferSrc = dubDeferred("v1")
     setQueueTimingMode("audioFirst")
-    // Cue paused at the verse (no gate on this path), then resume immediately.
+    // Cue paused at the verse (no gate on this path — but the cue DID create
+    // the dub element, cold), then resume immediately.
     startQueueAtTime(ctxFor(cells), 0.5, { play: false })
     await settle()
     expect(getQueueState().kind).toBe("paused")
     await resumeQueue()
-    // The dub element may not even exist yet — resume could only start the
-    // source. When the dub's bytes land, it must join by itself.
+    await settle()
+    // The dub element exists but is UNREADY — resume must not report
+    // "playing" with a clock that can't tick (the playhead would extrapolate
+    // ahead and snap back on the first real tick). It re-enters the gate.
+    expect(getQueueState().kind).toBe("loading")
     dubEl("v1")?.makeReady()
     await settle()
     expect(getQueueState().kind).toBe("playing")

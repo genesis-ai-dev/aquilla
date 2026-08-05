@@ -2077,11 +2077,13 @@ export async function resumeQueue(): Promise<void> {
     if (!slot) return
     // FORTIFY: a resume must obey the same rule as a slot open — sides start
     // TOGETHER. A paused CUE whose dub is still resolving (click-a-verse then
-    // Space before the clip arrives) has a due side with no element yet;
-    // playing "whatever is alive" started the source alone, the clock followed
-    // it ahead, and the late dub's self-join rebased the playhead BACKWARD.
-    // Re-enter through progPlaySlot, the one start authority: it re-cues from
-    // the parked position and gates until every due side is ready.
+    // Space before the clip arrives) has a due side that is missing or still
+    // loading; playing "whatever is alive" reported "playing" with a frozen
+    // clock, the playhead extrapolated ahead, and the first real tick rebased
+    // it BACKWARD. A due side counts only when its element is READY (the
+    // gate's own readyState >= 3 bar) — otherwise re-enter through
+    // progPlaySlot, the one start authority: it re-cues from the parked
+    // position and gates until every due side is ready.
     {
       const cell = activeContext?.cells.find((c) => c.id === slot.cellId)
       const into = Math.max(0, progress.currentTime - slot.startSec)
@@ -2089,11 +2091,14 @@ export async function resumeQueue(): Promise<void> {
         slot.targetWindow && cell && activeTargetForCell(cell) && into < slot.targetLenSec,
       )
       const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
-      const dubAlive = overlayPool.some((e) => e.element)
-      const sourceAlive = Boolean(
-        currentAudio && slot.sourceWindow && currentAudio.currentTime < slot.sourceWindow.end,
+      const dubReady = overlayPool.some((e) => e.element && e.element.readyState >= 3)
+      const sourceReady = Boolean(
+        currentAudio &&
+          slot.sourceWindow &&
+          currentAudio.currentTime < slot.sourceWindow.end &&
+          currentAudio.readyState >= 3,
       )
-      if ((dubDue && !dubAlive) || (sourceDue && !sourceAlive)) {
+      if ((dubDue && !dubReady) || (sourceDue && !sourceReady)) {
         void progPlaySlot(progIndex, slot.startSec + into, true)
         return
       }

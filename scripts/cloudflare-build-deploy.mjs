@@ -5,10 +5,11 @@ import { runVerifiedDeployment } from "./cloudflare-version-deploy.mjs"
 const SUPPORTED_SURFACES = new Set(WORKER_SURFACES)
 
 /**
- * Keep the Cloudflare Workers Builds dashboard command stable while the
- * repository owns branch-to-environment selection. Only main may promote a
- * version. Staging, development, and feature branches produce preview
- * versions without changing live traffic.
+ * Keep a safe Cloudflare Workers Builds command during the transition to
+ * GitHub-owned live deployments. Only main may promote a version. Staging,
+ * development, and feature branches produce unpromoted versions without
+ * changing live traffic. The Builds connections are disabled after the
+ * GitHub deployment path is proven; see the runbook.
  */
 export function deploymentPlan(branch) {
   const normalizedBranch = branch?.trim()

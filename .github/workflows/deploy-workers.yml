@@ -15,12 +15,23 @@ on:
   push:
     branches: [main, staging, dev]
     paths:
+      - '.github/workflows/deploy-workers.yml'
       - 'sync-worker/**'
       - 'auth-worker/**'
+      - 'db/**'
+      - 'shared/**'
+      - 'src/lib/migrate/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'tsconfig*.json'
       - 'config/cloudflare-deployments.json'
       - 'scripts/cloudflare-build-deploy.*'
       - 'scripts/cloudflare-deployment-manifest.*'
       - 'scripts/cloudflare-version-deploy.*'
+      - 'scripts/resolve-deployment-target.sh'
+      - 'scripts/resolve-worker-test-scope.*'
+      - 'scripts/verify-deploy-branch.sh'
+      - 'scripts/verify-live-environment.*'
       - 'scripts/verify-worker-deployment.*'
   workflow_dispatch:
     inputs:
@@ -77,12 +88,17 @@ jobs:
           fi
           base="${{ github.event.before }}"
           if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            base="${{ github.sha }}~1"
+            echo "::notice::No usable diff base; deploying every Worker."
+            node scripts/resolve-worker-test-scope.mjs --all
+            exit 0
           fi
-          changed=$(git diff --name-only "$base" "${{ github.sha }}" || git show --name-only --format= "${{ github.sha }}")
-          common='^(config/cloudflare-deployments\.json|scripts/(cloudflare-(build-deploy|deployment-manifest|version-deploy)|verify-worker-deployment)\.)'
-          echo "$changed" | grep -Eq "^sync-worker/|$common" && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
-          echo "$changed" | grep -Eq "^auth-worker/|$common" && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
+          if ! changed=$(git diff --name-only "$base" "${{ github.sha }}"); then
+            echo "::notice::Diff failed; deploying every Worker."
+            node scripts/resolve-worker-test-scope.mjs --all
+            exit 0
+          fi
+          echo "$changed"
+          printf '%s\n' "$changed" | node scripts/resolve-worker-test-scope.mjs
 
   # Worker deploys are blocked until the target Neon schema is current — the
   # recurring 500 class (AQU-135/150/158, projects.is_active/source_link_*) was

@@ -358,6 +358,7 @@ describe("worker deployment environment contract", () => {
     expect(matrix).toContain("`staging` -> `staging`")
     expect(matrix).toContain("`dev` -> `development`")
     expect(matrix).toContain("`pnpm run deploy:workers-build`")
+    expect(matrix).toContain("GitHub Actions is the sole intended owner")
     expect(matrix).toContain("All unnamed Wrangler profiles are local-only")
     expect(matrix).toContain("deployment-branch policy")
 
@@ -404,16 +405,28 @@ describe("worker deployment environment contract", () => {
     expect(workersWorkflow).toContain("node ../scripts/cloudflare-version-deploy.mjs identity")
     expect(workersWorkflow).toContain("config/cloudflare-deployments.json")
     expect(workersWorkflow).toContain("scripts/cloudflare-version-deploy.*")
-    const webWorkflow = readRepoFile(".github", "workflows", "deploy.yml")
+    expect(workersWorkflow).toContain("node scripts/resolve-worker-test-scope.mjs --all")
+    expect(workersWorkflow).toContain("node scripts/resolve-worker-test-scope.mjs")
+    for (const sharedPath of [
+      "'db/**'",
+      "'shared/**'",
+      "'src/lib/migrate/**'",
+      "'package.json'",
+      "'pnpm-lock.yaml'",
+      "'scripts/resolve-worker-test-scope.*'",
+    ]) {
+      expect(workersWorkflow).toContain(sharedPath)
+    }
+    const webWorkflow = readRepoFile(".github", "workflows", "ci.yml")
     expect(webWorkflow).toContain("node scripts/cloudflare-version-deploy.mjs web")
   })
 
   it("keeps SPA CI builds and deploys on the same explicit environment", () => {
-    const workflow = readRepoFile(".github", "workflows", "deploy.yml")
-    const deployJobStart = workflow.indexOf("  deploy:")
-    const deployJobHeader = workflow.slice(
-      deployJobStart,
-      workflow.indexOf("    steps:", deployJobStart),
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const buildJobStart = workflow.indexOf("  build:")
+    const buildJobHeader = workflow.slice(
+      buildJobStart,
+      workflow.indexOf("    steps:", buildJobStart),
     )
 
     expect(workflow).toContain("bash scripts/verify-dist-host.sh \"${{ needs.target.outputs.api_host }}\"")
@@ -430,16 +443,66 @@ describe("worker deployment environment contract", () => {
     expect(workflow).not.toContain("<workers-subdomain>")
     expect(workflow).not.toContain("cloudflare/wrangler-action")
     expect(workflow).not.toContain("|| '--env=development'")
-    expect(deployJobHeader).toContain("env:")
-    expect(deployJobHeader).toContain("VITE_SYNC_WORKER_HOST:")
-    expect(deployJobHeader).toContain("VITE_AUTH_BASE:")
-    expect(deployJobHeader).toContain("VITE_CHAT_BASE:")
+    expect(buildJobHeader).toContain("env:")
+    expect(buildJobHeader).toContain("VITE_SYNC_WORKER_HOST:")
+    expect(buildJobHeader).toContain("VITE_AUTH_BASE:")
+    expect(buildJobHeader).toContain("VITE_CHAT_BASE:")
     expect(workflow.match(/VITE_AUTH_BASE:/g)).toHaveLength(1)
     expect(workflow).not.toContain("refs/heads/main' && ' '")
   })
 
-  it("installs Chromium before running IDML browser conformance in Web CI", () => {
-    const workflow = readRepoFile(".github", "workflows", "web-ci.yml")
+  it("builds and tests once, then deploys the exact verified artifact", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const deployJob = workflow.slice(workflow.indexOf("  deploy:"))
+
+    expect(deployJob).toContain("needs: [target, lint, typecheck, unit, build]")
+    expect(deployJob).toContain("actions/download-artifact@v4")
+    expect(deployJob).not.toContain("pnpm run build")
+    expect(deployJob).not.toContain("run: pnpm test")
+    expect(workflow).toContain("actions/upload-artifact@v4")
+    expect(workflow.match(/run: pnpm run build/g)).toHaveLength(1)
+  })
+
+  it("keeps every required branch-protection check unconditional", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const triggers = workflow.slice(workflow.indexOf("\non:"), workflow.indexOf("\nconcurrency:"))
+    const requiredJobs = workflow.slice(workflow.indexOf("  lint:"), workflow.indexOf("  schema-migrations:"))
+
+    expect(triggers).not.toContain("paths-ignore")
+    expect(triggers).not.toContain("paths:")
+    expect(triggers).toContain("ready_for_review")
+    for (const job of ["  lint:", "  typecheck:", "  unit:", "  build:"]) {
+      expect(requiredJobs).toContain(job)
+    }
+    expect(requiredJobs).not.toContain("if:")
+  })
+
+  it("fails worker-suite change detection open for shared deployment inputs", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
+    const changesJob = workflow.slice(workflow.indexOf("  changes:"), workflow.indexOf("  lint:"))
+
+    expect(changesJob).toContain("No usable diff base; running every worker suite")
+    expect(changesJob).toContain("node scripts/resolve-worker-test-scope.mjs --all")
+    expect(changesJob).toContain("node scripts/resolve-worker-test-scope.mjs")
+  })
+
+  it("installs root and worker dependencies before deployable worker checks", () => {
+    const workflow = readRepoFile(".github", "workflows", "deploy-workers.yml")
+
+    for (const [worker, nextWorker] of [
+      ["sync-worker", "auth-worker"],
+      ["auth-worker", null],
+    ] as const) {
+      const jobStart = workflow.indexOf(`  ${worker}:`)
+      const nextJob = nextWorker === null ? -1 : workflow.indexOf(`\n  ${nextWorker}:`, jobStart)
+      const job = workflow.slice(jobStart, nextJob === -1 ? undefined : nextJob)
+      expect(job.match(/run: pnpm install --frozen-lockfile/g)).toHaveLength(2)
+      expect(job).toContain(`working-directory: ${worker}`)
+    }
+  })
+
+  it("installs Chromium before running IDML browser conformance in CI", () => {
+    const workflow = readRepoFile(".github", "workflows", "ci.yml")
     const installBrowser = workflow.indexOf("pnpm exec playwright install --with-deps chromium")
     const runIdmlTests = workflow.indexOf("pnpm test:idml")
 

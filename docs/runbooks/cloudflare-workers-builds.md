@@ -3,23 +3,37 @@
 This runbook implements the Cloudflare Builds section of the canonical
 [deployment environment matrix](../DEPLOYMENT-ENVIRONMENTS.md).
 
-The SPA (`aquilla-web`), identity (`aquilla-identity`), and sync
-(`aquilla-sync-worker`) Workers are connected to Cloudflare Workers Builds.
-Environment selection belongs to this repository; the dashboard must not infer
-an environment from a missing profile or use a command that can promote a
-feature build.
+GitHub Actions is the intended owner of production, staging, and development
+deployments. Cloudflare Workers Builds must not remain a second live deployment
+owner: its Worker-name override can place a development-bound feature version in
+a production Worker's version history even when the repository selected a named
+development profile. A later manual promotion can then bypass the branch policy.
 
-## Dashboard settings
+## Control-plane cutover
 
-After the shared helper is present on `main`, set both the production and
-non-production deploy commands for all three Workers to:
+Do not disable the existing Builds connections until all of these gates pass:
+
+1. GitHub Actions organization billing allows hosted jobs to start.
+2. Required Cloudflare and target Neon secrets are present.
+3. The consolidated CI workflow deploys and verifies `dev` successfully.
+4. The same exact-version path deploys and verifies `main` successfully.
+
+Then disable automatic Workers Builds for `aquilla-web`, `aquilla-identity`, and
+`aquilla-sync-worker`. Do not delete the Workers, routes, versions, or bindings.
+Web pull-request previews continue through GitHub Actions on the route-free
+`aquilla-web-preview` Worker.
+
+While any Builds connection remains enabled during the cutover, set both its
+production and non-production deploy commands to the repository-owned command:
 
 ```sh
 pnpm run deploy:workers-build
 ```
 
 Root directories remain `/`, `/auth-worker`, and `/sync-worker`, respectively.
-Each directory exposes the same `pnpm run deploy:workers-build` command. The
+Each directory exposes the same `pnpm run deploy:workers-build` command. Clean
+identity and sync builds must install both the repository root and the worker
+package because they import shared `db/`, `shared/`, and migration modules. The
 repository helper requires `WORKERS_CI=1`, reads `WORKERS_CI_BRANCH`, and applies
 this policy:
 
@@ -64,9 +78,9 @@ rejected before upload unless the checkout is on the authorized branch. The buil
 hook is defense in depth; Cloudflare Builds must still use the repository-owned
 command above.
 
-Actual staging and development promotion remains owned by
-`.github/workflows/deploy-workers.yml`, whose branch mapping always passes an
-explicit named environment.
+Live promotion is owned by `.github/workflows/ci.yml` for the SPA and
+`.github/workflows/deploy-workers.yml` for identity and sync. Both workflows pass
+an explicit named environment and use the same exact-version verifier.
 
 Removing the staging Workers or staging routes is explicitly deferred. This
 incident recovery only prevents non-production Workers Builds from changing

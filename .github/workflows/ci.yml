@@ -1,0 +1,283 @@
+name: CI
+
+# AQU-799: checks and the SPA deployment share one workflow so deployment can
+# consume the exact artifact that passed the build/environment gate. Required
+# check names are pinned by worker-deployment-contract.test.ts.
+
+on:
+  push:
+    branches: [main, staging, dev]
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    outputs:
+      wrangler_environment: ${{ steps.resolve.outputs.wrangler_environment }}
+      live_environment: ${{ steps.resolve.outputs.live_environment }}
+      github_environment: ${{ steps.resolve.outputs.github_environment }}
+      api_host: ${{ steps.resolve.outputs.api_host }}
+      sync_worker_host: ${{ steps.resolve.outputs.sync_worker_host }}
+      auth_base: ${{ steps.resolve.outputs.auth_base }}
+      chat_base: ${{ steps.resolve.outputs.chat_base }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: resolve
+        name: Resolve authorized deployment target
+        run: bash scripts/resolve-deployment-target.sh
+
+  # Worker suites are not required branch-protection contexts, so they may be
+  # skipped when irrelevant. Detection fails open for an unreadable diff and
+  # for every shared input that can affect more than one Worker.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      auth: ${{ steps.filter.outputs.auth }}
+      sync: ${{ steps.filter.outputs.sync }}
+      agent: ${{ steps.filter.outputs.agent }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          base="$BASE_SHA"
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::notice::No usable diff base; running every worker suite."
+            node scripts/resolve-worker-test-scope.mjs --all
+            exit 0
+          fi
+
+          if ! changed=$(git diff --name-only "$base" "$HEAD_SHA"); then
+            echo "::notice::Diff failed; running every worker suite."
+            node scripts/resolve-worker-test-scope.mjs --all
+            exit 0
+          fi
+          echo "$changed"
+          printf '%s\n' "$changed" | node scripts/resolve-worker-test-scope.mjs
+
+  # Required branch-protection checks. Do not rename or add conditions without
+  # updating the main/dev protection rules in the same control-plane change.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: npx tsc -b --noEmit
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:idml
+
+  # The repository build is the CI gate (tsc -b && vite build). It compiles
+  # once with the resolved target, verifies that target, and publishes the
+  # exact dist/ directory consumed by deploy.
+  build:
+    needs: target
+    runs-on: ubuntu-latest
+    env:
+      VITE_SYNC_WORKER_HOST: ${{ needs.target.outputs.sync_worker_host }}
+      VITE_AUTH_BASE: ${{ needs.target.outputs.auth_base }}
+      VITE_CHAT_BASE: ${{ needs.target.outputs.chat_base }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Verify built API environment
+        run: bash scripts/verify-dist-host.sh "${{ needs.target.outputs.api_host }}"
+      - name: Strip dist/_redirects (Workers static assets rejects it)
+        run: rm -f dist/_redirects
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
+          path: dist
+          retention-days: 3
+          if-no-files-found: error
+
+  schema-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm neon:check
+
+  auth-worker-tests:
+    needs: changes
+    if: needs.changes.outputs.auth == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            auth-worker/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: auth-worker
+      - run: pnpm run type-check
+        working-directory: auth-worker
+      - run: pnpm test
+        working-directory: auth-worker
+
+  sync-worker-tests:
+    needs: changes
+    if: needs.changes.outputs.sync == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            sync-worker/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+        working-directory: sync-worker
+      - run: pnpm run type-check
+        working-directory: sync-worker
+      - run: pnpm test
+        working-directory: sync-worker
+
+  agent-worker-tests:
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent-worker/package-lock.json
+      - run: npm ci
+        working-directory: agent-worker
+      - run: npm run type-check
+        working-directory: agent-worker
+      - run: npm test
+        working-directory: agent-worker
+      - run: docker build --tag aquilla-agent-sandbox:ci .
+        working-directory: agent-worker
+
+  deploy:
+    needs: [target, lint, typecheck, unit, build]
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
+          path: dist
+
+      - name: Deploy aquilla-web (main/staging/dev)
+        id: deploy_live
+        if: github.event_name != 'pull_request'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node scripts/cloudflare-version-deploy.mjs web "${{ needs.target.outputs.wrangler_environment }}"
+
+      - name: Verify deployed SPA environment
+        if: github.event_name != 'pull_request'
+        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=spa
+
+      - name: Upload aquilla-web preview (PR)
+        id: deploy_preview
+        if: github.event_name == 'pull_request'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node scripts/cloudflare-pr-preview.mjs "${{ github.event.number }}" "${{ github.event.pull_request.head.sha }}"
+
+      - name: Verify aquilla-web preview environment
+        if: github.event_name == 'pull_request'
+        env:
+          PREVIEW_URL: ${{ steps.deploy_preview.outputs.url }}
+        run: node scripts/verify-live-environment.mjs development --surface=spa --app-origin="$PREVIEW_URL"
+
+      - name: Comment preview URL on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          header: pages-preview
+          message: |
+            **Preview:** ${{ steps.deploy_preview.outputs.url }}
+
+            | | |
+            | --- | --- |
+            | Commit | `${{ github.event.pull_request.head.sha }}` |
+            | API | `api.dev.aquilla.app` (development) |
+
+            This route-free preview is refreshed for each non-draft PR update.
+            It targets development identity, sync, and chat services and cannot
+            alter production, staging, or development route traffic.
+
+            Draft PRs do not build a preview; mark the PR ready for review.

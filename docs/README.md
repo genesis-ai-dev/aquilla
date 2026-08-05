@@ -13,7 +13,7 @@ design and audit material.
   ownership.
 - [Staging](STAGING.md) — staging provisioning, refresh, deploy, and verification.
 - [Cloudflare Workers Builds](runbooks/cloudflare-workers-builds.md) — safe
-  repository-owned branch selection for the Cloudflare Git integration.
+  transition from duplicate Cloudflare Git deploys to GitHub-owned deployment.
 - [E2E](../e2e/README.md) — local integration and smoke-test environment.
 - [RLS rollout](RLS-ROLLOUT.md) — Postgres row-level-security operations.
 

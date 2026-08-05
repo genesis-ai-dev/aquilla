@@ -45,34 +45,39 @@ staging named profiles also run the branch guard as a Wrangler custom-build hook
 covering accidental direct `wrangler deploy --env=...` calls. Local live deploys
 additionally require a clean worktree whose HEAD matches the current remote branch.
 
-## Automation policy
+## Automation ownership
 
-GitHub Actions deploys only these mappings:
+GitHub Actions is the sole intended owner of live Aquilla deployments. It deploys
+only these mappings:
 
 - `main` -> `production`
 - `staging` -> `staging`
 - `dev` -> `development`
 
-Both deploy workflows resolve this mapping through
+The SPA CI/deploy workflow and the worker deploy workflow resolve this mapping through
 `scripts/resolve-deployment-target.sh`. Unsupported live refs fail before any
 schema, build, or deploy step; there is no default environment. Production deploy
 jobs enter the GitHub `production` Environment, whose deployment-branch policy
 admits only `main`. This is a server-side backstop independent of the workflow's
 branch resolver.
 
-Cloudflare Workers Builds for the SPA, identity, and sync Workers must run
-`pnpm run deploy:workers-build` for both their production and non-production
-commands. That repository-owned command verifies the exact uploaded version,
-then promotes `main` to production. `staging`, `dev`, and feature branches remain
-verified preview-only versions; all feature branches intentionally share the
-development resources. It fails closed when Cloudflare does not provide Workers
-CI branch and commit metadata. Production binding verification happens before
-promotion, with exact-version traffic verification afterward.
+Cloudflare Workers Builds must not be a second live deployment owner. After the
+GitHub workflow has successfully deployed and verified development and production,
+disable automatic Workers Builds for the SPA, identity, and sync repositories
+without deleting their existing Workers. Until that control-plane cutover is
+complete, every still-connected build must use the repository-owned
+`pnpm run deploy:workers-build` command. It fails closed without Workers CI branch
+and commit metadata, verifies the exact uploaded version, promotes only `main`, and
+keeps every other branch preview-only. This transition rule prevents an unsafe
+dashboard command while GitHub-hosted runners or required secrets are unavailable.
 
 Never paste a branch-selection shell expression into the Cloudflare dashboard and
 never use a bare `wrangler deploy` for a live Aquilla environment.
 
-Pull requests use the route-free `preview` Wrangler profile
+The consolidated `.github/workflows/ci.yml` builds the SPA exactly once, verifies
+its API target, uploads that exact artifact, and deploys it only after the required
+lint, typecheck, unit, and build jobs pass. Pull requests use the route-free
+`preview` Wrangler profile
 (`aquilla-web-preview`) with development API targets. Preview uploads cannot mutate
 the production, staging, or development SPA Workers.
 
@@ -94,7 +99,7 @@ An environment change is one atomic contract change. Update and verify all of:
 
 1. The three Wrangler files and their Worker routes/bindings.
 2. `package.json` deploy and live-verification commands.
-3. `.github/workflows/deploy.yml` and `deploy-workers.yml`.
+3. `.github/workflows/ci.yml` and `deploy-workers.yml`.
 4. `config/cloudflare-deployments.json`, `scripts/cloudflare-build-deploy.mjs`,
    `cloudflare-version-deploy.mjs`, and `verify-worker-deployment.mjs`.
 5. `scripts/resolve-deployment-target.sh` and `verify-deploy-branch.sh`.

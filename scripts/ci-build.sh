@@ -9,7 +9,7 @@
 #   *       → api.dev.aquilla.app      (dev backend; PR/preview builds land here)
 #
 # Baking the right VITE_* hosts is load-bearing: a bare build shipped
-# dev-API-pointing bundles to aquilla.app once (see .github/workflows/deploy.yml).
+# dev-API-pointing bundles to aquilla.app once (see .github/workflows/ci.yml).
 # dist/_redirects is stripped because Workers' static-assets parser rejects the
 # SPA `/* /index.html 200` rule (error 100324); wrangler.toml handles SPA
 # fallback via not_found_handling instead.

@@ -500,6 +500,12 @@ export class Workspace {
     expectedSlotCount: number,
   ): Promise<void> {
     const target = await this.activateTargetCell(index)
+    // Character-style IDs are structural metadata, not translator-facing UI.
+    // Native title attributes used to show a distracting raw InDesign tooltip
+    // whenever the pointer rested over an active slot.
+    await expect(target.locator(".idml-style-boundary[title]")).toHaveCount(0)
+    await expect(target.locator("span[data-idml-slot][data-idml-character-style]"))
+      .toHaveCount(expectedSlotCount)
     await this.page.keyboard.type(draft)
     await expect(target).toContainText(draft)
 

@@ -432,9 +432,11 @@ describe("TranslatedEditor — protected IDML mode", () => {
     expect(onEscapeToGrid).not.toHaveBeenCalled()
     expect(surface.querySelectorAll("p[data-idml-version=\"2\"]")).toHaveLength(1)
     expect(surface.querySelector("span[data-idml-slot=\"0\"] br")).toBeTruthy()
-    expect(
-      (surface.querySelector("span[data-idml-slot=\"1\"]") as HTMLElement).style.fontWeight,
-    ).toBe("700")
+    const styledSlot = surface.querySelector("span[data-idml-slot=\"1\"]") as HTMLElement
+    expect(styledSlot.style.fontWeight).toBe("700")
+    expect(styledSlot.getAttribute("data-idml-character-style"))
+      .toBe("CharacterStyle/Bold")
+    expect(styledSlot.hasAttribute("title")).toBe(false)
 
     act(() => fireEvent.blur(surface))
     expect(onCommit).toHaveBeenCalledTimes(1)

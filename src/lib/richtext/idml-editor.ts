@@ -508,7 +508,6 @@ function exactAttributes(element: HTMLElement, expected: ReadonlySet<string>): b
 
 function decorateIdmlStyleBoundary(element: HTMLElement, characterStyle: string): void {
   element.className = "idml-style-boundary"
-  element.title = `InDesign character style: ${characterStyle}`
   const normalized = characterStyle.toLowerCase()
   element.style.fontWeight = /(?:bold|black|heavy)/.test(normalized) ? "700" : ""
   element.style.fontStyle = /(?:italic|oblique)/.test(normalized) ? "italic" : ""

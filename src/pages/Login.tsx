@@ -1,6 +1,6 @@
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
-import { useNavigate, useSearchParams } from "react-router-dom"
+import { useNavigate, useSearchParams, Navigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import {
   Field,
@@ -13,6 +13,7 @@ import { RevealableInput } from "@/components/ui/revealable-input"
 import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError } from "@/lib/frontier/auth"
+import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
@@ -32,11 +33,20 @@ export function Login() {
   const { login } = useFrontierSession()
 
   const rawNext = searchParams.get("next") ?? ""
-  const next = rawNext.startsWith("/") ? rawNext : "/"
+  // `/` is the marketing homepage at the edge; send returning users into the
+  // workspace entry instead. Honor an explicit in-app ?next= path.
+  const next = rawNext.startsWith("/") && rawNext !== "/" ? rawNext : "/app"
 
   const [mode, setMode] = useState<Mode>("login")
   const [isMigrating, setIsMigrating] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  // Already signed in (or finished local onboarding) — skip the form and go
+  // straight into the app. Same gate AppEntry uses.
+  const onboarded =
+    typeof localStorage !== "undefined" &&
+    localStorage.getItem("codex:onboardingComplete") === "true"
+  const alreadySignedIn = hasAuthHintCookie() || onboarded
 
   const form = useForm({
     defaultValues: { username: "", password: "" },
@@ -54,6 +64,10 @@ export function Login() {
       }
     },
   })
+
+  if (alreadySignedIn) {
+    return <Navigate to={next} replace />
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-8">

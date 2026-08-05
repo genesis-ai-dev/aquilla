@@ -121,7 +121,7 @@ function SyncFreezeOverlay() {
  * doesn't branch on a cookie any more (see worker/index.ts), which is what lets
  * that page be edge-cached. So a fresh load never reaches this component at `/`;
  * only in-app navigation does. `/app` is the URL that opens the workspace, and
- * it's where the marketing nav and AppEntryBanner point.
+ * it's where the marketing nav's "Open app" CTA points.
  *
  * Signed-out visitors go to /login rather than back to the marketing page:
  * anyone arriving here clicked something that said "open the app", and bouncing
@@ -184,7 +184,7 @@ function AppRoutes() {
         {/* Eager — needed for first paint / sign-in flow */}
         <Route path="/" element={<AppEntry />} />
         {/* The workspace entry. `/` is marketing at the edge, so this is the
-            URL that opens the app — marketing nav + AppEntryBanner point here. */}
+            URL that opens the app — marketing "Open app" CTAs point here. */}
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />

@@ -5,8 +5,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { MultimodalWorkspace } from "./MultimodalWorkspace"
 import { LanguageBlitz, LanguageMarquee } from "./LanguageBlitz"
 import { BetaBar } from "./BetaBar"
-import { AppEntryBanner } from "./AppEntryBanner"
 import { BookCallSection } from "./BookCallSection"
+import { MarketingAuthOrDocsLink } from "./MarketingAuthOrDocsLink"
 import { useMarketingShell } from "./useMarketingShell"
 import "./homepage.css"
 
@@ -43,8 +43,7 @@ export function Homepage() {
   // `/` is the marketing homepage for everyone now, so "open app" can't point
   // there — /app is the workspace entry, and it sends signed-out visitors to
   // /login itself. No cookie read here: the marketing pages are prerendered and
-  // edge-cached, so their markup must not depend on who is asking. Signed-in
-  // visitors get steered by AppEntryBanner after mount instead.
+  // edge-cached, so their markup must not depend on who is asking.
   const appHref = "/app"
 
   return (
@@ -56,7 +55,6 @@ export function Homepage() {
       </div>
 
       {/* ── Beta strip (above the sticky nav; scrolls away) ──────────────── */}
-      <AppEntryBanner />
       <BetaBar />
 
       {/* ── Nav ───────────────────────────────────────────────────────── */}
@@ -86,8 +84,11 @@ export function Homepage() {
                 {theme === "dark" ? <IconSun /> : <IconMoon />}
               </button>
             </AppTooltip>
-            <a href={appHref} className="aq-btn aq-btn-ghost aq-btn-sm">Open app</a>
-            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-sm">Sign up free</a>
+            <MarketingAuthOrDocsLink
+              docsUrl={DOCS_URL}
+              className="aq-btn aq-btn-ghost aq-btn-sm"
+            />
+            <a href={appHref} className="aq-btn aq-btn-gold aq-btn-sm">Open app</a>
           </div>
         </div>
       </nav>
@@ -107,7 +108,7 @@ export function Homepage() {
             that learns — so every language reaches every medium it's heard, read, and watched in.
           </p>
           <div className="aq-hero-actions aq-load aq-d4">
-            <a href="/onboarding" className="aq-btn aq-btn-gold aq-btn-lg">Sign up free</a>
+            <a href={appHref} className="aq-btn aq-btn-gold aq-btn-lg">Open app</a>
             <a href="#workspace" className="aq-btn aq-btn-ghost aq-btn-lg">See how it works <IconArrow /></a>
           </div>
           <div className="aq-hero-trust aq-load aq-d5">
@@ -528,8 +529,8 @@ export function Homepage() {
               </div>
               <div className="aq-footer-col">
                 <h5>Get started</h5>
+                <MarketingAuthOrDocsLink docsUrl={DOCS_URL} />
                 <a href={appHref}>Open app</a>
-                <a href="/onboarding">Sign up free</a>
                 <a href="#book-call">Book a call</a>
                 <a href="#pricing">Enterprise</a>
               </div>

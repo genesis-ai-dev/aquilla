@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MessageCircleIcon } from "lucide-react"
+import { Discord } from "@/components/icons/Discord"
 
 const BETA_ENABLED = import.meta.env.VITE_BETA_FLAG === "1"
 
@@ -44,7 +44,7 @@ export function BetaBadge() {
             nativeButton={false}
             render={<a href="https://discord.gg/T2EndwXe4W" target="_blank" rel="noopener noreferrer" />}
           >
-            <MessageCircleIcon className="mr-1.5 h-4 w-4" />
+            <Discord className="mr-1.5 h-4 w-4" />
             Join our Discord
           </Button>
         </DialogFooter>

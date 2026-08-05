@@ -5,7 +5,6 @@
 # DEPLOY command between production/non-production, not the build command), so
 # the branch → API-host mapping lives here, keyed off $WORKERS_CI_BRANCH:
 #   main    → api.aquilla.app          (prod backend)
-#   staging → api.staging.aquilla.app  (staging backend)
 #   *       → api.dev.aquilla.app      (dev backend; PR/preview builds land here)
 #
 # Baking the right VITE_* hosts is load-bearing: a bare build shipped
@@ -17,7 +16,6 @@ set -euo pipefail
 
 case "${WORKERS_CI_BRANCH:-}" in
   main)    H=api.aquilla.app ;;
-  staging) H=api.staging.aquilla.app ;;
   *)       H=api.dev.aquilla.app ;;
 esac
 

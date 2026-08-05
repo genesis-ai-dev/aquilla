@@ -46,10 +46,10 @@ function healthyApiFetch(host: string) {
 }
 
 describe("live deployment environment verification", () => {
-  it("verifies the staging identity, chat, and sync route contracts", async () => {
-    const fetchImpl = healthyApiFetch("api.staging.aquilla.app")
+  it("verifies the production identity, chat, and sync route contracts", async () => {
+    const fetchImpl = healthyApiFetch("api.aquilla.app")
 
-    await expect(verifyLiveEnvironment("staging", {
+    await expect(verifyLiveEnvironment("production", {
       surface: "auth",
       fetchImpl,
       lookup,
@@ -57,7 +57,7 @@ describe("live deployment environment verification", () => {
       log: vi.fn(),
     })).resolves.toBeUndefined()
 
-    await expect(verifyLiveEnvironment("staging", {
+    await expect(verifyLiveEnvironment("production", {
       surface: "sync",
       fetchImpl,
       lookup,
@@ -78,28 +78,28 @@ describe("live deployment environment verification", () => {
     })).rejects.toThrow("unexpected body")
   })
 
-  it("verifies that staging SPA assets contain staging targets and no dev targets", async () => {
+  it("verifies that production SPA assets contain production targets and no dev targets", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
       // The bare origin serves the marketing homepage, whose JS graph lacks
       // the sync/chat targets (AQU-779) — the verifier must crawl /app instead.
-      if (url === "https://staging.aquilla.app" || url === "https://staging.aquilla.app/") {
+      if (url === "https://aquilla.app" || url === "https://aquilla.app/") {
         return response('<script type="module" src="/assets/homepage.js"></script>', 200, "text/html")
       }
-      if (url === "https://staging.aquilla.app/assets/homepage.js") {
-        return response('"https://api.staging.aquilla.app/identity"')
+      if (url === "https://aquilla.app/assets/homepage.js") {
+        return response('"https://api.aquilla.app/identity"')
       }
-      if (url === "https://staging.aquilla.app/app") {
+      if (url === "https://aquilla.app/app") {
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
       }
-      if (url === "https://staging.aquilla.app/assets/index.js") {
+      if (url === "https://aquilla.app/assets/index.js") {
         return response('const deps = ["assets/chunk.js"]; import "./chunk.js"')
       }
-      if (url === "https://staging.aquilla.app/assets/chunk.js") {
+      if (url === "https://aquilla.app/assets/chunk.js") {
         return response([
-          "https://api.staging.aquilla.app/identity",
-          "api.staging.aquilla.app/sync",
-          "https://api.staging.aquilla.app/chat",
+          "https://api.aquilla.app/identity",
+          "api.aquilla.app/sync",
+          "https://api.aquilla.app/chat",
         ].join(" "))
       }
       const caseStudy = serveCaseStudies("https://staging.aquilla.app", url)
@@ -107,7 +107,7 @@ describe("live deployment environment verification", () => {
       throw new Error(`unexpected URL ${url}`)
     })
 
-    await expect(verifyLiveEnvironment("staging", {
+    await expect(verifyLiveEnvironment("production", {
       surface: "spa",
       fetchImpl,
       lookup,
@@ -116,26 +116,26 @@ describe("live deployment environment verification", () => {
     })).resolves.toBeUndefined()
 
     const requestedUrls = fetchImpl.mock.calls.map(([input]) => String(input))
-    expect(requestedUrls).toContain("https://staging.aquilla.app/app")
-    expect(requestedUrls).not.toContain("https://staging.aquilla.app")
-    expect(requestedUrls).not.toContain("https://staging.aquilla.app/")
+    expect(requestedUrls).toContain("https://aquilla.app/app")
+    expect(requestedUrls).not.toContain("https://aquilla.app")
+    expect(requestedUrls).not.toContain("https://aquilla.app/")
   })
 
-  it("rejects a staging bundle that also contains a development target", async () => {
+  it("rejects a production bundle that also contains a development target", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
-      if (url === "https://staging.aquilla.app/app") {
+      if (url === "https://aquilla.app/app") {
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
       }
       return response([
-        "https://api.staging.aquilla.app/identity",
-        "api.staging.aquilla.app/sync",
-        "https://api.staging.aquilla.app/chat",
+        "https://api.aquilla.app/identity",
+        "api.aquilla.app/sync",
+        "https://api.aquilla.app/chat",
         "https://api.dev.aquilla.app/identity",
       ].join(" "))
     })
 
-    await expect(verifyLiveEnvironment("staging", {
+    await expect(verifyLiveEnvironment("production", {
       surface: "spa",
       fetchImpl,
       lookup,

@@ -1,6 +1,6 @@
 import deploymentManifest from "../../config/cloudflare-deployments.json"
 
-export type DeploymentEnvironment = "production" | "staging" | "development"
+export type DeploymentEnvironment = "production" | "development"
 
 interface DeploymentBindings {
   ENVIRONMENT?: string

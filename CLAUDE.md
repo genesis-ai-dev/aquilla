@@ -72,7 +72,7 @@ pnpm test -t "splits by verse"
 
 Other script families in `package.json` (look there before writing your own): `neon:*`
 (Postgres migration status/apply/baseline), `seed:*` (seed data), `parity:*` / `roundtrip:*`
-(acceptance suites), `tauri:*` (desktop), `deploy:aquilla:staging*` / `deploy:aquilla:dev*`.
+(acceptance suites), `tauri:*` (desktop), `deploy:aquilla:dev*`.
 
 ### Multi-brand
 

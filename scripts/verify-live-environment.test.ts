@@ -10,6 +10,25 @@ function response(body: string, status = 200, contentType = "text/plain"): Respo
   })
 }
 
+// AQU-798: the spa surface now also verifies the case-study static pages
+// resolve to their dedicated documents (distinct hardcoded og:url) rather than
+// the SPA index-shell fallback. These helpers let each spa mock serve valid
+// case-study documents so the crawl-focused assertions stay in focus.
+function caseStudyHtml(ogUrl: string): string {
+  return `<!doctype html><html><head><title>Case study — Aquilla</title>`
+    + `<meta property="og:url" content="${ogUrl}" /></head><body></body></html>`
+}
+
+function serveCaseStudies(origin: string, url: string): Response | null {
+  if (url === `${origin}/case-studies/biblica`) {
+    return response(caseStudyHtml("https://aquilla.app/case-studies/biblica"), 200, "text/html")
+  }
+  if (url === `${origin}/case-studies/come-and-see`) {
+    return response(caseStudyHtml("https://aquilla.app/case-studies/come-and-see"), 200, "text/html")
+  }
+  return null
+}
+
 function healthyApiFetch(host: string) {
   return vi.fn(async (input: string | URL | Request) => {
     const url = String(input)
@@ -83,6 +102,8 @@ describe("live deployment environment verification", () => {
           "https://api.staging.aquilla.app/chat",
         ].join(" "))
       }
+      const caseStudy = serveCaseStudies("https://staging.aquilla.app", url)
+      if (caseStudy) return caseStudy
       throw new Error(`unexpected URL ${url}`)
     })
 
@@ -137,6 +158,8 @@ describe("live deployment environment verification", () => {
           "https://api.dev.aquilla.app/chat",
         ].join(" "))
       }
+      const caseStudy = serveCaseStudies(previewOrigin, url)
+      if (caseStudy) return caseStudy
       throw new Error(`unexpected URL ${url}`)
     })
 
@@ -165,6 +188,8 @@ describe("live deployment environment verification", () => {
         if (entryAttempts === 1) return response("not found", 404)
         return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
       }
+      const caseStudy = serveCaseStudies(previewOrigin, url)
+      if (caseStudy) return caseStudy
       return response([
         "https://api.dev.aquilla.app/identity",
         "api.dev.aquilla.app/sync",
@@ -182,6 +207,70 @@ describe("live deployment environment verification", () => {
       log: vi.fn(),
     })).resolves.toBeUndefined()
     expect(entryAttempts).toBe(2)
+  })
+
+  it("verifies production case-study pages resolve to their dedicated documents (AQU-798)", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === "https://aquilla.app/app") {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://aquilla.app/assets/index.js") {
+        return response([
+          "https://api.aquilla.app/identity",
+          "api.aquilla.app/sync",
+          "https://api.aquilla.app/chat",
+        ].join(" "))
+      }
+      const caseStudy = serveCaseStudies("https://aquilla.app", url)
+      if (caseStudy) return caseStudy
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      log: vi.fn(),
+    })).resolves.toBeUndefined()
+
+    const requested = fetchImpl.mock.calls.map(([input]) => String(input))
+    expect(requested).toContain("https://aquilla.app/case-studies/biblica")
+    expect(requested).toContain("https://aquilla.app/case-studies/come-and-see")
+  })
+
+  it("rejects when a case-study path falls back to the SPA index shell (AQU-798)", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === "https://aquilla.app/app") {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://aquilla.app/assets/index.js") {
+        return response([
+          "https://api.aquilla.app/identity",
+          "api.aquilla.app/sync",
+          "https://api.aquilla.app/chat",
+        ].join(" "))
+      }
+      // The case-study HTML is missing from the deployed bundle, so the path
+      // falls through single-page-application not-found handling to the SPA
+      // index shell — which carries the bare-origin og:url, not the page's own.
+      if (url === "https://aquilla.app/case-studies/biblica") {
+        return response(caseStudyHtml("https://aquilla.app/"), 200, "text/html")
+      }
+      const caseStudy = serveCaseStudies("https://aquilla.app", url)
+      if (caseStudy) return caseStudy
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      log: vi.fn(),
+    })).rejects.toThrow("fell back to the SPA index shell")
   })
 
   it("fails closed for unknown environments and surfaces", async () => {

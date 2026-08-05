@@ -22,6 +22,7 @@ import {
   fileHasLiveShadowEvents,
   getOptimisticShadows,
   markShadowsSettled,
+  rehydrateShadowsFromOutbox,
   subscribeAudioAttachments,
   subscribeOptimisticAudioAttachment,
   type OptimisticShadow,
@@ -171,6 +172,12 @@ export function useFileAudioAttachments(
       setByCellId(EMPTY)
       return
     }
+    // FORTIFY (SUB-48 across reloads): the shadow registry is memory-only but
+    // the outbox is durable — rebuild shadows from still-queued cell.audio.*
+    // events before the first read of the session, or a recording made just
+    // before a refresh "vanishes" until the flusher delivers it. Idempotent
+    // (once per file per session, keyed inside the bus).
+    await rehydrateShadowsFromOutbox(projectId, fileId).catch(() => { /* best-effort */ })
     const gen = ++generationRef.current
     setIsLoading(true)
     try {

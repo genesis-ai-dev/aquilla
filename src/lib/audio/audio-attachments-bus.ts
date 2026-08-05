@@ -7,6 +7,7 @@
 // playback (audio-coordinator.ts) and TTS status (tts.ts).
 
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
+import { getOutboxFileAudioRecords } from "@/lib/sync/outbox"
 
 type Listener = () => void
 
@@ -318,4 +319,63 @@ export function markShadowsSettled(
 /** Drop every overlay for a file (used by tests). */
 export function clearOptimisticShadows(fileId: string): void {
   shadowsByFile.delete(fileId)
+}
+
+// ── Rehydration from the durable outbox (fortify round) ─────────────────────
+// This registry is memory-only, but the outbox it anchors to survives reloads
+// — so a still-queued attach used to VANISH from the takes strip and timeline
+// after a refresh until the flusher delivered it (minutes, in backoff),
+// breaking SUB-48's "a recording stays on screen until it is actually saved".
+// On a file's first read of the session, rebuild the shadows from the queued
+// events themselves; the existing queued-phase lifecycle then takes over.
+
+const rehydratedFiles = new Set<string>()
+
+/** @internal — tests. */
+export function __resetShadowRehydrationForTests(): void {
+  rehydratedFiles.clear()
+}
+
+export async function rehydrateShadowsFromOutbox(projectId: string, fileId: string): Promise<void> {
+  const key = `${projectId}/${fileId}`
+  if (rehydratedFiles.has(key)) return
+  rehydratedFiles.add(key)
+  const records = await getOutboxFileAudioRecords(projectId, fileId)
+  for (const record of records) {
+    const event = record.event
+    const cellId = event.cellId
+    if (!cellId) continue
+    const payload = (event.payload ?? {}) as Record<string, unknown>
+    if (event.kind === "cell.audio.attach") {
+      const audioId = payload.audioId
+      const url = payload.url
+      const slot = payload.slot
+      if (typeof audioId !== "string" || typeof url !== "string") continue
+      if (slot !== "recording" && slot !== "generatedVoice") continue
+      injectOptimisticAudioAttachment(
+        fileId,
+        cellId,
+        {
+          audioId,
+          url,
+          slot,
+          mimeType: typeof payload.mimeType === "string" ? payload.mimeType : null,
+          voiceId: typeof payload.voiceId === "string" ? payload.voiceId : null,
+          referenceAudioId: typeof payload.referenceAudioId === "string" ? payload.referenceAudioId : null,
+          durationMs: typeof payload.durationMs === "number" ? payload.durationMs : null,
+          label: typeof payload.label === "string" ? payload.label : null,
+          trimStartMs: typeof payload.trimStartMs === "number" ? payload.trimStartMs : null,
+          trimEndMs: typeof payload.trimEndMs === "number" ? payload.trimEndMs : null,
+        },
+        record.id,
+      )
+    } else if (event.kind === "cell.audio.remove") {
+      const audioId = payload.audioId
+      if (typeof audioId !== "string") continue
+      // The slot isn't in the remove payload; "recording" vs "generatedVoice"
+      // only matters for which selection the remove shadow clears, and the
+      // read-side prune keys removes by audioId — recording covers both.
+      injectOptimisticAudioRemove(fileId, cellId, audioId, "recording", record.id)
+    }
+  }
 }

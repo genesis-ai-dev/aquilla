@@ -1,22 +1,20 @@
-import { EventEmitter } from "node:events"
-import type { spawn } from "node:child_process"
-import { describe, expect, it } from "vitest"
-import { deploymentPlan, runDeployment } from "../../scripts/cloudflare-build-deploy.mjs"
+import { describe, expect, it, vi } from "vitest"
+import { deploymentPlan, runDeployment } from "../../../scripts/cloudflare-build-deploy.mjs"
 
 describe("Cloudflare Workers Build deployment policy", () => {
-  it("deploys main with the explicit production environment", () => {
+  it("uploads, verifies, and promotes main with the production environment", () => {
     expect(deploymentPlan("main")).toEqual({
       mode: "production",
       environment: "production",
-      args: ["deploy", "--env=production"],
+      promote: true,
     })
   })
 
-  it("uploads staging as a preview without promoting live traffic", () => {
+  it("uploads staging as a verified preview without promoting live traffic", () => {
     expect(deploymentPlan("staging")).toEqual({
       mode: "preview",
       environment: "staging",
-      args: ["versions", "upload", "--env=staging"],
+      promote: false,
     })
   })
 
@@ -26,7 +24,7 @@ describe("Cloudflare Workers Build deployment policy", () => {
       expect(deploymentPlan(branch)).toEqual({
         mode: "preview",
         environment: "development",
-        args: ["versions", "upload", "--env=development"],
+        promote: false,
       })
     },
   )
@@ -37,7 +35,7 @@ describe("Cloudflare Workers Build deployment policy", () => {
       expect(deploymentPlan(branch)).toEqual({
         mode: "preview",
         environment: "development",
-        args: ["versions", "upload", "--env=development"],
+        promote: false,
       })
     },
   )
@@ -46,31 +44,62 @@ describe("Cloudflare Workers Build deployment policy", () => {
     expect(() => deploymentPlan(branch)).toThrow("WORKERS_CI_BRANCH is required")
   })
 
-  it("passes the resolved preview plan to Wrangler", async () => {
-    const calls: Array<{ command: string; args: string[] }> = []
-    const spawnCommand = ((command: string, args: readonly string[]) => {
-      calls.push({ command, args: [...args] })
-      const child = new EventEmitter()
-      queueMicrotask(() => child.emit("exit", 0, null))
-      return child
-    }) as unknown as typeof spawn
+  it("passes a traceable development preview plan to the exact-version deployer", async () => {
+    const deployVersion = vi.fn().mockResolvedValue({ versionId: "preview-123" })
 
     await runDeployment({
+      surface: "sync",
       branch: "codex/aqu-771-prod-workers-build-env-guard",
       workersCi: "1",
-      spawnCommand,
+      commitSha: "abcdef1234567890",
+      buildUuid: "build-123",
+      deployVersion,
     })
 
-    expect(calls).toEqual([
-      {
-        command: "pnpm",
-        args: ["exec", "wrangler", "versions", "upload", "--env=development"],
-      },
-    ])
+    expect(deployVersion).toHaveBeenCalledWith({
+      surface: "sync",
+      environment: "development",
+      promote: false,
+      expectedWorker: "aquilla-sync-worker",
+      sourceId: "abcdef1234567890",
+      sourceLabel: "workers-build:codex/aqu-771-prod-workers-build-env-guard:build-123",
+    })
   })
 
   it("refuses to run the CI deploy command outside Workers Builds", async () => {
-    await expect(runDeployment({ branch: "main", workersCi: "" }))
-      .rejects.toThrow("WORKERS_CI=1 is required")
+    await expect(runDeployment({
+      surface: "sync",
+      branch: "main",
+      workersCi: "",
+      commitSha: "abcdef123456",
+    })).rejects.toThrow("WORKERS_CI=1 is required")
+  })
+
+  it("refuses an untraceable Workers Build", async () => {
+    await expect(runDeployment({
+      surface: "sync",
+      branch: "main",
+      workersCi: "1",
+      commitSha: "",
+    })).rejects.toThrow("WORKERS_CI_COMMIT_SHA is required")
+  })
+
+  it("promotes main only after exact-version verification", async () => {
+    const deployVersion = vi.fn().mockResolvedValue({ versionId: "production-123" })
+
+    await runDeployment({
+      surface: "identity",
+      branch: "main",
+      workersCi: "1",
+      commitSha: "abcdef123456",
+      deployVersion,
+    })
+
+    expect(deployVersion).toHaveBeenCalledWith(expect.objectContaining({
+      surface: "identity",
+      environment: "production",
+      promote: true,
+      expectedWorker: "aquilla-identity",
+    }))
   })
 })

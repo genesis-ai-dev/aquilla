@@ -599,7 +599,7 @@ export function TimelineEditor({
           {(
             [
               { mode: "dubbing" as const, label: "Original's timing", hint: "The translation is fitted to the original recording's timing." },
-              { mode: "audioFirst" as const, label: "Audio-first", hint: "Each verse takes as much room as its longer side, laid end to end." },
+              { mode: "audioFirst" as const, label: "Free timing", hint: "Verses are laid end to end — each takes as much room as its longer side." },
             ]
           ).map(({ mode, label, hint }) =>
             onChangeTimingMode ? (

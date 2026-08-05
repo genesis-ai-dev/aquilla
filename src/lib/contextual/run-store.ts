@@ -69,6 +69,7 @@ export interface ContextualSceneFrame {
   sceneBriefId: string
   spanLabel: string
   ambiguityCount: number
+  spanId?: string
 }
 
 export interface ContextualSpanFrame {
@@ -78,12 +79,43 @@ export interface ContextualSpanFrame {
   staged: number
   skipped: number
   verdictSummary: string
+  spanId?: string
 }
+
+/** A passage started. Arrives BEFORE any model call for that span, so the UI
+ *  can show the lane through the slowest phase instead of showing nothing. */
+export interface ContextualSpanStartFrame {
+  type: "contextual.span.start"
+  runId: string
+  fileId: string
+  spanId: string
+  spanLabel: string
+}
+
+export interface ContextualPhaseFrame {
+  type: "contextual.phase"
+  runId: string
+  spanId: string
+  spanLabel: string
+  phase: ContextualSpanPhase
+}
+
+export type ContextualSpanPhase = "reading" | "drafting" | "checking" | "staging"
 
 export type ContextualFrame =
   | ContextualRunStateFrame
   | ContextualSceneFrame
   | ContextualSpanFrame
+  | ContextualSpanStartFrame
+  | ContextualPhaseFrame
+
+/** One passage in flight. A wave runs several at once, so the pill reports
+ *  lanes rather than pretending there is a single current passage. */
+export interface ContextualLane {
+  spanId: string
+  spanLabel: string
+  phase: ContextualSpanPhase
+}
 
 // ── Transport ───────────────────────────────────────────────────────────────
 
@@ -96,7 +128,8 @@ export interface ContextualTransportSnapshot {
 
 export interface ContextualTransport {
   fetchSnapshot(projectId: string, fileId: string): Promise<ContextualTransportSnapshot>
-  start(projectId: string, fileId: string): Promise<{ runId: string }>
+  /** `anchorCellId` is where the user is looking — the first wave starts there. */
+  start(projectId: string, fileId: string, anchorCellId?: string): Promise<{ runId: string }>
   pause(runId: string): Promise<void>
   resume(runId: string): Promise<void>
   terminate(runId: string): Promise<void>
@@ -130,6 +163,8 @@ export interface ContextualRunState {
   phase: string | null
   spanLabel: string | null
   activeDirections: string[]
+  /** Passages currently in flight, oldest first. Empty when nothing is running. */
+  lanes: ContextualLane[]
 }
 
 export interface ContextualRunProgress {
@@ -146,6 +181,7 @@ const IDLE_STATE: ContextualRunState = {
   phase: null,
   spanLabel: null,
   activeDirections: [],
+  lanes: [],
 }
 
 const IDLE_PROGRESS: ContextualRunProgress = { done: 0, total: 0, failed: 0 }
@@ -205,6 +241,36 @@ function isStaleRunId(incoming: string): boolean {
 // component strings; these live here so every surface shows the same words.
 const PHASE_READING = "Reading context…"
 const PHASE_DRAFTING = "Drafting…"
+const PHASE_CHECKING = "Checking…"
+const PHASE_STAGING = "Saving drafts…"
+
+/** Spec phase → the words a translator sees. Never surface the raw phase. */
+const PHASE_WORDS: Record<ContextualSpanPhase, string> = {
+  reading: PHASE_READING,
+  drafting: PHASE_DRAFTING,
+  checking: PHASE_CHECKING,
+  staging: PHASE_STAGING,
+}
+
+/** Cap on lanes retained for display. A run's width is bounded server-side
+ *  well under this; the guard exists so a frame storm can't grow the array
+ *  without bound if a close frame is ever dropped. */
+const MAX_TRACKED_LANES = 12
+
+/** The phase to show for the run as a whole: the FURTHEST any lane has got.
+ *  Showing the least-advanced lane would make a wide wave look stuck on its
+ *  slowest passage. */
+const PHASE_RANK: ContextualSpanPhase[] = ["reading", "drafting", "checking", "staging"]
+
+function leadPhase(lanes: ContextualLane[]): string | null {
+  if (lanes.length === 0) return null
+  let best = 0
+  for (const lane of lanes) {
+    const rank = PHASE_RANK.indexOf(lane.phase)
+    if (rank > best) best = rank
+  }
+  return PHASE_WORDS[PHASE_RANK[best]]
+}
 
 // ---------------------------------------------------------------------------
 // Remote frames (project DO → WebSocket → here)
@@ -212,6 +278,37 @@ const PHASE_DRAFTING = "Drafting…"
 
 export function applyRemoteFrame(frame: ContextualFrame): void {
   if (isStaleRunId(frame.runId)) return
+
+  // ── Lane frames (a wave runs several passages at once) ──
+  if (frame.type === "contextual.span.start") {
+    if (_state.lanes.some((l) => l.spanId === frame.spanId)) return
+    const lanes = [
+      ..._state.lanes.slice(-(MAX_TRACKED_LANES - 1)),
+      { spanId: frame.spanId, spanLabel: frame.spanLabel, phase: "reading" as const },
+    ]
+    setState({
+      ..._state,
+      runId: _state.runId ?? frame.runId,
+      lanes,
+      spanLabel: frame.spanLabel,
+      phase: leadPhase(lanes),
+    })
+    return
+  }
+
+  if (frame.type === "contextual.phase") {
+    // A phase for an unknown lane opens it: frames are lossy, and a dropped
+    // span.start must not leave live work invisible.
+    const known = _state.lanes.some((l) => l.spanId === frame.spanId)
+    const lanes = known
+      ? _state.lanes.map((l) => (l.spanId === frame.spanId ? { ...l, phase: frame.phase } : l))
+      : [
+          ..._state.lanes.slice(-(MAX_TRACKED_LANES - 1)),
+          { spanId: frame.spanId, spanLabel: frame.spanLabel, phase: frame.phase },
+        ]
+    setState({ ..._state, lanes, phase: leadPhase(lanes) })
+    return
+  }
 
   if (frame.type === "contextual.run.state") {
     const sameRun = frame.runId === _state.runId
@@ -222,6 +319,9 @@ export function applyRemoteFrame(frame: ContextualFrame): void {
       sameRun && _state.status === "pausing" && frame.status === "running"
         ? "pausing"
         : frame.status
+    // A run that is no longer running has nothing in flight — clear the lanes
+    // so a terminal frame can never leave stale passages on screen.
+    const lanes = status === "running" || status === "pausing" ? (sameRun ? _state.lanes : []) : []
     setState({
       ..._state,
       available: true,
@@ -232,12 +332,13 @@ export function applyRemoteFrame(frame: ContextualFrame): void {
       // reading. Terminal/idle-ish states drop the phase readout.
       phase:
         status === "running"
-          ? (sameRun ? _state.phase : null) ?? PHASE_READING
+          ? leadPhase(lanes) ?? (sameRun ? _state.phase : null) ?? PHASE_READING
           : status === "pausing"
             ? _state.phase
             : null,
       spanLabel: sameRun ? _state.spanLabel : null,
       activeDirections: sameRun ? _state.activeDirections : [],
+      lanes,
     })
     setProgress({
       done: frame.done,
@@ -249,21 +350,31 @@ export function applyRemoteFrame(frame: ContextualFrame): void {
 
   if (frame.type === "contextual.scene") {
     // Scene construed → the performer drafts this span next.
+    const lanes = frame.spanId
+      ? _state.lanes.map((l) =>
+          l.spanId === frame.spanId ? { ...l, phase: "drafting" as const } : l,
+        )
+      : _state.lanes
     setState({
       ..._state,
       runId: _state.runId ?? frame.runId,
       spanLabel: frame.spanLabel,
-      phase: PHASE_DRAFTING,
+      lanes,
+      phase: leadPhase(lanes) ?? PHASE_DRAFTING,
     })
     return
   }
 
-  // contextual.span — span finished (staged/skipped); the run moves on.
+  // contextual.span — this passage finished (staged/skipped); its lane closes.
+  const lanes = frame.spanId
+    ? _state.lanes.filter((l) => l.spanId !== frame.spanId)
+    : _state.lanes.slice(1)
   setState({
     ..._state,
     runId: _state.runId ?? frame.runId,
     spanLabel: frame.spanLabel,
-    phase: PHASE_READING,
+    lanes,
+    phase: leadPhase(lanes) ?? PHASE_READING,
   })
 }
 
@@ -307,6 +418,9 @@ export async function attachContextualRun(projectId: string, fileId: string): Pr
     phase: run.phase,
     spanLabel: run.spanLabel,
     activeDirections: run.activeDirections,
+    // Lanes are live-only: the snapshot carries durable state, and passages in
+    // flight are not durable. They repopulate from the next frame.
+    lanes: run.runId === _state.runId ? _state.lanes : [],
   })
   setProgress({ done: run.done, total: run.total, failed: run.failed })
 }
@@ -315,11 +429,20 @@ export async function attachContextualRun(projectId: string, fileId: string): Pr
 // Transport commands (optimistic; frames/acks correct the mirror)
 // ---------------------------------------------------------------------------
 
-export async function startContextualRun(projectId: string, fileId: string): Promise<boolean> {
-  setState({ ..._state, fileId, status: "starting" })
+/**
+ * Start a run. `anchorCellId` is where the user is looking: the server rotates
+ * the first wave to begin there, so the first drafts land on screen rather
+ * than at the top of a file the user may be nowhere near.
+ */
+export async function startContextualRun(
+  projectId: string,
+  fileId: string,
+  anchorCellId?: string,
+): Promise<boolean> {
+  setState({ ..._state, fileId, status: "starting", lanes: [] })
   setProgress(IDLE_PROGRESS)
   try {
-    const { runId } = await _transport.start(projectId, fileId)
+    const { runId } = await _transport.start(projectId, fileId, anchorCellId)
     if (!isStaleRunId(runId)) {
       setState({ ..._state, runId, fileId, status: "running", phase: _state.phase ?? PHASE_READING })
     }

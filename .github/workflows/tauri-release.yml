@@ -53,7 +53,17 @@ jobs:
 
       - run: pnpm run build
 
-      - uses: tauri-apps/tauri-action@v1
+      # Fail loudly (not silently ship a broken/unverifiable auto-updater) if
+      # tauri.conf.json still carries the scaffolded placeholder updater
+      # endpoint/pubkey — see src-tauri/tauri.conf.json plugins.updater.
+      - name: Guard against placeholder updater config
+        run: |
+          if grep -q 'REPLACE_ORG\|REPLACE_WITH_OUTPUT_OF' src-tauri/tauri.conf.json; then
+            echo "::error file=src-tauri/tauri.conf.json::plugins.updater.endpoints/pubkey still contain scaffolded placeholders — a tagged release would ship with a non-functional or unverifiable auto-updater. Fill in the real GitHub org/repo and run 'npx tauri signer generate' to produce a real keypair before releasing, or set plugins.updater.active to false."
+            exit 1
+          fi
+
+      - uses: tauri-apps/tauri-action@944946e3e4cac6603d1fe8f514171e9ecd3c78aa # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS notarization + signing

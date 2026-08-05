@@ -58,7 +58,7 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, resumeQueue } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue } from "@/lib/audio/play-queue"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -3482,7 +3482,13 @@ export function ProjectWorkspace() {
     setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
   }, [])
   const handleAiSetupNeeded = useCallback(() => setAiSetupOpen(true), [])
-  const handleOpenRecording = useCallback((cellId: string) => setRecordingCellId(cellId), [])
+  const handleOpenRecording = useCallback((cellId: string) => {
+    // Opening the recorder always pauses playback — queue and single-cell
+    // clip both — so the mic never records over sounding audio. Module
+    // functions, so deps stay [] and the editor-actions memo contract holds.
+    pauseAllPlayback()
+    setRecordingCellId(cellId)
+  }, [])
 
   // FRO perf cleanup: the five openers above are pure pass-throughs through
   // EditorTable -> MemoizedRow -> EditorRow with no intermediate consumer, so

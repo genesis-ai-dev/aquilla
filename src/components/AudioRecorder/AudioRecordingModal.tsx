@@ -17,6 +17,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOnline } from "@/hooks/useOnline"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { probeDurationMsSafe } from "@/lib/import"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -48,6 +49,12 @@ interface Props {
 
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "saved" | "error"
 
+/** Decision 2026-08-05: recording is blocked UP FRONT while offline (a take
+ *  can't be saved without a connection), instead of failing mid-flow with a
+ *  raw fetch error. One copy of the message, used by every gate. */
+const OFFLINE_MESSAGE =
+  "You're offline — recordings can't be saved without a connection. Reconnect and try again."
+
 export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
   onActiveCellChange, onClose,
@@ -55,6 +62,7 @@ export function AudioRecordingModal({
   const recorder = useAudioRecorder()
   const countdown = useCountdown()
   const { session } = useFrontierSession()
+  const online = useOnline()
   const [beepEnabled, setBeepEnabled] = useState(true)
   // SUB-50: saving jumps to the next cell — great on a pass down the file,
   // wrong when working one line over and over. Persisted per device.
@@ -206,6 +214,13 @@ export function AudioRecordingModal({
   }, [recorder.state, phase])
 
   const startFlow = useCallback(() => {
+    // Offline gates FIRST — when both fail it is the truer cause ("sign in"
+    // is unactionable without a connection anyway).
+    if (!online) {
+      setErrorMessage(OFFLINE_MESSAGE)
+      setPhase("error")
+      return
+    }
     if (!session?.jwt) {
       setErrorMessage("Sign in to save recordings")
       setPhase("error")
@@ -238,7 +253,7 @@ export function AudioRecordingModal({
         },
       })
     })
-  }, [beepEnabled, countdown, recorder, session?.jwt])
+  }, [beepEnabled, countdown, recorder, session?.jwt, online])
 
   const stopRecording = useCallback(() => {
     recorder.stop()
@@ -262,6 +277,7 @@ export function AudioRecordingModal({
     setTtsDone(false)
   }, [activeCellId])
   const generateTts = useCallback(async () => {
+    if (!online) return // the disabled button + tooltip carry the message
     if (!activeCell || !session || ttsBusy) return
     setTtsBusy(true)
     setTtsDone(false)
@@ -290,10 +306,16 @@ export function AudioRecordingModal({
     } finally {
       setTtsBusy(false)
     }
-  }, [activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip])
+  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip])
 
   const save = useCallback(async () => {
     if (recorder.state.kind !== "stopped") return
+    // Silent backstop for the Space/Enter path — deliberately NOT the error
+    // phase (that replaces the preview UI and its footer has no Save button,
+    // stranding a reconnected user). The disabled Save button + the visible
+    // preview notice carry the message; the take stays previewable and saves
+    // once the connection returns.
+    if (!online) return
     if (!session?.jwt || !activeCell) return
     setPhase("uploading")
     setErrorMessage(null)
@@ -415,10 +437,12 @@ export function AudioRecordingModal({
         }, 450)
       }
     } catch (e) {
-      setErrorMessage(e instanceof Error ? e.message : String(e))
+      // A network failure that raced the online flag reads as the same
+      // offline story, not a raw fetch error.
+      setErrorMessage(!navigator.onLine ? OFFLINE_MESSAGE : e instanceof Error ? e.message : String(e))
       setPhase("error")
     }
-  }, [recorder.state, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose, autoAdvance, recordingTakes])
+  }, [recorder.state, online, session, activeCell, project.id, username, activeIndex, cells, onActiveCellChange, onClose, autoAdvance, recordingTakes])
 
   // A pending advance must never outlive the modal (or a manual jump): the
   // 450ms window was previously untracked, so closing inside it still fired.
@@ -644,6 +668,14 @@ export function AudioRecordingModal({
               {targetSec != null && (
                 <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />
               )}
+              {/* Connectivity died mid-flow: the take is safe (capture is
+                  local) — say why Save is disabled. Derived, so it clears
+                  itself the moment the connection returns. */}
+              {!online && (
+                <p data-testid="rec-offline-notice" className="text-center text-xs font-medium text-amber-500">
+                  {OFFLINE_MESSAGE}
+                </p>
+              )}
             </div>
           )}
 
@@ -730,10 +762,12 @@ export function AudioRecordingModal({
                   <RefreshCw className="mr-1 h-4 w-4" /> Retake
                 </Button>
               </AppTooltip>
-              <AppTooltip content="Save (Space or Enter)">
-                <Button size="sm" onClick={save}>
-                  <Check className="mr-1 h-4 w-4" /> Save
-                </Button>
+              <AppTooltip content={online ? "Save (Space or Enter)" : OFFLINE_MESSAGE}>
+                <span className="inline-flex">
+                  <Button size="sm" data-testid="rec-save" disabled={!online} onClick={save}>
+                    <Check className="mr-1 h-4 w-4" /> Save
+                  </Button>
+                </span>
               </AppTooltip>
             </>
           )}
@@ -754,11 +788,13 @@ export function AudioRecordingModal({
                   that sounds. */}
               <AppTooltip
                 content={
-                  !activeCell?.translated?.trim()
-                    ? "Translate this line first to generate voice"
-                    : ttsDone
-                      ? "Voice generated — it plays on the Target track"
-                      : "Generate this line's voice with the project's engine"
+                  !online
+                    ? OFFLINE_MESSAGE
+                    : !activeCell?.translated?.trim()
+                      ? "Translate this line first to generate voice"
+                      : ttsDone
+                        ? "Voice generated — it plays on the Target track"
+                        : "Generate this line's voice with the project's engine"
                 }
               >
                 <span className="inline-flex">
@@ -766,7 +802,7 @@ export function AudioRecordingModal({
                     variant="outline"
                     size="sm"
                     data-testid="rec-generate-tts"
-                    disabled={!activeCell?.translated?.trim() || ttsBusy}
+                    disabled={!online || !activeCell?.translated?.trim() || ttsBusy}
                     onClick={() => void generateTts()}
                   >
                     {ttsBusy ? (
@@ -780,9 +816,13 @@ export function AudioRecordingModal({
                   </Button>
                 </span>
               </AppTooltip>
-              <Button size="sm" onClick={startFlow}>
-                <Play className="mr-1 h-4 w-4" /> Start
-              </Button>
+              <AppTooltip content={online ? "Start recording (Space)" : OFFLINE_MESSAGE}>
+                <span className="inline-flex">
+                  <Button size="sm" data-testid="rec-start" disabled={!online} onClick={startFlow}>
+                    <Play className="mr-1 h-4 w-4" /> Start
+                  </Button>
+                </span>
+              </AppTooltip>
             </>
           )}
 

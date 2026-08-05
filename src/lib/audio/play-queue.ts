@@ -18,7 +18,7 @@ import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { setActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "./audio-coordinator"
+import { setActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 
 export type QueueState =
   | { kind: "idle" }
@@ -2200,6 +2200,17 @@ export function pauseQueue(): void {
     return
   }
   currentAudio?.pause()
+}
+
+/** Silence EVERYTHING that can sound: the queue (master element, overlay
+ *  pool, pending gates — pauseQueue knows all its states) AND whatever
+ *  single-cell clip is registered with the coordinator (useCellAudio's
+ *  path). Neither call covers the other; both are no-ops when idle. Used by
+ *  the recording modal's open path — the mic must never record over
+ *  sounding audio. */
+export function pauseAllPlayback(): void {
+  pauseQueue()
+  getActiveAudio()?.pause()
 }
 
 export async function resumeQueue(): Promise<void> {

@@ -81,6 +81,16 @@ export interface TimelineDetailActions {
 
 export interface TimelineCellDetailProps {
   cell: CellData | null
+  /** Meeting note (2026-08-05): the selected dub chip's own numbers, computed
+   *  by TimelineEditor (this component never reads lane geometry). Null when
+   *  there is no measured dub, or in free-timing mode. `endDiffSec` =
+   *  original end − dub end: negative exactly when the dub outruns its verse. */
+  chipStats?: {
+    startSec: number
+    endSec: number
+    durationSec: number
+    endDiffSec: number | null
+  } | null
   editable: boolean
   /** Emits a target commit. `valueHtml` carries the rich-text form so media
    *  edits persist identically to the main table (footnotes, marks, blots). */
@@ -147,6 +157,7 @@ function ActionIconButton({
 
 export function TimelineCellDetail({
   cell,
+  chipStats,
   editable,
   onCommitTarget,
   onTranscribe,
@@ -234,8 +245,41 @@ export function TimelineCellDetail({
         <Pill>
           <span className="font-mono tabular-nums">
             {fmtClock(start, true)}–{fmtClock(end, true)}
+            {" · "}
+            {(end - start).toFixed(1)}s
           </span>
         </Pill>
+        {chipStats && (
+          <Pill>
+            <span data-testid="tl-detail-dub-range" className="font-mono tabular-nums">
+              Dub {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
+              {" · "}
+              <span data-testid="tl-detail-duration">{chipStats.durationSec.toFixed(1)}s</span>
+            </span>
+          </Pill>
+        )}
+        {chipStats?.endDiffSec != null &&
+          (() => {
+            // One-decimal display; the sign follows the DISPLAYED value so a
+            // −0.04 never prints as a red "−0.0s".
+            const tenths = Math.round(chipStats.endDiffSec * 10) / 10
+            const negative = tenths < 0
+            return (
+              <Pill>
+                <span
+                  data-testid="tl-detail-enddiff"
+                  title="Original end − dub end: negative means the dub runs past its verse"
+                  className={cn(
+                    "font-mono tabular-nums",
+                    negative && "font-semibold text-red-600 dark:text-red-400",
+                  )}
+                >
+                  {negative ? "−" : "+"}
+                  {Math.abs(tenths).toFixed(1)}s
+                </span>
+              </Pill>
+            )
+          })()}
         {castName && (
           <Pill>
             Speaker <b className="font-semibold text-foreground">{castName}</b>

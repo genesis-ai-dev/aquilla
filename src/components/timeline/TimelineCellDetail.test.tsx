@@ -121,6 +121,62 @@ describe("TimelineCellDetail", () => {
     expect(onCommit).not.toHaveBeenCalled()
   })
 
+  it("shows the dub's range, duration, and a positive end-diff when it fits", () => {
+    render(
+      <TimelineCellDetail
+        cell={cell({ original: "x", startTime: 10, endTime: 15 })}
+        chipStats={{ startSec: 10, endSec: 14.3, durationSec: 4.3, endDiffSec: 0.7 }}
+        editable
+        onCommitTarget={() => {}}
+      />,
+    )
+    expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("0:10.0–0:14.3")
+    expect(screen.getByTestId("tl-detail-duration")).toHaveTextContent("4.3s")
+    const diff = screen.getByTestId("tl-detail-enddiff")
+    expect(diff).toHaveTextContent("+0.7s")
+    expect(diff.className).not.toContain("text-red")
+  })
+
+  it("shows a red negative end-diff when the dub outruns its verse", () => {
+    render(
+      <TimelineCellDetail
+        cell={cell({ original: "x", startTime: 10, endTime: 15 })}
+        chipStats={{ startSec: 11, endSec: 15.8, durationSec: 4.8, endDiffSec: -0.8 }}
+        editable
+        onCommitTarget={() => {}}
+      />,
+    )
+    const diff = screen.getByTestId("tl-detail-enddiff")
+    expect(diff).toHaveTextContent("−0.8s")
+    expect(diff.className).toContain("text-red-600")
+  })
+
+  it("a diff that rounds to zero is never painted red", () => {
+    render(
+      <TimelineCellDetail
+        cell={cell({ original: "x", startTime: 10, endTime: 15 })}
+        chipStats={{ startSec: 10, endSec: 15.04, durationSec: 5.04, endDiffSec: -0.04 }}
+        editable
+        onCommitTarget={() => {}}
+      />,
+    )
+    const diff = screen.getByTestId("tl-detail-enddiff")
+    expect(diff).toHaveTextContent("+0.0s")
+    expect(diff.className).not.toContain("text-red")
+  })
+
+  it("shows no dub numbers without chipStats (no measured dub / free timing)", () => {
+    render(
+      <TimelineCellDetail
+        cell={cell({ original: "x", startTime: 1, endTime: 3 })}
+        editable
+        onCommitTarget={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
+    expect(screen.queryByTestId("tl-detail-enddiff")).toBeNull()
+  })
+
   it("renders an empty state with no selection", () => {
     render(<TimelineCellDetail cell={null} editable onCommitTarget={() => {}} />)
     expect(screen.getByTestId("tl-detail-empty")).toBeInTheDocument()

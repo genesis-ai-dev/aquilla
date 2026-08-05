@@ -1621,7 +1621,9 @@ export function ProjectWorkspace() {
   const handleRetimeTarget = useCallback(
     async (cellId: string, anchorSec: number) => {
       if (!project?.id || !activeFileId) return
-      const targetStartMs = Math.round(anchorSec * 1000)
+      // The drag clamp already floors the anchor at 0; enforce it again at the
+      // single persistence point so no caller can store a chip before file zero.
+      const targetStartMs = Math.max(0, Math.round(anchorSec * 1000))
       applyOptimisticCellTiming(cellId, { metadata: { target_start_ms: targetStartMs } })
       await emitCellLaneRetime({
         projectId: project.id,

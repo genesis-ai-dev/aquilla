@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
@@ -501,8 +502,9 @@ describe("TimelineEditor — audio-first mode", () => {
 
   const px = (el: Element, key: "left" | "width") => parseFloat((el as HTMLElement).style[key])
 
+  // Tooltip provider included: chip hover text lives on AppTooltip now.
   const renderAt = (mode: "dubbing" | "audioFirst", extra: Record<string, unknown> = {}) =>
-    render(
+    renderWithTooltips(
       <TimelineEditor
         fileId="af1" coreMediaUrl={null} editable cells={verses}
         timingMode={mode}
@@ -532,12 +534,12 @@ describe("TimelineEditor — audio-first mode", () => {
     }
   })
 
-  it("running long stops being a warning, and says how it compares instead", () => {
+  it("running long stops being a warning, and says how it compares instead", async () => {
     renderAt("audioFirst")
     const chip = screen.getByTestId("tl-target-v1")
     expect(chip).toHaveAttribute("data-overflow", "none")
     expect(chip).toHaveAttribute("data-ratio", (11 / 6).toFixed(2))
-    expect(chip.getAttribute("title")).toMatch(/11\.0s — 1\.8× the original/)
+    await expectTooltip(chip, /11\.0s — 1\.8× the original/)
     // The same take in dubbing mode is still flagged for running past its verse.
     renderAt("dubbing")
     expect(screen.getAllByTestId("tl-target-v1")[1]).toHaveAttribute("data-overflow", "overlap")

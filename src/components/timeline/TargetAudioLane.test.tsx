@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import type { CellData } from "@/hooks/useCells"
 
@@ -77,6 +78,56 @@ describe("TargetAudioLane — overflow warnings", () => {
     render(<TargetAudioLane {...base} items={[first, second]} />)
     expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-overflow", "overlap")
     expect(screen.getByTestId("tl-target-c2")).toHaveAttribute("data-overflow", "none")
+  })
+
+  it("BLAME THE TRESPASSER: a chip slid back under the previous dub carries the warning; the in-bounds previous chip stays clean", () => {
+    const first = item({}, 8000) // [10, 18] — inside its own section (10–20)
+    // c2's section is 20–30; slid back to 16, its head under c1's tail.
+    const second = item(
+      { startTime: 20, endTime: 30, metadata: { target_start_ms: 16000 } } as Partial<CellData>,
+      6000,
+      "c2",
+    )
+    render(<TargetAudioLane {...base} items={[first, second]} />)
+    expect(screen.getByTestId("tl-target-c2")).toHaveAttribute("data-overflow", "overlap")
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-overflow", "none")
+  })
+
+  it("a backward slide into EMPTY slack (short previous dub) warns nobody", () => {
+    const first = item({}, 4000) // [10, 14]
+    const second = item(
+      { startTime: 20, endTime: 30, metadata: { target_start_ms: 16000 } } as Partial<CellData>,
+      6000,
+      "c2",
+    ) // [16, 22] — the space between 14 and 20 was free
+    render(<TargetAudioLane {...base} items={[first, second]} />)
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-overflow", "none")
+    expect(screen.getByTestId("tl-target-c2")).toHaveAttribute("data-overflow", "none")
+  })
+
+  it("the mover's hover shows its own overlap as a red negative number", async () => {
+    const first = item({}, 8000) // tail at 18
+    const second = item(
+      { startTime: 20, endTime: 30, metadata: { target_start_ms: 16000 } } as Partial<CellData>,
+      6000,
+      "c2",
+    ) // head at 16 → 2.0s under c1's tail
+    renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
+    await expectTooltip(screen.getByTestId("tl-target-c2"), /−2\.0s.*previous dub/)
+    // The red paints the whole warning line (the number span inherits it).
+    expect(
+      screen.getByTestId("tl-target-c2-tip-overlap-head").parentElement?.className,
+    ).toContain("text-red")
+  })
+
+  it("the overlong chip's hover states the tail overlap as a red negative number", async () => {
+    const first = item({}, 12500) // [10, 22.5] over c2's chip at 20 → −2.5s
+    const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2")
+    renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
+    await expectTooltip(screen.getByTestId("tl-target-c1"), /−2\.5s.*next dub/)
+    expect(
+      screen.getByTestId("tl-target-c1-tip-overlap").parentElement?.className,
+    ).toContain("text-red")
   })
 
   it("round 7: the earlier (overlong) chip paints OVER the following chip", () => {

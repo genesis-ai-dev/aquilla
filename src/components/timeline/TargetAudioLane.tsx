@@ -9,12 +9,15 @@
 // is never clamped.
 
 import { useRef, useState } from "react"
+import type { ReactNode } from "react"
 import { ChevronsRight, CloudUpload, Mic, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { isVisible, secToPx, pxToSec } from "@/lib/timeline/scale"
 import {
   targetChipGeom,
   chipOverflowState,
+  chipOverlaps,
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
@@ -73,6 +76,7 @@ interface ChipGeometry {
 
 function TargetAudioChip({
   chip,
+  prevChip,
   nextChipStartSec,
   paintOrder,
   audioFirst,
@@ -87,6 +91,9 @@ function TargetAudioChip({
   onOpenRecording,
 }: {
   chip: ChipGeometry
+  /** The PREVIOUS chip's span — a chip can begin before its own section
+   *  (end-based drag bounds), so its head can lie under this neighbour. */
+  prevChip: { start: number; end: number } | null
   nextChipStartSec: number | null
   /** Higher paints on top — earlier-start chips cover later ones. */
   paintOrder: number
@@ -153,7 +160,17 @@ function TargetAudioChip({
   // SUB-53: in audio-first every verse owns its own stretch of the track, so
   // there is nothing to run past and nothing to collide with — the warnings
   // would fire on every single line and mean nothing.
-  const overflow = audioFirst ? "none" : chipOverflowState(span.end, section.end, nextChipStartSec)
+  const overflow = audioFirst ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
+  const overlaps = audioFirst
+    ? { headSec: null, tailSec: null }
+    : chipOverlaps(span, prevChip, nextChipStartSec)
+  // Blame the trespasser: a warning belongs to THIS chip only for territory
+  // it left its section to claim (mirrors the chipOverflowState rule). The
+  // number is masked on fallback chips — never derived from a guessed width.
+  const tailTrespass = overlaps.tailSec != null && span.end > section.end
+  const headTrespass = overlaps.headSec != null && span.start < section.start
+  const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
+  const headOverlapSec = headTrespass && !geom.usingFallback ? overlaps.headSec : null
   const canMove = editable && Boolean(onRetimeTarget)
   // SUB-48: a chip that runs past the next dub is PAINTED short so it can
   // never bury its neighbour (Sam lost a whole take under one). The logical
@@ -233,23 +250,54 @@ function TargetAudioChip({
     audioFirst && !geom.usingFallback
       ? `${(span.end - span.start).toFixed(1)}s${chip.ratio != null ? ` — ${chip.ratio.toFixed(1)}× the original` : ""}`
       : null
-  const title = [
-    overflow === "overlap"
-      ? "Overlaps the next dub — both will sound"
-      : overflow === "soft"
-        ? `Runs ${overflowSec.toFixed(1)}s past the section`
-        : lengthNote
-          ? `${kindTitle} · ${lengthNote}`
-          : kindTitle,
-    // SUB-48: never let a guessed width read as a measured one.
-    geom.usingFallback ? "Length unknown — re-record or re-upload to fix" : null,
-    pendingSync ? "Saving — kept safe on this device until it syncs" : null,
-    truncated ? "Drawn short so the next dub stays reachable — hover for full length" : null,
-  ]
-    .filter(Boolean)
-    .join(" · ")
+  // Meeting note (2026-08-05): an overlap warns with the NUMBER, in red — how
+  // much of this chip double-sounds — not just prose. Native `title` can't be
+  // styled, hence AppTooltip. Secondary notes keep their SUB-48 wording.
+  const tipLines: ReactNode[] = []
+  if (overflow === "overlap") {
+    if (tailTrespass) {
+      tipLines.push(
+        <div key="tail" className="text-red-600 dark:text-red-400">
+          {tailOverlapSec != null && (
+            <span
+              data-testid={`tl-target-${cell.id}-tip-overlap`}
+              className="font-semibold tabular-nums"
+            >
+              −{tailOverlapSec.toFixed(1)}s{" "}
+            </span>
+          )}
+          <span className="opacity-90">Overlaps the next dub — both will sound</span>
+        </div>,
+      )
+    }
+    if (headTrespass) {
+      tipLines.push(
+        <div key="head" className="text-red-600 dark:text-red-400">
+          {headOverlapSec != null && (
+            <span
+              data-testid={`tl-target-${cell.id}-tip-overlap-head`}
+              className="font-semibold tabular-nums"
+            >
+              −{headOverlapSec.toFixed(1)}s{" "}
+            </span>
+          )}
+          <span className="opacity-90">Overlaps the previous dub — both will sound</span>
+        </div>,
+      )
+    }
+  } else if (overflow === "soft") {
+    tipLines.push(<div key="soft">{`Runs ${overflowSec.toFixed(1)}s past the section`}</div>)
+  } else {
+    tipLines.push(<div key="kind">{lengthNote ? `${kindTitle} · ${lengthNote}` : kindTitle}</div>)
+  }
+  // SUB-48: never let a guessed width read as a measured one.
+  if (geom.usingFallback) tipLines.push(<div key="fallback" className="text-muted-foreground">Length unknown — re-record or re-upload to fix</div>)
+  if (pendingSync) tipLines.push(<div key="saving" className="text-muted-foreground">Saving — kept safe on this device until it syncs</div>)
+  if (truncated) tipLines.push(<div key="truncated" className="text-muted-foreground">Drawn short so the next dub stays reachable — hover for full length</div>)
+  const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
 
   return (
+    <AppTooltip content={tooltipContent} disabled={drag != null}>
     <button
       type="button"
       data-testid={`tl-target-${cell.id}`}
@@ -259,7 +307,6 @@ function TargetAudioChip({
       {...(pendingSync ? { "data-pending-sync": "true" } : {})}
       {...(truncated ? { "data-truncated": "true" } : {})}
       {...(chip.ratio != null ? { "data-ratio": chip.ratio.toFixed(2) } : {})}
-      title={title}
       onClick={() => {
         onSelect(cell.id)
         if (!movedRef.current) onSeek?.(cell.id)
@@ -379,6 +426,7 @@ function TargetAudioChip({
         </span>
       )}
     </button>
+    </AppTooltip>
   )
 }
 
@@ -487,6 +535,7 @@ export function TargetAudioLane({
           <TargetAudioChip
             key={chip.item.cell.id}
             chip={chip}
+            prevChip={i > 0 ? { start: chips[i - 1].geom.start, end: chips[i - 1].geom.end } : null}
             nextChipStartSec={chips[i + 1]?.geom.start ?? null}
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}

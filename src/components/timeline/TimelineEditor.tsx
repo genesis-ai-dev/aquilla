@@ -353,6 +353,25 @@ export function TimelineEditor({
     () => cells.find((c) => c.id === selectedId) ?? null,
     [cells, selectedId],
   )
+  // Meeting note (2026-08-05): the detail readout carries the dub's own
+  // numbers — its range, its duration, and ALWAYS the end-to-end difference
+  // (original end − dub end). Ends are what timing work cares about; the diff
+  // goes negative exactly when the dub outruns its verse. Dubbing only, and
+  // never from a guessed width (SUB-48).
+  const selectedChipStats = useMemo(() => {
+    if (audioFirst || !selectedCell) return null
+    const item = targetItems.find((t) => t.cell.id === selectedCell.id)
+    if (!item) return null
+    const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId])
+    if (!geom || geom.usingFallback) return null
+    const sectionEnd = selectedCell.endTime
+    return {
+      startSec: geom.start,
+      endSec: geom.end,
+      durationSec: geom.end - geom.start,
+      endDiffSec: typeof sectionEnd === "number" ? sectionEnd - geom.end : null,
+    }
+  }, [audioFirst, selectedCell, targetItems, layout])
   const selectedClipAudio = useMemo(
     () => (selectedId ? resolveEntryAudio(audioByCellId?.get(selectedId)) : null),
     [audioByCellId, selectedId],
@@ -829,6 +848,7 @@ export function TimelineEditor({
 
       <TimelineCellDetail
         cell={selectedCell}
+        chipStats={selectedChipStats}
         editable={editable}
         onCommitTarget={onCommitTarget}
         onTranscribe={onTranscribe}

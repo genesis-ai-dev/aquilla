@@ -131,16 +131,51 @@ export function targetDueSec(
 }
 
 /**
- * How worried the UI should be about a chip's tail: "soft" when it runs
- * meaningfully past its section's end, "overlap" when it reaches the NEXT
- * section's chip — both dubs will sound through the overlap (round 7).
+ * Audible overlap between a chip and its neighbours' chips (null = none).
+ * tailSec — how far this chip's END intrudes past the NEXT chip's start.
+ * headSec — how much of this chip's HEAD lies under the PREVIOUS chip's tail
+ * (reachable since the end-based drag bounds let a chip begin before its own
+ * section). Each is the chip's OWN number, so a hover can state exactly how
+ * much of it double-sounds.
+ */
+export function chipOverlaps(
+  span: SpanSec,
+  prevChip: SpanSec | null,
+  nextChipStartSec: number | null,
+): { headSec: number | null; tailSec: number | null } {
+  const tailSec =
+    nextChipStartSec != null && span.end > nextChipStartSec ? span.end - nextChipStartSec : null
+  // The prevChip.start < span.end guard: a chip slid entirely BEFORE the
+  // previous chip's box does not intersect it — that is not an overlap.
+  const headSec =
+    prevChip != null && prevChip.end > span.start && prevChip.start < span.end
+      ? Math.min(prevChip.end, span.end) - span.start
+      : null
+  return { headSec, tailSec }
+}
+
+/**
+ * How worried the UI should be about a chip: "soft" (amber) when its tail
+ * runs meaningfully past its section's end, "overlap" (red) when it collides
+ * with a neighbour's chip — both dubs will sound through the overlap.
+ *
+ * BLAME THE TRESPASSER: a chip goes red only for territory it left its own
+ * section to claim — its end past the section's end into the next chip, or
+ * its head before the section's start under the previous chip. An in-bounds
+ * chip never lights up because a neighbour intruded on it; the intruder
+ * carries the warning. (In layouts where no chip starts before its section —
+ * everything pre-end-based-drag — this is exactly the round-7 behavior.)
  */
 export function chipOverflowState(
-  chipEndSec: number,
-  sectionEndSec: number,
+  span: SpanSec,
+  section: SpanSec,
+  prevChip: SpanSec | null,
   nextChipStartSec: number | null,
 ): "none" | "soft" | "overlap" {
-  if (nextChipStartSec != null && chipEndSec > nextChipStartSec) return "overlap"
-  if (chipEndSec > sectionEndSec + OVERFLOW_SOFT_SEC) return "soft"
+  const o = chipOverlaps(span, prevChip, nextChipStartSec)
+  const tailTrespass = o.tailSec != null && span.end > section.end
+  const headTrespass = o.headSec != null && span.start < section.start
+  if (tailTrespass || headTrespass) return "overlap"
+  if (span.end > section.end + OVERFLOW_SOFT_SEC) return "soft"
   return "none"
 }

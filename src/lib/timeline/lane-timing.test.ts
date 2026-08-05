@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest"
 import {
   chipOverflowState,
+  chipOverlaps,
   effectiveAttachmentDurationMs,
   subtitleSpanSec,
   targetChipGeom,
@@ -110,18 +111,78 @@ describe("targetDueSec — trim-aware (round 7)", () => {
 })
 
 describe("chipOverflowState", () => {
+  // Section 15–20 throughout; the chip span varies.
+  const section = { start: 15, end: 20 }
   it("inside the section → none", () => {
-    expect(chipOverflowState(19, 20, null)).toBe("none")
+    expect(chipOverflowState({ start: 15, end: 19 }, section, null, null)).toBe("none")
   })
   it("slightly past the end (within tolerance) → none", () => {
-    expect(chipOverflowState(20.3, 20, null)).toBe("none")
+    expect(chipOverflowState({ start: 15, end: 20.3 }, section, null, null)).toBe("none")
   })
   it("meaningfully past → soft", () => {
-    expect(chipOverflowState(21, 20, null)).toBe("soft")
+    expect(chipOverflowState({ start: 15, end: 21 }, section, null, null)).toBe("soft")
   })
   it("reaching the next chip → overlap (both will sound), even when the next chip starts late", () => {
-    expect(chipOverflowState(24, 20, 23)).toBe("overlap")
+    expect(chipOverflowState({ start: 15, end: 24 }, section, null, 23)).toBe("overlap")
     // Not yet touching the next chip → still just soft.
-    expect(chipOverflowState(22, 20, 23)).toBe("soft")
+    expect(chipOverflowState({ start: 15, end: 22 }, section, null, 23)).toBe("soft")
+  })
+  it("BLAME THE TRESPASSER: an in-bounds chip stays 'none' when the NEXT chip slid back under its tail", () => {
+    // Next chip (section 20–25) dragged back to start at 18 — under this
+    // chip's in-bounds tail. The mover carries the warning, not this chip.
+    expect(chipOverflowState({ start: 15, end: 19.5 }, section, null, 18)).toBe("none")
+  })
+  it("a chip whose HEAD reaches back under the previous chip goes red", () => {
+    // This chip's section is 20–25; it slid back to 18, under prev's tail.
+    expect(
+      chipOverflowState({ start: 18, end: 23 }, { start: 20, end: 25 }, { start: 15, end: 19.5 }, null),
+    ).toBe("overlap")
+  })
+  it("a backward slide into EMPTY slack (prev chip short) is not an overlap", () => {
+    expect(
+      chipOverflowState({ start: 18, end: 23 }, { start: 20, end: 25 }, { start: 15, end: 17.5 }, null),
+    ).toBe("none")
+  })
+  it("a chip slid entirely BEFORE the previous chip's box does not intersect it", () => {
+    expect(
+      chipOverflowState({ start: 10, end: 12 }, { start: 20, end: 25 }, { start: 15, end: 19 }, null),
+    ).toBe("none")
+  })
+  it("amber is unaffected by an innocent neighbourly overlap on the head side", () => {
+    // Runs long past its own section but doesn't reach the next chip; the
+    // previous chip's tail under our in-bounds head changes nothing.
+    expect(
+      chipOverflowState({ start: 20, end: 25.6 }, { start: 20, end: 25 }, { start: 15, end: 20.4 }, 26),
+    ).toBe("soft")
+  })
+})
+
+describe("chipOverlaps", () => {
+  it("tail = how far the end intrudes past the next chip's start", () => {
+    expect(chipOverlaps({ start: 15, end: 24 }, null, 23)).toEqual({ headSec: null, tailSec: 1 })
+  })
+  it("head = the stretch of this chip under the previous chip's tail", () => {
+    expect(chipOverlaps({ start: 18, end: 23 }, { start: 15, end: 19.5 }, null)).toEqual({
+      headSec: 1.5,
+      tailSec: null,
+    })
+  })
+  it("head is bounded by this chip's own end", () => {
+    expect(chipOverlaps({ start: 18, end: 19 }, { start: 15, end: 22 }, null)).toEqual({
+      headSec: 1,
+      tailSec: null,
+    })
+  })
+  it("no intersection → no head overlap", () => {
+    expect(chipOverlaps({ start: 10, end: 12 }, { start: 15, end: 19 }, null)).toEqual({
+      headSec: null,
+      tailSec: null,
+    })
+  })
+  it("both sides can overlap at once", () => {
+    expect(chipOverlaps({ start: 18, end: 26 }, { start: 15, end: 19 }, 25)).toEqual({
+      headSec: 1,
+      tailSec: 1,
+    })
   })
 })

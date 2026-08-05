@@ -19,7 +19,7 @@
 import { activeTargetForCell } from "./track-audio"
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
-import { audioCacheBudget, audioCacheHas, audioCachePut, audioCacheUsage } from "./bytes-cache"
+import { audioCacheAvailable, audioCacheBudget, audioCacheHas, audioCachePut, audioCacheUsage } from "./bytes-cache"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -45,7 +45,7 @@ export interface WarmFileDubsResult {
   alreadyCached: number
   failed: number
   /** Why the sweep ended. */
-  stopped: "done" | "aborted" | "budget"
+  stopped: "done" | "aborted" | "budget" | "cache-unavailable"
 }
 
 interface WarmTarget {
@@ -89,6 +89,14 @@ export async function warmFileDubs(args: WarmFileDubsArgs): Promise<WarmFileDubs
   const result: WarmFileDubsResult = { warmed: 0, alreadyCached: 0, failed: 0, stopped: "done" }
   if (!session?.jwt) return result
 
+  // FORTIFY: with no persistent cache (private browsing / restricted OPFS)
+  // every put is a silent no-op — the sweep would download the whole file's
+  // clips on EVERY lens entry and store none of them. Don't spend a byte.
+  if (!(await audioCacheAvailable())) {
+    result.stopped = "cache-unavailable"
+    return result
+  }
+
   const order = planWarmOrder(cells, nearCellId)
   if (order.length === 0) return result
 
@@ -125,12 +133,16 @@ export async function warmFileDubs(args: WarmFileDubsArgs): Promise<WarmFileDubs
           ext: target.ext,
           getSyncToken,
         })
+        // FORTIFY: bytes already paid for are ALWAYS kept — checking the
+        // abort before the put threw away completed downloads on lens exit,
+        // only to re-download them on the next entry. The abort still stops
+        // the sweep from fetching anything further.
+        await audioCachePut(target.audioId, target.ext, bytes)
+        result.warmed++
         if (signal?.aborted) {
           halted = "aborted"
           return
         }
-        await audioCachePut(target.audioId, target.ext, bytes)
-        result.warmed++
       } catch {
         // A missing clip (404) or a transient failure — skip, keep sweeping.
         result.failed++

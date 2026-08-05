@@ -21,7 +21,9 @@ vi.mock("./upload", async (importActual) => {
     }),
   }
 })
+let cacheAvailable = true
 vi.mock("./bytes-cache", () => ({
+  audioCacheAvailable: async () => cacheAvailable,
   audioCacheBudget: async () => budget,
   audioCacheUsage: async () => usage,
   audioCacheHas: async (audioId: string) => cachedIds.has(audioId),
@@ -59,6 +61,7 @@ beforeEach(() => {
   usage = 0
   budget = 1024 * 1024
   failIds = new Set()
+  cacheAvailable = true
 })
 
 afterEach(() => vi.clearAllMocks())
@@ -128,6 +131,15 @@ describe("warmFileDubs", () => {
       concurrency: 1,
     })
     expect(res).toMatchObject({ warmed: 1, failed: 1, stopped: "done" })
+  })
+
+  it("no persistent cache (private browsing) → downloads NOTHING", async () => {
+    // Without OPFS every put is a silent no-op — the sweep used to download
+    // the whole file's clips on every lens entry and store none of them.
+    cacheAvailable = false
+    const res = await warmFileDubs({ cells: [dubbed("a"), dubbed("b")], projectId: "p", session })
+    expect(res.stopped).toBe("cache-unavailable")
+    expect(fetched.length).toBe(0)
   })
 
   it("no session → a quiet no-op", async () => {

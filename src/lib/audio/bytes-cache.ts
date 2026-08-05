@@ -63,8 +63,10 @@ interface IndexEntry {
   audioId: string
   ext: string
   sizeBytes: number
-  /** ISO timestamp of the last access (read or write). Used for LRU ordering. */
-  lastAccessedAt: string
+  // FORTIFY: the old lastAccessedAt field was written on every get/put but
+  // never read — LRU truth is (and always was) the ARRAY ORDER, oldest first.
+  // Two encodings of recency where only one is real was a maintenance trap;
+  // stale copies in existing index files parse fine and are simply ignored.
 }
 
 interface CacheIndex {
@@ -95,6 +97,7 @@ async function rootFs(): Promise<OpfsFs | null> {
 /** @internal — test seam; replaces the OPFS root without touching navigator. */
 export function __setRootForTests(fs: OpfsFs | null): void {
   rootFsCache = fs
+  __resetAudioCacheMemo() // a fresh fs must not inherit the old fs's index
 }
 
 function sanitize(audioId: string): string {
@@ -128,6 +131,47 @@ async function readIndex(fs: OpfsFs): Promise<CacheIndex> {
 async function writeIndex(fs: OpfsFs, index: CacheIndex): Promise<void> {
   const raw = new TextEncoder().encode(JSON.stringify(index))
   await fs.promises.writeFile(INDEX_PATH, raw)
+}
+
+// ── Serialized, memoized index (fortify round) ───────────────────────────────
+// Every index operation used to be an unserialized read-modify-write of the
+// whole JSON file. The warmer's own two workers (and playback's write-through,
+// and LRU bumps) routinely interleaved: both read v0, both wrote, one PUT was
+// LOST — bytes sat on disk unindexed, invisible to `has`, uncountable by the
+// budget, unevictable forever. It also parsed the entire index once per
+// operation (hundreds of parses per warm sweep). Now: one in-memory index,
+// loaded once, every mutation funneled through a promise chain, written
+// through. Cross-tab remains last-write-wins — a second tab can still clobber
+// the file, which is an accepted (and now documented) residual; the in-tab
+// races that actually occurred constantly are gone.
+
+let memoIndex: CacheIndex | null = null
+let indexChain: Promise<unknown> = Promise.resolve()
+
+function withIndex<T>(op: (fs: OpfsFs, index: CacheIndex) => Promise<T>): Promise<T | null> {
+  const run = indexChain.then(async (): Promise<T | null> => {
+    const fs = await rootFs()
+    if (!fs) return null
+    if (!memoIndex) memoIndex = await readIndex(fs)
+    return op(fs, memoIndex)
+  })
+  indexChain = run.catch(() => {})
+  return run.catch(() => null)
+}
+
+/** True when the byte cache can actually persist anything this session. The
+ *  warmer checks this first — without it, an OPFS-less session (private
+ *  browsing) re-downloaded a whole file's clips every lens entry and stored
+ *  none of them. */
+export async function audioCacheAvailable(): Promise<boolean> {
+  return (await rootFs()) != null
+}
+
+/** @internal — sign-out purge + tests: drop all in-memory index state so a
+ *  wiped directory can't be resurrected from the memo. */
+export function __resetAudioCacheMemo(): void {
+  memoIndex = null
+  indexChain = Promise.resolve()
 }
 
 // ── Eviction ──────────────────────────────────────────────────────────────────
@@ -165,15 +209,16 @@ export async function audioCacheGet(
     const bytes = typeof raw === "string" ? new TextEncoder().encode(raw) : raw
     if (bytes.byteLength === 0) return null
 
-    // Update LRU: bump lastAccessedAt and move entry to the end (most recent).
-    const index = await readIndex(fs)
-    const idx = index.entries.findIndex((e) => e.audioId === audioId && e.ext === ext)
-    if (idx !== -1) {
-      const [entry] = index.entries.splice(idx, 1)
-      entry.lastAccessedAt = new Date().toISOString()
-      index.entries.push(entry)
-      await writeIndex(fs, index).catch(() => { /* non-fatal */ })
-    }
+    // LRU bump: move the entry to the end (most recent) — serialized so it
+    // can't race a concurrent put into losing an entry.
+    void withIndex(async (fsi, index) => {
+      const idx = index.entries.findIndex((e) => e.audioId === audioId && e.ext === ext)
+      if (idx !== -1) {
+        const [entry] = index.entries.splice(idx, 1)
+        index.entries.push(entry)
+        await writeIndex(fsi, index).catch(() => { /* non-fatal */ })
+      }
+    })
     return bytes
   } catch {
     return null
@@ -190,33 +235,31 @@ export async function audioCachePut(
   ext: string,
   bytes: Uint8Array,
 ): Promise<void> {
-  const fs = await rootFs()
-  if (!fs) return
-  try {
-    await fs.promises.writeFile(bytesPath(audioId, ext), bytes)
-    const index = await readIndex(fs)
+  await withIndex(async (fs, index) => {
+    try {
+      await fs.promises.writeFile(bytesPath(audioId, ext), bytes)
 
-    // Remove any existing entry for this audioId (e.g. overwritten recording
-    // with the same id is extremely unlikely given UUIDv7 audioIds, but be safe).
-    const existing = index.entries.findIndex((e) => e.audioId === audioId && e.ext === ext)
-    if (existing !== -1) {
-      const [old] = index.entries.splice(existing, 1)
-      index.totalBytes = Math.max(0, index.totalBytes - old.sizeBytes)
+      // Remove any existing entry for this audioId (e.g. overwritten recording
+      // with the same id is extremely unlikely given UUIDv7 audioIds, but be safe).
+      const existing = index.entries.findIndex((e) => e.audioId === audioId && e.ext === ext)
+      if (existing !== -1) {
+        const [old] = index.entries.splice(existing, 1)
+        index.totalBytes = Math.max(0, index.totalBytes - old.sizeBytes)
+      }
+
+      index.entries.push({
+        audioId,
+        ext,
+        sizeBytes: bytes.byteLength,
+      })
+      index.totalBytes += bytes.byteLength
+
+      await evictIfNeeded(fs, index)
+      await writeIndex(fs, index)
+    } catch {
+      // Non-fatal: the audio stack still works without the persistent cache.
     }
-
-    index.entries.push({
-      audioId,
-      ext,
-      sizeBytes: bytes.byteLength,
-      lastAccessedAt: new Date().toISOString(),
-    })
-    index.totalBytes += bytes.byteLength
-
-    await evictIfNeeded(fs, index)
-    await writeIndex(fs, index)
-  } catch {
-    // Non-fatal: the audio stack still works without the persistent cache.
-  }
+  })
 }
 
 /**
@@ -249,40 +292,30 @@ export async function audioCachePutBlob(
  * actually listening to.
  */
 export async function audioCacheHas(audioId: string, ext: string): Promise<boolean> {
-  const fs = await rootFs()
-  if (!fs) return false
-  try {
-    const index = await readIndex(fs)
-    return index.entries.some((e) => e.audioId === audioId && e.ext === ext)
-  } catch {
-    return false
-  }
+  const found = await withIndex(async (_fs, index) =>
+    index.entries.some((e) => e.audioId === audioId && e.ext === ext),
+  )
+  return found ?? false
 }
 
 /** Current cache occupancy in bytes (index-only read). */
 export async function audioCacheUsage(): Promise<number> {
-  const fs = await rootFs()
-  if (!fs) return 0
-  try {
-    return (await readIndex(fs)).totalBytes
-  } catch {
-    return 0
-  }
+  const usage = await withIndex(async (_fs, index) => index.totalBytes)
+  return usage ?? 0
 }
 
 export async function audioCacheEvict(audioId: string, ext: string): Promise<void> {
-  const fs = await rootFs()
-  if (!fs) return
-  try {
-    await fs.promises.unlink(bytesPath(audioId, ext)).catch(() => { /* already gone */ })
-    const index = await readIndex(fs)
-    const idx = index.entries.findIndex((e) => e.audioId === audioId && e.ext === ext)
-    if (idx !== -1) {
-      const [entry] = index.entries.splice(idx, 1)
-      index.totalBytes = Math.max(0, index.totalBytes - entry.sizeBytes)
-      await writeIndex(fs, index)
+  await withIndex(async (fs, index) => {
+    try {
+      await fs.promises.unlink(bytesPath(audioId, ext)).catch(() => { /* already gone */ })
+      const idx = index.entries.findIndex((e) => e.audioId === audioId && e.ext === ext)
+      if (idx !== -1) {
+        const [entry] = index.entries.splice(idx, 1)
+        index.totalBytes = Math.max(0, index.totalBytes - entry.sizeBytes)
+        await writeIndex(fs, index)
+      }
+    } catch {
+      // Best-effort.
     }
-  } catch {
-    // Best-effort.
-  }
+  })
 }

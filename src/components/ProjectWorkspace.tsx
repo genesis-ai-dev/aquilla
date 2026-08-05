@@ -4405,8 +4405,16 @@ export function ProjectWorkspace() {
   warmCellsRef.current = audioMergedCells
   const warmNearRef = useRef<string | null>(null)
   warmNearRef.current = timelineSelectedCellId
+  // FORTIFY: the sweep must wait for the per-file AUDIO ATTACHMENTS to arrive
+  // — store cells carry none, so a fixed-delay sweep on a slow connection saw
+  // attachment-less cells, found zero warm targets, and silently never ran
+  // for the whole session (exactly when warming matters most). Keying on
+  // "attachments have arrived" re-arms it once per file; the skip-cached fast
+  // path makes any extra run cheap.
+  const warmHasAttachments = workspaceAudioByCellId.size > 0
   useEffect(() => {
     if (lens !== "audio" || !activeFileId || !project?.id || !frontierSession?.jwt) return
+    if (!warmHasAttachments) return
     const controller = new AbortController()
     // Give the lens a beat to render before spending bandwidth.
     const t = setTimeout(() => {
@@ -4422,8 +4430,8 @@ export function ProjectWorkspace() {
       clearTimeout(t)
       controller.abort()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- cells/selection via refs; keyed on the open file
-  }, [lens, activeFileId, project?.id, frontierSession?.jwt])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cells/selection via refs; keyed on the open file + attachments-arrived
+  }, [lens, activeFileId, project?.id, frontierSession?.jwt, warmHasAttachments])
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
       void patchSettings({ audioTimingMode: mode })

@@ -122,7 +122,11 @@ export function VoicePlaybackBar({
   // hoist the bar back above a timeline/recorder that claimed later.
   const spaceOwnerRef = useRef<number | null>(null)
   useEffect(() => {
-    const releaseOverride = pushAudioShortcutOverride()
+    // "base" tier: the bar yields to the timeline and the recording modal no
+    // matter who mounted first — in the media lens the bar mounts AFTER the
+    // timeline, and a normal claim would hoist it above the surface designed
+    // to own Space (SUB-52's order: bar < timeline < recorder).
+    const releaseOverride = pushAudioShortcutOverride("base")
     spaceOwnerRef.current = releaseOverride.owner
     return () => {
       spaceOwnerRef.current = null

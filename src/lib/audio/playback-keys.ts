@@ -31,8 +31,15 @@ function isInteractiveOrEditable(target: EventTarget | null): boolean {
       return true
   }
   switch (el.getAttribute?.("role")) {
-    case "textbox":
     case "button":
+      // role="button" DIVs fork two ways: dialog dropzones and voice cards are
+      // real controls (refuse), but timeline cards/clips are the playback
+      // surface itself — their "activation" is selection, which the click that
+      // focused them already did. Those opt in with data-spacebar-transport so
+      // click-a-verse-then-Space plays instead of going dead. Real <button>
+      // elements never reach here (caught by tagName above).
+      return el.closest?.("[data-spacebar-transport]") == null
+    case "textbox":
     case "slider":
     case "menuitem":
       return true

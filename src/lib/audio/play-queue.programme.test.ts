@@ -694,7 +694,7 @@ describe("audio-first fortify — transport can never wedge", () => {
     }
   })
 
-  it("resume with nothing left to start ADVANCES instead of reporting silent 'playing'", async () => {
+  it("resume after the only side died RETRIES it gated, then advances when the retry dies too", async () => {
     vi.useFakeTimers()
     try {
       // Dub-only verse whose dub load fails while paused.
@@ -716,7 +716,14 @@ describe("audio-first fortify — transport can never wedge", () => {
       await vi.advanceTimersByTimeAsync(0)
       await resumeQueue()
       await vi.advanceTimersByTimeAsync(0)
-      // Not a silent wedge: the transport moved to the next verse.
+      // Resume re-enters through progPlaySlot: the dead dub is RE-CUED (a
+      // user-driven retry with the gate's bounded patience) instead of the
+      // verse being skipped on a possibly-transient failure. Honest state.
+      expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "v1" })
+
+      // The retry dies too — NOW the verse has nothing left and we advance.
+      dubEl("v1")!.failLoad()
+      await vi.advanceTimersByTimeAsync(0)
       expect(getQueueState()).toMatchObject({ cellId: "v2" })
     } finally {
       vi.useRealTimers()

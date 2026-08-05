@@ -181,6 +181,9 @@ export function TimelineCard({
       data-testid={`tl-card-${cell.id}`}
       role="button"
       tabIndex={0}
+      // Space on a just-clicked card toggles the transport (playback-keys
+      // honors this opt-in) — a card's activation is selection, already done.
+      data-spacebar-transport=""
       onClick={() => {
         onSelect(cell.id)
         if (!movedRef.current) onSeek?.(cell.id)

@@ -2075,6 +2075,29 @@ export async function resumeQueue(): Promise<void> {
     }
     const slot = progCurrentSlot()
     if (!slot) return
+    // FORTIFY: a resume must obey the same rule as a slot open — sides start
+    // TOGETHER. A paused CUE whose dub is still resolving (click-a-verse then
+    // Space before the clip arrives) has a due side with no element yet;
+    // playing "whatever is alive" started the source alone, the clock followed
+    // it ahead, and the late dub's self-join rebased the playhead BACKWARD.
+    // Re-enter through progPlaySlot, the one start authority: it re-cues from
+    // the parked position and gates until every due side is ready.
+    {
+      const cell = activeContext?.cells.find((c) => c.id === slot.cellId)
+      const into = Math.max(0, progress.currentTime - slot.startSec)
+      const dubDue = Boolean(
+        slot.targetWindow && cell && activeTargetForCell(cell) && into < slot.targetLenSec,
+      )
+      const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
+      const dubAlive = overlayPool.some((e) => e.element)
+      const sourceAlive = Boolean(
+        currentAudio && slot.sourceWindow && currentAudio.currentTime < slot.sourceWindow.end,
+      )
+      if ((dubDue && !dubAlive) || (sourceDue && !sourceAlive)) {
+        void progPlaySlot(progIndex, slot.startSec + into, true)
+        return
+      }
+    }
     // Only the sides that still have audio left in this verse come back. Ask
     // the ELEMENTS, not the clock — an element's own position is the truth,
     // and a dub that has finished is already out of the pool.

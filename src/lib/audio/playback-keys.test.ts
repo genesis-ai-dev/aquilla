@@ -46,4 +46,28 @@ describe("spacebarShouldToggle", () => {
     expect(spacebarShouldToggle(evt({ target: button }))).toBe(false)
     expect(spacebarShouldToggle(evt({ target: slider }))).toBe(false)
   })
+
+  it("refuses a role=button DIV (dropzones, voice cards)", () => {
+    const divButton = document.createElement("div")
+    divButton.setAttribute("role", "button")
+    expect(spacebarShouldToggle(evt({ target: divButton }))).toBe(false)
+  })
+
+  it("toggles on a role=button DIV that opts in as transport surface (timeline card)", () => {
+    // Click-a-verse-then-Space: the card is role="button" tabIndex=0, so the
+    // click FOCUSES it — Space must still play, not go dead.
+    const card = document.createElement("div")
+    card.setAttribute("role", "button")
+    card.setAttribute("data-spacebar-transport", "")
+    expect(spacebarShouldToggle(evt({ target: card }))).toBe(true)
+  })
+
+  it("still refuses a real <button> inside an opted-in card (mute, record)", () => {
+    const card = document.createElement("div")
+    card.setAttribute("role", "button")
+    card.setAttribute("data-spacebar-transport", "")
+    const mute = document.createElement("button")
+    card.appendChild(mute)
+    expect(spacebarShouldToggle(evt({ target: mute }))).toBe(false)
+  })
 })

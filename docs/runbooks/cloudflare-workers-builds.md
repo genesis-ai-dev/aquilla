@@ -26,7 +26,6 @@ this policy:
 | Branch | Wrangler operation | Named environment | Changes live traffic |
 | --- | --- | --- | --- |
 | `main` | upload → verify exact version → promote → verify traffic | `production` | Yes, after verification |
-| `staging` | upload → verify exact version | `staging` | No |
 | `dev` or `development` | upload → verify exact version | `development` | No |
 | Any feature branch | upload → verify exact version | `development` | No |
 
@@ -34,7 +33,7 @@ If `WORKERS_CI=1`, `WORKERS_CI_BRANCH`, or `WORKERS_CI_COMMIT_SHA` is absent,
 the command fails without invoking Wrangler.
 Feature builds may create preview versions, but they cannot promote a version or
 change a live route. Feature previews intentionally share development Hyperdrive
-and R2 resources; the verifier ensures they cannot inherit production or staging
+and R2 resources; the verifier ensures they cannot inherit production
 bindings.
 
 Until the helper commit reaches `main`, keep these containment commands inline
@@ -46,30 +45,27 @@ Production deploy command:
 npx wrangler deploy --env=production
 ```
 
-Non-production branch deploy command:
-
-```sh
-if [ "$WORKERS_CI_BRANCH" = staging ]; then npx wrangler versions upload --env=staging; else npx wrangler versions upload --env=development; fi
-```
-
-Do not add `--preview-alias "$WORKERS_CI_BRANCH"`; Git branch names may contain
-slashes, which are invalid Cloudflare version aliases. Keep
-`aquilla-sync-worker` on `pnpm run deploy:workers-build`; it already uses the
-repository policy.
+Non-production branch deploy command: **leave empty**, and disable "builds for
+non-production branches". A connection is bound to one Worker script, so a
+non-production build cannot deploy a differently-named Worker — it silently
+uploads to the bound (production) script instead. That is how feature-branch
+versions once landed on the production SPA Worker. QA gets its own three
+connections bound to the development scripts with `dev` as their production
+branch.
 
 The unnamed Wrangler profile targets `aquilla-sync-worker-local`, never
-`aquilla-sync-worker`. The named production and staging profiles run the repository
+`aquilla-sync-worker`. The named production profile runs the repository
 branch guard as a Wrangler build hook, so an accidental direct deployment is
 rejected before upload unless the checkout is on the authorized branch. The build
 hook is defense in depth; Cloudflare Builds must still use the repository-owned
 command above.
 
-Actual staging and development promotion remains owned by
+Actual development promotion remains owned by
 `.github/workflows/deploy-workers.yml`, whose branch mapping always passes an
 explicit named environment.
 
-Removing the staging Workers or staging routes is explicitly deferred. This
-incident recovery only prevents non-production Workers Builds from changing
+Staging was retired on 2026-08-05; its Workers, routes, R2 bucket and Neon
+branch are pending manual teardown in the Cloudflare and Neon dashboards.
 traffic.
 
 GitHub production deploy jobs also enter the repository's `production`
@@ -93,7 +89,7 @@ routes, then retry the version upload.
 Before the URL is posted to the pull request, the live verifier loads `/app`
 through that exact preview origin, crawls the deployed JavaScript graph, and
 requires the development identity, sync, and chat targets. This preview process
-does not promote a version or change production, staging, or development route
+does not promote a version or change production or development route
 traffic. Preview bundles do use development services and data.
 
 ## Exact-version deployment and verification

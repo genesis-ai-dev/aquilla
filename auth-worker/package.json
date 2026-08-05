@@ -4,7 +4,6 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "deploy:workers-build": "node ../scripts/cloudflare-build-deploy.mjs identity",
     "dev": "wrangler dev",
     "deploy": "pnpm --dir .. run deploy:aquilla:auth",
     "type-check": "tsc --noEmit",

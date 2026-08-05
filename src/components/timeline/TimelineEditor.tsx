@@ -17,6 +17,7 @@ import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeli
 // directly — muting is a pure element-level concern with no workspace state.
 import { useQueueProgress, useQueueState, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
+import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { TimelineRuler } from "./TimelineRuler"
@@ -253,7 +254,11 @@ export function TimelineEditor({
       // so Space was starting playback here at the same time as it started
       // the recording. Stand down whenever something has claimed above us.
       if (!isTopAudioShortcutOwner(releaseOverride.owner)) return
-      if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      // FORTIFY: the shared predicate also refuses Space when focus sits on a
+      // button/slider/menu item — with only the editable-context check, Space
+      // on a focused control (mute button, an open dialog's default button)
+      // toggled the transport underneath instead of activating the control.
+      if (spacebarShouldToggle(e)) {
         e.preventDefault() // keep Space from scrolling the page
         onTogglePlayRef.current?.()
         return

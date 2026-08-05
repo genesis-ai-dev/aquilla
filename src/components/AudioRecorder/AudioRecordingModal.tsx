@@ -458,7 +458,11 @@ export function AudioRecordingModal({
       }
       // SUB-52: modifier check matches the other Space handlers — Cmd/Ctrl/
       // Alt+Space belong to the OS or other shortcuts, not to recording.
+      // FORTIFY: Space on a FOCUSED BUTTON activates that button — a keyboard
+      // user who tabbed to "Retake" and pressed Space was having the bad take
+      // SAVED instead of discarded.
       if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        if (target?.tagName === "BUTTON" || target?.getAttribute?.("role") === "button") return
         e.preventDefault()
         if (phase === "idle" || phase === "error") { startFlow(); return }
         if (phase === "recording") { stopRecording(); return }

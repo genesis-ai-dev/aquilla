@@ -4,7 +4,7 @@
 // volume. It mirrors ElevenLabs' bottom player — the per-line buttons stay for
 // voicing a single line, but listening to the take in sequence happens here.
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
 } from "lucide-react"
@@ -20,7 +20,7 @@ import {
   skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
 } from "@/lib/audio/play-queue"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
-import { isAudioShortcutOverridden } from "@/lib/audio/audio-coordinator"
+import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellData } from "@/hooks/useCells"
@@ -111,15 +111,27 @@ export function VoicePlaybackBar({
   // only renders in the audio lens, so the binding is naturally scoped to it).
   // The predicate ignores the key when the user is typing or a control is
   // focused, so editing a line or clicking a button keeps Space's normal effect.
+  //
+  // FORTIFY: the bar now CLAIMS the audio-shortcut owner stack for its mount
+  // lifetime and acts only while it is the TOP owner. Two bugs die at once:
+  // the global capture handler (which yields to the stack) can no longer
+  // steal Space to replay the last previewed cell clip in the audio lens, and
+  // the timeline/recorder still win whenever they claim above us (SUB-52's
+  // arbitration, now with every Space owner in ONE stack). The claim lives in
+  // its own MOUNT-LIFETIME effect — re-claiming on every canPlay flip would
+  // hoist the bar back above a timeline/recorder that claimed later.
+  const spaceOwnerRef = useRef<number | null>(null)
+  useEffect(() => {
+    const releaseOverride = pushAudioShortcutOverride()
+    spaceOwnerRef.current = releaseOverride.owner
+    return () => {
+      spaceOwnerRef.current = null
+      releaseOverride()
+    }
+  }, [])
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // MERGE 2026-07-27 (AQU-660 × SUB-44/SUB-52): the media timeline and the
-      // recording modal each claim Space for their own transport while they
-      // are on screen. Without this guard the bar fires TOO — so Space in the
-      // media lens toggled twice (net: nothing happened), and Space in the
-      // recorder started playback underneath it again, which is exactly the
-      // bug SUB-52 fixed. Whoever claimed above us handles the key.
-      if (isAudioShortcutOverridden()) return
+      if (spaceOwnerRef.current == null || !isTopAudioShortcutOwner(spaceOwnerRef.current)) return
       if (!spacebarShouldToggle(e) || !canPlay) return
       e.preventDefault()
       onPlayPause()

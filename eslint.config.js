@@ -13,7 +13,10 @@ const reactStub = {
 }
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // .claude holds local agent worktrees (full repo copies with their own
+  // node_modules); ESLint 10 traverses dot-directories and resolves each file's
+  // nearest eslint.config.js, so without this ignore it loads those copies' configs.
+  globalIgnores(['dist', '.claude']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -57,6 +60,13 @@ export default defineConfig([
       'react-hooks/preserve-manual-memoization': 'warn',
       'react-hooks/refs': 'warn',
       'react-hooks/purity': 'warn',
+
+      // New in ESLint 10's recommended set; they flag ~40 pre-existing patterns
+      // across 30 files (and no-useless-assignment has known false positives around
+      // try/catch). Downgraded to warn so the upgrade lands without a mass refactor;
+      // address incrementally like the react-hooks rules above.
+      'preserve-caught-error': 'warn',
+      'no-useless-assignment': 'warn',
     },
   },
   // AuthorizedEvent perimeter guard: only authorize.ts may construct instances.

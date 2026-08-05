@@ -10,9 +10,11 @@
 
 import { useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsRight, CloudUpload, Mic, Sparkles } from "lucide-react"
+import { ChevronsRight, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Spinner } from "@/components/ui/spinner"
+import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { isVisible, secToPx, pxToSec } from "@/lib/timeline/scale"
 import {
   targetChipGeom,
@@ -43,6 +45,12 @@ export interface TargetAudioLaneProps {
   viewStartSec: number
   viewEndSec: number
   selectedId: string | null
+  /** The verse the transport is WAITING ON (queue state "loading") — its chip
+   *  shows a small spinner while the readiness gate parks. */
+  loadingCellId?: string | null
+  /** Cells whose dub audio definitively 404'd — their chips carry a missing
+   *  badge (decision 2026-08-05). */
+  missingCellIds?: ReadonlySet<string>
   editable: boolean
   snapEnabled?: boolean
   onSelect(id: string): void
@@ -82,6 +90,8 @@ function TargetAudioChip({
   audioFirst,
   pxPerSec,
   selected,
+  loading,
+  missing,
   editable,
   snap,
   onSelect,
@@ -102,6 +112,10 @@ function TargetAudioChip({
   audioFirst: boolean
   pxPerSec: number
   selected: boolean
+  /** The transport is parked waiting on this verse's audio (slow load). */
+  loading: boolean
+  /** This chip's dub audio definitively 404'd. */
+  missing: boolean
   editable: boolean
   snap: { enabled: boolean; candidates: number[] }
   onSelect(id: string): void
@@ -250,11 +264,15 @@ function TargetAudioChip({
   const overflowSec = span.end - section.end
   const paintedPx = Math.max(10, secToPx(paintedEnd - span.start, pxPerSec))
   const fullPx = secToPx(geom.end - geom.start, pxPerSec)
-  // Keep the two corner affordances from landing on top of each other: the
-  // saving glyph needs room in the PAINTED box, the mic button appears on
-  // hover (when the chip is full width) and must leave the glyph its corner.
-  const showSaving = pendingSync && paintedPx >= 20
-  const showRecordButton = editable && Boolean(onOpenRecording) && fullPx >= (pendingSync ? 46 : 28)
+  // The top-left corner is a single PRIORITY slot — one glyph at a time:
+  // missing (permanent, actionable) beats loading (transient seconds) beats
+  // saving (informational). Same width discipline as before: the glyph needs
+  // room in the PAINTED box, and the hover mic button must leave the corner
+  // alone whenever any glyph wants it.
+  const leftGlyph: "missing" | "loading" | "saving" | null =
+    missing ? "missing" : loading ? "loading" : pendingSync ? "saving" : null
+  const showLeftGlyph = leftGlyph != null && paintedPx >= 20
+  const showRecordButton = editable && Boolean(onOpenRecording) && fullPx >= (leftGlyph != null ? 46 : 28)
   const kindTitle = chip.item.kind === "take" ? "Recorded take" : "Generated voice"
   // SUB-53: audio-first says how the two compare instead of warning. Longer is
   // normal here; shorter is equally unremarkable.
@@ -302,6 +320,8 @@ function TargetAudioChip({
   } else {
     tipLines.push(<div key="kind">{lengthNote ? `${kindTitle} · ${lengthNote}` : kindTitle}</div>)
   }
+  // Decision 2026-08-05: a definitively 404'd clip says so, in red.
+  if (missing) tipLines.push(<div key="missing" className="font-semibold text-red-600 dark:text-red-400">{MISSING_AUDIO_MESSAGE}</div>)
   // SUB-48: never let a guessed width read as a measured one.
   if (geom.usingFallback) tipLines.push(<div key="fallback" className="text-muted-foreground">Length unknown — re-record or re-upload to fix</div>)
   if (pendingSync) tipLines.push(<div key="saving" className="text-muted-foreground">Saving — kept safe on this device until it syncs</div>)
@@ -320,6 +340,8 @@ function TargetAudioChip({
       data-overflow={overflow}
       {...(geom.usingFallback ? { "data-unknown-length": "true" } : {})}
       {...(pendingSync ? { "data-pending-sync": "true" } : {})}
+      {...(missing ? { "data-missing": "true" } : {})}
+      {...(loading ? { "data-loading": "true" } : {})}
       {...(truncated ? { "data-truncated": "true" } : {})}
       {...(chip.ratio != null ? { "data-ratio": chip.ratio.toFixed(2) } : {})}
       onClick={() => {
@@ -374,15 +396,28 @@ function TargetAudioChip({
           ?
         </span>
       )}
-      {/* SUB-48: still in the outbox — say so, so a queued take reads as
-          "safe, on its way" rather than mysteriously present. */}
-      {showSaving && (
+      {/* The corner priority slot: missing badge (decision 2026-08-05) >
+          loading spinner (the readiness gate is parked on this verse) >
+          SUB-48 saving glyph (still in the outbox — "safe, on its way"). */}
+      {showLeftGlyph && (
         <span
-          title="Saving — kept safe on this device until it syncs"
-          data-testid={`tl-target-${cell.id}-saving`}
+          title={
+            leftGlyph === "missing"
+              ? MISSING_AUDIO_MESSAGE
+              : leftGlyph === "loading"
+                ? "Loading this clip's audio…"
+                : "Saving — kept safe on this device until it syncs"
+          }
+          data-testid={`tl-target-${cell.id}-${leftGlyph}`}
           className="absolute left-1.5 top-1 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/85 shadow-sm ring-1 ring-border"
         >
-          <CloudUpload className="h-2.5 w-2.5 animate-pulse" />
+          {leftGlyph === "missing" ? (
+            <VolumeX className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
+          ) : leftGlyph === "loading" ? (
+            <Spinner className="h-2.5 w-2.5" />
+          ) : (
+            <CloudUpload className="h-2.5 w-2.5 animate-pulse" />
+          )}
         </span>
       )}
       {/* Round 8b (Sam): record right from the chip — opens this cell's
@@ -452,6 +487,8 @@ export function TargetAudioLane({
   viewStartSec,
   viewEndSec,
   selectedId,
+  loadingCellId,
+  missingCellIds,
   editable,
   snapEnabled,
   onSelect,
@@ -556,6 +593,8 @@ export function TargetAudioLane({
             audioFirst={Boolean(audioFirst)}
             pxPerSec={pxPerSec}
             selected={selectedId === chip.item.cell.id}
+            loading={loadingCellId === chip.item.cell.id}
+            missing={missingCellIds?.has(chip.item.cell.id) ?? false}
             editable={editable}
             snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.cell.id, chip.section) }}
             onSelect={onSelect}

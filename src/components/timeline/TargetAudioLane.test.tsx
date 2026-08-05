@@ -557,6 +557,61 @@ describe("TargetAudioLane — saving indicator (SUB-48)", () => {
   })
 })
 
+describe("TargetAudioLane — missing badge + loading spinner (2026-08-05)", () => {
+  it("a definitively missing dub shows the red badge and says so on hover", async () => {
+    renderWithTooltips(
+      <TargetAudioLane {...base} items={[item({}, 4000)]} missingCellIds={new Set(["c1"])} />,
+    )
+    const chip = screen.getByTestId("tl-target-c1")
+    expect(chip).toHaveAttribute("data-missing", "true")
+    expect(screen.getByTestId("tl-target-c1-missing")).toBeInTheDocument()
+    await expectTooltip(chip, /This clip's audio is missing\./)
+  })
+
+  it("the verse being waited on shows the loading spinner", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} loadingCellId="c1" />)
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-loading", "true")
+    expect(screen.getByTestId("tl-target-c1-loading")).toBeInTheDocument()
+  })
+
+  it("the corner is a PRIORITY slot: missing beats loading beats saving — one glyph max", () => {
+    const it_ = item({}, 4000)
+    const takeId = it_.audioId
+    const pendingCell = {
+      ...it_.cell,
+      attachments: {
+        ...it_.cell.attachments,
+        [takeId]: { ...it_.cell.attachments![takeId], pendingSync: true },
+      },
+    } as unknown as CellData
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ ...it_, cell: pendingCell }]}
+        loadingCellId="c1"
+        missingCellIds={new Set(["c1"])}
+      />,
+    )
+    expect(screen.getByTestId("tl-target-c1-missing")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-target-c1-loading")).toBeNull()
+    expect(screen.queryByTestId("tl-target-c1-saving")).toBeNull()
+  })
+
+  it("any left glyph pushes the hover mic button to the wider threshold", () => {
+    // 1s at 40px/s = 40px wide: enough for the mic alone (28) but not beside
+    // a corner glyph (46) — same arbitration the saving glyph pinned.
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({}, 1000)]}
+        missingCellIds={new Set(["c1"])}
+        onOpenRecording={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+  })
+})
+
 describe("TargetAudioLane — truncation edge cases (SUB-48)", () => {
   it("a chip moved BEFORE its neighbour keeps its full width (no sliver)", () => {
     // c2 is dragged back to 5s, ahead of c1 at 10s. Clamping c2 to "the next

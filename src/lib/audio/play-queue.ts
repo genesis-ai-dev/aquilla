@@ -6,7 +6,7 @@
 
 import { useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
-import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
+import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
 import { activeTargetForCell, sourceClipAudioForCell } from "./track-audio"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { hasTiming, sortByLens } from "@/lib/timeline/derive"
@@ -65,6 +65,72 @@ function subscribe(listener: () => void): () => void {
 
 export function useQueueState(): QueueState {
   return useSyncExternalStore(subscribe, () => state, () => IDLE)
+}
+
+// ── Missing-clip registry (decision 2026-08-05) ─────────────────────────────
+// Lines whose dub audio DEFINITIVELY 404'd (deleted, or an upload that never
+// completed) — the timeline paints a per-chip badge from this, so the user is
+// told even when the verse keeps playing on its other side. cellId → the dub
+// attachment audioId that died (the identity the clearing sweep checks).
+// Never marked from a probe "unknown" (a flaky network must read as today's
+// transient behavior) and never for a pendingSync clip (an outbox take
+// legitimately 404s server-side — that is "saving", not "missing").
+
+const missingClips = new Map<string, string>()
+const EMPTY_MISSING: ReadonlySet<string> = new Set()
+/** Cached snapshot — useSyncExternalStore needs a STABLE reference between
+ *  changes or every consumer re-renders on every check. */
+let missingSnapshot: ReadonlySet<string> = EMPTY_MISSING
+const missingListeners = new Set<() => void>()
+
+function notifyMissing(): void {
+  missingSnapshot = new Set(missingClips.keys())
+  for (const l of missingListeners) l()
+}
+
+function markClipMissing(cellId: string, audioId: string): void {
+  if (missingClips.get(cellId) === audioId) return
+  const cell = activeContext?.cells.find((c) => c.id === cellId)
+  if (cell?.attachments?.[audioId]?.pendingSync) return // saving, not missing
+  missingClips.set(cellId, audioId)
+  notifyMissing()
+}
+
+/** Re-derive the registry against a fresh cell list: an entry survives only
+ *  while its cell still exists and still points at the SAME dead clip. */
+function sweepMissingClips(cells: readonly CellData[]): void {
+  if (missingClips.size === 0) return
+  const byId = new Map(cells.map((c) => [c.id, c]))
+  let changed = false
+  for (const [cellId, audioId] of missingClips) {
+    const cell = byId.get(cellId)
+    const target = cell ? activeTargetForCell(cell) : null
+    if (!cell || target?.audioId !== audioId || cell.attachments?.[audioId]?.pendingSync) {
+      missingClips.delete(cellId)
+      changed = true
+    }
+  }
+  if (changed) notifyMissing()
+}
+
+function subscribeMissing(listener: () => void): () => void {
+  missingListeners.add(listener)
+  return () => { missingListeners.delete(listener) }
+}
+
+/** Cells whose dub audio is definitively missing (server 404). */
+export function useMissingClipCells(): ReadonlySet<string> {
+  return useSyncExternalStore(subscribeMissing, () => missingSnapshot, () => EMPTY_MISSING)
+}
+
+export function getMissingClipCells(): ReadonlySet<string> {
+  return missingSnapshot
+}
+
+/** @internal — test isolation. */
+export function resetMissingClipsForTests(): void {
+  missingClips.clear()
+  missingSnapshot = EMPTY_MISSING
 }
 
 // ── Playback progress (time/duration/rate/volume) ───────────────────────────
@@ -566,6 +632,10 @@ interface ProgGate {
    *  pending is struck from here). */
   dueSource: boolean
   dueTarget: boolean
+  /** AQU-660 parity (2026-08-05): a user-chosen start on THIS verse — a
+   *  definitively missing clip surfaces its state here instead of the verse
+   *  being silently skipped (auto-advance is still allowed to skip). */
+  explicit: boolean
 }
 
 let progGate: ProgGate | null = null
@@ -612,6 +682,48 @@ function progGateTimeout(gate: ProgGate): void {
     }
     progGateSideFailed(gate, side)
   }
+}
+
+/** Decision 2026-08-05: a definitively missing clip on an EXPLICIT start
+ *  stops there and says so — same state shape as the dubbing path's
+ *  surfaceMissing, so the bar and the detail badge already render it. */
+function progSurfaceMissing(cellId: string): void {
+  progClearGate()
+  progQuiet(currentAudio)
+  setState({ kind: "error", message: MISSING_AUDIO_MESSAGE, cellId })
+}
+
+/**
+ * Verdict for a failed dub load: definitively missing (server 404) or
+ * anything else (transient/slow/unknown — keep today's behavior). Sync when
+ * the caught error is in hand; a status-less element error (stream URLs are
+ * minted blind, so a 404 usually lands as a bare `error` event) needs the
+ * 1-byte probe. "unknown" NEVER reads as missing — a flaky network must
+ * degrade to the transient path, byte for byte. Non-frontier URLs (blob/http)
+ * can't be probed and are never "missing".
+ */
+function classifyTargetFailure(
+  cellId: string,
+  cause: unknown | undefined,
+): "missing" | "other" | Promise<"missing" | "other"> {
+  if (cause !== undefined) return isMissingAudioError(cause) ? "missing" : "other"
+  const ctx = activeContext
+  const cell = ctx?.cells.find((c) => c.id === cellId)
+  const target = cell ? activeTargetForCell(cell) : null
+  if (!ctx || !cell || !target) return "other"
+  const frontier = parseFrontierAudioUrl(target.url)
+  if (!frontier) return "other"
+  if (cell.attachments?.[target.audioId]?.pendingSync) return "other" // saving
+  return probeCellAudioPresent({
+    projectId: ctx.projectId,
+    fileId: cell.fileId,
+    audioId: frontier.audioId,
+    ext: frontier.ext,
+    getSyncToken: audioSyncTokenFetcherForSession(ctx.session),
+  }).then(
+    (presence) => (presence === "missing" ? "missing" : "other"),
+    () => "other",
+  )
 }
 
 /**
@@ -719,13 +831,50 @@ function progStopEndStop(): void {
 }
 
 /** A dub stopped — at its trim end, its natural end, or because it failed. */
-function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error"): void {
+function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error", cause?: unknown): void {
+  const gate = timingMode === "audioFirst" ? progGate : null
+  const gateOwns = Boolean(gate && gate.cellId === entry.cellId)
+  // Fatal-explicit: the user pressed play on THIS verse and the dub is its
+  // only due side — the verdict decides between surfacing and advancing, so
+  // it is handled (and marked) in the gate branch below, not here.
+  const fatalExplicit = Boolean(gateOwns && gate!.explicit && !gate!.dueSource)
+  // Decision 2026-08-05: every other failed dub is CLASSIFIED fire-and-forget
+  // (missing vs transient) BEFORE the audioFirst guard, so dubbing-mode
+  // overlay 404s badge their chip too — with zero transport change there.
+  // The badge may appear a beat after the strike.
+  if (reason === "error" && !fatalExplicit) {
+    const verdict = classifyTargetFailure(entry.cellId, cause)
+    const applyMark = (v: "missing" | "other") => {
+      if (v === "missing") markClipMissing(entry.cellId, entry.audioId)
+    }
+    if (typeof verdict === "string") applyMark(verdict)
+    else void verdict.then(applyMark)
+  }
   if (timingMode !== "audioFirst") return
   // While a gate is pending for this verse, a cued dub can only FAIL here —
   // route to the gate (which starts what's ready) instead of advancing; both
   // its own error path and the gate acting would double-advance.
-  const gate = progGate
-  if (gate && gate.cellId === entry.cellId) {
+  if (gate && gateOwns) {
+    if (fatalExplicit) {
+      // HOLD the strike (state stays an honest "loading" — the chip spinner
+      // shows) while the verdict resolves: missing → surface the message
+      // immediately; anything else → today's strike-and-advance. The
+      // still-armed 6s patience timer backstops a hung probe, and the
+      // gate-identity check discards a verdict that lost to a seek-away.
+      const verdict = classifyTargetFailure(entry.cellId, cause)
+      const settle = (v: "missing" | "other") => {
+        if (progGate !== gate) return // superseded (seek-away / timeout won)
+        if (v === "missing") {
+          markClipMissing(entry.cellId, entry.audioId)
+          progSurfaceMissing(entry.cellId)
+        } else {
+          progGateSideFailed(gate, "target")
+        }
+      }
+      if (typeof verdict === "string") settle(verdict)
+      else void verdict.then(settle)
+      return
+    }
     progGateSideFailed(gate, "target")
     return
   }
@@ -776,13 +925,17 @@ function progTargetTick(entry: OverlayEntry, audio: HTMLAudioElement): void {
  *  branches encoded a way to start the source WITHOUT the readiness gate —
  *  exactly the bug the gate exists to prevent. Starting sides is exclusively
  *  progStartSides' job now. */
-async function progOpenSource(cell: CellData, atClipSec: number): Promise<void> {
+/** Opens (or re-seeks) the source side. Returns how it went so the cue path
+ *  can distinguish a definitively MISSING clip (decision 2026-08-05) from a
+ *  transient failure — the raw 404 sentinel string is never published as
+ *  user-facing state anymore. */
+async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open" | "missing" | "error"> {
   const ctx = activeContext
-  if (!ctx) return
+  if (!ctx) return "error"
   const src = sourceClipAudioForCell(cell) ?? pickPlayableAudio(cell)
   if (!src) {
     progQuiet(currentAudio)
-    return
+    return "error"
   }
   // Every verse is a window into the SAME imported file, so after the first
   // one this is just a seek — no element churn at a verse boundary.
@@ -790,7 +943,7 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<void> 
     const el = currentAudio
     el.currentTime = atClipSec
     if (!el.paused) progQuiet(el)
-    return
+    return "open"
   }
 
   disposeCurrentSourceOnly()
@@ -799,13 +952,14 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<void> 
   try {
     resolved = await resolveAudioSrc(src.url, ctx.projectId, cell.fileId, ctx.session, cell)
   } catch (e) {
-    if (seq !== currentSeq) return
+    if (seq !== currentSeq) return "error"
+    if (isMissingAudioError(e)) return "missing" // the caller decides how to say it
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
-    return
+    return "error"
   }
   if (seq !== currentSeq) {
     if (resolved.objectUrl) URL.revokeObjectURL(resolved.objectUrl)
-    return
+    return "error"
   }
 
   const audio = new Audio(resolved.src)
@@ -900,6 +1054,7 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<void> 
     const slot = progCurrentSlot()
     if (slot && !progTargetEntry()) progAdvance()
   }
+  return "open"
 }
 
 /** Tear down just the source element — the dub pool belongs to the verse. */
@@ -936,6 +1091,7 @@ async function progPlaySlot(
   index: number,
   atProgrammeSec: number | null,
   autoplay: boolean,
+  explicit = false,
 ): Promise<void> {
   const ctx = activeContext
   const prog = programme
@@ -1012,6 +1168,7 @@ async function progPlaySlot(
     pending: new Set(),
     dueSource: sourceDue,
     dueTarget: dubDue,
+    explicit,
   }
   if (dubDue) gate.pending.add("target")
   if (sourceDue) gate.pending.add("source")
@@ -1033,7 +1190,9 @@ async function progPlaySlot(
 }
 
 /** Seek on the PROGRAMME clock. Re-opens the landing verse from that point. */
-function progSeekTo(sec: number, wantPlay: boolean): void {
+// A seek/click is a user-chosen target (AQU-660 parity) — a missing clip
+// there surfaces its state instead of being skipped, hence explicit=true.
+function progSeekTo(sec: number, wantPlay: boolean, explicit = true): void {
   const prog = programme
   if (!prog) return
   const at = Math.max(0, sec)
@@ -1045,10 +1204,10 @@ function progSeekTo(sec: number, wantPlay: boolean): void {
     const last = progPrevPlayable(prog.slots.length - 1)
     if (last < 0) return
     const s = prog.slots[last]
-    void progPlaySlot(last, s.startSec + Math.max(0, s.slotLenSec - 0.001), wantPlay)
+    void progPlaySlot(last, s.startSec + Math.max(0, s.slotLenSec - 0.001), wantPlay, explicit)
     return
   }
-  void progPlaySlot(prog.slots.indexOf(slot), at, wantPlay)
+  void progPlaySlot(prog.slots.indexOf(slot), at, wantPlay, explicit)
 }
 
 /**
@@ -1403,11 +1562,12 @@ function executeFire(plan: Extract<TargetOverlayPlan, { kind: "fire" }>): void {
     let resolved: ResolvedAudioSrc
     try {
       resolved = await resolveAudioSrc(plan.url, ctx.projectId, cell.fileId, ctx.session, cell)
-    } catch {
+    } catch (e) {
       removeOverlayEntry(entry)
       // SUB-53: in audio-first this dub may have been the one clocking its
-      // verse — hand the job on rather than stall the whole programme.
-      progOnTargetFinished(entry, "error")
+      // verse — hand the job on rather than stall the whole programme. The
+      // caught error rides along: a 404 sentinel classifies synchronously.
+      progOnTargetFinished(entry, "error", e)
       return
     }
     if (!overlayPool.includes(entry)) {
@@ -1683,9 +1843,11 @@ function progCueTarget(
     let resolved: ResolvedAudioSrc
     try {
       resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
-    } catch {
+    } catch (e) {
       removeOverlayEntry(entry)
-      progOnTargetFinished(entry, "error") // routes to the gate while pending
+      // Routes to the gate while pending; the caught error rides along so a
+      // 404 sentinel classifies synchronously (decision 2026-08-05).
+      progOnTargetFinished(entry, "error", e)
       return
     }
     if (!overlayPool.includes(entry)) {
@@ -1703,8 +1865,21 @@ function progCueTarget(
  * fresh open reports on 'canplay'.
  */
 function progCueSource(cell: CellData, atClipSec: number, gate: ProgGate): void {
-  void progOpenSource(cell, atClipSec).then(() => {
+  void progOpenSource(cell, atClipSec).then((result) => {
     if (progGate !== gate) return
+    if (result === "missing") {
+      // Decision 2026-08-05: a definitively missing SOURCE on an explicit
+      // start with no dub to carry surfaces "this clip's audio is missing"
+      // immediately; otherwise the dub carries exactly as before. No registry
+      // mark — the chips represent DUBS, and the shared source affects every
+      // verse (per-card badges are a flagged deferral).
+      if (gate.explicit && !gate.dueTarget) {
+        progSurfaceMissing(cell.id)
+        return
+      }
+      progGateSideFailed(gate, "source")
+      return
+    }
     const el = currentAudio
     if (!el || state.kind === "error") {
       progGateSideFailed(gate, "source")
@@ -2073,7 +2248,7 @@ export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false
       disposeCurrent()
       return
     }
-    void progPlaySlot(start, null, true)
+    void progPlaySlot(start, null, true, explicit)
     return
   }
   const start = findNextPlayable(ctx.cells, Math.max(0, fromIndex))
@@ -2361,6 +2536,9 @@ export function updateQueueCells(cells: CellData[]): void {
     // through the rest of the file and mislabel the now-playing line.
     if (!activeContext.snapshot) activeContext.cells = cells
   }
+  // A missing-clip badge lives only as long as its cell still points at the
+  // same dead clip — a new take/generation/deletion clears it here.
+  sweepMissingClips(cells)
   if (timingMode === "audioFirst" && progIndex >= 0) {
     // SUB-53: a new take or a trim re-flows the layout. Rebuild and keep the
     // transport on the SAME verse — its slot may well have moved.

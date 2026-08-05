@@ -15,7 +15,7 @@ import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeli
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
 // Round 5 exception: the per-track speaker buttons drive setQueueAudibility
 // directly — muting is a pure element-level concern with no workspace state.
-import { useQueueProgress, useQueueState, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
+import { useQueueProgress, useQueueState, useMissingClipCells, setQueueAudibility, type TrackAudibility } from "@/lib/audio/play-queue"
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
@@ -205,6 +205,12 @@ export function TimelineEditor({
   // would re-yank a user who deliberately scrolled away mid-playback.
   const queueRunning =
     (queueState.kind === "playing" || queueState.kind === "loading") && cellIdSet.has(queueState.cellId)
+  // Decision 2026-08-05: the verse being WAITED ON shows a small spinner on
+  // its chip ("loading" is exactly the parked-gate/cold-load state and
+  // carries the cellId), and a definitively 404'd dub shows a missing badge.
+  const loadingCellId =
+    queueState.kind === "loading" && cellIdSet.has(queueState.cellId) ? queueState.cellId : null
+  const missingCellIds = useMissingClipCells()
   useEffect(() => {
     if (queueActive) clock.setCurrentSec(queueProgress.currentTime)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
@@ -835,6 +841,8 @@ export function TimelineEditor({
               viewStartSec={viewStartSec}
               viewEndSec={viewEndSec}
               selectedId={selectedId}
+              loadingCellId={loadingCellId}
+              missingCellIds={missingCellIds}
               editable={editable}
               snapEnabled={snapOn && !audioFirst}
               onSelect={setSelectedId}

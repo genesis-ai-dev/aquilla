@@ -12,9 +12,13 @@ let mockQueueState: QueueState = { kind: "idle" }
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
 // Round 5: the speaker buttons push audibility straight into the queue.
 let lastAudibility: { source: boolean; target: boolean } | null = null
+// Decision 2026-08-05: chips badge definitively-missing dubs.
+let mockMissingCells: ReadonlySet<string> = new Set()
 vi.mock("@/lib/audio/play-queue", () => ({
   useQueueState: () => mockQueueState,
   useQueueProgress: () => mockProgress,
+  useMissingClipCells: () => mockMissingCells,
+  MISSING_AUDIO_MESSAGE: "This clip's audio is missing.",
   setQueueAudibility: (a: { source: boolean; target: boolean }) => {
     lastAudibility = a
   },

@@ -409,7 +409,14 @@ orgs.get("/:orgId/groups", async (c) => {
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
   const groups = await listOrgGroups(c.env, orgId, user.id)
-  return c.json({ groups })
+  // AQU-789: the Teams list must agree with the team-detail visibility gate
+  // (AQU-748). A non-maintainer can only open a team they belong to, so listing
+  // teams they aren't in produces the "phantom membership" bug — a team shows in
+  // the list but its detail 404s ("it says I have a team but I'm not part of
+  // it"). Filter the list to the viewer's own teams for non-maintainers;
+  // maintainers+ see every team, matching their detail access.
+  const visible = role >= ROLE.MAINTAINER ? groups : groups.filter((g) => g.viewerIsMember)
+  return c.json({ groups: visible })
 })
 
 /** GET /api/v2/orgs/:orgId/groups/:groupId — read-only team detail. */

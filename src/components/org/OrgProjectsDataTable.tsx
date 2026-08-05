@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { CircleCheck, FolderOpen, Mic, MoreHorizontal, Sparkles, UserPlus } from "lucide-react"
+import { CircleCheck, FolderOpen, Mic, MoreHorizontal, Sparkles, UserPlus, Users } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import {
   attentionRank,
@@ -386,6 +386,7 @@ export function OrgProjectsDataTable({
                 <DropdownMenuItem
                   onClick={() => navigate(`/project/${p.id}/settings/members`)}
                 >
+                  <Users className="size-4" />
                   Add member
                 </DropdownMenuItem>
               </DropdownMenuContent>

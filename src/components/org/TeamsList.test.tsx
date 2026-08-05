@@ -87,7 +87,7 @@ describe("TeamsList admin create", () => {
   })
 })
 
-describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
+describe("TeamsList — AQU-333: internal/public visibility tabs", () => {
   /**
    * WHY: AQU-333 (re-scoping AQU-142) reintroduces a three-position
    * All / Internal only / Public only filter, defaulting to "Internal only"
@@ -95,23 +95,23 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
    *
    * The AQU-158/AQU-165 regression guarantee — public teams (isInternal ===
    * false) must NOT be silently dropped — is preserved and re-expressed here
-   * *through the toggle*: public teams are always reachable via "All" and
+   * *through the tabs*: public teams are always reachable via "All" and
    * "Public only". The earlier unconditional "show all by default" assertion
    * is intentionally replaced (not deleted) because the default now filters.
    */
   const internalTeam = makeTeam({ id: 1, name: "Internal Team", isInternal: true })
   const publicTeam = makeTeam({ id: 2, name: "Public Team", isInternal: false })
 
-  it("renders the three-position toggle and defaults to Internal only", async () => {
+  it("renders the three-position tabs and defaults to Internal only", async () => {
     listTeams.mockResolvedValue([internalTeam, publicTeam])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
-    // Toggle controls exist alongside search + sort.
-    expect(screen.getByRole("button", { name: /^all$/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /internal only/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /public only/i })).toBeInTheDocument()
-    // Default is Internal only (pressed), so the public team is hidden.
-    expect(screen.getByRole("button", { name: /internal only/i })).toHaveAttribute("aria-pressed", "true")
+    // Tab controls exist alongside search + sort.
+    expect(screen.getByRole("tab", { name: /^all$/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /internal only/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /public only/i })).toBeInTheDocument()
+    // Default is Internal only (selected), so the public team is hidden.
+    expect(screen.getByRole("tab", { name: /internal only/i })).toHaveAttribute("aria-selected", "true")
     expect(screen.queryByText("Public Team")).toBeNull()
   })
 
@@ -120,11 +120,11 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
     // All → both internal and public appear.
-    fireEvent.click(screen.getByRole("button", { name: /^all$/i }))
+    fireEvent.click(screen.getByRole("tab", { name: /^all$/i }))
     await waitFor(() => expect(screen.getByText("Public Team")).toBeInTheDocument())
     expect(screen.getByText("Internal Team")).toBeInTheDocument()
     // Public only → just the public team.
-    fireEvent.click(screen.getByRole("button", { name: /public only/i }))
+    fireEvent.click(screen.getByRole("tab", { name: /public only/i }))
     await waitFor(() => expect(screen.queryByText("Internal Team")).toBeNull())
     expect(screen.getByText("Public Team")).toBeInTheDocument()
   })
@@ -133,7 +133,7 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
     listTeams.mockResolvedValue([internalTeam])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: /public only/i }))
+    fireEvent.click(screen.getByRole("tab", { name: /public only/i }))
     await waitFor(() => expect(screen.queryByText("Internal Team")).toBeNull())
     expect(screen.getByText(/no public teams/i)).toBeInTheDocument()
     // Clear resets the filter (to All) and the team reappears — no crash/stale list.
@@ -147,7 +147,7 @@ describe("TeamsList — AQU-333: internal/public visibility toggle", () => {
     listTeams.mockResolvedValue([internalTeam, publicAlpha, publicBeta])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: /public only/i }))
+    fireEvent.click(screen.getByRole("tab", { name: /public only/i }))
     await waitFor(() => expect(screen.queryByText("Internal Team")).toBeNull())
     fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "Alpha" } })
     await waitFor(() => expect(screen.getByText("Public Alpha")).toBeInTheDocument())

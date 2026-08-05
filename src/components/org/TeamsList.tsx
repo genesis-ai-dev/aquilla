@@ -8,8 +8,8 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { SegmentTabs } from "@/components/ui/tabs"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -264,19 +264,12 @@ export function TeamsList() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <ButtonGroup aria-label="Filter teams by visibility">
-                {VISIBILITY_OPTIONS.map((o) => (
-                  <Button
-                    key={o.value}
-                    size="sm"
-                    variant={visibility === o.value ? "default" : "outline"}
-                    aria-pressed={visibility === o.value}
-                    onClick={() => setVisibility(o.value)}
-                  >
-                    {o.label}
-                  </Button>
-                ))}
-              </ButtonGroup>
+              <SegmentTabs
+                aria-label="Filter teams by visibility"
+                value={visibility}
+                onValueChange={setVisibility}
+                options={VISIBILITY_OPTIONS}
+              />
             </div>
           )}
 

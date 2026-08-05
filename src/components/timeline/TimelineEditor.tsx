@@ -5,7 +5,7 @@
 // preview (the remote host serves Range — no streaming work needed here).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX } from "lucide-react"
+import { AudioLines, Film, LocateFixed, Magnet, Minus, Plus, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
@@ -20,6 +20,7 @@ import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
+import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
@@ -172,6 +173,7 @@ export function TimelineEditor({
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   const [audibility, setAudibility] = useState<TrackAudibility>(() => loadAudibility(fileId))
   const [snapOn, setSnapOn] = useState(loadSnapEnabled)
+  const audioQuality = useAudioQualityPref()
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
   const [selectedId, setSelectedId] = useState<string | null>(() => initialSelectedCellId ?? null)
@@ -653,6 +655,32 @@ export function TimelineEditor({
           )}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          {/* Meeting 2026-08-05: generated voices default to compressed
+              playback; fast connections can opt into the original WAV. Mic
+              recordings have no lossless form — the tooltip says so. */}
+          <AppTooltip
+            content={
+              audioQuality === "original"
+                ? "Original quality (WAV) for generated voices — larger downloads. Recordings are always compressed."
+                : "Compressed playback (smaller, faster). Toggle for original-quality generated voices."
+            }
+          >
+            <button
+              type="button"
+              aria-label="Play generated voices at original quality"
+              aria-pressed={audioQuality === "original"}
+              data-testid="tl-quality-toggle"
+              onClick={() => setAudioQualityPref(audioQuality === "original" ? "compressed" : "original")}
+              className={cn(
+                "inline-flex items-center rounded-md border border-border px-1.5 py-1",
+                audioQuality === "original"
+                  ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                  : "bg-background text-foreground/70 hover:bg-muted",
+              )}
+            >
+              <AudioLines className="h-3.5 w-3.5" />
+            </button>
+          </AppTooltip>
           {/* SUB-53: nothing to snap to when positions are computed. */}
           {!audioFirst && (
           <AppTooltip content={snapOn ? "Snapping on — edges magnet to neighbors" : "Snapping off"}>

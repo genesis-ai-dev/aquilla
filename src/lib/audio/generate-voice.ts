@@ -15,6 +15,7 @@ import { audioCachePutBlob } from "./bytes-cache"
 import { resolveVoice } from "./voices"
 import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
+import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
@@ -203,6 +204,21 @@ export async function generateAndAttachCellVoice(
     url = res.url
     playable = uploadBlob
     generatedMimeType = uploadMime
+    // Meeting note (2026-08-05): the original WAV stays obtainable — uploaded
+    // best-effort under the SAME id with ext "wav", unattached (a second
+    // attachment row would read as a duplicate take). Lossless export and the
+    // original-quality playback toggle find it by ext-swap convention. Only
+    // when the primary went out compressed; fire-and-forget so the attach is
+    // never delayed and a sibling failure never fails the generation.
+    if (ext === "webm") {
+      void uploadLosslessSiblingBestEffort({
+        projectId: args.projectId,
+        fileId: args.fileId,
+        audioId: baseId,
+        wavBlob: ttsBlob,
+        getSyncToken,
+      })
+    }
   }
 
   // FORTIFY: local-first parity with mic and denoised takes — the exact

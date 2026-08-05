@@ -21,6 +21,7 @@ import { synthesizeForCell, setTtsStatus, ttsStatusKey } from "./tts"
 import { resolveCastVoice } from "./voices"
 import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
+import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
 import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { audioCachePutBlob } from "./bytes-cache"
@@ -187,6 +188,17 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         // Local-first: the exact playable bytes are in hand — stock the byte
         // cache so first playback/peaks/transcription need no re-download.
         void audioCachePutBlob(res.audioId, ext, uploadBlob)
+        // Meeting note (2026-08-05): keep the original WAV obtainable — same
+        // base id, ext "wav", unattached, best-effort (see lossless-sibling).
+        if (ext === "webm") {
+          void uploadLosslessSiblingBestEffort({
+            projectId: project.id,
+            fileId,
+            audioId: baseId,
+            wavBlob: ttsBlob,
+            getSyncToken,
+          })
+        }
       }
     }
     const objectName = `${audioId}.${ext}`

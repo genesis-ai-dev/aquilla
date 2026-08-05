@@ -14,6 +14,8 @@ import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot 
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
+import { preferredPlaybackExt } from "./lossless-sibling"
+import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { setActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "./audio-coordinator"
@@ -350,12 +352,15 @@ interface ResolvedAudioSrc {
 }
 
 /** Full-download fallback: fetch all bytes, write through to the OPFS cache,
- *  return a blob object URL. */
+ *  return a blob object URL. `skipCacheWrite` is set only for a quality-
+ *  swapped WAV sibling — 14× bytes the user may never replay must not evict
+ *  the compressed baseline the warmer stocked. */
 async function fetchFullBlobUrl(
   frontier: { audioId: string; ext: string },
   projectId: string,
   fileId: string,
   session: FrontierSession,
+  skipCacheWrite = false,
 ): Promise<string> {
   const bytes = await fetchCellAudio({
     projectId,
@@ -364,7 +369,7 @@ async function fetchFullBlobUrl(
     ext: frontier.ext,
     getSyncToken: audioSyncTokenFetcherForSession(session),
   })
-  void audioCachePut(frontier.audioId, frontier.ext, bytes)
+  if (!skipCacheWrite) void audioCachePut(frontier.audioId, frontier.ext, bytes)
   // MIME must match the real container — Safari/Firefox reject mistyped or
   // typeless blobs with a bare onerror ("Audio failed to load").
   return URL.createObjectURL(new Blob([bytes as BlobPart], { type: audioMimeForExt(frontier.ext) }))
@@ -375,19 +380,44 @@ async function fetchFullBlobUrl(
  * order: OPFS-cached bytes (offline-friendly, zero network) → authenticated
  * streaming URL (first sound before the download finishes; Range/206 handles
  * seeks) → full-download blob when no stream URL could be minted.
+ *
+ * Meeting 2026-08-05: when `cell` is supplied and the attachment is the
+ * cell's GENERATED voice with a compressed primary, the device quality pref
+ * may swap the fetch to the lossless WAV sibling (same base id, ext "wav" —
+ * see lib/audio/lossless-sibling). The swap is decided HERE, before the
+ * stream URL is minted, because stream URLs are minted blind — a missing
+ * sibling would only surface as a mid-play element error. The returned
+ * `frontier` carries the RESOLVED ext so error-retries refetch coherently.
  */
 async function resolveAudioSrc(
   attachmentUrl: string,
   projectId: string,
   fileId: string,
   session: FrontierSession,
+  cell?: CellData,
 ): Promise<ResolvedAudioSrc> {
-  const frontier = parseFrontierAudioUrl(attachmentUrl)
-  if (!frontier) {
+  const parsed = parseFrontierAudioUrl(attachmentUrl)
+  if (!parsed) {
     // Direct (blob: / http) URL — the media element streams it natively.
     return { src: attachmentUrl, objectUrl: null, streaming: false, frontier: null }
   }
   if (!session.jwt) throw new Error("Sign in to play audio")
+  // Free classification: the attachment key IS `<id>.<ext>`, so equality with
+  // the cell's generated-voice selection marks eligibility — mic takes and
+  // source clips never match; server-side WAV voices short-circuit on ext.
+  const eligible = Boolean(
+    cell && `${parsed.audioId}.${parsed.ext}` === cell.selectedGeneratedVoiceAudioId,
+  )
+  const ext = await preferredPlaybackExt({
+    projectId,
+    fileId,
+    audioId: parsed.audioId,
+    attachmentExt: parsed.ext,
+    eligible,
+    getSyncToken: audioSyncTokenFetcherForSession(session),
+  })
+  const swapped = ext !== parsed.ext
+  const frontier = { audioId: parsed.audioId, ext }
   const cached = await audioCacheGet(frontier.audioId, frontier.ext)
   if (cached) {
     const url = URL.createObjectURL(
@@ -403,7 +433,7 @@ async function resolveAudioSrc(
     getSyncToken: audioSyncTokenFetcherForSession(session),
   })
   if (streamUrl) return { src: streamUrl, objectUrl: null, streaming: true, frontier }
-  const url = await fetchFullBlobUrl(frontier, projectId, fileId, session)
+  const url = await fetchFullBlobUrl(frontier, projectId, fileId, session, swapped)
   return { src: url, objectUrl: url, streaming: false, frontier }
 }
 
@@ -767,7 +797,7 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<void> 
   const seq = ++currentSeq
   let resolved: ResolvedAudioSrc
   try {
-    resolved = await resolveAudioSrc(src.url, ctx.projectId, cell.fileId, ctx.session)
+    resolved = await resolveAudioSrc(src.url, ctx.projectId, cell.fileId, ctx.session, cell)
   } catch (e) {
     if (seq !== currentSeq) return
     setState({ kind: "error", message: e instanceof Error ? e.message : String(e), cellId: cell.id })
@@ -1372,7 +1402,7 @@ function executeFire(plan: Extract<TargetOverlayPlan, { kind: "fire" }>): void {
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
-      resolved = await resolveAudioSrc(plan.url, ctx.projectId, cell.fileId, ctx.session)
+      resolved = await resolveAudioSrc(plan.url, ctx.projectId, cell.fileId, ctx.session, cell)
     } catch {
       removeOverlayEntry(entry)
       // SUB-53: in audio-first this dub may have been the one clocking its
@@ -1490,6 +1520,9 @@ interface ProgPrefetch {
   cellId: string
   audioId: string
   url: string
+  /** The device quality pref this stash was resolved under — a flip makes it
+   *  inert (never adopted, restocked fresh) with zero event wiring. */
+  quality: AudioQuality
   element: HTMLAudioElement | null
   objectUrl: string | null
 }
@@ -1527,7 +1560,8 @@ function progPrefetchNext(): void {
     progPrefetch &&
     progPrefetch.cellId === slot.cellId &&
     progPrefetch.audioId === target.audioId &&
-    progPrefetch.url === target.url
+    progPrefetch.url === target.url &&
+    progPrefetch.quality === getAudioQualityPref()
   ) {
     return // already stocked
   }
@@ -1536,6 +1570,7 @@ function progPrefetchNext(): void {
     cellId: slot.cellId,
     audioId: target.audioId,
     url: target.url,
+    quality: getAudioQualityPref(),
     element: null,
     objectUrl: null,
   }
@@ -1544,7 +1579,7 @@ function progPrefetchNext(): void {
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
-      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session)
+      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
     } catch {
       if (progPrefetch === stash) progPrefetch = null
       return
@@ -1635,7 +1670,10 @@ function progCueTarget(
     stash.element.error == null &&
     stash.cellId === slot.cellId &&
     stash.audioId === target.audioId &&
-    stash.url === target.url
+    stash.url === target.url &&
+    // A quality flip after stocking makes the stash the WRONG bytes — fall
+    // through to a fresh resolve, exactly like a take swap.
+    stash.quality === getAudioQualityPref()
   ) {
     progPrefetch = null
     wireOverlayElement(entry, { element: stash.element, objectUrl: stash.objectUrl }, startAtClipSec, cueOpts)
@@ -1644,7 +1682,7 @@ function progCueTarget(
   void (async () => {
     let resolved: ResolvedAudioSrc
     try {
-      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session)
+      resolved = await resolveAudioSrc(target.url, ctx.projectId, cell.fileId, ctx.session, cell)
     } catch {
       removeOverlayEntry(entry)
       progOnTargetFinished(entry, "error") // routes to the gate while pending
@@ -1797,7 +1835,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
 
   let resolved: ResolvedAudioSrc
   try {
-    resolved = await resolveAudioSrc(playable.url, ctx.projectId, cell.fileId, ctx.session)
+    resolved = await resolveAudioSrc(playable.url, ctx.projectId, cell.fileId, ctx.session, cell)
   } catch (e) {
     if (seq !== currentSeq) return // superseded
     if (isMissingAudioError(e)) { skipMissingFrom(cell.id); return }

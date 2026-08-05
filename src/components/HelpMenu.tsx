@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react"
-import { HelpCircle, ExternalLink, Mail, BookOpen, Map, Flag, ChevronDown } from "lucide-react"
+import { HelpCircle, ExternalLink, Mail, BookOpen, Map, Flag, ChevronDown, Home } from "lucide-react"
 import { Discord } from "@/components/icons/Discord"
 import { cn } from "@/lib/utils"
 import { useProductTourContext } from "@/context/ProductTourContext"
@@ -84,6 +84,21 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
           sideOffset={4}
         >
           <DropdownMenuGroup>
+            <DropdownMenuItem
+              render={
+                // Hard <a>: /homepage is the separate marketing entry point.
+                <a
+                  href="/homepage"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setOpen(false)}
+                />
+              }
+            >
+              <Home />
+              Homepage
+              <ExternalLink className="ml-auto opacity-60" />
+            </DropdownMenuItem>
             {showTour ? (
               <DropdownMenuItem onClick={handleTour}>
                 <Map />

@@ -45,6 +45,10 @@ describe("HelpMenu", () => {
     await waitFor(() => {
       expect(screen.getByText("Take the tour")).toBeInTheDocument()
     })
+    const homepage = screen.getByRole("menuitem", { name: /homepage/i })
+    expect(homepage).toHaveAttribute("href", "/homepage")
+    expect(homepage).toHaveAttribute("target", "_blank")
+    expect(homepage).toHaveAttribute("rel", "noopener noreferrer")
     expect(screen.getByText("Discord server")).toBeInTheDocument()
     expect(screen.getByText("Contact support")).toBeInTheDocument()
     // Report moved out of its own dock button and into this menu.

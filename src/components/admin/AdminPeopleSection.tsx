@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { AlertTriangle, ShieldCheck, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -6,7 +6,42 @@ import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { cn } from "@/lib/utils"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
+
+
+function CopyEmailButton({ email }: { email: string }) {
+  const [copied, setCopied] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    },
+    [],
+  )
+
+  return (
+    <button
+      type="button"
+      className={cn(
+        "max-w-full truncate text-left text-muted-foreground transition-colors hover:text-foreground",
+        copied && "text-foreground",
+      )}
+      aria-label={copied ? "Email copied" : `Copy ${email}`}
+      onClick={(e) => {
+        e.stopPropagation()
+        void navigator.clipboard.writeText(email).then(() => {
+          setCopied(true)
+          if (timerRef.current) clearTimeout(timerRef.current)
+          timerRef.current = setTimeout(() => setCopied(false), 1500)
+        })
+      }}
+    >
+      {copied ? "Copied" : email}
+    </button>
+  )
+}
 
 /**
  * People — the merge of the old Users and Admins tabs. Every registered user is
@@ -49,6 +84,7 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
       {
         accessorKey: "email",
         header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
+        cell: ({ row }) => <CopyEmailButton email={row.original.email} />,
       },
       {
         accessorKey: "orgCount",

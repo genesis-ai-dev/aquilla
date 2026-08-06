@@ -3,8 +3,8 @@
  * callout. Verifies the badge is applied by email match and the callout lists
  * allowlisted emails with no account. Also covers TanStack search / sort.
  */
-import { describe, it, expect } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { describe, it, expect, vi } from "vitest"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import { AdminPeopleSection } from "./AdminPeopleSection"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
 
@@ -38,6 +38,21 @@ describe("AdminPeopleSection", () => {
     expect(within(ryderRow).getByText(/platform admin/i)).toBeInTheDocument()
     const caseyRow = screen.getByText("casey").closest("tr")!
     expect(within(caseyRow).queryByText(/platform admin/i)).not.toBeInTheDocument()
+  })
+
+
+  it("copies email when the muted email button is clicked", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    render(<AdminPeopleSection users={users} admins={admins} />)
+    const btn = screen.getByRole("button", { name: /copy casey@example.com/i })
+    expect(btn).toHaveClass("text-muted-foreground")
+    fireEvent.click(btn)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("casey@example.com"))
+    expect(screen.getByRole("button", { name: /email copied/i })).toBeInTheDocument()
   })
 
   it("warns about allowlisted emails with no account", () => {

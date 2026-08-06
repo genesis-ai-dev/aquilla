@@ -4,7 +4,7 @@
  * down to projects that need attention.
  */
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { AdminProjectsSection } from "./AdminProjectsSection"
 import type { AdminProject } from "@/lib/frontier/admin"
@@ -47,19 +47,31 @@ const renderSection = () =>
     </MemoryRouter>,
   )
 
+/** Base UI Select: options live in a portaled listbox. */
+async function pickLens(optionName: RegExp) {
+  fireEvent.click(screen.getByRole("combobox", { name: /filter projects/i }))
+  const option = await screen.findByRole("option", { name: optionName })
+  fireEvent.pointerMove(option)
+  fireEvent.mouseMove(option)
+  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+  await waitFor(() => {
+    expect(screen.queryByRole("listbox")).toBeNull()
+  })
+}
+
 describe("AdminProjectsSection", () => {
   it("shows attention reasons and status badges", () => {
     renderSection()
     expect(screen.getByText("Overdue")).toBeInTheDocument()
     expect(screen.getByText("On track")).toBeInTheDocument()
-    // "Archived" also names a lens button — scope to the archived project's row.
+    // "Archived" also names a lens option — scope to the archived project's row.
     const archivedRow = screen.getByText("Archived One").closest("tr")!
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument()
   })
 
-  it("filters to needs-attention projects via the lens", () => {
+  it("filters to needs-attention projects via the lens", async () => {
     renderSection()
-    fireEvent.click(screen.getByRole("button", { name: /needs attention/i }))
+    await pickLens(/needs attention/i)
     expect(screen.getByText("Overdue One")).toBeInTheDocument()
     expect(screen.queryByText("Healthy")).not.toBeInTheDocument()
     expect(screen.queryByText("Archived One")).not.toBeInTheDocument()
@@ -107,13 +119,13 @@ describe("AdminProjectsSection", () => {
     expect(screen.getByText(short)).toBeInTheDocument()
   })
 
-  it("keeps search visible when the archived lens has no projects", () => {
+  it("keeps search visible when the archived lens has no projects", async () => {
     render(
       <MemoryRouter>
         <AdminProjectsSection projects={[proj({ id: "healthy", name: "Healthy" })]} />
       </MemoryRouter>,
     )
-    fireEvent.click(screen.getByRole("button", { name: /^archived$/i }))
+    await pickLens(/^archived$/i)
     expect(screen.getByLabelText("Search projects…")).toBeInTheDocument()
     expect(screen.getByText("No archived projects")).toBeInTheDocument()
     expect(screen.queryByTestId("admin-projects-table")).not.toBeInTheDocument()

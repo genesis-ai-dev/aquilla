@@ -2,9 +2,16 @@ import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { FolderOpen } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { EmptyState } from "@/components/ui/empty"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ProjectStatus } from "@/components/ProjectStatus"
 import { ValidatedBar } from "./ValidatedBar"
 import { attentionReasons, attentionScore, validatedFraction } from "@/lib/admin/insights"
@@ -160,49 +167,53 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
   )
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-1">
-        {LENSES.map((l) => (
-          <Button
-            key={l.value}
-            type="button"
-            size="xs"
-            variant={lens === l.value ? "default" : "secondary"}
-            onClick={() => setLens(l.value)}
+    <DataTable
+      columns={columns}
+      data={data}
+      getRowId={(p) => p.id}
+      onRowClick={(p) => {
+        if (!p.archived) navigate(`/projects/${p.id}`)
+      }}
+      initialSorting={[{ id: "status", desc: true }]}
+      searchPlaceholder="Search projects…"
+      globalFilterFn={(row, _columnId, filterValue) => {
+        const q = String(filterValue).trim().toLowerCase()
+        if (!q) return true
+        const p = row.original
+        return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`
+          .toLowerCase()
+          .includes(q)
+      }}
+      toolbar={(table) => (
+        <>
+          <Select
+            items={LENSES}
+            value={lens}
+            onValueChange={(v) => setLens((v as Lens) ?? "all")}
           >
-            {l.label}
-          </Button>
-        ))}
-      </div>
-
-      <DataTable
-        columns={columns}
-        data={data}
-        getRowId={(p) => p.id}
-        onRowClick={(p) => {
-          if (!p.archived) navigate(`/projects/${p.id}`)
-        }}
-        initialSorting={[{ id: "status", desc: true }]}
-        searchPlaceholder="Search projects…"
-        globalFilterFn={(row, _columnId, filterValue) => {
-          const q = String(filterValue).trim().toLowerCase()
-          if (!q) return true
-          const p = row.original
-          return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`
-            .toLowerCase()
-            .includes(q)
-        }}
-        toolbar={(table) => (
+            <SelectTrigger className="h-8 bg-card" aria-label="Filter projects">
+              <SelectValue className="flex-none" />
+            </SelectTrigger>
+            <SelectContent align="start">
+              <SelectGroup>
+                {LENSES.map((l) => (
+                  <SelectItem key={l.value} value={l.value}>
+                    {l.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
             {table.getFilteredRowModel().rows.length === data.length
               ? `${data.length}`
               : `${table.getFilteredRowModel().rows.length} of ${data.length}`}
           </span>
-        )}
-        emptyState={emptyState}
-        testId="admin-projects-table"
-        dense
-      />
-    </div>
+        </>
+      )}
+      emptyState={emptyState}
+      testId="admin-projects-table"
+      dense
+    />
   )
 }

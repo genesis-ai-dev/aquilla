@@ -5676,9 +5676,14 @@ export function ProjectWorkspace() {
         }
         statusBar={
           (() => {
+            // Audio playback chrome belongs to the open file — hide it on
+            // overlay surfaces (Rules / Terminology / …) even if the audio
+            // lens is still selected from a prior editor visit.
+            const showAudioToolbar =
+              lens === "audio" && centerSurface === "editor" && !!project
             const syncStatus = (
               <WorkspaceStatusBar
-                className={lens === "audio" && project && centerSurface !== "agent" ? "px-0 py-0.5" : undefined}
+                className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 left={
                   <div className="flex min-w-0 items-center gap-1.5">
                     <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
@@ -5704,7 +5709,7 @@ export function ProjectWorkspace() {
               centerSurface !== "agent" &&
               (cellAreaState.kind === "ready" || cellAreaState.kind === "ready-empty") ? (
               <StatusBar
-                className={lens === "audio" && project ? "px-0 py-0.5" : undefined}
+                className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 cells={cellSummaries}
                 projectHealth={projectHealth}
                 healthMap={healthMap}
@@ -5713,7 +5718,7 @@ export function ProjectWorkspace() {
               />
             ) : null
 
-            if (lens === "audio" && project && centerSurface !== "agent") {
+            if (showAudioToolbar && project) {
               return (
                 <VoicePlaybackBar
                   cells={legacyCells}

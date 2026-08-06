@@ -123,3 +123,24 @@ describe("shell-routing: back-nav contract", () => {
     }
   })
 })
+
+// Keep in sync with `showAudioToolbar` in ProjectWorkspace statusBar.
+function shouldShowAudioToolbar(lens: "text" | "audio", centerSurface: CenterSurface | "agent"): boolean {
+  return lens === "audio" && centerSurface === "editor"
+}
+
+describe("shouldShowAudioToolbar", () => {
+  it("shows the playback bar only on the editor surface in audio lens", () => {
+    expect(shouldShowAudioToolbar("audio", "editor")).toBe(true)
+  })
+
+  it("hides the playback bar on overlay surfaces even when audio lens is sticky", () => {
+    for (const surface of ["rules", "comments", "memory", "terminology", "agent"] as const) {
+      expect(shouldShowAudioToolbar("audio", surface)).toBe(false)
+    }
+  })
+
+  it("hides the playback bar in text lens on the editor", () => {
+    expect(shouldShowAudioToolbar("text", "editor")).toBe(false)
+  })
+})

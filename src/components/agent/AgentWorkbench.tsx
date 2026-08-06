@@ -245,29 +245,28 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
               Stop
             </Button>
           )}
-          <AppTooltip content="Drop this conversation and start a fresh session">
+          <AppTooltip content="New session">
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 text-[11px] text-muted-foreground"
+              size="icon-xs"
+              className="text-muted-foreground"
               onClick={reset}
+              aria-label="New session"
             >
-              <RotateCcw data-icon="inline-start" />
-              New session
+              <RotateCcw />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Back to the editor">
+          <AppTooltip content="Editor">
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 text-[11px] text-muted-foreground"
+              size="icon-xs"
+              className="text-muted-foreground"
               onClick={onClose}
               aria-label="Close workbench"
             >
-              <Minimize2 data-icon="inline-start" />
-              Editor
+              <Minimize2 />
             </Button>
           </AppTooltip>
         </span>

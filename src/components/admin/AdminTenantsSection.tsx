@@ -1,7 +1,6 @@
 import { useMemo } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { Building2, ExternalLink } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Building2 } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { EmptyState } from "@/components/ui/empty"
@@ -12,8 +11,8 @@ import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 
 /**
  * Tenants — flat cross-tenant list of organizations. Team nesting lives on the
- * Teams tab; this table only shows a per-org team count. "Open" switches into
- * the org workspace (platform admins resolve owner-level everywhere).
+ * Teams tab; this table only shows a per-org team count. Row click switches
+ * into the org workspace (platform admins resolve owner-level everywhere).
  */
 
 export function AdminTenantsSection({
@@ -100,25 +99,8 @@ export function AdminTenantsSection({
           />
         ),
       },
-      {
-        id: "actions",
-        enableSorting: false,
-        header: () => null,
-        cell: ({ row }) => (
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="h-auto p-0"
-            onClick={() => onOpenOrg(row.original.id)}
-          >
-            Open
-            <ExternalLink data-icon="inline-end" />
-          </Button>
-        ),
-      },
     ],
-    [onOpenOrg, teamCountByOrg],
+    [teamCountByOrg],
   )
 
   if (orgs.length === 0) {
@@ -137,6 +119,7 @@ export function AdminTenantsSection({
       columns={columns}
       data={orgs}
       getRowId={(o) => String(o.id)}
+      onRowClick={(o) => onOpenOrg(o.id)}
       searchPlaceholder="Search organizations…"
       globalFilterFn={(row, _columnId, filterValue) => {
         const q = String(filterValue).trim().toLowerCase()

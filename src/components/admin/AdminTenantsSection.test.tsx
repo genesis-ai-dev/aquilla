@@ -1,6 +1,6 @@
 /**
- * AdminTenantsSection — flat org list. Verifies search filters orgs and Open
- * navigates into the org workspace. Nested team expansion lives on Teams.
+ * AdminTenantsSection — flat org list. Verifies search filters orgs and row
+ * click navigates into the org workspace. Nested team expansion lives on Teams.
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
@@ -39,10 +39,10 @@ describe("AdminTenantsSection", () => {
     expect(screen.getByText(created)).toBeInTheDocument()
   })
 
-  it("calls onOpenOrg when Open is clicked", () => {
+  it("calls onOpenOrg when a row is clicked", () => {
     const onOpenOrg = vi.fn()
     render(<AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={onOpenOrg} />)
-    fireEvent.click(screen.getAllByRole("button", { name: /open/i })[0])
+    fireEvent.click(screen.getByText("Alpha").closest("tr")!)
     expect(onOpenOrg).toHaveBeenCalledWith(1)
   })
 })

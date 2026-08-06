@@ -13,12 +13,6 @@ const DEPLOYMENTS = {
     baseUrl: "https://aquilla.app",
     syncWorkerUrl: "https://api.aquilla.app/sync",
   },
-  staging: {
-    apiUrl: "https://api.staging.aquilla.app/identity/api/v2/health",
-    worker: "aquilla-staging-identity",
-    baseUrl: "https://staging.aquilla.app",
-    syncWorkerUrl: "https://api.staging.aquilla.app/sync",
-  },
   development: {
     apiUrl: "https://api.dev.aquilla.app/identity/api/v2/health",
     worker: "aquilla-dev-identity",
@@ -44,7 +38,7 @@ function bindings(environment: keyof typeof DEPLOYMENTS, overrides: Partial<Env>
 }
 
 describe("identity deployment environment guard", () => {
-  it.each(["production", "staging", "development"] as const)(
+  it.each(["production", "development"] as const)(
     "accepts matching %s bindings",
     (environment) => {
       expect(
@@ -104,7 +98,7 @@ describe("identity deployment environment guard", () => {
     )
   })
 
-  it.each(["production", "staging", "development"] as const)(
+  it.each(["production", "development"] as const)(
     "accepts matching %s scheduled bindings",
     (environment) => {
       expect(scheduledDeploymentEnvironmentError(bindings(environment))).toBeNull()

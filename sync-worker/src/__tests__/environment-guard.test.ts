@@ -4,7 +4,6 @@ import { deploymentEnvironmentError } from "../environment-guard"
 describe("deployment environment guard", () => {
   it.each([
     ["production", "https://api.aquilla.app/sync/events", "production", "https://api.aquilla.app/identity"],
-    ["staging", "https://api.staging.aquilla.app/sync/events", "staging", "https://api.staging.aquilla.app/identity"],
     ["development", "https://api.dev.aquilla.app/sync/events", "development", "https://api.dev.aquilla.app/identity"],
   ])("accepts matching %s bindings", (_label, requestUrl, environment, authWorkerUrl) => {
     expect(

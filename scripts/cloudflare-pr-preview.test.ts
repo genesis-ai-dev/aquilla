@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
@@ -7,6 +7,7 @@ import {
   pullRequestPreviewAlias,
   uploadPullRequestPreview,
 } from "./cloudflare-pr-preview.mjs"
+import { REQUIRED_ASSET_IGNORE_PATTERNS } from "./verify-deployment-artifacts.mjs"
 
 const VERSION_ID = "64fca16d-9a57-41da-9f66-990655dfcae2"
 const PREVIEW_URL = "https://pr-274-aquilla-web-preview.blue-darkness-7674.workers.dev"
@@ -62,9 +63,17 @@ describe("Cloudflare pull request preview upload", () => {
     })
 
     try {
+      mkdirSync(join(outputDirectory, "dist"))
+      writeFileSync(
+        join(outputDirectory, "dist", ".assetsignore"),
+        `${REQUIRED_ASSET_IGNORE_PATTERNS.join("\n")}\n`,
+      )
+      writeFileSync(join(outputDirectory, "dist", ".DS_Store"), "real escaped metadata shape")
+
       await expect(uploadPullRequestPreview({
         prNumber: 274,
         commitSha: "abc123",
+        cwd: outputDirectory,
         githubOutputPath,
         run,
         log: vi.fn(),
@@ -102,6 +111,7 @@ describe("Cloudflare pull request preview upload", () => {
       githubOutputPath: null,
       run,
       log: vi.fn(),
+      verifyArtifacts: vi.fn(),
     })).resolves.toMatchObject({ url: PREVIEW_URL })
 
     expect(run.mock.calls.map(([, args]) => args.slice(0, 4))).toEqual([
@@ -126,7 +136,30 @@ describe("Cloudflare pull request preview upload", () => {
       githubOutputPath: null,
       run,
       log: vi.fn(),
+      verifyArtifacts: vi.fn(),
     })).rejects.toBe(failure)
     expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it("rejects an unsafe artifact before any Wrangler command", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "aquilla-preview-unsafe-"))
+    const run = vi.fn()
+    try {
+      mkdirSync(join(directory, "dist"))
+      writeFileSync(join(directory, "dist", ".DS_Store"), "real escaped metadata shape")
+
+      await expect(uploadPullRequestPreview({
+        prNumber: 274,
+        commitSha: "abc123",
+        cwd: directory,
+        githubOutputPath: null,
+        run,
+        log: vi.fn(),
+      })).rejects.toThrow(/cannot read required \.assetsignore policy/)
+
+      expect(run).not.toHaveBeenCalled()
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 })

@@ -1,32 +1,28 @@
-name: Deploy Workers
+name: Manual Deploy Workers
 
-# Branch → environment mapping:
-#   push to main    → wrangler deploy --env=production → prod workers
-#   push to staging → wrangler deploy --env=staging → staging workers (staging.aquilla.app)
-#   push to dev     → wrangler deploy --env=development → dev workers (dev.aquilla.app)
+# This workflow has no push trigger. A human must select the authorized branch
+# and explicitly dispatch it. The same deployment is available locally through
+# package.json and is the usable path while GitHub-hosted runners are unavailable.
 #
-# Each worker only runs if its directory changed in the push (path filter) or
-# if invoked explicitly via workflow_dispatch.
+# Branch → environment mapping for an explicit dispatch:
+#   main    → production
+#   dev     → development
 #
 # DEVEX-1: deploy steps are ordered after their test steps in the same job,
 # so tests must pass before wrangler deploy runs.
 
 on:
-  push:
-    branches: [main, staging, dev]
-    paths:
-      - 'sync-worker/**'
-      - 'auth-worker/**'
-      - 'config/cloudflare-deployments.json'
-      - 'scripts/cloudflare-build-deploy.*'
-      - 'scripts/cloudflare-deployment-manifest.*'
-      - 'scripts/cloudflare-version-deploy.*'
-      - 'scripts/verify-worker-deployment.*'
   workflow_dispatch:
     inputs:
       worker:
-        description: 'Which worker to deploy (all, sync-worker, auth-worker)'
-        required: false
+        description: 'Which Worker to deploy'
+        required: true
+        type: choice
+        options:
+          - all
+          - web
+          - sync-worker
+          - auth-worker
         default: 'all'
 
 # Least-privilege default: deploys authenticate to Cloudflare via the
@@ -52,37 +48,27 @@ jobs:
         name: Resolve authorized deployment target
         run: bash scripts/resolve-deployment-target.sh
 
-  # Reliable change detection. The old per-job `contains(toJSON(
-  # github.event.commits.*.modified), 'sync-worker/')` guard silently
-  # evaluated false (truncated/empty `commits` payloads, merge/batch
-  # pushes), so worker deploys were skipped even when the worker changed.
-  # Diff the actual push range instead.
+  # The operator selects the exact worker set. There is deliberately no diff
+  # inference here: a manual deployment must never silently skip a requested
+  # surface because a push payload or comparison range is incomplete.
   detect:
     needs: target
     runs-on: ubuntu-latest
     outputs:
+      web: ${{ steps.f.outputs.web }}
       sync: ${{ steps.f.outputs.sync }}
       auth: ${{ steps.f.outputs.auth }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - id: f
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            w="${{ github.event.inputs.worker }}"
-            [ "$w" = "all" ] || [ "$w" = "sync-worker" ] && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
-            [ "$w" = "all" ] || [ "$w" = "auth-worker" ] && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          base="${{ github.event.before }}"
-          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            base="${{ github.sha }}~1"
-          fi
-          changed=$(git diff --name-only "$base" "${{ github.sha }}" || git show --name-only --format= "${{ github.sha }}")
-          common='^(config/cloudflare-deployments\.json|scripts/(cloudflare-(build-deploy|deployment-manifest|version-deploy)|verify-worker-deployment)\.)'
-          echo "$changed" | grep -Eq "^sync-worker/|$common" && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
-          echo "$changed" | grep -Eq "^auth-worker/|$common" && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
+          w="${{ github.event.inputs.worker }}"
+          case "$w" in
+            all|web|sync-worker|auth-worker) ;;
+            *) echo "::error::Unknown Worker selection '$w'"; exit 1 ;;
+          esac
+          [ "$w" = "all" ] || [ "$w" = "web" ] && echo "web=true" >> "$GITHUB_OUTPUT" || echo "web=false" >> "$GITHUB_OUTPUT"
+          [ "$w" = "all" ] || [ "$w" = "sync-worker" ] && echo "sync=true" >> "$GITHUB_OUTPUT" || echo "sync=false" >> "$GITHUB_OUTPUT"
+          [ "$w" = "all" ] || [ "$w" = "auth-worker" ] && echo "auth=true" >> "$GITHUB_OUTPUT" || echo "auth=false" >> "$GITHUB_OUTPUT"
 
   # Worker deploys are blocked until the target Neon schema is current — the
   # recurring 500 class (AQU-135/150/158, projects.is_active/source_link_*) was
@@ -91,7 +77,7 @@ jobs:
   # and diffs db/postgres/schema.sql against live information_schema. On a
   # failure, apply pending migrations from a laptop (npm run neon:apply) and
   # re-run the deploy. Requires target-specific NEON_*_PG_* repo secrets for
-  # dev/staging and NEON_PG_* for production; fails closed if they're missing.
+  # dev and NEON_PG_* for production; fails closed if they're missing.
   schema-guard:
     needs: [target, detect]
     if: needs.detect.outputs.sync == 'true' || needs.detect.outputs.auth == 'true'
@@ -113,12 +99,7 @@ jobs:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
           NEON_PROJECT_ID: sweet-paper-88472094
           NEON_PRODUCTION_BRANCH: production
-          NEON_STAGING_BRANCH: staging
           NEON_DEV_BRANCH: dev
-          NEON_STAGING_PG_HOST: ${{ secrets.NEON_STAGING_PG_HOST }}
-          NEON_STAGING_PG_DB: ${{ secrets.NEON_STAGING_PG_DB }}
-          NEON_STAGING_PG_ROLE: ${{ secrets.NEON_STAGING_PG_ROLE }}
-          NEON_STAGING_PG_PASSWORD: ${{ secrets.NEON_STAGING_PG_PASSWORD }}
           NEON_DEV_PG_HOST: ${{ secrets.NEON_DEV_PG_HOST }}
           NEON_DEV_PG_DB: ${{ secrets.NEON_DEV_PG_DB }}
           NEON_DEV_PG_ROLE: ${{ secrets.NEON_DEV_PG_ROLE }}
@@ -126,8 +107,32 @@ jobs:
         run: |
           case "${{ needs.target.outputs.live_environment }}" in
             production) pnpm neon:status:prod ;;
-            staging) pnpm neon:status:staging ;;
             development) pnpm neon:status:dev ;;
+            *) echo "::error::Unknown deployment target"; exit 1 ;;
+          esac
+
+  web:
+    needs: [target, detect]
+    if: needs.detect.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.target.outputs.github_environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build, deploy, and verify aquilla-web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: |
+          case "${{ needs.target.outputs.live_environment }}" in
+            production) pnpm run deploy:aquilla:spa ;;
+            development) pnpm run deploy:aquilla:dev:spa ;;
             *) echo "::error::Unknown deployment target"; exit 1 ;;
           esac
 
@@ -169,14 +174,15 @@ jobs:
         working-directory: sync-worker
 
       - name: Deploy sync-worker
-        working-directory: sync-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
-        run: node ../scripts/cloudflare-version-deploy.mjs sync "${{ needs.target.outputs.wrangler_environment }}"
-
-      - name: Verify sync-worker route and environment
-        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=sync
+        run: |
+          case "${{ needs.target.outputs.live_environment }}" in
+            production) pnpm run deploy:aquilla:sync ;;
+            development) pnpm run deploy:aquilla:dev:sync ;;
+            *) echo "::error::Unknown deployment target"; exit 1 ;;
+          esac
 
   auth-worker:
     needs: [target, detect, schema-guard]
@@ -219,11 +225,12 @@ jobs:
       # ledger). The schema-guard job above fails this deploy if the target
       # schema is behind db/postgres/migrations/.
       - name: Deploy auth-worker
-        working-directory: auth-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
-        run: node ../scripts/cloudflare-version-deploy.mjs identity "${{ needs.target.outputs.wrangler_environment }}"
-
-      - name: Verify identity and chat routes
-        run: node scripts/verify-live-environment.mjs "${{ needs.target.outputs.live_environment }}" --surface=auth
+        run: |
+          case "${{ needs.target.outputs.live_environment }}" in
+            production) pnpm run deploy:aquilla:auth ;;
+            development) pnpm run deploy:aquilla:dev:auth ;;
+            *) echo "::error::Unknown deployment target"; exit 1 ;;
+          esac
